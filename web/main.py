@@ -733,6 +733,7 @@ from web.api import init_api_routes
 from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language, visitor_language
 from web.citation_chip import render_citation_chip
+from web.home_query import home_query_target  # the header's go-to box routes as the homepage box does
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
     load_atlas_state,
@@ -1592,6 +1593,36 @@ def _resolve_ui_language() -> str:
 # Layout Components
 # ============================================================================
 
+# The header's go-to box (render_header_center) is left out where the page has
+# its own: the homepage hero box and the /search box.
+_HEADER_SEARCH_HIDDEN_ON = frozenset({'/', '/search'})
+
+# Below 1024px the box is closed behind a search button. Opening and closing
+# only toggle a class on the header row (common.css draws the field across the
+# header while it is set) and move the focus, so they run in the browser.
+_HEADER_SEARCH_OPEN_JS = (
+    "(e) => { const s = e.target.closest('.header-search'); if (!s) return;"
+    " s.classList.add('is-open'); const i = s.querySelector('input');"
+    " if (i) setTimeout(() => i.focus(), 0); }"
+)
+_HEADER_SEARCH_CLOSE_JS = (
+    "(e) => { const s = e.target.closest('.header-search'); if (!s) return;"
+    " s.classList.remove('is-open'); const b = s.querySelector('.header-search-toggle');"
+    " if (b && b.offsetParent) b.focus(); }"
+)
+
+
+def _request_path(fallback: str) -> str:
+    """The path of the page being built, or ``fallback`` when there is no request.
+
+    Read from the request rather than ``current_page``: not every page sets
+    that, and a stale value from the previous page would hide the box."""
+    try:
+        return ui.context.client.request.url.path or fallback
+    except Exception:                                        # noqa: BLE001
+        return fallback
+
+
 def create_layout():
     """Create the main application layout with modern Header and Sidebar."""
     # Phase 87 FOUND-01 (B1 in 87-REVIEWS.md): mint _session_uuid on first
@@ -1798,6 +1829,7 @@ def create_layout():
                              '/catalog-browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
+    _show_header_search = _request_path(current_page) not in _HEADER_SEARCH_HIDDEN_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).
     _whats_new_key = WHATS_NEW_VERSION + ai_whats_new_suffix()
     _whats_new_unseen = safe_user_get('whats_new_dismissed') != _whats_new_key
@@ -1820,10 +1852,41 @@ def create_layout():
         return section
 
     def render_header_center():
-        """Render center section: Quick search"""
-        with ui.row().classes('hidden md:flex items-center') as section:
-            quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
-            quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value or ""}'))
+        """Render center section: the go-to box (2026-11-04).
+
+        The homepage box's routing (``web/home_query.py::home_query_target``):
+        a sys_id or a shelfmark opens Browse, anything else is searched. It
+        replaces the old "Quick search..." box, which ran every input as text
+        and was hidden below 768px. Not on ``/`` (the hero box) or ``/search``
+        (its own box). From 1024px the field sits in the header; below, a
+        search button opens it across the header (``header-search`` rules in
+        common.css). Opening and closing are client-side: no round trip.
+        """
+        with ui.row(wrap=False).classes('items-center header-search') as section:
+            if not _show_header_search:
+                return section
+
+            def _go():
+                target = home_query_target(header_box.value)
+                if target:
+                    ui.navigate.to(target)
+
+            with ui.row(wrap=False).classes('items-center header-search-field'):
+                header_box = ui.input(
+                    placeholder=tr('Text, shelfmark or system ID')
+                ).props(
+                    f'dark dense outlined rounded aria-label="{tr("Search")}"'
+                ).classes('header-search-input').on('keydown.enter', _go).on(
+                    'keydown.esc', js_handler=_HEADER_SEARCH_CLOSE_JS
+                ).mark('header-search')
+                ui.button(icon='close').props(
+                    f'flat round dense text-color=white aria-label="{tr("Close")}"'
+                ).classes('header-search-close').on('click', js_handler=_HEADER_SEARCH_CLOSE_JS)
+            ui.button(icon='search').props(
+                f'flat round text-color=white aria-label="{tr("Search")}"'
+            ).tooltip(tr('Search')).classes('header-search-toggle').on(
+                'click', js_handler=_HEADER_SEARCH_OPEN_JS
+            ).mark('header-search-toggle')
         return section
 
     def render_header_right():

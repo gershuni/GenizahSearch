@@ -1239,6 +1239,7 @@ on `/catalog-browse` (sidebar card, chips under the button), in "Search only in.
 - **Function** `page_meta` (Line 128) — per-route SEO metadata (title, description, canonical, OG/Twitter)
 - **Function** `_resolve_ui_language` (Line 222) — detect UI language from storage/cookie
 - **Function** `create_layout` (Line 240) — shared page layout (header, sidebar, footer)
+- **Function** `_request_path` (Line 1615) — the path of the page being built (the request's, not `current_page`); `create_layout`'s `render_header_center` uses it with `_HEADER_SEARCH_HIDDEN_ON` (`/`, `/search`) to leave out the header's go-to box (`home_query_target`; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css). Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
 - **Function** `_show_citation_reminder` (Line 635) — periodic citation reminder popup
 - **Function** `apply_theme_immediately` (Line 689) — inject dark/light theme CSS
 - **Function** `_safe_user_storage_get` (Line 821) — safe app.storage.user accessor
@@ -2000,8 +2001,7 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 
 ## web/home_query.py
 
-- **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
-- **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
+- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Tests: `tests/test_home_query_routing.py`.
 
 ## web/search_box_input.py
 

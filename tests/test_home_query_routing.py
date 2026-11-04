@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Routing of the homepage search box (owner, 2026-10-19).
+"""Routing of the go-to boxes (owner, 2026-10-19; changed 2026-11-04).
 
-``web/home_query.py::home_query_target`` decides where ``/`` sends what the
-visitor typed: a corpus sys_id opens that manuscript, Hebrew or Arabic text is
-searched, and anything else is a shelfmark for ``/browse`` to look up. The
-wiring on the page itself is ``tests/render_smoke/test_home_search_routing_render_smoke.py``.
+``web/home_query.py::home_query_target`` decides where the homepage box and the
+header box send what the visitor typed: a corpus sys_id opens that manuscript,
+a shelfmark (as the /search box recognises one, ``web/search_box_input.py``)
+is looked up by ``/browse``, and everything else -- Hebrew, English words,
+Hebrew typed on the English layout -- is searched. The wiring on the pages is
+``tests/render_smoke/test_home_search_routing_render_smoke.py`` and
+``tests/render_smoke/test_header_search_render_smoke.py``.
 """
 from __future__ import annotations
 
@@ -43,10 +46,11 @@ def test_a_corpus_sys_id_opens_that_manuscript(sys_id):
     '970993169503583183',   # LOCAL "My Library" namespace -- never a corpus record
     '123456789099',         # ends with 99 but is not in the 99 namespace
     '99',                   # too short to be a sys_id
+    '12',                   # a bare number is not a shelfmark (15,533 catalogue rows)
     '٩٩٠٠٥٣٨٣٥٠٢٠٢٠٥١٧١',   # Arabic-Indic digits: `\d` matches them, a sys_id never has them
 ])
-def test_other_numbers_are_looked_up_as_shelfmarks(text):
-    assert _route(text) == ('/browse', 'shelfmark', text)
+def test_other_numbers_are_searched(text):
+    assert _route(text) == ('/search', 'q', text)
 
 
 @pytest.mark.parametrize('text', [
@@ -61,17 +65,44 @@ def test_hebrew_or_arabic_text_is_searched(text):
     assert _route(text) == ('/search', 'q', text)
 
 
+@pytest.mark.parametrize('text', [
+    'dcuk',                     # גבול typed on the English layout
+    'fufch anh',                # Hebrew typed on the English layout, two words
+    'Psalm 23',                 # a word and a number
+    'Maimonides',
+    'letter from Fustat',
+    'version 1.2',
+])
+def test_latin_text_that_is_not_a_shelfmark_is_searched(text):
+    """It reached /browse as a shelfmark and found nothing before 2026-11-04."""
+    assert _route(text) == ('/search', 'q', text)
+
+
 @pytest.mark.parametrize('shelfmark', [
     'T-S 8J6.1',
+    'ts 20.57',
+    'add 3356',
     'MS Heb c 57',
     'ENA 2591.1',
+    'JTS ENA 2591.1',           # library-prefixed
     'Moss. III,27O',
+    'Halper 331',
+    "T-S 10J9 (2)",
+    'Cambridge University Library, Ms. T-S K 08.026',   # the NLI catalogue form
+])
+def test_a_shelfmark_is_looked_up_and_survives_the_url(shelfmark):
+    assert _route(shelfmark) == ('/browse', 'shelfmark', shelfmark)
+
+
+@pytest.mark.parametrize('text', [
     'T-S AS 74.1+2',            # '+' would read as a space if not encoded
     'T-S 10J9 #5',              # '#' would start a URL fragment if not encoded
     'A&B 1',                    # '&' would split the query string if not encoded
 ])
-def test_anything_else_is_a_shelfmark_and_survives_the_url(shelfmark):
-    assert _route(shelfmark) == ('/browse', 'shelfmark', shelfmark)
+def test_characters_no_shelfmark_carries_send_it_to_search_intact(text):
+    """No libraries.csv shelfmark has '+', '#' or '&'-plus-this-shape, so the
+    recogniser calls these text; /search must still get them unmangled."""
+    assert _route(text) == ('/search', 'q', text)
 
 
 def test_a_search_query_survives_the_url():
