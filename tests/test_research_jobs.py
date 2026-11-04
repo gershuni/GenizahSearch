@@ -276,3 +276,20 @@ def test_os_allocation_limit_rejects_large_allocation_in_child(tmp_path):
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert 'allocation refused' in result.stdout
+
+
+def test_a_shutdown_leaves_no_closed_pool_behind(monkeypatch):
+    """A later lifespan in the same process (the tests run several) must get a fresh pool, not
+    the one the last lifespan shut down ("cannot schedule new futures after shutdown")."""
+    import web.research_jobs as research_jobs
+
+    monkeypatch.setattr(research_jobs, "_wait_executor", None)
+    monkeypatch.setattr(research_jobs, "_queue", None)
+    first = research_jobs.wait_executor()
+    research_jobs.shutdown_research()
+    second = research_jobs.wait_executor()
+    try:
+        assert second is not first
+        assert second.submit(lambda: 7).result(timeout=5) == 7
+    finally:
+        research_jobs.shutdown_research()

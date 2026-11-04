@@ -87,6 +87,7 @@ EXTRACTED_MODULES = [
     "shared/catalog_numbers.py",         # catalogue criteria plan, PR 1a, 2026-11-01
     "shared/catalog_criteria.py",        # catalogue criteria plan, PR 1a, 2026-11-01
     "shared/cudl_identity.py",           # structural CUDL identity, 2026-10-29
+    "shared/arabic_normalize.py",        # Arabic dictionary readings and keys, 2026-11-04
     "shared/blau_normalize.py",          # Blau dictionary lookup keys, 2026-11-03
     "shared/blau_service.py",            # Blau dictionary sidecar reader, 2026-11-04
     "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24

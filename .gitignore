@@ -394,3 +394,8 @@ scripts/nightly_verify_search_combinations.cmd
 # blau_data/download/ is untrusted third-party data fetched by hand, and blau.db is the
 # build artifact of scripts/build_blau_sidecar.py, deployed like the other *_data/ sidecars.
 blau_data/
+
+# Arabic dictionary sidecar (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md, phase A): the download
+# under arabic_data/download/ is untrusted third-party data fetched by scripts/build_arabic_sidecar.py
+# fetch, and arabic.db is its build artifact, deployed like the other *_data/ sidecars.
+arabic_data/

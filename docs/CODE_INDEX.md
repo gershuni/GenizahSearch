@@ -3543,6 +3543,19 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `compose` (Line 303) — A width preset plus a passage-length profile plus a search depth,
 - **Function** `get_preset` (Line 351)
 
+## shared/arabic_normalize.py
+
+- **Function** `ja_letters` (Line 57) — (letter, dotted) for each Hebrew letter of one word: finals folded, the dot read
+- **Function** `is_abbreviation` (Line 70) — Gershayim, or a quote mark after a letter that takes no dot (ב׳כ׳ר׳, ר').
+- **Function** `readings` (Line 85) — Every Arabic skeleton a Judeo-Arabic word may be, plain letters first, the last
+- **Function** `_readings` (Line 98)
+- **Function** `strip_harakat` (Line 124) — NFC, then the Arabic vowel signs, shadda, sukun, tanwin and Quranic marks removed.
+- **Function** `skeleton` (Line 129) — The frequency key of an Arabic word: harakat and tatweel dropped, the hamza seats
+- **Function** `arabic_tokens` (Line 136) — Surface Arabic words of a text, harakat dropped (hamza kept).
+- **Function** `root_key` (Line 145) — A root key, so the dictionaries' spellings meet: Arabic letters only, every hamza
+- **Function** `strong_letters` (Line 163) — The root key's letters that are neither hamza nor weak, doubles collapsed.
+- **Function** `buckwalter_to_arabic` (Line 179) — The consonants of a Perseus-Buckwalter string in Arabic script (vowels dropped).
+
 ## shared/blau_normalize.py
 
 - **Function** `strip_site_diacritics` (Line 78) — The site's own "strip diacritics": exactly its regex, nothing more.
