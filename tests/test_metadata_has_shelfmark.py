@@ -16,9 +16,11 @@ from shared.browse_map_utils import normalize_shelfmark
 from shared.metadata_manager import MetadataManager, _ShelfmarkSearchIndex
 
 
-def _manager(*shelfmarks, built=True):
+def _manager(*shelfmarks, built=True, alternates=None):
     mm = MetadataManager.__new__(MetadataManager)   # no csv load
     mm.csv_bank = {f'99{i:016d}': {'shelfmark': shelf} for i, shelf in enumerate(shelfmarks)}
+    for sys_id, others in (alternates or {}).items():
+        mm.csv_bank[sys_id] = {'shelfmark': others[0], 'call_numbers_raw': list(others)}
     mm._shelfmark_search_index = _ShelfmarkSearchIndex(mm.csv_bank, normalize_shelfmark) if built else None
     return mm
 
@@ -47,3 +49,15 @@ def test_an_index_of_another_catalogue_is_not_used():
     mm = _manager('Mingana 9')
     mm.csv_bank = dict(mm.csv_bank, **{'990000000000000099': {'shelfmark': 'T-S 1.1'}})
     assert mm.has_shelfmark('Mingana 9') is False
+
+
+def test_a_records_other_call_numbers_are_found_too():
+    """Codex on #476: libraries.csv 990053779870205171 stores its Gaster number
+    second; Browse resolves it, so the go-to boxes must open Browse for it."""
+    mm = _manager('T-S 12.123', alternates={
+        '990053779870205171': ('Gaster 61', 'Gaster, Moses Collection Printed series 61'),
+    })
+    assert mm.has_shelfmark('Gaster, Moses Collection Printed series 61') is True
+    assert mm.has_shelfmark('gaster moses collection printed series 61') is True
+    assert mm.has_shelfmark('Gaster 61') is True
+    assert mm.has_shelfmark('Gaster, Moses Collection Printed series 6') is False
