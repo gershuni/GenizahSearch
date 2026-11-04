@@ -39,6 +39,37 @@ if ($dirty.Count -gt 0 -and $dirty.Count -le 12) { $dirty | ForEach-Object { Wri
 Write-Host "recent commits:"
 git log --oneline -5 | ForEach-Object { Write-Host ("  " + $_) }
 
+# ------------------------------------------------------------ worktree ----
+# A linked worktree (its .git is a FILE) has none of the gitignored sidecars. Sessions
+# have bridged that with junctions into the main checkout, and on 2026-11-04 a forced
+# removal of such a worktree walked them and emptied C:\GenizahSearch\nli_data and
+# fgp_data. So: name every reparse point, loudly, before anything else happens.
+$isWorktree = Test-Path -LiteralPath '.git' -PathType Leaf
+$wtRoot = '.claude\worktrees'
+if ($isWorktree -or (Test-Path -LiteralPath $wtRoot -PathType Container)) {
+    Section "Worktree links"
+    $links = @(& (Join-Path $PSScriptRoot 'check_worktree_links.ps1') -Quiet 2>&1)
+    $linksExit = $LASTEXITCODE
+    if ($isWorktree) {
+        Write-Host ("  linked worktree: " + (Get-Location).Path)
+    } else {
+        Write-Host ("  main checkout; scanned " + $wtRoot + "\*")
+    }
+    if ($linksExit -ne 0) {
+        Write-Host ""
+        Write-Host "  !!! WARNING: reparse point(s) in a worktree, or folder(s) the scan could not read." -ForegroundColor Red
+        Write-Host "  !!! Do NOT 'git worktree remove --force' or 'rm -rf' the worktree that holds them: both" -ForegroundColor Red
+        Write-Host "  !!! walk a junction INTO ITS TARGET (2026-11-04: the main checkout's nli_data/ and" -ForegroundColor Red
+        Write-Host "  !!! fgp_data/ were emptied that way). Remove each link with 'cmd /c rmdir <path>' (no /S)," -ForegroundColor Red
+        Write-Host "  !!! then copy the sidecar under %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\ instead" -ForegroundColor Red
+        Write-Host "  !!! (CLAUDE.md, How to work here). A 'could not scan' line = unchecked until it is fixed." -ForegroundColor Red
+        $links | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
+    } else {
+        Write-Host "  no reparse points. A worktree never links to the main checkout's data: copy a sidecar" -ForegroundColor DarkGray
+        Write-Host "  under %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\ or set GENIZAH_FJMS_DB_PATH (ENV_VARS.md)." -ForegroundColor DarkGray
+    }
+}
+
 # ----------------------------------------------------------- milestone ----
 Section "Milestone (.planning/STATE.md frontmatter)"
 if (Test-Path '.planning\STATE.md') {
