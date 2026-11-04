@@ -36,11 +36,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from shared.browse_map_utils import _strip_library_prefix
 from shared.catalog_shelfmark import looks_like_catalogue_form
-from shared.quick_open import has_hebrew_or_arabic_letter
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 # The page modes in which what was typed is words to find in the text: the only
@@ -82,6 +81,19 @@ _LETTER_RUN_RE = re.compile(r'[A-Za-z]+')
 _ROMAN_RE = re.compile(r'^[ivxlcdm]+[a-z]?$')
 _DOTTED_NUMBER_RE = re.compile(r'[0-9A-Za-z]\.\d')
 _LETTER_DIGIT_RE = re.compile(r'[A-Za-z]\d|\d[A-Za-z]')
+
+
+def has_hebrew_or_arabic_letter(text: str) -> bool:
+    """True when ``text`` holds at least one Hebrew or Arabic LETTER.
+
+    Letters only: niqqud, cantillation and Arabic-Indic digits do not count,
+    so a string of them alone is not routed to full-text search. (Here since
+    2026-11-04, from shared/quick_open.py, which re-exports it.)
+    """
+    for ch in text:
+        if ch.isalpha() and unicodedata.name(ch, '').startswith(('HEBREW ', 'ARABIC ')):
+            return True
+    return False
 
 
 def _words_are_shelfmark_words(text: str) -> bool:
@@ -132,6 +144,27 @@ def search_box_input_kind(query: Optional[str]) -> str:
 def typed_as_shelfmark(query: Optional[str]) -> bool:
     """True when the search box holds a shelfmark (not a system number, not words)."""
     return search_box_input_kind(query) == 'shelfmark'
+
+
+def go_to_kind(query: Optional[str], has_shelfmark: Optional[Callable[[str], bool]] = None) -> Optional[str]:
+    """Where a go-to box sends ``query``: ``'sys_id'``, ``'shelfmark'`` or ``'text'``
+    (None when blank). One rule for the website's homepage and header boxes
+    (``web/home_query.py``) and the desktop's Go to box (``shared/quick_open.py``).
+
+    ``search_box_input_kind`` decides, except that text with a digit and no Hebrew
+    or Arabic letter is first looked up in the catalogue when ``has_shelfmark`` is
+    given (``MetadataManager.has_shelfmark``): no set of rules knows every catalogue
+    form (``Mingana 9``; Codex on #476). Words alone are never looked up."""
+    text = (query or '').strip()
+    if not text:
+        return None
+    kind = search_box_input_kind(text)
+    if kind != 'text':
+        return kind
+    if (has_shelfmark is not None and any(ch.isdigit() for ch in text)
+            and not has_hebrew_or_arabic_letter(text) and has_shelfmark(text)):
+        return 'shelfmark'
+    return 'text'
 
 
 def split_placeholder(template: str, placeholder: str = '{query}') -> Tuple[str, str]:

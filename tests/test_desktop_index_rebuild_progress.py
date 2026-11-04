@@ -189,6 +189,11 @@ class _Running:
         return True
 
 
+class _Done:
+    def isRunning(self):
+        return False
+
+
 def _reader(window, kind):
     """Something that reads the open index: the main search, Composition, grouping, or
     the Join Workbench's two searches (desktop/join_workbench.py shares app.searcher)."""
@@ -201,13 +206,18 @@ def _reader(window, kind):
         window.group_thread = _Running()
     elif kind == 'restore replay':
         window._replay_restore_thread = _Running()
+    elif kind == 'layout suggestion':
+        # "Did you mean": words_occur. An older check still running beside a finished
+        # newer one counts (Codex on #479).
+        window._layout_suggestion_workers = {_Done(), _Running()}
     elif kind == 'join candidates':
         window._join_workbench = types.SimpleNamespace(_search_thread=_Running(), _cross_worker=None)
     elif kind == 'join cross-side':
         window._join_workbench = types.SimpleNamespace(_search_thread=None, _cross_worker=_Running())
 
 
-@pytest.mark.parametrize('kind', ['search', 'composition', 'grouping', 'restore replay', 'join candidates', 'join cross-side'])
+@pytest.mark.parametrize('kind', ['search', 'composition', 'grouping', 'restore replay', 'layout suggestion',
+                                  'join candidates', 'join cross-side'])
 def test_the_swap_waits_while_a_search_holds_the_index(window, kind):
     th = _started(window, 'beside')
     _reader(window, kind)

@@ -38,17 +38,53 @@ _APP = QApplication.instance() or QApplication([])
     ("fl 12345678", ("fl", "FL12345678")),
     ("T-S 12.123", ("shelfmark", "T-S 12.123")),
     ("MS Heb c 57", ("shelfmark", "MS Heb c 57")),
-    ("12345", ("shelfmark", "12345")),          # not a system number: Browse decides
+    ("12345", ("search", "12345")),             # a bare number is not a shelfmark (website rule)
+    ("ts 20.57", ("shelfmark", "ts 20.57")),
+    ("add 3356", ("shelfmark", "add 3356")),
+    ("T-S NS 307.61b", ("shelfmark", "T-S NS 307.61b")),
+    ("dcuk", ("search", "dcuk")),               # גבול on the English layout
+    ("fufch anh", ("search", "fufch anh")),     # כוכבי שמי
+    ("hello world", ("search", "hello world")),
+    ("Psalm 23", ("search", "Psalm 23")),
+    ("Mingana 9", ("search", "Mingana 9")),     # no catalogue check given: the rules alone
     ("אל תיראו", ("search", "אל תיראו")),
     ("T-S אל", ("search", "T-S אל")),           # a Hebrew letter makes it words
     ("قال", ("search", "قال")),
-    ("٩٩٠٠٠١٢٣٤٥٦٠٢٠٥١٧١", ("shelfmark", "٩٩٠٠٠١٢٣٤٥٦٠٢٠٥١٧١")),  # Arabic-Indic digits
+    ("٩٩٠٠٠١٢٣٤٥٦٠٢٠٥١٧١", ("search", "٩٩٠٠٠١٢٣٤٥٦٠٢٠٥١٧١")),  # Arabic-Indic digits: not a number here
     ("", None),
     ("   ", None),
     (None, None),
 ])
 def test_what_a_line_is(text, expected):
     assert quick_open_target(text) == expected
+
+
+def test_the_catalogue_check_decides_what_the_rules_call_text():
+    """Mingana 9 is a catalogue shelfmark no rule knows (Codex on #476); words
+    alone are never looked up; and the website's routing says the same."""
+    from web.home_query import home_query_target
+    asked = []
+
+    def catalogue(q):
+        asked.append(q)
+        return q == "Mingana 9"
+    assert quick_open_target("Mingana 9", catalogue) == ("shelfmark", "Mingana 9")
+    assert quick_open_target("Psalm 23", catalogue) == ("search", "Psalm 23")
+    assert quick_open_target("dcuk", catalogue) == ("search", "dcuk")
+    assert asked == ["Mingana 9", "Psalm 23"]
+    assert home_query_target("Mingana 9", catalogue) == "/browse?shelfmark=Mingana%209"
+
+
+@pytest.mark.parametrize("text", ["ts 20.57", "dcuk", "fufch anh", "Mingana 9", "Psalm 23",
+                                  "990001234560205171", "hello world", "12345", "אל תיראו"])
+def test_the_desktop_and_the_website_route_alike(text):
+    """One rule (shared/search_box_input.py::go_to_kind): Browse on one is Browse
+    on the other, a search on one a search on the other."""
+    from web.home_query import home_query_target
+    kind, _ = quick_open_target(text)
+    url = home_query_target(text)
+    assert {"sys_id": "/browse?sys_id=", "shelfmark": "/browse?shelfmark=",
+            "search": "/search?q="}[kind] == url.split("=")[0] + "="
 
 
 def test_the_letter_rule_is_the_websites():
@@ -61,6 +97,9 @@ class _Window:
     """The parts of GenizahGUI Go to, F1 and Ctrl+F use, with the real methods."""
 
     go_to = GenizahGUI.go_to
+    _catalogue_has_shelfmark = GenizahGUI._catalogue_has_shelfmark
+    _go_to_word_mode = GenizahGUI._go_to_word_mode
+    _GO_TO_WORD_MODES = GenizahGUI._GO_TO_WORD_MODES
     open_help_for_current_section = GenizahGUI.open_help_for_current_section
     _focus_section_field = GenizahGUI._focus_section_field
     _open_section = GenizahGUI._open_section
@@ -97,6 +136,7 @@ class _Window:
         self.browse_fl_input = QLineEdit()
         self.current_browse_sid = None                    # no manuscript open in Browse
         self.is_searching = False
+        self.meta_mgr = None                              # the catalogue not loaded yet
         self.calls = []
         self.help_anchors = []
         self.tabs.show()
@@ -138,6 +178,56 @@ def test_go_to_opens_a_shelfmark_and_an_fl_number():
     w.go_to("fl 42")
     assert w.calls == [("last", "shelf"), ("browse", "", "T-S 12.123", ""),
                        ("last", "fl"), ("browse", "", "", "FL42")]
+
+
+def test_go_to_searches_english_letters_and_asks_the_catalogue():
+    """dcuk (גבול on the English layout) is searched, where the Search tab can
+    offer the Hebrew; Mingana 9 opens in Browse when the catalogue has it."""
+    w = _Window()
+    assert w.go_to("dcuk") == "search"
+    assert w.calls == [("search", "dcuk")]
+    assert w.tabs.currentWidget() is w.search_tab
+
+    class _Meta:
+        def has_shelfmark(self, q):
+            return q == "Mingana 9"
+    w.meta_mgr = _Meta()
+    assert w.go_to("Mingana 9") == "shelfmark"
+    assert w.calls[-1] == ("browse", "", "Mingana 9", "")
+
+    class _Broken:
+        def has_shelfmark(self, q):
+            raise RuntimeError("index gone")
+    w.meta_mgr = _Broken()
+    assert w.go_to("Mingana 9") == "search"
+
+
+@pytest.mark.parametrize("start, expected", [
+    (0, 0), (1, 1), (2, 2), (3, 3),     # Exact, Variants, Responsa, Fuzzy: kept
+    (4, 0), (5, 0), (6, 0), (7, 0),     # Regex, Title, Shelfmark, PGP Tags: Exact
+])
+def test_go_to_searches_words_in_a_mode_that_searches_words(start, expected):
+    """Codex on #479: from PGP Tags the search ran the tag box and dropped the
+    words; from Title or Shelfmark it searched something else."""
+    from PyQt6.QtWidgets import QComboBox
+    w = _Window()
+    w.mode_combo = QComboBox()
+    w.mode_combo.addItems(["Exact", "Variants", "Responsa", "Fuzzy", "Regex", "Title", "Shelfmark", "PGP Tags"])
+    w.mode_combo.setCurrentIndex(start)
+    assert w.go_to("dcuk") == "search"
+    assert w.mode_combo.currentIndex() == expected
+    assert w.calls == [("search", "dcuk")]
+
+
+def test_go_to_leaves_the_mode_alone_while_a_search_runs():
+    from PyQt6.QtWidgets import QComboBox
+    w = _Window()
+    w.mode_combo = QComboBox()
+    w.mode_combo.addItems(["Exact", "Variants", "Responsa", "Fuzzy", "Regex", "Title", "Shelfmark", "PGP Tags"])
+    w.mode_combo.setCurrentIndex(5)
+    w.is_searching = True
+    w.go_to("dcuk")
+    assert w.mode_combo.currentIndex() == 5 and w.calls == []
 
 
 def test_go_to_searches_words_but_not_over_a_running_search():

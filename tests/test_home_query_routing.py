@@ -3,7 +3,7 @@
 
 ``web/home_query.py::home_query_target`` decides where the homepage box and the
 header box send what the visitor typed: a corpus sys_id opens that manuscript,
-a shelfmark (as the /search box recognises one, ``web/search_box_input.py``)
+a shelfmark (as the /search box recognises one, ``shared/search_box_input.py``)
 is looked up by ``/browse``, and everything else -- Hebrew, English words,
 Hebrew typed on the English layout -- is searched. The wiring on the pages is
 ``tests/render_smoke/test_home_search_routing_render_smoke.py`` and
