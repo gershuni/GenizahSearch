@@ -26,7 +26,7 @@ What the 2026-11-04 change adds, and what it does not. The rule in `CLAUDE.md` (
 here": a worktree never links to the main checkout's data; copy a sidecar under
 `%LOCALAPPDATA%\GenizahSearchPro\data\<dir>\` or set `GENIZAH_FJMS_DB_PATH`),
 `scripts/check_worktree_links.ps1` (names every reparse point anywhere under a worktree, never
-stepping into one, exit 1) and `scripts/init.ps1` running it in every worktree and, from the main
+stepping into one, exit 1; a folder it cannot read makes the scan fail closed, exit 2) and `scripts/init.ps1` running it in every worktree and, from the main
 checkout, over `.claude/worktrees/*`. Nothing BLOCKS `git worktree remove --force` or `rm -rf` on a
 worktree that still holds a junction: the guard is advisory, and a session that skips `init.ps1`
 sees no warning. Closing this row = a removal path that refuses while a reparse point exists

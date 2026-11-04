@@ -9,14 +9,19 @@ what scripts/init.ps1 runs at every session start and what the cleanup step runs
 a forced removal, so it must be shown able to fail: junctions at the top level, one
 level down and two levels down are all named with their target and the exit code is 1
 (Codex, PR round 1: the first version looked one level down only, and `rm -rf` walks at
-any depth); a clean folder exits 0; and the scan itself changes nothing (the links stay
-until `rmdir` removes them, and the target's file survives both the scan and the `rmdir`).
+any depth); a clean folder exits 0; a folder the scan cannot list, or a -Path that is
+not a folder, is reported and the exit code is nonzero (Codex, round 2: an unreadable
+subtree was skipped silently and the scan still said clean); and the scan itself changes
+nothing (the links stay until `rmdir` removes them, and the target's file survives both
+the scan and the `rmdir`).
 
 Windows only: junctions and `cmd /c mklink /J` exist nowhere else. The CI matrix has a
 windows-latest lane, so this runs there for real rather than skipping everywhere.
 """
 from __future__ import annotations
 
+import getpass
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +45,10 @@ def _scan(folder: Path) -> subprocess.CompletedProcess:
 def _junction(link: Path, target: Path) -> None:
     subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
                    check=True, capture_output=True, timeout=60)
+
+
+def _icacls(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["icacls", *args], capture_output=True, text=True, timeout=60)
 
 
 def _rmdir(link: Path) -> None:
@@ -97,6 +106,30 @@ def test_junctions_at_every_depth_are_named_with_their_target(
     assert not any(link.exists() for link in links)
     assert (main_data / "sidecar.db").read_bytes() == b"keep me"
     assert _scan(worktree).returncode == 0
+
+
+def test_a_folder_the_scan_cannot_list_fails_closed(worktree: Path) -> None:
+    locked = worktree / "shared" / "locked"
+    locked.mkdir()
+    user = os.environ.get("USERNAME") or getpass.getuser()
+    denied = _icacls(str(locked), "/deny", f"{user}:(RD)")   # RD = list the folder
+    if denied.returncode != 0:
+        pytest.skip("icacls could not deny listing here: " + denied.stdout + denied.stderr)
+    try:
+        r = _scan(worktree)
+        assert r.returncode == 2, r.stdout + r.stderr
+        assert "could not scan" in r.stdout and str(locked) in r.stdout, r.stdout
+        assert "no reparse points" not in r.stdout, r.stdout
+        assert "INCOMPLETE" in r.stdout, r.stdout
+    finally:
+        assert _icacls(str(locked), "/remove:d", user).returncode == 0
+    assert _scan(worktree).returncode == 0
+
+
+def test_a_path_that_is_not_a_folder_is_not_clean(tmp_path: Path) -> None:
+    r = _scan(tmp_path / "no_such_worktree")
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "could not scan" in r.stdout and "not a folder" in r.stdout, r.stdout
 
 
 def test_init_runs_the_scanner() -> None:

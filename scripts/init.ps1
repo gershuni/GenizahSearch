@@ -57,11 +57,12 @@ if ($isWorktree -or (Test-Path -LiteralPath $wtRoot -PathType Container)) {
     }
     if ($linksExit -ne 0) {
         Write-Host ""
-        Write-Host "  !!! WARNING: reparse point(s) in a worktree. Do NOT 'git worktree remove --force'" -ForegroundColor Red
-        Write-Host "  !!! or 'rm -rf' the worktree that holds them: both walk a junction INTO ITS TARGET" -ForegroundColor Red
-        Write-Host "  !!! (2026-11-04: the main checkout's nli_data/ and fgp_data/ were emptied that way)." -ForegroundColor Red
-        Write-Host "  !!! Remove each link with 'cmd /c rmdir <path>' (no /S), then copy the sidecar under" -ForegroundColor Red
-        Write-Host "  !!! %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\ instead (CLAUDE.md, How to work here)." -ForegroundColor Red
+        Write-Host "  !!! WARNING: reparse point(s) in a worktree, or folder(s) the scan could not read." -ForegroundColor Red
+        Write-Host "  !!! Do NOT 'git worktree remove --force' or 'rm -rf' the worktree that holds them: both" -ForegroundColor Red
+        Write-Host "  !!! walk a junction INTO ITS TARGET (2026-11-04: the main checkout's nli_data/ and" -ForegroundColor Red
+        Write-Host "  !!! fgp_data/ were emptied that way). Remove each link with 'cmd /c rmdir <path>' (no /S)," -ForegroundColor Red
+        Write-Host "  !!! then copy the sidecar under %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\ instead" -ForegroundColor Red
+        Write-Host "  !!! (CLAUDE.md, How to work here). A 'could not scan' line = unchecked until it is fixed." -ForegroundColor Red
         $links | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
     } else {
         Write-Host "  no reparse points. A worktree never links to the main checkout's data: copy a sidecar" -ForegroundColor DarkGray

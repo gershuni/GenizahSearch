@@ -14,9 +14,12 @@
     It walks each folder given (default: the current folder when it is a linked
     worktree, otherwise every folder under <repo>\.claude\worktrees\) to any depth,
     never stepping INTO a reparse point, and prints one line per finding: the path,
-    its kind and its target. Exit code 1 when any is found, 0 when none. It changes
-    nothing. (Codex, round 1 of the PR: a junction two levels down was missed by the
-    first version, which looked one level down only, and rm -rf walks at any depth.)
+    its kind and its target. Exit code 1 when any is found, 0 when none. A folder it
+    cannot read (ACL, I/O error, a -Path that is not a folder) is printed as "could not
+    scan" and the exit code is 2: an incomplete scan is never reported clean. It
+    changes nothing. (Codex on the PR: round 1, a junction two levels down was missed
+    by a version that looked one level down only; round 2, an unreadable subtree was
+    skipped silently and the scan still said clean.)
 
     Remove a junction with `cmd /c rmdir <path>` (no /S): that deletes the link and
     leaves its target alone. Never Remove-Item -Recurse, rm -rf or git worktree remove
@@ -34,6 +37,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$script:unscanned = @()   # folders the walk could not read: the scan is then incomplete
 
 function Test-LinkedWorktree([string]$Folder) {
     # A linked worktree's .git is a FILE ("gitdir: ..."); the main checkout's is a folder.
@@ -47,11 +51,17 @@ function Get-ReparsePoints([string]$Root) {
     # PowerShell 5.1 follows junctions when it recurses.
     $found = @()
     $stack = New-Object System.Collections.Stack
-    $stack.Push((Get-Item -LiteralPath $Root -Force))
+    try { $stack.Push((Get-Item -LiteralPath $Root -Force -ErrorAction Stop)) }
+    catch { $script:unscanned += ('{0}: {1}' -f $Root, $_.Exception.Message); return @() }
     while ($stack.Count -gt 0) {
         $dir = $stack.Pop()
         $entries = @()
-        try { $entries = @($dir.GetFileSystemInfos()) } catch { continue }
+        try { $entries = @($dir.GetFileSystemInfos()) }
+        catch {
+            # Fail closed: a subtree we could not list may hold a junction.
+            $script:unscanned += ('{0}: {1}' -f $dir.FullName, $_.Exception.Message)
+            continue
+        }
         foreach ($e in $entries) {
             if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) {
                 $found += $e
@@ -77,7 +87,7 @@ if (-not $Path) {
 $total = 0
 foreach ($p in $Path) {
     if (-not (Test-Path -LiteralPath $p -PathType Container)) {
-        Write-Output ('  (not a folder: {0})' -f $p)
+        $script:unscanned += ('{0}: not a folder' -f $p)
         continue
     }
     $full = (Resolve-Path -LiteralPath $p).Path
@@ -91,14 +101,23 @@ foreach ($p in $Path) {
     }
 }
 
-if ($total -eq 0) {
+foreach ($u in $script:unscanned) { Write-Output ('  could not scan {0}' -f $u) }
+$problems = $script:unscanned.Count
+
+if ($total -eq 0 -and $problems -eq 0) {
     if (-not $Quiet) { Write-Output ('no reparse points under: ' + ($Path -join '; ')) }
     exit 0
 }
 if (-not $Quiet) {
     Write-Output ''
-    Write-Output ('{0} reparse point(s). Remove each with "cmd /c rmdir <path>" (no /S), never recursively,' -f $total)
-    Write-Output 'and never "git worktree remove --force" or "rm -rf" a worktree while one exists: both walk'
-    Write-Output 'the link into its target (2026-11-04: the main checkout''s nli_data\ and fgp_data\ were emptied).'
+    if ($problems -gt 0) {
+        Write-Output ('{0} folder(s) could not be read: the scan is INCOMPLETE and the worktree is not known clean.' -f $problems)
+    }
+    if ($total -gt 0) {
+        Write-Output ('{0} reparse point(s). Remove each with "cmd /c rmdir <path>" (no /S), never recursively,' -f $total)
+        Write-Output 'and never "git worktree remove --force" or "rm -rf" a worktree while one exists: both walk'
+        Write-Output 'the link into its target (2026-11-04: the main checkout''s nli_data\ and fgp_data\ were emptied).'
+    }
 }
-exit 1
+if ($total -gt 0) { exit 1 }
+exit 2
