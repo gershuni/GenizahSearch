@@ -189,6 +189,11 @@ class _Running:
         return True
 
 
+class _Done:
+    def isRunning(self):
+        return False
+
+
 def _reader(window, kind):
     """Something that reads the open index: the main search, Composition, grouping, or
     the Join Workbench's two searches (desktop/join_workbench.py shares app.searcher)."""
@@ -202,7 +207,9 @@ def _reader(window, kind):
     elif kind == 'restore replay':
         window._replay_restore_thread = _Running()
     elif kind == 'layout suggestion':
-        window._layout_suggestion_worker = _Running()   # "Did you mean": words_occur (Codex on #479)
+        # "Did you mean": words_occur. An older check still running beside a finished
+        # newer one counts (Codex on #479).
+        window._layout_suggestion_workers = {_Done(), _Running()}
     elif kind == 'join candidates':
         window._join_workbench = types.SimpleNamespace(_search_thread=_Running(), _cross_worker=None)
     elif kind == 'join cross-side':

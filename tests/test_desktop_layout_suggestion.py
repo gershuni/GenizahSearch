@@ -62,11 +62,10 @@ class _Window(QWidget):
         self._run_seq += 1
         self._layout_offer = (self._run_seq, query) if text_search else None
         self._offer_layout_suggestion()
-        worker = getattr(self, '_layout_suggestion_worker', None)
-        if worker is not None:
+        for worker in list(getattr(self, '_layout_suggestion_workers', ())):
             assert worker.wait(5000)
-        QApplication.processEvents()      # the worker's queued signals
-        self.last_worker_gone = getattr(self, '_layout_suggestion_worker', None) is None
+        QApplication.processEvents()      # the workers' queued signals
+        self.last_worker_gone = not getattr(self, '_layout_suggestion_workers', set())
 
     def toggle_search(self):
         self.searches.append(self.query_input.text())
@@ -97,6 +96,37 @@ def test_the_worker_is_an_index_reader_only_while_it_runs():
     w = _Window()
     w.finished_zero("dcuk")
     assert w.last_worker_gone
+
+
+def test_every_running_check_is_an_index_reader():
+    """Two zero-result searches in a row: the first check, still running after
+    the second has ended, still holds the index swap; when it ends, nothing does
+    (Codex on #479). The real _index_readers_busy."""
+    import threading
+    gate = threading.Event()
+    w = _Window()
+    w._index_readers_busy = GenizahGUI._index_readers_busy.__get__(w)
+    slow = _Searcher({"גבול"})
+    slow.words_occur = lambda q: gate.wait(5)                 # the first check blocks
+    w.searcher = slow
+    w._run_seq = 1
+    w._layout_offer = (1, "dcuk")
+    w._offer_layout_suggestion()
+    (first,) = w._layout_suggestion_workers
+    w.searcher = _Searcher({"גבול"})
+    w._run_seq = 2
+    w._layout_offer = (2, "dcuk")
+    w._offer_layout_suggestion()
+    (second,) = w._layout_suggestion_workers - {first}
+    assert second.wait(5000)
+    QApplication.processEvents()                              # the second's finished()
+    assert w._layout_suggestion_workers == {first} and first.isRunning()
+    assert w._index_readers_busy() == ['layout suggestion']
+    gate.set()
+    assert first.wait(5000)
+    QApplication.processEvents()
+    assert w._layout_suggestion_workers == set()
+    assert w._index_readers_busy() == []
 
 
 def test_the_hebrew_clicked_runs_it_as_if_typed(lang):
