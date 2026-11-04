@@ -1122,6 +1122,19 @@ desktop.Y.X` identity holds via the facades.
     - Method `__init__` (Line 1741)
     - Method `run` (Line 1751)
 
+## web/components/blau_panel.py
+
+- **Function** `head_html` (Line 61) — The ``<head>`` line that loads the click script, versioned by its
+- **Function** `lookup_word` (Line 73) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
+- **Function** `_attr` (Line 95)
+- **Function** `_rtl` (Line 99) — A Hebrew-letter text, right-to-left whatever the UI direction.
+- **Function** `_gloss_pair` (Line 104) — (text, class) of the glosses to show, the UI language's first.
+- **Function** `_render_sense` (Line 112)
+- **Function** `_render_card` (Line 135)
+- **Function** `_render_examples` (Line 164)
+- **Function** `_render_credit` (Line 176)
+- **Function** `render_lookup` (Line 183) — Draw ``result`` into the current container. Returns False, drawing
+
 ## web/components/criteria_panel.py
 
 The "Manuscript features" control (catalogue criteria, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.3, PR 1b):
@@ -3532,6 +3545,42 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `_peel_prefixes` (Line 134)
 - **Function** `_peel_suffix` (Line 149)
 - **Function** `candidate_stems` (Line 157) — Normalized lookup candidates for one corpus word, the word itself first, then with
+
+## shared/blau_service.py
+
+- **Function** `blau_enabled` (Line 77) — The ``BLAU_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 85) — The dictionary site's page for one entry.
+- **Function** `default_sidecar_path` (Line 90) — Where the sidecar lives: the user's updated copy first (the desktop
+- **Class** `BlauSense` (Line 108) — One form under an entry: the dictionary's own text, spelling, binyan,
+- **Class** `BlauCard` (Line 129) — One dictionary entry (a root) that a candidate key hit.
+- **Class** `BlauExample` (Line 146) — An entry whose example phrases contain the key: it defines another word.
+- **Class** `BlauLookup` (Line 155)
+    - Property `found` (Line 165)
+- **Function** `empty_lookup` (Line 169)
+- **Class** `_CardBuild` (Line 174) — A card while its hits are collected.
+    - Method `__init__` (Line 180)
+- **Function** `_text` (Line 190)
+- **Function** `_page` (Line 194)
+- **Function** `_has_content` (Line 201)
+- **Class** `BlauService` (Line 205) — Read-only access to the Blau sidecar. See the module docstring.
+    - Method `__init__` (Line 208)
+    - Property `db_path` (Line 250)
+    - Method `is_ready` (Line 253) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 257) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 261)
+    - Property `credit_he` (Line 265) — The site's own credit line (ruling (a)); shown on every surface.
+    - Property `credit_en` (Line 270)
+    - Method `close` (Line 273)
+    - Method `lookup` (Line 284) — What the dictionary has for one clicked word. Never raises; empty
+    - Method `_lookup` (Line 302)
+    - Method `_add_hit` (Line 340)
+    - Method `_finish` (Line 365)
+    - Method `_sense` (Line 410)
+    - Method `_root` (Line 430)
+    - Method `_target_root` (Line 437) — A form's cross-reference target: a root, or a stem (then its root).
+- **Function** `_validate` (Line 447) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `get_blau_service` (Line 483) — The default service, created on first use (per-thread connections by
+- **Function** `reset_blau_service` (Line 493) — Forget the default service (after the sidecar file is replaced).
 
 ## shared/cudl_identity.py
 

@@ -3558,9 +3558,29 @@ async def initialize_engine():
             name='gc-freeze-after-loaders',
         )
 
+async def open_blau_sidecar_on_startup():
+    """Open and check the Blau dictionary sidecar once, off the loop.
+
+    ``shared.blau_service.get_blau_service`` opens ``blau_data/blau.db``
+    read-only and runs its checks (schema, normalizer, credit line,
+    ``quick_check``) on first use; doing that here keeps the first /browse
+    render from paying for it on the event loop. Fail-closed: an absent or
+    rejected sidecar leaves the service unavailable and /browse without the
+    companion; nothing here can stop the app.
+    """
+    from shared.blau_service import get_blau_service
+    try:
+        service = await run.io_bound(get_blau_service)
+        if service is not None and not service.is_ready():
+            print(f"[init] Blau dictionary not served: {service.unavailable_reason}", flush=True)
+    except Exception as e:
+        print(f"[init] Blau dictionary sidecar check failed (non-fatal): {e}", flush=True)
+
+
 app.on_startup(compact_export_storage_on_startup)
 app.on_startup(start_malloc_trim_on_startup)
 app.on_startup(start_perf_watch_on_startup)
+app.on_startup(open_blau_sidecar_on_startup)
 app.on_startup(initialize_engine)
 
 

@@ -2681,3 +2681,113 @@ body {
     .lists-item-card > .nicegui-row:first-child { flex-wrap: wrap !important; }
     .lists-item-actions { flex-direction: row !important; flex: 1 1 100%; order: 10; gap: 0 !important; }
 }
+
+/* The Blau dictionary companion on /browse (docs/plans/BLAU_DICTIONARY_PLAN.md
+   §6.2; web/components/blau_panel.py draws it, web/static/js/blau_lookup.js
+   opens it). EVERY rule is scoped under `.gs-blau`, as the discovery block
+   is, because the class names inside are generic.
+   Phone-first: the base is a sheet at the foot of the screen; from 1024px the
+   popover sits beside the clicked word, where the script put it
+   (`--blau-left`, `--blau-top`, `--blau-bottom`, `data-blau-place`). Those
+   three are viewport pixels of the word's own box, so `left`/`top` are
+   deliberately physical; everything inside the panel is logical, since it
+   renders in both UI directions. Colours are the theme variables only, so
+   light, parchment and dark need no rules of their own. */
+.blau-word-hit {
+    background: rgba(5, 150, 105, 0.22);
+    box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.22);
+    border-radius: 3px;
+}
+[data-theme="dark"] .blau-word-hit {
+    background: rgba(52, 211, 153, 0.3);
+    box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.3);
+}
+.gs-blau-popover {
+    position: fixed; z-index: 2500;
+    left: 0; right: 0; bottom: 0; top: auto;
+    max-height: 55vh;
+    display: flex; flex-direction: column;
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-primary, #1e293b);
+    border: 1px solid var(--border-light, #e2e8f0); border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    box-shadow: var(--shadow-xl, 0 -8px 24px rgba(0, 0, 0, 0.18));
+    font-size: 0.9rem;
+}
+@media (min-width: 1024px) {
+    .gs-blau-popover {
+        left: var(--blau-left, 16px); right: auto;
+        top: var(--blau-top, 80px); bottom: auto;
+        width: 440px; max-height: 380px;   /* keep in step with WIDTH/HEIGHT in blau_lookup.js */
+        border-radius: 10px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+        box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
+    }
+    .gs-blau-popover[data-blau-place="above"] { top: auto; bottom: var(--blau-bottom, 80px); }
+}
+@media print { .gs-blau-popover { display: none !important; } }
+.gs-blau .panel-head {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    padding: 8px 12px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+}
+.gs-blau .panel-head .title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted, #64748b);
+}
+.gs-blau .panel-head .word {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.25rem; font-weight: 700;
+}
+.gs-blau .panel-head .blau-close { margin-inline-start: auto; }
+.gs-blau .panel-body { overflow-y: auto; padding: 6px 12px 10px; }
+.gs-blau .card { padding: 8px 0; border-bottom: 1px solid var(--border-light, #e2e8f0); }
+.gs-blau .card:last-of-type { border-bottom: 0; }
+.gs-blau .entry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.gs-blau .entry .name {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.3rem; font-weight: 700; line-height: 1.3;
+}
+.gs-blau .entry .name.sub { font-size: 1.15rem; font-weight: 600; }
+.gs-blau .entry .sep { color: var(--text-muted, #64748b); }
+.gs-blau .ar {
+    font-family: 'Noto Naskh Arabic', 'Scheherazade New', 'Amiri', 'Times New Roman', serif;
+    font-size: 1.1rem; color: var(--text-secondary, #475569);
+}
+.gs-blau .entry .page { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+.gs-blau .entry .site { font-size: 0.75rem; margin-inline-start: auto; white-space: nowrap; }
+.gs-blau .via, .gs-blau .matched-key, .gs-blau .see, .gs-blau .looked-for {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; font-size: 0.8rem;
+}
+.gs-blau .via-label, .gs-blau .matched-label, .gs-blau .see-label,
+.gs-blau .looked-label, .gs-blau .examples-label { color: var(--text-muted, #64748b); }
+.gs-blau .sense {
+    padding: 4px 0; padding-inline-start: 10px;
+    border-inline-start: 3px solid transparent;
+}
+.gs-blau .sense.matched { border-inline-start-color: var(--primary-600, #059669); }
+.gs-blau .sense .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.gs-blau .sense .ja {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.1rem; font-weight: 600;
+}
+.gs-blau .binyan, .gs-blau .flag {
+    font-size: 0.68rem; padding: 0 6px; border-radius: 999px; line-height: 1.5;
+}
+.gs-blau .binyan {
+    font-weight: 600; letter-spacing: 0.04em;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
+.gs-blau .flag { background: var(--bg-secondary, #f8fafc); color: var(--text-muted, #64748b); }
+.gs-blau .gloss { line-height: 1.45; }
+.gs-blau .gloss + .gloss { font-size: 0.82rem; color: var(--text-secondary, #475569); }
+.gs-blau .more { font-size: 0.78rem; }
+.gs-blau .examples { padding-top: 8px; font-size: 0.82rem; }
+.gs-blau .example-links { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.gs-blau .empty { padding: 4px 0 8px; }
+.gs-blau .credit {
+    margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border-light, #e2e8f0);
+    font-size: 0.68rem; line-height: 1.4; color: var(--text-muted, #64748b);
+}
+/* The credit is the link to the dictionary site: muted like the text around
+   it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
+.gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
+.blau-hint { color: var(--text-muted, #64748b); }

@@ -6431,3 +6431,25 @@ TRANSLATIONS.update({
     "The catalogue data could not be read: the filters that need it are not applied.":
         "לא ניתן היה לקרוא את נתוני הקטלוג: המסננים שתלויים בהם לא הוחלו.",
 })
+
+# The Blau dictionary companion on /browse (web/components/blau_panel.py,
+# docs/plans/BLAU_DICTIONARY_PLAN.md §6.2, 2026-11-04). "Blau's dictionary" is
+# the panel's title; the credit line itself comes from the sidecar's meta.
+TRANSLATIONS.update({
+    "Blau's dictionary": "מילון בלאו",
+    "Click a word for its dictionary entry": "לחיצה על מילה פותחת את ערכה במילון בלאו",
+    "Open on the dictionary site": "פתיחה באתר המילון",
+    "more senses on the site": "משמעויות נוספות באתר",
+    "more entries": "ערכים נוספים",
+    "Also in the examples under": "מופיע גם בדוגמאות שבערכים",
+    "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
+    "Looked for": "חיפשנו",
+    "matched": "התאמה",
+    "via": "דרך",
+    "see": "ראו",
+    "binyan": "בניין",
+    "classical": "קלאסי",
+    "reconstructed": "משוחזר",
+    "erroneous": "שגוי",
+    "p.": "עמ׳",
+})

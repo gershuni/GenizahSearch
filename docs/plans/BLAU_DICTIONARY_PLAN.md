@@ -1,9 +1,11 @@
 # Blau's dictionary as a companion: a Judeo-Arabic dictionary in GenizahSearch
 
-**Status:** plan **rev. 2** (2026-11-03). Phase 1 (the sidecar, its normalizer and its gate) is
-built on branch `claude/blau-sidecar` and is this plan's PR (#472); phases 2-4 are described, not
-built. **Both owner decisions are ruled (2026-11-03, §9):** the site's permission is treated as
-covering GenizahSearch, and the companion is **web only first**. Phase 2 can start.
+**Status:** plan **rev. 3** (2026-11-04). Phase 1 (the sidecar, its normalizer and its gate) is
+**merged** (#472, `c4b7f8c8`, 2026-11-03). Phase 2 (the reader companion on `/browse`) is built
+on branch `claude/blau-browse` and is this plan's second PR; phases 3-4 are described, not built.
+**Both owner decisions are ruled (2026-11-03, §9):** the site's permission is treated as
+covering GenizahSearch, and the companion is **web only first**. Nothing is deployed: the server
+copy of the sidecar is the owner's (`scripts/deploy_blau_sidecar.ps1`, §8).
 **Origin:** the PostHog usage review of 2026-11-03 (`_tmp/posthog_usage_review_2026-11-03.md`):
 readers whose browser is English hit zero results in 53% of their Hebrew-letter searches, against
 33% for readers whose browser is Hebrew. The suspected cause is Judeo-Arabic orthography: a large
@@ -13,7 +15,8 @@ Mediaeval Judaeo-Arabic Texts* (2006) as a companion for every reader, and as he
 Hebrew readers searching Arabic terms, and pointed at its digital edition as the data source.
 **Scope:** data layer now (web and desktop can both read a SQLite sidecar); the reader companion,
 search by meaning and the reverse link later, on the surfaces ruling (b) names.
-**Branch:** `claude/blau-sidecar` (PR against `master-main`; nothing merged, nothing deployed).
+**Branches:** `claude/blau-sidecar` (phase 1, #472, merged 2026-11-03) and `claude/blau-browse`
+(phase 2, PR against `master-main`); nothing deployed.
 
 ---
 
@@ -176,25 +179,38 @@ made the gate fail with "415 forms_norm keys differ"; the rebuild passed.)
 their tests, the `.gitignore` entry, one `DATA_LIFECYCLE.md` row, a `changelog.d/` fragment, this
 plan. No reader, no route, no bundling: the file exists only where someone ran the build.
 
-### 6.2 Phase 2 — the reader companion on `/browse`
+### 6.2 Phase 2 — the reader companion on `/browse` (built: branch `claude/blau-browse`)
 
-A reader clicks a word on the transcription. `shared/blau_service.py` (new, read-only over the
-sidecar, resolving its path like `shared/fgp_service.py`, failing closed when the file is absent)
-looks the word up: `normalize_ja`, then `candidate_stems` in order, each against `forms_norm`,
-headword-like kinds first (root, sub-entry, headword, variant), phrases after. Every hit is shown
-as one card: the entry name in Hebrew letters with its marks, the Arabic spelling, the binyan,
-the Hebrew gloss, the English gloss, the flags (classical, reconstructed, erroneous), the printed
-page, and the site's entry link (`/entry/blau-e-…`). Several hits, or several candidates that hit
-(`כתאב` and `תאב`), are shown as a list in candidate order, not merged: the reader decides.
-Ambiguity is the norm here, not an error. The credit line of ruling (a) is on the panel, on every
-surface, always.
+A reader clicks a word on the transcription. `shared/blau_service.py` (read-only over the
+sidecar, resolving its path like `shared/fgp_service.py`, failing closed when the file is absent
+or fails a check: schema version, normalizer version, credit line, lookup index, row count,
+`quick_check`) looks the word up: `normalize_ja`, then `candidate_stems` in order, each against
+`forms_norm`, headword-like kinds first (root, sub-entry, headword, variant). Every entry a key
+reaches is one card: the entry name in Hebrew letters with its marks, the Arabic spelling, the
+printed page, the site's entry link (`entry/blau-e-…`, its own `openInReader`), then its senses
+-- the matched form first, then the first forms under the matched sub-entry or root
+(`MAX_SENSES` 4; the rest counted and linked), each with its text, binyan, Hebrew and English
+glosses (the UI language's first) and flags (classical, reconstructed, erroneous); a
+cross-reference root leads to its target ("via"). Several hits, or several candidates that hit
+(`כתאב` and `תאב`), are several cards in candidate order, not merged: the reader decides. A key
+found only inside the dictionary's own example phrases (kind `phrase`) is listed apart, "also in
+the examples under", because the entry it sits in defines another word -- on the real file that
+is most of what a common word (וקאל, פי, מן) reaches. Ambiguity is the norm here, not an error.
+The credit line of ruling (a) is on the panel, always: the renderer draws nothing without it.
 
-Web first (ruling b): a panel beside the viewer (phone: a sheet), opened from a word click,
-closed by the next click; the word stays highlighted. Desktop (a later ruling): the same lookup
-in the Browse viewer's context menu, same card, same credit.
+Web first (ruling b): `web/static/js/blau_lookup.js` finds the word under the pointer (caret
+from point, widened over Hebrew letters, combining marks and the apostrophe family), wraps it in
+a highlighted span, places the popover beside it and dispatches `blau-lookup` on it; the page
+answers from the service off the loop and `web/components/blau_panel.py` draws the cards into
+the popover (`position: fixed`: beside the word from 1024px, a sheet at the foot of a phone).
+The next click on no word, or the panel's close, hides it; the word stays highlighted until
+then. A page without a served sidecar (or with `BLAU_DICTIONARY_ENABLED=0`) carries no script,
+no popover and no marked pane. Desktop (a later ruling): the same lookup in the Browse viewer's
+context menu, same card, same credit.
 
-Also here: a "what is this word" entry point on `/search`'s result snippets, since the review
-shows readers leave after a zero result without opening anything.
+Not in this PR: the "what is this word" entry point on `/search`'s result snippets (that page is
+in another session's hands; it follows once the panel is live), and the root-skeleton fallback
+of §10.
 
 ### 6.3 Phase 3 — search by meaning
 
@@ -228,10 +244,10 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 | `scripts/verify_blau_sidecar.py` (new) | the gate (§8) | 1 |
 | `tests/test_blau_normalize.py`, `tests/test_build_blau_sidecar.py` (new) | 43 + 35 tests on a synthetic v6 fixture (no dictionary text in the repository) | 1 |
 | `tests/test_no_back_edges_core.py`, `.gitignore`, `docs/architecture/DATA_LIFECYCLE.md`, `docs/CODE_INDEX.md`, `changelog.d/` | registration | 1 |
-| `shared/blau_service.py` (new) | read-only lookups, fail-closed path resolution, the card model | 2 |
-| `web/components/blau_panel.py` (new), `web/pages/browse.py`, `web/static/manuscript_viewer.js` | the word click and the panel; the credit line | 2 |
-| `desktop/viewers.py`, `desktop/result_dialog.py` | the context-menu lookup (ruling b) | 2 |
-| `GenizahSearchPro.spec`, `docs/guides/DEPLOYMENT_TECHNICAL.md`, `scripts/deploy_blau_sidecar.ps1` | bundling and the server copy (ruling b) | 2 |
+| `shared/blau_service.py` (new) | read-only lookups, fail-closed open, the card model; `tests/test_blau_service.py` | 2 (built) |
+| `web/components/blau_panel.py`, `web/static/js/blau_lookup.js` (new), `web/pages/browse.py`, `web/static/common.css`, `web/main.py`, `shared/genizah_translations.py` | the word click, the popover and its cards, the credit line, the startup check; `tests/test_blau_panel.py`, `tests/render_smoke/test_blau_panel_render_smoke.py` | 2 (built) |
+| `scripts/deploy_blau_sidecar.ps1` (new), `docs/guides/DEPLOYMENT_TECHNICAL.md`, `docs/guides/ENV_VARS.md`, `CLAUDE.md` | the server copy (owner); the kill switch | 2 (built) |
+| `desktop/viewers.py`, `desktop/result_dialog.py`, `GenizahSearchPro.spec` | the context-menu lookup and the bundling (desktop: a later ruling) | 2 (later) |
 | `web/pages/search.py`, `shared/search_engine.py` | gloss lookup, chips, one alternation into the variants path; FTS5 table in the build | 3 |
 | a nightly script + table | page counts per key | 4 |
 
@@ -302,6 +318,34 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 ---
 
 ## 11. Review log
+
+### Phase 2 (PR #473)
+
+**Round 1** (`a4b6796d`), Codex: two P2, both fixed.
+- A lookup that finished after a later click or a close could overwrite the newer word's card
+  or reopen a closed panel: the page keeps a request counter, a close bumps it, and a completion
+  that is no longer the latest draws nothing (`test_a_slow_earlier_lookup_does_not_overwrite_the_newer_word`,
+  `test_a_close_during_a_lookup_keeps_the_panel_closed`).
+- The panel's own close control left the word highlighted (the script returned early on a click
+  inside the popover): a click on `.blau-close` now unwraps the mark before the page hides the
+  popover.
+
+**Round 2** (`aa877b04`), Codex: three P2, all fixed.
+- Cards were keyed by entry, so two candidates that reached the same entry (`ובלג` and `בלג`)
+  merged into one card with the first candidate's metadata, against §6.2: a card is now one
+  scope (an entry, or one sub-entry of it) reached by one candidate, in candidate order
+  (`test_two_candidates_that_reach_the_same_entry_are_two_cards_in_candidate_order`,
+  `test_a_root_hit_and_a_sub_entry_hit_of_one_candidate_are_two_scopes`).
+- The click script's word class spanned U+0591-05C7, which includes the maqaf, paseq, sof pasuq
+  and nun hafukha -- punctuation that `normalize_ja` treats as a word boundary, so a click on
+  `אב־גד` looked up the pair as a phrase: the class now names the combining marks only, pinned
+  by running the script's class as a Python regex.
+- The credit line was plain text; ruling (a) wants the site linked on every surface, and an
+  empty answer had no other link: both credit lines are links to the site.
+
+**Round 3** (`7a3528c6`), Codex: no findings. The review loop ends here (findings 2 → 3 → 0).
+
+### Phase 1 (PR #472)
 
 **Round 1** (PR #472, `4794cf69`), Codex: two P2, both fixed.
 - The gate let a cross-reference root with a NULL `target_id` pass (the dangling-target check
