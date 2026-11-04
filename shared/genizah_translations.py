@@ -1500,7 +1500,7 @@ TRANSLATIONS = {
     # inputs -- in few enough words to fit the box on a 360px phone (measured).
     "Text, shelfmark or system ID": "טקסט, מספר מדף או מספר מערכת",
     # The header's go-to box (web/main.py::render_header_center), on every page.
-    # Hebrew: the owner's words (2026-11-04); English awaiting the owner.
+    # Hebrew: the owner's words; English approved by the owner (both 2026-11-04).
     "Search text or go to a shelfmark...": "חפשו טקסט או עברו למספר מדף...",
     "Search mode": "מצב חיפוש",
     "results found": "תוצאות נמצאו",
