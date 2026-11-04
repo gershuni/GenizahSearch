@@ -525,6 +525,18 @@ def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=No
     from nicegui import core, ui
     from nicegui.client import Client
 
+    # THE READS NOT STUBBED BELOW GO TO THE REAL WRAPPERS, and every one of them
+    # gates on `discovery_available()` -- so it is PINNED OFF here, never
+    # inherited from the process. Both of its inputs are frozen at import:
+    # `web.feature_flags` reads DISCOVERY_ENABLED when it is first imported, and
+    # `web.main` loads the sidecar from GENIZAH_DISCOVERY_DATA_DIR. Whether a
+    # developer's `.env` was already in the environment by then depends on which
+    # test file the process collected first (`web/auth_state.py` loads it at
+    # import, reached through `web.components`). After `tests/test_blau_panel.py`
+    # the real launch read served the live artifact, and its figures reached
+    # the headline and the pool invitation (2026-11-04). A test that wants the
+    # sized states passes `launch`.
+    _set_availability(monkeypatch, False)
     monkeypatch.setattr(fp, "get_findings_enveloped", findings or _fake_findings())
     monkeypatch.setattr(fp, "get_findings_facets_enveloped", facets or _fake_facets())
 
@@ -747,6 +759,44 @@ def test_headline_slot_is_present_and_contains_no_digit(monkeypatch, lang):
     )
     # The scaffolding is bilingual: the region carries an accessible label.
     assert fp.copy_text("headline_slot_label", lang) in text
+
+
+def test_the_render_harness_never_inherits_the_process_s_discovery_state(monkeypatch):
+    """REGRESSION (2026-11-04). `_render_page` lets the launch read run unstubbed
+    and relies on it being the UNAVAILABLE one -- the digit-free headline and
+    the degraded pool invitation above are asserted on exactly that. It used to
+    inherit that from whatever the process had loaded, so
+    `pytest tests/test_blau_panel.py tests/test_findings_page.py` on a machine
+    whose `.env` turns discovery on rendered the live artifact's figures, and
+    six tests here failed in that order only.
+
+    The state such a process leaves behind is reproduced here directly: the flag
+    on, a sidecar ready, and a launch read that answers with figures. Every one
+    of them must stay out of the page the harness renders."""
+    import web.discovery as wd
+
+    _set_availability(monkeypatch, True)
+
+    async def _served_launch(*_args, **_kwargs):
+        return _launch_envelope_v3()
+
+    async def _no_excerpts(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(wd._service, "get_launch_stats_enveloped_async", _served_launch)
+    monkeypatch.setattr(wd._service, "excerpts_available_async", _no_excerpts)
+
+    client = _render_page(monkeypatch, lang="en")
+
+    headline = _scoped_text(client, fp.HEADLINE_SLOT_CLASS)
+    assert not _DIGIT_RE.findall(headline), (
+        "the harness rendered a launch read the process had loaded rather than the "
+        f"unavailable one it relies on. Headline text: {headline!r}")
+    strips = _elements_with_class(client, fp.POOL_INVITE_CLASS)
+    assert strips, "the pool invitation did not render"
+    invite = "\n".join(_subtree_strings(strips[0]))
+    assert f"{_ALL_SENTINEL_MORE_POOL:,}" not in invite, (
+        f"the second pool's size reached the invitation from the process: {invite!r}")
 
 
 def _docstring_nodes(tree) -> set:
