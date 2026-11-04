@@ -14,10 +14,28 @@ from scripts.measure_arabic_readings import (
     GATE,
     form_roots,
     gate,
+    lane_attribute,
+    plural_alif_dropped,
     rank_readings,
     strip_roots,
 )
-from shared.arabic_normalize import root_key
+from shared.arabic_normalize import buckwalter_to_arabic, ja_letters, root_key
+
+
+def test_p2_compares_a_plural_alif_reading_letter_for_letter_with_the_page():
+    """חצ'רו read حضروا: the alif v2 adds is not on the page, so the marked צ is still letter 1."""
+    page = ja_letters("חצ'רו")
+    assert plural_alif_dropped("حضروا", page) == "حضرو"
+    assert plural_alif_dropped("حضرو", page) == "حضرو"
+    assert plural_alif_dropped("حضرا", ja_letters("חצ'רא")) == "حضرا", "only after a final ו"
+
+
+def test_lane_attributes_are_decoded_before_buckwalter():
+    """``&amp;`` is Buckwalter's ؤ in XML; read raw it would be four letters."""
+    name = lane_attribute('<div2 type="root" n="&amp;mr &amp;c.">', "n")
+    assert name == "&mr &c."
+    assert buckwalter_to_arabic(name.split()[0]) == "ؤمر"
+    assert lane_attribute('<div2 type="root">', "n") == ""
 
 
 def test_frequency_puts_the_common_reading_first_and_the_broken_rankings_do_not():

@@ -1,14 +1,14 @@
 # Arabic dictionaries beside Blau: Lane and Lisān al-ʿArab for Judeo-Arabic words
 
-**Status:** plan **rev. 3** (2026-11-04). **The owner ruled D1-D10** (§8): Lane first, Lisān
+**Status:** plan **rev. 4** (2026-11-04). **The owner ruled D1-D11** (§8): Lane first, Lisān
 later; the laneslexicon master files; credit and licence terms at the minimum each source
 requires; Ephraim Meiri's parsed files may be used; the stdlib v3 method; the 250-650 AH count;
-the cards under Blau's for now; the gate plus the owner's grading; a closed-class table. **Phase A
+the cards under Blau's for now; the gate plus the owner's grading; a closed-class table; Hebrew
+words given an Arabic card are not a gate (a reader who asks for Arabic gets Arabic). **Phase A
 is built** (§7.1, branch `claude/arabic-lane-sidecar`): `arabic_data/arabic.db` with Lane's
 47,855 articles, its headword table, a 247-million-token word count and a 141-row closed-class
 table; its own gate passes and fails on mutations; the plan's gate passes on it. Nothing is served,
-bundled or deployed; no reader sees anything. Next: phase B, which must first stop Hebrew words
-getting Arabic cards (§7.1).
+bundled or deployed; no reader sees anything. Next: phase B, the Lane cards on `/browse` (§7).
 **Origin:** the owner's review of the Blau companion on 2026-11-04 (PR #475,
 `docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1): Blau records what is particular to Judeo-Arabic, so
 an ordinary Arabic word (אבו *abū*, לנא *lanā*) has no entry, and an undotted letter is two
@@ -289,7 +289,15 @@ first 15 P1 and 15 P2 errors of one run over all documents, before the split exi
 and v3 were added after reading seeded samples of the scored data's errors (the 40 P1 cases of
 §4, 40 P2 words shown wrong and 40 with nothing shown), so their scored numbers are not a clean
 held-out estimate. The development documents alone give the same direction: P1 right 75.0% (v1),
-77.4% (v2), 80.1% (v3); P2 69.1%, 77.9%, 77.9% (68 words only).
+77.4% (v2), 80.1% (v3); P2 69.1%, 79.4%, 79.4% (68 words only).
+
+**Corrected in rev. 4** (GitHub Codex on PR #477): P2 compared the reading's length with the
+page's, so a reading with v2's silent plural alif (حضروا for חצ'רו) was scored wrong even when the
+marked letter was right. P2 now compares without that alif. v1 cannot produce one and is unchanged;
+v2 and later gain 3.3 to 3.5 points of P2 (40 of the 1,215 words on the 15-million count, 43 on
+the built file) and nothing else moves. v4 on the development documents now passes G1 (83.8% of 68
+words, from 79.4%). Every v2+ number
+below is the corrected one.
 
 ### 6.3 Results (scored documents)
 
@@ -298,15 +306,15 @@ held-out estimate. The development documents alone give the same direction: P1 r
 | **v1, 15 M tokens (as fixed)** | 74.9 / 18.7 / 6.4 | **78.7** / 5.5 / 15.8 (93.5) | 67.7 / 64.5 | **FAIL G1** |
 | v1, 30 M tokens | 76.0 / 18.8 / 5.2 | 80.4 / 6.8 / 12.8 (92.2) | 72.5 / 68.9 | PASS |
 | v1, CAMeL roots, 15 M | 68.7 / 25.2 / 6.0 | 78.7 / 5.5 / 15.8 (93.5) | 67.7 / 62.7 | FAIL G1 |
-| v2, 15 M | 77.6 / 19.7 / 2.7 | 83.1 / 10.6 / 6.3 (88.7) | 76.9 / 73.3 | PASS |
-| v2, 30 M | 77.8 / 19.9 / 2.3 | 84.1 / 11.9 / 4.0 (87.7) | 80.9 / 76.9 | PASS |
-| **v3, 15 M** | **80.6** / 17.6 / 1.8 | 83.1 / 10.6 / 6.3 (88.7) | 76.9 / 74.0 | PASS |
-| v3, 30 M | 80.8 / 18.0 / 1.3 | 84.1 / 11.9 / 4.0 (87.7) | 80.9 / 77.6 | PASS |
+| v2, 15 M | 77.6 / 19.7 / 2.7 | 86.4 / 7.3 / 6.3 (92.2) | 76.9 / 73.3 | PASS |
+| v2, 30 M | 77.8 / 19.9 / 2.3 | 87.5 / 8.5 / 4.0 (91.2) | 80.9 / 76.9 | PASS |
+| **v3, 15 M** | **80.6** / 17.6 / 1.8 | 86.4 / 7.3 / 6.3 (92.2) | 76.9 / 74.0 | PASS |
+| v3, 30 M | 80.8 / 18.0 / 1.3 | 87.5 / 8.5 / 4.0 (91.2) | 80.9 / 77.6 | PASS |
 
 With stripping or Lane's headwords the plain-letter baseline is 63.2-65.7% right, so frequency
-ranking adds 11.7 to 15.2 points (with CAMeL, 54.2% to 68.7%). v2 and v3 show more (nothing shown falls from 15.8% to 6.3%) and are wrong more often when
-they show something (88.7% of shown right, against 93.5%): the stem backoff guesses where v1 kept
-quiet.
+ranking adds 11.7 to 15.2 points (with CAMeL, 54.2% to 68.7%). v2 and v3 show more (nothing
+shown falls from 15.8% to 6.3%) and are wrong a little more often when they show something (92.2%
+of shown right, against 93.5%): the stem backoff guesses where v1 kept quiet.
 
 ### 6.4 The gate fails when the ranking is broken
 
@@ -317,15 +325,15 @@ The same runs with a deliberately broken ranking, each exiting 1:
 | reversed (rarest first), v1 15 M | 64.8 / 28.6 | 51.4 | G1, G2 (+1.6 points) |
 | plain letters only (today's undotted reading), v1 15 M | 63.2 / 17.3 | 0.0 | G1, G2 |
 | every dottable letter dotted, v1 15 M | 41.0 / 20.8 | 61.2 | G1, G2 (-22.2 points) |
-| reversed, v2 30 M | 64.3 / 33.3 | 46.8 | G1, G2, G3 |
-| reversed, v3 30 M | 64.8 / 33.9 | 46.8 | G1, G2, G3 |
+| reversed, v2 30 M | 64.3 / 33.3 | 48.1 | G1, G2, G3 |
+| reversed, v3 30 M | 64.8 / 33.9 | 48.1 | G1, G2, G3 |
 
 `tests/test_measure_arabic_readings.py` pins each criterion failing on a made-up result.
 
 ### 6.5 What the gate does not show
 
 It does not measure the words the layer is for (P3) except by the hand grading; it does not see
-Hebrew words given an Arabic reading (§5.4: 3 of 20 in v1, 7 of 20 in v3); and P1's truth is
+Hebrew words given an Arabic reading (§5.4: 3 of 20 in v1, 7 of 20 in v3; not a criterion, D11); and P1's truth is
 Blau's filing, which is not always the word's (§4). Before anything ships, the owner's grading of
 the 200-word sample is the check this measurement cannot replace (D9).
 
@@ -379,14 +387,20 @@ script, the numbers unchanged on the development documents); `NORMALIZER_VERSION
 
 **The gate** (`scripts/verify_arabic_sidecar.py --db arabic_data/arabic.db --expect-entries
 47890`): integrity, schema against the builder's DDL, every `rows_<table>` against its table, the
-source's count (stored plus rootless), floors on every table and on the tokens counted, every root
-key, headword skeleton, frequency key and closed-class key recomputed with the running normalizer,
-the Perseus credit line and availability statement intact, the lookup indexes used. It passes the
-built file. **Proven to fail on the real file**: ten articles deleted ("meta.rows_lane_entries =
+source's count (stored plus rootless), floors on every table and on the tokens counted, the stored
+counts summing to the tokens counted (each type left out was counted once), the texts counted plus
+those unavailable equal to D7's selection, every root key, headword skeleton, frequency key and
+closed-class key recomputed with the running normalizer, the Perseus credit line and availability
+statement intact, the lookup indexes used. The build itself recomputes D7's selection from the
+pinned release metadata and fails unless the manifest accounts for every selected text once
+(counted, or listed as unavailable, at most 0.5%). It passes the built file. **Proven to fail on the real file**: ten articles deleted ("meta.rows_lane_entries =
 '47855' but the table holds 47,845 rows", the count against the source, four roots' entry counts);
 one in a hundred form keys edited ("423 lane_forms keys differ from skeleton(headword)"); the
 credit line and a row count doctored ("meta.lane_credit is not the Perseus credit line",
-"meta.rows_freq = '808440' but the table holds 808,441 rows").
+"meta.rows_freq = '808440' but the table holds 808,441 rows"); one frequency count raised by one,
+or one row deleted with `rows_freq` fixed to match ("freq counts sum to 246,521,387 with 516,597
+types left out, which does not add up to meta.freq_tokens 247,037,983"); the texts counted
+doctored ("meta.freq_texts '2000' + 3 unavailable != 2819 selected").
 
 **The plan's gate on the built file** (`measure_arabic_readings.py measure --sidecar`, Lane only,
 the full count, scored documents):
@@ -394,9 +408,9 @@ the full count, scored documents):
 | Method | P1 right / wrong / none | P2 right / wrong / none (right of shown) | P3 reading / root | Gate |
 |---|---|---|---|---|
 | v1 | 77.8 / 18.2 / 4.0 | 85.2 / 8.1 / 6.7 (91.3) | 81.5 / 72.6 | PASS |
-| v3 | 81.0 / 18.0 / 1.0 | 84.4 / 12.7 / 3.0 (86.9) | 87.3 / 79.9 | PASS |
-| v4 (v3 + the closed-class table) | 81.0 / 18.0 / 1.0 | 84.4 / 12.7 / 3.0 (86.9) | 87.3 / 79.9 | PASS |
-| v4, reversed ranking | 57.0 / 37.6 / 5.4 | 34.7 / 62.3 / 3.0 | | FAIL G1, G2, G3 |
+| v3 | 81.0 / 18.0 / 1.0 | 87.9 / 9.1 / 3.0 (90.6) | 87.3 / 79.9 | PASS |
+| v4 (v3 + the closed-class table) | 81.0 / 18.0 / 1.0 | 87.9 / 9.1 / 3.0 (90.6) | 87.3 / 79.9 | PASS |
+| v4, reversed ranking | 57.0 / 37.6 / 5.4 | 35.9 / 61.2 / 3.0 | | FAIL G1, G2, G3 |
 | v4, plain letters only | 65.8 / 25.4 / 8.9 | 0.0 | | FAIL G1, G2 |
 | v4, every dottable letter dotted | 42.8 / 31.0 / 26.2 | 72.1 / 0.0 / 27.9 | | FAIL G1, G2, G3 |
 
@@ -414,18 +428,17 @@ follows on the same 60 words and the same gate:
 
 | Offered at | Arabic words: root right / wrong / no card | Hebrew words and names given a card | P1 right / wrong | P2 right | Gate |
 |---|---|---|---|---|---|
-| 2 or more | 32 / 7 / 1 | 13 of 20 | 81.0 / 18.0 | 84.4 | PASS |
-| 20 or more | 33 / 6 / 1 | 7 of 20 | 80.8 / 17.7 | 83.2 | PASS |
-| 100 or more | 33 / 5 / 2 | 4 of 20 | 80.1 / 16.8 | 79.6 | FAIL G1 (by 0.4) |
+| 2 or more | 32 / 7 / 1 | 13 of 20 | 81.0 / 18.0 | 87.9 | PASS |
+| 20 or more | 33 / 6 / 1 | 7 of 20 | 80.8 / 17.7 | 86.5 | PASS |
+| 100 or more | 33 / 5 / 2 | 4 of 20 | 80.1 / 16.8 | 82.6 | PASS (79.6, FAIL G1, before the rev. 4 correction) |
 
 (The grading of these 60 is Claude's, from the page context, applied the same way to every run;
 the owner's grading of the 200 replaces it, D9.)
 
-**For phase B** this means: the lookup must not show a card on a bare attestation. A threshold of
-about 20 halves the Hebrew cards at no measured cost; a higher one costs the gate. The other remedy
-is the Hebrew filter of §9 (a word much commoner in the PGP Hebrew editions than in the
-Judeo-Arabic ones gets no Arabic card). Phase B measures both on the owner's graded sample before
-anything is shown.
+**The owner's ruling (D11):** this is not a gate. A reader who clicks a word for its Arabic
+readings has decided to read it as Arabic, and gets them; the panel does not judge the word's
+language, as it does not for Blau (ruling (c) of the Blau plan). Phase B therefore adds no Hebrew
+filter and keeps the count at 2. The table above stays as information.
 
 ---
 
@@ -443,6 +456,7 @@ anything is shown.
 | D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense |
 | D9 | **The release gate.** G1-G3 as fixed, with the owner's grading of the 200-word sample as the deciding check | **Keep G1-G3 and add the owner's grading** |
 | D10 | **The closed-class table.** A hand list of about 150 forms (prepositions with pronouns, demonstratives, particles) pointing at Lane's particle articles | **Yes** |
+| D11 | **Hebrew words given an Arabic card** (13 of 20 in the graded sample on the built file, §7.1). A gate, a count threshold or a Hebrew filter? | **Not a gate** (later the same day): "If someone thinks it's Arabic, let him look for Arabic." No filter; the count stays at 2 |
 
 ---
 
@@ -451,8 +465,9 @@ anything is shown.
 - **Hebrew and Aramaic words.** A page mixes languages and the page does not infer which (ruling
   (c)); a Hebrew word with an Arabic look-alike gets a card (צדיק as صديق, אבר as أبر). v3's backoff
   makes it worse (7 of 20 non-Arabic words in the graded sample), and so does the full count (13 of
-  20 on the built file, §7.1). A threshold on the count, a filter by the word's count in the PGP
-  Hebrew editions, or showing the cards only on the reader's click on "Arabic", are the options.
+  20 on the built file, §7.1). **Accepted (D11):** the reader asked for Arabic. Should it ever
+  matter, a threshold on the count or a filter by the word's count in the PGP Hebrew editions are
+  the measured options.
 - **The truths are imperfect.** P1's truth is Blau's filing (about a third of "wrong" was Blau's
   filing, §4); P2's is the editions' marks, which follow the scribe (צ'גיר).
 - **Genre bias** in the count (فصل over فضل): the count should be large and mixed (D7).

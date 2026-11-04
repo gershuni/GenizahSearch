@@ -30,6 +30,7 @@ from scripts.build_arabic_sidecar import (  # noqa: E402  -- the one schema defi
     COUNTED_TABLES,
     DDL,
     FREQ_MIN_STORED,
+    MAX_UNAVAILABLE_SHARE,
     PERSEUS_AVAILABILITY,
     PERSEUS_CREDIT,
     SCHEMA_VERSION,
@@ -40,7 +41,8 @@ REQUIRED_META = ("version", "normalizer_version", "built_at", "builder_revision"
                  "lane_source_built_at", "lane_manifest_sha256", "lane_pins_sha256", "lane_credit",
                  "lane_availability", "freq_source", "freq_doi", "freq_credit", "freq_texts", "freq_tokens",
                  "freq_manifest_sha256", "freq_min_stored", "closed_class_sha256", "lane_entries_in_source",
-                 "lane_entries_without_root")
+                 "lane_entries_without_root", "freq_types", "freq_texts_selected", "freq_texts_unavailable",
+                 "freq_metadata_sha256")
 #: Floors a real build clears by far (47,890 entries, about 4,700 roots, over 100 million tokens);
 #: a truncated source or a half-written count trips them.
 MIN_ROOTS = 3000
@@ -154,6 +156,25 @@ def verify(db: str, expect_entries: int, expect_version: Optional[str] = None) -
             problems.append(f"closed_class {counts['closed_class']} < {MIN_CLOSED_CLASS}")
         if _int(meta.get("freq_tokens")) < MIN_FREQ_TOKENS:
             problems.append(f"meta.freq_tokens {meta.get('freq_tokens')!r} < {MIN_FREQ_TOKENS:,}")
+        # The counts add up: a stored count edited, or a row dropped, moves the sum off the token
+        # count, since every type left out was counted fewer than FREQ_MIN_STORED times.
+        if meta.get("freq_min_stored") != str(FREQ_MIN_STORED):
+            problems.append(f"meta.freq_min_stored = {meta.get('freq_min_stored')!r}, this code stores "
+                            f"{FREQ_MIN_STORED} or more")
+        stored = con.execute("SELECT COALESCE(SUM(count), 0) FROM freq").fetchone()[0]
+        left_out = _int(meta.get("freq_types")) - counts["freq"]
+        tokens = _int(meta.get("freq_tokens"))
+        if left_out < 0 or not stored + left_out <= tokens <= stored + left_out * (FREQ_MIN_STORED - 1):
+            problems.append(f"freq counts sum to {stored:,} with {left_out:,} types left out, which does not "
+                            f"add up to meta.freq_tokens {tokens:,}")
+        # Every text D7 selects was counted or is listed as unavailable, and few are unavailable.
+        selected, unavailable = _int(meta.get("freq_texts_selected")), _int(meta.get("freq_texts_unavailable"))
+        if _int(meta.get("freq_texts")) + unavailable != selected:
+            problems.append(f"meta.freq_texts {meta.get('freq_texts')!r} + {unavailable} unavailable != "
+                            f"{selected} selected")
+        if not 0 <= unavailable <= MAX_UNAVAILABLE_SHARE * selected:
+            problems.append(f"meta.freq_texts_unavailable {unavailable} is outside 0..{MAX_UNAVAILABLE_SHARE:.1%} "
+                            f"of the selection")
 
         # Every key recomputed with the running normalizer.
         names = {}

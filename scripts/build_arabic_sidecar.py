@@ -16,7 +16,10 @@ Sources, fetched by ``fetch`` into an EMPTY directory of their own and never com
   ``lane`` entries are read. ``pins.json`` records every file's sha256.
 - ``openiti/``: the texts of OpenITI release 2025.1.9 that ``select_openiti`` names, from the
   release metadata table, each fetched from its repository at a recorded commit;
-  ``manifest.json`` records commit, path and sha256 per text.
+  ``manifest.json`` records commit, path and sha256 per text, and lists as ``unavailable`` the
+  selected texts not found in their repository. The build recomputes the selection from
+  ``metadata.tsv`` (sha256 pinned) and fails unless the manifest accounts for every selected
+  text, exactly once, with at most ``MAX_UNAVAILABLE_SHARE`` unavailable.
 - ``scripts/arabic_closed_class.json`` (in the repository): the closed-class table (D10).
 
     python scripts/build_arabic_sidecar.py fetch --dest arabic_data/download
@@ -96,6 +99,9 @@ OPENITI_CREDIT = ("Word counts from the Open Islamicate Texts Initiative (OpenIT
                   "doi:10.5281/zenodo.17767721, CC BY-NC-SA 4.0.")
 #: Rows of the count kept: a reading is offered only at 2 or more (the plan's MIN_COUNT).
 FREQ_MIN_STORED = 2
+#: Texts D7 selects that the fetch did not find in their repository (3 of 2,819 on 2026-11-04) are
+#: listed as unavailable in the manifest; more than this share and the count is not D7's.
+MAX_UNAVAILABLE_SHARE = 0.005
 
 EXIT_OK = 0
 EXIT_SOURCE = 2
@@ -317,14 +323,43 @@ def _count_file(path: str) -> tuple[Counter, dict[str, Counter]]:
     return counts, dict(spelled)
 
 
+def check_selection(openiti_dir: Path, manifest: dict) -> dict:
+    """The manifest against D7's selection from the pinned metadata table: every selected text is
+    counted or listed as unavailable, nothing outside it is counted, none twice, and few are
+    unavailable. A manifest that lost rows is refused, however many tokens remain."""
+    metadata = openiti_dir / "metadata.tsv"
+    if not metadata.is_file() or sha256_of(metadata) != OPENITI_METADATA_SHA256:
+        raise SourceError(f"missing, or differs from the pinned release: {metadata}")
+    selected = {r["version_uri"] for r in select_openiti(metadata)}
+    counted = [str(t.get("version_uri", "")) for t in manifest.get("texts") or []]
+    unavailable = [str(u) for u in manifest.get("unavailable") or []]
+    listed = counted + unavailable
+    if len(listed) != len(set(listed)):
+        raise SourceError("openiti/manifest.json names a text twice")
+    outside = sorted(set(listed) - selected)
+    if outside:
+        raise SourceError(f"openiti/manifest.json: {len(outside)} texts outside the D7 selection "
+                          f"(first {outside[0]!r})")
+    left_out = sorted(selected - set(listed))
+    if left_out:
+        raise SourceError(f"openiti/manifest.json: {len(left_out)} selected texts neither counted nor listed "
+                          f"as unavailable (first {left_out[0]})")
+    if len(unavailable) > MAX_UNAVAILABLE_SHARE * len(selected):
+        raise SourceError(f"openiti/manifest.json: {len(unavailable)} of {len(selected)} selected texts "
+                          f"unavailable, more than {MAX_UNAVAILABLE_SHARE:.1%}")
+    return {"freq_texts_selected": str(len(selected)), "freq_texts_unavailable": str(len(unavailable)),
+            "freq_metadata_sha256": OPENITI_METADATA_SHA256}
+
+
 def read_openiti(openiti_dir: Path, workers: int) -> tuple[list[tuple], dict]:
     """The frequency rows (skeleton, count, commonest spelling), kept at ``FREQ_MIN_STORED`` or
-    more, from every text the manifest pins (sha256 checked)."""
+    more, from every text the manifest pins (sha256 checked), once the manifest is D7's selection."""
     manifest_path = openiti_dir / "manifest.json"
     manifest = _read_json(manifest_path)
     texts = manifest.get("texts") if isinstance(manifest, dict) else None
     if not texts:
         raise SourceError(f"{manifest_path}: no texts")
+    selection = check_selection(openiti_dir, manifest)
     paths = []
     for t in texts:
         path = openiti_dir / (os.path.basename(str(t["path"])).replace(".", "_") + ".txt")
@@ -363,7 +398,8 @@ def read_openiti(openiti_dir: Path, workers: int) -> tuple[list[tuple], dict]:
              "freq_credit": OPENITI_CREDIT, "freq_texts": str(len(paths)), "freq_tokens": str(sum(counts.values())),
              "freq_types": str(len(counts)), "freq_min_stored": str(FREQ_MIN_STORED),
              "freq_manifest_sha256": sha256_of(manifest_path),
-             "freq_selection": "primary, non-OCR Arabic texts dated 250-650 AH; dictionaries excluded"}
+             "freq_selection": "primary, non-OCR Arabic texts dated 250-650 AH; dictionaries excluded",
+             **selection}
     return rows, facts
 
 
@@ -566,6 +602,7 @@ def fetch(dest: str) -> int:
         commits: dict[str, str] = {}
         trees: dict[str, set[str]] = {}
         texts = []
+        unavailable = []
         for row in select_openiti(root / "openiti" / "metadata.tsv"):
             repo = row["repo"]
             if repo not in commits:
@@ -577,14 +614,15 @@ def fetch(dest: str) -> int:
                      if p in trees[repo]]
             if not found:
                 print(f"not in its repository: {base}")
+                unavailable.append(row["version_uri"])
                 continue
             data = _get(f"https://raw.githubusercontent.com/OpenITI/{repo}/{commits[repo]}/{found[0]}")
             (root / "openiti" / (os.path.basename(found[0]).replace(".", "_") + ".txt")).write_bytes(data)
             texts.append({"version_uri": row["version_uri"], "date": row["date"], "repo": repo,
                           "commit": commits[repo], "path": found[0], "bytes": len(data),
                           "sha256": sha256_bytes(data)})
-        (root / "openiti" / "manifest.json").write_text(json.dumps({"texts": texts}, ensure_ascii=False, indent=1),
-                                                       encoding="utf-8")
+        (root / "openiti" / "manifest.json").write_text(
+            json.dumps({"texts": texts, "unavailable": unavailable}, ensure_ascii=False, indent=1), encoding="utf-8")
     except SourceError as exc:
         print(f"FAIL: {exc}")
         return EXIT_SOURCE

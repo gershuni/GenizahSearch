@@ -3,7 +3,8 @@
 
 The build writes every table from pinned sources and refuses what it cannot vouch for (a file
 that differs from its pin, a credit line that is not Perseus's, a count that disagrees with the
-source's manifest, a closed-class row Lane cannot answer, a smaller sidecar over a larger one);
+source's manifest, an OpenITI manifest that is not D7's whole selection, a closed-class row Lane
+cannot answer, a smaller sidecar over a larger one);
 the gate passes the file it wrote and fails each mutation with a sentence that says what changed.
 No dictionary or corpus text is in the repository: the entries below are made up.
 """
@@ -20,6 +21,16 @@ import scripts.build_arabic_sidecar as build
 import scripts.verify_arabic_sidecar as gate
 
 SHARDS = 4
+#: A made-up OpenITI metadata table: two texts D7 selects, one too late and one dictionary.
+METADATA_TSV = "\t".join(("version_uri", "date", "language", "status", "uncorrected_OCR", "tags", "local_path",
+                           "tok_length")) + "\n" + "".join("\t".join(row) + "\n" for row in (
+    ("0300Test.A.Text-ara1", "300", "ara", "pri", "False", "_HADITH", "data/x/a", "10"),
+    ("0400Test.B.Text-ara1", "400", "ara", "pri", "False", "_TARIKH", "data/x/b", "12"),
+    ("0700Test.C.Text-ara1", "700", "ara", "pri", "False", "_TARIKH", "data/x/c", "5"),
+    ("0350Test.D.Text-ara1", "350", "ara", "pri", "False", "_MACAJIM", "data/x/d", "5"),
+))
+METADATA_SHA256 = hashlib.sha256(METADATA_TSV.encode("utf-8")).hexdigest()
+TEXTS = {"a": "0300Test.A.Text-ara1", "b": "0400Test.B.Text-ara1", "c": "0700Test.C.Text-ara1"}
 ENTRIES = [
     # id, headword, root, page
     ("lane:t:1", "كَتَبَ", "كتب", "1"),
@@ -40,7 +51,8 @@ def _write(path: Path, data) -> bytes:
     return raw
 
 
-def make_source(root: Path, credit: str = build.PERSEUS_CREDIT, count: int = len(ENTRIES)) -> Path:
+def make_source(root: Path, credit: str = build.PERSEUS_CREDIT, count: int = len(ENTRIES),
+                counted: tuple[str, ...] = ("a", "b"), unavailable: tuple[str, ...] = ()) -> Path:
     emeiri = root / "emeiri"
     pins = {}
     manifest = {"built_at": "2026-11-01T00:00:00Z", "counts": {"lane": count},
@@ -59,13 +71,17 @@ def make_source(root: Path, credit: str = build.PERSEUS_CREDIT, count: int = len
     _write(emeiri / "pins.json", pins)
     openiti = root / "openiti"
     texts = []
-    for name, body in (("a.txt", "#META# x\nقال ذلك الكتاب والكتاب ذلك أخذ أخذ أخذ\n"),
-                       ("b.txt", "ذلك ذلك لنا لنا من من على على كتب كتب دلك\n")):
-        raw = body.encode("utf-8")
-        (openiti / name).parent.mkdir(parents=True, exist_ok=True)
-        (openiti / name).write_bytes(raw)
-        texts.append({"path": f"data/x/{name[:-4]}", "sha256": hashlib.sha256(raw).hexdigest()})
-    _write(openiti / "manifest.json", {"texts": texts})
+    bodies = {"a": "#META# x\nقال ذلك الكتاب والكتاب ذلك أخذ أخذ أخذ\n",
+              "b": "ذلك ذلك لنا لنا من من على على كتب كتب دلك\n",
+              "c": "كتب كتب كتب\n"}
+    openiti.mkdir(parents=True, exist_ok=True)
+    (openiti / "metadata.tsv").write_bytes(METADATA_TSV.encode("utf-8"))
+    for name in counted:
+        raw = bodies[name].encode("utf-8")
+        (openiti / f"{name}.txt").write_bytes(raw)
+        texts.append({"version_uri": TEXTS[name], "path": f"data/x/{name}",
+                      "sha256": hashlib.sha256(raw).hexdigest()})
+    _write(openiti / "manifest.json", {"texts": texts, "unavailable": [TEXTS[n] for n in unavailable]})
     return root
 
 
@@ -83,6 +99,7 @@ def make_closed_class(path: Path, forms=None) -> Path:
 @pytest.fixture
 def small(monkeypatch):
     monkeypatch.setattr(build, "EMEIRI_SHARDS", SHARDS)
+    monkeypatch.setattr(build, "OPENITI_METADATA_SHA256", METADATA_SHA256)
     monkeypatch.setattr(gate, "MIN_ROOTS", 1)
     monkeypatch.setattr(gate, "MIN_FORMS", 1)
     monkeypatch.setattr(gate, "MIN_FREQ_TOKENS", 1)
@@ -166,6 +183,8 @@ def _mutate(db: Path, sql: str) -> None:
     ("UPDATE meta SET value = 'Text provided by someone.' WHERE key = 'lane_credit'", "Perseus credit line"),
     ("UPDATE meta SET value = '99' WHERE key = 'normalizer_version'", "normalizer_version"),
     ("UPDATE closed_class SET skeleton = 'لكم' WHERE form = 'لنا'", "closed_class keys differ"),
+    ("UPDATE freq SET count = count + 1 WHERE skeleton = 'ذلك'", "does not add up to meta.freq_tokens"),
+    ("UPDATE meta SET value = '1' WHERE key = 'freq_texts'", "selected"),
 ])
 def test_the_gate_fails_each_mutation(tmp_path, small, sql, expect):
     assert run_build(tmp_path) == build.EXIT_OK
@@ -173,6 +192,50 @@ def test_the_gate_fails_each_mutation(tmp_path, small, sql, expect):
     _mutate(db, sql)
     problems = gate.verify(str(db), len(ENTRIES))
     assert any(expect in p for p in problems), problems
+
+
+def _refused(tmp_path: Path, capsys, source: Path, words: str) -> None:
+    assert run_build(tmp_path, source=source) == build.EXIT_SOURCE
+    out = capsys.readouterr().out
+    assert words in out, out
+    assert not (tmp_path / "arabic.db").exists()
+
+
+def test_a_manifest_that_lost_a_selected_text_is_refused(tmp_path, small, capsys):
+    """However many tokens the rest hold: the count must be D7's whole selection."""
+    _refused(tmp_path, capsys, make_source(tmp_path / "src", counted=("a",)), "neither counted nor listed")
+
+
+def test_a_text_outside_the_selection_is_refused(tmp_path, small, capsys):
+    _refused(tmp_path, capsys, make_source(tmp_path / "src", counted=("a", "b", "c")), "outside the D7 selection")
+
+
+def test_a_text_named_twice_is_refused(tmp_path, small, capsys):
+    _refused(tmp_path, capsys, make_source(tmp_path / "src", counted=("a", "b"), unavailable=("b",)), "twice")
+
+
+def test_a_metadata_table_that_differs_from_its_pin_is_refused(tmp_path, small, capsys):
+    source = make_source(tmp_path / "src")
+    (source / "openiti" / "metadata.tsv").write_text(METADATA_TSV.replace("_TARIKH", "_ADAB", 1), encoding="utf-8")
+    _refused(tmp_path, capsys, source, "differs from the pinned release")
+
+
+def test_unavailable_texts_are_recorded_and_capped(tmp_path, small, capsys, monkeypatch):
+    source = make_source(tmp_path / "src", counted=("a",), unavailable=("b",))
+    _refused(tmp_path, capsys, source, "unavailable, more than")
+    monkeypatch.setattr(build, "MAX_UNAVAILABLE_SHARE", 0.5)
+    monkeypatch.setattr(gate, "MAX_UNAVAILABLE_SHARE", 0.5)
+    assert run_build(tmp_path, source=source) == build.EXIT_OK
+    db = tmp_path / "arabic.db"
+    assert gate.verify(str(db), len(ENTRIES)) == []
+    con = sqlite3.connect(db)
+    try:
+        meta = dict(con.execute("SELECT key, value FROM meta"))
+    finally:
+        con.close()
+    assert (meta["freq_texts"], meta["freq_texts_unavailable"], meta["freq_texts_selected"]) == ("1", "1", "2")
+    monkeypatch.setattr(gate, "MAX_UNAVAILABLE_SHARE", 0.005)
+    assert any("freq_texts_unavailable" in p for p in gate.verify(str(db), len(ENTRIES)))
 
 
 def test_the_repository_closed_class_table_is_well_formed():

@@ -69,6 +69,7 @@ import difflib
 import glob
 import gzip
 import hashlib
+import html
 import json
 import math
 import os
@@ -123,6 +124,15 @@ SAMPLE_SEED, SAMPLE_PER_TAG, SAMPLE_CAP_TOKENS = 20261104, 6, 15_000_000
 # ---------------------------------------------------------------------------
 
 
+def lane_attribute(tag: str, name: str) -> str:
+    """An attribute of a Lane XML tag, its entities decoded: Buckwalter's ``&`` (ؤ) and ``<`` (إ)
+    can only stand in XML as ``&amp;`` and ``&lt;``, and converting the entity letter by letter
+    would read ``&amp;`` as four Arabic letters. In the pinned master no converted name or key
+    holds one: the 101 root names with one ("ytm &amp;c.") keep only their first word."""
+    found = re.search(rf'\b{name}="([^"]*)"', tag)
+    return html.unescape(found.group(1)) if found else ""
+
+
 def lane_roots(lane_dir: str) -> tuple[dict[str, list[str]], Counter]:
     """root_key -> Lane's root names (Arabic), from every ``*.xml`` in the folder;
     root_key -> the characters of its articles (a prior: a common root has a
@@ -136,10 +146,10 @@ def lane_roots(lane_dir: str) -> tuple[dict[str, list[str]], Counter]:
         text = Path(path).read_text(encoding="utf-8")
         tags = list(re.finditer(r'<div2\b[^>]*\btype="root"[^>]*>', text))
         for k, tag in enumerate(tags):
-            name = re.search(r'\bn="([^"]*)"', tag.group(0))
-            if not name or not name.group(1).split():
+            name = lane_attribute(tag.group(0), "n")
+            if not name.split():
                 continue
-            arabic = buckwalter_to_arabic(name.group(1).split()[0])
+            arabic = buckwalter_to_arabic(name.split()[0])
             if 1 <= len(arabic) <= 5:
                 key = root_key(arabic)
                 if arabic not in out[key]:
@@ -157,12 +167,13 @@ def lane_forms(lane_dir: str) -> dict[str, set[str]]:
         text = Path(path).read_text(encoding="utf-8")
         tags = list(re.finditer(r'<div2\b[^>]*\btype="root"[^>]*>', text))
         for k, tag in enumerate(tags):
-            name = re.search(r'\bn="([^"]*)"', tag.group(0))
-            if not name or not name.group(1).split():
+            name = lane_attribute(tag.group(0), "n")
+            if not name.split():
                 continue
-            root = root_key(buckwalter_to_arabic(name.group(1).split()[0]))
+            root = root_key(buckwalter_to_arabic(name.split()[0]))
             end = tags[k + 1].start() if k + 1 < len(tags) else len(text)
-            for key in re.findall(r'<entryFree\b[^>]*\bkey="([^"]*)"', text[tag.end():end]):
+            for raw in re.findall(r'<entryFree\b[^>]*\bkey="([^"]*)"', text[tag.end():end]):
+                key = html.unescape(raw)
                 if " " in key.strip():
                     continue
                 bare = re.sub(r"[auioNKF~`=_^@\-]", "", key.replace("A^", "<"))
@@ -566,6 +577,14 @@ GATE = {"G1_p2_dot_agreement_min": 0.80, "G2_p1_right_margin_over_plain_min": 0.
 MAX_SHOWN = 3
 
 
+def plural_alif_dropped(top: str, ed_letters: list[tuple[str, bool]]) -> str:
+    """The top reading letter for letter with the page: the silent alif that v2 and later add
+    after a final ו (חצ'רו = حضروا) is not one of the page's letters, so P2 compares without it."""
+    if len(top) == len(ed_letters) + 1 and top.endswith("وا") and ed_letters and ed_letters[-1][0] == "ו":
+        return top[:-1]
+    return top
+
+
 class Layer:
     """The proposed lookup, for one ranking and one root method."""
 
@@ -710,7 +729,7 @@ def run(args: argparse.Namespace) -> dict:
                         if r == "frequency":
                             keep_sample("p2_none", {"edition": ed_raw, "automatic": auto_raw})
                         continue
-                    top = ranked[0][0]
+                    top = plural_alif_dropped(ranked[0][0], ed_letters)
                     ok = len(top) == len(ed_letters) and all(top[k] == v for k, v in want.items())
                     p2[r]["right" if ok else "wrong"] += 1
                     if not ok and r == "frequency":
