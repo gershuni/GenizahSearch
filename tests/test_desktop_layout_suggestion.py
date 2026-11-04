@@ -142,6 +142,60 @@ def test_no_check_without_the_engines_words_occur():
     assert w.layout_suggestion_label.isHidden()
 
 
+class _ZeroResultHost:
+    """The real on_search_finished and reset_ui over stand-in widgets (as
+    tests/test_search_cutoff_empty_status.py drives them): any other attribute
+    is a no-op callable."""
+
+    on_search_finished = GenizahGUI.on_search_finished
+    reset_ui = GenizahGUI.reset_ui
+    _run_left_matches_out = GenizahGUI._run_left_matches_out
+    _forget_responsa_notes = GenizahGUI._forget_responsa_notes
+    _downgrade_note = GenizahGUI._downgrade_note
+
+    def __init__(self, cancelled=False):
+        from types import SimpleNamespace
+        self._layout_offer = (1, "dcuk")
+        self._search_was_cancelled = cancelled
+        self._search_cutoff = None
+        self._refine_mode = False
+        self._restoring_session = False
+        self._pause_search = SimpleNamespace(elapsed=lambda now: 1.0, state='running')
+        self.export_buttons = []
+        self.offered = []
+
+    def __getattr__(self, name):
+        if name.startswith('__'):
+            raise AttributeError(name)
+        return _NoOp()
+
+    def _offer_layout_suggestion(self):
+        self.offered.append(self._layout_offer)
+
+
+class _NoOp:
+    def __call__(self, *a, **k):
+        return None
+
+    def __getattr__(self, name):
+        return _NoOp()
+
+
+def test_a_completed_zero_result_search_reaches_the_offer():
+    """reset_ui -- which every exit of a search passes through, the zero-result
+    one first -- leaves the pending offer alone: only New (_reset_search) and
+    the next start_search clear it (Codex on #479 read it the other way)."""
+    host = _ZeroResultHost()
+    host.on_search_finished([])
+    assert host.offered == [(1, "dcuk")]
+
+
+def test_a_stopped_search_with_no_results_offers_nothing():
+    host = _ZeroResultHost(cancelled=True)
+    host.on_search_finished([])
+    assert host.offered == []
+
+
 def test_the_window_builds_the_label_and_resets_it():
     """The real window wires the label (hidden until offered) and its reset."""
     import inspect
