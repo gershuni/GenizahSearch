@@ -1124,16 +1124,20 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/blau_panel.py
 
-- **Function** `head_html` (Line 61) — The ``<head>`` line that loads the click script, versioned by its
-- **Function** `lookup_word` (Line 73) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
-- **Function** `_attr` (Line 95)
-- **Function** `_rtl` (Line 99) — A Hebrew-letter text, right-to-left whatever the UI direction.
-- **Function** `_gloss_pair` (Line 104) — (text, class) of the glosses to show, the UI language's first.
-- **Function** `_render_sense` (Line 112)
-- **Function** `_render_card` (Line 135)
-- **Function** `_render_examples` (Line 164)
-- **Function** `_render_credit` (Line 176)
-- **Function** `render_lookup` (Line 183) — Draw ``result`` into the current container. Returns False, drawing
+- **Function** `lookup_on` (Line 84) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
+- **Function** `set_lookup_on` (Line 89)
+- **Function** `switch_tooltip` (Line 93) — What the switch will do when pressed.
+- **Function** `head_html` (Line 98) — The ``<head>`` line that loads the click script, versioned by its
+- **Function** `lookup_word` (Line 110) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
+- **Function** `_attr` (Line 132)
+- **Function** `_rtl` (Line 136) — A Hebrew-letter text, right-to-left whatever the UI direction.
+- **Function** `_gloss_pair` (Line 141) — (text, class) of the glosses to show, the UI language's first.
+- **Function** `_render_sense` (Line 149)
+- **Function** `_render_card` (Line 172)
+- **Function** `_render_examples` (Line 201)
+- **Function** `_render_credit` (Line 213) — The credit, as a link to the dictionary site (ruling (a): the credit
+- **Function** `_render_box` (Line 223) — The box at the top of the panel: the word shown, editable; Enter or the
+- **Function** `render_lookup` (Line 236) — Draw ``result`` into the current container. Returns False, drawing
 
 ## web/components/criteria_panel.py
 
@@ -3548,39 +3552,44 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 
 ## shared/blau_service.py
 
-- **Function** `blau_enabled` (Line 77) — The ``BLAU_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
-- **Function** `entry_url` (Line 85) — The dictionary site's page for one entry.
-- **Function** `default_sidecar_path` (Line 90) — Where the sidecar lives: the user's updated copy first (the desktop
-- **Class** `BlauSense` (Line 108) — One form under an entry: the dictionary's own text, spelling, binyan,
-- **Class** `BlauCard` (Line 129) — One dictionary entry (a root) that a candidate key hit.
-- **Class** `BlauExample` (Line 146) — An entry whose example phrases contain the key: it defines another word.
-- **Class** `BlauLookup` (Line 155)
-    - Property `found` (Line 165)
-- **Function** `empty_lookup` (Line 169)
-- **Class** `_CardBuild` (Line 174) — A card while its hits are collected.
-    - Method `__init__` (Line 180)
-- **Function** `_text` (Line 190)
-- **Function** `_page` (Line 194)
-- **Function** `_has_content` (Line 201)
-- **Class** `BlauService` (Line 205) — Read-only access to the Blau sidecar. See the module docstring.
-    - Method `__init__` (Line 208)
-    - Property `db_path` (Line 250)
-    - Method `is_ready` (Line 253) — The sidecar is open and passed every check.
-    - Method `is_available` (Line 257) — Ready AND the kill switch is on. The only question a surface asks.
-    - Method `meta` (Line 261)
-    - Property `credit_he` (Line 265) — The site's own credit line (ruling (a)); shown on every surface.
-    - Property `credit_en` (Line 270)
-    - Method `close` (Line 273)
-    - Method `lookup` (Line 284) — What the dictionary has for one clicked word. Never raises; empty
-    - Method `_lookup` (Line 302)
-    - Method `_add_hit` (Line 340)
-    - Method `_finish` (Line 365)
-    - Method `_sense` (Line 410)
-    - Method `_root` (Line 430)
-    - Method `_target_root` (Line 437) — A form's cross-reference target: a root, or a stem (then its root).
-- **Function** `_validate` (Line 447) — '' and the meta when the open file is one this reader serves; else the reason.
-- **Function** `get_blau_service` (Line 483) — The default service, created on first use (per-thread connections by
-- **Function** `reset_blau_service` (Line 493) — Forget the default service (after the sidecar file is replaced).
+- **Function** `blau_enabled` (Line 90) — The ``BLAU_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 98) — The dictionary site's page for one entry.
+- **Function** `arabic_key` (Line 110) — One Arabic spelling as a lookup key: ``normalize_arabic``, the dictionary's
+- **Function** `arabic_keys` (Line 121) — The keys of a stored Arabic spelling: one per alternative (the dictionary
+- **Function** `arabic_candidates` (Line 132) — A typed Arabic word's candidates: the word, then without a conjunction
+- **Function** `default_sidecar_path` (Line 149) — Where the sidecar lives: the user's updated copy first (the desktop
+- **Class** `BlauSense` (Line 167) — One form under an entry: the dictionary's own text, spelling, binyan,
+- **Class** `BlauCard` (Line 188) — One dictionary entry (a root) that a candidate key hit.
+- **Class** `BlauExample` (Line 205) — An entry whose example phrases contain the key: it defines another word.
+- **Class** `BlauLookup` (Line 214)
+    - Property `found` (Line 226)
+- **Function** `empty_lookup` (Line 230)
+- **Class** `_CardBuild` (Line 236) — A card while its hits are collected: one scope (an entry, or one of its
+    - Method `__init__` (Line 243)
+- **Function** `_text` (Line 254)
+- **Function** `_page` (Line 258)
+- **Function** `_has_content` (Line 265)
+- **Class** `BlauService` (Line 269) — Read-only access to the Blau sidecar. See the module docstring.
+    - Method `__init__` (Line 272)
+    - Property `db_path` (Line 317)
+    - Method `is_ready` (Line 320) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 324) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 328)
+    - Property `credit_he` (Line 332) — The site's own credit line (ruling (a)); shown on every surface.
+    - Property `credit_en` (Line 337)
+    - Method `close` (Line 340)
+    - Method `lookup` (Line 351) — What the dictionary has for one clicked or typed word. A word with
+    - Method `_arabic` (Line 379) — arabic_key -> the hits it reaches: entries and sub-entries by their
+    - Method `_lookup_arabic` (Line 409)
+    - Method `_lookup` (Line 424)
+    - Method `_add_hit` (Line 468) — One hit into its card. ``row`` is a ``forms_norm`` row, or the same
+    - Method `_finish` (Line 497)
+    - Method `_sense` (Line 542)
+    - Method `_root` (Line 562)
+    - Method `_target_root` (Line 569) — A form's cross-reference target: a root, or a stem (then its root).
+- **Function** `_validate` (Line 579) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `get_blau_service` (Line 615) — The default service, created on first use (per-thread connections by
+- **Function** `reset_blau_service` (Line 625) — Forget the default service (after the sidecar file is replaced).
 
 ## shared/cudl_identity.py
 

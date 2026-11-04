@@ -12,6 +12,15 @@ What is always on the panel: the credit line of the owner's ruling (a) --
 the site's own Hebrew line on every surface, with the English rendering
 beside it in the English UI. A result without a credit does not render.
 
+The reader decides where the dictionary applies (owner, 2026-11-04: the page
+does not guess the text's language). A switch in the version row turns the
+word lookup on or off, remembered per visitor (``PREF_KEY``, default OFF);
+while it is off the pane is not marked, so a click on a word does nothing.
+While it is on, a button beside the hint opens the panel with an empty box
+(``OPEN_CLASS``: the script handles that click, ``OPEN_EVENT``), and every
+panel has the box at its top, holding the word it shows, so a misread word
+can be corrected and looked up again.
+
 Every class here lives in web/static/common.css under ``.gs-blau``; the root
 element carries that class or none of it applies.
 """
@@ -26,9 +35,23 @@ from typing import Any, Callable, Optional
 from nicegui import ui
 
 from shared.blau_service import SITE_URL, BlauCard, BlauLookup, BlauSense
+from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
+
+#: The visitor's choice: is the word lookup on? (default off).
+PREF_KEY = 'ui.blau_lookup'
+#: The switch in the version row; ``active`` while the lookup is on.
+SWITCH_CLASS = 'blau-switch'
+#: The button that opens the panel with an empty box (the script handles it).
+OPEN_CLASS = 'blau-open'
+OPEN_EVENT = 'blau-open'
+#: The hint beside the switch (shown only while the lookup is on).
+HINT_CLASS = 'blau-hint'
+#: The box at the top of the panel and its search button.
+INPUT_CLASS = 'blau-input'
+SEARCH_CLASS = 'blau-search'
 
 #: The scope class of the CSS block, and the popover the page creates.
 PANEL_CLASS = 'gs-blau'
@@ -56,6 +79,20 @@ _FLAG_LABELS = (
     ('is_reconstructed', 'reconstructed'),
     ('is_erroneous', 'erroneous'),
 )
+
+
+def lookup_on() -> bool:
+    """The visitor's choice (default off: the page never assumes Judeo-Arabic)."""
+    return bool(safe_user_get(PREF_KEY, False))
+
+
+def set_lookup_on(value: bool) -> None:
+    safe_user_set(PREF_KEY, bool(value))
+
+
+def switch_tooltip(on: bool) -> str:
+    """What the switch will do when pressed."""
+    return tr("Turn off Blau's dictionary") if on else tr("Turn on Blau's dictionary (Judeo-Arabic)")
 
 
 def head_html() -> str:
@@ -183,18 +220,35 @@ def _render_credit(credit_he: str, credit_en: str, lang: str) -> None:
             ui.link(credit_en, SITE_URL, new_tab=True).props('dir="ltr"').classes('credit-en')
 
 
+def _render_box(word: str, on_search: Callable[[str], Any], focus: bool) -> None:
+    """The box at the top of the panel: the word shown, editable; Enter or the
+    search button looks up what it holds."""
+    box = ui.input(value=word, placeholder=tr('A word in Hebrew or Arabic letters')).props(
+        'dense outlined autocomplete=off spellcheck=false' + (' autofocus' if focus else '')
+    ).classes(f'{INPUT_CLASS} word-input')
+    box.props(f'aria-label="{_attr(tr("Type a word to look up"))}"')
+    box.on('keydown.enter', lambda: on_search(box.value or ''))
+    search = ui.button(icon='search', on_click=lambda: on_search(box.value or '')).props(
+        f'flat round dense size=sm aria-label="{_attr(tr("Look up"))}"').classes(SEARCH_CLASS)
+    search.tooltip(tr('Look up'))
+
+
 def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', lang: str = 'he',
-                  on_close: Optional[Callable[..., Any]] = None) -> bool:
+                  on_close: Optional[Callable[..., Any]] = None,
+                  on_search: Optional[Callable[[str], Any]] = None, focus_input: bool = False) -> bool:
     """Draw ``result`` into the current container. Returns False, drawing
     nothing, when there is no credit line to show (ruling (a): no panel
-    without it)."""
+    without it). With ``on_search`` the head holds the box (the word in it);
+    a result with no word is the panel opened to type one."""
     credit_he = (credit_he or '').strip()
     if not credit_he:
         logger.warning('blau_panel: no credit line; the lookup of %r is not shown', result.word)
         return False
     with ui.element('div').classes('panel-head'):
         ui.label(tr("Blau's dictionary")).classes('title')
-        if result.word:
+        if on_search is not None:
+            _render_box(result.word, on_search, focus_input)
+        elif result.word:
             _rtl(result.word).classes('word')
         close = ui.button(icon='close', on_click=on_close).props(
             f'flat round dense size=sm aria-label="{_attr(tr("Close"))}"').classes(CLOSE_CLASS)
@@ -207,9 +261,12 @@ def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', la
                 ui.label(f'+{result.more_cards} {tr("more entries")}').classes('more')
         if result.examples:
             _render_examples(result, lang)
-        if not result.found:
+        if not result.word:
+            ui.label(tr('Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.')).classes(
+                'type-note')
+        elif not result.found:
             with ui.element('div').classes(f'{EMPTY_CLASS} empty'):
-                ui.label(tr('Nothing in the dictionary for this word.'))
+                ui.label(tr("Blau's dictionary covers Judeo-Arabic; nothing for this word."))
                 if result.candidates:
                     with ui.element('div').classes('looked-for'):
                         ui.label(tr('Looked for')).classes('looked-label')

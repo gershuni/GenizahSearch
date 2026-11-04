@@ -25,6 +25,7 @@ from shared.fgp_service import (
 )
 from shared.transcription_credits import resolve_transcription_credit
 from shared.export_utils import GENIZAHSEARCH_URL
+from shared.blau_service import empty_lookup as blau_empty_lookup
 from shared.blau_service import get_blau_service
 from web.components import blau_panel
 from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
@@ -4822,34 +4823,54 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if not blau_popover.is_deleted:
                             blau_popover.style('display: none;')
 
-                    async def _blau_answer(word, request):
-                        result = await run.io_bound(blau_service.lookup, word)
-                        if result is None or blau_popover.is_deleted or request != _blau_request['value']:
-                            return
+                    def _blau_draw(result, focus):
                         with using_language(_blau_lang):
                             blau_popover.clear()
                             with blau_popover:
                                 drawn = blau_panel.render_lookup(
                                     result, credit_he=blau_service.credit_he,
                                     credit_en=blau_service.credit_en, lang=_blau_lang,
-                                    on_close=_blau_hide)
+                                    on_close=_blau_hide, on_search=_blau_search,
+                                    focus_input=focus)
                         blau_popover.style('display: flex;' if drawn else 'display: none;')
 
-                    def _blau_lookup(e):
+                    async def _blau_answer(word, request, focus=False):
+                        result = await run.io_bound(blau_service.lookup, word)
+                        if result is None or blau_popover.is_deleted or request != _blau_request['value']:
+                            return
+                        _blau_draw(result, focus)
+
+                    def _blau_start(word, focus):
                         # Synchronous on purpose: the counter must move in the
                         # order the clicks arrived, before any of their lookups
                         # runs. An async handler is a task that starts later,
                         # and a close handled in between would be counted
                         # before the lookup it was meant to cancel.
-                        word = blau_panel.lookup_word(e.args)
-                        if not word:
-                            return
                         _blau_request['value'] += 1
-                        background_tasks.create(_blau_answer(word, _blau_request['value']),
+                        background_tasks.create(_blau_answer(word, _blau_request['value'], focus),
                                                 name='blau-lookup')
+
+                    def _blau_lookup(e):
+                        word = blau_panel.lookup_word(e.args)
+                        if word:
+                            _blau_start(word, False)
+
+                    def _blau_search(word):
+                        # The box at the top of the panel (typed, or a
+                        # clicked word corrected): the focus stays in it.
+                        word = (word or '').strip()
+                        if word:
+                            _blau_start(word, True)
+
+                    def _blau_open(_e=None):
+                        # The "type a word" button: the panel with an empty box.
+                        _blau_request['value'] += 1
+                        if not blau_popover.is_deleted:
+                            _blau_draw(blau_empty_lookup(''), True)
 
                     blau_popover.on(blau_panel.LOOKUP_EVENT, _blau_lookup)
                     blau_popover.on(blau_panel.CLOSE_EVENT, _blau_hide)
+                    blau_popover.on(blau_panel.OPEN_EVENT, _blau_open)
 
                 # Main container with flex row
                 with ui.element('div').classes('viewer-panels').style(
@@ -5254,8 +5275,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Text content container
                             text_container = ui.column().classes('w-full h-full')
-                            if blau_on:
-                                # The pane whose words the click script looks up.
+                            # The reader's switch (owner, 2026-11-04: the page
+                            # never guesses the text's language). Marked, the
+                            # pane's words are looked up; unmarked, a click on
+                            # a word does nothing.
+                            blau_lookup_on = blau_on and blau_panel.lookup_on()
+                            if blau_lookup_on:
                                 text_container.props(blau_panel.PANE_ATTR)
                             current_text = {'value': page.text}
 
@@ -5349,8 +5374,46 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         on_click=_toggle_line_numbers,
                                     ).props('flat round dense').tooltip(tr('Toggle line numbers'))
                                     if blau_on:
-                                        ui.label(tr('Click a word for its dictionary entry')).classes(
-                                            'text-xs blau-hint print-hide')
+                                        # The switch, then (while it is on) the
+                                        # hint and the "type a word" button --
+                                        # whose click the script handles: a
+                                        # server handler would race its close.
+                                        blau_switch = ui.button(icon='menu_book').props(
+                                            'flat round dense').classes(
+                                            f'{blau_panel.SWITCH_CLASS} print-hide'
+                                            + (' active' if blau_lookup_on else ''))
+                                        blau_switch.props(
+                                            f'aria-pressed={"true" if blau_lookup_on else "false"}')
+                                        with blau_switch:
+                                            blau_switch_tip = ui.tooltip(
+                                                blau_panel.switch_tooltip(blau_lookup_on))
+                                        blau_hint = ui.label(tr('Click a word for its dictionary entry')).classes(
+                                            f'text-xs {blau_panel.HINT_CLASS} print-hide')
+                                        blau_type = ui.button(icon='keyboard').props(
+                                            'flat round dense size=sm').classes(
+                                            f'{blau_panel.OPEN_CLASS} print-hide')
+                                        blau_type.props(f'aria-label="{tr("Type a word to look up")}"')
+                                        blau_type.tooltip(tr('Type a word to look up'))
+                                        blau_hint.set_visibility(blau_lookup_on)
+                                        blau_type.set_visibility(blau_lookup_on)
+
+                                        def _toggle_blau():
+                                            on = not blau_panel.lookup_on()
+                                            blau_panel.set_lookup_on(on)
+                                            if on:
+                                                text_container.props(blau_panel.PANE_ATTR)
+                                                blau_switch.classes(add='active')
+                                            else:
+                                                text_container.props(remove=blau_panel.PANE_ATTR)
+                                                blau_switch.classes(remove='active')
+                                                _blau_hide()
+                                            blau_switch.props(f'aria-pressed={"true" if on else "false"}')
+                                            with using_language(_blau_lang):
+                                                blau_switch_tip.text = blau_panel.switch_tooltip(on)
+                                            blau_hint.set_visibility(on)
+                                            blau_type.set_visibility(on)
+
+                                        blau_switch.on_click(_toggle_blau)
 
                                 if state.enrichment_loaded:
                                     with version_row:

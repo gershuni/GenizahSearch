@@ -24,6 +24,9 @@ from shared.blau_service import (
     MAX_SENSES,
     SCHEMA_VERSION,
     BlauService,
+    arabic_candidates,
+    arabic_key,
+    arabic_keys,
     blau_enabled,
     entry_url,
     get_blau_service,
@@ -295,10 +298,53 @@ def test_a_lookup_never_raises(service, monkeypatch):
     assert result.found is False and result.word == "אכ̇ד̇" and result.key == "אכד"
 
 
+# ---------------------------------------------------------------------------
+# Typed Arabic
+# ---------------------------------------------------------------------------
+
+def test_arabic_keys_undo_the_extraction_s_spacing_and_fold_what_typists_vary():
+    assert arabic_key("أخ ذ") == "اخذ"
+    assert arabic_key("ج أَبايا") == "ابايا", "the plural mark is not part of the word"
+    assert arabic_key("مدرسة") == arabic_key("مدرسه")
+    assert arabic_key("على") == arabic_key("علي")
+    assert arabic_keys("إِجا ص | إِنْجا ص") == ["اجاص", "انجاص"]
+    assert arabic_keys("ـ") == []
+    assert arabic_candidates("والكتاب") == ["والكتاب", "الكتاب", "كتاب"]
+    assert arabic_candidates("ذ") == []
+
+
+def test_a_typed_arabic_word_finds_the_entry_by_its_arabic_spelling(service):
+    result = service.lookup("أخذ")
+    assert result.script == "arabic" and result.key == "اخذ"
+    assert [c.root_id for c in result.cards] == [ROOT_1]
+    assert result.cards[0].matched_key == ""
+
+
+def test_a_typed_arabic_form_marks_that_form(service):
+    [card] = service.lookup("مأخوذ").cards
+    assert card.root_id == ROOT_1 and card.senses[0].form_id == "blau-f-000002" and card.senses[0].matched
+
+
+def test_a_typed_arabic_word_peels_the_conjunction_and_the_article(service):
+    result = service.lookup("والمأخذ")
+    assert result.candidates == ("والماخذ", "الماخذ", "ماخذ")
+    [card] = result.cards
+    assert card.root_id == ROOT_1 and card.sub_entry == "מאכ̇ד̇" and card.candidate == "ماخذ"
+
+
+def test_a_typed_arabic_word_the_dictionary_lacks_says_so(service):
+    result = service.lookup("قاضي")
+    assert result.script == "arabic" and result.found is False and result.candidates == ("قاضي",)
+
+
+def test_hebrew_letters_win_over_arabic_in_one_word(service):
+    assert service.lookup("אכ̇ד̇ أخذ").script == "ja"
+
+
 def test_thread_safe_lookups_agree_across_threads(built):
     svc = BlauService(str(built), thread_safe=True)
     assert svc.is_ready(), svc.unavailable_reason
-    words = ["אכ̇ד̇", "מאכ̇וד̇", "חוה", "בלג"] * 5
+    words = ["אכ̇ד̇", "מאכ̇וד̇", "חוה", "בלג", "أخذ"] * 5
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(svc.lookup, words))
     expected = {w: svc.lookup(w) for w in set(words)}

@@ -6442,7 +6442,6 @@ TRANSLATIONS.update({
     "more senses on the site": "משמעויות נוספות באתר",
     "more entries": "ערכים נוספים",
     "Also in the examples under": "מופיע גם בדוגמאות שבערכים",
-    "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
     "Looked for": "חיפשנו",
     "matched": "התאמה",
     "via": "דרך",
@@ -6452,4 +6451,18 @@ TRANSLATIONS.update({
     "reconstructed": "משוחזר",
     "erroneous": "שגוי",
     "p.": "עמ׳",
+})
+
+# The reader's switch and the box (owner, 2026-11-04: the page does not guess
+# the text's language; the reader turns the lookup on and can type a word).
+TRANSLATIONS.update({
+    "Turn on Blau's dictionary (Judeo-Arabic)": "הפעלת מילון בלאו (ערבית־יהודית)",
+    "Turn off Blau's dictionary": "כיבוי מילון בלאו",
+    "Type a word to look up": "הקלדת מילה לחיפוש במילון",
+    "A word in Hebrew or Arabic letters": "מילה באותיות עבריות או ערביות",
+    "Look up": "חיפוש",
+    "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.":
+        "אפשר להקליד מילה ערבית־יהודית באותיות עבריות, או מילה ערבית.",
+    "Blau's dictionary covers Judeo-Arabic; nothing for this word.":
+        "מילון בלאו עוסק בערבית־היהודית; אין בו ערך למילה זו.",
 })
