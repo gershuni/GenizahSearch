@@ -15,6 +15,9 @@ are not offered.
   forms' Arabic spellings (`shared/blau_service.py::arabic_key`: `normalize_arabic`, the
   extraction's broken spacing undone, ة/ه, ى/ي and the hamza seats folded; the conjunction and
   the article peeled). This is an index built in memory on first use: the sidecar is unchanged.
+- **The MiDRASH project is credited** on every panel, under the print credit: the digital edition
+  is MiDRASH's, funded by the European Union (ERC, MiDRASH, 101071829), linked to the site's
+  about page, which names the team (owner, at Ephraim Meiri's request).
 - **A disclaimer on every panel** (the owner's words): Blau's dictionary records only meanings
   particular to Judeo-Arabic; to look up verbs and inflected forms, type the root or the base
   form. The empty answer stays short.

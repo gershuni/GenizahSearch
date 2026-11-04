@@ -6470,4 +6470,7 @@ TRANSLATIONS.update({
         "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
         "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
     "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
+    # The digital edition's credit under the print credit (owner, 2026-11-04, at Ephraim Meiri's request).
+    "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
+        "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
 })

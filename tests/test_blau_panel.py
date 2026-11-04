@@ -115,6 +115,18 @@ def test_the_disclaimer_is_the_owner_s_hebrew():
         "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.")
 
 
+def test_the_digital_edition_credits_midrash_in_both_languages():
+    """Owner, 2026-11-04 (Ephraim Meiri's request): the MiDRASH project is credited
+    on every panel, linked to the site's about page, which names the team."""
+    from shared.genizah_translations import TRANSLATIONS
+
+    he = TRANSLATIONS.get(blau_panel.MIDRASH_CREDIT, "")
+    assert "MiDRASH" in blau_panel.MIDRASH_CREDIT and "101071829" in blau_panel.MIDRASH_CREDIT
+    assert "MiDRASH" in he and "101071829" in he and "האיחוד האירופי" in he
+    assert "tr(MIDRASH_CREDIT), ABOUT_URL" in PANEL_SRC
+    assert blau_panel.ABOUT_URL == "https://blau-dict.netlify.app/about.html"
+
+
 def test_enter_in_a_box_that_works_in_the_page_does_not_start_the_top_bar():
     """The site's top bar starts on Enter in any text box and is hidden only by a
     page load or a 15-second fallback; the dictionary box and the /search query

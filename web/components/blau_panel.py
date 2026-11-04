@@ -10,7 +10,9 @@ ranking, no merging, no cap -- those are the service's, and are tested there.
 
 What is always on the panel: the credit line of the owner's ruling (a) --
 the site's own Hebrew line on every surface, with the English rendering
-beside it in the English UI. A result without a credit does not render.
+beside it in the English UI -- and under it the digital edition's credit to
+the MiDRASH project (``MIDRASH_CREDIT``). A result without a credit does not
+render.
 
 The reader decides where the dictionary applies (owner, 2026-11-04: the page
 does not guess the text's language). A switch in the version row turns the
@@ -58,6 +60,14 @@ SEARCH_CLASS = 'blau-search'
 DISCLAIMER = ("Blau's dictionary records only meanings particular to Judeo-Arabic. "
               "To look up verbs and inflected forms, type the root or the base form.")
 DISCLAIMER_CLASS = 'blau-disclaimer'
+#: The digital edition's credit, under the print credit on EVERY panel (owner,
+#: 2026-11-04, at Ephraim Meiri's request: the data is the MiDRASH project's
+#: digitization). It links to the site's about page, which names the team and
+#: the funder in full.
+MIDRASH_CREDIT = ("Digital edition: the MiDRASH project, funded by the European Union "
+                  "(ERC, MiDRASH, 101071829).")
+MIDRASH_CREDIT_CLASS = 'blau-credit-midrash'
+ABOUT_URL = SITE_URL + 'about.html'
 
 #: The scope class of the CSS block, and the popover the page creates.
 PANEL_CLASS = 'gs-blau'
@@ -221,11 +231,14 @@ def _render_examples(result: BlauLookup, lang: str) -> None:
 def _render_credit(credit_he: str, credit_en: str, lang: str) -> None:
     """The credit, as a link to the dictionary site (ruling (a): the credit
     with the site linked, on every panel -- an empty answer has no other
-    link to it)."""
+    link to it), then the digital edition's (``MIDRASH_CREDIT``), linked to
+    the site's about page."""
     with ui.element('div').classes(f'{CREDIT_CLASS} credit'):
         ui.link(credit_he, SITE_URL, new_tab=True).props('dir="rtl"').classes('credit-he')
         if lang != 'he' and credit_en:
             ui.link(credit_en, SITE_URL, new_tab=True).props('dir="ltr"').classes('credit-en')
+        ui.link(tr(MIDRASH_CREDIT), ABOUT_URL, new_tab=True).props(
+            'dir="rtl"' if lang == 'he' else 'dir="ltr"').classes(f'{MIDRASH_CREDIT_CLASS} credit-midrash')
 
 
 def _render_box(word: str, on_search: Callable[[str], Any], focus: bool) -> None:

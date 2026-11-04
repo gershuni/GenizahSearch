@@ -237,6 +237,8 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
         assert blau_panel.DISCLAIMER in texts, 'the disclaimer is on every panel'
         credit_links = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == SITE_URL]
         assert sorted(e.text for e in credit_links) == sorted([CREDIT_HE, CREDIT_EN])
+        midrash = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == blau_panel.ABOUT_URL]
+        assert [e.text for e in midrash] == [blau_panel.MIDRASH_CREDIT], 'the digital edition is credited, linked'
         [close] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.CLOSE_CLASS in e.classes]
         assert close.props.get('aria-label') == 'Close'
 
@@ -261,6 +263,7 @@ def test_the_hebrew_ui_shows_the_site_s_line_only_and_its_own_words():
         texts = _texts(user)
         assert CREDIT_HE in texts and CREDIT_EN not in texts
         assert any(t.startswith('מילון בלאו מתעד') for t in texts), 'the disclaimer in Hebrew'
+        assert any(t.startswith('המהדורה הדיגיטלית: פרויקט MiDRASH') for t in texts), 'MiDRASH, in Hebrew'
         assert 'מילון בלאו' in texts and 'עמ׳ 587' in texts and 'קלאסי' in texts
         assert 'לחיצה על מילה פותחת את ערכה במילון בלאו' in _visible_texts(user)
         assert 'כיבוי מילון בלאו' in [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
@@ -283,7 +286,7 @@ def test_an_empty_answer_says_what_was_looked_for():
         assert _with_class(user, blau_panel.EMPTY_CLASS) and not _with_class(user, blau_panel.CARD_CLASS)
         assert 'Nothing in the dictionary for this word.' in texts and blau_panel.DISCLAIMER in texts
         assert 'Looked for' in texts and 'וזזז' in texts and 'זזז' in texts
-        assert CREDIT_HE in texts
+        assert CREDIT_HE in texts and blau_panel.MIDRASH_CREDIT in texts
         assert SITE_URL in _links(user), 'an empty answer still links the credited site'
 
     _run(driver, _dictionary(result=result), lang='en')
