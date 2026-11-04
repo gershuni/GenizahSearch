@@ -4,7 +4,7 @@
 One routing for the homepage hero box (``web/pages/home.py``), the search box
 in the site header (``web/main.py::create_layout``) and the system-number case
 of the /search box (``web/pages/search.py``). It routes by what
-``web/search_box_input.py::search_box_input_kind`` -- the /search box's own
+``shared/search_box_input.py::search_box_input_kind`` -- the /search box's own
 recogniser -- says the input is:
 
 * a corpus sys_id (ASCII digits, the ``99`` namespace)  -> ``/browse?sys_id=``
@@ -42,8 +42,7 @@ from typing import Callable, Optional
 from urllib.parse import quote
 
 # Re-exported: tests/test_home_query_routing.py and older callers import it from here.
-from shared.quick_open import has_hebrew_or_arabic_letter
-from web.search_box_input import search_box_input_kind
+from shared.search_box_input import go_to_kind, has_hebrew_or_arabic_letter  # noqa: F401
 
 
 def home_query_target(
@@ -54,21 +53,18 @@ def home_query_target(
     ``has_shelfmark(query)`` says whether the catalogue holds ``query`` as a
     shelfmark; it is asked only about text with a digit and no Hebrew or Arabic
     letter that the recogniser did not take. Without it the recogniser alone decides.
+    The decision is ``shared/search_box_input.py::go_to_kind``, which the desktop's
+    Go to box (``shared/quick_open.py``) shares.
     """
-    query = (text or '').strip()
-    if not query:
+    kind = go_to_kind(text, has_shelfmark)
+    if kind is None:
         return None
-    kind = search_box_input_kind(query)
+    query = text.strip()
     if kind == 'sys_id':
         return f'/browse?sys_id={query}'
-    if kind == 'shelfmark' or (has_shelfmark is not None and _worth_looking_up(query) and has_shelfmark(query)):
+    if kind == 'shelfmark':
         return f'/browse?shelfmark={quote(query, safe="")}'
     return f'/search?q={quote(query, safe="")}'
-
-
-def _worth_looking_up(query: str) -> bool:
-    """A digit, and no Hebrew or Arabic letter: words alone are never a shelfmark."""
-    return any(ch.isdigit() for ch in query) and not has_hebrew_or_arabic_letter(query)
 
 
 def catalogue_has_shelfmark(query: str) -> bool:

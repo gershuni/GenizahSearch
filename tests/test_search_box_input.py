@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""What the /search box was given (web/search_box_input.py).
+"""What the /search box was given (shared/search_box_input.py).
 
 The shelfmarks are real zero-result text searches from PostHog ``search_executed``
 (2026-11-03). The page's wiring -- Browse for a system number, Shelfmark mode and
@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from web.home_query import home_query_target
-from web.search_box_input import (
+from shared.search_box_input import (
     COLLECTION_PREFIXES, SHELFMARK_WORDS, TEXT_MODES, search_box_input_kind, split_placeholder, typed_as_shelfmark,
 )
 from web.search_bootstrap import VALID_SEARCH_MODES

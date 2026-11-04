@@ -91,6 +91,7 @@ EXTRACTED_MODULES = [
     "shared/blau_service.py",            # Blau dictionary sidecar reader, 2026-11-04
     "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24
     "shared/keyboard_layout.py",         # the /search box's wrong-layout suggestion, 2026-11-03
+    "shared/search_box_input.py",        # what a search or go-to box holds (moved from web/), 2026-11-04
     "shared/exclusion_service.py",
     "shared/export_dossier.py",
     "shared/export_utils.py",

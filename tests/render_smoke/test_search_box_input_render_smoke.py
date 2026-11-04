@@ -14,7 +14,7 @@
    click runs it on this page, and both the showing and the taking are
    counted (PostHog ``search_suggestion``, kind=layout).
 
-The engine is a stub (web/search_box_input.py and shared/keyboard_layout.py
+The engine is a stub (shared/search_box_input.py and shared/keyboard_layout.py
 are pure and tested on their own); what is pinned here is the page's wiring:
 which mode reaches the engine for which input, and what the page then shows.
 The NiceGUI User harness is the one tests/render_smoke/test_search_url_open_dispatch.py
