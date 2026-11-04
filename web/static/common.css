@@ -2738,6 +2738,21 @@ body {
     font-size: 1.25rem; font-weight: 700;
 }
 .gs-blau .panel-head .blau-close { margin-inline-start: auto; }
+/* The box: the word shown, editable. `plaintext` sets its direction from what
+   is typed, so Hebrew and Arabic read right to left in an English UI too. */
+.gs-blau .panel-head .word-input { flex: 1 1 auto; min-width: 0; }
+.gs-blau .panel-head .word-input input {
+    unicode-bidi: plaintext; text-align: start;
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', 'Noto Naskh Arabic', serif;
+    font-size: 1.15rem; font-weight: 600;
+}
+.gs-blau .panel-head .word-input + .blau-search + .blau-close { margin-inline-start: 0; }
+.gs-blau .type-note { font-size: 0.82rem; color: var(--text-muted, #64748b); padding: 4px 0 8px; }
+/* What the dictionary records, on every panel (owner, 2026-11-04). */
+.gs-blau .disclaimer {
+    font-size: 0.75rem; line-height: 1.4; color: var(--text-muted, #64748b);
+    padding: 2px 0 6px; border-bottom: 1px dashed var(--border-light, #e2e8f0); margin-bottom: 2px;
+}
 .gs-blau .panel-body { overflow-y: auto; padding: 6px 12px 10px; }
 .gs-blau .card { padding: 8px 0; border-bottom: 1px solid var(--border-light, #e2e8f0); }
 .gs-blau .card:last-of-type { border-bottom: 0; }
@@ -2777,6 +2792,8 @@ body {
     border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
 }
 .gs-blau .flag { background: var(--bg-secondary, #f8fafc); color: var(--text-muted, #64748b); }
+/* The looked-up word has the dot and this entry's spelling does not. */
+.gs-blau .flag.dot-mismatch { border: 1px dashed var(--border-light, #e2e8f0); }
 .gs-blau .gloss { line-height: 1.45; }
 .gs-blau .gloss + .gloss { font-size: 0.82rem; color: var(--text-secondary, #475569); }
 .gs-blau .more { font-size: 0.78rem; }
@@ -2791,3 +2808,6 @@ body {
    it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
 .gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
 .blau-hint { color: var(--text-muted, #64748b); }
+/* The reader's switch in the version row: tinted while the lookup is on. */
+.blau-switch { color: var(--text-muted, #64748b); }
+.blau-switch.active { color: var(--primary-600, #059669); background: rgba(5, 150, 105, 0.12); }

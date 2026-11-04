@@ -1,11 +1,14 @@
 # Blau's dictionary as a companion: a Judeo-Arabic dictionary in GenizahSearch
 
-**Status:** plan **rev. 3** (2026-11-04). Phase 1 (the sidecar, its normalizer and its gate) is
-**merged** (#472, `c4b7f8c8`, 2026-11-03). Phase 2 (the reader companion on `/browse`) is built
-on branch `claude/blau-browse` and is this plan's second PR; phases 3-4 are described, not built.
-**Both owner decisions are ruled (2026-11-03, §9):** the site's permission is treated as
-covering GenizahSearch, and the companion is **web only first**. Nothing is deployed: the server
-copy of the sidecar is the owner's (`scripts/deploy_blau_sidecar.ps1`, §8).
+**Status:** plan **rev. 4** (2026-11-04). Phase 1 (the sidecar, its normalizer and its gate) is
+**merged** (#472, `c4b7f8c8`, 2026-11-03). Phase 2 (the reader companion on `/browse`) is
+**merged** (#473, `d948a479`); its follow-up after the owner's rulings (c)-(e) (§6.2.1: the
+reader's switch, the box, typed Arabic; close spellings measured and dropped) is on branch
+`claude/blau-reader-switch`. Phases 3-4 are described, not built.
+**Owner decisions (§9):** the site's permission is treated as covering GenizahSearch, the
+companion is **web only first** (2026-11-03); the page never guesses the text's language, a
+reader can type a word, and no one-letter guesses are offered (2026-11-04). Nothing is deployed:
+the server copy of the sidecar is the owner's (`scripts/deploy_blau_sidecar.ps1`, §8).
 **Origin:** the PostHog usage review of 2026-11-03 (`_tmp/posthog_usage_review_2026-11-03.md`):
 readers whose browser is English hit zero results in 53% of their Hebrew-letter searches, against
 33% for readers whose browser is Hebrew. The suspected cause is Judeo-Arabic orthography: a large
@@ -15,8 +18,8 @@ Mediaeval Judaeo-Arabic Texts* (2006) as a companion for every reader, and as he
 Hebrew readers searching Arabic terms, and pointed at its digital edition as the data source.
 **Scope:** data layer now (web and desktop can both read a SQLite sidecar); the reader companion,
 search by meaning and the reverse link later, on the surfaces ruling (b) names.
-**Branches:** `claude/blau-sidecar` (phase 1, #472, merged 2026-11-03) and `claude/blau-browse`
-(phase 2, PR against `master-main`); nothing deployed.
+**Branches:** `claude/blau-sidecar` (phase 1, #472, merged 2026-11-03), `claude/blau-browse`
+(phase 2, #473, merged 2026-11-04) and `claude/blau-reader-switch` (§6.2.1); nothing deployed.
 
 ---
 
@@ -212,6 +215,75 @@ Not in this PR: the "what is this word" entry point on `/search`'s result snippe
 in another session's hands; it follows once the panel is live), and the root-skeleton fallback
 of §10.
 
+### 6.2.1 The reader's switch, the box, and a measured "no" (2026-11-04, branch `claude/blau-reader-switch`)
+
+Rulings (c)-(e) (§9) change three things on the companion of §6.2, and test one idea that does
+not ship.
+
+- **The reader decides where the dictionary applies.** A dictionary button (`translate`, the languages icon; not the book of Browse) in
+  the version row, beside the line-number toggle, is OFF by default and remembered per visitor
+  (`web/components/blau_panel.py::PREF_KEY`, `ui.blau_lookup`). While it is off, the pane carries
+  no `data-blau-lookup`, there is no hint, and a click on a word does nothing. The click script
+  asks the server to close only when something is open. While it is on, the hint and a "type a
+  word" button (`keyboard`) show. The script handles that button's click (`blau-open`): a server
+  handler of its own would race the script's close of the same click.
+- **The box.** Every panel has a box at its top holding the word it shows. Enter, or its search
+  button, looks up what the box holds, so a misread word is corrected by the reader and looked up
+  again. A word with no Hebrew letter but Arabic ones is looked up against the Arabic spellings
+  of entries, sub-entries and forms (`shared/blau_service.py::arabic_key`, `arabic_candidates`).
+  The extraction split Arabic words (`أخ ذ`, tatweel-broken forms), so the key is the letters with
+  every space removed, plus `normalize_arabic`. The dictionary's plural mark `ج` is dropped, and
+  ة/ه, ى/ي and the hamza seats are folded. The conjunction and the article are peeled. The index
+  is built in memory on first use (about 50 ms on the real file); the sidecar is unchanged.
+- **A disclaimer on every panel** (owner's review, same day; the Hebrew is the owner's): "מילון
+  בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. כדי לחפש פעלים ונטיות יש להקליד את השורש או את
+  צורת הבסיס." (`blau_panel.DISCLAIMER`). A word with no entry is usually an ordinary Arabic word
+  or an inflected form (אבו, לנא), not a word in another language, so the empty answer is back to
+  the short "המילה לא נמצאה במילון." with the forms looked for.
+- **The site's top loading bar** started on Enter in any text box and was hidden only by a page
+  load or a 15-second fallback, so it ran on after every lookup in the box (and after every
+  `/search` query, which has its own progress bar). Enter inside `[data-no-loading-bar]` no longer
+  starts it (`web/main.py`); the popover and the `/search` query box carry the attribute.
+- **פ** was already peeled as a conjunction, like ו (`CONJUNCTIONS`): פאלכתאב → אלכתאב → כתאב.
+- **The dot above** (owner's review: דלך reached only دلك "to polish", and no keyboard types the
+  dot). The key drops the dot, so both readings share it; two changes make the common one reachable
+  and let the reader choose it:
+  - A single word reaches an entry whose name is several words and begins with it
+    (`NAME_PREFIX_KINDS`: roots, sub-entries, headwords; not multi-word variants, which are mostly
+    a verb with its preposition). ذلك is the entry "ד̇לך ו", so דלך now shows دلك and ذلك.
+  - A word written with the dot -- U+0307, or an apostrophe or geresh after ג ד ט צ ת כ, as the
+    automatic text and any keyboard write it (`dot_pattern`) -- puts the entries spelled with the
+    dot on the same letters first and marks the rest "spelled without the dot". ד'לך shows ذلك
+    first. The box's placeholder says how to type it: "ד' for ד̇". An apostrophe after another
+    letter (ר', an abbreviation) changes nothing.
+  - Not solved: where Blau has the dotted word only inside examples (ذا, הד̇א), the only entry is
+    the undotted one, now marked; and an undotted word gives no preference (דלך lists دلك first).
+    Ranking readings by how common each is needs a frequency list of classical Arabic (part of the
+    Arabic-dictionary layer the owner raised on 2026-11-04; not yet planned).
+- **The popover's position** is written on `<html>`, not on the popover. The page shows the
+  popover with `.style('display: flex;')`, and that re-render replaced its inline style, so the
+  position the script had written there was gone. Since #473 the panel had always opened at the
+  fallback corner. This was seen in the browser on 2026-11-04; #473 was merged without a browser
+  check.
+- **Close spellings: measured, dropped.** The idea: when a word reaches no entry, try it with one
+  letter swapped, using the top one-letter pairs of the HTR confusion table
+  (`shared/unified_variants.py`). `scripts/measure_blau_close_spellings.py` aligns the PGP
+  Judeo-Arabic editions (`document_sources.source_language = 'jrb'`) word by word with the
+  automatic text of the same pages. On every edition (2,770 documents, 3,291 pages, 425,588
+  aligned pairs; 30 pairs, the first six entries shown):
+
+  | Population | Count | Result |
+  |---|---|---|
+  | misread, the edition's word in Blau, the automatic word not | 10,623 | right entry first 26.5%, among the shown 35.2%, only wrong 42.4%, nothing 22.4% |
+  | read right, not in Blau | 126,083 | 60.1% would get an offer, every one of them false |
+  | misread onto another entry (no guess tried) | 6,854 | the reader sees the wrong entry |
+
+  Of all offers, about 1 in 20 is right: 4.5-4.9% at 10, 20, 30 and 50 pairs, and 3.7-10.5% at
+  every word length from 3 to 7+ letters (a seeded sample of 1,200 documents). The reason: most words with no entry were read correctly, and the dictionary
+  lacks them. The owner dropped the feature. The script stays, with the logic it measured, so a
+  later idea (a filter on how often a word occurs in the corpus, say) is measured the same way
+  before anything ships.
+
 ### 6.3 Phase 3 — search by meaning
 
 A Hebrew, English or Arabic-script query that matches a gloss or a spelling offers the
@@ -281,8 +353,11 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 
 | # | Decision | Recommendation / state |
 |---|---|---|
-| **(a)** | **Permission and credit.** Does the permission the site cites ("published with permission"; research and educational use only; no commercial use beyond conventional scholarly publication) cover bundling the data in GenizahSearch — a free research site and a free desktop app — and what credit line must every surface show? The site's own line is: יהושע בלאו, מילון לטקסטים ערביים־יהודיים מימי הביניים, ירושלים: האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים, תשס"ו (2006) © האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים. פורסם ברשות | **RULED 2026-11-03: "Treat as permission."** The site's permission is taken to cover GenizahSearch; the data may be served. The credit line every surface shows is the site's own line above (`meta.credit_he`), with the site linked; the English rendering in `meta.credit_en` is still a public string the owner approves when phase 2 first shows it |
+| **(a)** | **Permission and credit.** Does the permission the site cites ("published with permission"; research and educational use only; no commercial use beyond conventional scholarly publication) cover bundling the data in GenizahSearch — a free research site and a free desktop app — and what credit line must every surface show? The site's own line is: יהושע בלאו, מילון לטקסטים ערביים־יהודיים מימי הביניים, ירושלים: האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים, תשס"ו (2006) © האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים. פורסם ברשות | **RULED 2026-11-03: "Treat as permission."** The site's permission is taken to cover GenizahSearch; the data may be served. The credit line every surface shows is the site's own line above (`meta.credit_he`), with the site linked; the English rendering in `meta.credit_en` is still a public string the owner approves when phase 2 first shows it. **Added 2026-11-04** (owner, at the request of Ephraim Meiri of the digital edition's team): under it, every panel credits the digital edition to the MiDRASH project with its ERC grant (`web/components/blau_panel.py::MIDRASH_CREDIT`), linked to the site's about page, which names the team. Meiri's 1.1 data export of the same day (`blau-dictionary-1.1-data-export-2026-11-04/`, not committed) carries the same `semantic_blau.json` and `hebrew_bibliography.json` byte for byte (sha256 `1ae5a9ec…`, `fba53ebd…`), so the sidecar is unchanged; the export adds the English bibliography (59 records, among them `blau-bib-000364`, the one dangling source) and no licence of its own |
 | **(b)** | **Web-only or both apps?** | **RULED 2026-11-03: "Web only first."** Phase 2 ships on `/browse` on the website; the desktop context-menu lookup and the installer bundling (§7) wait for a later ruling |
+| **(c)** | **Where does the lookup apply?** Not every page is Judeo-Arabic | **RULED 2026-11-04: the reader decides; the page does not infer the language.** A switch, off by default, remembered per visitor (§6.2.1) |
+| **(d)** | **Typing a word** | **RULED 2026-11-04: yes.** The box at the top of every panel; Arabic script too (§6.2.1) |
+| **(e)** | **One-letter guesses for misread words** | **RULED 2026-11-04: "Drop for now."** Measured at about 1 right offer in 20 (§6.2.1); `scripts/measure_blau_close_spellings.py` stays for a later attempt |
 | D1 | The lookup key drops the corpus's apostrophe family as well as the combining marks | decided (§3: 164,480 apostrophes against 9,256 dots) |
 | D2 | Brackets are transparent, not separators | decided (`חיט(ה̈)`, `]הנתשנ`) |
 | D3 | Unnamed roots (7) and sub-entries (54) are kept, counted and pinned, not dropped | decided |

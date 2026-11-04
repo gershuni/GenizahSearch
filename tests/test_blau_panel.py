@@ -14,6 +14,7 @@ from web.components import blau_panel
 REPO = Path(blau_panel.__file__).resolve().parents[2]
 JS = (REPO / "web" / "static" / "js" / "blau_lookup.js").read_text(encoding="utf-8")
 CSS = (REPO / "web" / "static" / "common.css").read_text(encoding="utf-8")
+PANEL_SRC = Path(blau_panel.__file__).read_text(encoding="utf-8")
 
 
 def test_lookup_word_reads_the_script_s_payload():
@@ -49,6 +50,96 @@ def test_the_script_and_the_renderer_use_the_same_names():
     assert "JSON.stringify" in JS and "word: word.text" in JS
 
 
+def test_the_script_and_the_page_agree_on_the_open_button_and_its_event():
+    assert f"'{blau_panel.OPEN_CLASS}'" in JS and f"'{blau_panel.OPEN_EVENT}'" in JS
+    # The open button is placed beside, like a word.
+    assert "place(pop, opener.getBoundingClientRect())" in JS
+
+
+def test_the_script_writes_the_position_where_the_page_cannot_wipe_it():
+    """The page shows the popover with `.style('display: flex;')`, which
+    replaces the popover's inline style: a position written there is lost and
+    the panel opens at the fallback corner (seen in the browser, 2026-11-04).
+    The script writes the custom properties on <html>; they inherit."""
+    place = JS[JS.index("function place("):JS.index("function dispatch(")]
+    assert "document.documentElement.style" in place
+    assert "pop.style.setProperty" not in place
+
+
+def test_the_script_asks_the_server_to_close_only_what_is_open():
+    """With the lookup switched off nothing on the page is marked, and a click
+    must not send the server a close (one message per click, for nothing)."""
+    assert "if (open) dispatch(pop, 'blau-close')" in JS
+    assert "shown(pop) || document.querySelector('.' + HIT) !== null" in JS
+
+
+def test_the_switch_is_off_until_the_reader_turns_it_on(monkeypatch):
+    store = {}
+    monkeypatch.setattr(blau_panel, "safe_user_get", lambda key, default=None: store.get(key, default))
+    monkeypatch.setattr(blau_panel, "safe_user_set", lambda key, value: store.__setitem__(key, value) or True)
+    assert blau_panel.lookup_on() is False
+    blau_panel.set_lookup_on(True)
+    assert store == {blau_panel.PREF_KEY: True} and blau_panel.lookup_on() is True
+    blau_panel.set_lookup_on(0)
+    assert blau_panel.lookup_on() is False
+
+
+def test_the_switch_says_what_pressing_it_will_do():
+    from web.translations import using_language
+
+    with using_language("en"):
+        assert blau_panel.switch_tooltip(False) == "Turn on Blau's dictionary (Judeo-Arabic)"
+        assert blau_panel.switch_tooltip(True) == "Turn off Blau's dictionary"
+    with using_language("he"):
+        assert blau_panel.switch_tooltip(False) == "הפעלת מילון בלאו (ערבית־יהודית)"
+
+
+def test_every_new_panel_string_has_its_hebrew():
+    from shared.genizah_translations import TRANSLATIONS
+
+    for text in ("Turn on Blau's dictionary (Judeo-Arabic)", "Turn off Blau's dictionary",
+                 "Type a word to look up", "A word in Hebrew or Arabic letters (ד' for ד̇)", "Look up",
+                 "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.",
+                 "spelled without the dot"):
+        assert TRANSLATIONS.get(text, "").strip(), text
+        assert text in PANEL_SRC, f"{text!r} is not the renderer's string any more"
+    assert "tr(DISCLAIMER)" in PANEL_SRC
+
+
+def test_the_disclaimer_is_the_owner_s_hebrew():
+    """Owner, 2026-11-04: a disclaimer on every panel, in these words."""
+    from shared.genizah_translations import TRANSLATIONS
+
+    assert TRANSLATIONS[blau_panel.DISCLAIMER] == (
+        "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
+        "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.")
+
+
+def test_the_digital_edition_credits_midrash_in_both_languages():
+    """Owner, 2026-11-04 (Ephraim Meiri's request): the MiDRASH project is credited
+    on every panel, linked to the site's about page, which names the team."""
+    from shared.genizah_translations import TRANSLATIONS
+
+    he = TRANSLATIONS.get(blau_panel.MIDRASH_CREDIT, "")
+    assert "MiDRASH" in blau_panel.MIDRASH_CREDIT and "101071829" in blau_panel.MIDRASH_CREDIT
+    assert "MiDRASH" in he and "101071829" in he and "האיחוד האירופי" in he
+    assert "tr(MIDRASH_CREDIT), ABOUT_URL" in PANEL_SRC
+    assert blau_panel.ABOUT_URL == "https://blau-dict.netlify.app/about.html"
+
+
+def test_enter_in_a_box_that_works_in_the_page_does_not_start_the_top_bar():
+    """The site's top bar starts on Enter in any text box and is hidden only by a
+    page load or a 15-second fallback; the dictionary box and the /search query
+    work in the page, so it ran on after every query (owner, 2026-11-04)."""
+    main = (REPO / "web" / "main.py").read_text(encoding="utf-8")
+    enter = main[main.index("// 2. Trigger on Enter key"):main.index("// 3. KEY FIX")]
+    assert "closest('[data-no-loading-bar]')) return;" in enter
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "aria-live=\"polite\" data-no-loading-bar" in browse
+    search = (REPO / "web" / "pages" / "search.py").read_text(encoding="utf-8")
+    assert "data-ux-enter=search_results data-no-loading-bar" in search
+
+
 def test_the_script_s_word_characters_match_the_normalizer_s_word():
     """The class the script widens a click over, run as a Python regex (same
     syntax): Hebrew letters, combining marks and the quote family are word
@@ -67,7 +158,10 @@ def test_the_stylesheet_styles_what_the_renderer_and_the_script_make():
                      f".{blau_panel.PANEL_CLASS} .credit {{", f".{blau_panel.PANEL_CLASS} .card {{",
                      f".{blau_panel.PANEL_CLASS} .sense {{", f".{blau_panel.PANEL_CLASS} .sense.matched {{",
                      "[data-blau-place=\"above\"]",
-                     "--blau-left", "--blau-top", "--blau-bottom"):
+                     "--blau-left", "--blau-top", "--blau-bottom",
+                     f".{blau_panel.SWITCH_CLASS}.active {{", f".{blau_panel.HINT_CLASS} {{",
+                     f".{blau_panel.PANEL_CLASS} .panel-head .word-input input {{",
+                     f".{blau_panel.PANEL_CLASS} .type-note {{"):
         assert selector in CSS, selector
     # The script places the popover with the size the stylesheet gives it.
     js_width = int(re.search(r"var WIDTH = (\d+)", JS).group(1))
