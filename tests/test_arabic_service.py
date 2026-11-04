@@ -98,7 +98,7 @@ def test_one_word_survives_its_dot_marks_and_niqqud():
     for word in ("דלך", "ד'לך", "ד׳לך", "ד̇לך", "ד‘לך", "ד’לך", "ד[ל]ך", "דָלִךְ",
                  "מוּסא", "מוּסא", "ר'"):
         assert one_ja_word(word), word
-    for word in ("ד לך", "ד־לך", "ד-לך", "דלך كتاب", "abc", ""):
+    for word in ("ד לך", "ד־לך", "ד-לך", "דלך كتاب", "דלך-كتاب", "דלךabc", "abc", ""):
         assert not one_ja_word(word), word
 
 

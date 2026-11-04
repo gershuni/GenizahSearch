@@ -186,6 +186,8 @@ def one_ja_word(word: str) -> bool:
         return False
     text = unicodedata.normalize("NFC", word)
     kept = "".join(ch for ch in text if ch not in _IN_WORD_MARKS and unicodedata.category(ch) != "Mn")
+    if any(ch.isalpha() and not "א" <= ch <= "ת" for ch in kept):
+        return False  # another script joined on (דלך-كتاب): two words
     return len(re.findall("[א-ת]+", kept)) == 1
 
 
