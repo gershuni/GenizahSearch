@@ -1,14 +1,17 @@
 # Arabic dictionaries beside Blau: Lane and Lisān al-ʿArab for Judeo-Arabic words
 
-**Status:** plan **rev. 4** (2026-11-04). **The owner ruled D1-D11** (§8): Lane first, Lisān
+**Status:** plan **rev. 6** (2026-11-04). **The owner ruled D1-D12** (§8): Lane first, Lisān
 later; the laneslexicon master files; credit and licence terms at the minimum each source
 requires; Ephraim Meiri's parsed files may be used; the stdlib v3 method; the 250-650 AH count;
-the cards under Blau's for now; the gate plus the owner's grading; a closed-class table; Hebrew
-words given an Arabic card are not a gate (a reader who asks for Arabic gets Arabic). **Phase A
+each dictionary in its own tab of one panel (D12, replacing D8's "under Blau's"); the gate plus
+the owner's grading; a closed-class table; Hebrew words given an Arabic card are not a gate (a
+reader who asks for Arabic gets Arabic). **Phase A
 is built** (§7.1, branch `claude/arabic-lane-sidecar`): `arabic_data/arabic.db` with Lane's
-47,855 articles, its headword table, a 247-million-token word count and a 141-row closed-class
+47,855 articles, its headword table, a 247-million-token word count and a closed-class
 table; its own gate passes and fails on mutations; the plan's gate passes on it. Nothing is served,
-bundled or deployed; no reader sees anything. Next: phase B, the Lane cards on `/browse` (§7).
+bundled or deployed; no reader sees anything. **Phase B is built** (§7.2, branch
+`claude/arabic-lane-cards`): Lane in its own tab beside Blau's on `/browse`, not deployed; its
+wording awaits the owner.
 **Origin:** the owner's review of the Blau companion on 2026-11-04 (PR #475,
 `docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1): Blau records what is particular to Judeo-Arabic, so
 an ordinary Arabic word (אבו *abū*, לנא *lanā*) has no entry, and an undotted letter is two
@@ -261,6 +264,83 @@ words in the same order, the same roots shown), but 164 of the 200 rows now show
 Each row now also names its page (`page`, the transcription header), and the owner's grading
 must use a file written by rev. 4 or later.
 
+**Graded by two AI judges (2026-11-04; the owner's choice for D9, in place of grading by hand).**
+
+*Setup*
+- The rev. 4 sample (seed 20261104) was rebuilt from the served lookup (`shared/arabic_service.py` on
+  the built sidecar). Its roots match the measuring script's on all 200 rows.
+- Each row has about 20 words of context on each side, from the same page of the automatic text.
+  This holds for 188 rows; the other 12 kept the 9-word window.
+- Counts were withheld from the judges.
+- The two judges were Fable 5.1 and Codex `gpt-6-astra`. Both had the same brief. Each first wrote
+  its own Arabic reading, then graded the language, the first reading and the root.
+- They judged separately: neither read the other's files. Scripts: the session scratchpad
+  `judge/`.
+
+*Results, where the judges agree*
+
+| | Fable 5.1 | Codex Astra | where both agree |
+|---|---|---|---|
+| Arabic words | 127 | 124 | 124 (2 with nothing shown) |
+| first reading right | 119/125, 95.2% | 116/122, 95.1% | 116/122, 95.1% |
+| root right (of those with a card) | 90/120, 75.0% | 88/117, 75.2% | 87/116, 75.0% |
+| not Arabic, given a card | 44 of 73 | 47 of 76 | 44 of 73 (D11: not a gate) |
+
+*How far the judges agree*
+- Language: 97.5% (κ 0.955).
+- The first reading: 100% (κ 1.0).
+- The root: 99.1% (κ 0.977).
+- They split on 6 rows, most of them on whether the word is Arabic at all.
+
+**What is wrong.**
+- **The reading.** 6 of 122 readings are wrong, each a dot or a final vowel letter: ويضلك for
+  ويصلك, عني for عنا, غالية for جالية, حفصها for حفظها, مسخوا for مسكوا, ثبيتة for تبيته.
+- **The root.** Of the 29 roots wrong:
+  - 4 follow from a wrong reading.
+  - 5 are مولاي filed under مول, not ولي.
+  - About 20 are weak, hollow or doubled roots and frequent particles:
+    - أدام under ادم, not دوم;
+    - قلت and كنت taken as roots;
+    - يبيع and أباع under بوع, not بيع;
+    - معاش, يبقى and اشتريت under the wrong و/ي heading;
+    - سيدي, نحن, بن, ستين and الاثنين.
+  - These are §4's weak step, and they are systematic.
+- **Pass or fail.** D9 sets no number for this grading; the owner decides on these figures.
+
+**Fixed the same day (the owner's go-ahead), and re-scored against the judges' roots.** Two changes,
+both on what the grading found:
+
+- **The closed-class table** grew from 141 to 181 rows (`scripts/arabic_closed_class.json`):
+  - مولى, سيد, ابن / بن, أبو and their common pronoun forms;
+  - قلت, قلنا, كنت and كنا;
+  - the blessing formulas أدام and عز;
+  - the numerals two (اثنان, the oblique forms, الاثنين) and six (ستة, ستون).
+
+  Each names the root and headword the judges gave. نحن stays unmapped: Lane has no article for it.
+- **A merged root's card is titled by the right heading.** Lane files بوع and بيع (سود and سيد, بقو
+  and بقى) apart under one root key. Until now the card took the key's first name. It now takes the
+  heading of the first matched entry. Failing that, it takes the heading with more entries, the
+  commoner sense, as the method breaks a tie between roots
+  (`shared/arabic_service.py::lane_heading`). It does not judge by the word's letters: a ي in the
+  word does not make it the root's (سيّد and جيّد are of سود and جود), and a first try that did so
+  broke two right cards.
+
+| On the 116 rows both judges graded alike | the root right |
+|---|---|
+| before | 87, 75.0% |
+| the table alone | 101, 87.1% |
+| the table and the headings | **107, 92.2%**; no card the judges marked right changed |
+
+Two notes on the remaining misses and the figures:
+
+- **The 9 still wrong.** 4 follow from a wrong reading. One is نحن. One (حياة) now shows حى, Lane's
+  spelling of the root the judges wrote حيي. Three are the method's own: أجبناه (جوب), تصل (وصل),
+  كرى (كري).
+- **These figures are fitted.** They are measured on the sample that found the errors, so they are
+  not an independent measure; the check on documents the method was not shaped on is still owed.
+- **The plan's gate on the rebuilt file:** P1 81.1%, P2 87.9%, the same as before (a broken ranking
+  still exits 1). The sidecar's own gate passes.
+
 ---
 
 ## 6. The gate
@@ -352,11 +432,12 @@ the 200-word sample is the check this measurement cannot replace (D9).
 
 - **A. A Lane sidecar, `arabic_data/arabic.db`: BUILT (2026-11-04, branch
   `claude/arabic-lane-sidecar`), §7.1.**
-- **B. The Lane cards on `/browse`**, inside the Blau panel, under the same switch and box (rulings
-  (c) and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen
+- **B. The Lane cards on `/browse`**, in the dictionary panel, under the same switch and box
+  (rulings (c) and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen
   reading, the root card with Lane's article (English, truncated, "more"), the Perseus credit line
-  and a link to the source. Typed Arabic skips the reading step. The cards sit under Blau's (D8; to
-  be revisited, since Lane often gives the broader sense). Web only first, as Blau.
+  and a link to the source. Typed Arabic skips the reading step. Lane has its own tab beside Blau's
+  (D12, which replaced D8's "under Blau's cards"). Web only first, as Blau. **BUILT
+  (2026-11-04, branch `claude/arabic-lane-cards`, not deployed), §7.2.**
 - **C. Lisān al-ʿArab**, the same way, after Lane: its articles from the pinned OpenITI file (or
   Ephraim Meiri's parse, D5), its card beside Lane's, with OpenITI's credit and licence (D4).
 - **D. The desktop**, on a later ruling (GPL v2 is one reason to keep CAMeL out of it; D6 keeps the
@@ -394,7 +475,7 @@ workers):
 | `lane_entries` | 47,855 | every article: headword, root, printed page, text |
 | `lane_forms` | 42,351 | the one-word headwords by skeleton: the form-to-root table of method v3 (5,470 headwords of several words are not forms) |
 | `freq` | 808,441 | skeleton, count, commonest spelling, at 2 or more: 247,037,983 tokens of 2,816 OpenITI texts (D7's selection is 2,819; three are listed in the release metadata but absent from their repositories), 1,325,038 distinct skeletons |
-| `closed_class` | 141 | `scripts/arabic_closed_class.json`: prepositions alone and with the seven commonest pronouns, demonstratives, particles; each names Lane's article, and 105 the headword in it; the build refuses a row Lane cannot answer. Not yet mapped: the relative pronouns (الذي, التي, الذين), نحن and the third-person pronouns, for which no Lane article was found by headword |
+| `closed_class` | 141 (181 since §5.4's fix) | `scripts/arabic_closed_class.json`: prepositions alone and with the seven commonest pronouns, demonstratives, particles (and since the grading of §5.4, frequent forms the method filed under the wrong root); each names Lane's article, and 105 the headword in it; the build refuses a row Lane cannot answer. Not yet mapped: the relative pronouns (الذي, التي, الذين), نحن and the third-person pronouns, for which no Lane article was found by headword |
 
 `shared/arabic_normalize.py` is the one copy of the readings and keys (moved out of the measuring
 script, the numbers unchanged on the development documents); `NORMALIZER_VERSION` is pinned in
@@ -456,6 +537,84 @@ readings has decided to read it as Arabic, and gets them; the panel does not jud
 language, as it does not for Blau (ruling (c) of the Blau plan). Phase B therefore adds no Hebrew
 filter and keeps the count at 2. The table above stays as information.
 
+### 7.2 Phase B as built (not deployed)
+
+**One method, served and measured.** The v1-v4 method moved verbatim from the measuring script
+into `shared/arabic_method.py`; the script imports it back. Re-run on the built file, v1, v3 and
+v4 give the same P1, P2, P3, samples and examples as before the move, so the numbers of §7.1 are
+the numbers of what is served.
+
+**The service** (`shared/arabic_service.py`), fail-closed as `shared/blau_service.py`: ready only
+when `arabic_data/arabic.db` is where a sidecar lives, opens read-only and passes `quick_check`,
+has schema 1.0.0 and the running normalizer, every table and both lookup indexes, matching row
+counts, and the Perseus credit line. `LANE_DICTIONARY_ENABLED` (default on, read live) is its kill
+switch. A lookup is method v4 at count 2 (D11):
+
+- **A word in Hebrew letters** gives up to three readings, the commonest in the word count first.
+  An abbreviation gets none.
+- **A word typed in Arabic letters** is its own reading.
+- **The first reading's first root** gets a card. The gate measured the first root only (P1), and
+  the second was often a weak guess (`كتاب` offered توب), so one card.
+- **The card's entries:** the entries whose headword is the reading (or its stem, or the
+  closed-class table's headword) come first, then the rest in Lane's order. At most three are shown,
+  each cut at 600 characters, and the rest are counted.
+
+The tables the method reads per lookup are held in memory: the root keys, the article size per
+root, the headword table and the closed-class table. The word count stays on disk and is read by
+key. The real file opens in 0.3 s, and a lookup takes 0 to 16 ms.
+
+**One tab per dictionary (D12).** The panel was first built with Lane's section under Blau's
+cards and credit (D8). The owner, trying it the same day: a long Blau entry pushed Lane out of
+sight, and the panel's title and hint named Blau alone. So:
+
+- **The tabs.** Each dictionary served has a tab, Blau's then Lane's, in a row between the head
+  and the scrolling body. A tab whose dictionary has nothing for the word is greyed, not hidden,
+  and says so when opened. With one dictionary served there is no tab row, and the head carries its
+  name.
+- **Which tab opens** (`blau_panel.pick_tab`): the tab the reader last chose on the page (it holds
+  across the manuscripts opened from it; a new visit starts afresh),
+  while it has something for the word; else the first that has (Blau's, if it does); else the
+  reader's. A tab the panel chose by itself is not remembered as the reader's.
+- **The panel appears when either dictionary is served.** Each lookup asks each service again (the
+  kill switches are read live); a dictionary not served then has no tab, and with neither the panel
+  stays closed.
+- **The wording names no one dictionary:** the head says "Dictionaries", the hint "Click a word to
+  look it up in the dictionaries", the switch "Turn on/off the dictionaries". Inside each tab, an
+  empty answer says "Nothing in the dictionary for this word." The owner approved this wording
+  (2026-11-04), in Hebrew: מילונים; בלאו / ליין; לחיצה על מילה מחפשת אותה במילונים;
+  הפעלת / כיבוי המילונים (ערבית־יהודית).
+- **The switch is seen** (owner, later the same day: the feature was too hidden): the letters עع
+  drawn, and from 640px the label "חדש! מילונים לערבית־יהודית!", highlighted until the visitor
+  first turns it on, then "מילונים לערבית־יהודית" (`docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1).
+  PostHog: `dictionary_switch`, `dictionary_lookup`, `dictionary_tab`.
+
+**Lane's tab** (`web/components/lane_panel.py`, drawn by `web/components/blau_panel.py`;
+`web/pages/browse.py` asks both services in one trip off the event loop):
+
+- **The title**, then the readings as chips. The first is marked; a click on another looks that
+  reading up in the box, so the panel then shows it in Arabic letters.
+- **The root card:** Lane's entries, the matched ones marked. A cut entry links to its full text on
+  Ephraim Meiri's site (`?id=<entry id>`), and the root links to all its entries there
+  (`?q=<root>&source=lane`).
+- **The credits:** the Perseus line verbatim (English in both UIs), then where the entries come from
+  and what ranks the readings.
+- **When nothing shows:** without the credit line, Lane has no tab (D3). For a word with no reading
+  the tab is greyed and says nothing was found.
+
+**Owner decisions still open for phase B** (drafts in place, nothing deployed):
+
+- the English and Hebrew wording of Lane's tab (`shared/genizah_translations.py`, marked DRAFTS;
+  its title is the owner's own; the panel's title, tabs, hint and switch are approved);
+- whether the two source lines are wanted, or the Perseus line alone (D3 asks only that one);
+- the server copy of `arabic_data/arabic.db` (74 MB) and the release.
+
+The gate before deploy (D9):
+- the 200-word sample, graded by two AI judges at the owner's request (§5.4): the first reading is
+  right on 95.1% of the Arabic words, the root on 75.0% (92.2% after the fix of §5.4, measured on
+  the same sample). The owner decides on these figures.
+- still owed: a check on documents the method was not shaped on;
+- the sidecar's own gate.
+
 ---
 
 ## 8. Owner decisions (ruled 2026-11-04)
@@ -469,10 +628,11 @@ filter and keeps the count at 2. The table above stays as information.
 | D5 | **The emeiri sites.** Reuse their parsed Lane and Lisān? | **Yes, at our convenience**: their maintainer, Ephraim Meiri, is the owner's friend. Phase A takes whichever source is simpler; the Perseus and OpenITI credits still apply to the text |
 | D6 | **Morphology.** Stdlib (stripping plus Lane's headwords, v3) or CAMeL Tools (GPL v2 database)? | **Stdlib v3** |
 | D7 | **The frequency count.** Which part of OpenITI, which genres? | **All primary non-OCR texts of 250-650 AH, dictionaries excluded** |
-| D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense |
+| D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense. *Replaced by D12* |
 | D9 | **The release gate.** G1-G3 as fixed, with the owner's grading of the 200-word sample as the deciding check | **Keep G1-G3 and add the owner's grading** |
 | D10 | **The closed-class table.** A hand list of about 150 forms (prepositions with pronouns, demonstratives, particles) pointing at Lane's particle articles | **Yes** |
 | D11 | **Hebrew words given an Arabic card** (13 of 20 in the graded sample on the built file, §7.1). A gate, a count threshold or a Hebrew filter? | **Not a gate** (later the same day): "If someone thinks it's Arabic, let him look for Arabic." No filter; the count stays at 2 |
+| D12 | **Where the cards go, after trying phase B.** Under Blau's, the panel's head and hint name Blau alone, and a long Blau entry hides Lane | **A tab per dictionary** (later the same day): "show Lane not under Blau but in a tab", so a long Blau entry needs no scrolling and more dictionaries can be added; the wording becomes general (§7.2) |
 
 ---
 

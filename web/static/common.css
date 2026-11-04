@@ -2844,6 +2844,73 @@ body {
    it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
 .gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
 .blau-hint { color: var(--text-muted, #64748b); }
-/* The reader's switch in the version row: tinted while the lookup is on. */
-.blau-switch { color: var(--text-muted, #64748b); }
+/* One tab per dictionary (owner, 2026-11-04; plan D12), between the head and the scrolling
+   body, so a long entry never hides the other tab. A tab with nothing for the word is greyed. */
+.gs-blau .dict-tabs {
+    flex: none; padding-inline: 8px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+    color: var(--text-secondary, #475569);
+}
+/* The tabs start where the reading starts (Quasar centres them by default). */
+.gs-blau .dict-tabs .q-tabs__content { justify-content: flex-start; }
+.gs-blau .dict-tab { min-height: 32px; padding-inline: 12px; font-weight: 600; }
+.gs-blau .dict-tab.q-tab--active { color: var(--primary-600, #059669); }
+.gs-blau .dict-tab.not-found { opacity: 0.5; font-weight: 400; }
+.gs-blau .dict-tab-panels { background: transparent; color: inherit; }
+.gs-blau .dict-tab-panels > .q-panel > .q-tab-panel,
+.gs-blau .dict-tab-panels .q-tab-panel { padding: 0; }
+/* Lane's Lexicon (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12;
+   web/components/lane_panel.py). It reuses the card, entry, sense and credit rules above;
+   these are only what Lane adds: the title, the reading chips, the English text. */
+.gs-blau .lane-section, .gs-blau .lane-none { padding-top: 2px; }
+.gs-blau .lane-title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted, #64748b);
+}
+.gs-blau .lane-readings { padding: 4px 0 2px; }
+.gs-blau .lane-readings .readings-label { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+.gs-blau .lane-readings .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; padding-top: 2px; }
+.gs-blau .lane-chip {
+    font-family: 'Noto Naskh Arabic', 'Scheherazade New', 'Amiri', 'Times New Roman', serif;
+    font-size: 1.05rem; min-height: 0; padding: 0 10px; border-radius: 999px;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
+.gs-blau .lane-chip.active {
+    border-color: var(--primary-600, #059669); color: var(--text-primary, #1e293b); font-weight: 700;
+}
+.gs-blau .lane-root .root-label { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.gs-blau .lane-root .root-name { font-size: 1.3rem; font-weight: 700; }
+.gs-blau .lane-entry .headword { font-size: 1.15rem; font-weight: 600; }
+.gs-blau .lane-entry .page { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+/* Lane's text is English with Arabic inside it: left to right in both UIs. */
+.gs-blau .lane-text { direction: ltr; text-align: start; font-size: 0.85rem; }
+.gs-blau .lane-no-root { font-size: 0.82rem; color: var(--text-muted, #64748b); }
+/* The reader's switch in the version row (owner, 2026-11-04): the letters עع (blau_panel.GLYPH_SVG)
+   and, from 640px, its label; on a phone the letters alone, in a round button. Highlighted until
+   this visitor first turns it on (.new: "New!" in the label, a dot on a phone), tinted while the
+   lookup is on (.active). Amber for new, so a new switch never looks switched on. */
+.blau-switch.q-btn {
+    color: var(--text-muted, #64748b);
+    min-height: 32px; min-width: 32px; padding: 0 6px;
+    border-radius: 999px; border: 1px solid transparent;
+}
+.blau-switch .q-btn__content { flex-wrap: nowrap; gap: 6px; }
+.blau-switch .blau-switch-glyph { display: inline-flex; line-height: 0; }
+.blau-switch .blau-switch-glyph svg { width: 24px; height: auto; display: block; }
+.blau-switch .blau-switch-label { font-size: 0.8rem; font-weight: 600; line-height: 1.2; white-space: nowrap; }
 .blau-switch.active { color: var(--primary-600, #059669); background: rgba(5, 150, 105, 0.12); }
+.blau-switch.new { color: #92400e; background: #fef3c7; border-color: #f59e0b; }
+[data-theme="dark"] .blau-switch.new { color: #fcd34d; background: rgba(245, 158, 11, 0.16); }
+@media (max-width: 639px) {
+    .blau-switch.q-btn { width: 32px; padding: 0; }
+    .blau-switch .blau-switch-label { display: none; }
+    .blau-switch.new::after {
+        content: ''; position: absolute; top: -2px; inset-inline-end: -2px;
+        width: 9px; height: 9px; border-radius: 50%;
+        background: #f59e0b; box-shadow: 0 0 0 2px var(--bg-primary, #ffffff);
+    }
+}
+@media (min-width: 640px) {
+    .blau-switch.q-btn { padding-block: 0; padding-inline: 8px 12px; border-color: var(--border-light, #e2e8f0); }
+    .blau-switch.active { border-color: transparent; }
+    .blau-switch.new { border-color: #f59e0b; }
+}

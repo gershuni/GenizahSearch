@@ -1124,20 +1124,37 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/blau_panel.py
 
-- **Function** `lookup_on` (Line 90) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
-- **Function** `set_lookup_on` (Line 95)
-- **Function** `switch_tooltip` (Line 99) — What the switch will do when pressed.
-- **Function** `head_html` (Line 104) — The ``<head>`` line that loads the click script, versioned by its
-- **Function** `lookup_word` (Line 116) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
-- **Function** `_attr` (Line 138)
-- **Function** `_rtl` (Line 142) — A Hebrew-letter text, right-to-left whatever the UI direction.
-- **Function** `_gloss_pair` (Line 147) — (text, class) of the glosses to show, the UI language's first.
-- **Function** `_render_sense` (Line 155)
-- **Function** `_render_card` (Line 178)
-- **Function** `_render_examples` (Line 209)
-- **Function** `_render_credit` (Line 221) — The credit, as a link to the dictionary site (ruling (a): the credit
-- **Function** `_render_box` (Line 231) — The box at the top of the panel: the word shown, editable; Enter or the
-- **Function** `render_lookup` (Line 244) — Draw ``result`` into the current container. Returns False, drawing
+- **Function** `lookup_on` (Line 168) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
+- **Function** `set_lookup_on` (Line 173) — The reader's choice; turning it on also marks the switch as no longer new.
+- **Function** `switch_is_new` (Line 180) — Is the switch still new to this visitor (highlighted, its label saying so)? Yes until
+- **Function** `switch_label` (Line 192) — The switch's label (shown from 640px).
+- **Function** `switch_tooltip` (Line 197) — What the switch will do when pressed.
+- **Function** `lookup_event` (Line 202) — The ``POSTHOG_LOOKUP`` properties of one answered lookup (never the word).
+- **Function** `pick_tab` (Line 209) — The tab a lookup opens on: the one the reader last chose while it has
+- **Function** `head_html` (Line 221) — The ``<head>`` line that loads the click script, versioned by its
+- **Function** `lookup_word` (Line 233) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
+- **Function** `_attr` (Line 255)
+- **Function** `_rtl` (Line 259) — A Hebrew-letter text, right-to-left whatever the UI direction.
+- **Function** `_gloss_pair` (Line 264) — (text, class) of the glosses to show, the UI language's first.
+- **Function** `_render_sense` (Line 272)
+- **Function** `_render_card` (Line 295)
+- **Function** `_render_examples` (Line 326)
+- **Function** `_render_credit` (Line 338) — The credit, as a link to the dictionary site (ruling (a): the credit
+- **Function** `_render_box` (Line 351) — The box at the top of the panel: the word shown, editable; Enter or the
+- **Function** `_render_blau` (Line 364) — Blau's tab: the disclaimer, the cards and the examples, or what was
+- **Function** `_render_lane` (Line 386) — Lane's tab: its section (web/components/lane_panel.py), or its title and,
+- **Function** `render_lookup` (Line 395) — Draw the dictionaries' answers for one word into the current container:
+
+## web/components/lane_panel.py
+
+- **Function** `_attr` (Line 56)
+- **Function** `_arabic` (Line 60)
+- **Function** `_render_readings` (Line 64)
+- **Function** `_render_entry` (Line 79)
+- **Function** `_render_root` (Line 90)
+- **Function** `_render_credit` (Line 106) — The Perseus line verbatim (D3; English in both UIs, as Perseus words it), then the
+- **Function** `render_lane_empty` (Line 116) — Lane's tab when Lane has no reading for ``word`` (or no word was typed yet): its title,
+- **Function** `render_lane` (Line 126) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
 
 ## web/components/criteria_panel.py
 
@@ -3567,6 +3584,57 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `_peel_prefixes` (Line 134)
 - **Function** `_peel_suffix` (Line 149)
 - **Function** `candidate_stems` (Line 157) — Normalized lookup candidates for one corpus word, the word itself first, then with
+
+## shared/arabic_method.py
+
+- **Function** `backoff_count` (Line 35) — The count of the commonest stem left when a proclitic and a pronoun are
+- **Function** `rank_readings` (Line 50) — (skeleton, count) of the word's attested readings, best first.
+- **Function** `_proclitic_layers` (Line 78) — How many proclitics a peeled prefix is: و/ف, then ب/ل/ك, then the article (لل is two).
+- **Function** `form_roots` (Line 90) — Roots of a reading through Lane's headwords: the reading, or the reading with
+- **Function** `strip_roots` (Line 126) — Root keys an Arabic word may come from: peel a proclitic, a pronoun, an
+- **Function** `closed_class_roots` (Line 169) — v4: a closed-class word, alone or after a conjunction (و, ف), is the table's: its roots in
+- **Function** `reading_roots` (Line 178) — The roots of one reading, best first, by method ``version``: the closed-class table (v4),
+
+## shared/arabic_service.py
+
+- **Function** `lane_enabled` (Line 92) — The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 100) — One Lane entry on Ephraim Meiri's site.
+- **Function** `root_url` (Line 105) — Lane's entries under a root on Ephraim Meiri's site (a headword search in Lane).
+- **Function** `default_sidecar_path` (Line 110) — Where the sidecar lives: the user's updated copy first (as for the Blau, FGP and PGP
+- **Class** `LaneReading` (Line 126) — One Arabic reading of the word: its skeleton, its commonest spelling in the word count
+- **Class** `LaneEntry` (Line 135) — One Lane entry: the headword, the printed page, the text (cut at ``MAX_TEXT``).
+- **Class** `LaneRoot` (Line 148) — One root the first reading may come from, with its entries.
+- **Class** `LaneLookup` (Line 159)
+    - Property `found` (Line 167)
+    - Property `reading` (Line 171) — The reading the root cards are for: the first.
+- **Function** `one_ja_word` (Line 182) — ``word`` is ONE Judeo-Arabic word: no space at all, and, NFC-normalized as ``ja_letters``
+- **Function** `empty_lane` (Line 195)
+- **Function** `_text` (Line 199)
+- **Function** `_page` (Line 203)
+- **Function** `cut_text` (Line 210) — ``text`` up to ``limit`` characters, ended at a space where one is near, and whether
+- **Function** `lane_heading` (Line 223) — Which of a root key's Lane headings titles the card, when the key has several (Lane files
+- **Class** `_FreqView` (Line 243) — The word count for one lookup: ``.get`` like a Counter, read from ``freq`` by key and kept
+    - Method `__init__` (Line 247)
+    - Method `__bool__` (Line 251)
+    - Method `prefetch` (Line 254)
+    - Method `_row` (Line 265)
+    - Method `get` (Line 270)
+    - Method `spelling` (Line 274)
+- **Class** `ArabicService` (Line 279) — Read-only access to the Arabic sidecar. See the module docstring.
+    - Method `__init__` (Line 282)
+    - Method `_load_tables` (Line 325) — The small tables the method reads on every lookup, held in memory (as the gate's
+    - Property `db_path` (Line 345)
+    - Method `is_ready` (Line 348) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 352) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 356)
+    - Property `credit` (Line 360) — The Perseus credit line (D3), verbatim; shown on every Lane card.
+    - Method `close` (Line 364)
+    - Method `lookup` (Line 375) — What Lane has for one clicked or typed word. Hebrew letters are read as Judeo-Arabic;
+    - Method `_matched_entries` (Line 412) — The entries of ``root_key`` whose headword is the reading, or the reading with a
+    - Method `_root` (Line 436)
+- **Function** `_validate` (Line 467) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `get_arabic_service` (Line 509) — The default service, created on first use (per-thread connections by default: safe under
+- **Function** `reset_arabic_service` (Line 519) — Forget the default service (after the sidecar file is replaced).
 
 ## shared/blau_service.py
 

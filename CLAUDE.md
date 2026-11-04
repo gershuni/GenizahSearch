@@ -168,6 +168,7 @@ Never treat a flag alone as proof a feature is live.
 | `IDENTIFICATION_REVIEWS_ENABLED` | `true` | community identification reviews (beta) | — |
 | `FGP_TRANSCRIPTIONS_ENABLED` | `true` | FGP transcriptions as a version-chooser source | presence of `fgp_data/` |
 | `BLAU_DICTIONARY_ENABLED` | `true` | Blau's dictionary on `/browse` (click a word) | `shared/blau_service.py::BlauService.is_ready()` -- `blau_data/blau.db` present and checked |
+| `LANE_DICTIONARY_ENABLED` | `true` | Lane's Lexicon, its own tab in the dictionary panel | `shared/arabic_service.py::ArabicService.is_ready()` -- `arabic_data/arabic.db` present and checked |
 | `WEB_PUZZLE_ENABLED` | `true` | the web Fragment Puzzle page | — |
 | `MCP_ENABLED` | `false` | the public MCP server at `POST /mcp` (replaces the GPT; `docs/plans/MCP_SERVER_PLAN.md`) | the `/api/chatgpt` facade being registered |
 | `SEARCH_API_MODE` | `open` | the public API (`open`/`localhost-only`/`disabled`) | — |

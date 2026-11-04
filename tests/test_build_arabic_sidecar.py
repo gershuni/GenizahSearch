@@ -317,3 +317,17 @@ def test_the_gate_fails_a_missing_file_and_a_wrong_entry_count(tmp_path, small):
     assert run_build(tmp_path) == build.EXIT_OK
     assert any("lane_entries" in p for p in gate.verify(str(tmp_path / "arabic.db"), len(ENTRIES) + 1))
     assert gate.main(["--db", str(tmp_path / "arabic.db"), "--expect-entries", str(len(ENTRIES))]) == 0
+
+
+def test_the_frequent_forms_the_judges_found_are_in_the_closed_class_table():
+    """Plan §5.4 (two AI judges, 2026-11-04): frequent words the method filed under the wrong root
+    (مولاي under مول 'wealth', ستين under تين 'fig', بن under بن 'coffee') are in the table, each
+    under the root the judges gave."""
+    from shared.arabic_normalize import root_key, skeleton, strip_harakat
+
+    data = json.loads(build.CLOSED_CLASS_FILE.read_text(encoding="utf-8"))
+    table = {(skeleton(strip_harakat(f["form"])), root_key(strip_harakat(f["root"]))) for f in data["forms"]}
+    for form, root in (("مولاي", "ولى"), ("مولانا", "ولى"), ("سيدي", "سود"), ("ياسيدي", "سود"),
+                       ("ابن", "بنى"), ("بن", "بنى"), ("ابو", "ابو"), ("ابي", "ابو"), ("قلت", "قول"), ("كنت", "كون"), ("ادام", "دوم"),
+                       ("عز", "عزز"), ("الاثنين", "ثنى"), ("ستين", "ست")):
+        assert (skeleton(form), root_key(root)) in table, form

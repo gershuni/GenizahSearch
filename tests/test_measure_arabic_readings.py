@@ -13,17 +13,15 @@ from collections import Counter
 import pytest
 
 from scripts.measure_arabic_readings import (
+    DEV_DOCUMENTS_FILE,
     GATE,
-    form_roots,
     gate,
     iter_pages,
-    DEV_DOCUMENTS_FILE,
     lane_attribute,
     load_dev_documents,
     plural_alif_dropped,
-    rank_readings,
-    strip_roots,
 )
+from shared.arabic_method import form_roots, rank_readings, strip_roots
 from shared.arabic_normalize import buckwalter_to_arabic, ja_letters, root_key
 
 

@@ -3126,7 +3126,9 @@ def privacy_extension_route():
 def reset_hints_route():
     """Hidden utility route to reset all feature discovery hints."""
     ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
-    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
+    # The dictionaries switch is new again only while the lookup is off (blau_panel.switch_is_new).
+    from web.components.blau_panel import SEEN_KEY as dictionaries_seen
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen', dictionaries_seen):
         safe_user_pop(key, None)
     ui.navigate.to('/')
 
@@ -3611,7 +3613,8 @@ async def initialize_engine():
         )
 
 async def open_blau_sidecar_on_startup():
-    """Open and check the Blau dictionary sidecar once, off the loop.
+    """Open and check the Blau dictionary sidecar, and the Arabic (Lane) sidecar shown in its panel,
+    once each, off the loop.
 
     ``shared.blau_service.get_blau_service`` opens ``blau_data/blau.db``
     read-only and runs its checks (schema, normalizer, credit line,
@@ -3627,6 +3630,15 @@ async def open_blau_sidecar_on_startup():
             print(f"[init] Blau dictionary not served: {service.unavailable_reason}", flush=True)
     except Exception as e:
         print(f"[init] Blau dictionary sidecar check failed (non-fatal): {e}", flush=True)
+    # Lane's Lexicon (shared/arabic_service.py) sits in Blau's panel: open its 74 MB sidecar here
+    # too, so its quick_check and table loads never run inside the first /browse render (Codex on #480).
+    from shared.arabic_service import get_arabic_service
+    try:
+        lane = await run.io_bound(get_arabic_service)
+        if lane is not None and not lane.is_ready():
+            print(f"[init] Lane's Lexicon not served: {lane.unavailable_reason}", flush=True)
+    except Exception as e:
+        print(f"[init] Lane sidecar check failed (non-fatal): {e}", flush=True)
 
 
 app.on_startup(compact_export_storage_on_startup)
