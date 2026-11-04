@@ -503,7 +503,9 @@ sight, and the panel's title and hint named Blau alone. So:
   stays closed.
 - **The wording names no one dictionary:** the head says "Dictionaries", the hint "Click a word to
   look it up in the dictionaries", the switch "Turn on/off the dictionaries". Inside each tab, an
-  empty answer says "Nothing in the dictionary for this word." (drafts, below).
+  empty answer says "Nothing in the dictionary for this word." The owner approved this wording
+  (2026-11-04), in Hebrew: מילונים; בלאו / ליין; לחיצה על מילה מחפשת אותה במילונים;
+  הפעלת / כיבוי המילונים (ערבית־יהודית).
 
 **Lane's tab** (`web/components/lane_panel.py`, drawn by `web/components/blau_panel.py`;
 `web/pages/browse.py` asks both services in one trip off the event loop):
@@ -520,8 +522,8 @@ sight, and the panel's title and hint named Blau alone. So:
 
 **Owner decisions still open for phase B** (drafts in place, nothing deployed):
 
-- the English and Hebrew wording of the section and of the panel's title, tabs, hint and switch
-  (`shared/genizah_translations.py`, marked DRAFTS);
+- the English and Hebrew wording of Lane's tab (`shared/genizah_translations.py`, marked DRAFTS;
+  its title is the owner's own; the panel's title, tabs, hint and switch are approved);
 - whether the two source lines are wanted, or the Perseus line alone (D3 asks only that one);
 - the server copy of `arabic_data/arabic.db` (74 MB) and the release.
 

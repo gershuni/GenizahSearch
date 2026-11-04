@@ -6478,7 +6478,7 @@ TRANSLATIONS.update({
 
 # The dictionary panel holds every dictionary, one tab each (owner, 2026-11-04; plan
 # docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12): its title, the tabs, the hint and the
-# switch name no one dictionary. DRAFTS for the owner's approval.
+# switch name no one dictionary. Approved by the owner, 2026-11-04 ("Wording is fine").
 TRANSLATIONS.update({
     "Dictionaries": "מילונים",
     "Blau": "בלאו",
