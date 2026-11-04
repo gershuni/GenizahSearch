@@ -42,6 +42,8 @@ def _service(path: Path) -> ArabicService:
 
 def test_the_reader_understands_the_builder_s_schema():
     assert arabic_service.SCHEMA_VERSION == build.SCHEMA_VERSION
+    assert arabic_service.PERSEUS_CREDIT == build.PERSEUS_CREDIT
+    assert set(arabic_service.COUNTED_TABLES) == set(build.COUNTED_TABLES)
 
 
 def test_the_commonest_reading_first_and_its_closed_class_root(sidecar):
@@ -85,7 +87,8 @@ def test_typed_arabic_is_its_own_reading(sidecar):
 
 def test_nothing_for_an_abbreviation_a_word_with_no_reading_or_no_letters(sidecar):
     service = _service(sidecar)
-    for word in ("ר'", "קקק", "abc", "", "   "):
+    # "ד לך" joined would be דלך, which is counted: two words are never read as one.
+    for word in ("ר'", "קקק", "abc", "", "   ", "ד לך", "כל מה"):
         result = service.lookup(word)
         assert not result.found and not result.readings, word
 
@@ -114,6 +117,10 @@ def _mutated(sidecar: Path, sql: str) -> ArabicService:
     ("UPDATE meta SET value = '9.9.9' WHERE key = 'version'", "schema version"),
     ("UPDATE meta SET value = '99' WHERE key = 'normalizer_version'", "normalizer"),
     ("UPDATE meta SET value = '' WHERE key = 'lane_credit'", "credit"),
+    ("UPDATE meta SET value = 'Text provided by Perseus.' WHERE key = 'lane_credit'", "Perseus credit line"),
+    ("UPDATE meta SET value = '3' WHERE key = 'freq_min_stored'", "freq_min_stored"),
+    ("DELETE FROM closed_class", "rows_closed_class"),
+    ("DELETE FROM lane_forms WHERE entry_id = 'lane:t:1'", "rows_lane_forms"),
     ("DROP INDEX idx_lane_forms_skeleton", "index"),
     ("DROP TABLE closed_class", "missing table"),
     ("DELETE FROM freq WHERE skeleton = 'كتب'", "rows_freq"),

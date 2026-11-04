@@ -65,8 +65,7 @@ def _dictionary(available=True, credit_he=CREDIT_HE, result=None):
     return svc
 
 
-PERSEUS = ('Text provided by Perseus Digital Library, with funding from The U.S. Department of Education. '
-           'Original version available for viewing and download at http://www.perseus.tufts.edu/.')
+PERSEUS = arabic_service.PERSEUS_CREDIT
 LANE_ENTRY_URL = arabic_service.entry_url('lane:t:ذا')
 LANE_ROOT_URL = arabic_service.root_url('ذا')
 

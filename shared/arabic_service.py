@@ -69,6 +69,13 @@ SIDECAR_FILENAME = "arabic.db"
 #: Ephraim Meiri's site, where the Lane entries come from (D5): an entry is ``?id=<entry id>``.
 SITE_URL = "https://semitic.lang.emeiri.org/"
 REQUIRED_TABLES = ("meta", "lane_roots", "lane_entries", "lane_forms", "freq", "closed_class")
+#: Every table whose row count the builder records in ``meta.rows_<table>``: a table that lost rows
+#: (an empty closed-class table sends דלך to the wrong root) is not served.
+COUNTED_TABLES = ("lane_roots", "lane_entries", "lane_forms", "freq", "closed_class")
+#: The Perseus credit line, verbatim (D3); scripts/build_arabic_sidecar.py checks the source against
+#: the same words and tests/test_arabic_service.py pins the two copies equal.
+PERSEUS_CREDIT = ("Text provided by Perseus Digital Library, with funding from The U.S. Department of "
+                  "Education and The Max Planck Society.")
 LOOKUP_INDEXES = ("idx_lane_entries_root", "idx_lane_forms_skeleton")
 #: The method the gate measured (plan section 7.1) and the floor it measured at (D11: 2).
 METHOD_VERSION = "v4"
@@ -333,7 +340,8 @@ class ArabicService:
         try:
             counts = _FreqView(self._conn)
             if ja_letters(word):
-                if is_abbreviation(word):
+                # One word only: ja_letters reads past spaces, so "כל מה" would be كلمة.
+                if is_abbreviation(word) or len(word.split()) != 1:
                     return empty_lane(word)
                 counts.prefetch(readings(word, plural_alif=True))
                 ranked = rank_readings(word, counts, "frequency", METHOD_VERSION, MIN_COUNT)[:MAX_READINGS]
@@ -417,13 +425,18 @@ def _validate(conn: Any) -> tuple[str, dict[str, str]]:
     if meta.get("normalizer_version") != str(NORMALIZER_VERSION):
         return (f"keyed by normalizer {meta.get('normalizer_version')!r}; this process runs "
                 f"{NORMALIZER_VERSION}: rebuild the sidecar"), {}
-    if not meta.get("lane_credit", "").strip():
-        return "no credit line (meta.lane_credit)", {}
+    if meta.get("lane_credit") != PERSEUS_CREDIT:
+        return "meta.lane_credit is not the Perseus credit line", {}
+    # The readings are offered from MIN_COUNT up (D11); a sidecar that stores only higher counts
+    # would drop readings the gate measured.
+    floor = meta.get("freq_min_stored", "")
+    if not floor.isdigit() or not 1 <= int(floor) <= MIN_COUNT:
+        return f"meta.freq_min_stored = {floor!r}; this reader offers readings counted {MIN_COUNT} or more", {}
     indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
     absent = [i for i in LOOKUP_INDEXES if i not in indexes]
     if absent:
         return f"lookup index(es) missing: {', '.join(absent)}", {}
-    for table in ("lane_entries", "freq"):
+    for table in COUNTED_TABLES:
         expected = meta.get(f"rows_{table}", "")
         actual = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         if not expected.isdigit() or int(expected) != int(actual):
