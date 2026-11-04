@@ -7,7 +7,7 @@ each dictionary in its own tab of one panel (D12, replacing D8's "under Blau's")
 the owner's grading; a closed-class table; Hebrew words given an Arabic card are not a gate (a
 reader who asks for Arabic gets Arabic). **Phase A
 is built** (§7.1, branch `claude/arabic-lane-sidecar`): `arabic_data/arabic.db` with Lane's
-47,855 articles, its headword table, a 247-million-token word count and a 141-row closed-class
+47,855 articles, its headword table, a 247-million-token word count and a closed-class
 table; its own gate passes and fails on mutations; the plan's gate passes on it. Nothing is served,
 bundled or deployed; no reader sees anything. **Phase B is built** (§7.2, branch
 `claude/arabic-lane-cards`): Lane in its own tab beside Blau's on `/browse`, not deployed; its
@@ -304,9 +304,42 @@ must use a file written by rev. 4 or later.
     - يبيع and أباع under بوع, not بيع;
     - معاش, يبقى and اشتريت under the wrong و/ي heading;
     - سيدي, نحن, بن, ستين and الاثنين.
-  - These are §4's weak step, and they are systematic: a closed-class entry for the frequent forms
-    and a choice among و/ي headings by the matched entries would address most of them (not done).
+  - These are §4's weak step, and they are systematic.
 - **Pass or fail.** D9 sets no number for this grading; the owner decides on these figures.
+
+**Fixed the same day (the owner's go-ahead), and re-scored against the judges' roots.** Two changes,
+both on what the grading found:
+
+- **The closed-class table** grew from 141 to 181 rows (`scripts/arabic_closed_class.json`):
+  - مولى, سيد, ابن / بن, أبو and their common pronoun forms;
+  - قلت, قلنا, كنت and كنا;
+  - the blessing formulas أدام and عز;
+  - the numerals two (اثنان, the oblique forms, الاثنين) and six (ستة, ستون).
+
+  Each names the root and headword the judges gave. نحن stays unmapped: Lane has no article for it.
+- **A merged root's card is titled by the right heading.** Lane files بوع and بيع (سود and سيد, بقو
+  and بقى) apart under one root key. Until now the card took the key's first name. It now takes the
+  heading of the first matched entry. Failing that, it takes the heading with more entries, the
+  commoner sense, as the method breaks a tie between roots
+  (`shared/arabic_service.py::lane_heading`). It does not judge by the word's letters: a ي in the
+  word does not make it the root's (سيّد and جيّد are of سود and جود), and a first try that did so
+  broke two right cards.
+
+| On the 116 rows both judges graded alike | the root right |
+|---|---|
+| before | 87, 75.0% |
+| the table alone | 101, 87.1% |
+| the table and the headings | **107, 92.2%**; no card the judges marked right changed |
+
+Two notes on the remaining misses and the figures:
+
+- **The 9 still wrong.** 4 follow from a wrong reading. One is نحن. One (حياة) now shows حى, Lane's
+  spelling of the root the judges wrote حيي. Three are the method's own: أجبناه (جوب), تصل (وصل),
+  كرى (كري).
+- **These figures are fitted.** They are measured on the sample that found the errors, so they are
+  not an independent measure; the check on documents the method was not shaped on is still owed.
+- **The plan's gate on the rebuilt file:** P1 81.1%, P2 87.9%, the same as before (a broken ranking
+  still exits 1). The sidecar's own gate passes.
 
 ---
 
@@ -442,7 +475,7 @@ workers):
 | `lane_entries` | 47,855 | every article: headword, root, printed page, text |
 | `lane_forms` | 42,351 | the one-word headwords by skeleton: the form-to-root table of method v3 (5,470 headwords of several words are not forms) |
 | `freq` | 808,441 | skeleton, count, commonest spelling, at 2 or more: 247,037,983 tokens of 2,816 OpenITI texts (D7's selection is 2,819; three are listed in the release metadata but absent from their repositories), 1,325,038 distinct skeletons |
-| `closed_class` | 141 | `scripts/arabic_closed_class.json`: prepositions alone and with the seven commonest pronouns, demonstratives, particles; each names Lane's article, and 105 the headword in it; the build refuses a row Lane cannot answer. Not yet mapped: the relative pronouns (الذي, التي, الذين), نحن and the third-person pronouns, for which no Lane article was found by headword |
+| `closed_class` | 141 (181 since §5.4's fix) | `scripts/arabic_closed_class.json`: prepositions alone and with the seven commonest pronouns, demonstratives, particles (and since the grading of §5.4, frequent forms the method filed under the wrong root); each names Lane's article, and 105 the headword in it; the build refuses a row Lane cannot answer. Not yet mapped: the relative pronouns (الذي, التي, الذين), نحن and the third-person pronouns, for which no Lane article was found by headword |
 
 `shared/arabic_normalize.py` is the one copy of the readings and keys (moved out of the measuring
 script, the numbers unchanged on the development documents); `NORMALIZER_VERSION` is pinned in
@@ -573,7 +606,8 @@ sight, and the panel's title and hint named Blau alone. So:
 
 The gate before deploy (D9):
 - the 200-word sample, graded by two AI judges at the owner's request (§5.4): the first reading is
-  right on 95.1% of the Arabic words, the root on 75.0%. The owner decides on these figures.
+  right on 95.1% of the Arabic words, the root on 75.0% (92.2% after the fix of §5.4, measured on
+  the same sample). The owner decides on these figures.
 - still owed: a check on documents the method was not shaped on;
 - the sidecar's own gate.
 

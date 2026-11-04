@@ -17,7 +17,7 @@ import pytest
 import scripts.build_arabic_sidecar as build
 from shared import arabic_service
 from shared.arabic_normalize import root_key
-from shared.arabic_service import ArabicService, cut_text, entry_url, root_url
+from shared.arabic_service import ArabicService, cut_text, entry_url, lane_heading, root_url
 from tests.test_build_arabic_sidecar import METADATA_SHA256, SHARDS, make_closed_class, make_source
 
 
@@ -149,3 +149,30 @@ def test_a_missing_file_and_the_kill_switch(sidecar, tmp_path, monkeypatch):
     assert not service.is_available() and not service.lookup("דלך").found
     monkeypatch.setenv("LANE_DICTIONARY_ENABLED", "1")
     assert service.lookup("דלך").found
+
+
+def test_a_card_on_a_merged_root_is_titled_with_the_heading_of_its_entry():
+    """Lane files بوع and بيع (سود and سيد, بقو and بقى) apart, under one root key; the two AI judges
+    of plan §5.4 marked يبيعه under بوع wrong. The card names the heading of the first matched
+    entry; else the heading with the most entries (the commoner sense); else the key's name. Not the
+    word's letters: سيّد and جيّد carry a ي but are of سود and جود."""
+    entries = [("e1", "سود"), ("e2", "سود"), ("e3", "سيد")]
+    assert lane_heading(["سود", "سيد"], entries, {"e3"}) == "سيد", "the matched entry, before the sizes"
+    assert lane_heading(["سود", "سيد"], entries, {"e2", "e3"}) == "سود", "the first matched, in Lane's order"
+    sell = [("b1", "بوع"), ("b2", "بيع"), ("b3", "بيع")]
+    assert lane_heading(["بوع", "بيع"], sell, set()) == "بيع", "nothing matched: the larger heading"
+    assert lane_heading(["بوع", "بيع"], sell[:2], set()) == "", "a tie: the key's name"
+    assert lane_heading(["بيع"], sell, set()) == "", "one heading: nothing to choose"
+    assert lane_heading(["بوع", "بيع"], sell + [("x", "عز")], {"x"}) == "بيع",         "a matched entry under no heading of the key is ignored"
+
+
+def test_the_service_titles_a_merged_root_card_with_its_entry_s_heading(sidecar):
+    """The call site: a key whose entries Lane files under a second heading is titled, linked and
+    paged by that heading, not by the key's first name."""
+    con = sqlite3.connect(sidecar)
+    with con:
+        con.execute("UPDATE lane_roots SET names_json = ? WHERE root_key = ?", ('["كتب", "كتبى"]', "كتب"))
+        con.execute("UPDATE lane_entries SET root = ? WHERE root_key = ?", ("كتبى", "كتب"))
+    con.close()
+    [root] = _service(sidecar).lookup("כתב").roots
+    assert root.root_key == "كتب" and root.name == "كتبى" and root.url == root_url("كتبى")

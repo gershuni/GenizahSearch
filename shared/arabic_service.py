@@ -31,6 +31,7 @@ where the entries come from (D5).
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -40,7 +41,7 @@ import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 from urllib.parse import quote
 
 from shared.arabic_method import (
@@ -217,6 +218,26 @@ def cut_text(text: str, limit: int = MAX_TEXT) -> tuple[str, bool]:
     if space > limit * 0.8:
         head = head[:space]
     return head.rstrip(" ,;:") + "…", True
+
+
+def lane_heading(names: Sequence[str], entries: Sequence[tuple[str, str]], matched: set[str]) -> str:
+    """Which of a root key's Lane headings titles the card, when the key has several (Lane files
+    بوع and بيع, or سود and سيد, apart; one root key holds both): the heading of the first matched
+    entry, in Lane's order (سيدي: سَيِّدٌ under سود); else the heading with the most entries, the
+    commoner sense (يبيعه: بيع 'sell', not بوع 'fathom'; the method breaks a tie between roots the
+    same way); else '' (a tie; the caller keeps the key's first name). Not the letters of the word:
+    a ي in it does not make the root's (سيّد and جيّد are of سود and جود).
+    ``entries`` is (entry id, the heading it is under) in Lane's order."""
+    names = [n for n in names if n]
+    if len(names) < 2:
+        return ""
+    for entry_id, heading in entries:
+        if entry_id in matched and heading in names:
+            return heading
+    sizes = Counter(heading for _entry, heading in entries if heading in names).most_common(2)
+    if sizes and (len(sizes) == 1 or sizes[0][1] > sizes[1][1]):
+        return sizes[0][0]
+    return ""
 
 
 class _FreqView:
@@ -413,15 +434,24 @@ class ArabicService:
         return ids
 
     def _root(self, root_key: str, reading: str) -> Optional[LaneRoot]:
-        row = self._conn.execute("SELECT name, first_page FROM lane_roots WHERE root_key = ?",
+        row = self._conn.execute("SELECT name, first_page, names_json FROM lane_roots WHERE root_key = ?",
                                  (root_key,)).fetchone()
         if row is None:
             return None
-        listing = self._conn.execute("SELECT id FROM lane_entries WHERE root_key = ? ORDER BY ordinal",
+        listing = self._conn.execute("SELECT id, root, page FROM lane_entries WHERE root_key = ? ORDER BY ordinal",
                                      (root_key,)).fetchall()
         matched = self._matched_entries(root_key, reading)
-        order = [r[0] for r in listing]
-        chosen = [i for i in order if i in matched] + [i for i in order if i not in matched]
+        try:
+            names = [n for n in json.loads(row[2] or "[]") if isinstance(n, str)]
+        except ValueError:
+            names = []
+        name = lane_heading(names, [(r[0], r[1]) for r in listing], matched) or _text(row[0])
+        page = row[1]
+        if name != _text(row[0]):
+            page = next((r[2] for r in listing if r[1] == name and r[2] is not None), row[1])
+        under = {r[0] for r in listing if r[1] == name}
+        # The matched entries first, then those under the heading shown; Lane's order within each.
+        chosen = sorted((r[0] for r in listing), key=lambda i: (i not in matched, i not in under))
         shown = chosen[:MAX_ENTRIES]
         entries = []
         for entry_id in shown:
@@ -430,9 +460,8 @@ class ArabicService:
             text, cut = cut_text(_text(e[2]))
             entries.append(LaneEntry(entry_id=entry_id, headword=_text(e[0]), page=_page(e[1]), text=text,
                                      cut=cut, url=entry_url(entry_id), matched=entry_id in matched))
-        name = _text(row[0])
-        return LaneRoot(root_key=root_key, name=name, page=_page(row[1]), url=root_url(name),
-                        entries=tuple(entries), more_entries=max(0, len(order) - len(shown)))
+        return LaneRoot(root_key=root_key, name=name, page=_page(page), url=root_url(name),
+                        entries=tuple(entries), more_entries=max(0, len(chosen) - len(shown)))
 
 
 def _validate(conn: Any) -> tuple[str, dict[str, str]]:

@@ -3594,42 +3594,44 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 
 ## shared/arabic_service.py
 
-- **Function** `lane_enabled` (Line 81) — The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
-- **Function** `entry_url` (Line 89) — One Lane entry on Ephraim Meiri's site.
-- **Function** `root_url` (Line 94) — Lane's entries under a root on Ephraim Meiri's site (a headword search in Lane).
-- **Function** `default_sidecar_path` (Line 99) — Where the sidecar lives: the user's updated copy first (as for the Blau, FGP and PGP
-- **Class** `LaneReading` (Line 115) — One Arabic reading of the word: its skeleton, its commonest spelling in the word count
-- **Class** `LaneEntry` (Line 124) — One Lane entry: the headword, the printed page, the text (cut at ``MAX_TEXT``).
-- **Class** `LaneRoot` (Line 137) — One root the first reading may come from, with its entries.
-- **Class** `LaneLookup` (Line 148)
-    - Property `found` (Line 156)
-    - Property `reading` (Line 160) — The reading the root cards are for: the first.
-- **Function** `empty_lane` (Line 165)
-- **Function** `_text` (Line 169)
-- **Function** `_page` (Line 173)
-- **Function** `cut_text` (Line 180) — ``text`` up to ``limit`` characters, ended at a space where one is near, and whether
-- **Class** `_FreqView` (Line 193) — The word count for one lookup: ``.get`` like a Counter, read from ``freq`` by key and kept
-    - Method `__init__` (Line 197)
-    - Method `__bool__` (Line 201)
-    - Method `prefetch` (Line 204)
-    - Method `_row` (Line 215)
-    - Method `get` (Line 220)
-    - Method `spelling` (Line 224)
-- **Class** `ArabicService` (Line 229) — Read-only access to the Arabic sidecar. See the module docstring.
-    - Method `__init__` (Line 232)
-    - Method `_load_tables` (Line 275) — The small tables the method reads on every lookup, held in memory (as the gate's
-    - Property `db_path` (Line 295)
-    - Method `is_ready` (Line 298) — The sidecar is open and passed every check.
-    - Method `is_available` (Line 302) — Ready AND the kill switch is on. The only question a surface asks.
-    - Method `meta` (Line 306)
-    - Property `credit` (Line 310) — The Perseus credit line (D3), verbatim; shown on every Lane card.
-    - Method `close` (Line 314)
-    - Method `lookup` (Line 325) — What Lane has for one clicked or typed word. Hebrew letters are read as Judeo-Arabic;
-    - Method `_matched_entries` (Line 361) — The entries of ``root_key`` whose headword is the reading, or the reading with a
-    - Method `_root` (Line 385)
-- **Function** `_validate` (Line 408) — '' and the meta when the open file is one this reader serves; else the reason.
-- **Function** `get_arabic_service` (Line 445) — The default service, created on first use (per-thread connections by default: safe under
-- **Function** `reset_arabic_service` (Line 455) — Forget the default service (after the sidecar file is replaced).
+- **Function** `lane_enabled` (Line 92) — The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 100) — One Lane entry on Ephraim Meiri's site.
+- **Function** `root_url` (Line 105) — Lane's entries under a root on Ephraim Meiri's site (a headword search in Lane).
+- **Function** `default_sidecar_path` (Line 110) — Where the sidecar lives: the user's updated copy first (as for the Blau, FGP and PGP
+- **Class** `LaneReading` (Line 126) — One Arabic reading of the word: its skeleton, its commonest spelling in the word count
+- **Class** `LaneEntry` (Line 135) — One Lane entry: the headword, the printed page, the text (cut at ``MAX_TEXT``).
+- **Class** `LaneRoot` (Line 148) — One root the first reading may come from, with its entries.
+- **Class** `LaneLookup` (Line 159)
+    - Property `found` (Line 167)
+    - Property `reading` (Line 171) — The reading the root cards are for: the first.
+- **Function** `one_ja_word` (Line 182) — ``word`` is ONE Judeo-Arabic word: no space at all, and, NFC-normalized as ``ja_letters``
+- **Function** `empty_lane` (Line 195)
+- **Function** `_text` (Line 199)
+- **Function** `_page` (Line 203)
+- **Function** `cut_text` (Line 210) — ``text`` up to ``limit`` characters, ended at a space where one is near, and whether
+- **Function** `lane_heading` (Line 223) — Which of a root key's Lane headings titles the card, when the key has several (Lane files
+- **Class** `_FreqView` (Line 243) — The word count for one lookup: ``.get`` like a Counter, read from ``freq`` by key and kept
+    - Method `__init__` (Line 247)
+    - Method `__bool__` (Line 251)
+    - Method `prefetch` (Line 254)
+    - Method `_row` (Line 265)
+    - Method `get` (Line 270)
+    - Method `spelling` (Line 274)
+- **Class** `ArabicService` (Line 279) — Read-only access to the Arabic sidecar. See the module docstring.
+    - Method `__init__` (Line 282)
+    - Method `_load_tables` (Line 325) — The small tables the method reads on every lookup, held in memory (as the gate's
+    - Property `db_path` (Line 345)
+    - Method `is_ready` (Line 348) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 352) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 356)
+    - Property `credit` (Line 360) — The Perseus credit line (D3), verbatim; shown on every Lane card.
+    - Method `close` (Line 364)
+    - Method `lookup` (Line 375) — What Lane has for one clicked or typed word. Hebrew letters are read as Judeo-Arabic;
+    - Method `_matched_entries` (Line 412) — The entries of ``root_key`` whose headword is the reading, or the reading with a
+    - Method `_root` (Line 436)
+- **Function** `_validate` (Line 467) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `get_arabic_service` (Line 509) — The default service, created on first use (per-thread connections by default: safe under
+- **Function** `reset_arabic_service` (Line 519) — Forget the default service (after the sidecar file is replaced).
 
 ## shared/blau_service.py
 

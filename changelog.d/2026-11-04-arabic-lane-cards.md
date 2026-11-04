@@ -15,6 +15,12 @@ Phase B of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md` (§7.2). Not deployed: t
   reading first, cut short and linked to the entry on semitic.lang.emeiri.org. On every Lane
   section, the Perseus credit line verbatim, then the entries' source and the ranking's. A word
   typed in Arabic letters is its own reading.
+- **Roots fixed after the grading (plan §5.4).** Two AI judges graded the 200-word sample, and
+  the fix follows what they found. On the same sample, the root is right 75.0% → 92.2%.
+  - The closed-class table grows from 141 to 181 rows: frequent forms filed under the wrong root,
+    such as مولاي (not مول 'wealth'), ستين (not تين 'fig'), بن (not 'coffee'), قلت and كنت.
+  - A card on a root Lane splits in two (بوع / بيع) is titled by the heading of its matched entry,
+    or else by the larger heading.
 - `shared/arabic_service.py`: the read-only, fail-closed reader of `arabic_data/arabic.db`
   (schema and normalizer versions, tables, lookup indexes, row counts, the credit line,
   `quick_check`); kill switch `LANE_DICTIONARY_ENABLED` (default on, read live).
