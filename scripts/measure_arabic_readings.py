@@ -77,7 +77,6 @@ import re
 import sqlite3
 import sys
 import time
-import unicodedata
 import urllib.request
 from collections import Counter, defaultdict
 from itertools import product
@@ -88,7 +87,19 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from shared.blau_normalize import QUOTE_MARKS, candidate_stems, fold_finals, normalize_ja  # noqa: E402
+from shared.arabic_normalize import (  # noqa: E402
+    DOTTED,
+    buckwalter_to_arabic,
+    is_abbreviation,
+    ja_letters,
+    readings,
+    root_key,
+    skeleton,
+    strip_harakat,
+    arabic_tokens,
+    strong_letters,
+)
+from shared.blau_normalize import candidate_stems, normalize_ja  # noqa: E402
 
 HEADWORD_KINDS = ("root", "sub_entry", "headword", "variant")  # as shared/blau_service.py
 HEADER_PREFIX = "==> "
@@ -107,169 +118,9 @@ SAMPLE_MANIFEST = REPO / "scripts" / "arabic_layer_openiti_sample.json"
 SAMPLE_SEED, SAMPLE_PER_TAG, SAMPLE_CAP_TOKENS = 20261104, 6, 15_000_000
 
 # ---------------------------------------------------------------------------
-# Judeo-Arabic letters -> Arabic letters
+# The two dictionaries' root lists (the letters, readings and keys are
+# shared/arabic_normalize.py's, which the sidecar build uses too)
 # ---------------------------------------------------------------------------
-
-#: Each Hebrew letter (finals folded) -> the Arabic letters it may stand for,
-#: the plain reading first. Measured on Blau's own one-word spellings (plan §3):
-#: ג 151 غ / 3 ج and ג\u0307 404 ج; ד 647 د / 2 ذ and ד\u0307 125 ذ; and so on. The
-#: automatic text mostly drops the dot, so an undotted ג ד ט צ ת כ is read both
-#: ways; a marked one only one way (``DOTTED``).
-LETTERS = {
-    "א": ("ا",), "ב": ("ب",), "ג": ("غ", "ج"), "ד": ("د", "ذ"), "ה": ("ه",), "ו": ("و",), "ז": ("ز",),
-    "ח": ("ح",), "ט": ("ط", "ظ"), "י": ("ي",), "כ": ("ك", "خ"), "ל": ("ل",), "מ": ("م",), "נ": ("ن",),
-    "ס": ("س",), "ע": ("ع",), "פ": ("ف",), "צ": ("ص", "ض"), "ק": ("ق",), "ר": ("ر",), "ש": ("ش",),
-    "ת": ("ت", "ث"),
-}
-DOTTED = {"ג": "ج", "ד": "ذ", "ט": "ظ", "צ": "ض", "ת": "ث", "כ": "خ"}
-#: What a MARKED letter may be read as. Blau marks ج (ג\u0307, 404 of 404), but the PGP
-#: editions mark غ as often (בג'יר, ג'ריב): a mark on ג says only "not plain", so
-#: both stay and frequency decides; the other marks are unambiguous.
-DOTTED_READINGS = {letter: (arabic,) for letter, arabic in DOTTED.items()} | {"ג": ("ج", "غ")}
-#: A final alef also writes alef maqsura (מוסא = موسى); the skeleton folds ى to ي.
-FINAL_ALEF = ("ا", "ي")
-MAX_READINGS = 64
-DOT_ABOVE = "\u0307"
-
-
-def ja_letters(text: str) -> list[tuple[str, bool]]:
-    """(letter, dotted) for each Hebrew letter of one word: finals folded, the dot
-    read from U+0307 or a quote mark right after a letter of ``DOTTED`` (as
-    shared/blau_service.py::dot_pattern reads it); every other mark dropped."""
-    out: list[tuple[str, bool]] = []
-    for ch in unicodedata.normalize("NFC", text or ""):
-        if "א" <= ch <= "ת":
-            out.append((fold_finals(ch), False))
-        elif (ch == DOT_ABOVE or ch in QUOTE_MARKS) and out and out[-1][0] in DOTTED:
-            out[-1] = (out[-1][0], True)
-    return out
-
-
-def is_abbreviation(text: str) -> bool:
-    """Gershayim, or a quote mark after a letter that takes no dot (ב׳כ׳ר׳, ר')."""
-    if "״" in text or '"' in text or "׳׳" in text or "''" in text:
-        return True
-    prev = ""
-    for ch in unicodedata.normalize("NFC", text):
-        if ch in QUOTE_MARKS and prev and fold_finals(prev) not in DOTTED:
-            return True
-        if "א" <= ch <= "ת":
-            prev = ch
-        elif ch not in QUOTE_MARKS and ch != DOT_ABOVE:
-            prev = ""
-    return False
-
-
-def readings(word: str, plural_alif: bool = False) -> list[str]:
-    """Every Arabic skeleton a Judeo-Arabic word may be, in letter-option order
-    (plain letters first). At most ``MAX_READINGS``.
-
-    ``plural_alif`` (method v2): Judeo-Arabic mostly omits the silent alif after
-    the plural -ū (חצ'רו for حضروا), so a word ending in ו is also read with it."""
-    base = _readings(word)
-    if plural_alif and len(base) and ja_letters(word)[-1][0] == "ו" and len(ja_letters(word)) > 2:
-        base = base + [r + "ا" for r in base][: MAX_READINGS - len(base)]
-    return base
-
-
-def _readings(word: str) -> list[str]:
-    letters = ja_letters(word)
-    if not letters:
-        return []
-    options: list[tuple[str, ...]] = []
-    for i, (letter, dotted) in enumerate(letters):
-        if dotted:
-            options.append(DOTTED_READINGS[letter])
-        elif letter == "א" and i == len(letters) - 1 and len(letters) > 1:
-            options.append(FINAL_ALEF)
-        else:
-            options.append(LETTERS.get(letter, ("",)))
-    out: list[str] = []
-    for combo in product(*options):
-        out.append("".join(combo))
-        if len(out) >= MAX_READINGS:
-            break
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Arabic keys
-# ---------------------------------------------------------------------------
-
-_SKELETON_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي", "ؤ": "و",
-                                "ئ": "ي", "ء": None, "ـ": None})
-_ARABIC_TOKEN_RE = re.compile("[\u0621-\u064a\u0671]+")
-_MARKS_RE = re.compile("[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]")
-
-
-def skeleton(word: str) -> str:
-    """The frequency key of an Arabic word: harakat and tatweel dropped, the
-    hamza seats and alef forms folded to their carrier, ة to ه, ى to ي, a bare
-    hamza dropped -- the distinctions Judeo-Arabic spelling does not make."""
-    return _MARKS_RE.sub("", unicodedata.normalize("NFC", word or "")).translate(_SKELETON_FOLD)
-
-
-def arabic_tokens(text: str) -> Iterator[str]:
-    """Surface Arabic words of a text, harakat dropped (hamza kept)."""
-    for tok in _ARABIC_TOKEN_RE.findall(_MARKS_RE.sub("", unicodedata.normalize("NFC", text))):
-        yield tok
-
-
-_HAMZA = set("ءأإآؤئ")
-_WEAK = set("اويى#")
-
-
-def root_key(root: str) -> str:
-    """A root key, so the three dictionaries' spellings meet: Arabic letters
-    only, every hamza seat as ``ء``, every weak letter (ا و ي ى, or CAMeL's
-    ``#``) as ``W`` -- Lane writes قول, Lisān sometimes قال -- and a two-letter
-    root doubled (Lane writes شبب as شب)."""
-    letters = []
-    for ch in root:
-        if ch in _HAMZA or (ch == "ا" and not letters):
-            # a root never begins with a long vowel: Lane writes أخذ as "Ax*" (اخذ)
-            letters.append("ء")
-        elif ch in _WEAK:
-            letters.append("W")
-        elif "\u0621" <= ch <= "\u064a" and ch not in "ةـ":
-            letters.append(ch)
-    if len(letters) == 2:
-        letters.append(letters[-1])
-    return "".join(letters)
-
-
-def strong_letters(key: str) -> str:
-    """The root's letters that are neither hamza nor weak, doubles collapsed."""
-    out = []
-    for ch in key:
-        if ch not in "ءW" and (not out or out[-1] != ch):
-            out.append(ch)
-    return "".join(out)
-
-
-# ---------------------------------------------------------------------------
-# The two dictionaries' root lists
-# ---------------------------------------------------------------------------
-
-#: Buckwalter as the Perseus Lane files write it (``A^`` is an alef with hamza).
-_BW = {"'": "ء", "|": "آ", ">": "أ", "&": "ؤ", "<": "إ", "}": "ئ", "A": "ا", "b": "ب", "p": "ة", "t": "ت",
-       "v": "ث", "j": "ج", "H": "ح", "x": "خ", "d": "د", "*": "ذ", "r": "ر", "z": "ز", "s": "س", "$": "ش",
-       "S": "ص", "D": "ض", "T": "ط", "Z": "ظ", "E": "ع", "g": "غ", "f": "ف", "q": "ق", "k": "ك", "l": "ل",
-       "m": "م", "n": "ن", "h": "ه", "w": "و", "Y": "ى", "y": "ي", "{": "ٱ"}
-
-
-def buckwalter_to_arabic(text: str) -> str:
-    out: list[str] = []
-    i = 0
-    while i < len(text):
-        if text[i] == "A" and text[i + 1:i + 2] == "^":
-            out.append("أ")
-            i += 2
-            continue
-        if text[i] in _BW:
-            out.append(_BW[text[i]])
-        i += 1
-    return "".join(out)
 
 
 def lane_roots(lane_dir: str) -> tuple[dict[str, list[str]], Counter]:
@@ -356,6 +207,29 @@ def form_roots(reading: str, forms: dict[str, set[str]], prior: Counter,
                 if score < found.get(root, 99.0):
                     found[root] = score
     return sorted(found, key=lambda k: (found[k], -prior.get(k, 0), k))
+
+
+def load_sidecar(db: str) -> tuple[dict, Counter, dict, Counter, dict, dict]:
+    """From the built sidecar: Lane's roots, the prior (article characters per root), the
+    headword table, the counts and spellings, and the closed-class table (skeleton -> roots)."""
+    conn = _ro(db)
+    try:
+        lane = {key: json.loads(names) for key, names in conn.execute("SELECT root_key, names_json FROM lane_roots")}
+        prior = Counter(dict(conn.execute("SELECT root_key, SUM(LENGTH(text)) FROM lane_entries GROUP BY root_key")))
+        forms: dict[str, set[str]] = defaultdict(set)
+        for form, key in conn.execute("SELECT skeleton, root_key FROM lane_forms"):
+            forms[form].add(key)
+        counts, surface = Counter(), {}
+        for key, n, spelled in conn.execute("SELECT skeleton, count, surface FROM freq"):
+            counts[key] = n
+            surface[key] = spelled
+        closed: dict[str, list[str]] = defaultdict(list)
+        for key, rkey in conn.execute("SELECT skeleton, root_key FROM closed_class ORDER BY ordinal"):
+            if rkey not in closed[key]:
+                closed[key].append(rkey)
+        return lane, prior, dict(forms), counts, surface, dict(closed)
+    finally:
+        conn.close()
 
 
 def lisan_roots(lisan_file: str) -> tuple[dict[str, list[str]], Counter]:
@@ -453,7 +327,7 @@ def backoff_count(reading: str, counts: Counter) -> int:
 
 
 def rank_readings(word: str, counts: Counter, ranking: str = "frequency",
-                  version: str = "v1") -> list[tuple[str, int]]:
+                  version: str = "v1", min_count: int = MIN_COUNT) -> list[tuple[str, int]]:
     """(skeleton, count) of the word's attested readings, best first.
 
     ``frequency`` -- commonest first (the proposal). The broken rankings the gate
@@ -463,7 +337,7 @@ def rank_readings(word: str, counts: Counter, ranking: str = "frequency",
 
     ``version`` "v2" adds the plural alif (``readings``) and, when no reading is
     attested as a whole word, ranks them by their stems (``backoff_count``)."""
-    later = version in ("v2", "v3")
+    later = version in ("v2", "v3", "v4")
     all_readings = readings(word, plural_alif=later)
     if ranking == "plain":
         all_readings = all_readings[:1]
@@ -471,9 +345,9 @@ def rank_readings(word: str, counts: Counter, ranking: str = "frequency",
         letters = ja_letters(word)
         dotted_word = "".join(f"{letter}\u0307" if letter in DOTTED else letter for letter, _ in letters)
         all_readings = readings(dotted_word, plural_alif=later)[:1]
-    attested = [(r, counts.get(r, 0)) for r in all_readings if counts.get(r, 0) >= MIN_COUNT]
+    attested = [(r, counts.get(r, 0)) for r in all_readings if counts.get(r, 0) >= min_count]
     if not attested and later:
-        attested = [(r, c) for r, c in ((r, backoff_count(r, counts)) for r in all_readings) if c >= MIN_COUNT]
+        attested = [(r, c) for r, c in ((r, backoff_count(r, counts)) for r in all_readings) if c >= min_count]
     if ranking == "reversed":
         return sorted(attested, key=lambda rc: rc[1])
     order = {r: i for i, r in enumerate(all_readings)}
@@ -500,7 +374,7 @@ def strip_roots(surface: str, roots: set[str], prior: Optional[Counter] = None) 
     inflectional ending and a verbal or nominal prefix (each optional), drop at
     most one inner long vowel or t, and keep what is a root of Lane or Lisān.
     Cheapest first; a tie goes to the root with the longer dictionary articles."""
-    word = _MARKS_RE.sub("", surface)
+    word = strip_harakat(surface)
     stems: list[tuple[float, str]] = []
     for pro in ("",) + PROCLITICS:
         if pro and not word.startswith(pro):
@@ -588,7 +462,7 @@ def load_blau(blau_db: str) -> tuple[dict[str, frozenset[str]], dict[str, str]]:
                 "SELECT id, is_cross_reference, target_id, arabic_spelling FROM roots"):
             if is_x and target:
                 xref[str(rid)] = str(target)
-            letters = "".join(_MARKS_RE.sub("", (arabic or "").split("|")[0]).split())
+            letters = "".join(strip_harakat((arabic or "").split("|")[0]).split())
             ok = (3 <= len(letters) <= 4 and all("\u0621" <= ch <= "\u064a" for ch in letters)
                   and "ة" not in letters and "ا" not in letters[1:])
             clean[str(rid)] = root_key(letters) if ok else ""
@@ -697,9 +571,11 @@ class Layer:
 
     def __init__(self, counts: Counter, surface: dict[str, str], roots: set[str], prior: Counter, ranking: str,
                  method: str, camel: Optional[CamelRoots], version: str = "v1",
-                 forms: Optional[dict[str, set[str]]] = None):
+                 forms: Optional[dict[str, set[str]]] = None, closed: Optional[dict[str, list[str]]] = None):
         self.counts, self.surface, self.roots, self.prior = counts, surface, roots, prior
         self.forms = forms or {}
+        self.closed = closed or {}
+        self.min_count = MIN_COUNT
         self.ranking, self.method, self.camel, self.version = ranking, method, camel, version
         self._cache: dict[str, tuple[list[tuple[str, int]], list[str]]] = {}
 
@@ -707,9 +583,14 @@ class Layer:
         """Roots of a reading, found from its commonest spelling in the sample
         (which carries the hamza and the ة the skeleton folds away)."""
         spelled = self.surface.get(reading, reading)
+        if self.closed:
+            # v4: a closed-class word (with at most a conjunction before it) is the table's.
+            for pro in ("", "و", "ف"):
+                if reading.startswith(pro) and reading[len(pro):] in self.closed:
+                    return self.closed[reading[len(pro):]]
         if self.method == "camel" and self.camel is not None:
             return [k for k in self.camel.roots(spelled) if k in self.roots]
-        if self.version == "v3" and self.forms:
+        if self.version in ("v3", "v4") and self.forms:
             found = form_roots(reading, self.forms, self.prior, self.counts)
             if found:
                 return found
@@ -718,7 +599,7 @@ class Layer:
     def lookup(self, word: str) -> tuple[list[tuple[str, int]], list[str]]:
         """(ranked attested readings, the first reading's roots in Lane/Lisān)."""
         if word not in self._cache:
-            ranked = rank_readings(word, self.counts, self.ranking, self.version)[:MAX_SHOWN]
+            ranked = rank_readings(word, self.counts, self.ranking, self.version, self.min_count)[:MAX_SHOWN]
             roots = self.root_of(ranked[0][0]) if ranked else []
             self._cache[word] = (ranked, roots)
         return self._cache[word]
@@ -727,15 +608,24 @@ class Layer:
 def run(args: argparse.Namespace) -> dict:
     started = time.monotonic()
     sources = args.sources
-    lane, lane_size = lane_roots(os.path.join(sources, "lane"))
-    lisan, lisan_size = lisan_roots(os.path.join(sources, "lisan", os.path.basename(LISAN_PATH)))
+    closed: dict[str, list[str]] = {}
+    if args.sidecar:
+        # The built artifact (scripts/build_arabic_sidecar.py): Lane only, the full count.
+        lane, prior, forms, counts, surface, closed = load_sidecar(args.sidecar)
+        lisan = {}
+    else:
+        lane, lane_size = lane_roots(os.path.join(sources, "lane"))
+        lisan, lisan_size = lisan_roots(os.path.join(sources, "lisan", os.path.basename(LISAN_PATH)))
+        counts, surface = load_frequency(sources, args.frequency_cache, tuple(args.frequency_extra))
+        prior = lane_size + lisan_size
+        forms = lane_forms(os.path.join(sources, "lane")) if args.method_version in ("v3", "v4") else {}
     roots = set(lane) | set(lisan)
-    counts, surface = load_frequency(sources, args.frequency_cache, tuple(args.frequency_extra))
     camel = CamelRoots() if args.root_method == "camel" else None
-    prior = lane_size + lisan_size
-    forms = lane_forms(os.path.join(sources, "lane")) if args.method_version == "v3" else {}
-    layers = {r: Layer(counts, surface, roots, prior, r, args.root_method, camel, args.method_version, forms)
+    layers = {r: Layer(counts, surface, roots, prior, r, args.root_method, camel, args.method_version, forms,
+                       closed if args.method_version == "v4" else None)
               for r in RANKINGS}
+    for layer in layers.values():
+        layer.min_count = args.min_count
     key_roots, clean_root = load_blau(args.blau_db)
     editions, by_sys = load_editions(args.pgp_db)
     # The development documents: the seeded sample the method was tuned on (the
@@ -873,10 +763,11 @@ def run(args: argparse.Namespace) -> dict:
     result = {
         "inputs": {k: getattr(args, k) for k in ("blau_db", "pgp_db", "transcriptions", "sources", "root_method",
                                                  "ranking", "min_coverage", "min_words", "limit_docs", "seed",
-                                                 "dev_docs", "score_dev", "method_version", "frequency_extra")},
+                                                 "dev_docs", "score_dev", "method_version", "frequency_extra",
+                                                 "sidecar")},
         "lane_root_keys": len(lane), "lisan_root_keys": len(lisan), "root_keys_either": len(roots),
         "root_keys_both": len(set(lane) & set(lisan)),
-        "frequency_tokens": sum(counts.values()), "frequency_types": len(counts), "min_count": MIN_COUNT,
+        "frequency_tokens": sum(counts.values()), "frequency_types": len(counts), "min_count": args.min_count,
         "documents_with_jrb_edition": len(editions), "dev_documents": len(dev), "dev_pages_skipped": dev_pages,
         "pages_seen": pages_seen, "pages_used": pages_used,
         "aligned_pairs": pairs_total,
@@ -1020,13 +911,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     p = sub.add_parser("pick", help="print the seeded OpenITI pick from the release metadata TSV")
     p.add_argument("--metadata", required=True)
     m = sub.add_parser("measure", help="run the measurement and the gate")
-    m.add_argument("--sources", required=True, help="the folder fetch filled (lane/, lisan/, openiti/)")
+    m.add_argument("--sources", default="", help="the folder fetch filled (lane/, lisan/, openiti/)")
+    m.add_argument("--sidecar", default="", help="measure the built arabic_data/arabic.db instead (Lane only)")
+    m.add_argument("--min-count", type=int, default=MIN_COUNT,
+                   help="a reading is offered only at this count or more in the word count")
     m.add_argument("--pgp-db", default=str(REPO / "pgp_data" / "pgp.db"))
     m.add_argument("--transcriptions", default=str(REPO / "Transcriptions.txt"))
     m.add_argument("--blau-db", default=str(REPO / "blau_data" / "blau.db"))
     m.add_argument("--frequency-cache", default="", help="gzip JSON of the counts (written when absent)")
     m.add_argument("--root-method", choices=("strip", "camel"), default="strip")
-    m.add_argument("--method-version", choices=("v1", "v2", "v3"), default="v1",
+    m.add_argument("--method-version", choices=("v1", "v2", "v3", "v4"), default="v1",
                    help="v1: as the gate first judged it; v2: plural alif + stem backoff; v3: v2 + roots "
                         "from Lane's headwords (plan, section 6)")
     m.add_argument("--frequency-extra", action="append", default=[],
@@ -1049,6 +943,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         for row in pick_sample(args.metadata):
             print(json.dumps(row, ensure_ascii=False))
         return 0
+    if bool(args.sources) == bool(args.sidecar):
+        print("give exactly one of --sources and --sidecar", file=sys.stderr)
+        return 2
     for name in ("pgp_db", "transcriptions", "blau_db"):
         path = getattr(args, name)
         if not os.path.isfile(path) or os.path.getsize(path) == 0:

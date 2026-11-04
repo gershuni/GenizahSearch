@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """scripts/measure_arabic_readings.py: the pure parts the Arabic-layer measurement rests on.
 
-An undotted letter gives both readings and a marked one gives one (except ג, whose
-mark means ج in Blau and غ in many editions); the frequency ranking puts the common
-reading first and the broken rankings do not; the root keys of Lane, Lisān and a
-peeled word meet; the gate fails on a broken result. No dictionary or corpus text
-is needed: the counts and roots below are made up.
+The frequency ranking puts the common reading first and the broken rankings do not; the
+root finders peel what they should; the gate fails on a broken result. The readings and
+keys themselves are tests/test_arabic_normalize.py's. No dictionary or corpus text is
+needed: the counts and roots below are made up.
 """
 from __future__ import annotations
 
@@ -13,31 +12,12 @@ from collections import Counter
 
 from scripts.measure_arabic_readings import (
     GATE,
-    buckwalter_to_arabic,
     form_roots,
     gate,
-    ja_letters,
     rank_readings,
-    readings,
-    root_key,
-    skeleton,
     strip_roots,
 )
-
-
-def test_an_undotted_letter_is_read_both_ways_and_a_marked_one_once():
-    assert readings("דלך") == ["دلك", "دلخ", "ذلك", "ذلخ"], "plain letters first, the last letter varying fastest"
-    assert readings("ד'לך") == ["ذلك", "ذلخ"]
-    assert readings("ד\u0307לך") == ["ذلك", "ذلخ"]
-    assert readings("ר'גל") == readings("רגל"), "an apostrophe after ר is an abbreviation, not a dot"
-    assert set(readings("ג'יר")) == {"جير", "غير"}, "a mark on ג says only 'not plain'"
-    assert ja_letters("אלמד׳") == [("א", False), ("ל", False), ("מ", False), ("ד", True)]
-
-
-def test_a_final_alef_may_be_alef_maqsura_and_the_skeleton_folds_what_judeo_arabic_does_not_write():
-    assert "موسي" in readings("מוסא")
-    assert skeleton("شيء") == "شي" and skeleton("على") == "علي" and skeleton("مدينة") == "مدينه"
-    assert skeleton("أ\u064eي\u0652ض\u064bا") == "ايضا" and skeleton("ذ\u0670ل\u0650ك\u064e") == "ذلك"
+from shared.arabic_normalize import root_key
 
 
 def test_frequency_puts_the_common_reading_first_and_the_broken_rankings_do_not():
@@ -47,13 +27,6 @@ def test_frequency_puts_the_common_reading_first_and_the_broken_rankings_do_not(
     assert [r for r, _ in rank_readings("דלך", counts, "reversed")] == ["دلك", "ذلك"]
     assert [r for r, _ in rank_readings("גיר", counts, "dotted")] == ["جير"]
     assert rank_readings("קקק", counts) == [], "an unattested word shows nothing"
-
-
-def test_root_keys_meet_across_the_dictionaries():
-    assert root_key(buckwalter_to_arabic("Ax*")) == root_key("أخذ") == "ءخذ", "Lane writes initial hamza as A"
-    assert root_key(buckwalter_to_arabic("A^bw")) == root_key("أبو")
-    assert root_key("قال") == root_key("قول") == "قWل"
-    assert root_key(buckwalter_to_arabic("$b")) == root_key("شبب"), "Lane writes a geminate root with two letters"
 
 
 def test_peeling_prefers_the_proclitic_to_an_inner_letter():
