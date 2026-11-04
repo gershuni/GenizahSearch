@@ -466,11 +466,17 @@ _wait_executor = None
 
 
 def shutdown_research():
-    """Stop child processes before the web server exits its lifespan."""
-    if _queue is not None:
-        _queue.close()
-    if _wait_executor is not None:
-        _wait_executor.shutdown(wait=False, cancel_futures=True)
+    """Stop child processes before the web server exits its lifespan. The globals are reset, so
+    a later lifespan in the same process (the tests run several) builds a fresh queue and pool
+    instead of scheduling on a closed one ("cannot schedule new futures after shutdown")."""
+    global _queue, _wait_executor
+    with _queue_lock:
+        queue, executor = _queue, _wait_executor
+        _queue = _wait_executor = None
+    if queue is not None:
+        queue.close()
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def wait_executor():
