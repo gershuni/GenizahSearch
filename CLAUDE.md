@@ -25,6 +25,16 @@ session, so their size is a recurring cost; `scripts/check_docs.py` fails the bu
 passes its ceiling. When a ceiling is hit, split closed content into `docs/archive/` — never
 raise the number.
 
+**A worktree never links to the main checkout's data.** Sessions run in
+`.claude/worktrees/<name>`, which has none of the gitignored sidecars (`nli_data/`, `fgp_data/`,
+`pgp_data/`, `fist_data/`, `blau_data/`). Never bridge that with a junction or symlink into
+`C:\GenizahSearch`: `git worktree remove --force` and `rm -rf` walk a junction as a directory, and
+on 2026-11-04 that emptied the main checkout's `nli_data/` and `fgp_data/`. A session that needs a
+sidecar copies it under `%LOCALAPPDATA%\GenizahSearchPro\data\<dir>\` (the path every
+`shared/*_service.py` checks first) or points the service's env var at the main checkout's file
+where one exists (`GENIZAH_FJMS_DB_PATH`; `docs/guides/ENV_VARS.md`). `scripts/init.ps1` warns on
+any reparse point in a worktree; remove one with `cmd /c rmdir <link>`, never recursively.
+
 **Effort is routed, not pinned.** Sessions run at `high`. Raise with `/effort xhigh` for the
 calls where being wrong costs the owner grading hours — sample design and weighting, threshold
 selection, the precedence matrix, relation-label taxonomy, anything that decides what a public
@@ -351,30 +361,6 @@ every session's context.
 - **v9.4.0 — Data integrity (2026-09-28)** — the 2026-09-25 improvement sweep's round 2 (#367 #368 #370 #371): lists/settings/language saved atomically with backup recovery (`shared/atomic_io.py`), one desktop copy per data folder (`desktop/single_instance.py`), New keeps `session.json`, exclusions hold until New; list sync rebuilt — a cloud row per list membership (new `list_items.page` column), keyset paging, differing notes kept both, a one-at-a-time runner off the UI thread (`desktop/lists_sync_runner.py`, uploads on a copy), desktop removals and moves sent, website removals offered in a prompt; the gate is the seeded scenario harness `tests/list_sync_scenarios.py`; Fragment Puzzle asks before dropping work and Joins Lab keeps running QThreads. Web: /lists edit/remove/page fixes deployed WITH the installer. (both)
 - **v9.3.0 — Fresh PGP data, small screens, and urgent fixes (2026-09-24)** — installer ships the 2026-09-22 PGP refresh (36,642 docs; IIIF-linked fragments 57.5% -> 87.0%; the file predates #358's `meta.source_revision` stamp, which only the web deploy reads); layout for low resolution / 300% scaling (`desktop/widgets/overflow_row.py`: shrink to icons, then a More menu; `ColumnFitter` fits result columns with no horizontal scroll; viewer fits the screen and goes compact when it must); open/copy on genizahsearch.com + A−/A+ in the viewer and Browse; the Composition viewer follows the result filters (#360); fixes: xlsx Library/Shelfmark swap, flat-view filtered marker, viewer title bar off-screen (#361), Joins Lab other-side search (#359), and letter-level lost on restart (#363 — the index loads BEFORE the session restore, so a parked choice was never applied; no one-time reset, owner). (desktop)
 - **v9.2.1 — Viewer window, Local-search hint, honest Oxford images (2026-09-17)** — the Manuscript Viewer is an unparented non-modal window (it was an owned modal dialog, which is why minimizing it buried the whole app); zero-result LOCAL searches offer the Genizah corpus; chunk controls re-enable after letter-level; Composition Search now really opens on letter-level when its index exists (the autosaved method was being read as a choice); Oxford failure strip translated with the Bodleian link everywhere and the Rosetta placeholder rejected. Seven Codex rounds, eleven extra defects. The tag also carries the web-side work merged from the cloud and deployed the same day: the GenizahSearch GPT + `/ai` page, isolated research workers with background API jobs, regex bounding (#338–#342). README trimmed to a normal README on 2026-09-18 (old What's New sections in `docs/archive/README_WHATS_NEW_ARCHIVE.md`). (both)
-- **v9.2.0 — Citations, Princeton links, and a round of repairs (2026-09-06)** — NOTE the
-  span: this tag covers 67 commits, including PR #333 and PR #334, not one branch.
-  Desktop gained **PGP links on three surfaces** and **separate Exclude Manuscripts
-  lists** for Search vs Composition Search (they shared one); composition header-click
-  sorting had NEVER fired (`setHeader()` discards every width, mode and signal), two
-  composition crashes fixed, Browse showed hits as literal asterisks, Oxford images died
-  silently, and a crawler could take `/browse` down. On citations: one shared decision
-  (`shared/transcription_credits.py`) drives the printed sheet, the web "How to cite" chip,
-  Word exports, the desktop citation bar and the new Cite buttons, so a citation copied from
-  the screen, printed, or exported cannot disagree about who made the text. MiDRASH is cited
-  for the automatic transcription and ONLY that; a Princeton/Friedberg edition, a translation
-  or a community correction is credited to those people. **The desktop cites the APPLICATION**
-  ("Dicta Genizah Search Pro V<version>", name untranslated in both UIs, no address and no
-  retrieval date) rather than the website. New: print/Save-as-PDF on the web reading view
-  (`contain: none !important` is load-bearing — Quasar's `contain: strict` defeats every
-  height rule in print), "Cite this page" on the desktop Browse toolbar and in ResultDialog,
-  and a calmer homepage (one strip, not four overlays; the two big promotion cards removed).
-  `page_citation` RAISES if given both a software clause and a URL/date — a citation is one
-  kind of thing or the other. 15 production defects were found across four Codex review rounds,
-  two of them the INVERSE of the original bug (a .docx shipping HTR text credited to the
-  selected scholar; an FGP translation headed "Transcription"). (both)
-- **v9.1.0 — Several Witnesses of One Work (2026-08-27)** — desktop multi-witness letter-level search: a Witnesses panel in the Composition tab (paste one, or a file split on blank lines), promote manuscripts from your own results, and optional auto-expand rounds; results are rank-fused (RRF k=60), NEVER concatenated — 17 Birkat Hamazon witnesses fused find 455 of 614 census manuscripts (74.1%) against 348 (56.7%) for the best single witness and 296 (48.2%) concatenated. Stop now works BETWEEN witnesses (the one in flight finishes; "New" defers and never terminates), so the witness cap is a flat 25 at every depth. "Full Recursive Search" runs fusion in letter-level mode and still concatenates in chunk mode, which is correct for that engine. Letter-level search is now the DEFAULT method once an index exists -- but never over a stored choice; the orange "New" markers are one-shot (`config.pkl`, not the session). In the manuscript viewer, letter-level matches are HIGHLIGHTED (passage rows carry `highlight_pattern` + `source_highlight_pattern`, literal alternations of what each side matched -- the viewer re-marks a whole page from a regex and had none), and Prev/Next Manuscript skips the remaining pages of the fragment you are reading. **Desktop-only.** (desktop)
-- **v8.6.0 — Pause/Resume, and Stop that actually stops (2026-08-20)** — desktop Pause/Resume for regular, Lab and Composition searches (parks the worker at a checkpoint; Resume continues at the same index, paused time excluded from timings); Stop repaired in Lab Mode (three causes, incl. a bare `except Exception` eating `InterruptedError`, an `OSError` subclass) and stopped runs now keep partial results in Title/Shelfmark/My Library; monotonic elapsed timing; search toolbar no longer overlaps itself (row 2 needed 1423 px on a 1440 px screen). **Desktop-only — the desktop line continues from v8.5.2, since 9.0.0 was web-only and never tagged.** (desktop)
-- **v9.0.0 — Computed Identifications, the Visual Atlas & Start Here (public beta, 2026-08-16)** — `DISCOVERY_ENABLED` flipped ON in production 2026-08-08; `/computed-identifications`, the browse connections panel and the `/help` methods section are publicly reachable. Then a fast post-launch run: catalogue-divergent rows un-hidden (3,570, 12.5% of the main pool), a frozen relation-precedence matrix, a "View text match" excerpt view, a `/start` guided launchpad, homepage discovery entry points, and beta community identification reviews. **Desktop 9.0.0 followed 2026-08-26** — letter-level (passage) search in the Composition tab, on a locally built index; that half does carry a GitHub Release + installer. One REL-01 gate item (the cross-surface masking re-sweep) is still open; see ROADMAP.md. (both)
-**Older releases (v8.5.2 and older, SEED-006 back to v7.7.x) are in [`CHANGELOG.md`](CHANGELOG.md) only.**
+**Older releases: the one-liners for v9.2.0, v9.1.0, v8.6.0 and v9.0.0 moved to [`docs/archive/CLAUDE_MD_RELEASES_ARCHIVE.md`](docs/archive/CLAUDE_MD_RELEASES_ARCHIVE.md) on 2026-11-04, when this file hit its ceiling; v8.5.2 and older (SEED-006 back to v7.7.x) are in [`CHANGELOG.md`](CHANGELOG.md) only.**
 They were one-line duplicates of sections that file already carries in full, and nothing
 in them changes how you work today. If you need one, grep the changelog for its version.
