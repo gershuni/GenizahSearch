@@ -2353,6 +2353,33 @@ class MetadataManager:
         self._shelfmark_index = index
         return index
 
+    def has_shelfmark(self, query) -> bool:
+        """True when ``query`` is a catalogue shelfmark exactly, as ``resolve_system_by_shelfmark``
+        compares them (normalised; with a library name off its front, or whole).
+
+        For the website's go-to boxes (``web/home_query.py``): a rule-based recogniser
+        cannot know every catalogue form (``Mingana 9``, ``P. Mich. Inv. 531``), so what it
+        calls text is looked up here before it is searched. A binary search of the Shelfmark
+        search index (``_ShelfmarkSearchIndex.norm_keys``, each record's catalogue shelfmark),
+        which the server builds at start (``prewarm_shelfmark_search``); until it is built
+        the answer is False -- a key press never builds it (~2 s of CPU)."""
+        from bisect import bisect_left
+        q = (query or '').strip()
+        if not q:
+            return False
+        bank = self.csv_bank
+        index = getattr(self, '_shelfmark_search_index', None)
+        if index is None or not bank or not index.is_for(bank):
+            return False
+        keys = {self._normalize_shelfmark(q), self._normalize_shelfmark(_strip_library_prefix(q))}
+        keys.discard('')
+        norm_keys = index.norm_keys
+        for key in keys:
+            i = bisect_left(norm_keys, key)
+            if i < len(norm_keys) and norm_keys[i] == key:
+                return True
+        return False
+
     def resolve_system_by_shelfmark(self, query, limit=100):
         """
         Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.

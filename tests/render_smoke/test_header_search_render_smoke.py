@@ -12,9 +12,10 @@ neighbours there are routed by the same pages.
 """
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import patch
 
-from tests.render_smoke.test_home_search_routing_render_smoke import _press_enter
+from tests.render_smoke.test_home_search_routing_render_smoke import _navigated, _press_enter
 from tests.render_smoke.test_home_teaser_render_smoke import _marked_element, _run_home_smoke
 
 _BOX = 'header-search'
@@ -41,11 +42,13 @@ def test_enter_in_the_header_box_goes_where_the_input_belongs():
             box.value = typed
             with patch('nicegui.ui.navigate.to') as nav_mock:
                 _press_enter(user, box)
-            assert [c.args for c in nav_mock.call_args_list] == [(expected,)], typed
+                calls = await _navigated(nav_mock)
+            assert calls == [(expected,)], typed
 
         box.value = '  '
         with patch('nicegui.ui.navigate.to') as nav_mock:
             _press_enter(user, box)
+            await asyncio.sleep(0.3)
         assert not nav_mock.called
 
     _run_home_smoke(driver, lang='en')
@@ -76,3 +79,57 @@ def test_no_header_box_on_the_homepage():
 def test_the_pages_without_it_are_the_homepage_and_search():
     from web.main import _HEADER_SEARCH_HIDDEN_ON
     assert _HEADER_SEARCH_HIDDEN_ON == {'/', '/search'}
+
+
+class _Catalogue:
+    """A loaded catalogue that holds one shelfmark the recogniser does not know."""
+
+    def __init__(self):
+        self.asked = []
+
+    def has_shelfmark(self, query):
+        self.asked.append(query)
+        return query == 'Mingana 9'
+
+
+def test_a_shelfmark_only_the_catalogue_knows_opens_browse(monkeypatch):
+    """Codex on #476: ``Mingana 9`` is a libraries.csv shelfmark the rules call
+    text; the box asks the catalogue before it searches, and asks nothing of
+    words or Hebrew."""
+    from web.state import state
+
+    catalogue = _Catalogue()
+    monkeypatch.setattr(state, 'meta_mgr', catalogue)
+
+    async def driver(user):
+        await user.open('/about')
+        for box_marker in (_BOX,):
+            box = _marked_element(user, box_marker)
+            for typed, expected in (('Mingana 9', '/browse?shelfmark=Mingana%209'),
+                                    ('Psalm 23', '/search?q=Psalm%2023'),
+                                    ('dcuk', '/search?q=dcuk')):
+                box.value = typed
+                with patch('nicegui.ui.navigate.to') as nav_mock:
+                    _press_enter(user, box)
+                    calls = await _navigated(nav_mock)
+                assert calls == [(expected,)], typed
+
+    _run_home_smoke(driver, lang='en')
+    assert catalogue.asked == ['Mingana 9', 'Psalm 23'], catalogue.asked
+
+
+def test_the_homepage_box_asks_the_catalogue_too(monkeypatch):
+    from web.state import state
+
+    monkeypatch.setattr(state, 'meta_mgr', _Catalogue())
+
+    async def driver(user):
+        await user.open('/')
+        box = _marked_element(user, 'home-hero-search')
+        box.value = 'Mingana 9'
+        with patch('nicegui.ui.navigate.to') as nav_mock:
+            _press_enter(user, box)
+            calls = await _navigated(nav_mock)
+        assert calls == [('/browse?shelfmark=Mingana%209',)]
+
+    _run_home_smoke(driver, lang='en')

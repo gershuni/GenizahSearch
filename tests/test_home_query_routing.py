@@ -11,7 +11,7 @@ Hebrew typed on the English layout -- is searched. The wiring on the pages is
 """
 from __future__ import annotations
 
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 
@@ -122,3 +122,59 @@ def test_a_search_query_survives_the_url():
 ])
 def test_only_hebrew_and_arabic_letters_count(text, expected):
     assert has_hebrew_or_arabic_letter(text) is expected
+
+
+# --- the catalogue lookup (Codex on #476) ------------------------------------
+
+class _Catalogue:
+    def __init__(self, holds=()):
+        self.holds, self.asked = set(holds), []
+
+    def __call__(self, query):
+        self.asked.append(query)
+        return query in self.holds
+
+
+@pytest.mark.parametrize('shelfmark', ['Mingana 9', 'P. Mich. Inv. 531', 'B 2093'])
+def test_a_shelfmark_the_catalogue_holds_opens_browse(shelfmark):
+    catalogue = _Catalogue({shelfmark})
+    assert home_query_target(shelfmark, catalogue) == '/browse?shelfmark=' + quote(shelfmark, safe='')
+    assert catalogue.asked == [shelfmark]
+
+
+def test_without_the_catalogue_the_rules_decide():
+    assert _route('Mingana 9') == ('/search', 'q', 'Mingana 9')
+
+
+def test_text_the_catalogue_does_not_hold_is_searched():
+    catalogue = _Catalogue({'Mingana 9'})
+    assert home_query_target('Psalm 23', catalogue) == '/search?q=Psalm%2023'
+    assert catalogue.asked == ['Psalm 23']
+
+
+@pytest.mark.parametrize('text', ['dcuk', 'Maimonides', 'שבת 12', 'T-S 8J6.1', '990053835020205171', '  '])
+def test_the_catalogue_is_asked_only_about_latin_text_with_a_digit(text):
+    """Words without a digit are never a shelfmark; Hebrew is searched; what the
+    rules already know is not asked again."""
+    catalogue = _Catalogue({text.strip()})
+    home_query_target(text, catalogue)
+    assert catalogue.asked == []
+
+
+def test_the_page_lookup_is_false_without_a_catalogue(monkeypatch):
+    from web.home_query import catalogue_has_shelfmark
+    from web.state import state
+    monkeypatch.setattr(state, 'meta_mgr', None)
+    assert catalogue_has_shelfmark('Mingana 9') is False
+
+
+def test_the_page_lookup_searches_when_the_catalogue_fails(monkeypatch):
+    from web.home_query import catalogue_has_shelfmark
+    from web.state import state
+
+    class _Broken:
+        def has_shelfmark(self, query):
+            raise RuntimeError('index not ready')
+
+    monkeypatch.setattr(state, 'meta_mgr', _Broken())
+    assert catalogue_has_shelfmark('Mingana 9') is False

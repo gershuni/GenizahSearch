@@ -2001,7 +2001,8 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 
 ## web/home_query.py
 
-- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Tests: `tests/test_home_query_routing.py`.
+- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Optional `has_shelfmark` predicate: Latin text with a digit the rules call text is looked up in the catalogue first (`Mingana 9`). Tests: `tests/test_home_query_routing.py`.
+- **Function** `catalogue_has_shelfmark` — the pages' `has_shelfmark`: `state.meta_mgr.has_shelfmark`, False when the catalogue is not loaded or the lookup fails; the pages call `home_query_target` with it via `run.io_bound`.
 
 ## web/search_box_input.py
 
@@ -2673,6 +2674,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
     - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
     - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
+    - Method `has_shelfmark` — True when the query, normalised (library prefix off, or whole), is a record's catalogue shelfmark exactly: a binary search of the prewarmed `_ShelfmarkSearchIndex.norm_keys`; False until that index is built (never builds it). For the website's go-to boxes (`web/home_query.py::catalogue_has_shelfmark`). Tests: `tests/test_metadata_has_shelfmark.py`.
     - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces. A prefix naming a library keeps it (`catalog_shelfmark.named_library_exact`). When nothing matches exactly, falls back to catalogue forms (`shared/catalog_shelfmark.py`) before substring options.
     - Method `resolve_catalog_form` / `resolve_catalog_forms` — exact-or-catalogue-form answer for one / many inputs (one index pass), never substring options; `{sys_id, options, selected_shelfmark, total, tier}`. Used by `search_by_meta`'s empty-result fallback and exclusion lists.
     - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).
