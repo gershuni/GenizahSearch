@@ -2834,7 +2834,7 @@ body {
 .gs-blau .lane-entry .headword { font-size: 1.15rem; font-weight: 600; }
 .gs-blau .lane-entry .page { font-size: 0.75rem; color: var(--text-muted, #64748b); }
 /* Lane's text is English with Arabic inside it: left to right in both UIs. */
-.gs-blau .lane-text { direction: ltr; text-align: left; font-size: 0.85rem; }
+.gs-blau .lane-text { direction: ltr; text-align: start; font-size: 0.85rem; }
 .gs-blau .lane-no-root { font-size: 0.82rem; color: var(--text-muted, #64748b); }
 /* The reader's switch in the version row: tinted while the lookup is on. */
 .blau-switch { color: var(--text-muted, #64748b); }
