@@ -274,8 +274,11 @@ matching runs), 388,317 aligned word pairs. Three populations, each with its own
 30%. The script exits 1 when any fails.
 
 The methods were shaped on 300 seeded development documents (282 pages), which are never scored
-(`--dev-docs`). **Disclosed:** methods v2 and v3 were added after reading seeded samples of the
-scored data's errors (the 40 P1 cases of §4, 40 P2 cases), so their scored numbers are not a clean
+(`--dev-docs`). **Disclosed:** v1's last two rules (the future marker سـ only before an imperfect
+verb; P2 leaving out words with a mark after a letter that takes no dot) came after reading the
+first 15 P1 and 15 P2 errors of one run over all documents, before the split existed. Methods v2
+and v3 were added after reading seeded samples of the scored data's errors (the 40 P1 cases of
+§4, 40 P2 words shown wrong and 40 with nothing shown), so their scored numbers are not a clean
 held-out estimate. The development documents alone give the same direction: P1 right 75.0% (v1),
 77.4% (v2), 80.1% (v3); P2 69.1%, 77.9%, 77.9% (68 words only).
 
