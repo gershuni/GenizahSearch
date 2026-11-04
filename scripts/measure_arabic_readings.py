@@ -221,6 +221,18 @@ def form_roots(reading: str, forms: dict[str, set[str]], prior: Counter,
     return sorted(found, key=lambda k: (found[k], -prior.get(k, 0), k))
 
 
+def sidecar_freq_facts(db: str) -> dict[str, int]:
+    """The word count as built: every token and type counted (``freq`` keeps only the types counted
+    ``freq_min_stored`` times or more, so its own sums understate both), and that floor."""
+    conn = _ro(db)
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta WHERE key IN "
+                                 "('freq_tokens', 'freq_types', 'freq_min_stored')").fetchall())
+    finally:
+        conn.close()
+    return {k: int(meta[k]) for k in ("freq_tokens", "freq_types", "freq_min_stored")}
+
+
 def load_sidecar(db: str) -> tuple[dict, Counter, dict, Counter, dict, dict]:
     """From the built sidecar: Lane's roots, the prior (article characters per root), the
     headword table, the counts and spellings, and the closed-class table (skeleton -> roots)."""
@@ -642,9 +654,11 @@ def run(args: argparse.Namespace) -> dict:
     started = time.monotonic()
     sources = args.sources
     closed: dict[str, list[str]] = {}
+    freq_facts: dict[str, int] = {}
     if args.sidecar:
         # The built artifact (scripts/build_arabic_sidecar.py): Lane only, the full count.
         lane, prior, forms, counts, surface, closed = load_sidecar(args.sidecar)
+        freq_facts = sidecar_freq_facts(args.sidecar)
         lisan = {}
     else:
         lane, lane_size = lane_roots(os.path.join(sources, "lane"))
@@ -804,7 +818,10 @@ def run(args: argparse.Namespace) -> dict:
                                                  "sidecar")},
         "lane_root_keys": len(lane), "lisan_root_keys": len(lisan), "root_keys_either": len(roots),
         "root_keys_both": len(set(lane) & set(lisan)),
-        "frequency_tokens": sum(counts.values()), "frequency_types": len(counts), "min_count": args.min_count,
+        # From a sidecar, the totals as counted (meta), not the sums of the stored rows.
+        "frequency_tokens": freq_facts["freq_tokens"] if freq_facts else sum(counts.values()),
+        "frequency_types": freq_facts["freq_types"] if freq_facts else len(counts),
+        "frequency_rows_loaded": len(counts), "min_count": args.min_count,
         "documents_with_jrb_edition": len(editions), "dev_documents": len(dev), "dev_pages_skipped": dev_pages,
         "pages_seen": pages_seen, "pages_used": pages_used,
         "aligned_pairs": pairs_total,
@@ -989,11 +1006,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     if bool(args.sources) == bool(args.sidecar):
         print("give exactly one of --sources and --sidecar", file=sys.stderr)
         return 2
-    for name in ("pgp_db", "transcriptions", "blau_db"):
+    for name in ("pgp_db", "transcriptions", "blau_db") + (("sidecar",) if args.sidecar else ()):
         path = getattr(args, name)
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
             print(f"missing or empty input: {path}", file=sys.stderr)
             return 2
+    # Below 1 every generated reading would count as attested; below the sidecar's storage floor
+    # the readings counted fewer times are absent, so the run would not be the threshold it names.
+    floor = sidecar_freq_facts(args.sidecar)["freq_min_stored"] if args.sidecar else 1
+    if args.min_count < max(1, floor):
+        print(f"--min-count {args.min_count} is below {max(1, floor)}"
+              + (", the sidecar's stored floor (meta.freq_min_stored)" if args.sidecar else ""), file=sys.stderr)
+        return 2
     result = run(args)
     failures = gate(result, args.ranking)
     result["gate"] = {"ranking": args.ranking, "failures": failures, "passed": not failures}

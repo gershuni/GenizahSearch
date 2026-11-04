@@ -107,3 +107,27 @@ def test_the_gate_passes_a_good_result_and_fails_each_broken_one():
     assert any(f.startswith("G1") for f in gate(_result(750, 150, 600, low_dot), "frequency"))
     assert any(f.startswith("G2") for f in gate(_result(620, 150, 600, 900), "frequency"))
     assert any(f.startswith("G3") for f in gate(_result(600, 350, 500, 900), "frequency"))
+
+
+def test_a_threshold_below_the_sidecar_floor_is_refused(tmp_path, capsys):
+    """The sidecar stores only counts at freq_min_stored or more: --min-count 1 would not be the
+    threshold it names, and 0 would accept every generated reading."""
+    import sqlite3
+
+    from scripts.measure_arabic_readings import main, sidecar_freq_facts
+
+    db = tmp_path / "arabic.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    con.executemany("INSERT INTO meta VALUES (?, ?)",
+                    [("freq_tokens", "10"), ("freq_types", "4"), ("freq_min_stored", "2")])
+    con.commit()
+    con.close()
+    assert sidecar_freq_facts(str(db)) == {"freq_tokens": 10, "freq_types": 4, "freq_min_stored": 2}
+    other = tmp_path / "input"
+    other.write_text("x", encoding="utf-8")
+    argv = ["measure", "--sidecar", str(db), "--pgp-db", str(other), "--transcriptions", str(other),
+            "--blau-db", str(other)]
+    for low in ("1", "0"):
+        assert main(argv + ["--min-count", low]) == 2
+        assert "below 2" in capsys.readouterr().err
