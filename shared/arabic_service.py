@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -167,6 +169,19 @@ class LaneLookup:
     def reading(self) -> Optional[LaneReading]:
         """The reading the root cards are for: the first."""
         return self.readings[0] if self.readings else None
+
+
+#: Marks written inside one Judeo-Arabic word: the dot above as an apostrophe, a geresh or quote
+#: marks (the combining dot and niqqud are dropped as nonspacing marks).
+_IN_WORD_MARKS = frozenset("'׳״\"’")
+
+
+def one_ja_word(word: str) -> bool:
+    """The Hebrew letters of ``word`` form ONE word: with the in-word marks dropped, a single run of
+    letters. A space, a maqaf (כל־מה) or a hyphen between letters makes two, which ``ja_letters``
+    would otherwise read as one (كلمة)."""
+    kept = "".join(ch for ch in word if ch not in _IN_WORD_MARKS and unicodedata.category(ch) != "Mn")
+    return len(re.findall("[א-ת]+", kept)) == 1
 
 
 def empty_lane(word: str = "", script: str = "ja") -> LaneLookup:
@@ -340,8 +355,8 @@ class ArabicService:
         try:
             counts = _FreqView(self._conn)
             if ja_letters(word):
-                # One word only: ja_letters reads past spaces, so "כל מה" would be كلمة.
-                if is_abbreviation(word) or len(word.split()) != 1:
+                # One word only: ja_letters reads past a space or a maqaf, so "כל מה" would be كلمة.
+                if is_abbreviation(word) or not one_ja_word(word):
                     return empty_lane(word)
                 counts.prefetch(readings(word, plural_alif=True))
                 ranked = rank_readings(word, counts, "frequency", METHOD_VERSION, MIN_COUNT)[:MAX_READINGS]

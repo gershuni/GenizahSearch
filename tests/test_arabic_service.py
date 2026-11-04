@@ -88,9 +88,17 @@ def test_typed_arabic_is_its_own_reading(sidecar):
 def test_nothing_for_an_abbreviation_a_word_with_no_reading_or_no_letters(sidecar):
     service = _service(sidecar)
     # "ד לך" joined would be דלך, which is counted: two words are never read as one.
-    for word in ("ר'", "קקק", "abc", "", "   ", "ד לך", "כל מה"):
+    for word in ("ר'", "קקק", "abc", "", "   ", "ד לך", "ד־לך", "ד-לך", "כל מה"):
         result = service.lookup(word)
         assert not result.found and not result.readings, word
+
+
+def test_one_word_survives_its_dot_marks_and_niqqud():
+    from shared.arabic_service import one_ja_word
+    for word in ("דלך", "ד'לך", "ד׳לך", "ד̇לך", "דָלִךְ", "ר'"):
+        assert one_ja_word(word), word
+    for word in ("ד לך", "ד־לך", "ד-לך", "abc", ""):
+        assert not one_ja_word(word), word
 
 
 def test_the_entries_are_bounded_and_the_rest_counted(sidecar, monkeypatch):
