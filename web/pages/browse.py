@@ -772,7 +772,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # dictionary not served then has no tab.
     lane_service = get_arabic_service()
     dict_on = blau_service.is_available() or lane_service.is_available()
-    # The tab the reader last chose, for the next words on this manuscript (blau_panel.pick_tab).
+    # The tab the reader last chose (blau_panel.pick_tab): it holds while the reader stays on the page,
+    # across the manuscripts opened from it (a reader who prefers Lane keeps Lane); a new visit starts
+    # afresh. Local Codex review of 5d84236f: per visit, not per manuscript, by choice.
     dict_tab = {'value': None}
     if dict_on:
         ui.add_head_html(blau_panel.head_html())

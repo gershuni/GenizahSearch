@@ -494,7 +494,8 @@ sight, and the panel's title and hint named Blau alone. So:
   and the scrolling body. A tab whose dictionary has nothing for the word is greyed, not hidden,
   and says so when opened. With one dictionary served there is no tab row, and the head carries its
   name.
-- **Which tab opens** (`blau_panel.pick_tab`): the tab the reader last chose on this manuscript,
+- **Which tab opens** (`blau_panel.pick_tab`): the tab the reader last chose on the page (it holds
+  across the manuscripts opened from it; a new visit starts afresh),
   while it has something for the word; else the first that has (Blau's, if it does); else the
   reader's. A tab the panel chose by itself is not remembered as the reader's.
 - **The panel appears when either dictionary is served.** Each lookup asks each service again (the
