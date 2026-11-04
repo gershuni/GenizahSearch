@@ -95,9 +95,10 @@ def test_nothing_for_an_abbreviation_a_word_with_no_reading_or_no_letters(sideca
 
 def test_one_word_survives_its_dot_marks_and_niqqud():
     from shared.arabic_service import one_ja_word
-    for word in ("דלך", "ד'לך", "ד׳לך", "ד̇לך", "דָלִךְ", "ר'"):
+    for word in ("דלך", "ד'לך", "ד׳לך", "ד̇לך", "ד‘לך", "ד’לך", "ד[ל]ך", "דָלִךְ",
+                 "מוּסא", "מוּסא", "ר'"):
         assert one_ja_word(word), word
-    for word in ("ד לך", "ד־לך", "ד-לך", "abc", ""):
+    for word in ("ד לך", "ד־לך", "ד-לך", "דלך كتاب", "abc", ""):
         assert not one_ja_word(word), word
 
 

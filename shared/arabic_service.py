@@ -59,6 +59,7 @@ from shared.arabic_normalize import (
     skeleton,
     strip_harakat,
 )
+from shared.blau_normalize import BRACKETS, QUOTE_MARKS
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -171,16 +172,20 @@ class LaneLookup:
         return self.readings[0] if self.readings else None
 
 
-#: Marks written inside one Judeo-Arabic word: the dot above as an apostrophe, a geresh or quote
-#: marks (the combining dot and niqqud are dropped as nonspacing marks).
-_IN_WORD_MARKS = frozenset("'׳״\"’")
+#: Marks written inside one Judeo-Arabic word: the quote marks ``ja_letters`` reads as the dot,
+#: and the editorial brackets of a restored letter (ד[ל]ך). Nonspacing marks (the combining dot,
+#: niqqud) are dropped too.
+_IN_WORD_MARKS = QUOTE_MARKS | BRACKETS
 
 
 def one_ja_word(word: str) -> bool:
-    """The Hebrew letters of ``word`` form ONE word: with the in-word marks dropped, a single run of
-    letters. A space, a maqaf (כל־מה) or a hyphen between letters makes two, which ``ja_letters``
-    would otherwise read as one (كلمة)."""
-    kept = "".join(ch for ch in word if ch not in _IN_WORD_MARKS and unicodedata.category(ch) != "Mn")
+    """``word`` is ONE Judeo-Arabic word: no space at all, and, NFC-normalized as ``ja_letters``
+    reads it, with the in-word marks dropped, a single run of Hebrew letters. A space, a maqaf
+    (כל־מה) or a hyphen between letters makes two, which ``ja_letters`` would read as one (كلمة)."""
+    if len(word.split()) != 1:
+        return False
+    text = unicodedata.normalize("NFC", word)
+    kept = "".join(ch for ch in text if ch not in _IN_WORD_MARKS and unicodedata.category(ch) != "Mn")
     return len(re.findall("[א-ת]+", kept)) == 1
 
 
