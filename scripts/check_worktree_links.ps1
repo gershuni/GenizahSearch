@@ -11,11 +11,12 @@
     checkout's nli_data\ and fgp_data\. This script is the check scripts/init.ps1 runs
     at every session start and the cleanup step must run before any forced removal.
 
-    It scans each folder given (default: the current folder when it is a linked
-    worktree, otherwise every folder under <repo>\.claude\worktrees\) at its top level
-    and one level down, never descending INTO a reparse point, and prints one line per
-    finding: the path, its kind and its target. Exit code 1 when any is found, 0 when
-    none. It changes nothing.
+    It walks each folder given (default: the current folder when it is a linked
+    worktree, otherwise every folder under <repo>\.claude\worktrees\) to any depth,
+    never stepping INTO a reparse point, and prints one line per finding: the path,
+    its kind and its target. Exit code 1 when any is found, 0 when none. It changes
+    nothing. (Codex, round 1 of the PR: a junction two levels down was missed by the
+    first version, which looked one level down only, and rm -rf walks at any depth.)
 
     Remove a junction with `cmd /c rmdir <path>` (no /S): that deletes the link and
     leaves its target alone. Never Remove-Item -Recurse, rm -rf or git worktree remove
@@ -40,16 +41,26 @@ function Test-LinkedWorktree([string]$Folder) {
 }
 
 function Get-ReparsePoints([string]$Root) {
+    # Every ordinary directory under $Root, to any depth, by an explicit stack: a reparse
+    # point is RECORDED and never entered (listing a junction's target is the walk this
+    # script exists to prevent), and Get-ChildItem -Recurse is not used because Windows
+    # PowerShell 5.1 follows junctions when it recurses.
     $found = @()
-    $found += @(Get-ChildItem -LiteralPath $Root -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
-    # One level down, but never INTO a reparse point: listing a junction's target is the
-    # walk this script exists to prevent.
-    $subdirs = @(Get-ChildItem -LiteralPath $Root -Force -Directory -ErrorAction SilentlyContinue |
-                 Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) })
-    foreach ($d in $subdirs) {
-        $found += @(Get-ChildItem -LiteralPath $d.FullName -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+    $stack = New-Object System.Collections.Stack
+    $stack.Push((Get-Item -LiteralPath $Root -Force))
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        $entries = @()
+        try { $entries = @($dir.GetFileSystemInfos()) } catch { continue }
+        foreach ($e in $entries) {
+            if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                $found += $e
+            } elseif ($e.Attributes -band [IO.FileAttributes]::Directory) {
+                $stack.Push($e)
+            }
+        }
     }
-    return $found
+    return @($found | Sort-Object FullName)
 }
 
 if (-not $Path) {

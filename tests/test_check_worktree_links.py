@@ -6,10 +6,11 @@ checkout's gitignored data folders, and `git worktree remove --force` followed b
 `rm -rf` walked them and emptied C:\\GenizahSearch\\nli_data and fgp_data
 (docs/open_issues.d/2026-11-04-worktree-junctions-emptied-main-data.md). The scanner is
 what scripts/init.ps1 runs at every session start and what the cleanup step runs before
-a forced removal, so it must be shown able to fail: a junction at the top level and one
-a level down are both named with their target and the exit code is 1; a clean folder
-exits 0; and the scan itself changes nothing (the links stay until `rmdir` removes them,
-and the target's file survives both the scan and the `rmdir`).
+a forced removal, so it must be shown able to fail: junctions at the top level, one
+level down and two levels down are all named with their target and the exit code is 1
+(Codex, PR round 1: the first version looked one level down only, and `rm -rf` walks at
+any depth); a clean folder exits 0; and the scan itself changes nothing (the links stay
+until `rmdir` removes them, and the target's file survives both the scan and the `rmdir`).
 
 Windows only: junctions and `cmd /c mklink /J` exist nowhere else. The CI matrix has a
 windows-latest lane, so this runs there for real rather than skipping everywhere.
@@ -53,6 +54,7 @@ def worktree(tmp_path: Path) -> Path:
     (wt / ".git").write_text("gitdir: elsewhere\n")   # a linked worktree's .git is a file
     (wt / "shared").mkdir()
     (wt / "shared" / "module.py").write_text("")
+    (wt / "shared" / "cache").mkdir()
     return wt
 
 
@@ -70,27 +72,29 @@ def test_a_clean_worktree_exits_0(worktree: Path) -> None:
     assert "no reparse points" in r.stdout
 
 
-def test_junctions_at_the_top_and_one_level_down_are_named_with_their_target(
+def test_junctions_at_every_depth_are_named_with_their_target(
         worktree: Path, main_data: Path) -> None:
-    top = worktree / "nli_data"
-    deep = worktree / "shared" / "fgp_data"
-    _junction(top, main_data)
-    _junction(deep, main_data)
+    links = [worktree / "nli_data",                        # top level
+             worktree / "shared" / "fgp_data",             # one level down
+             worktree / "shared" / "cache" / "data_link"]  # two levels down
+    for link in links:
+        _junction(link, main_data)
     try:
         r = _scan(worktree)
         assert r.returncode == 1, r.stdout + r.stderr
-        assert str(top) in r.stdout and str(deep) in r.stdout, r.stdout
-        assert r.stdout.count(str(main_data)) >= 2, r.stdout
+        for link in links:
+            assert str(link) in r.stdout, r.stdout
+        assert r.stdout.count(str(main_data)) >= len(links), r.stdout
         assert "Junction" in r.stdout, r.stdout
         assert "rmdir" in r.stdout and "--force" in r.stdout, r.stdout
         # The scan changed nothing.
-        assert top.exists() and deep.exists()
+        assert all(link.exists() for link in links)
         assert (main_data / "sidecar.db").read_bytes() == b"keep me"
     finally:
-        _rmdir(top)
-        _rmdir(deep)
+        for link in links:
+            _rmdir(link)
     # rmdir took the links and left the target alone; the folder is clean again.
-    assert not top.exists() and not deep.exists()
+    assert not any(link.exists() for link in links)
     assert (main_data / "sidecar.db").read_bytes() == b"keep me"
     assert _scan(worktree).returncode == 0
 

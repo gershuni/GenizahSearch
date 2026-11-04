@@ -25,8 +25,8 @@ inventory gates (`docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md`), an owner decisi
 What the 2026-11-04 change adds, and what it does not. The rule in `CLAUDE.md` ("How to work
 here": a worktree never links to the main checkout's data; copy a sidecar under
 `%LOCALAPPDATA%\GenizahSearchPro\data\<dir>\` or set `GENIZAH_FJMS_DB_PATH`),
-`scripts/check_worktree_links.ps1` (names every reparse point at a worktree's top level and one
-level down, exit 1) and `scripts/init.ps1` running it in every worktree and, from the main
+`scripts/check_worktree_links.ps1` (names every reparse point anywhere under a worktree, never
+stepping into one, exit 1) and `scripts/init.ps1` running it in every worktree and, from the main
 checkout, over `.claude/worktrees/*`. Nothing BLOCKS `git worktree remove --force` or `rm -rf` on a
 worktree that still holds a junction: the guard is advisory, and a session that skips `init.ps1`
 sees no warning. Closing this row = a removal path that refuses while a reparse point exists
