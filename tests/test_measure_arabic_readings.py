@@ -10,11 +10,16 @@ from __future__ import annotations
 
 from collections import Counter
 
+import pytest
+
 from scripts.measure_arabic_readings import (
     GATE,
     form_roots,
     gate,
+    iter_pages,
+    DEV_DOCUMENTS_FILE,
     lane_attribute,
+    load_dev_documents,
     plural_alif_dropped,
     rank_readings,
     strip_roots,
@@ -28,6 +33,24 @@ def test_p2_compares_a_plural_alif_reading_letter_for_letter_with_the_page():
     assert plural_alif_dropped("حضروا", page) == "حضرو"
     assert plural_alif_dropped("حضرو", page) == "حضرو"
     assert plural_alif_dropped("حضرا", ja_letters("חצ'רא")) == "حضرا", "only after a final ו"
+
+
+def test_the_development_documents_are_pinned_not_drawn(tmp_path):
+    """A later seed or a newer pgp.db must not re-admit the documents the method was shaped on."""
+    dev = load_dev_documents(str(DEV_DOCUMENTS_FILE))
+    assert len(dev) == 300 and all(isinstance(i, int) for i in dev)
+    empty = tmp_path / "dev.json"
+    empty.write_text('{"pgpids": []}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_dev_documents(str(empty))
+
+
+def test_pages_of_one_manuscript_keep_their_own_headers(tmp_path):
+    """The grading rows name the page, not only the manuscript: 990001_1 and 990001_2 differ."""
+    text = tmp_path / "t.txt"
+    text.write_text("==> 990001_1 <==\nאלף\n==> 990001_2 <==\nבית\n==> 990002_1 <==\nגימל\n", encoding="utf-8")
+    pages = list(iter_pages(str(text), {"990001"}))
+    assert [(s, h) for s, h, _ in pages] == [("990001", "990001_1"), ("990001", "990001_2")]
 
 
 def test_lane_attributes_are_decoded_before_buckwalter():

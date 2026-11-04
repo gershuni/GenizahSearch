@@ -19,6 +19,7 @@ import pytest
 
 import scripts.build_arabic_sidecar as build
 import scripts.verify_arabic_sidecar as gate
+from shared.arabic_normalize import root_key
 
 SHARDS = 4
 #: A made-up OpenITI metadata table: two texts D7 selects, one too late and one dictionary.
@@ -41,6 +42,9 @@ ENTRIES = [
     ("lane:t:6", "أَخَذَ", "أخذ", "6"),
     ("lane:t:7", "عَلَى", "علو", "7"),
     ("lane:t:8", "مَا كَانَ", "كون", "8"),
+    # Headings that join spellings: one root written two ways, and two roots (filed under the first).
+    ("lane:t:9", "سَعَى", "سعو & سعى", "9"),
+    ("lane:t:10", "ثَنْدَأ", "ثند & ثندأ", "10"),
 ]
 
 
@@ -129,8 +133,26 @@ def test_the_build_writes_every_table_and_the_gate_passes_it(tmp_path, small):
         assert con.execute("SELECT count FROM freq WHERE skeleton = 'ذلك'").fetchone()[0] == 4
         assert con.execute("SELECT COUNT(*) FROM freq WHERE skeleton = 'دلك'").fetchone()[0] == 0, "count 1 dropped"
         assert con.execute("SELECT entry_id FROM closed_class WHERE skeleton = 'لنا'").fetchone()[0] == "lane:t:4"
+        # A joined heading files under its root, never under the letters run together.
+        assert con.execute("SELECT root_key FROM lane_entries WHERE id = 'lane:t:9'").fetchone()[0] == root_key("سعو")
+        assert json.loads(con.execute("SELECT names_json FROM lane_roots WHERE root_key = ?",
+                                      (root_key("سعو"),)).fetchone()[0]) == ["سعو", "سعى"]
+        assert con.execute("SELECT root, root_key FROM lane_entries WHERE id = 'lane:t:10'").fetchone() == \
+            ("ثند & ثندأ", "ثند"), "the heading is kept whole"
+        assert meta["lane_entries_heading_names_two_roots"] == "1"
     finally:
         con.close()
+
+
+def test_root_spellings_split_a_joined_heading_and_keep_a_plain_one():
+    assert build.root_spellings("سعو & سعى") == ["سعو", "سعى"]
+    assert build.root_spellings("غو | غوى") == ["غو", "غوى"]
+    assert build.root_spellings("(دمو or دمى)") == ["دمو", "دمى"]
+    assert build.root_spellings("جبو & جبى [The words of the former are few.]") == ["جبو", "جبى"]
+    assert build.root_spellings("سفر جل") == ["سفرجل"], "one word written with a space"
+    assert build.root_spellings("كَتَبَ") == ["كتب"]
+    assert build.heading_root_key("ثند & ثندأ") == ("ثند", ["ثند"])
+    assert build.heading_root_key("[a note]") == ("", [])
 
 
 def test_a_file_that_differs_from_its_pin_is_refused(tmp_path, small):
@@ -185,6 +207,8 @@ def _mutate(db: Path, sql: str) -> None:
     ("UPDATE closed_class SET skeleton = 'لكم' WHERE form = 'لنا'", "closed_class keys differ"),
     ("UPDATE freq SET count = count + 1 WHERE skeleton = 'ذلك'", "does not add up to meta.freq_tokens"),
     ("UPDATE meta SET value = '1' WHERE key = 'freq_texts'", "selected"),
+    ("UPDATE lane_roots SET names_json = '[\"كتب\", \"(كتب)\"]' WHERE name = 'كتب'", "not plain letters"),
+    ("UPDATE lane_entries SET root_key = 'سعWسعW' WHERE id = 'lane:t:9'", "root_key differs"),
 ])
 def test_the_gate_fails_each_mutation(tmp_path, small, sql, expect):
     assert run_build(tmp_path) == build.EXIT_OK
@@ -236,6 +260,42 @@ def test_unavailable_texts_are_recorded_and_capped(tmp_path, small, capsys, monk
     assert (meta["freq_texts"], meta["freq_texts_unavailable"], meta["freq_texts_selected"]) == ("1", "1", "2")
     monkeypatch.setattr(gate, "MAX_UNAVAILABLE_SHARE", 0.005)
     assert any("freq_texts_unavailable" in p for p in gate.verify(str(db), len(ENTRIES)))
+
+
+def test_the_gate_fails_a_form_table_rebuilt_without_its_foreign_keys(tmp_path, small):
+    """Without REFERENCES, foreign_key_check has nothing to check and an inner join drops the row."""
+    assert run_build(tmp_path) == build.EXIT_OK
+    db = tmp_path / "arabic.db"
+    con = sqlite3.connect(db)
+    con.executescript("""
+        ALTER TABLE lane_forms RENAME TO old_forms;
+        CREATE TABLE lane_forms (skeleton TEXT NOT NULL, root_key TEXT NOT NULL, entry_id TEXT NOT NULL,
+                                 PRIMARY KEY (skeleton, entry_id));
+        INSERT INTO lane_forms SELECT * FROM old_forms;
+        DROP TABLE old_forms;
+        CREATE INDEX idx_lane_forms_skeleton ON lane_forms(skeleton);
+        UPDATE lane_forms SET entry_id = 'lane:none' WHERE entry_id = 'lane:t:2';
+    """)
+    con.commit()
+    con.close()
+    problems = gate.verify(str(db), len(ENTRIES))
+    assert any("foreign keys" in p for p in problems), problems
+
+
+def test_the_gate_fails_a_form_that_points_at_no_entry(tmp_path, small):
+    assert run_build(tmp_path) == build.EXIT_OK
+    db = tmp_path / "arabic.db"
+    _mutate(db, "UPDATE lane_forms SET entry_id = 'lane:none' WHERE entry_id = 'lane:t:2'")
+    assert any("point at no entry" in p for p in gate.verify(str(db), len(ENTRIES)))
+
+
+def test_two_identifiers_cannot_share_one_file(tmp_path, small, capsys):
+    """Text b's row given text a's file: a would be counted twice and b never."""
+    source = make_source(tmp_path / "src")
+    manifest = json.loads((source / "openiti" / "manifest.json").read_text(encoding="utf-8"))
+    manifest["texts"][1].update(path=manifest["texts"][0]["path"], sha256=manifest["texts"][0]["sha256"])
+    _write(source / "openiti" / "manifest.json", manifest)
+    _refused(tmp_path, capsys, source, "names the file")
 
 
 def test_the_repository_closed_class_table_is_well_formed():

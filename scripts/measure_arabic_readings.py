@@ -64,6 +64,7 @@ method is stdlib only.
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
 import difflib
 import glob
@@ -572,6 +573,19 @@ def aligned_pairs(page: list[str], edition: list[str], min_coverage: float) -> O
 EXAMPLES = ("דלך", "ד'לך", "ודלך", "אבו", "לנא", "אלדי", "גיר", "כאן", "תם", "אכד", "אלכתאב", "קאל", "פי", "מן",
             "עלי", "אלי", "שי", "איצא", "הדא", "דאלך", "צרב")
 
+#: The 300 documents the methods were shaped on (plan, section 6.2), pinned.
+DEV_DOCUMENTS_FILE = REPO / "scripts" / "arabic_layer_dev_documents.json"
+
+
+def load_dev_documents(path: str) -> set[int]:
+    """The pinned development documents (PGP ids); a missing or empty list is an error, never
+    an empty set that would score them."""
+    ids = json.loads(Path(path).read_text(encoding="utf-8")).get("pgpids") or []
+    if not ids:
+        raise ValueError(f"{path}: no development documents")
+    return {int(i) for i in ids}
+
+
 #: Fixed before the first full run (2026-11-04); see the plan, §6.
 GATE = {"G1_p2_dot_agreement_min": 0.80, "G2_p1_right_margin_over_plain_min": 0.05, "G3_p1_wrong_max": 0.30}
 MAX_SHOWN = 3
@@ -647,9 +661,12 @@ def run(args: argparse.Namespace) -> dict:
         layer.min_count = args.min_count
     key_roots, clean_root = load_blau(args.blau_db)
     editions, by_sys = load_editions(args.pgp_db)
-    # The development documents: the seeded sample the method was tuned on (the
-    # same draw as --limit-docs with the same seed). Never scored unless asked.
-    dev = set(random.Random(args.seed).sample(sorted(editions), min(args.dev_docs, len(editions))))
+    # The development documents the method was shaped on, pinned (a later seed or a newer
+    # pgp.db must not re-admit them). Never scored unless asked.
+    dev = load_dev_documents(args.dev_file)
+    if args.only_dev:
+        by_sys = {s: {p for p in ps if p in dev} for s, ps in by_sys.items()}
+        by_sys = {s: ps for s, ps in by_sys.items() if ps}
     if args.limit_docs:
         keep = set(random.Random(args.seed).sample(sorted(editions), min(args.limit_docs, len(editions))))
         by_sys = {s: {p for p in ps if p in keep} for s, ps in by_sys.items()}
@@ -677,13 +694,13 @@ def run(args: argparse.Namespace) -> dict:
     p2 = {r: Counter() for r in RANKINGS}
     p3 = Counter()
     p3_words: Counter = Counter()
-    p3_context: dict[str, str] = {}
+    p3_context: dict[str, list[tuple[str, str, str]]] = defaultdict(list)  # word -> (context, sys_id, page)
     p1_seen: Counter = Counter()
     p2_seen: Counter = Counter()
     samples: dict[str, list] = {"p1_wrong": [], "p2_wrong": [], "p2_none": [], "p3_no_reading": []}
     pages_seen = pages_used = pairs_total = 0
     dev_pages = 0
-    for sys_id, _header, text in iter_pages(args.transcriptions, set(by_sys)):
+    for sys_id, header, text in iter_pages(args.transcriptions, set(by_sys)):
         page = raw_words(text)
         if len(page) < args.min_words:
             continue
@@ -695,7 +712,7 @@ def run(args: argparse.Namespace) -> dict:
                 best, best_doc = pairs, pgpid
         if best is None:
             continue
-        if best_doc in dev and not args.score_dev:
+        if best_doc in dev and not (args.score_dev or args.only_dev):
             dev_pages += 1
             continue
         pages_used += 1
@@ -750,7 +767,7 @@ def run(args: argparse.Namespace) -> dict:
                 if not ranked:
                     keep_sample("p3_no_reading", {"word": auto_raw})
                 p3_words[auto_raw] += 1
-                p3_context.setdefault(auto_raw, " ".join(page[max(0, i - 4):i + 5]))
+                p3_context[auto_raw].append((" ".join(page[max(0, i - 4):i + 5]), sys_id, header))
                 continue
             if len(hits) != 1:
                 p1_seen["several_blau_roots"] += 1
@@ -782,7 +799,8 @@ def run(args: argparse.Namespace) -> dict:
     result = {
         "inputs": {k: getattr(args, k) for k in ("blau_db", "pgp_db", "transcriptions", "sources", "root_method",
                                                  "ranking", "min_coverage", "min_words", "limit_docs", "seed",
-                                                 "dev_docs", "score_dev", "method_version", "frequency_extra",
+                                                 "dev_file", "score_dev", "only_dev", "method_version",
+                                                 "frequency_extra",
                                                  "sidecar")},
         "lane_root_keys": len(lane), "lisan_root_keys": len(lisan), "root_keys_either": len(roots),
         "root_keys_both": len(set(lane) & set(lisan)),
@@ -797,13 +815,18 @@ def run(args: argparse.Namespace) -> dict:
         "seconds": round(time.monotonic() - started, 1),
     }
     if args.grading_sample:
+        # Occurrences, not spellings: the draw is the one over every occurrence (sorted by word, so
+        # the same words as before), and each row carries ITS occurrence's context and page.
         rng = random.Random(args.seed)
         population = sorted(p3_words.elements())
-        chosen = rng.sample(population, min(args.grading_sample, len(population)))
+        chosen = rng.sample(range(len(population)), min(args.grading_sample, len(population)))
         rows = []
-        for word in chosen:
+        for index in chosen:
+            word = population[index]
+            context, page_sys_id, page_header = p3_context[word][index - bisect.bisect_left(population, word)]
             ranked, found = layers["frequency"].lookup(word)
-            rows.append({"word": word, "context": p3_context.get(word, ""), "readings": " | ".join(f"{surface.get(r, r)} ({c})" for r, c in ranked),
+            rows.append({"word": word, "context": context, "sys_id": page_sys_id, "page": page_header,
+                         "readings": " | ".join(f"{surface.get(r, r)} ({c})" for r, c in ranked),
                          "root": found[0] if found else "", "lane": " ".join(lane.get(found[0], [])) if found else "",
                          "lisan": " ".join(lisan.get(found[0], [])) if found else "", "grade": ""})
         result["grading_sample"] = rows
@@ -949,9 +972,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     m.add_argument("--min-words", type=int, default=15)
     m.add_argument("--limit-docs", type=int, default=0, help="a seeded sample of documents (0 = all)")
     m.add_argument("--seed", type=int, default=20261104)
-    m.add_argument("--dev-docs", type=int, default=300,
-                   help="the seeded documents the method was tuned on; not scored (see --score-dev)")
+    m.add_argument("--dev-file", default=str(DEV_DOCUMENTS_FILE),
+                   help="the pinned documents the method was shaped on; not scored (see --score-dev)")
     m.add_argument("--score-dev", action="store_true", help="score the development documents too")
+    m.add_argument("--only-dev", action="store_true", help="score the development documents only")
     m.add_argument("--samples", type=int, default=15)
     m.add_argument("--grading-sample", type=int, default=0, help="P3 words to write for a person to grade")
     m.add_argument("--out", default="")

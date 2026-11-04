@@ -51,6 +51,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -241,24 +242,57 @@ def _first_page(pages: list[str]) -> Optional[int]:
     return None
 
 
+#: Where a Lane root heading joins spellings: "سعو & سعى", "غو | غوى", "(دمو or دمى)".
+_HEADING_SEPARATORS = re.compile(r"&|\||\bor\b|,|،")
+
+
+def root_spellings(heading: str) -> list[str]:
+    """The root spellings a Lane heading names, unvowelled, in the order written. A heading may
+    join several ("سعو & سعى"), carry an English note in brackets, or split one word with a space
+    ("سفر جل" is سفرجل): the note and the parentheses are dropped, the heading is split at
+    ``_HEADING_SEPARATORS``, and the letters of each part are joined."""
+    text = re.sub(r"\[[^\]]*\]", " ", strip_harakat(heading))
+    out: list[str] = []
+    for part in _HEADING_SEPARATORS.split(text):
+        letters = "".join(re.findall("[ء-ي]+", part))
+        if letters and letters not in out:
+            out.append(letters)
+    return out
+
+
+def heading_root_key(heading: str) -> tuple[str, list[str]]:
+    """(the key an entry is filed under, the heading's spellings that share it). The key is the
+    first spelling's; "سعو & سعى" is one root (سعW), "ثند & ثندأ" names two and files under the
+    first. A heading with no Arabic letter gives ("", [])."""
+    spellings = root_spellings(heading)
+    if not spellings:
+        return "", []
+    key = root_key(spellings[0])
+    return key, [s for s in spellings if root_key(s) == key]
+
+
 def lane_tables(entries: list[dict]) -> tuple[list[tuple], list[tuple], list[tuple], dict]:
     """(roots, entries, forms) rows and facts. An entry the source gives no root is left out and
-    counted (``lane_entries_without_root``); a root with no Arabic letter is a source error."""
+    counted (``lane_entries_without_root``); a root with no Arabic letter is a source error. A
+    heading that names spellings of two roots files under the first, the heading kept whole in
+    ``lane_entries.root`` and counted (``lane_entries_heading_names_two_roots``)."""
     by_key: dict[str, dict] = {}
     entry_rows, form_rows = [], []
-    multiword = rootless = 0
+    multiword = rootless = two_roots = 0
     for e in entries:
         if e["root"] is None:
             rootless += 1
             continue
-        key = root_key(strip_harakat(e["root"]))
+        key, names = heading_root_key(e["root"])
         if not key:
             raise SourceError(f"{e['id']}: the root {e['root']!r} has no Arabic letter")
+        if len(names) < len(root_spellings(e["root"])):
+            two_roots += 1
         page = _first_page(e["pages"])
         slot = by_key.setdefault(key, {"names": [], "ordinal": e["ordinal"], "n": 0, "page": page})
-        name = strip_harakat(e["root"])
-        if name not in slot["names"]:
-            slot["names"].append(name)
+        for name in names:
+            if name not in slot["names"]:
+                slot["names"].append(name)
         slot["n"] += 1
         entry_rows.append((e["id"], key, e["root"], e["ordinal"], e["headword"], page, json.dumps(e["pages"]),
                            e["text"]))
@@ -274,6 +308,7 @@ def lane_tables(entries: list[dict]) -> tuple[list[tuple], list[tuple], list[tup
     form_rows = sorted(set(form_rows))
     return root_rows, entry_rows, form_rows, {"lane_headwords_not_one_word": str(multiword),
                                               "lane_entries_without_root": str(rootless),
+                                              "lane_entries_heading_names_two_roots": str(two_roots),
                                               "lane_entries_in_source": str(len(entries))}
 
 
@@ -323,6 +358,15 @@ def _count_file(path: str) -> tuple[Counter, dict[str, Counter]]:
     return counts, dict(spelled)
 
 
+#: The suffixes an OpenITI text may carry in its repository, in the order ``fetch`` tries them.
+OPENITI_EXTENSIONS = (".mARkdown", ".completed", ".inProgress", "")
+
+
+def openiti_local_name(repo_path: str) -> str:
+    """The file name ``fetch`` stores a text under, from its path in the repository."""
+    return os.path.basename(repo_path).replace(".", "_") + ".txt"
+
+
 def check_selection(openiti_dir: Path, manifest: dict) -> dict:
     """The manifest against D7's selection from the pinned metadata table: every selected text is
     counted or listed as unavailable, nothing outside it is counted, none twice, and few are
@@ -330,8 +374,18 @@ def check_selection(openiti_dir: Path, manifest: dict) -> dict:
     metadata = openiti_dir / "metadata.tsv"
     if not metadata.is_file() or sha256_of(metadata) != OPENITI_METADATA_SHA256:
         raise SourceError(f"missing, or differs from the pinned release: {metadata}")
-    selected = {r["version_uri"] for r in select_openiti(metadata)}
+    local_paths = {r["version_uri"]: r["local_path"] for r in select_openiti(metadata)}
+    selected = set(local_paths)
     counted = [str(t.get("version_uri", "")) for t in manifest.get("texts") or []]
+    # Each counted text is the file its own metadata row names, so two identifiers cannot share one.
+    for t in manifest.get("texts") or []:
+        base = local_paths.get(str(t.get("version_uri", "")))
+        if base is not None and str(t.get("path", "")) not in {base + ext for ext in OPENITI_EXTENSIONS}:
+            raise SourceError(f"openiti/manifest.json: {t.get('version_uri')} names the file {t.get('path')!r}, "
+                              f"not its own ({base})")
+    local_files = [openiti_local_name(str(t.get("path", ""))) for t in manifest.get("texts") or []]
+    if len(local_files) != len(set(local_files)):
+        raise SourceError("openiti/manifest.json names one file twice")
     unavailable = [str(u) for u in manifest.get("unavailable") or []]
     listed = counted + unavailable
     if len(listed) != len(set(listed)):
@@ -362,7 +416,7 @@ def read_openiti(openiti_dir: Path, workers: int) -> tuple[list[tuple], dict]:
     selection = check_selection(openiti_dir, manifest)
     paths = []
     for t in texts:
-        path = openiti_dir / (os.path.basename(str(t["path"])).replace(".", "_") + ".txt")
+        path = openiti_dir / openiti_local_name(str(t["path"]))
         if not path.is_file() or sha256_of(path) != t.get("sha256"):
             raise SourceError(f"missing, or sha256 differs from the manifest: {path}")
         paths.append(str(path))
@@ -610,14 +664,13 @@ def fetch(dest: str) -> int:
                 trees[repo] = set(_gh(f"repos/OpenITI/{repo}/git/trees/{commits[repo]}?recursive=1",
                                       ".tree[].path").split("\n"))
             base = row["local_path"]
-            found = [p for p in (base + ".mARkdown", base + ".completed", base + ".inProgress", base)
-                     if p in trees[repo]]
+            found = [base + ext for ext in OPENITI_EXTENSIONS if base + ext in trees[repo]]
             if not found:
                 print(f"not in its repository: {base}")
                 unavailable.append(row["version_uri"])
                 continue
             data = _get(f"https://raw.githubusercontent.com/OpenITI/{repo}/{commits[repo]}/{found[0]}")
-            (root / "openiti" / (os.path.basename(found[0]).replace(".", "_") + ".txt")).write_bytes(data)
+            (root / "openiti" / openiti_local_name(found[0])).write_bytes(data)
             texts.append({"version_uri": row["version_uri"], "date": row["date"], "repo": repo,
                           "commit": commits[repo], "path": found[0], "bytes": len(data),
                           "sha256": sha256_bytes(data)})

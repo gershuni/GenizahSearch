@@ -254,6 +254,13 @@ The reading itself was right for 35 of the 36 Arabic words v1 showed (the one mi
 ranked عني first). **Ranking is not the weak step; the root is**, and v3's gain on Arabic words is
 paid for on Hebrew words (§9).
 
+**Corrected in rev. 4** (local Codex review): until then each sampled row showed the context of the
+first occurrence of its spelling, not of the occurrence drawn. The draw is unchanged (the same 200
+words in the same order, the same roots shown), but 164 of the 200 rows now show another context,
+47 of the 60 graded above. Those 60 grades were read from the old contexts and stay provisional.
+Each row now also names its page (`page`, the transcription header), and the owner's grading
+must use a file written by rev. 4 or later.
+
 ---
 
 ## 6. The gate
@@ -283,7 +290,9 @@ matching runs), 388,317 aligned word pairs. Three populations, each with its own
 30%. The script exits 1 when any fails.
 
 The methods were shaped on 300 seeded development documents (282 pages), which are never scored
-(`--dev-docs`). **Disclosed:** v1's last two rules (the future marker سـ only before an imperfect
+unless asked (`--score-dev`, or `--only-dev` for them alone). Since rev. 4 they are pinned in
+`scripts/arabic_layer_dev_documents.json`, so a later seed or a newer `pgp.db` cannot re-admit
+them (local Codex review). **Disclosed:** v1's last two rules (the future marker سـ only before an imperfect
 verb; P2 leaving out words with a mark after a letter that takes no dot) came after reading the
 first 15 P1 and 15 P2 errors of one run over all documents, before the split existed. Methods v2
 and v3 were added after reading seeded samples of the scored data's errors (the 40 P1 cases of
@@ -368,14 +377,20 @@ XML would have had to do. His Lane is quranic-research/lexicon_xml (2019), a res
 cleaned, senses marked) of the laneslexicon master files, so it is the text D2 chose. His manifest
 carries the Perseus credit line and availability statement; the build checks both against the TEI
 header's wording and fails on a difference. His source gives no root on 35 of 47,890 entries (the
-roots شأم, أدر, حرث); they are left out, counted and pinned in `meta`, not guessed.
+roots شأم, أدر, حرث); they are left out, counted and pinned in `meta`, not guessed. 66 root
+headings join spellings (`سعو & سعى`, `غو | غوى`, `(دمو or دمى)`, one with an English note), 696
+entries in all; until rev. 4 each was keyed as its letters run together (`سعWسعW`), a root no
+reading could reach (local Codex review). Each is now split into its spellings and filed under the
+first one's root; 57 headings spell one root two ways, and 9 (11 entries, rare loanwords such as
+`ثند & ثندأ`) name two roots and file under the first, the heading kept whole in
+`lane_entries.root`.
 
 **The tables** (`scripts/build_arabic_sidecar.py`, schema 1.0.0, 73.7 MB, two minutes on 12
 workers):
 
 | Table | Rows | What |
 |---|---|---|
-| `lane_roots` | 4,621 | one per root key, with Lane's spellings of it |
+| `lane_roots` | 4,619 | one per root key, with Lane's spellings of it (a heading that joins spellings, `سعو & سعى`, is split into them) |
 | `lane_entries` | 47,855 | every article: headword, root, printed page, text |
 | `lane_forms` | 42,351 | the one-word headwords by skeleton: the form-to-root table of method v3 (5,470 headwords of several words are not forms) |
 | `freq` | 808,441 | skeleton, count, commonest spelling, at 2 or more: 247,037,983 tokens of 2,816 OpenITI texts (D7's selection is 2,819; three are listed in the release metadata but absent from their repositories), 1,325,038 distinct skeletons |
@@ -386,14 +401,15 @@ script, the numbers unchanged on the development documents); `NORMALIZER_VERSION
 `meta`.
 
 **The gate** (`scripts/verify_arabic_sidecar.py --db arabic_data/arabic.db --expect-entries
-47890`): integrity, schema against the builder's DDL, every `rows_<table>` against its table, the
+47890`): integrity, schema (columns, foreign keys, indexes) against the builder's DDL, no form
+pointing at no entry, every root spelling plain letters, every `rows_<table>` against its table, the
 source's count (stored plus rootless), floors on every table and on the tokens counted, the stored
 counts summing to the tokens counted (each type left out was counted once), the texts counted plus
 those unavailable equal to D7's selection, every root key, headword skeleton, frequency key and
 closed-class key recomputed with the running normalizer, the Perseus credit line and availability
 statement intact, the lookup indexes used. The build itself recomputes D7's selection from the
 pinned release metadata and fails unless the manifest accounts for every selected text once
-(counted, or listed as unavailable, at most 0.5%). It passes the built file. **Proven to fail on the real file**: ten articles deleted ("meta.rows_lane_entries =
+(counted from its own file, or listed as unavailable, at most 0.5%). It passes the built file. **Proven to fail on the real file**: ten articles deleted ("meta.rows_lane_entries =
 '47855' but the table holds 47,845 rows", the count against the source, four roots' entry counts);
 one in a hundred form keys edited ("423 lane_forms keys differ from skeleton(headword)"); the
 credit line and a row count doctored ("meta.lane_credit is not the Perseus credit line",
@@ -407,12 +423,12 @@ the full count, scored documents):
 
 | Method | P1 right / wrong / none | P2 right / wrong / none (right of shown) | P3 reading / root | Gate |
 |---|---|---|---|---|
-| v1 | 77.8 / 18.2 / 4.0 | 85.2 / 8.1 / 6.7 (91.3) | 81.5 / 72.6 | PASS |
-| v3 | 81.0 / 18.0 / 1.0 | 87.9 / 9.1 / 3.0 (90.6) | 87.3 / 79.9 | PASS |
-| v4 (v3 + the closed-class table) | 81.0 / 18.0 / 1.0 | 87.9 / 9.1 / 3.0 (90.6) | 87.3 / 79.9 | PASS |
-| v4, reversed ranking | 57.0 / 37.6 / 5.4 | 35.9 / 61.2 / 3.0 | | FAIL G1, G2, G3 |
-| v4, plain letters only | 65.8 / 25.4 / 8.9 | 0.0 | | FAIL G1, G2 |
-| v4, every dottable letter dotted | 42.8 / 31.0 / 26.2 | 72.1 / 0.0 / 27.9 | | FAIL G1, G2, G3 |
+| v1 | 77.9 / 18.2 / 4.0 | 85.2 / 8.1 / 6.7 (91.3) | 81.5 / 72.8 | PASS |
+| v3 | 81.1 / 17.9 / 1.0 | 87.9 / 9.1 / 3.0 (90.6) | 87.3 / 80.0 | PASS |
+| v4 (v3 + the closed-class table) | 81.1 / 17.9 / 1.0 | 87.9 / 9.1 / 3.0 (90.6) | 87.3 / 80.0 | PASS |
+| v4, reversed ranking | 57.1 / 37.5 / 5.4 | 35.9 / 61.2 / 3.0 | | FAIL G1, G2, G3 |
+| v4, plain letters only | 65.9 / 25.3 / 8.8 | 0.0 | | FAIL G1, G2 |
+| v4, every dottable letter dotted | 42.9 / 30.9 / 26.2 | 72.1 / 0.0 / 27.9 | | FAIL G1, G2, G3 |
 
 The full count is what lifts v1's P2 over the line (78.7% with 15 million tokens, 85.2% with
 247 million): the method as first fixed now passes all three criteria on the built file. The
@@ -428,9 +444,9 @@ follows on the same 60 words and the same gate:
 
 | Offered at | Arabic words: root right / wrong / no card | Hebrew words and names given a card | P1 right / wrong | P2 right | Gate |
 |---|---|---|---|---|---|
-| 2 or more | 32 / 7 / 1 | 13 of 20 | 81.0 / 18.0 | 87.9 | PASS |
-| 20 or more | 33 / 6 / 1 | 7 of 20 | 80.8 / 17.7 | 86.5 | PASS |
-| 100 or more | 33 / 5 / 2 | 4 of 20 | 80.1 / 16.8 | 82.6 | PASS (79.6, FAIL G1, before the rev. 4 correction) |
+| 2 or more | 32 / 7 / 1 | 13 of 20 | 81.1 / 17.9 | 87.9 | PASS |
+| 20 or more | 33 / 6 / 1 | 7 of 20 | 80.9 / 17.6 | 86.5 | PASS |
+| 100 or more | 33 / 5 / 2 | 4 of 20 | 80.2 / 16.7 | 82.6 | PASS (79.6, FAIL G1, before the rev. 4 correction) |
 
 (The grading of these 60 is Claude's, from the page context, applied the same way to every run;
 the owner's grading of the 200 replaces it, D9.)

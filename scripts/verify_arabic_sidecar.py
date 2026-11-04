@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -34,6 +35,7 @@ from scripts.build_arabic_sidecar import (  # noqa: E402  -- the one schema defi
     PERSEUS_AVAILABILITY,
     PERSEUS_CREDIT,
     SCHEMA_VERSION,
+    heading_root_key,
 )
 from shared.arabic_normalize import NORMALIZER_VERSION, root_key, skeleton, strip_harakat  # noqa: E402
 
@@ -42,7 +44,9 @@ REQUIRED_META = ("version", "normalizer_version", "built_at", "builder_revision"
                  "lane_availability", "freq_source", "freq_doi", "freq_credit", "freq_texts", "freq_tokens",
                  "freq_manifest_sha256", "freq_min_stored", "closed_class_sha256", "lane_entries_in_source",
                  "lane_entries_without_root", "freq_types", "freq_texts_selected", "freq_texts_unavailable",
-                 "freq_metadata_sha256")
+                 "freq_metadata_sha256", "lane_entries_heading_names_two_roots")
+#: A root spelling as stored: Arabic letters only (no separator, note or space from the heading).
+ROOT_LETTERS = re.compile("[ء-ي]+")
 #: Floors a real build clears by far (47,890 entries, about 4,700 roots, over 100 million tokens);
 #: a truncated source or a half-written count trips them.
 MIN_ROOTS = 3000
@@ -58,13 +62,17 @@ def _schema(con: sqlite3.Connection) -> dict:
     for (name,) in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"):
         out[name] = [(r[1], (r[2] or "").upper(), r[3], r[5])
                      for r in con.execute("SELECT * FROM pragma_table_info(?)", (name,))]
+        # The foreign keys too: a table rebuilt without its REFERENCES leaves foreign_key_check nothing to check.
+        out[f"<fk {name}>"] = sorted((r[2], r[3], r[4]) for r in con.execute(
+            "SELECT * FROM pragma_foreign_key_list(?)", (name,)))
     out["<indexes>"] = sorted(r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"))
     return out
 
 
 def schema_problems(con: sqlite3.Connection) -> list[str]:
-    """Every table, column (name, type, NOT NULL, primary key) and index, compared with the DDL."""
+    """Every table, column (name, type, NOT NULL, primary key), foreign key and index, compared with
+    the DDL."""
     mem = sqlite3.connect(":memory:")
     try:
         mem.executescript(DDL)
@@ -74,13 +82,18 @@ def schema_problems(con: sqlite3.Connection) -> list[str]:
     have = _schema(con)
     problems = []
     for table, columns in want.items():
-        if table == "<indexes>":
+        if table == "<indexes>" or table.startswith("<fk "):
             continue
         if table not in have:
             problems.append(f"table {table} is missing")
-        elif have[table] != columns:
+            continue
+        if have[table] != columns:
             problems.append(f"table {table} does not match the schema: {have[table]} != {columns}")
-    problems += [f"table {t} is not part of the schema" for t in have if t != "<indexes>" and t not in want]
+        if have[f"<fk {table}>"] != want[f"<fk {table}>"]:
+            problems.append(f"table {table}'s foreign keys {have[f'<fk {table}>']} != expected "
+                            f"{want[f'<fk {table}>']}")
+    problems += [f"table {t} is not part of the schema" for t in have
+                 if t != "<indexes>" and not t.startswith("<fk ") and t not in want]
     if have["<indexes>"] != want["<indexes>"]:
         problems.append(f"indexes {have['<indexes>']} != expected {want['<indexes>']}")
     return problems
@@ -182,15 +195,15 @@ def verify(db: str, expect_entries: int, expect_version: Optional[str] = None) -
                 "SELECT root_key, name, names_json, num_entries FROM lane_roots"):
             names[key] = n_entries
             spellings = json.loads(names_json or "[]")
-            if name not in spellings or any(root_key(s) != key for s in spellings):
-                problems.append(f"lane_roots {key!r}: a spelling does not key to it")
+            if name not in spellings or any(root_key(s) != key or not ROOT_LETTERS.fullmatch(s) for s in spellings):
+                problems.append(f"lane_roots {key!r}: a spelling is not plain letters or does not key to it")
                 break
         per_root = dict(con.execute("SELECT root_key, COUNT(*) FROM lane_entries GROUP BY root_key").fetchall())
         if per_root != names:
             bad = sorted(k for k in set(per_root) | set(names) if per_root.get(k) != names.get(k))
             problems.append(f"{len(bad)} lane_roots whose num_entries differs from their entries (first {bad[0]!r})")
         wrong = con.execute("SELECT id, root_key, root FROM lane_entries").fetchall()
-        wrong = [r for r in wrong if root_key(strip_harakat(r[2])) != r[1]]
+        wrong = [r for r in wrong if heading_root_key(r[2])[0] != r[1]]
         if wrong:
             problems.append(f"{len(wrong)} lane_entries whose root_key differs from root_key(root) (first {wrong[0][0]})")
         bad_forms = 0
@@ -201,6 +214,10 @@ def verify(db: str, expect_entries: int, expect_version: Optional[str] = None) -
                 bad_forms += 1
         if bad_forms:
             problems.append(f"{bad_forms} lane_forms keys differ from skeleton(headword) or the entry's root")
+        orphans = con.execute("SELECT COUNT(*) FROM lane_forms f WHERE NOT EXISTS "
+                              "(SELECT 1 FROM lane_entries e WHERE e.id = f.entry_id)").fetchone()[0]
+        if orphans:
+            problems.append(f"{orphans} lane_forms rows point at no entry")
         bad_freq = sum(1 for key, n, surface in con.execute("SELECT skeleton, count, surface FROM freq")
                        if skeleton(surface) != key or n < FREQ_MIN_STORED)
         if bad_freq:
