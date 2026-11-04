@@ -220,10 +220,12 @@ async def _load_anchor_and_search(user) -> None:
                     break
 
     # --- Step 4: Click "Run Search" (unelevated button with icon=search) ---
+    # Not the header's search button (2026-11-04), which opens the go-to box.
     with user._client:
         search_btns = [
             b for b in ElementFilter(kind=ui.button)
             if b._props.get('icon') == 'search' and b.visible
+            and 'header-search-toggle' not in b._markers
         ]
     if search_btns:
         _click_element(user, search_btns[0])
@@ -3595,7 +3597,8 @@ def test_a_superseded_enrichment_failing_late_changes_nothing(joins_lab_smoke_ru
             def _run_button():
                 with user._client:
                     [run] = [b for b in ElementFilter(kind=ui.button)
-                             if b._props.get('icon') == 'search' and b.visible]
+                             if b._props.get('icon') == 'search' and b.visible
+                             and 'header-search-toggle' not in b._markers]
                 return run
             await _until(lambda: _run_button() is not None)
             _click_element(user, _run_button())             # the search again
