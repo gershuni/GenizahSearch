@@ -6464,9 +6464,10 @@ TRANSLATIONS.update({
     "Look up": "חיפוש",
     "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.":
         "אפשר להקליד מילה ערבית־יהודית באותיות עבריות, או מילה ערבית.",
-    "Not an entry in Blau's dictionary. Blau records what is particular to Judeo-Arabic, so an "
-    "ordinary Arabic word may not be in it; and the lookup does not always find the base of an "
-    "inflected form.":
-        "אין לכך ערך במילון בלאו. בלאו מתעד את המיוחד לערבית־היהודית, ולכן מילה ערבית רגילה אולי "
-        "אינה בו; וגם החיפוש אינו מוצא תמיד את הבסיס של צורה נטויה.",
+    # The disclaimer on every panel: the Hebrew is the owner's own wording (2026-11-04).
+    "Blau's dictionary records only meanings particular to Judeo-Arabic. "
+    "To look up verbs and inflected forms, type the root or the base form.":
+        "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
+        "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
+    "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
 })

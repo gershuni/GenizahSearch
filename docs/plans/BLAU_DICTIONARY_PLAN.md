@@ -235,10 +235,16 @@ not ship.
   every space removed, plus `normalize_arabic`. The dictionary's plural mark `ج` is dropped, and
   ة/ه, ى/ي and the hamza seats are folded. The conjunction and the article are peeled. The index
   is built in memory on first use (about 50 ms on the real file); the sidecar is unchanged.
-- **The empty answer** (owner's review, same day) says why a word may have no entry: Blau records
-  what is particular to Judeo-Arabic, so an ordinary Arabic word may not be in it, and the lookup
-  does not always find the base of an inflected form (אבו, לנא). It no longer suggests the word is
-  in another language (`blau_panel.EMPTY_ANSWER`).
+- **A disclaimer on every panel** (owner's review, same day; the Hebrew is the owner's): "מילון
+  בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. כדי לחפש פעלים ונטיות יש להקליד את השורש או את
+  צורת הבסיס." (`blau_panel.DISCLAIMER`). A word with no entry is usually an ordinary Arabic word
+  or an inflected form (אבו, לנא), not a word in another language, so the empty answer is back to
+  the short "המילה לא נמצאה במילון." with the forms looked for.
+- **The site's top loading bar** started on Enter in any text box and was hidden only by a page
+  load or a 15-second fallback, so it ran on after every lookup in the box (and after every
+  `/search` query, which has its own progress bar). Enter inside `[data-no-loading-bar]` no longer
+  starts it (`web/main.py`); the popover and the `/search` query box carry the attribute.
+- **פ** was already peeled as a conjunction, like ו (`CONJUNCTIONS`): פאלכתאב → אלכתאב → כתאב.
 - **The dot above** (owner's review: דלך reached only دلك "to polish", and no keyboard types the
   dot). The key drops the dot, so both readings share it; two changes make the common one reachable
   and let the reader choose it:

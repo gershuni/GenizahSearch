@@ -15,9 +15,12 @@ are not offered.
   forms' Arabic spellings (`shared/blau_service.py::arabic_key`: `normalize_arabic`, the
   extraction's broken spacing undone, ة/ه, ى/ي and the hamza seats folded; the conjunction and
   the article peeled). This is an index built in memory on first use: the sidecar is unchanged.
-- **The empty answer** now says why a word may have no entry: Blau records what is particular to
-  Judeo-Arabic, so an ordinary Arabic word may not be in it, and the lookup does not always find
-  the base of an inflected form.
+- **A disclaimer on every panel** (the owner's words): Blau's dictionary records only meanings
+  particular to Judeo-Arabic; to look up verbs and inflected forms, type the root or the base
+  form. The empty answer stays short.
+- **The top loading bar** no longer runs on for 15 seconds after Enter in the dictionary box or
+  in the `/search` query box: Enter inside `[data-no-loading-bar]` does not start it
+  (`web/main.py`). Both boxes do their work in the page.
 - **The dot above.** A word now also reaches an entry whose name is several words and begins with
   it: דלך shows ذلك (the entry "ד̇לך ו") beside دلك. A word written with the dot (an apostrophe or
   geresh after ג ד ט צ ת כ, or U+0307) lists the dotted reading first and marks the others

@@ -234,6 +234,7 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
         assert 'Also in the examples under' in texts and 'וג̇ה' in texts and '+2' in texts
         assert {ENTRY_URL, EXAMPLE_URL, SITE_URL} <= _links(user)
         assert CREDIT_HE in texts and CREDIT_EN in texts
+        assert blau_panel.DISCLAIMER in texts, 'the disclaimer is on every panel'
         credit_links = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == SITE_URL]
         assert sorted(e.text for e in credit_links) == sorted([CREDIT_HE, CREDIT_EN])
         [close] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.CLOSE_CLASS in e.classes]
@@ -259,6 +260,7 @@ def test_the_hebrew_ui_shows_the_site_s_line_only_and_its_own_words():
         await _wait_until(lambda: popover._style.get('display') == 'flex')
         texts = _texts(user)
         assert CREDIT_HE in texts and CREDIT_EN not in texts
+        assert any(t.startswith('מילון בלאו מתעד') for t in texts), 'the disclaimer in Hebrew'
         assert 'מילון בלאו' in texts and 'עמ׳ 587' in texts and 'קלאסי' in texts
         assert 'לחיצה על מילה פותחת את ערכה במילון בלאו' in _visible_texts(user)
         assert 'כיבוי מילון בלאו' in [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
@@ -279,7 +281,7 @@ def test_an_empty_answer_says_what_was_looked_for():
         await _wait_until(lambda: popover._style.get('display') == 'flex')
         texts = _texts(user)
         assert _with_class(user, blau_panel.EMPTY_CLASS) and not _with_class(user, blau_panel.CARD_CLASS)
-        assert blau_panel.EMPTY_ANSWER in texts
+        assert 'Nothing in the dictionary for this word.' in texts and blau_panel.DISCLAIMER in texts
         assert 'Looked for' in texts and 'וזזז' in texts and 'זזז' in texts
         assert CREDIT_HE in texts
         assert SITE_URL in _links(user), 'an empty answer still links the credited site'
@@ -336,6 +338,7 @@ def test_the_type_a_word_button_opens_an_empty_box_and_the_box_looks_up_what_is_
         [box] = [e for e in _all_elements(user) if isinstance(e, ui.input) and blau_panel.INPUT_CLASS in e.classes]
         assert 'autofocus' in box.props
         assert 'Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.' in _texts(user)
+        assert blau_panel.DISCLAIMER in _texts(user)
         assert CREDIT_HE in _texts(user)
 
         box.value = ' أخذ '

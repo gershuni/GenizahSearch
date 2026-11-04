@@ -52,12 +52,12 @@ HINT_CLASS = 'blau-hint'
 #: The box at the top of the panel and its search button.
 INPUT_CLASS = 'blau-input'
 SEARCH_CLASS = 'blau-search'
-#: The empty answer (owner, 2026-11-04): a word with no entry is usually an
-#: ordinary Arabic word, which Blau does not record, or an inflected form whose
-#: base the lookup did not find (אבו, לנא) -- not a word in another language.
-EMPTY_ANSWER = ("Not an entry in Blau's dictionary. Blau records what is particular to Judeo-Arabic, "
-                "so an ordinary Arabic word may not be in it; and the lookup does not always find "
-                "the base of an inflected form.")
+#: The disclaimer at the top of EVERY panel (owner, 2026-11-04, the Hebrew in the
+#: owner's words): a word with no entry is usually an ordinary Arabic word, which
+#: Blau does not record, or a verb or inflected form whose base was not found.
+DISCLAIMER = ("Blau's dictionary records only meanings particular to Judeo-Arabic. "
+              "To look up verbs and inflected forms, type the root or the base form.")
+DISCLAIMER_CLASS = 'blau-disclaimer'
 
 #: The scope class of the CSS block, and the popover the page creates.
 PANEL_CLASS = 'gs-blau'
@@ -262,6 +262,7 @@ def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', la
             f'flat round dense size=sm aria-label="{_attr(tr("Close"))}"').classes(CLOSE_CLASS)
         close.tooltip(tr('Close'))
     with ui.element('div').classes('panel-body'):
+        ui.label(tr(DISCLAIMER)).classes(f'{DISCLAIMER_CLASS} disclaimer')
         if result.cards:
             for card in result.cards:
                 _render_card(card, lang)
@@ -274,7 +275,7 @@ def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', la
                 'type-note')
         elif not result.found:
             with ui.element('div').classes(f'{EMPTY_CLASS} empty'):
-                ui.label(tr(EMPTY_ANSWER))
+                ui.label(tr('Nothing in the dictionary for this word.'))
                 if result.candidates:
                     with ui.element('div').classes('looked-for'):
                         ui.label(tr('Looked for')).classes('looked-label')

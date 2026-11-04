@@ -4810,7 +4810,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if blau_on:
                     blau_popover = ui.element('div').classes(
                         f'{blau_panel.POPOVER_CLASS} {blau_panel.PANEL_CLASS} print-hide'
-                    ).style('display: none;').props('role="dialog" aria-live="polite"')
+                    ).style('display: none;').props(
+                        # data-no-loading-bar: Enter in the panel's box looks a word up in
+                        # the page; the site's top bar (web/main.py) must not start.
+                        'role="dialog" aria-live="polite" data-no-loading-bar')
                     _blau_lang = get_language()
                     # The request counter: a lookup that finishes after a later
                     # click or a close is stale and draws nothing (Codex on

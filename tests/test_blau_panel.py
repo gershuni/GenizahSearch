@@ -103,18 +103,29 @@ def test_every_new_panel_string_has_its_hebrew():
                  "spelled without the dot"):
         assert TRANSLATIONS.get(text, "").strip(), text
         assert text in PANEL_SRC, f"{text!r} is not the renderer's string any more"
-    assert TRANSLATIONS.get(blau_panel.EMPTY_ANSWER, "").strip()
-    assert "tr(EMPTY_ANSWER)" in PANEL_SRC
+    assert "tr(DISCLAIMER)" in PANEL_SRC
 
 
-def test_the_empty_answer_does_not_say_the_word_is_in_another_language():
-    """Owner, 2026-11-04: a word with no entry is usually an ordinary Arabic word
-    (Blau records what is particular to Judeo-Arabic) or an inflected form whose
-    base the lookup missed (אבו, לנא) -- the answer must say so, not imply that
-    the reader clicked a non-Arabic word."""
-    text = blau_panel.EMPTY_ANSWER
-    assert "ordinary Arabic word" in text and "inflected form" in text
-    assert "covers Judeo-Arabic" not in text
+def test_the_disclaimer_is_the_owner_s_hebrew():
+    """Owner, 2026-11-04: a disclaimer on every panel, in these words."""
+    from shared.genizah_translations import TRANSLATIONS
+
+    assert TRANSLATIONS[blau_panel.DISCLAIMER] == (
+        "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
+        "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.")
+
+
+def test_enter_in_a_box_that_works_in_the_page_does_not_start_the_top_bar():
+    """The site's top bar starts on Enter in any text box and is hidden only by a
+    page load or a 15-second fallback; the dictionary box and the /search query
+    work in the page, so it ran on after every query (owner, 2026-11-04)."""
+    main = (REPO / "web" / "main.py").read_text(encoding="utf-8")
+    enter = main[main.index("// 2. Trigger on Enter key"):main.index("// 3. KEY FIX")]
+    assert "closest('[data-no-loading-bar]')) return;" in enter
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "aria-live=\"polite\" data-no-loading-bar" in browse
+    search = (REPO / "web" / "pages" / "search.py").read_text(encoding="utf-8")
+    assert "data-ux-enter=search_results data-no-loading-bar" in search
 
 
 def test_the_script_s_word_characters_match_the_normalizer_s_word():
