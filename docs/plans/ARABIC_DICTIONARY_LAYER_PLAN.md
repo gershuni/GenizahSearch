@@ -1,7 +1,11 @@
 # Arabic dictionaries beside Blau: Lane and Lisān al-ʿArab for Judeo-Arabic words
 
-**Status:** plan **rev. 1** (2026-11-04), research and measurement only. Nothing is built in
-either app, nothing is deployed, nothing public changes. The owner's decisions are in §8.
+**Status:** plan **rev. 2** (2026-11-04): **the owner ruled D1-D10** (§8): Lane first, Lisān
+later; the laneslexicon master files; credit and licence terms at the minimum each source
+requires; Ephraim Meiri's parsed files may be used; the stdlib v3 method; the 250-650 AH count;
+the cards under Blau's for now; the gate plus the owner's grading; a closed-class table. Still
+research and measurement only: nothing is built in either app, nothing is deployed, nothing public
+changes. The next step is phase A (§7).
 **Origin:** the owner's review of the Blau companion on 2026-11-04 (PR #475,
 `docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1): Blau records what is particular to Judeo-Arabic, so
 an ordinary Arabic word (אבו *abū*, לנא *lanā*) has no entry, and an undotted letter is two
@@ -13,9 +17,10 @@ input).
 **The result in four lines** (§6): ranking the readings by classical-Arabic frequency works (the
 edition's dotted letter comes first in 88-94% of the words where anything is shown; ذلك 82,941
 against دلك 25). Finding the root is the weak step (Blau's root matched for 75-81% of the words
-Blau has, about two thirds of the misses being the method's own). The gate as fixed before the first run **fails** on the first method with the smaller
-word count (78.7% against 80%) and passes with a larger count or the later methods, which were
-shaped after looking at errors on the scored data; a fresh check is owed before anything ships.
+Blau has, about two thirds of the misses being the method's own). The gate as fixed before the
+first run **fails** on the first method with the smaller word count (78.7% against 80%) and
+passes with a larger count or the later methods, which were shaped after looking at errors on the
+scored data; a fresh check is owed before anything ships.
 
 ---
 
@@ -68,7 +73,7 @@ can pick another. Nothing is guessed about misread letters (ruling (e) of the Bl
   release and the version URI. Non-commercial fits a free research site; share-alike would apply
   to anything derived from the text (a parsed index, card text) that GenizahSearch publishes.
 
-### 2.3 The emeiri sites (not used; an option to ask about)
+### 2.3 The emeiri sites (may be used, D5)
 
 `https://semitic.lang.emeiri.org` already serves both dictionaries, parsed. Its manifest
 (`/data/manifest.json`, built 2026-11-01) lists `lane` with 47,890 documents ("Perseus free
@@ -76,9 +81,10 @@ distribution", the Perseus credit line above) and `lisan` with 9,155 (CC BY-NC-S
 OpenITI), beside ORACC, CAD, Dillmann, Fraenkel and Al-Jallad. Its data are sharded
 (`data/entries/<n>.json` and `data/cards/<n>.json` answer; the per-letter `data/bodies/<letter>.json`
 named in the brief returned 404 when probed). Its counts agree with ours (Lisān 9,155 against the
-9,153 heads parsed here). **This plan does not use its files.** Asking its maintainer whether
-GenizahSearch may reuse the parsed entries, with their credit lines, would save the parsing of §7
-phase A; that is the owner's call (§8, D5).
+9,153 heads parsed here). The measurement here did not use its files. **Ruled 2026-11-04 (D5):**
+its maintainer, Ephraim Meiri, is the owner's friend, and GenizahSearch may use the parsed files
+as is convenient; phase A (§7) takes whichever source is simpler, with the Perseus and OpenITI
+credits still on the text.
 
 Its sister site, `https://dicts.lang.emeiri.org`, lists Hebrew and Aramaic dictionaries marked
 public domain: Jastrow (32,512 entries), Levy and Levy's Targum dictionary, Dalman, the ʿArukh,
@@ -322,41 +328,49 @@ the 200-word sample is the check this measurement cannot replace (D9).
 
 ---
 
-## 7. If the owner goes ahead: phases
+## 7. Phases (Lane first, D1)
 
-- **A. A sidecar, `arabic_data/arabic.db`**, built and verified like `blau_data/blau.db`
+- **A. A Lane sidecar, `arabic_data/arabic.db`**, built and verified like `blau_data/blau.db`
   (`scripts/build_blau_sidecar.py` is the model: fail on a bad download, never shrink silently,
-  atomic write, facts about the source pinned in `meta`): Lane's roots and articles from the
-  pinned XML, Lisān's articles from the pinned mARkdown, Lane's headword table (§4), the frequency
-  table counted over the OpenITI subset the owner chooses, and the closed-class table (D10). A gate
-  script recomputes every key, checks counts and credit lines, and fails rather than skips.
-- **B. The cards on `/browse`**, inside the Blau panel, under the same switch and box (rulings (c)
-  and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen reading,
-  the root card with Lane's article (English, truncated, "more") and Lisān's (Arabic), each with its
-  credit line and a link to its source. Typed Arabic skips the reading step. Where they go in the
-  panel is D8. Web only first, as Blau.
-- **C. The desktop**, on a later ruling (GPL v2 is one reason to keep CAMeL out of it).
-- **Gate before deploy:** this script's gate on data not used to shape the method (a fresh seed
-  split, or editions added since), the owner's grading of the P3 sample, and the sidecar's own gate.
+  atomic write, facts about the source pinned in `meta`). It holds Lane's roots and articles from
+  the laneslexicon master files (D2), Lane's headword table (§4), the frequency table counted over
+  all primary non-OCR OpenITI texts of 250-650 AH, dictionaries excluded (D7), and the
+  closed-class table (D10). `meta` keeps the Perseus availability statement and credit line (D3,
+  D4). Where Ephraim Meiri's parsed Lane files are simpler to take than our own parse of the XML
+  (rendered articles, say), the build may read them instead (D5); the first task of phase A is to
+  look at what his `data/entries` and `data/cards` shards carry and pick the cheaper source. A gate
+  script recomputes every key, checks counts and the credit line, and fails rather than skips.
+- **B. The Lane cards on `/browse`**, inside the Blau panel, under the same switch and box (rulings
+  (c) and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen
+  reading, the root card with Lane's article (English, truncated, "more"), the Perseus credit line
+  and a link to the source. Typed Arabic skips the reading step. The cards sit under Blau's (D8; to
+  be revisited, since Lane often gives the broader sense). Web only first, as Blau.
+- **C. Lisān al-ʿArab**, the same way, after Lane: its articles from the pinned OpenITI file (or
+  Ephraim Meiri's parse, D5), its card beside Lane's, with OpenITI's credit and licence (D4).
+- **D. The desktop**, on a later ruling (GPL v2 is one reason to keep CAMeL out of it; D6 keeps the
+  method stdlib anyway).
+- **Gate before deploy (D9):** this script's gate G1-G3 on data not used to shape the method (a
+  fresh seed split, or editions added since), the owner's grading of the 200-word P3 sample, and the
+  sidecar's own gate.
 
 Not proposed: guessing misread letters (ruling (e)); inferring the page's language (ruling (c)).
 
 ---
 
-## 8. Owner decisions
+## 8. Owner decisions (ruled 2026-11-04)
 
-| # | Decision | Recommendation |
+| # | Decision | Ruling (owner, 2026-11-04) |
 |---|---|---|
-| D1 | **Sources.** Lane and Lisān both, or one? | Both: Lane in English for most readers, Lisān in Arabic for the rest; they agree on 4,348 root keys |
-| D2 | **Which Lane.** `laneslexicon/lexicon_xml` master (amended) or its `originals` branch (Perseus as published)? | Master: the amendments are corrections; both carry the same availability statement |
-| D3 | **Credit lines** on every card. Lane: the Perseus line verbatim (§2.1). Lisān: OpenITI, the version URI and the release DOI, CC BY-NC-SA 4.0. Hebrew and English renderings are public strings | The owner approves the wording when phase B first shows it |
-| D4 | **Licences.** Perseus asks for modifications to be offered back; CC BY-NC-SA asks derived material to carry the same licence (our Lisān index, the card text, perhaps the frequency table) | Offer Perseus our parsed corrections; publish the Lisān-derived files under CC BY-NC-SA; ask whether a word count is "adapted material" |
-| D5 | **The emeiri sites.** Ask the maintainer whether we may reuse their parsed Lane and Lisān? | Optional: our parsing is measured here and works; asking costs little |
-| D6 | **Morphology.** Stdlib (stripping plus Lane's headwords, v3) or CAMeL Tools (GPL v2 database)? | Stdlib v3 |
-| D7 | **The frequency count.** Which part of OpenITI (all of 250-650 AH, or the whole release), which genres? | All primary non-OCR texts of 250-650 AH, dictionaries excluded; measured larger is better (§5.3) |
-| D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | Under Blau's cards, always, with the readings as chips |
-| D9 | **The release gate.** Keep G1 as fixed (nothing shown counts as a miss), or judge "right of shown" with a coverage floor; the owner's grading of the 200-word sample as the deciding check | Keep G1-G3 and add the owner's grading |
-| D10 | **The closed-class table.** A hand list of about 150 forms (prepositions with pronouns, demonstratives, particles) pointing at Lane's particle articles | Yes: it is where every method fails and it is the commonest words |
+| D1 | **Sources.** Lane and Lisān both, or one? | **Lane has the priority and comes first**; Lisān after it (§7 phases A-C) |
+| D2 | **Which Lane.** `laneslexicon/lexicon_xml` master (amended) or its `originals` branch (Perseus as published)? | **Master** |
+| D3 | **Credit lines** on every card. Lane: the Perseus line verbatim (§2.1). Lisān: OpenITI, the version URI and the release DOI, CC BY-NC-SA 4.0 | **Credit as needed**: each card carries the credit its source requires and no more; for Lane, the Perseus line verbatim |
+| D4 | **Licences.** Perseus asks for modifications to be offered back; CC BY-NC-SA asks derived material to carry the same licence | **Do the minimum needed.** Lane: the credit line on every surface that shows Lane, the availability statement kept with the data (`meta`); GenizahSearch shows Lane's text, it does not change it, so there is nothing to offer back unless a build ever corrects the source, and then that correction is offered to Perseus (by the owner). Lisān (phase C): credit, the licence named and linked, non-commercial use; no derived file is published, so share-alike asks nothing further. The frequency table is an internal ranking aid, not published |
+| D5 | **The emeiri sites.** Reuse their parsed Lane and Lisān? | **Yes, at our convenience**: their maintainer, Ephraim Meiri, is the owner's friend. Phase A takes whichever source is simpler; the Perseus and OpenITI credits still apply to the text |
+| D6 | **Morphology.** Stdlib (stripping plus Lane's headwords, v3) or CAMeL Tools (GPL v2 database)? | **Stdlib v3** |
+| D7 | **The frequency count.** Which part of OpenITI, which genres? | **All primary non-OCR texts of 250-650 AH, dictionaries excluded** |
+| D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense |
+| D9 | **The release gate.** G1-G3 as fixed, with the owner's grading of the 200-word sample as the deciding check | **Keep G1-G3 and add the owner's grading** |
+| D10 | **The closed-class table.** A hand list of about 150 forms (prepositions with pronouns, demonstratives, particles) pointing at Lane's particle articles | **Yes** |
 
 ---
 
