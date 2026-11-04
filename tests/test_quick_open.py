@@ -98,6 +98,8 @@ class _Window:
 
     go_to = GenizahGUI.go_to
     _catalogue_has_shelfmark = GenizahGUI._catalogue_has_shelfmark
+    _go_to_word_mode = GenizahGUI._go_to_word_mode
+    _GO_TO_WORD_MODES = GenizahGUI._GO_TO_WORD_MODES
     open_help_for_current_section = GenizahGUI.open_help_for_current_section
     _focus_section_field = GenizahGUI._focus_section_field
     _open_section = GenizahGUI._open_section
@@ -198,6 +200,34 @@ def test_go_to_searches_english_letters_and_asks_the_catalogue():
             raise RuntimeError("index gone")
     w.meta_mgr = _Broken()
     assert w.go_to("Mingana 9") == "search"
+
+
+@pytest.mark.parametrize("start, expected", [
+    (0, 0), (1, 1), (2, 2), (3, 3),     # Exact, Variants, Responsa, Fuzzy: kept
+    (4, 0), (5, 0), (6, 0), (7, 0),     # Regex, Title, Shelfmark, PGP Tags: Exact
+])
+def test_go_to_searches_words_in_a_mode_that_searches_words(start, expected):
+    """Codex on #479: from PGP Tags the search ran the tag box and dropped the
+    words; from Title or Shelfmark it searched something else."""
+    from PyQt6.QtWidgets import QComboBox
+    w = _Window()
+    w.mode_combo = QComboBox()
+    w.mode_combo.addItems(["Exact", "Variants", "Responsa", "Fuzzy", "Regex", "Title", "Shelfmark", "PGP Tags"])
+    w.mode_combo.setCurrentIndex(start)
+    assert w.go_to("dcuk") == "search"
+    assert w.mode_combo.currentIndex() == expected
+    assert w.calls == [("search", "dcuk")]
+
+
+def test_go_to_leaves_the_mode_alone_while_a_search_runs():
+    from PyQt6.QtWidgets import QComboBox
+    w = _Window()
+    w.mode_combo = QComboBox()
+    w.mode_combo.addItems(["Exact", "Variants", "Responsa", "Fuzzy", "Regex", "Title", "Shelfmark", "PGP Tags"])
+    w.mode_combo.setCurrentIndex(5)
+    w.is_searching = True
+    w.go_to("dcuk")
+    assert w.mode_combo.currentIndex() == 5 and w.calls == []
 
 
 def test_go_to_searches_words_but_not_over_a_running_search():

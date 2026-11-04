@@ -43,6 +43,7 @@ class _Window(QWidget):
     _show_layout_suggestion = GenizahGUI._show_layout_suggestion
     _hide_layout_suggestion = GenizahGUI._hide_layout_suggestion
     _take_layout_suggestion = GenizahGUI._take_layout_suggestion
+    _layout_suggestion_worker_done = GenizahGUI._layout_suggestion_worker_done
 
     def __init__(self, known=("גבול",)):
         super().__init__()
@@ -64,7 +65,8 @@ class _Window(QWidget):
         worker = getattr(self, '_layout_suggestion_worker', None)
         if worker is not None:
             assert worker.wait(5000)
-        QApplication.processEvents()      # the worker's queued signal
+        QApplication.processEvents()      # the worker's queued signals
+        self.last_worker_gone = getattr(self, '_layout_suggestion_worker', None) is None
 
     def toggle_search(self):
         self.searches.append(self.query_input.text())
@@ -87,6 +89,14 @@ def test_a_wrong_layout_query_is_offered_as_hebrew(lang):
         assert text == 'האם התכוונתם ל<a href="layout">גבול</a>?'
     else:
         assert text == 'Did you mean <a href="layout">גבול</a>?'
+
+
+def test_the_worker_is_an_index_reader_only_while_it_runs():
+    """_index_readers_busy reads _layout_suggestion_worker: it is dropped when
+    the thread ends, so the install never waits on, or touches, a deleted one."""
+    w = _Window()
+    w.finished_zero("dcuk")
+    assert w.last_worker_gone
 
 
 def test_the_hebrew_clicked_runs_it_as_if_typed(lang):

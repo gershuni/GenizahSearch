@@ -16778,6 +16778,17 @@ class GenizahGUI(QMainWindow):
             logger.debug("Go to: catalogue shelfmark check failed for %r", query, exc_info=True)
             return False
 
+    # The Search tab's modes that search the words of the text (mode_combo order:
+    # Exact, Variants, Responsa, Fuzzy). Go to keeps one of these; from Regex,
+    # Title, Shelfmark or PGP Tags it searches in Exact -- PGP Tags would run the
+    # tag box and drop the words (Codex on #479).
+    _GO_TO_WORD_MODES = (0, 1, 2, 3)
+
+    def _go_to_word_mode(self):
+        combo = getattr(self, 'mode_combo', None)
+        if combo is not None and combo.currentIndex() not in self._GO_TO_WORD_MODES:
+            combo.setCurrentIndex(0)
+
     def go_to(self, text):
         """Open a system number, FL number or shelfmark in Browse, or search
         anything else -- words in any script, Hebrew typed on the English layout
@@ -16791,6 +16802,7 @@ class GenizahGUI(QMainWindow):
             self.query_input.setText(value)
             self._set_active_tab(self.search_tab)
             if not self.is_searching:
+                self._go_to_word_mode()
                 self.toggle_search()
             return kind
         # Only the one field: browse_load also reads the other two, and a
@@ -24432,9 +24444,17 @@ class GenizahGUI(QMainWindow):
             return
         worker = _LayoutSuggestionWorker(occurs, hebrew, run_id, self)
         worker.checked.connect(self._on_layout_suggestion_checked)
-        worker.finished.connect(worker.deleteLater)
+        # An index reader while it runs: the beside-the-live-index install waits
+        # for it (_index_readers_busy; Codex on #479). Dropped when it ends, so
+        # that check never meets a deleted thread.
+        worker.finished.connect(lambda w=worker: self._layout_suggestion_worker_done(w))
         self._layout_suggestion_worker = worker
         worker.start()
+
+    def _layout_suggestion_worker_done(self, worker):
+        if getattr(self, '_layout_suggestion_worker', None) is worker:
+            self._layout_suggestion_worker = None
+        worker.deleteLater()
 
     def _on_layout_suggestion_checked(self, run_id, hebrew, found):
         """Show the line if the corpus has the words and no other search has
@@ -34625,7 +34645,8 @@ class GenizahGUI(QMainWindow):
         if getattr(self, 'is_searching', False):
             busy.append('search')
         for name, attr in (('search', 'search_thread'), ('composition', 'comp_thread'),
-                           ('grouping', 'group_thread'), ('restore replay', '_replay_restore_thread')):
+                           ('grouping', 'group_thread'), ('restore replay', '_replay_restore_thread'),
+                           ('layout suggestion', '_layout_suggestion_worker')):
             th = getattr(self, attr, None)
             if th is not None and th.isRunning() and name not in busy:
                 busy.append(name)
