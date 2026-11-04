@@ -2375,8 +2375,10 @@ class MetadataManager:
         record's shelfmark (``norm_keys``) and the hashes of its other call numbers
         (``alternate_hashes``: ``Gaster, Moses Collection Printed series 61``; a hash
         collision could only send a non-shelfmark to Browse, which then says "No
-        manuscript found"). Until the index is built the answer is False -- a key press
-        never builds it (seconds of CPU)."""
+        manuscript found"), then the NLI cache's ``shelfmark`` / ``shelfmark_alt`` (as
+        ``resolve_system_by_shelfmark`` reads them; the Shelfmark search's own pass over
+        the cache, with its kept forms). Until the index is built the answer is False --
+        a key press never builds it (seconds of CPU)."""
         from bisect import bisect_left
         q = (query or '').strip()
         if not q:
@@ -2396,6 +2398,13 @@ class MetadataManager:
             h = hash(key)
             j = bisect_left(hashes, h)
             if j < len(hashes) and hashes[j] == h:
+                return True
+        for sys_id, data in list(self.nli_cache.items()):
+            value = data.get('shelfmark')
+            if isinstance(value, str) and value and self._nli_shelfmark_forms_for(sys_id, value)[1] in keys:
+                return True
+            alt = data.get('shelfmark_alt')
+            if isinstance(alt, str) and alt and self._normalize_shelfmark(alt) in keys:
                 return True
         return False
 

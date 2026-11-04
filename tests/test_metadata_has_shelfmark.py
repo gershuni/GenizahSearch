@@ -21,6 +21,7 @@ def _manager(*shelfmarks, built=True, alternates=None):
     mm.csv_bank = {f'99{i:016d}': {'shelfmark': shelf} for i, shelf in enumerate(shelfmarks)}
     for sys_id, others in (alternates or {}).items():
         mm.csv_bank[sys_id] = {'shelfmark': others[0], 'call_numbers_raw': list(others)}
+    mm.nli_cache = {}
     mm._shelfmark_search_index = _ShelfmarkSearchIndex(mm.csv_bank, normalize_shelfmark) if built else None
     return mm
 
@@ -61,3 +62,13 @@ def test_a_records_other_call_numbers_are_found_too():
     assert mm.has_shelfmark('gaster moses collection printed series 61') is True
     assert mm.has_shelfmark('Gaster 61') is True
     assert mm.has_shelfmark('Gaster, Moses Collection Printed series 6') is False
+
+
+def test_a_shelfmark_only_the_nli_cache_holds_is_found():
+    """Codex on #476: Browse also resolves the NLI cache's shelfmark and
+    shelfmark_alt (tests/test_catalog_shelfmark.py, 'Alt 7' -> NLIONLY)."""
+    mm = _manager('T-S 12.123')
+    mm.nli_cache = {'NLIONLY': {'shelfmark': 'Prim 3', 'shelfmark_alt': 'Alt 7'}}
+    assert mm.has_shelfmark('Alt 7') is True
+    assert mm.has_shelfmark('Prim 3') is True
+    assert mm.has_shelfmark('Alt 8') is False
