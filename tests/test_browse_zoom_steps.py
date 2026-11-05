@@ -117,13 +117,15 @@ def test_the_browse_buttons_zoom_in_the_browser_and_keep_their_hooks():
     # Client-side clicks, on the buttons the keyboard handler finds by data-action.
     zoom_in = [line for line in browse.splitlines() if 'data-action="zoom-in"' in line]
     zoom_out = [line for line in browse.splitlines() if 'data-action="zoom-out"' in line]
-    assert len(zoom_in) == 2 and len(zoom_out) == 2, 'the button and the key that clicks it'
+    assert len(zoom_in) == 1 and len(zoom_out) == 1, 'one button each, which the keys click'
     [button_in] = [line for line in zoom_in if 'ui.button' in line]
     [button_out] = [line for line in zoom_out if 'ui.button' in line]
     assert ".on('click', js_handler=ZOOM_IN_JS)" in button_in and 'on_click=' not in button_in
     assert ".on('click', js_handler=ZOOM_OUT_JS)" in button_out and 'on_click=' not in button_out
-    assert "document.querySelector('[data-action=\"zoom-in\"]')?.click();" in browse
-    assert "document.querySelector('[data-action=\"zoom-out\"]')?.click();" in browse
+    # The keys click those buttons (the key script's action table, 2026-11-05).
+    assert "else if (e.key === '+' || e.key === '=') action = 'zoom-in';" in browse
+    assert "else if (e.key === '-') action = 'zoom-out';" in browse
+    assert "if (action) document.querySelector('[data-action=\"' + action + '\"]')?.click();" in browse
     assert 'on_click=zoom_in' not in browse and 'on_click=zoom_out' not in browse
     # Both toolbars (the main one and the fullscreen editor's) use the same handlers.
     assert browse.count("js_handler=ZOOM_IN_JS") == 2

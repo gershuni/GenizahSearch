@@ -277,7 +277,8 @@ def test_the_keyboard_listener_ignores_keys_while_a_page_loads():
 
     src = Path(browse.__file__).read_text(encoding='utf-8')
     script = src[src.index("document.addEventListener('keydown'"):]
-    script = script[:script.index('switch(e.key)')]
+    # Before any key is turned into a click (since 2026-11-05 an action table, not a switch).
+    script = script[:script.index('let action = null;')]
     assert "if (document.querySelector('.browse-loading')) return;" in script
     css = (_REPO / 'web' / 'static' / 'common.css').read_text(encoding='utf-8')
     assert '.browse-loading { opacity: .5; pointer-events: none; }' in css
