@@ -149,13 +149,13 @@ Save Codex's output as `260519-hoi-CODEX-CRITIQUE-2.md` in the quick task dir.
 
 ```bash
 git push origin master-main
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd GenizahSearch && ./deploy.sh"
+ssh genizah-prod "cd GenizahSearch && ./deploy.sh"
 ```
 
 ## Post-deploy verification (~2h soak)
 
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com 'PID=$(systemctl show genizah-web.service -p MainPID --value); SECRET=$(sudo bash -c "tr \"\\0\" \"\\n\" < /proc/$PID/environ" | grep -a "^MEMSTAT_SECRET=" | cut -d= -f2-); curl -s -H "X-Memstat-Secret: $SECRET" http://localhost:8081/_internal/memstat | python3 -m json.tool | head -40'
+ssh genizah-prod 'PID=$(systemctl show genizah-web.service -p MainPID --value); SECRET=$(sudo bash -c "tr \"\\0\" \"\\n\" < /proc/$PID/environ" | grep -a "^MEMSTAT_SECRET=" | cut -d= -f2-); curl -s -H "X-Memstat-Secret: $SECRET" http://localhost:8081/_internal/memstat | python3 -m json.tool | head -40'
 ```
 
 **Verdict gate:**

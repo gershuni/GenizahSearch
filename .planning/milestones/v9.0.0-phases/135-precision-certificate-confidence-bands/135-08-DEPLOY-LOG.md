@@ -245,7 +245,7 @@ The app stayed fully up on the prior frame and came back on v2. The swap is reve
 ## 7. Follow-ups (not blocking)
 
 1. **`backup.sh` on the web box holds a cleartext Postgres password**
-   (`PGPASSWORD=genizah_secure_pwd_2024`), targeting the `genizah_db` Postgres retired by
+   (`PGPASSWORD=<redacted>`), targeting the `genizah_db` Postgres retired by
    the Jan-2026 backend removal. Untracked, pre-existing, unrelated to this deploy, and
    untouched. Likely dead — worth deleting or rotating.
 2. **`pgp_data/pgp_backup_2026-03-11.db`** (172 MB, four months old) is now correctly

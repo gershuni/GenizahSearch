@@ -28,7 +28,7 @@ All programmatic access goes through `fgp.genizah.org`. The site uses:
 **Step 1 — Get UIT token:**
 ```
 GET https://SSO.genizah.org/login/GetLoginUIT
-    ?username=Miriamg&password=Fgp123&screenWidth=1920&callback=cb
+    ?username=<FJMS_USERNAME>&password=<FJMS_PASSWORD>&screenWidth=1920&callback=cb
 → Returns JSONP: cb({"d": {"UIT": "94d0161c-21be-438d-a...", ...}})
 ```
 
@@ -42,7 +42,7 @@ GET https://fgp.genizah.org/FgpFrames.aspx
 ### Python Implementation
 
 ```python
-import requests, re
+import os, requests, re
 
 def login_fjms():
     """Login to FJMS and return authenticated session."""
@@ -53,8 +53,8 @@ def login_fjms():
 
     # Step 1: Get UIT token
     resp = s.get('https://SSO.genizah.org/login/GetLoginUIT', params={
-        'username': 'Miriamg',
-        'password': 'Fgp123',
+        'username': os.environ['FJMS_USERNAME'],
+        'password': os.environ['FJMS_PASSWORD'],
         'screenWidth': '1920',
         'callback': 'cb',
     })
@@ -77,7 +77,7 @@ def login_fjms():
     return s
 ```
 
-**Credentials:** `Miriamg` / `Fgp123` (public demo account)
+**Credentials:** an FJMS account, read from the `FJMS_USERNAME` and `FJMS_PASSWORD` environment variables. Never write them into this file.
 
 **Verification:** Check `.ASPXAUTH` in cookies:
 ```python

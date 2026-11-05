@@ -184,7 +184,7 @@ Return image to browser
 ---
 
 ## Server Details
-- Host: `ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com`
+- Host: `genizah-prod`
 - App path: `/home/ubuntu/GenizahSearch`
 - Services: `genizah-backend`, `genizah-web`
 - Logs: `sudo journalctl -u genizah-web -f`

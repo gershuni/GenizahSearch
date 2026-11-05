@@ -3,7 +3,7 @@
 **Status (2026-10-19):** PRs 1-5 and step (a) of PR 6 are merged into `master-main`, with two
 follow-ups to PR 4; none is released yet (the last release is 9.7.0). Left: PR 6 step (b), the
 Cloudflare Cache Rule that step (a) needs, and the open question below. See "Where it stands".
-**Source:** the owner's list of six ideas and a WhatsApp exchange with a user (Adiel Breuer),
+**Source:** the owner's list of six ideas and feedback from a user,
 both 2026-10-19. Every decision below was made by the owner on 2026-10-19, one question at a time.
 
 ## The ideas, as the owner wrote them
@@ -75,7 +75,7 @@ Left:
 - **A Cloudflare Cache Rule for the six image routes**, once #409 is deployed. Their paths have
   no file extension, so Cloudflare does not cache them until a rule makes them eligible.
   Until then, the week-long `Cache-Control` helps browsers only.
-- **The open question below**, for Adiel.
+- **The open question below**, for the user who raised it.
 
 ## PR 1: Joins Lab links and the Compare window (#407)
 

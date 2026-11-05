@@ -20,7 +20,7 @@ param(
     [string]$Version = "2.0.0",
     [string]$Candidate = "fgp_data/inventory/fgp_transcriptions.candidate.db",
     [string]$Summary = "fgp_data/inventory/gate4_summary.json",
-    [string]$RemoteHost = "ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com",
+    [string]$RemoteHost = "genizah-prod",
     [string]$RemoteRepo = "/home/ubuntu/GenizahSearch",
     [switch]$DryRun
 )

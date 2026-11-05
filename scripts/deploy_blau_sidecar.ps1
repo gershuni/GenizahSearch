@@ -20,7 +20,7 @@ param(
     [Parameter(Mandatory = $true)][int]$Forms,
     [string]$Version = "1.0.0",
     [string]$Candidate = "blau_data/blau.db",
-    [string]$RemoteHost = "ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com",
+    [string]$RemoteHost = "genizah-prod",
     [string]$RemoteRepo = "/home/ubuntu/GenizahSearch",
     [switch]$DryRun
 )

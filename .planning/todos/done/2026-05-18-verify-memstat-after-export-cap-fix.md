@@ -33,7 +33,7 @@ OPEN_ISSUES.md P1 entry was flipped to ✅ Fixed — but the fix is
 5+ hours after fix ship (so ≥ 2026-05-18T19:00 UTC):
 
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com \
+ssh genizah-prod \
   'PID=$(systemctl show genizah-web.service -p MainPID --value);
    SECRET=$(sudo bash -c "tr \"\\0\" \"\\n\" < /proc/$PID/environ" \
      | grep -a "^MEMSTAT_SECRET=" | cut -d= -f2-);

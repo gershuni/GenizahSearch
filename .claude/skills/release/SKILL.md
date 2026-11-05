@@ -264,7 +264,7 @@ After user confirms:
    **If CI fails:** STOP. Do NOT deploy to production with a red CI run on the release commit. Read the failure logs (`gh run view <id> --log-failed`), diagnose root cause, push a hotfix commit, and re-watch CI. Only proceed to deploy once CI is green. (For the v7.14.0 incident the user accepted that web+desktop were already deployed and live, but the right default is to gate deploy on CI — not parallel.)
 
 4. **Deploy web** (if web or both):
-   - Run: `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && ./deploy.sh"`
+   - Run: `ssh genizah-prod "cd /home/ubuntu/GenizahSearch && ./deploy.sh"`
    - Verify service restarted successfully
 
 5. **Web smoke test** (if web or both):
@@ -304,7 +304,7 @@ This phase is NOT part of the normal flow. Only use if the deploy fails or the u
 **Web rollback:**
 ```bash
 # SSH to server, revert to previous commit
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && git checkout HEAD~1 && sudo systemctl restart genizah-web"
+ssh genizah-prod "cd /home/ubuntu/GenizahSearch && git checkout HEAD~1 && sudo systemctl restart genizah-web"
 ```
 
 **Desktop rollback:**

@@ -237,7 +237,7 @@ test files added by the hold commits.
 
 ```bash
 # Confirm v7.11.1 still live
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com \
+ssh genizah-prod \
   "cd GenizahSearch && git rev-parse --short HEAD && sudo systemctl is-active genizah-web"
 # Expected: 242664d3 + active
 

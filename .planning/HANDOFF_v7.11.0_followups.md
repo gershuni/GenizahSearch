@@ -208,7 +208,7 @@ reusing for ambiguous design decisions during release sequences.
 git log --oneline -8 origin/master-main
 
 # Server state
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd GenizahSearch && git rev-parse --short HEAD && sudo systemctl is-active genizah-web"
+ssh genizah-prod "cd GenizahSearch && git rev-parse --short HEAD && sudo systemctl is-active genizah-web"
 
 # Live API smoke test (should return shelfmark + fjms_sources + pgp description)
 curl -s "https://genizahsearch.com/api/browse?sys_id=990051753360205171&p_num=1&fl_id=164978060" | python -c "import json,sys; d=json.load(sys.stdin); print('shelfmark:',d['shelfmark']); print('fjms:',d['metadata']['fjms']['source_names']); print('pgp:',(d['metadata']['pgp'] or {}).get('description','')[:80])"
