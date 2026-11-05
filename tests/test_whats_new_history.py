@@ -14,6 +14,14 @@ from shared import whats_new_history as wnh
 from version import APP_VERSION
 
 
+@pytest.fixture(autouse=True)
+def _pin_english_labels(monkeypatch):
+    """The desktop HTML's labels are asserted in English; tr() follows the machine's saved
+    language (a Hebrew-configured machine would fail them while CI passes)."""
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+
+
 def _release(version, items, apps=('web', 'desktop'), date='2026-11-05'):
     return {'version': version, 'date': date, 'apps': list(apps),
             'title': {'en': f'T {version}', 'he': f'כ {version}'}, 'items': items}

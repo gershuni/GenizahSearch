@@ -22,6 +22,13 @@ pytestmark = pytest.mark.gui
 _APP = QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _pin_english_labels(monkeypatch):
+    """The labels asserted here are English; tr() follows the machine's saved language."""
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+
+
 class _FakeThread(QObject):
     """Stands in for ReleaseNotesThread: no network; the test emits the answer."""
     finished_signal = pyqtSignal(object)

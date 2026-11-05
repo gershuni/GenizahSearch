@@ -31,8 +31,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from genizah_core import CURRENT_LANG, tr
+import genizah_core
+from genizah_core import tr
 from shared.whats_new_history import CATEGORY_LABELS, app_note, from_public, localize
+
+
+def _lang() -> str:
+    """The interface language now (read at call time, as tr() does)."""
+    return genizah_core.CURRENT_LANG
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +123,7 @@ class VersionHistoryDialog(QDialog):
         self.setMinimumSize(520, 480)
         self.resize(640, 640)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
-        if CURRENT_LANG == 'he':
+        if _lang() == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout(self)
@@ -148,7 +154,7 @@ class VersionHistoryDialog(QDialog):
         self.link_btn.setStyleSheet('color: #0c5460; text-decoration: underline; border: none;')
         self.link_btn.clicked.connect(self._open_release_page)
         self.link_btn.setVisible(False)
-        layout.addWidget(self.link_btn, 0, Qt.AlignmentFlag.AlignLeft if CURRENT_LANG != 'he'
+        layout.addWidget(self.link_btn, 0, Qt.AlignmentFlag.AlignLeft if _lang() != 'he'
                          else Qt.AlignmentFlag.AlignRight)
 
         buttons = QHBoxLayout()
@@ -190,7 +196,7 @@ class VersionHistoryDialog(QDialog):
         super().done(result)
 
     def set_releases(self, releases: list) -> None:
-        self.browser.setHtml(render_html(releases, CURRENT_LANG))
+        self.browser.setHtml(render_html(releases, _lang()))
         self.link_btn.setVisible(False)
 
     def set_loading(self) -> None:
