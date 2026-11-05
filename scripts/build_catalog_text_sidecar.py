@@ -95,8 +95,12 @@ COLUMN_OF = {
     ("libraries", "title_en"): "title",
 }
 SOURCES = ("fjms", "pgp", "libraries")
-#: Translated FJMS fields left out: they describe people, not manuscripts.
-EXCLUDED_TRANSLATION_FIELDS = ("PersonEngDesc", "PersonHebDesc")
+#: Translated FJMS fields left out, every one known by name: the person descriptions
+#: (scripts/translate_fjms_catalog.py) describe people, and ``BibRunningTitle``
+#: (scripts/translate_fjms_free_desc.py, bibliography mode) is keyed by a bibliography entry; none
+#: describes a manuscript. Any OTHER field without a column in ``COLUMN_OF`` still fails the
+#: build, on purpose: a new manuscript field must be placed in a column, never silently dropped.
+EXCLUDED_TRANSLATION_FIELDS = ("PersonEngDesc", "PersonHebDesc", "BibRunningTitle")
 #: Title and author segments that only say the catalogue could not decide (compared by key, any
 #: case or period). FJMS writes the unknown work as GenizahTitleId -1 (לא ידוע) or -999 (לא מקודד /
 #: Not Coded), the unknown author as לא מזוהה, translated "Unknown": indexed, they would put

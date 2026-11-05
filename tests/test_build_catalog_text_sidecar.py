@@ -154,6 +154,13 @@ def test_a_missing_input_fails_and_leaves_the_served_file(built, tmp_path):
     assert not list(out.parent.glob("*.building-*"))
 
 
+def test_bibliography_translations_are_skipped_not_fatal(tmp_path):
+    inputs = write_inputs(tmp_path / "inputs", extra_translations=[("123", "BibRunningTitle", "A bibliography title")])
+    out = tmp_path / "catalog_text.db"
+    assert main(build_args(inputs, out)) == 0
+    assert not [r for r in _records(out) if r[5] == "A bibliography title"]
+
+
 def test_an_untyped_translation_field_fails_the_build(tmp_path):
     inputs = write_inputs(tmp_path / "inputs", extra_translations=[(A, "Bogus", "text")])
     out = tmp_path / "catalog_text.db"

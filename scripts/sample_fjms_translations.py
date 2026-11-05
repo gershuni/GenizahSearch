@@ -9,7 +9,8 @@ garbage against its original, every adverse grade re-judged by a second reader t
 stylistic nitpicking.
 
 The sample covers exactly the rows the catalogue text sidecar indexes: every translated field
-except the person descriptions (``PersonEngDesc`` / ``PersonHebDesc``), which describe people,
+except the person descriptions (``PersonEngDesc`` / ``PersonHebDesc``) and the bibliography titles
+(``BibRunningTitle``), which describe people and bibliography entries,
 not manuscripts. Rows are drawn uniformly by row, which is how search meets them.
 
 Usage::
@@ -28,7 +29,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-EXCLUDED_FIELDS = ("PersonEngDesc", "PersonHebDesc")
+EXCLUDED_FIELDS = ("PersonEngDesc", "PersonHebDesc", "BibRunningTitle")  # as scripts/build_catalog_text_sidecar.py
 MAX_CHARS = 2000
 
 
