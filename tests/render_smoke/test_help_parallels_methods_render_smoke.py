@@ -199,3 +199,62 @@ def test_puzzle_help_follows_the_web_puzzle_flag_in_both_languages(lang):
     assert set(off) == set(on) == {'help-puzzle', 'help-community-publish'}
     assert not any(off.values()), off
     assert all(on.values()), on
+
+
+def _page_text_with_dictionaries(lang: str, served: bool) -> str:
+    with patch('web.keyboard_shortcuts.dictionaries_served', return_value=served):
+        return _page_text(lang, passage_on=False, multi_on=False)
+
+
+@pytest.mark.render_smoke
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_the_shortcuts_and_side_menu_section_is_in_both_languages(lang):
+    """Owner, 2026-11-05: the Help Center said nothing about the keys, the icon rail or the
+    one sign-in button. A section after the Introduction, listed in the contents."""
+    from web.pages.help import _SHORTCUTS_HELP
+
+    text = _page_text_with_dictionaries(lang, served=False)
+    section = _SHORTCUTS_HELP[lang]
+    assert text.count(section['title']) >= 2, 'the title is in the contents and on the card'
+    assert section['body'].strip() in text
+    assert '#help-shortcuts' in text and 'help-shortcuts' in text
+
+
+@pytest.mark.render_smoke
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_the_dictionaries_help_follows_whether_a_dictionary_is_served(lang):
+    from web.pages.help import _DICTIONARY_BULLETS
+
+    bullets = _DICTIONARY_BULLETS[lang]
+    on = _page_text_with_dictionaries(lang, served=True)
+    off = _page_text_with_dictionaries(lang, served=False)
+    assert bullets in on, 'the dictionaries and their keys are undocumented'
+    assert bullets not in off, 'help for a switch the page does not show'
+
+
+@pytest.mark.render_smoke
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_every_help_block_reads_a_list_under_a_line_as_a_list(lang):
+    """Found 2026-11-05: "**Features:**" with "- " lines under it and no blank line between
+    rendered as one paragraph, in some fifteen sections of both languages."""
+    import markdown2
+    from nicegui.elements.markdown import Markdown
+
+    saved_slots = list(nicegui_context.slot_stack)
+    extras: list = []
+
+    async def invoke():
+        async with _help_user(lang, passage_on=False, multi_on=False) as user:
+            await user.open('/help')
+            with user._client:
+                extras.extend(e.extras for e in user._client.elements.values()
+                              if isinstance(e, Markdown))
+
+    try:
+        run_bounded(invoke())
+    finally:
+        nicegui_context.slot_stack.clear()
+        nicegui_context.slot_stack.extend(saved_slots)
+    assert len(extras) > 20
+    assert all('cuddled-lists' in x for x in extras), extras
+    assert '<li>' in markdown2.markdown('**Features:**\n- one\n- two\n', extras=extras[0])

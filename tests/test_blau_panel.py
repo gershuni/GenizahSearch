@@ -282,3 +282,106 @@ def test_render_lookup_draws_nothing_without_a_credit_line():
     assert blau_panel.render_lookup(empty_lookup("כתאב"), credit_he="   ") is False
     assert blau_panel.render_lookup(None, lane=empty_lane("כתאב"), lane_credit=" ") is False
     assert blau_panel.render_lookup(None, credit_he="a credit") is False, "no dictionary served"
+
+
+def test_the_look_up_key_works_wherever_a_dictionary_is_served():
+    """Owner, 2026-11-05: D or M tapped arms the next click, Alt + a click, selected words and
+    the key, with the switch on or off. Held M + a touchpad failed: Windows ignores the
+    touchpad while a letter key is held, so the key is tapped, not held."""
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert f"'[{blau_panel.KEY_PANE_ATTR}]'" in JS
+    marked = browse[browse.index("blau_lookup_on = dict_on and blau_panel.lookup_on()"):]
+    marked = marked[:marked.index("current_text = {'value': page.text}")]
+    assert "if dict_on:\n                                text_container.props(blau_panel.KEY_PANE_ATTR)" in marked
+    assert "text_container.props[blau_panel.CHIP_LABEL_ATTR] = tr(blau_panel.CHIP_LABEL)" in marked
+    # D and M by name, by the Hebrew letter, or by the physical key.
+    assert ("event.code === 'KeyD' || event.code === 'KeyM' || event.key === 'd' || event.key === 'D' ||\n"
+            "      event.key === 'm' || event.key === 'M' || event.key === 'מ'") in JS
+    # A tap arms the next click; a key still down is held. Held or tapped is told by the key's
+    # own down and up, not by auto-repeat: a click can come before the first repeat (Codex, PR
+    # #484), so a click while it is down marks it held, and only a held key disarms on release.
+    assert "down = true;\n    if (event.repeat) {" in JS
+    assert "held = false;\n    if (lookUpSelection(pop, true)) { arm(false); return; }" in JS
+    assert ("if (!isLookupKey(event) || !down) return;\n    down = false;\n"
+            "    if (held) arm(false);") in JS
+    assert "if (down) { down = false; arm(false); }" in JS          # blur: its keyup never comes
+    assert "var repeated" not in JS and "repeated = " not in JS
+    # ...used up by a click on the panel's or the switch's own controls too (Codex, PR #484):
+    # the disarm comes before their early returns.
+    click = JS[JS.index("document.addEventListener('click'"):]
+    disarm = click.index("if (armed) { if (down) held = true; else arm(false); }")
+    assert disarm < click.index("if (pop.contains(event.target)) {")
+    assert disarm < click.index("if (opener) {")
+    assert click.index("var viaKey = ") < disarm
+    assert f"var ARMED = '{blau_panel.ARMED_CLASS}';" in JS and f"html.{blau_panel.ARMED_CLASS} [data-blau-pane]" in CSS
+    # Alt + a click looks up too; a plain click only where the switch is on.
+    assert "var viaAlt = event.altKey && !event.ctrlKey && !event.metaKey;" in JS
+    assert "return el.closest(PANE) || (viaKey ? el.closest(KEY_PANE) : null);" in JS
+    assert "var pane = target ? paneOf(target, viaKey) : null;" in JS
+    # Never while typing (the panel's own box takes a D), never with Ctrl/Alt/Cmd, never under
+    # an open dialog or menu (Codex, PR #484): all checked before the key arms.
+    keydown = JS[JS.index("document.addEventListener('keydown'"):JS.index("document.addEventListener('keyup'")]
+    for guard in ("if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;",
+                  "if (inABox(event.target) || inABox(document.activeElement)) return;",
+                  "if (overlayOpen()) return;"):
+        assert guard in keydown and keydown.index(guard) < keydown.index("down = true;"), guard
+        assert keydown.index(guard) < keydown.index("arm(true);"), guard
+    assert "return document.querySelector('.q-dialog, .q-menu') !== null;" in JS
+
+
+def test_esc_closes_the_panel_from_anywhere_but_a_dialog():
+    keydown = JS[JS.index("document.addEventListener('keydown'"):JS.index("document.addEventListener('keyup'")]
+    esc = keydown[keydown.index("if (event.key === 'Escape') {"):keydown.index("if (event.ctrlKey")]
+    assert "if (overlayOpen()) return;" in esc
+    assert "if (had) dispatch(pop, 'blau-close');" in esc and "arm(false);" in esc
+    # Before the box guard: Esc closes the panel from its own box too.
+    assert keydown.index("if (event.key === 'Escape') {") < keydown.index("inABox(event.target)")
+
+
+def test_a_selection_is_looked_up_by_its_words():
+    assert "lookUp(pop, picked, 'selection');" in JS
+    assert "dispatch(pop, 'blau-lookup', { word: picked.text, how: how });" in JS
+    assert "SELECTION_WORDS = 6" in JS and "if (/[א-ת]/.test(part)) words.push(part);" in JS
+    assert "how: viaAlt ? 'alt' : viaKey ? 'key' : 'word'" in JS
+
+
+def test_a_phone_gets_a_look_up_chip_for_selected_words():
+    """No key on a phone (owner, 2026-11-05): words selected there show a chip that looks them
+    up, the switch on or off, labelled in the page's language."""
+    from shared.genizah_translations import TRANSLATIONS
+
+    assert "window.matchMedia('(hover: none)').matches" in JS
+    assert "document.addEventListener('selectionchange'" in JS
+    assert f"var CHIP = '{blau_panel.CHIP_CLASS}';" in JS and f".{blau_panel.CHIP_CLASS} {{" in CSS
+    assert f"pane.getAttribute('{blau_panel.CHIP_LABEL_ATTR}')" in JS
+    # Pressing it keeps the selection, and its click is not the page's "click elsewhere".
+    assert "chip.addEventListener('pointerdown', function (e) { e.preventDefault(); });" in JS
+    assert "e.stopPropagation();\n        var p = document.querySelector(POPOVER);\n        if (p && chipPick) lookUp(p, chipPick, 'chip');" in JS
+    assert TRANSLATIONS[blau_panel.CHIP_LABEL].strip()
+    # Not again for the words the open panel shows (it came back under the panel, 2026-11-05).
+    assert "if (!picked || (picked.text === chipDone && shown(pop))) { hideChip(); return; }" in JS
+
+
+def test_how_a_lookup_started_is_counted():
+    assert blau_panel.lookup_how({"detail": json.dumps({"word": "x", "how": "key"})}) == "key"
+    assert blau_panel.lookup_how(json.dumps({"word": "x", "how": "selection"})) == "selection"
+    for how in ("alt", "chip"):
+        assert blau_panel.lookup_how(json.dumps({"word": "x", "how": how})) == how
+    for args in (None, "not json", {"detail": json.dumps({"word": "x"})}, {"detail": json.dumps({"how": "evil"})}):
+        assert blau_panel.lookup_how(args) == "word", args
+    assert blau_panel.lookup_event(False, empty_lookup("x"), None, "key")["how"] == "key"
+    assert blau_panel.lookup_event(True, empty_lookup("x"), None, "key")["how"] == "box"
+    assert blau_panel.lookup_event(False, empty_lookup("x"), None, "nonsense")["how"] == "word"
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "_blau_start(word, False, blau_panel.lookup_how(e.args))" in browse
+
+
+def test_the_switch_s_tooltip_names_the_key_in_both_languages():
+    from shared.genizah_translations import TRANSLATIONS
+
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "ui.label(tr(blau_panel.KEY_HINT)).classes(" in browse
+    assert blau_panel.KEY_HINT == ("Press D or M, then click a word (or click it with Alt held); "
+                                   "or select words and press D or M")
+    assert TRANSLATIONS[blau_panel.KEY_HINT].strip()
+    assert f".{blau_panel.TIP_CLASS} .{blau_panel.KEY_HINT_CLASS}" in CSS

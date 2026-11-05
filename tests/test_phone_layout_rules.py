@@ -45,14 +45,30 @@ def test_the_header_row_does_not_wrap():
     assert "ui.row(wrap=False).classes('w-full h-full items-center justify-between px-6 app-header')" in main
 
 
-def test_login_and_register_are_named_icon_buttons_on_a_phone():
+def test_sign_in_is_one_named_icon_button_on_a_phone():
+    """One button (owner, 2026-11-05): its dialog has the Register tab."""
     auth = _read('web/auth_state.py')
-    for name, icon in (('Login', 'login'), ('Register', 'person_add')):
-        pattern = (r"ui\.button\(tr\('%s'\), icon='%s'.*?aria-label=\"\{tr\(\"%s\"\)\}\".*?"
-                   r"\.classes\('text-sm phone-icon-only'\)" % (name, icon, name))
-        assert re.search(pattern, auth, re.S), name
+    pattern = (r"ui\.button\(tr\('Sign in'\), icon='login'.*?aria-label=\"\{tr\(\"Sign in or register\"\)\}\".*?"
+               r"\.classes\('text-sm phone-icon-only'\)")
+    assert re.search(pattern, auth, re.S)
+    header = auth.split('def create_auth_buttons', 1)[1].split('\nclass ', 1)[0]
+    assert "tr('Register')" not in header and "tr('Login')" not in header
     rules = _phone_rules(_read('web/static/common.css'))
     assert '.phone-icon-only .q-btn__content > .block { font-size: 0;' in rules
+
+
+def test_the_sidebar_hides_its_labels_only_in_the_icon_rail():
+    """Quasar's `q-mini-drawer-hide` is also hidden in the phone's overlay drawer, so the
+    labels vanished there (2026-11-05); the sidebar uses its own class, and the overlay
+    drawer has no rail button."""
+    main = _read('web/main.py')
+    css = _read('web/static/common.css')
+    assert 'q-mini-drawer-hide' not in main
+    assert main.count('nav-mini-hide') == 3
+    assert '.q-drawer--mini .nav-mini-hide { display: none !important; }' in css
+    assert '.q-drawer--mobile .nav-rail-row { display: none; }' in css
+    # The rail button at the sidebar's right edge in Hebrew too (the sidebar is at the left).
+    assert '[dir="rtl"] .q-drawer:not(.q-drawer--mini) .nav-rail-row { justify-content: flex-start; }' in css
 
 
 def test_the_search_form_folds_once_the_search_is_marked_running():
@@ -243,7 +259,7 @@ SHARED_HOOKS = {
                                     'result-title', 'result-index', 'expand-row', 'expand-thumb', 'expand-text',
                                     'expand-actions', 'adv-info-bar', 'adv-content', 'adv-tabs', 'adv-text-col',
                                     'adv-image-col', 'adv-info', 'adv-image-adjust', 'adv-actions-card', 'adv-scroll'],
-    'web/auth_state.py': ['phone-icon-only', 'auth-username'],
+    'web/auth_state.py': ['phone-icon-only', 'auth-account-btn', 'auth-menu-name'],
 }
 
 

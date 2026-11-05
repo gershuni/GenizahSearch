@@ -728,27 +728,31 @@ def create_auth_buttons():
         username = GlobalAuthState.get_username()
         role = GlobalAuthState.get_role() or 'user'
 
-        with ui.row().classes('items-center gap-2'):
-            # User avatar/icon
-            ui.icon('account_circle').classes('text-2xl text-white/80')
+        # The account icon alone (owner, 2026-11-05): the name is the menu's first line
+        # and the icon's tooltip, so the header keeps its room at every width.
+        with ui.button(icon='account_circle').props(
+            f'flat round text-color=white aria-label="{tr("Account")}"'
+        ).classes('auth-account-btn'):
+            name_tip = ui.tooltip(username)
+            with ui.menu().classes('min-w-40').style('background: var(--bg-card); color: var(--text-primary);'):
+                name_label = ui.label(username).classes('auth-menu-name')
+                ui.menu_item(f"Role: {role.title()}", auto_close=False).props('disable')
+                ui.separator()
+                if GlobalAuthState.is_admin():
+                    ui.menu_item(tr('Admin Panel'), lambda: ui.navigate.to('/admin'))
+                ui.menu_item(tr('My Profile'), lambda: ui.navigate.to('/profile'))
+                ui.menu_item(tr('My Lists'), lambda: ui.navigate.to('/lists'))
+                ui.menu_item(tr('My Corrections'), lambda: ui.navigate.to('/corrections'))
+                ui.separator()
 
-            # User info with dropdown menu
-            with ui.button(username, icon='arrow_drop_down').props('flat text-color=white dense').classes('text-sm auth-username') as name_button:
-                with ui.menu().classes('min-w-40').style('background: var(--bg-card); color: var(--text-primary);'):
-                    ui.menu_item(f"Role: {role.title()}", auto_close=False).props('disable')
-                    ui.separator()
-                    if GlobalAuthState.is_admin():
-                        ui.menu_item(tr('Admin Panel'), lambda: ui.navigate.to('/admin'))
-                    ui.menu_item(tr('My Profile'), lambda: ui.navigate.to('/profile'))
-                    ui.menu_item(tr('My Corrections'), lambda: ui.navigate.to('/corrections'))
-                    ui.separator()
+                def handle_logout():
+                    do_logout()
+                    ui.notify(tr('Logged out'), type='info')
+                    ui.navigate.reload()
 
-                    def handle_logout():
-                        do_logout()
-                        ui.notify(tr('Logged out'), type='info')
-                        ui.navigate.reload()
-
-                    ui.menu_item(tr('Logout'), handle_logout)
+                ui.menu_item(tr('Logout'), handle_logout)
+        # Where the header shows the name: the menu's first line and the icon's tooltip.
+        name_button = _ShownName(name_label, name_tip)
 
         # Once per account: how should the name appear (an alias until answered)?
         try:
@@ -771,20 +775,36 @@ def create_auth_buttons():
             d.tabs.set_value(d.login_tab)
             d.open()
 
-        def open_register():
-            d = _ensure_dialog()
-            d.tabs.set_value(d.register_tab)
-            d.open()
-
+        # One button (owner, 2026-11-05): the dialog it opens has the Register tab.
         # `phone-icon-only` (common.css): at phone width the label goes and the
         # icon stays, the name living on in aria-label and the tooltip; on wider
-        # screens the icon is hidden and the buttons look as they always did.
-        ui.button(tr('Login'), icon='login', on_click=open_login).props(
-            f'flat text-color=white dense aria-label="{tr("Login")}"'
-        ).classes('text-sm phone-icon-only').tooltip(tr('Login'))
-        ui.button(tr('Register'), icon='person_add', on_click=open_register).props(
-            f'outline text-color=white dense aria-label="{tr("Register")}"'
-        ).classes('text-sm phone-icon-only').tooltip(tr('Register'))
+        # screens the icon is hidden.
+        ui.button(tr('Sign in'), icon='login', on_click=open_login).props(
+            f'outline text-color=white dense aria-label="{tr("Sign in or register")}"'
+        ).classes('text-sm phone-icon-only').tooltip(tr('Sign in or register'))
+
+
+class _ShownName:
+    """Where the signed-in header shows the name (the menu's first line, the icon's
+    tooltip), as one thing with ``text``: ``web.public_name`` renames it after the
+    reader chooses how their name appears."""
+
+    def __init__(self, *elements):
+        self._elements = elements
+
+    @property
+    def is_deleted(self) -> bool:
+        return all(e.is_deleted for e in self._elements)
+
+    @property
+    def text(self) -> str:
+        return self._elements[0].text
+
+    @text.setter
+    def text(self, value: str) -> None:
+        for element in self._elements:
+            if not element.is_deleted:
+                element.text = value
 
 
 # ============================================================================

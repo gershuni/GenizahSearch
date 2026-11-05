@@ -79,7 +79,7 @@ def test_the_zoom_buttons_carry_no_server_click_handler():
         [listener] = _click_listeners(reset)
         assert listener.handler is not None
         assert 'v.reset()' in listener.js_handler and 'emit(e)' in listener.js_handler
-        assert _button_with_tooltip(user, 'Zoom in') is _action_button(user, 'zoom-in')
+        assert _button_with_tooltip(user, 'Zoom in (+)') is _action_button(user, 'zoom-in')
 
     _run_browse(OPEN_PAGE, driver)
 

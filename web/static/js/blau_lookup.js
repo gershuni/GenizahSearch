@@ -22,6 +22,22 @@
  *     is not marked, and a click on the page asks the server nothing.
  * The reader's switch (blau_panel.PREF_KEY) is the pane's attribute: the page
  * adds or removes it, and this script reads it on every click.
+ * The look-up key (owner, 2026-11-05), the switch on or off, in a pane the page
+ * marks `data-blau-pane` wherever a dictionary is served:
+ *   - D or M tapped arms the next click: it looks up the word under the pointer
+ *     (`how: 'key'`); held with a mouse, every click while it is down. Alt + a
+ *     click does the same (`how: 'alt'`): a laptop touchpad ignores input while
+ *     a letter key is held, but not while Alt is;
+ *   - D or M pressed while words of the pane are selected, or a selection made
+ *     with the key armed or Alt held, looks up the selection (`how:
+ *     'selection'`): its first words that hold Hebrew letters, without what
+ *     stands around them (line numbers, punctuation);
+ *   - on a phone (no hover), selected words show a "Look up" chip under them
+ *     (`how: 'chip'`), its label from the pane's `data-blau-chip`;
+ *   - Esc closes the panel and disarms the key.
+ * D and M are the keys by name, the Hebrew letter on a Hebrew layout (`מ`), or
+ * the physical keys on any layout; never while a box has the focus, while a
+ * dialog or menu is open, or with Ctrl, Alt or Cmd (those are the browser's).
  * The word is what sits between two non-word characters in the text node
  * under the pointer: Hebrew letters, combining marks, the apostrophe and
  * geresh family the transcriptions write the Judeo-Arabic letters with.
@@ -33,6 +49,8 @@
 
   var POPOVER = '.gs-blau-popover';
   var PANE = '[data-blau-lookup]';
+  var KEY_PANE = '[data-blau-pane]';   // where the look-up key works, the switch on or off
+  var SELECTION_WORDS = 6;            // a selection is looked up by its first words
   var HIT = 'blau-word-hit';
   var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
   var OPEN = 'blau-open';     // the "type a word" button (this script opens the panel)
@@ -122,9 +140,183 @@
     return pop.style.display !== 'none';
   }
 
+  // The look-up key (owner, 2026-11-05): D or M. Tapped, it arms the NEXT click: that click
+  // looks up the word under it, and is used up wherever it lands. Held (with a mouse), every
+  // click while it is down looks up, and letting it go disarms. Alt + a click does the same
+  // without a letter: on a laptop Windows ignores the touchpad while a letter key is held
+  // (the pointer stops, taps are dropped -- the owner's report on M), but not for Alt.
+  // Held or tapped is told by the key's own down and up, not by auto-repeat: a click can come
+  // before the first repeat (Codex, PR #484).
+  var armed = false;
+  var down = false;                     // D or M is down now: its keydown seen, its keyup not yet
+  var held = false;                     // ...and it auto-repeated, or a click came while it was down
+  var ARMED = 'blau-armed';             // on <html> while armed: the pointer says so over the text
+
+  function isLookupKey(event) {
+    return event.code === 'KeyD' || event.code === 'KeyM' || event.key === 'd' || event.key === 'D' ||
+      event.key === 'm' || event.key === 'M' || event.key === 'מ';
+  }
+
+  function arm(on) {
+    armed = on;
+    document.documentElement.classList.toggle(ARMED, on);
+  }
+
+  // A dialog or menu above the page (the shortcuts card, a confirmation, the account menu):
+  // its keys are its own (Codex, PR #484). The dictionary panel is neither.
+  function overlayOpen() {
+    return document.querySelector('.q-dialog, .q-menu') !== null;
+  }
+
+  function inABox(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  }
+
+  function paneOf(node, viaKey) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el) return null;
+    return el.closest(PANE) || (viaKey ? el.closest(KEY_PANE) : null);
+  }
+
+  // The selected words of a pane: {text, rect}, or null when nothing of a pane
+  // is selected or the selection holds no Hebrew letters.
+  function selectedWords(viaKey) {
+    var sel = window.getSelection ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var range = sel.getRangeAt(0);
+    if (!paneOf(range.commonAncestorContainer, viaKey)) return null;
+    var words = [];
+    var parts = sel.toString().split(/\s+/);
+    for (var i = 0; i < parts.length && words.length < SELECTION_WORDS; i++) {
+      var part = parts[i];
+      var start = 0, end = part.length;
+      while (start < end && !WORD_CHAR.test(part.charAt(start))) start++;
+      while (end > start && !WORD_CHAR.test(part.charAt(end - 1))) end--;
+      part = part.slice(start, end);
+      if (/[א-ת]/.test(part)) words.push(part);
+    }
+    if (!words.length) return null;
+    return { text: words.join(' '), rect: range.getBoundingClientRect() };
+  }
+
+  function lookUp(pop, picked, how) {
+    clearHit();
+    hideChip();
+    chipDone = picked.text;
+    place(pop, picked.rect);
+    dispatch(pop, 'blau-lookup', { word: picked.text, how: how });
+  }
+
+  function lookUpSelection(pop, viaKey) {
+    var picked = selectedWords(viaKey);
+    if (!picked) return false;
+    lookUp(pop, picked, 'selection');
+    return true;
+  }
+
+  // Phones (owner, 2026-11-05): no key, so words selected in the text (a long press) show a
+  // "Look up" chip under them, the switch on or off (`how: 'chip'`). Its label is the
+  // page's, translated there (`data-blau-chip` on the pane).
+  var CHIP = 'blau-chip';
+  var chip = null;
+  var chipPick = null;
+  var chipDone = null;    // the words the panel shows from the chip: no chip again for them
+
+  function hideChip() {
+    if (chip) chip.style.display = 'none';
+    chipPick = null;
+  }
+
+  function showChip() {
+    var pop = document.querySelector(POPOVER);
+    var picked = pop && !overlayOpen() ? selectedWords(true) : null;
+    // Nothing selected, or the very words the open panel already shows.
+    if (!picked || (picked.text === chipDone && shown(pop))) { hideChip(); return; }
+    var pane = document.querySelector(KEY_PANE);
+    if (!chip) {
+      chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = CHIP;
+      // Pressing the chip must not clear the selection it looks up.
+      chip.addEventListener('pointerdown', function (e) { e.preventDefault(); });
+      chip.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      chip.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var p = document.querySelector(POPOVER);
+        if (p && chipPick) lookUp(p, chipPick, 'chip');
+      });
+      document.body.appendChild(chip);
+    }
+    chip.textContent = (pane && pane.getAttribute('data-blau-chip')) || 'Look up';
+    chipPick = picked;
+    chip.style.display = 'block';
+    var r = picked.rect;
+    var w = chip.offsetWidth, h = chip.offsetHeight;
+    var left = Math.max(MARGIN, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - MARGIN));
+    var top = r.bottom + 2 * GAP;   // under the selection: the phone's own menu sits above it
+    if (top + h > window.innerHeight - MARGIN) top = Math.max(MARGIN, r.top - h - 2 * GAP);
+    chip.style.left = Math.round(left) + 'px';
+    chip.style.top = Math.round(top) + 'px';
+  }
+
+  if (window.matchMedia && window.matchMedia('(hover: none)').matches) {
+    var chipTimer = null;
+    document.addEventListener('selectionchange', function () {
+      clearTimeout(chipTimer);
+      chipTimer = setTimeout(showChip, 250);   // after the selection handles settle
+    });
+    window.addEventListener('scroll', hideChip, true);
+  }
+
+  document.addEventListener('keydown', function (event) {
+    var pop = document.querySelector(POPOVER);
+    if (!pop) return;                       // no dictionary on this page
+    if (event.key === 'Escape') {
+      // Esc closes the panel (owner, 2026-11-05), from its own box too, and disarms the key.
+      if (overlayOpen()) return;
+      var had = shown(pop) || document.querySelector('.' + HIT) !== null;
+      var wasArmed = armed;
+      arm(false);
+      hideChip();
+      clearHit();
+      if (had) dispatch(pop, 'blau-close');
+      if (had || wasArmed) event.preventDefault();
+      return;
+    }
+    if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;
+    if (inABox(event.target) || inABox(document.activeElement)) return;
+    if (overlayOpen()) return;
+    down = true;
+    if (event.repeat) {                     // held: every click while it is down
+      held = true;
+      arm(true);
+      return;
+    }
+    held = false;
+    if (lookUpSelection(pop, true)) { arm(false); return; }   // selected words, then the key
+    arm(true);
+  });
+  document.addEventListener('keyup', function (event) {
+    if (!isLookupKey(event) || !down) return;
+    down = false;
+    if (held) arm(false);                   // held and let go; a tap stays armed for its click
+  });
+  // Back from another window: a held key's release was never seen here.
+  window.addEventListener('blur', function () {
+    if (down) { down = false; arm(false); }
+  });
+
   document.addEventListener('click', function (event) {
     var pop = document.querySelector(POPOVER);
     if (!pop) return;                       // no dictionary on this page
+    var viaAlt = event.altKey && !event.ctrlKey && !event.metaKey;
+    var viaKey = viaAlt || (armed && !event.ctrlKey && !event.metaKey);
+    // A tapped key arms one click, wherever it lands: before the panel's and the switch's own
+    // clicks return, which use it up too (Codex, PR #484). A key still down is held: every click
+    // while it is down looks up, and letting it go disarms.
+    if (armed) { if (down) held = true; else arm(false); }
     if (pop.contains(event.target)) {       // the panel's own controls
       var closing = event.target.nodeType === 1 ? event.target.closest('.' + CLOSE) : null;
       if (closing) clearHit();              // the page hides the popover; the word's mark goes with it
@@ -138,7 +330,9 @@
       dispatch(pop, 'blau-open');
       return;
     }
-    var pane = target ? target.closest(PANE) : null;
+    // Words selected with the key armed (or Alt held): the selection, not the word under the pointer.
+    if (viaKey && target && paneOf(target, true) && lookUpSelection(pop, true)) return;
+    var pane = target ? paneOf(target, viaKey) : null;
     // Something to close: the popover is up, or a word is marked (its lookup
     // may still be running; the close makes it stale).
     var open = shown(pop) || document.querySelector('.' + HIT) !== null;
@@ -155,6 +349,7 @@
     var rect = markWord(caret.node, word) ||
       { left: event.clientX, right: event.clientX, top: event.clientY, bottom: event.clientY, width: 0 };
     place(pop, rect);
-    dispatch(pop, 'blau-lookup', { word: word.text });
+    hideChip();
+    dispatch(pop, 'blau-lookup', { word: word.text, how: viaAlt ? 'alt' : viaKey ? 'key' : 'word' });
   });
 })();

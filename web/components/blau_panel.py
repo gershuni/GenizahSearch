@@ -120,14 +120,33 @@ PANEL_CLASS = 'gs-blau'
 POPOVER_CLASS = 'gs-blau-popover'
 #: The attribute that marks the transcription pane whose words are looked up.
 PANE_ATTR = 'data-blau-lookup'
+#: The attribute on the same pane wherever a dictionary is served, the switch on or off: the
+#: look-up key works there at any time (owner, 2026-11-05; blau_lookup.js): D or M tapped arms
+#: the next click, Alt + a click, selected words and D or M, and on a phone a chip.
+KEY_PANE_ATTR = 'data-blau-pane'
+#: The phone's chip under selected words: its label, set on the pane in the page's language.
+CHIP_LABEL_ATTR = 'data-blau-chip'
+CHIP_LABEL = 'Look up in the dictionary'
+CHIP_CLASS = 'blau-chip'
+#: On <html> while a tapped key waits for its click (the pointer says so over the text).
+ARMED_CLASS = 'blau-armed'
+#: The switch's tooltip: what pressing it does, and under it the key (owner, 2026-11-05).
+TIP_CLASS = 'blau-switch-tip'
+KEY_HINT = 'Press D or M, then click a word (or click it with Alt held); or select words and press D or M'
+KEY_HINT_CLASS = 'blau-key-hint'
+#: How a lookup started (``lookup_how``): a click with the switch on, a click with D or M
+#: armed, a click with Alt held, selected words and the key, or the phone's chip.
+LOOKUP_HOWS = ('word', 'key', 'alt', 'selection', 'chip')
 #: The span the script wraps the clicked word in (keeps it highlighted).
 HIT_CLASS = 'blau-word-hit'
 #: The events the script dispatches on the popover element.
 LOOKUP_EVENT = 'blau-lookup'
 CLOSE_EVENT = 'blau-close'
 #: PostHog events (owner, 2026-11-04: do readers find the switch, and use it?), beside
-#: browse_manuscript. The switch: {on, was_new}; a lookup: {how: 'word' (clicked in the text) or
-#: 'box' (typed, or a reading chip), blau / lane: found something, or None when not served};
+#: browse_manuscript. The switch: {on, was_new}; a lookup: {how: 'word' (clicked in the text),
+#: 'key' (clicked with D or M armed), 'alt' (clicked with Alt), 'selection' (selected words and
+#: the key), 'chip' (the phone's chip) or 'box' (typed, or a reading chip), blau / lane: found
+#: something, or None when not served};
 #: a tab the reader chose: {tab}. The word itself is never sent.
 POSTHOG_SWITCH = 'dictionary_switch'
 POSTHOG_LOOKUP = 'dictionary_lookup'
@@ -200,9 +219,10 @@ def switch_tooltip(on: bool) -> str:
     return tr('Turn off the dictionaries') if on else tr('Turn on the dictionaries (Judeo-Arabic)')
 
 
-def lookup_event(typed: bool, result: Optional[BlauLookup], lane: Optional[LaneLookup]) -> dict:
+def lookup_event(typed: bool, result: Optional[BlauLookup], lane: Optional[LaneLookup],
+                 how: str = 'word') -> dict:
     """The ``POSTHOG_LOOKUP`` properties of one answered lookup (never the word)."""
-    return {'how': 'box' if typed else 'word',
+    return {'how': 'box' if typed else (how if how in LOOKUP_HOWS else 'word'),
             'blau': None if result is None else bool(result.found),
             'lane': None if lane is None else bool(lane.readings)}
 
@@ -251,6 +271,21 @@ def lookup_word(args: Any) -> str:
         return ''
     word = payload.get('word')
     return word.strip() if isinstance(word, str) else ''
+
+
+def lookup_how(args: Any) -> str:
+    """How the script's lookup started (``LOOKUP_HOWS``), from the same payload as
+    ``lookup_word``; 'word' for anything else. Never raises."""
+    payload = args
+    if isinstance(payload, dict) and 'detail' in payload:
+        payload = payload['detail']
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return 'word'
+    how = payload.get('how') if isinstance(payload, dict) else None
+    return how if how in LOOKUP_HOWS else 'word'
 
 
 def _attr(value: Any) -> str:

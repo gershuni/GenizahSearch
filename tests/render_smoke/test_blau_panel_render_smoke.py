@@ -207,6 +207,13 @@ async def _turn_on(user):
     assert _marked_panes(user), 'the switch did not mark the pane'
 
 
+
+def _switch_tip(user) -> list[str]:
+    """The switch's tooltip, line by line: what pressing it does, then the M key (2026-11-05)."""
+    [tip] = [e for e in _all_elements(user) if isinstance(e, ui.tooltip) and blau_panel.TIP_CLASS in e.classes]
+    return [e.text for e in tip.descendants() if isinstance(e, ui.label)]
+
+
 def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
     async def driver(user):
         await _open(user)
@@ -229,8 +236,8 @@ def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
         assert switch.props.get('aria-label') == 'Judeo-Arabic dictionaries'
         assert _hint_shown(user) and _opener_shown(user)
         assert 'Click a word to look it up in the dictionaries' in _visible_texts(user)
-        tips = [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
-        assert 'Turn off the dictionaries' in tips
+        tips = _switch_tip(user)
+        assert tips == ['Turn off the dictionaries', blau_panel.KEY_HINT], tips
 
         # Off again, with the panel up: the pane is unmarked and the panel hides.
         popover = _popover(user)
@@ -241,8 +248,7 @@ def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
         assert not _marked_panes(user) and popover._style.get('display') == 'none'
         assert not _hint_shown(user) and switch.props.get('aria-pressed') == 'false'
         assert blau_panel.NEW_CLASS not in switch.classes, 'off again, but not new again'
-        assert 'Turn on the dictionaries (Judeo-Arabic)' in [
-            e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
+        assert _switch_tip(user) == ['Turn on the dictionaries (Judeo-Arabic)', blau_panel.KEY_HINT]
 
     _run(driver, _dictionary(), lang='en')
 
@@ -373,7 +379,7 @@ def test_the_hebrew_ui_shows_the_site_s_line_only_and_its_own_words():
         assert any(t.startswith('המהדורה הדיגיטלית: פרויקט MiDRASH') for t in texts), 'MiDRASH, in Hebrew'
         assert 'מילון בלאו' in texts and 'עמ׳ 587' in texts and 'קלאסי' in texts
         assert 'לחיצה על מילה מחפשת אותה במילונים' in _visible_texts(user)
-        assert 'כיבוי המילונים' in [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
+        assert _switch_tip(user) == ['כיבוי המילונים', 'לחצו על D או M (או מ) ואז על מילה (או לחצו עליה כש-Alt לחוץ), או בחרו מילים ולחצו על D או M']
         # The Hebrew gloss comes first in a sense, the English after it.
         glosses = [e for e in _all_elements(user) if isinstance(e, ui.label) and 'gloss' in e.classes]
         assert [('he' in g.classes) for g in glosses[:2]] == [True, False]
