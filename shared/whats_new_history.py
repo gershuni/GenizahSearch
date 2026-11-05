@@ -60,13 +60,27 @@ def _for_app(release: dict, app: Optional[str]) -> Optional[dict]:
     return out if out['items'] else None
 
 
+def current_version() -> str:
+    """The running app's version, read at call time (``version.APP_VERSION``)."""
+    import version
+    return version.APP_VERSION
+
+
 def releases(app: Optional[str] = None) -> list[dict]:
-    """Every release, newest first; with ``app``, only the items that app shows, and only
-    the releases that still have one."""
+    """Every released version, newest first; with ``app``, only the items that app shows, and
+    only the releases that still have one.
+
+    An entry newer than the running app's own version is left out: a release's entry is
+    written with its texts, before the bump, and a deploy in between must not announce a
+    version that does not exist yet (Codex, PR #482). On the website that is the server's
+    version, so the desktop update notes reach as far as the deployed site."""
     if app is not None and app not in APPS:
         raise ValueError(f'not an app: {app!r}')
+    ceiling = version_key(current_version())
     out = []
     for release in sorted(HISTORY, key=lambda r: version_key(r['version']), reverse=True):
+        if version_key(release['version']) > ceiling:
+            continue
         kept = _for_app(release, app)
         if kept is not None:
             out.append(kept)

@@ -64,7 +64,9 @@ def test_update_mode_asks_the_website_for_the_changes_and_shows_them(fake_thread
     assert (thread.since, thread.upto, thread.started) == ('9.13.1', '9.14.0', True)
     assert 'Loading' in dlg.browser.toPlainText()
     assert '9.13.1' in dlg.windowTitle() and 'v9.14.0' in dlg.subtitle_label.text()
-    thread.finished_signal.emit(wnh.releases_between('9.13.1', '9.14.0', app='desktop'))
+    # What the website would send (its own version may be ahead of this copy's).
+    newer = [r for r in wnh.HISTORY if r['version'] == '9.14.0']
+    thread.finished_signal.emit(newer)
     assert 'Version 9.14.0' in dlg.browser.toPlainText()
     dlg.update_btn.click()
     assert dlg.result() == dlg.DialogCode.Accepted

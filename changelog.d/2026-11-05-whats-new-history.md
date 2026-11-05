@@ -8,7 +8,8 @@ and the desktop update notice showing the changes between the reader's version a
   each a new feature, an improvement or a fix, in English and Hebrew, with the app a reader sees it
   in. The entries for 9.0.0-9.13.1 were written from each release's approved What's New texts, its
   GitHub notes and its CHANGELOG section. `tests/test_whats_new_history.py` fails while
-  `version.APP_VERSION` has no entry, so each release adds its own.
+  `version.APP_VERSION` has no entry, so each release adds its own. An entry newer than the running
+  app's version is not shown anywhere (it is written with the release texts, before the bump).
 - **Website:** `/whats-new` (`web/pages/whats_new.py`), linked from the header's What's New panel
   ("What's New in every version"; the panel is not shown on the page itself), and in the static
   sitemap. `GET /api/whats-new?since=&upto=&app=web|desktop` serves the same entries in both

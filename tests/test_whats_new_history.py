@@ -88,6 +88,23 @@ def test_releases_newest_first_and_by_app(fake_history):
         wnh.releases('phone')
 
 
+def test_a_version_newer_than_the_app_is_not_shown(fake_history, monkeypatch):
+    """Codex, PR #482: an entry written before the bump is not announced until the app is
+    that version -- on every surface, since they all read releases()."""
+    monkeypatch.setattr(wnh, 'current_version', lambda: '9.2.0')
+    assert [r['version'] for r in wnh.releases()] == ['9.2.0', '9.1.0']
+    assert [r['version'] for r in wnh.releases_between('9.1.0')] == ['9.2.0']
+    assert wnh.problems(fake_history) == [], 'an unreleased entry is still a sound entry'
+    monkeypatch.setattr(wnh, 'current_version', lambda: '9.3.0')
+    assert wnh.releases()[0]['version'] == '9.3.0'
+
+
+def test_the_api_hides_an_unreleased_version(client, fake_history, monkeypatch):
+    monkeypatch.setattr(wnh, 'current_version', lambda: '9.2.0')
+    body = client.get('/api/whats-new').json()
+    assert body['latest'] == '9.2.0' and [r['version'] for r in body['releases']] == ['9.2.0', '9.1.0']
+
+
 def test_releases_between_is_after_since_up_to_upto(fake_history):
     assert [r['version'] for r in wnh.releases_between('9.1.0')] == ['9.3.0', '9.2.0']
     assert [r['version'] for r in wnh.releases_between('9.1.0', '9.2.0')] == ['9.2.0']
