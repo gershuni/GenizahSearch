@@ -31,8 +31,8 @@
  *     that hold Hebrew letters, without what stands around them (line numbers,
  *     punctuation).
  * M is the key `m`/`M`, the Hebrew letter on a Hebrew layout (`מ`), or the
- * physical M key on any layout; never while a box has the focus or with Ctrl,
- * Alt or Cmd (those are the browser's).
+ * physical M key on any layout; never while a box has the focus, while a dialog
+ * or menu is open, or with Ctrl, Alt or Cmd (those are the browser's).
  * The word is what sits between two non-word characters in the text node
  * under the pointer: Hebrew letters, combining marks, the apostrophe and
  * geresh family the transcriptions write the Judeo-Arabic letters with.
@@ -187,6 +187,9 @@
   document.addEventListener('keydown', function (event) {
     if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;
     if (inABox(event.target) || inABox(document.activeElement)) return;
+    // A dialog or menu is open (the shortcuts card, a confirmation, the account menu): M is
+    // not for the page behind it (Codex, PR #484). The dictionary panel is neither.
+    if (document.querySelector('.q-dialog, .q-menu')) return;
     keyHeld = true;
     if (event.repeat) return;
     var pop = document.querySelector(POPOVER);

@@ -299,6 +299,9 @@ def test_the_m_key_looks_up_wherever_a_dictionary_is_served():
     # Never while typing (the panel's own box takes an M), never with Ctrl/Alt/Cmd.
     assert "if (inABox(event.target) || inABox(document.activeElement)) return;" in JS
     assert "if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;" in JS
+    # Nor while a dialog or menu is open (Codex, PR #484): checked before M counts as held.
+    guard = "if (document.querySelector('.q-dialog, .q-menu')) return;"
+    assert guard in JS and JS.index(guard) < JS.index("keyHeld = true;")
     assert "window.addEventListener('blur', function () { keyHeld = false; });" in JS
 
 
