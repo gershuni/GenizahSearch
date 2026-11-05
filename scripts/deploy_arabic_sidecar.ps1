@@ -20,7 +20,7 @@ param(
     [Parameter(Mandatory = $true)][int]$Entries,
     [string]$Version = "1.0.0",
     [string]$Candidate = "arabic_data/arabic.db",
-    [string]$RemoteHost = "ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com",
+    [string]$RemoteHost = "genizah-prod",
     [string]$RemoteRepo = "/home/ubuntu/GenizahSearch",
     [switch]$DryRun
 )

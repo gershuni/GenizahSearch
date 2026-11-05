@@ -61,10 +61,10 @@ The local `fist_data/fjms_enrichment.db` (1.5GB) has all changes (bib dedup + tr
 gzip -k fist_data/fjms_enrichment.db
 
 # Upload to server (will take a few minutes)
-scp fist_data/fjms_enrichment.db.gz ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/tmp/
+scp fist_data/fjms_enrichment.db.gz genizah-prod:/tmp/
 
 # On server: backup old, replace, restart
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com << 'EOF'
+ssh genizah-prod << 'EOF'
 cd /home/ubuntu/GenizahSearch
 cp fist_data/fjms_enrichment.db fist_data/fjms_enrichment_backup_pre_v73.db
 gunzip -c /tmp/fjms_enrichment.db.gz > fist_data/fjms_enrichment.db

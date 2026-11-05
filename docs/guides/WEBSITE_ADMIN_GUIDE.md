@@ -12,7 +12,7 @@
 | **Website URL** | https://genizahsearch.com |
 | **Supabase Dashboard** | https://supabase.com/dashboard |
 | **Server Management** | https://admin.genizahsearch.com (Cockpit) |
-| **Server Access** | `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com` |
+| **Server Access** | `ssh genizah-prod` |
 | **Cloudflare Dashboard** | https://dash.cloudflare.com |
 
 ---
@@ -70,7 +70,7 @@ All user data (lists, corrections, comments, discoveries) is stored in **Supabas
 
 **From command line:**
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl status genizah-web"
+ssh genizah-prod "sudo systemctl status genizah-web"
 ```
 Look for "Active: active (running)" in green.
 
@@ -81,7 +81,7 @@ Look for "Active: active (running)" in green.
 If the website is slow or not responding:
 
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
+ssh genizah-prod "sudo systemctl restart genizah-web"
 ```
 
 Wait 10 seconds, then check if it's working.
@@ -93,7 +93,7 @@ Wait 10 seconds, then check if it's working.
 When you've made changes to the code and pushed to GitHub:
 
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && ./deploy.sh"
+ssh genizah-prod "cd /home/ubuntu/GenizahSearch && ./deploy.sh"
 ```
 
 This will:
@@ -128,12 +128,12 @@ To see what's happening on the website:
 
 ```bash
 # See the last 50 log entries
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo journalctl -u genizah-web -n 50"
+ssh genizah-prod "sudo journalctl -u genizah-web -n 50"
 ```
 
 To watch logs in real-time (press Ctrl+C to stop):
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo journalctl -u genizah-web -f"
+ssh genizah-prod "sudo journalctl -u genizah-web -f"
 ```
 
 ---
@@ -141,7 +141,7 @@ ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo journalctl -
 ### 6. Check Server Health
 
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "df -h / && free -h"
+ssh genizah-prod "df -h / && free -h"
 ```
 
 This shows:
@@ -159,7 +159,7 @@ This shows:
 **How to fix:**
 1. Restart the service:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
+   ssh genizah-prod "sudo systemctl restart genizah-web"
    ```
 2. Wait 30 seconds and try again.
 
@@ -175,11 +175,11 @@ This shows:
 **How to fix:**
 1. Check server resources:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "free -h && df -h /"
+   ssh genizah-prod "free -h && df -h /"
    ```
 2. Restart service:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
+   ssh genizah-prod "sudo systemctl restart genizah-web"
    ```
 
 ---
@@ -212,11 +212,11 @@ User data (lists, corrections) is stored in Supabase cloud. If data isn't syncin
 **How to fix:**
 1. Restart service first:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
+   ssh genizah-prod "sudo systemctl restart genizah-web"
    ```
 2. If still not working, rebuild the index:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && source venv/bin/activate && nohup python build_index.py > index_rebuild.log 2>&1 &"
+   ssh genizah-prod "cd /home/ubuntu/GenizahSearch && source venv/bin/activate && nohup python build_index.py > index_rebuild.log 2>&1 &"
    ```
 
 ---
@@ -288,7 +288,7 @@ Check GitHub: https://github.com/gershuni/GenizahSearch
 
 ```bash
 # Connect to server
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com
+ssh genizah-prod
 
 # Once connected, you can run:
 
@@ -319,7 +319,7 @@ Cockpit is a web-based tool that lets you manage the server through your browser
 ### First Time Setup
 Set a password for Cockpit login:
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo passwd ubuntu"
+ssh genizah-prod "sudo passwd ubuntu"
 ```
 Enter a password when prompted (you'll type it twice).
 

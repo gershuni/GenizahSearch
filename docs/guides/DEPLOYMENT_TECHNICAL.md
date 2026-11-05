@@ -62,9 +62,19 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 |-----------|-------|
 | Provider | AWS EC2 |
 | Instance | Ubuntu 24.04.3 LTS |
-| IP | 44.247.206.248 |
-| SSH | `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com` |
+| SSH | `ssh genizah-prod` (an alias in your `~/.ssh/config`; see below) |
 | Region | us-west-2 |
+
+The server's address is kept out of this repository. Every command here and in the deploy
+scripts reaches it as `genizah-prod`, an SSH alias you define once on your own machine:
+
+```
+# ~/.ssh/config  (Windows: %USERPROFILE%\.ssh\config)
+Host genizah-prod
+    HostName <the server's public DNS name>
+    User ubuntu
+    IdentityFile <path to the server key>
+```
 
 ### Domain & DNS
 
@@ -301,8 +311,9 @@ break, and fails if `web/` reads those headers or sets `FORWARDED_ALLOW_IPS`. It
 server's environment: step 0 below checks that.
 
 **Limits.** The origin listens on `0.0.0.0:443` and `:80` with no Cloudflare-only restriction in
-the nginx config, and its address is in this public repo (Server Details above); whether the AWS
-security group admits only Cloudflare is not visible from the config. The snippet does not stop a
+the nginx config, and its address was published in this repository's history; whether the AWS
+security group admits only Cloudflare is not visible from the config. Lock it to Cloudflare's IP
+ranges (security group, or nginx `allow`/`deny`) so the published address cannot bypass Cloudflare. The snippet does not stop a
 direct request -- it only guarantees that such a request is logged and limited under its true
 address. The app itself listens on `0.0.0.0:8081` (NiceGUI's default when `ui.run` gets no
 `host`), which would skip nginx and Cloudflare altogether; checked 2026-10-07, port 8081 is not
@@ -1131,8 +1142,8 @@ All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be 
 
 ```bash
 # From local machine:
-scp fist_data/fjms_enrichment.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/fist_data/
-scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/nli_data/
+scp fist_data/fjms_enrichment.db genizah-prod:/home/ubuntu/GenizahSearch/fist_data/
+scp nli_data/nli_crossref.db genizah-prod:/home/ubuntu/GenizahSearch/nli_data/
 
 # pgp.db goes through the guarded deploy script, never a bare scp: the web reads
 # pgp_translations through TranslationService, so an unconditional upload can publish a
@@ -1145,10 +1156,10 @@ scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazona
 # arabic.db (Lane's Lexicon) the same way, after the code of PR #480 is on the server:
 #   powershell -File scripts/deploy_arabic_sidecar.ps1 -Entries 47890
 
-scp libraries_translations.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/
+scp libraries_translations.db genizah-prod:/home/ubuntu/GenizahSearch/
 
 # On server, create directories if needed:
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com
+ssh genizah-prod
 mkdir -p /home/ubuntu/GenizahSearch/fist_data /home/ubuntu/GenizahSearch/nli_data /home/ubuntu/GenizahSearch/pgp_data
 ```
 

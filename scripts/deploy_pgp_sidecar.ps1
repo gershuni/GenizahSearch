@@ -32,7 +32,7 @@
 #   powershell -File scripts/deploy_pgp_sidecar.ps1            # guard, code check, upload, restart
 #   powershell -File scripts/deploy_pgp_sidecar.ps1 -DryRun    # guard only; print the rest
 param(
-    [string]$RemoteHost = "ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com",
+    [string]$RemoteHost = "genizah-prod",
     [string]$RemotePath = "/home/ubuntu/GenizahSearch/pgp_data/",
     [string]$RemoteRepo = "/home/ubuntu/GenizahSearch",
     [string]$Sidecar = "pgp_data/pgp.db",
