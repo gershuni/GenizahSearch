@@ -145,8 +145,11 @@
   // click while it is down looks up, and letting it go disarms. Alt + a click does the same
   // without a letter: on a laptop Windows ignores the touchpad while a letter key is held
   // (the pointer stops, taps are dropped -- the owner's report on M), but not for Alt.
+  // Held or tapped is told by the key's own down and up, not by auto-repeat: a click can come
+  // before the first repeat (Codex, PR #484).
   var armed = false;
-  var repeated = false;                 // the key auto-repeated: it was held, not tapped
+  var down = false;                     // D or M is down now: its keydown seen, its keyup not yet
+  var held = false;                     // ...and it auto-repeated, or a click came while it was down
   var ARMED = 'blau-armed';             // on <html> while armed: the pointer says so over the text
 
   function isLookupKey(event) {
@@ -285,28 +288,35 @@
     if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;
     if (inABox(event.target) || inABox(document.activeElement)) return;
     if (overlayOpen()) return;
+    down = true;
     if (event.repeat) {                     // held: every click while it is down
-      repeated = true;
+      held = true;
       arm(true);
       return;
     }
-    repeated = false;
+    held = false;
     if (lookUpSelection(pop, true)) { arm(false); return; }   // selected words, then the key
     arm(true);
   });
   document.addEventListener('keyup', function (event) {
-    if (isLookupKey(event) && repeated) arm(false);   // held and let go; a tap stays armed
+    if (!isLookupKey(event) || !down) return;
+    down = false;
+    if (held) arm(false);                   // held and let go; a tap stays armed for its click
   });
   // Back from another window: a held key's release was never seen here.
-  window.addEventListener('blur', function () { if (repeated) arm(false); });
+  window.addEventListener('blur', function () {
+    if (down) { down = false; arm(false); }
+  });
 
   document.addEventListener('click', function (event) {
     var pop = document.querySelector(POPOVER);
     if (!pop) return;                       // no dictionary on this page
     var viaAlt = event.altKey && !event.ctrlKey && !event.metaKey;
     var viaKey = viaAlt || (armed && !event.ctrlKey && !event.metaKey);
-    // Before the panel's and the switch's own clicks return (Codex, PR #484): those use it up too.
-    if (armed && !repeated) arm(false);     // a tapped key arms one click, wherever it lands
+    // A tapped key arms one click, wherever it lands: before the panel's and the switch's own
+    // clicks return, which use it up too (Codex, PR #484). A key still down is held: every click
+    // while it is down looks up, and letting it go disarms.
+    if (armed) { if (down) held = true; else arm(false); }
     if (pop.contains(event.target)) {       // the panel's own controls
       var closing = event.target.nodeType === 1 ? event.target.closest('.' + CLOSE) : null;
       if (closing) clearHit();              // the page hides the popover; the word's mark goes with it
