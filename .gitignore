@@ -399,3 +399,8 @@ blau_data/
 # under arabic_data/download/ is untrusted third-party data fetched by scripts/build_arabic_sidecar.py
 # fetch, and arabic.db is its build artifact, deployed like the other *_data/ sidecars.
 arabic_data/
+
+# Catalogue text search sidecar (docs/plans/CATALOGUE_TEXT_SEARCH_PLAN.md): catalog_text.db is
+# DERIVED by scripts/build_catalog_text_sidecar.py from the FJMS and PGP sidecars, libraries.csv and
+# libraries_translations.db, rebuilt after every refresh of any of them; never committed.
+catalog_data/

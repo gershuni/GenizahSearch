@@ -1,8 +1,9 @@
 # Catalogue text search: find manuscripts by what their catalogue records say
 
-**Status:** plan **rev. 2** (2026-11-05). **Settled by the owner, 2026-11-05: D1-D7 as
-recommended, plus a `%` shortcut and a note that PGP and NLI records change (§4.6).** Nothing
-built; PR 1 (§5) is next. The shape was approved on 2026-11-03 ("Yes, catalogue round"); this
+**Status:** plan **rev. 3** (2026-11-05). **Settled by the owner, 2026-11-05: D1-D7 as
+recommended, plus a `%` shortcut and a note that PGP and NLI records change (§4.6).** **PR 1 (the
+data file) is built** on branch `claude/catalogue-text-data`: the real file and its numbers are in
+§3.1, the FJMS translation audit D2 asked for is in §3.2. Nothing is served; PR 2 is next. The shape was approved on 2026-11-03 ("Yes, catalogue round"); this
 document writes it down, measures it on a throwaway prototype (§3), and corrects one point against
 a binding decision (§2.3).
 **Origin:** the PostHog usage review of 2026-11-03 (90 days of web searches, repeated identical
@@ -108,6 +109,66 @@ pairs (וה, וב, ול, שה, מה, בה, לה). Three things the numbers say:
 3. **English and Hebrew do not meet by themselves.** כתובה finds 2,531, "marriage contract" 966,
    "ketubba" 1,043 — different sets. Synonyms and transliterations are out of scope for this round.
 
+### 3.1 The first real build (PR 1, 2026-11-05)
+
+`scripts/build_catalog_text_sidecar.py` on the main checkout's sidecars (FJMS 5.1.0, PGP of
+2026-09-22, `libraries.csv`, `libraries_translations.db`), into the scratchpad:
+
+- **2,442,250 records over 218,839 manuscripts, 730 MB, built in 3.5-5 minutes** (the dedup
+  hashing and the key computed per record make it slower than the prototype's 97 s). By source:
+  FJMS 1,457,084 original + 675,970 automatic, PGP 37,153, library titles 166,889 + 105,154
+  automatic. Left out: 594,810 FJMS and 104,723 library texts that repeat a text already stored
+  for the same manuscript, and **871 FJMS rows whose AlmaId is not a corpus sys_id**.
+- **The gate passes** on it in 3 minutes (`--expect-rows 2442250`, 2,000 sampled records re-keyed,
+  eight canaries, `quick_check`).
+- **English plurals** were measured before the rule in §4.2 was added: the plural alone added
+  31-64% more manuscripts (letter 18,449 -> 28,567 with letters; contract 1,914 -> 3,097; prayer
+  13,123 -> 20,772; poem 15,412 -> 20,262; merchant 540 -> 884). With the rule, "letter" and
+  "letters" find the same 28,567.
+- **Speed on this laptop, warm:** 1-120 ms for ordinary words (כתובה 87 ms, ketubba 11 ms, cheese
+  4 ms, Maimonides 82 ms), but **0.3-1.2 s for the commonest** (פיוט, 52,862 manuscripts, 1.2 s;
+  תורה 0.4 s; piyyut 0.36 s; letter 0.28 s). PR 2 therefore runs the search off the event loop
+  (`run.io_bound`) and measures it on the server; a bound on very common words is a PR 2 choice.
+
+| Query | Manuscripts | Original text only |
+|---|---|---|
+| כתובה | 2,537 | 1,581 |
+| גבינה | 54 | 27 |
+| marriage contract | 1,008 | 754 |
+| ketubba | 1,045 | 1,018 |
+| רמב"ם | 4,438 | 3,530 |
+| Maimonides | 5,082 | 3,030 |
+| cheese | 126 | 111 |
+| תפילין | 394 | 364 |
+| פיוט ליום כפור | 40 | 38 |
+
+### 3.2 How good are the FJMS automatic translations? (D2, 2026-11-05)
+
+A seeded random sample of 150 of the translations the file searches
+(`scripts/sample_fjms_translations.py`, seed 20261105: 97 he2en, 53 en2he; FreeDesc 58,
+RunningTitle 55, TextualFrame 20, FullText 17), graded with the PGP audit's method: one reader
+graded every row good / minor / wrong / garbage against its original, and a second reader, told
+to overturn stylistic nitpicking, re-judged the 23 adverse grades (21 upheld, 2 downgraded to
+minor, 1 wrong raised to garbage).
+
+| Grade | Rows | Share |
+|---|---|---|
+| good | 100 | 66.7% |
+| minor | 29 | 19.3% |
+| **wrong** | 18 | 12.0% |
+| **garbage** | 3 | 2.0% |
+
+**14.0% wrong or garbage, 95% CI 8.4-19.6%**, against 27.8% (21.2-34.3%) for the withheld PGP
+Hebrew translations: about half, and the intervals do not overlap. By direction: he2en 12.4%,
+en2he 17.0%. **By field, FullText is the weak one: 7 of 17 wrong or garbage**, against 4 of 20
+TextualFrame, 5 of 55 RunningTitle and 5 of 58 FreeDesc. The sample is small, so this is a
+signal, not a rate. 18 of the 21 bad rows would mislead a word search: a wrong tractate, person,
+folio or verse number, a dropped shelfmark, "cantillated" rendered as "vocalized" (three times),
+and one translation that invents some thirty catalogue entries. **Under D2 (a) the translations
+are searched, every such hit is labelled "automatic translation", and the switch starts ON.**
+The verdict files are in the session scratchpad. To rerun the audit, draw the sample again with
+the script above (same seed).
+
 ## 4. Design
 
 ### 4.1 The data file
@@ -117,17 +178,18 @@ pairs (וה, וב, ול, שה, מה, בה, לה). Three things the numbers say:
   file of its own because FJMS (1.7 GB) is rebuilt by the owner, PGP is re-exported, and the
   libraries files change separately: a derived file rebuilt from all of them gets one row in
   `docs/architecture/DATA_LIFECYCLE.md`, its own gate, and a rebuild whenever an input changes
-  (100 s). The `catalog_data/` directory is gitignored like the other sidecar directories.
-- **Rows:** one per (sys_id, source, field, language, automatic, text). Identical text for the
-  same manuscript and field is stored once.
+  (3.5-5 minutes, §3.1). The `catalog_data/` directory is gitignored like the other sidecar directories.
+- **Rows:** one per (sys_id, source, field, language, automatic, text). A text identical after
+  normalization to one already stored for the same manuscript is stored once, whatever field said
+  it. Originals are read first, so an automatic translation that repeats an original adds nothing.
 - **FTS5:** the normalized text in three columns by weight — titles (work title, running title,
   library title, `TitleHeb`), descriptions (free description, PGP description, textual frame,
   comment, mentions) and full catalogue text — so bm25 ranks a title match above a match deep in
-  a full entry. The prototype used one column, so PR 1 measures the three.
+  a full entry. bm25 weights 3 / 1.5 / 1 (`COLUMN_WEIGHTS` in the service).
 - **Snippets:** the card shows ~200 characters of the original text around the first match, with
   the matched words marked the way result cards already mark them (`*word*`, rendered by
-  `SearchEngine.format_snippet`). The match offsets come from the normalized text, mapped back to
-  the original through the normalizer.
+  `SearchEngine.format_snippet`). The original text is re-tokenized by the same normalizer, and
+  each word whose key is a query key is marked. A literal `*` in the text becomes `∗`.
 - **`meta`:** schema version, normalizer version, built-at, each input's version or fingerprint
   (FJMS `meta.version`, PGP `upstream_commit`, sha256 of `libraries.csv` and
   `libraries_translations.db`), row counts per source and field.
@@ -135,21 +197,27 @@ pairs (וה, וב, ול, שה, מה, בה, לה). Three things the numbers say:
   round), FJMS person descriptions (`PersonEngDesc`/`PersonHebDesc` describe people, not
   manuscripts), placeholder titles.
 - **Gate:** `scripts/verify_catalog_text_sidecar.py --db … --expect-rows N`. It fails rather than
-  skips, recomputes every normalized key from the stored original, checks the counts per source
-  against the inputs, and runs a fixed list of queries with known minimum hits (the table in §3).
-  As with every gate here, it is shown failing on a damaged copy before it is trusted.
+  skips. It checks the schema, the counts per source against `meta`, every record's sys_id, field
+  and language label, and a seeded sample of records (2,000 by default, all with `--sample 0`)
+  re-keyed by today's normalizer, each of which must find itself in the index. It then runs eight
+  canary searches with floors at about half of the first build's counts, and `quick_check`. Its
+  tests show it failing on ten kinds of damage.
 
 ### 4.2 Normalization (one module, versioned)
 
-`shared/catalog_text_normalize.py`, built on `shared/text_normalize.py` (`strip_nikud`,
-`strip_search_diacritics`) and the final-letter fold already in `shared/blau_normalize.py`. Its
+`shared/catalog_text_normalize.py` (NFKD with every combining mark dropped, the same quote family
+as `shared/text_normalize.py::strip_search_diacritics`, the final-letter fold of
+`shared/blau_normalize.py`). Its
 `NORMALIZER_VERSION` is pinned in `meta`, and the service refuses a file whose version differs. The
 same function runs on both sides: on the text at build time, and on the query at search time.
 
 - Hebrew: nikud and cantillation stripped, geresh/gershayim inside a word removed, final letters
   folded, prefixes expanded at query time (§8 D3).
-- English: case and diacritics folded by the tokenizer (Fusṭāṭ = Fustat). Whether to add Porter
-  stemming (cheese / cheeses) is measured in PR 1, and kept only if it changes no Hebrew token.
+- English: case and accents folded (Fusṭāṭ = Fustat), and **every Latin-letter word made singular**
+  by a small rule of our own (`english_singular`: letters -> letter, stories -> story, churches ->
+  church; glass, Exodus, Genesis stay), measured in §3.1. It is not SQLite's Porter stemmer,
+  because the snippet highlighter must run the very same function, and it touches no Hebrew,
+  Arabic or digit.
 - Several words: every word must occur in the same catalogue record (row), as in the prototype.
   Quotation marks ask for the words next to each other.
 
@@ -264,10 +332,10 @@ behind the rest of the site:
 
 ## 5. Phasing (three PRs)
 
-1. **Data:** normalizer, builder, gate, service, tests on a small fixture file (built in the test
-   from synthetic inputs, never the real file), the DATA_LIFECYCLE row. The real file is built
-   locally and the §3 table re-run on it, with three FTS columns and with/without Porter. If D2
-   asks for it, the FJMS translation sample is graded here too. Nothing is served.
+1. **Data (built, branch `claude/catalogue-text-data`):** normalizer, builder, gate, service, tests
+   on a small fixture file (built in the test from synthetic inputs, never the real file), the
+   DATA_LIFECYCLE row, the env var. The real file was built locally and measured (§3.1), and the
+   FJMS translation sample graded (§3.2). Nothing is served.
 2. **Web, API, MCP:** mode, the `%` shortcut in the engine and web maps, rows, cards, the
    zero-result line, Latin routing, header/home box, `search_mode='catalog'`, MCP tool, the startup drift
    warning (§4.6), PostHog, flag + readiness, deploy script, docs, a `changelog.d/` fragment. Every
@@ -332,3 +400,8 @@ Added at the same time: the `%` shortcut (§4.4) and the refresh note (§4.6).
   (§4.4, all three prefix maps, Responsa's `%word` untouched); §4.6 on PGP and NLI records changing
   (a rebuild in every refresh, a startup drift warning; no date shown in results, owner); PR 2 and 3 scope
   updated.
+- **rev. 3 (2026-11-05):** PR 1 built. §3.1 records the first real build: 2,442,250 records, 218,839
+  manuscripts, 730 MB, the gate passing, the plural measurement, and 0.3-1.2 s for the commonest
+  words, so PR 2 runs the search off the event loop. §3.2 records the D2 audit: 14.0% wrong or
+  garbage, FullText weakest, switch ON. §4.2: English words made singular by our own rule instead
+  of Porter. §4.1 updated to what was built.
