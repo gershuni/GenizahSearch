@@ -6,7 +6,7 @@ time-to-first-results is ~30s" row in `docs/OPEN_ISSUES.md`.
 
 ## Why this exists
 
-A user (Uri Aharon Ben-Simon, by email) compared us with Otzaria, which returns results
+A user compared us with Otzaria, which returns results
 in milliseconds; the owner confirmed Otzaria is that fast. Otzaria is (to our understanding,
 unverified) also Tantivy-based, so the gap is not the engine. It is what we do per hit.
 

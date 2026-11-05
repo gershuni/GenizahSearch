@@ -88,7 +88,7 @@ OpenITI), beside ORACC, CAD, Dillmann, Fraenkel and Al-Jallad. Its data are shar
 (`data/entries/<n>.json` and `data/cards/<n>.json` answer; the per-letter `data/bodies/<letter>.json`
 named in the brief returned 404 when probed). Its counts agree with ours (Lisān 9,155 against the
 9,153 heads parsed here). The measurement here did not use its files. **Ruled 2026-11-04 (D5):**
-its maintainer, Ephraim Meiri, is the owner's friend, and GenizahSearch may use the parsed files
+GenizahSearch may use the parsed files of its maintainer, Ephraim Meiri,
 as is convenient; phase A (§7) takes whichever source is simpler, with the Perseus and OpenITI
 credits still on the text.
 
@@ -628,7 +628,7 @@ The gate before deploy (D9):
 | D2 | **Which Lane.** `laneslexicon/lexicon_xml` master (amended) or its `originals` branch (Perseus as published)? | **Master** |
 | D3 | **Credit lines** on every card. Lane: the Perseus line verbatim (§2.1). Lisān: OpenITI, the version URI and the release DOI, CC BY-NC-SA 4.0 | **Credit as needed**: each card carries the credit its source requires and no more; for Lane, the Perseus line verbatim |
 | D4 | **Licences.** Perseus asks for modifications to be offered back; CC BY-NC-SA asks derived material to carry the same licence | **Do the minimum needed.** Lane: the credit line on every surface that shows Lane, the availability statement kept with the data (`meta`); GenizahSearch shows Lane's text, it does not change it, so there is nothing to offer back unless a build ever corrects the source, and then that correction is offered to Perseus (by the owner). Lisān (phase C): credit, the licence named and linked, non-commercial use; no derived file is published, so share-alike asks nothing further. The frequency table is an internal ranking aid, not published |
-| D5 | **The emeiri sites.** Reuse their parsed Lane and Lisān? | **Yes, at our convenience**: their maintainer, Ephraim Meiri, is the owner's friend. Phase A takes whichever source is simpler; the Perseus and OpenITI credits still apply to the text |
+| D5 | **The emeiri sites.** Reuse their parsed Lane and Lisān? | **Yes, at our convenience** (their maintainer is Ephraim Meiri). Phase A takes whichever source is simpler; the Perseus and OpenITI credits still apply to the text |
 | D6 | **Morphology.** Stdlib (stripping plus Lane's headwords, v3) or CAMeL Tools (GPL v2 database)? | **Stdlib v3** |
 | D7 | **The frequency count.** Which part of OpenITI, which genres? | **All primary non-OCR texts of 250-650 AH, dictionaries excluded** |
 | D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense. *Replaced by D12* |
