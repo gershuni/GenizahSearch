@@ -47,6 +47,16 @@ own use (PostHog, 30 days to 2026-11-05).
   the site אתר הגניזה של דיקטה (owner). Fixed: a list under a line of text with no blank line
   between rendered as one run-on paragraph, in some fifteen sections of both languages; every
   block now goes through `_md`, which adds markdown2's `cuddled-lists`.
+- **The owner's Help corrections** (tracked changes in a Word copy of the Hebrew page, mirrored in
+  English): shorter Exact, Variants, Fuzzy and search-history entries, Regex points to Responsa
+  style, "Search only in..." says its data is FGP's and incomplete, the RNL example for the
+  library filter, "N" manuscripts vs results, tags instead of chips, a "deep" search depth, and
+  some sentences dropped (among them the My Library credit line, at the owner's edit). The
+  Hebrew syntax table shows each cell in its own direction: in left-to-right cells every prefix
+  (`#מילה`, `%מילה`, `*מילה`) read as a suffix to a Hebrew reader. The rail's arrows in the
+  Hebrew text sit in `<bdi dir="ltr">`, so they show as the buttons do. A confidence tier shows
+  only what was measured: no sample line of three "not yet measured", no audit line repeating
+  its status (`_measured_sample_parts`).
 - **Labels (owner):** the phone chip says "Look up in the dictionary" (חיפוש במילון); the
   Parallels button "Add witness text" is הוספת עד נוסח (was הוספת נוסח עד); the account menu's
   "Logout" is התנתקות (was התנתק), in both apps.

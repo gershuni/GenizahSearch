@@ -471,7 +471,6 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     lk = _confidence_lang_key(lang)
     fl = _CONFIDENCE_FIELD_LABELS
     ph = _CONFIDENCE_PLACEHOLDERS
-    nm = ph['not_measured'][lk]
     row = _band_precision_row(precision, evidence_source, canonical_band)
 
     # D-10 per-band anchor (tooltip deep-link target) from the anchor registry;
@@ -510,29 +509,33 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     if status == 'not_measured':
         return
 
-    # sample size — THREE distinct numbers, never conflated with population.
-    def _num(v):
-        return f"{v:,}" if isinstance(v, int) else nm
-
-    sample_parts = [
-        f"{DRAW_SIZE_LABEL[lk]} {_num(row.get('draw_size'))}",
-        f"{DENOMINATOR_LABEL[lk]} {_num(row.get('denominator'))}",
-        f"{NUMERATOR_LABEL[lk]} {_num(row.get('numerator'))}",
-    ]
-    ui.label(f"{fl['sample'][lk]}: " + "; ".join(sample_parts)).style(text_style)
+    # ⟨2026-11-05, owner: "remove all these if we did not measure -- here and below"⟩ A GRADED
+    # tier shows only what was measured too: its sample numbers that exist, and the registry
+    # fields that are set. Before, a graded tier printed a sample line of three "not yet
+    # measured" and an audit line repeating the "audit pending" its status line had just said.
+    sample_parts = _measured_sample_parts(row, lk)
+    if sample_parts:
+        ui.label(f"{fl['sample'][lk]}: " + "; ".join(sample_parts)).style(text_style)
 
     # the CERT-01 registry fields — read via .get(), NEVER fabricated (135-05
     # columns; filled by 135-09). Each is skipped when absent rather than
-    # printed as a placeholder; the audit state is unconditional because its
-    # own placeholder ("independent audit pending") is a real statement about a
-    # graded tier rather than a stand-in for a missing one.
-    for field in ('measurement_date', 'grader', 'report_id'):
+    # printed as a placeholder.
+    for field in ('measurement_date', 'grader', 'report_id', 'audit_status'):
         value = row.get(field)
         if value:
             ui.label(f"{fl[field][lk]}: {value}").style(text_style)
-    ui.label(
-        f"{fl['audit_status'][lk]}: {row.get('audit_status') or ph['audit_pending'][lk]}"
-    ).style(text_style)
+
+
+def _measured_sample_parts(row, lk):
+    """The sample's numbers that were measured -- draw, determinate, successes, three distinct
+    numbers never conflated with the population -- or [] when none was."""
+    parts = []
+    for label, key in ((DRAW_SIZE_LABEL, 'draw_size'), (DENOMINATOR_LABEL, 'denominator'),
+                       (NUMERATOR_LABEL, 'numerator')):
+        value = row.get(key)
+        if isinstance(value, int):
+            parts.append(f"{label[lk]} {value:,}")
+    return parts
 
 
 def _help_tool_link(label: str, target: str, marker: str, *, rtl: bool = False) -> None:
@@ -792,7 +795,9 @@ def _dictionary_bullets(lang: str) -> str:
 
 
 #: The section after the Introduction (owner, 2026-11-05): the side menu's icon rail, the one
-#: sign-in button and its account menu, and the keys (the full list is the `?` card).
+#: sign-in button and its account menu, and the keys (the full list is the `?` card). In Hebrew
+#: the rail's arrows sit in <bdi dir="ltr">: a right-to-left line mirrors ‹ and › in some
+#: places and not in others, and the owner saw the wrong ones (2026-11-05).
 _SHORTCUTS_HELP = {
     'en': {
         'title': 'Keyboard Shortcuts and the Side Menu',
@@ -803,8 +808,8 @@ _SHORTCUTS_HELP = {
 
 **Keyboard shortcuts:** press **?** on any page, or choose **Keyboard shortcuts** in the side menu, for the full list. The ones used most:
 - **/** — jump to the search box.
-- On **Browse**: the arrow keys turn the page, in the direction of the page buttons; **+** and **−** zoom in and out; **0** resets the view; **F** turns full screen on and off. The tooltip of each button names its key.
-- The dictionaries' keys: see [Browse by Shelfmark](#help-browse).
+- On **Browse**: the arrow keys turn the page, in the direction of the page buttons; **+** and **−** zoom in and out; **0** resets the view; **F** turns full screen on and off.
+- Dictionaries: see [Browse by Shelfmark](#help-browse).
 
 The keys do nothing while you type in a box or while a window is open.
 ''',
@@ -812,14 +817,14 @@ The keys do nothing while you type in a box or while a window is open.
     'he': {
         'title': 'קיצורי מקלדת ותפריט הצד',
         'body': '''
-**תפריט הצד:** הכפתור **כיווץ התפריט** (‹) שבראשו מצמצם אותו לעמודה של סמלים. הצבעה על סמל מציגה את שמו, ו-› מרחיב את התפריט שוב. האתר זוכר את הבחירה. בטלפון התפריט נפתח מ-☰, כמו קודם.
+**תפריט הצד:** הכפתור **כיווץ התפריט** (<bdi dir="ltr">‹</bdi>) שבראשו מצמצם אותו לעמודה של סמלים. הצבעה על סמל מציגה את שמו, ו-<bdi dir="ltr">›</bdi> מרחיב את התפריט שוב. האתר זוכר את הבחירה. בטלפון התפריט נפתח מ-☰, כמו קודם.
 
 **התחברות:** הכפתור **התחברות** שבראש העמוד פותח חלון להתחברות או להרשמה. אחרי ההתחברות, סמל החשבון פותח את התפריט שלכם: **הפרופיל שלי**, **הרשימות שלי**, **התיקונים שלי** ו**התנתקות**.
 
 **קיצורי מקלדת:** הקישו **?** בכל עמוד, או בחרו **קיצורי מקלדת** בתפריט הצד, כדי לראות את הרשימה המלאה. השימושיים ביותר:
 - **/** — מעבר לתיבת החיפוש.
-- ב**עיון**: מקשי החצים מעבירים עמוד, בכיוון של כפתורי העמודים; **+** ו-**−** מגדילים ומקטינים; **0** מאפס את התצוגה; **F** מפעיל ומבטל מסך מלא. ההסבר שמופיע כשמצביעים על כפתור מציין את המקש שלו.
-- המקשים של המילונים: ראו [עיון לפי מספר מדף](#help-browse).
+- ב**עיון**: מקשי החצים מעבירים עמוד, בכיוון של כפתורי העמודים; **+** ו-**−** מגדילים ומקטינים; **0** מאפס את התצוגה; **F** מפעיל ומבטל מסך מלא.
+- מילונים: ראו [עיון לפי מספר מדף](#help-browse).
 
 המקשים אינם פועלים בזמן הקלדה בתיבה או כשחלון פתוח.
 ''',
@@ -934,8 +939,8 @@ some of the reading errors from the MiDRASH project's decoding algorithm.
 > Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments [Data set]. Zenodo.
 > https://doi.org/10.5281/zenodo.17734473
 
-The application fetches metadata and images from:
-- **National Library of Israel (NLI)**
+The site fetches metadata and images from:
+- **National Library of Israel**
 - **Bodleian Library** at Oxford
 - **Cambridge University Library**
 
@@ -953,16 +958,16 @@ The application fetches metadata and images from:
             ui.icon('search').classes('text-2xl text-primary')
             h2('Search', classes='text-xl font-bold', style='color: var(--text-primary);')
 
-        ui.label('This is the entry point for free text or metadata searches within the corpus. You can use the shortcuts shown in parentheses below to go directly to your desired search type.').style('color: var(--text-secondary);').classes('mb-4')
+        ui.label('This is the entry point for free text or metadata searches within the corpus. You can use the shortcuts shown in parentheses below to go directly to your desired search type. For example, type ? and then a space to switch to Variants search.').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Search Modes', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
 
         modes_data = [
-            ('Exact (=)', 'Matches only the exact word or sequence of words as typed. To search with gaps between words, fill in the "Gap" field with the desired number (up to 10). In Responsa-style search you can write a larger gap in the query itself, e.g. `[25]`; in Regex mode the Gap field is not used, and the pattern itself sets any distance.'),
-            ('Variants (?)', 'Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod). Choose a level: **Basic**, **Extended** (adds pairs like Qof/Kaf and Tet/Tav) or **Maximum** (the broadest flexibility) \u2014 a higher level gives broader recall but slower, noisier results. **Num Changes** sets how many letters in each word may be swapped (\u00d71, \u00d72 or \u00d73); each level keeps its own (by default \u00d71 for Basic, \u00d72 for Extended and Maximum). In the general settings you can switch the level buttons to a slider.'),
+            ('Exact (=)', 'Matches only the word or sequence of words exactly as given (that is, without allowing for errors or spelling variants). To search with gaps between words, fill in the "Gap" field with the desired number (up to 10).'),
+            ('Variants (?)', 'Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod). Choose a level: **Basic**, **Extended** or **Maximum** \u2014 a higher level gives broader recall but is slower and brings more irrelevant results. **Num Changes** sets how many letters in each word may be swapped (\u00d71, \u00d72 or \u00d73); each level keeps its own (by default \u00d71 for Basic, \u00d72 for Extended and Maximum). In the general settings you can switch the level buttons to a slider.'),
             ('Responsa (R)', 'Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Also includes a convenient and flexible tabular query builder. Familiar to Responsa Project users; easy to learn for newcomers. See [Responsa-Style Search](#help-responsa) below.'),
-            ('Fuzzy (~)', 'Finds near spellings, useful for decoding errors: whole words that differ from the query by one letter (two in words of 5 letters or more) — a letter added, dropped or changed, or two neighbouring letters swapped. Prefixed forms are included (ושלום for שלום); a word found only inside a longer word is not.'),
-            ('Regex (/)', 'Advanced search for experienced users. Example: \\b\u05d0[\u05d0-\u05ea]{3}\\b finds 4-letter words starting with Aleph. You can use your preferred AI assistant to help build a regex that fits your needs.'),
+            ('Fuzzy (~)', 'Finds near spellings, useful for decoding errors: whole words that differ from the query by one letter (two in words of 5 letters or more) — a letter added, dropped or changed, or two neighbouring letters swapped.'),
+            ('Regex (/)', 'Advanced search for experienced users. Example: \\b\u05d0[\u05d0-\u05ea]{3}\\b finds 4-letter words starting with Aleph. You can use your preferred AI assistant to help build a regex that fits your needs. For a more intuitive advanced search, Responsa-style search is recommended.'),
             ('Title ($)', 'Searches within the catalog titles of compositions.'),
             ('Shelfmark (#)', 'Fast search for shelfmarks (e.g., "T-S NS 13.15").'),
             ('PGP Tags', 'Browse manuscripts by topic tags from the Princeton Geniza Project (PGP). See [PGP Data](#help-pgp) below.'),
@@ -975,14 +980,14 @@ The application fetches metadata and images from:
                     _md(desc).style('color: var(--text-secondary);')
 
         _md('''
-The **Search History** button (clock icon) near the **Search** button lists your recent searches. Clicking one restores its query, its search mode (with its variant level), **Gap** and **Text Position**, and its domain, author, work, **Manuscript features**, **Exclude Printed** and **Text Filter** choices under **Search only in...**, then runs the search again (an older entry that saved its results shows them instead). Other options — for example **Exclude Words** and the Responsa-style checkboxes — stay as they are.
+The **Search History** button (clock icon) near the **Search** button lists your recent searches. Clicking one restores its query with all its settings, then runs the search again.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Text Position (for join detection)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary);')
         _md('''
 The **Advanced Options** include a **Text Position** selector \u2014 *Anywhere*, *Start of text*, *End of text*, *Line starts*, or *Line ends* \u2014 that works in **every search mode**. It is especially useful for **finding joins** between fragments. For example, if you have part of a phrase at the start of a torn fragment, you can search for the rest of the phrase restricted to the *start* of fragments \u2014 or the *end* of fragments if you are looking for the preceding page of the manuscript. Responsa mode adds finer per-word and per-line control (see [Responsa-Style Search](#help-responsa) below).
 
-Also under **Advanced Options**, **Exclude Words** hides results containing any of the words you enter (separated by spaces). This is separate from excluding whole manuscripts (see [Exclude Known Manuscripts](#help-exclude-manuscripts) below).
+Also under **Advanced Options**, **Exclude Words** hides results containing any of the words you enter (separated by spaces).
         ''').style('color: var(--text-secondary);')
 
     # === Responsa-Style Search ===
@@ -997,7 +1002,7 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
         _md('''
-**Activation:** Select **Responsa (R)** from the search Mode dropdown, or type `R ` (R followed by a space) at the beginning of your query.
+**Activation:** Select **Responsa** from the search Mode dropdown, or type `R` followed by a space at the beginning of your query.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Syntax', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
@@ -1082,7 +1087,7 @@ These positional operators are ideal for **join detection** — build a multi-li
 Use the **Search only in...** panel (available on both Search and Parallels pages) to narrow results by manuscript properties before searching. This focuses your search on specific subsets of the corpus.
 
 **Available Filters:**
-- **Domain:** Filter by scholarly classification (e.g., Bible, Talmud, Poetry)
+- **Domain:** Filter by classification (e.g., Bible, Talmud, Poetry)
 - **Author:** Filter by attributed author
 - **Work:** Filter by specific work title
 - **Manuscript features:** a window of catalogue criteria — period of copy, language and script, script style and region, vocalization, columns, lines, physical status, material, attributes, and computer-generated measurements. Each list can take "only these" or "all except these"; lines, size and material can come from the catalogue, the measurement, or either. The window shows how many manuscripts match before you apply it. The same window is on the **Browse by Identification** page, which lists the manuscripts themselves
@@ -1091,11 +1096,11 @@ Use the **Search only in...** panel (available on both Search and Parallels page
 **How it works:**
 - Open the collapsible **Search only in...** panel above the search results
 - Select one or more filters — the manuscript count updates in real time
-- Active filters appear as removable **chips** above the results
+- Active filters appear as removable **tags** above the results
 - Filters apply to all search modes (Exact, Variants, Responsa, etc.)
 - On the Browse page, domain and author labels link directly to a filtered search
 
-**Filter by library:** after searching, the **Filter by library** button in the results bar opens a window where you can **Show only selected** libraries or **Hide selected** libraries (e.g. CUL, JTS). Your choice is kept for later searches.
+**Filter by library:** after searching, the **Filter by library** button in the results bar opens a window where you can **Show only selected** libraries or **Hide selected** libraries. For example, if you want to hide results from RNL, whose complete manuscripts are mostly not from the Cairo Genizah, you can do it here. Your choice is kept for later searches.
         ''').style('color: var(--text-secondary);')
 
     # === Search Within Results ===
@@ -1106,7 +1111,7 @@ Use the **Search only in...** panel (available on both Search and Parallels page
             h2('Search Within Results', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         _md('''
-After running a search, click **"Search within N manuscripts"** in the results header to restrict your next query to only the manuscripts found in the current result set. This lets you progressively narrow results through multiple refinement steps.
+After running a search, click **"Search within N manuscripts"** in the results header to restrict your next query to only the manuscripts found in the current result set. This lets you progressively narrow results through multiple refinement steps. Note: the number of manuscripts shown ("N") can differ from the number of results shown, because one manuscript can have several results.
 
 **How it works:**
 - Search for a term (e.g., "חנוכה") — results show all matching manuscripts
@@ -1140,7 +1145,7 @@ Click **Exclude known manuscripts** in the "Search only in..." panel (before sea
 **From File:** Upload a TXT file (one shelfmark per line) or CSV file (shelfmark column auto-detected). A resolution report shows per-row status — found, not found, or duplicate — before you apply.
 
 **Managing exclusions:**
-- Active exclusions appear as red chips in the results bar, one per source with the number of manuscripts it hides; click a chip to clear that source
+- Active exclusions appear as red tags in the results bar, one per source with the number of manuscripts it hides; click a tag to clear that source
 - A collapsible "Excluded manuscripts" section at the bottom of results shows what was hidden and why
 - Exclusions persist across searches and page navigation within your session
 - Exports (Excel/Word) only include visible manuscripts — excluded items are never exported
@@ -1178,7 +1183,7 @@ This tool is designed for researchers wishing to find **parallel texts** for a c
 (such as a Piyyut, medieval commentary, or other rare work) within the Genizah, thereby locating additional
 textual witnesses\u2014both direct and indirect.
 
-(The desktop app calls this tool Composition Search.)
+The desktop app calls this tool Composition Search.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
         if passage_available():
@@ -1196,10 +1201,6 @@ of live runs it returned far fewer irrelevant results.
 **Chunk search** is the older method, kept because it can do things
 letter-level search cannot: word-level Exact / Variants / Fuzzy modes,
 cross-paragraph filtering, and a tunable chunk size. It is much slower.
-
-Two differences people expect but will not find: **both methods ignore
-nikkud**, and **both treat a line break as an ordinary space**. Neither is a
-reason to pick one over the other.
             ''').style('color: var(--text-secondary);').classes('mb-4')
 
             h3('How Letter-level Search Works', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
@@ -1222,7 +1223,7 @@ Three controls shape the result:
   **Normal passages (default)** keeps only substantial overlap;
   **Also short passages** adds formulaic phrases, quotations and badly damaged
   copies, at roughly double the results for a third fewer correct ones.
-- **Search depth** \u2014 how hard the engine looks. Deeper settings find more and
+- **Search depth** \u2014 how deep the engine looks. Deeper settings find more and
   cost proportionally more time (roughly one second, six seconds and twenty
   seconds per search).
             ''').style('color: var(--text-secondary);').classes('mb-4')
@@ -1230,7 +1231,7 @@ Three controls shape the result:
         if passage_multi_witness_available():
             h3('Searching With Several Witnesses', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
             _md('''
-One copy of a work is rarely enough to find all the others. If you have several
+If you have several
 manuscript copies of the same composition, the **Witnesses** panel lets you
 search with all of them at once and merges the results into one list.
 
@@ -1281,7 +1282,7 @@ three controls, described above.
 
         h3('Filtering Known Sources', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
         _md('''
-A powerful and recommended feature for reducing "noise" in your results. If your source text quotes Bible verses, Mishnah,
+A powerful and recommended feature for reducing noise in your results. If your source text quotes Bible verses, Mishnah,
 Talmud, or other known texts, you can **load these sources** so matches found in them are filtered separately.
 
 **How to use:**
@@ -1302,7 +1303,7 @@ you can enable **cross-paragraph search** to specifically find manuscripts that 
 **Why is this useful?**
 - Text **within** paragraphs often contains citations from other sources or sources that quote the composition you're searching for
 - Text that **crosses** paragraph boundaries is much less likely to be a citation, since citations rarely span across structural breaks
-- This effectively filters out most of the "noise" and helps you find genuine textual witnesses
+- This effectively filters out most of the noise and helps you find genuine textual witnesses
 
 **How to use:**
 1. Enter your text with paragraph breaks (or set a custom delimiter like period or colon)
@@ -1338,7 +1339,7 @@ libraries or **Hide selected** ones. Your choice is kept for later searches.
             h2('Joins Lab', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         _md('''
-The **Joins Lab** is a dedicated workspace for hunting **physical joins** — fragments once part of the same leaf or codex, now scattered across collections. You pin one fragment as the **anchor**, then search for and triage candidate fragments against it, side by side. It works **without logging in** (saving a join or adding to a list does require login).
+The **Joins Lab** is a dedicated workspace for hunting **physical joins** — fragments once part of the same leaf or codex, now scattered across collections. You pin one fragment as the **anchor**, then search for and triage candidate fragments against it, side by side.
 
 **Opening the Joins Lab** — the **Joins Lab** link in the sidebar (or go directly to `/joins-lab`); the **Find joins** button on **Browse**; or from any search result (opens the Lab anchored on that page).
 
@@ -1544,10 +1545,10 @@ Browse the scholarly catalog by domain classification, author, or work title.
 
 **Author & Work Filters:** Use the search dropdowns to filter by author name or work title. Filters combine — selecting a domain and an author shows only manuscripts matching both.
 
-**Text Filter:** Type keywords to search across catalog titles, descriptions, and domain names. Choose ALL (all terms must match), ANY (any term matches), or NOT (exclude matching terms). Add multiple terms as color-coded chips.
+**Text Filter:** Type keywords to search across catalog titles, descriptions, and domain names. Choose ALL (all terms must match), ANY (any term matches), or NOT (exclude matching terms). Add multiple terms as color-coded tags.
 
 **Features:**
-- **Filter chips:** Active filters appear as removable chips above the results
+- **Filter tags:** Active filters appear as removable tags above the results
 - **Pagination:** Results display 50 per page with navigation controls
 - **Deep linking:** The URL updates with your filter selections for bookmarking and sharing
 - **Cross-links:** Domain and author labels on the Browse by Shelfmark page link directly here with the appropriate filter pre-set
@@ -1667,8 +1668,6 @@ ChatGPT, Claude or an MCP client), with setup instructions.
 
         _md('''
 In the **[downloadable desktop app](/download)** you can run all the search modes over your own local files too (`.docx`, `.pdf`, `.txt`, `.html`, `.xlsx`, and `.csv`).
-
-*My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.*
         ''').style('color: var(--text-secondary);')
 
     # === Contact ===
@@ -1746,8 +1745,8 @@ def _create_hebrew_content(precision=None, band_counts=None):
 > Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments [Data set]. Zenodo.
 > https://doi.org/10.5281/zenodo.17734473
 
-האפליקציה מושכת מידע ותמונות מ:
-- **הספרייה הלאומית של ישראל (NLI)**
+האתר מושך מידע ותמונות מ:
+- **הספרייה הלאומית של ישראל**
 - **ספריית הבודליאנה** באוקספורד
 - **ספריית אוניברסיטת קיימברידג'**
 
@@ -1765,16 +1764,16 @@ def _create_hebrew_content(precision=None, band_counts=None):
             ui.icon('search').classes('text-2xl text-primary')
             h2('חיפוש', classes='text-xl font-bold', style='color: var(--text-primary);')
 
-        ui.label('זוהי נקודת הכניסה לחיפוש טקסט חופשי או מטא-נתונים בקורפוס. ניתן להשתמש בקיצורי הדרך המופיעים בסוגריים להלן כדי להגיע ישירות לסוג החיפוש המעניין אתכם.').style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4 w-full')
+        ui.label('זוהי נקודת הכניסה לחיפוש טקסט חופשי או מטא-נתונים בקורפוס. ניתן להשתמש בקיצורי הדרך המופיעים בסוגריים להלן כדי להגיע ישירות לסוג החיפוש המעניין אתכם. לדוגמה, לחצו על ? ולאחר מכן רווח כדי לעבור לחיפוש וריאנטים.').style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4 w-full')
 
         h3('מצבי חיפוש', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
 
         modes_data = [
-            ('מדויק (=)', 'מוצא רק את המילה או את רצף המילים בדיוק כפי שנכתבו. לחיפוש עם פערים בין המילים יש למלא את התיבה "מרווח" במספר הרצוי (עד 10). בחיפוש בסגנון פרויקט השו"ת ניתן לכתוב מרווח גדול יותר בתוך השאילתה עצמה, למשל `[25]`; במצב ביטוי רגולרי התיבה "מרווח" אינה בשימוש, והתבנית עצמה קובעת כל מרחק.'),
-            ('וריאנטים (?)', 'מתחשב בחילופי אותיות נפוצים בטקסטים אלו (למשל: ד/ר, ה/ח, ו/י). בחרו רמה: **בסיסי**, **מורחב** (מוסיף זוגות כמו ק/כ ו-ט/ת) או **מרבי** (הגמישות הרחבה ביותר) — רמה גבוהה יותר מרחיבה את התוצאות אך איטית ורועשת יותר. **מס\' שינויים** קובע כמה אותיות בכל מילה אפשר להחליף (×1, ×2 או ×3); לכל רמה ערך משלה (ברירת מחדל: ×1 בבסיסי, ×2 במורחב ובמרבי). בהגדרות הכלליות ניתן להחליף את כפתורי הרמה במחוון.'),
+            ('מדויק (=)', 'מוצא רק את המילה או את רצף המילים בדיוק לפי הטקסט הנתון (כלומר בלי להתחשב בשגיאות או בחילופי כתיב). לחיפוש עם פערים בין המילים יש למלא את התיבה "מרווח" במספר הרצוי (עד 10).'),
+            ('וריאנטים (?)', 'מתחשב בחילופי אותיות נפוצים בטקסטים אלו (למשל: ד/ר, ה/ח, ו/י). בחרו רמה: **בסיסי**, **מורחב** או **מרבי** — רמה גבוהה יותר מרחיבה את התוצאות אך איטית יותר ותביא תוצאות לא רלוונטיות רבות יותר. **מס\' שינויים** קובע כמה אותיות בכל מילה אפשר להחליף (×1, ×2 או ×3); לכל רמה ערך משלה (ברירת מחדל: ×1 בבסיסי, ×2 במורחב ובמרבי). בהגדרות הכלליות ניתן להחליף את כפתורי הרמה במחוון.'),
             ('פרויקט השו"ת (R)', 'חיפוש בתחביר בסגנון החיפוש המתקדם של פרויקט השו"ת של אוניברסיטת בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. כולל גם בונה שאילתות טבלאי נוח וגמיש. מוכר למשתמשי פרויקט השו"ת; קל ללמוד גם למי שלא מכיר. ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן.'),
-            ('מקורב (~)', 'מוצא כתיב קרוב, שימושי לשגיאות פענוח: מילים שלמות השונות מהמילה המבוקשת באות אחת (בשתיים במילים של 5 אותיות ומעלה) — אות שנוספה, נשמטה או הוחלפה, או שתי אותיות סמוכות שהתחלפו. צורות עם תחילית נכללות (ושלום עבור שלום); מילה שנמצאת רק בתוך מילה ארוכה יותר — לא.'),
-            ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם.'),
+            ('מקורב (~)', 'מוצא כתיב קרוב, שימושי לשגיאות פענוח: מילים שלמות השונות מהמילה המבוקשת באות אחת (בשתיים במילים של 5 אותיות ומעלה) — אות שנוספה, נשמטה או הוחלפה, או שתי אותיות סמוכות שהתחלפו.'),
+            ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם. לחיפוש מתקדם אינטואיטיבי יותר מומלץ להשתמש בחיפוש בסגנון פרויקט השו"ת.'),
             ('כותרת ($)', 'חיפוש בתוך כותרות הקטלוג של חיבורים.'),
             ('מספר מדף (#)', 'חיפוש מהיר של מספרי מדף (למשל: "T-S NS 13.15").'),
             ('תגיות PGP', 'עיון לפי נושאים בכתבי יד שקוטלגו על ידי פרויקט הגניזה של פרינסטון (Princeton Geniza Project). ראו [מידע PGP](#help-pgp) להלן.'),
@@ -1787,14 +1786,14 @@ def _create_hebrew_content(precision=None, band_counts=None):
                     _md(desc).style('color: var(--text-secondary);')
 
         _md('''
-כפתור **היסטוריית חיפוש** (סמל השעון) שליד כפתור **חפש** מציג את החיפושים האחרונים שלכם. לחיצה על אחד מהם משחזרת את השאילתה, את מצב החיפוש (עם רמת הווריאנטים שלו), את **מרווח** ואת **מיקום בטקסט**, ואת הבחירות של תחום, מחבר, חיבור, **מאפייני כתב היד**, **הסתר מודפסים** ו**סינון טקסט** שתחת **חפש רק ב...**, ואז מריצה את החיפוש מחדש (רשומה ישנה ששמרה את תוצאותיה מציגה אותן במקום זאת). אפשרויות אחרות — למשל **מילים להחרגה** ותיבות הסימון של חיפוש בסגנון פרויקט השו"ת — נשארות כפי שהן.
+כפתור **היסטוריית חיפוש** (סמל השעון) שליד כפתור **חפש** מציג את החיפושים האחרונים שלכם. לחיצה על אחד מהם משחזרת את השאילתה כולל כל מאפייניה, ואז מריצה את החיפוש מחדש.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         h3('מיקום בטקסט (לאיתור צירופים)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
         _md('''
 תחת **אפשרויות מתקדמות** קיים בורר **מיקום בטקסט** — *בכל מקום*, *תחילת הטקסט*, *סוף הטקסט*, *תחילת שורות* או *סוף שורות* — הפועל ב**כל מצבי החיפוש**. הוא שימושי במיוחד ל**איתור צירופים** בין קטעים. לדוגמה, אם יש ברשותכם חלק של ביטוי בתחילת קטע קרוע, תוכלו לחפש את החלק השני של הביטוי רק בתחילתם של קטעים, או בסופם של קטעים אם אתם מחפשים את העמוד הקודם בכתב היד. מצב פרויקט השו"ת מוסיף שליטה עדינה יותר ברמת המילה והשורה (ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן).
 
-תחת **אפשרויות מתקדמות** נמצאת גם התיבה **מילים להחרגה**: תוצאות המכילות אחת מהמילים שתזינו (מופרדות ברווח) יסוננו. זה נפרד מהחרגת כתבי יד שלמים (ראו [החרגת כתבי יד מוכרים](#help-exclude-manuscripts) להלן).
+תחת **אפשרויות מתקדמות** נמצאת גם התיבה **מילים להחרגה**: תוצאות המכילות אחת מהמילים שתזינו (מופרדות ברווח) יסוננו.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Responsa-Style Search ===
@@ -1809,7 +1808,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         _md('''
-**הפעלה:** בחרו **פרויקט השו"ת (R)** מתפריט מצב החיפוש, או הקלידו `R ` (R ואחריו רווח) בתחילת השאילתה.
+**הפעלה:** בחרו **פרויקט השו"ת** מתפריט מצב החיפוש, או הקלידו `R` ואחריו רווח בתחילת השאילתה.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         h3('תחביר', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
@@ -1837,12 +1836,15 @@ def _create_hebrew_content(precision=None, band_counts=None):
             with ui.element('tbody'):
                 for syntax, meaning, example in syntax_data:
                     with ui.element('tr').style('border-bottom: 1px solid var(--border-color, #e0e0e0);'):
-                        with ui.element('td').style('padding: 4px 10px; direction: ltr; text-align: left; white-space: nowrap;'):
-                            ui.label(syntax).classes('font-mono font-bold text-sm').style('color: var(--primary-700);')
+                        # Each cell takes its direction from its own text (dir=auto), as the search
+                        # box shows it. In a left-to-right cell "#מילה" read as "מילה#", so every prefix
+                        # looked like a suffix to a Hebrew reader (owner, 2026-11-05).
+                        with ui.element('td').style('padding: 4px 10px; text-align: right; white-space: nowrap;'):
+                            ui.label(syntax).classes('font-mono font-bold text-sm').style('color: var(--primary-700);').props('dir=auto')
                         with ui.element('td').style('padding: 4px 10px; color: var(--text-secondary);'):
                             ui.label(meaning).classes('text-sm')
-                        with ui.element('td').style('padding: 4px 10px; direction: ltr; text-align: left; color: var(--text-tertiary, #888);'):
-                            ui.label(example).classes('text-sm font-mono')
+                        with ui.element('td').style('padding: 4px 10px; text-align: right; color: var(--text-tertiary, #888);'):
+                            ui.label(example).classes('text-sm font-mono').props('dir=auto')
 
         _md('ניתן לשלב סימנים, למשל `#%מילה*` = תחיליות + כתיב מלא/חסר + תו כללי בסוף.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-2')
 
@@ -1892,10 +1894,10 @@ def _create_hebrew_content(precision=None, band_counts=None):
             h2('חיפוש ממוקד ("חפש רק ב...")', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
 
         _md('''
-השתמשו בפאנל **"חפש רק ב..."** (זמין בדפי חיפוש ומקבילות) כדי לצמצם תוצאות לפי מאפייני כתב יד לפני החיפוש. כך תוכלו למקד את החיפוש בתת-קבוצה ספציפית של הקורפוס.
+השתמשו בפאנל **"חפש רק ב..."** (זמין בדפי חיפוש ומקבילות) כדי לצמצם תוצאות לפי מאפייני כתב יד לפני החיפוש. כך תוכלו למקד את החיפוש בתת-קבוצה ספציפית של הקורפוס. שימו לב: סינון זה הוא לפי המידע של פרויקט פרידברג לחקר הגניזה (FGP), שאינו מלא ואינו בהכרח מדויק.
 
 **מסננים זמינים:**
-- **תחום:** סינון לפי סיווג מדעי (כגון תנ"ך, תלמוד, שירה)
+- **תחום:** סינון לפי סיווג (כגון תנ"ך, תלמוד, שירה)
 - **מחבר:** סינון לפי מחבר מיוחס
 - **יצירה:** סינון לפי שם יצירה
 - **מאפייני כתב היד:** חלון של מאפיינים מהקטלוג — תקופת העתקה, שפה ואות, כתב ואזור, ניקוד, מספר טורים, מספר שורות, מצב פיזי, חומר, תכונות ונתונים ממוחשבים. בכל רשימה אפשר לבחור "רק אלה" או "הכול חוץ מאלה"; שורות, מידות וחומר יכולים לבוא מהקטלוג, מהמדידה או מאחד מהם. החלון מראה כמה כתבי יד מתאימים לפני שמחילים אותו. אותו חלון נמצא גם בדף **עיון לפי זיהוי**, שמציג את כתבי היד עצמם
@@ -1904,11 +1906,11 @@ def _create_hebrew_content(precision=None, band_counts=None):
 **אופן השימוש:**
 - פתחו את פאנל **"חפש רק ב..."** המתקפל מעל תוצאות החיפוש
 - בחרו מסנן אחד או יותר — מספר כתבי היד מתעדכן בזמן אמת
-- מסננים פעילים מופיעים כ**צ'יפים** ניתנים להסרה מעל התוצאות
+- מסננים פעילים מופיעים כ**תגיות** ניתנות להסרה מעל התוצאות
 - המסננים חלים על כל מצבי החיפוש (מדויק, וריאנטים, פרויקט השו"ת וכו')
 - בדף העיון, תוויות תחום ומחבר מקשרות ישירות לחיפוש מסונן
 
-**סינון לפי ספרייה:** אחרי החיפוש, הכפתור **סינון לפי ספרייה** שבשורת התוצאות פותח חלון שבו אפשר לבחור **הצג רק נבחרות** או **הסתר נבחרות**, כלומר להציג רק ספריות מסוימות או להסתיר אותן (למשל CUL, JTS). הבחירה נשמרת גם לחיפושים הבאים.
+**סינון לפי ספרייה:** אחרי החיפוש, הכפתור **סינון לפי ספרייה** שבשורת התוצאות פותח חלון שבו אפשר לבחור **הצג רק נבחרות** או **הסתר נבחרות**, כלומר להציג רק ספריות מסוימות או להסתיר אותן. למשל, אם תרצו להסתיר תוצאות מספריית RNL, המכילה כתבי יד שלמים שרובם כנראה אינם מן הגניזה הקהירית, תוכלו לעשות זאת כאן. הבחירה נשמרת גם לחיפושים הבאים.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Search Within Results ===
@@ -1919,7 +1921,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
             h2('חיפוש בתוך תוצאות', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
 
         _md('''
-לאחר חיפוש, לחצו על **"חפש בתוך N כתבי יד"** בכותרת התוצאות כדי להגביל את השאילתה הבאה לכתבי היד שנמצאו בתוצאות הנוכחיות. כך ניתן לצמצם תוצאות בהדרגה דרך מספר שלבי חיפוש.
+לאחר חיפוש, לחצו על **"חפש בתוך N כתבי יד"** בכותרת התוצאות כדי להגביל את השאילתה הבאה לכתבי היד שנמצאו בתוצאות הנוכחיות. כך ניתן לצמצם תוצאות בהדרגה דרך מספר שלבי חיפוש. שימו לב: מספר כתבי היד המוצג ("N") יכול להיות שונה ממספר התוצאות המוצגות, משום שיכולות להיות כמה תוצאות באותו כתב יד.
 
 **איך זה עובד:**
 - חפשו מונח (למשל "חנוכה") — התוצאות מציגות את כל כתבי היד התואמים
@@ -1953,7 +1955,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 **מקובץ:** העלו קובץ TXT (מספר מדף אחד בכל שורה) או CSV (עמודת מספרי מדף מזוהה אוטומטית). דו"ח איתור מציג סטטוס לכל שורה — נמצא, לא נמצא, כפול — לפני ההחלה.
 
 **ניהול החרגות:**
-- החרגות פעילות מוצגות כצ'יפים אדומים בשורת התוצאות, צ'יפ לכל מקור עם מספר כתבי היד שהוא מסתיר; לחיצה על צ'יפ מנקה את המקור
+- החרגות פעילות מוצגות כתגיות אדומות בשורת התוצאות, תגית לכל מקור עם מספר כתבי היד שהיא מסתירה; לחיצה על תגית מנקה את המקור
 - קטע מתקפל "כתבי יד שהוחרגו" בתחתית התוצאות מראה מה הוסתר ולמה
 - ההחרגות נשמרות בין חיפושים וניווט בדפים במהלך הביקור באתר
 - ייצוא (אקסל/וורד) כולל רק כתבי יד גלויים — פריטים מוחרגים לא מיוצאים
@@ -1989,7 +1991,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
         _md('''
 כלי זה מיועד לחוקרים המעוניינים למצוא **טקסטים מקבילים** לחיבור ספרותי שלם (כגון פיוט, פירוש מימי הביניים או יצירה נדירה אחרת) בתוך הגניזה, ובכך לאתר עדי נוסח נוספים – ישירים ועקיפים.
 
-(בתוכנה למחשב נקרא כלי זה "חיפוש חיבורים".)
+בתוכנה למחשב נקרא כלי זה "חיפוש חיבורים".
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         if passage_available():
@@ -2000,8 +2002,6 @@ def _create_hebrew_content(precision=None, band_counts=None):
 **חיפוש ברמת האות הוא ברירת המחדל, והוא המומלץ אלא אם כן דרושה לכם יכולת מסוימת של השנייה.** הוא משווה את הטקסט שלכם למאגר כרצף של אותיות ולא כרצף של מילים, ולכן הבדלי כתיב, חלוקת מילים, פיסוק ושיבושי פענוח אינם שוברים התאמה. הוא מחזיר תשובה תוך כשנייה, במקום דקות בשיטה הוותיקה, ובהשוואה מדורגת של חיפושים אמיתיים הוא החזיר הרבה פחות תוצאות לא רלוונטיות.
 
 **חיפוש מקטעים** הוא השיטה הוותיקה, שנשמרה משום שהיא מאפשרת דברים שחיפוש ברמת האות אינו מאפשר: מצבי מדויק / וריאנטים / מקורב ברמת המילה, סינון חוצה-פסקאות, וגודל מקטע ניתן לכיול. היא איטית בהרבה.
-
-שני הבדלים שאפשר היה לצפות להם אינם קיימים: **שתי השיטות מתעלמות מניקוד**, ו**שתיהן מתייחסות לשבירת שורה כאל רווח רגיל**. אין באלו סיבה להעדיף אחת על פני האחרת.
             ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
             h3('איך עובד חיפוש ברמת האות?', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
@@ -2012,15 +2012,15 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
 שלוש הגדרות קובעות את התוצאה:
 
-- **רוחב התאמה** – כמה קרוב חייב קטע להיות כדי להיספר. צר מוצא טקסט כמעט זהה; הגדרות רחבות יותר מקבלות יותר שונות וגם יותר רעש.
+- **רוחב התאמה** – כמה קרוב חייב קטע להיות כדי להיספר. רוחב צר מוצא טקסט כמעט זהה; הגדרות רחבות יותר מקבלות יותר שונות וגם יותר רעש.
 - **אורך הקטע** – האם גם קטע משותף קצר נחשב התאמה. האפשרות **קטעים רגילים (ברירת מחדל)** משאירה רק חפיפה משמעותית; האפשרות **גם קטעים קצרים** מוסיפה צירופים נוסחאיים, ציטוטים ועותקים פגומים מאוד – בערך פי שניים תוצאות, תמורת שליש פחות תוצאות נכונות.
-- **עומק החיפוש** – עד כמה המנוע מעמיק בחיפוש. הגדרות עמוקות יותר מוצאות יותר, ועולות בזמן בהתאם (בערך שנייה, שש שניות ועשרים שניות לחיפוש).
+- **עומק החיפוש** – כמה עמוק המנוע מחפש. הגדרות עמוקות יותר מוצאות יותר, ועולות בזמן בהתאם (בערך שנייה, שש שניות ועשרים שניות לחיפוש).
             ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         if passage_multi_witness_available():
             h3('חיפוש עם כמה עדי נוסח', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
             _md('''
-עד נוסח אחד של חיבור אינו מספיק בדרך כלל כדי למצוא את כל האחרים. אם בידכם כמה עדי נוסח של אותו חיבור, פאנל **עדים** מאפשר לחפש בכולם בבת אחת וממזג את התוצאות לרשימה אחת.
+אם בידכם כמה עדי נוסח של אותו חיבור, פאנל **עדים** מאפשר לחפש בכולם בבת אחת וממזג את התוצאות לרשימה אחת.
 
 כל עד נוסח נשלח לחיפוש **בנפרד**, והרשימות ממוזגות לפי דירוג. הם לעולם אינם מחוברים לשאילתה ארוכה אחת – מדידות מראות שחיבור כזה מוצא *פחות* מעד הנוסח הטוב ביותר לבדו, משום שלכל חיפוש תקציב קבוע, ושאילתה ארוכה מפזרת אותו דק מדי.
 
@@ -2055,7 +2055,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
         h3('סינון מקורות ידועים', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
         _md('''
-תכונה חזקה ומומלצת להפחתת "רעש" בתוצאות. אם טקסט המקור שלכם מצטט פסוקי תנ"ך, משנה, תלמוד או טקסטים ידועים אחרים, תוכלו **לטעון מקורות אלה** כך שהתאמות שנמצאו בהם יסוננו בנפרד.
+תכונה חזקה ומומלצת להפחתת רעש בתוצאות. אם טקסט המקור שלכם מצטט פסוקי תנ"ך, משנה, תלמוד או טקסטים ידועים אחרים, תוכלו **לטעון מקורות אלה** כך שהתאמות שנמצאו בהם יסוננו בנפרד.
 
 **כיצד להשתמש:**
 1. הרחיבו את הפאנל **"סינון טקסט (החרג מקורות ידועים)"**
@@ -2074,7 +2074,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 **למה זה שימושי?**
 - טקסט **בתוך** פסקאות מכיל לעיתים קרובות ציטוטים ממקורות אחרים או מקורות שמצטטים את החיבור שאתם מחפשים
 - טקסט ש**חוצה** גבולות פסקה הוא ציטוט בסבירות נמוכה בהרבה, כי ציטוטים חוצים לעיתים רחוקות גבולות כאלה
-- זה מסנן ביעילות את רוב ה"רעש" ועוזר למצוא עדי נוסח אמיתיים
+- זה מסנן ביעילות את רוב הרעש ועוזר למצוא עדי נוסח אמיתיים
 
 **כיצד להשתמש:**
 1. הזינו את הטקסט עם מעברי פסקה (או הגדירו מפריד מותאם כמו נקודה או נקודתיים)
@@ -2103,7 +2103,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
             h2('מעבדת צירופים', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         _md('''
-**מעבדת הצירופים** היא סביבת עבודה ייעודית לאיתור **צירופים פיזיים** — קטעים שהיו בעבר חלק מאותו דף או כרך, וכיום מפוזרים בין אוספים שונים. אתם מקבעים קטע אחד כ**עוגן**, ואז מחפשים קטעים מועמדים וממיינים אותם מולו, זה לצד זה. המעבדה פועלת **בלי צורך בהתחברות** (שמירת צירוף או הוספה לרשימה כן דורשות התחברות).
+**מעבדת הצירופים** היא סביבת עבודה ייעודית לאיתור **צירופים פיזיים** — קטעים שהיו בעבר חלק מאותו דף או כרך, וכיום מפוזרים בין אוספים שונים. אתם מקבעים קטע אחד כ**עוגן**, ואז מחפשים קטעים מועמדים וממיינים אותם מולו, זה לצד זה.
 
 **כיצד לפתוח את מעבדת הצירופים** — קישור **מעבדת צירופים** בתפריט הצד (או מעבר ישיר אל `/joins-lab`); כפתור **מצא צירופים** בעמוד **עיון**; או מכל תוצאת חיפוש (נפתחת מעוגנת על אותו עמוד).
 
@@ -2309,10 +2309,10 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
 **סינון לפי מחבר ויצירה:** השתמשו בתפריטי החיפוש לסינון לפי שם מחבר או כותרת יצירה. המסננים משתלבים — בחירת תחום ומחבר מציגה רק כתבי יד התואמים לשניהם.
 
-**סינון טקסט:** הקלידו מילות מפתח לחיפוש בכותרות, תיאורים ושמות תחומים. בחרו **כל** (כל המונחים), **אחד מ-** (די במונח אחד) או **ללא** (בלי המונח). הוסיפו מספר מונחים כצ׳יפים צבעוניים.
+**סינון טקסט:** הקלידו מילות מפתח לחיפוש בכותרות, תיאורים ושמות תחומים. בחרו **כל** (כל המונחים), **אחד מ-** (די במונח אחד) או **ללא** (בלי המונח). הוסיפו מספר מונחים כתגיות צבעוניות.
 
 **תכונות:**
-- **צ׳יפים של מסננים:** מסננים פעילים מופיעים כצ׳יפים ניתנים להסרה מעל התוצאות
+- **תגיות של מסננים:** מסננים פעילים מופיעים כתגיות ניתנות להסרה מעל התוצאות
 - **דפדוף:** התוצאות מוצגות 50 בעמוד עם פקדי ניווט
 - **קישור קבוע:** כתובת הדף משקפת את המסננים שבחרתם, כך שאפשר לשמור אותה או לשתף אותה
 - **קישורים צולבים:** תוויות תחום ומחבר בעמוד עיון לפי מספר מדף מקשרות ישירות לכאן עם המסנן המתאים
@@ -2404,8 +2404,6 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
         _md('''
 [בגרסת התוכנה להורדה](/download) תוכלו להשתמש בסוגי החיפוש השונים גם בתוך קבצים מקומיים (.docx, .pdf, .txt, .html, .xlsx ו-.csv).
-
-*תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Contact ===
