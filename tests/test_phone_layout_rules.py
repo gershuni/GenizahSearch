@@ -67,6 +67,8 @@ def test_the_sidebar_hides_its_labels_only_in_the_icon_rail():
     assert main.count('nav-mini-hide') == 3
     assert '.q-drawer--mini .nav-mini-hide { display: none !important; }' in css
     assert '.q-drawer--mobile .nav-rail-row { display: none; }' in css
+    # The rail button at the sidebar's right edge in Hebrew too (the sidebar is at the left).
+    assert '[dir="rtl"] .q-drawer:not(.q-drawer--mini) .nav-rail-row { justify-content: flex-start; }' in css
 
 
 def test_the_search_form_folds_once_the_search_is_marked_running():

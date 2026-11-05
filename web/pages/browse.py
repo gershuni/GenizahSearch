@@ -5314,10 +5314,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             blau_lookup_on = dict_on and blau_panel.lookup_on()
                             if blau_lookup_on:
                                 text_container.props(blau_panel.PANE_ATTR)
-                            # The M key looks up here with the switch off too
-                            # (owner, 2026-11-05; blau_lookup.js).
+                            # The look-up key, Alt + a click and the phone's
+                            # chip work here with the switch off too (owner,
+                            # 2026-11-05; blau_lookup.js); the chip's label is
+                            # in the page's language.
                             if dict_on:
                                 text_container.props(blau_panel.KEY_PANE_ATTR)
+                                text_container.props[blau_panel.CHIP_LABEL_ATTR] = tr(blau_panel.CHIP_LABEL)
                             current_text = {'value': page.text}
 
                             def render_text_content(text: str):
@@ -5435,8 +5438,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 blau_panel.GLYPH_CLASS)
                                             blau_label = ui.label(blau_panel.switch_label(blau_new)).classes(
                                                 blau_panel.LABEL_CLASS)
-                                            # What pressing it does, and under it the M key,
-                                            # which works either way (owner, 2026-11-05).
+                                            # What pressing it does, and under it the look-up
+                                            # key, which works either way (owner, 2026-11-05).
                                             with ui.tooltip().classes(blau_panel.TIP_CLASS):
                                                 blau_switch_tip = ui.label(
                                                     blau_panel.switch_tooltip(blau_lookup_on))

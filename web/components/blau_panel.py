@@ -120,16 +120,23 @@ PANEL_CLASS = 'gs-blau'
 POPOVER_CLASS = 'gs-blau-popover'
 #: The attribute that marks the transcription pane whose words are looked up.
 PANE_ATTR = 'data-blau-lookup'
-#: The attribute on the same pane wherever a dictionary is served, the switch on or off: the M
-#: key looks up there at any time (owner, 2026-11-05; blau_lookup.js).
+#: The attribute on the same pane wherever a dictionary is served, the switch on or off: the
+#: look-up key works there at any time (owner, 2026-11-05; blau_lookup.js): D or M tapped arms
+#: the next click, Alt + a click, selected words and D or M, and on a phone a chip.
 KEY_PANE_ATTR = 'data-blau-pane'
-#: The switch's tooltip: what pressing it does, and under it the M key (owner, 2026-11-05).
+#: The phone's chip under selected words: its label, set on the pane in the page's language.
+CHIP_LABEL_ATTR = 'data-blau-chip'
+CHIP_LABEL = 'Look up in the dictionary'
+CHIP_CLASS = 'blau-chip'
+#: On <html> while a tapped key waits for its click (the pointer says so over the text).
+ARMED_CLASS = 'blau-armed'
+#: The switch's tooltip: what pressing it does, and under it the key (owner, 2026-11-05).
 TIP_CLASS = 'blau-switch-tip'
-KEY_HINT = 'Press M (or מ) and click a word while the key is still down, or select words and press M (or מ)'
+KEY_HINT = 'Press D or M, then click a word (or click it with Alt held); or select words and press D or M'
 KEY_HINT_CLASS = 'blau-key-hint'
-#: How a lookup started (``lookup_how``): a click with the switch on, a click with M held,
-#: or selected words and M.
-LOOKUP_HOWS = ('word', 'key', 'selection')
+#: How a lookup started (``lookup_how``): a click with the switch on, a click with D or M
+#: armed, a click with Alt held, selected words and the key, or the phone's chip.
+LOOKUP_HOWS = ('word', 'key', 'alt', 'selection', 'chip')
 #: The span the script wraps the clicked word in (keeps it highlighted).
 HIT_CLASS = 'blau-word-hit'
 #: The events the script dispatches on the popover element.
@@ -137,8 +144,9 @@ LOOKUP_EVENT = 'blau-lookup'
 CLOSE_EVENT = 'blau-close'
 #: PostHog events (owner, 2026-11-04: do readers find the switch, and use it?), beside
 #: browse_manuscript. The switch: {on, was_new}; a lookup: {how: 'word' (clicked in the text),
-#: 'key' (clicked with M held), 'selection' (selected words and M) or 'box' (typed, or a reading
-#: chip), blau / lane: found something, or None when not served};
+#: 'key' (clicked with D or M armed), 'alt' (clicked with Alt), 'selection' (selected words and
+#: the key), 'chip' (the phone's chip) or 'box' (typed, or a reading chip), blau / lane: found
+#: something, or None when not served};
 #: a tab the reader chose: {tab}. The word itself is never sent.
 POSTHOG_SWITCH = 'dictionary_switch'
 POSTHOG_LOOKUP = 'dictionary_lookup'

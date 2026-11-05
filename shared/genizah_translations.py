@@ -1080,7 +1080,7 @@ TRANSLATIONS = {
     "Registering...": "נרשם...",
     "Account created! You can now login.": "החשבון נוצר! כעת ניתן להתחבר.",
     "Registration Failed": "ההרשמה נכשלה",
-    "Logout": "התנתק",
+    "Logout": "התנתקות",
     "Logged in as": "מחובר כ",
     "Not logged in": "לא מחובר",
     "Login to participate in the community": "התחבר כדי להשתתף בקהילה",
@@ -5269,7 +5269,7 @@ TRANSLATIONS.update({
     "Witnesses": "עדים",
     "Add other copies of this work to search with. Each is searched on its own and the results are merged.":
         "הוסף עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
-    "Add witness text": "הוספת נוסח עד",
+    "Add witness text": "הוספת עד נוסח",
     "This paste contains several witnesses separated by blank lines":
         "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
     "Preview split": "תצוגה מקדימה של הפיצול",
@@ -6529,11 +6529,17 @@ TRANSLATIONS.update({
     "Release notes on GitHub": "פרטי הגרסה ב-GitHub",
 })
 # Before 9.14.0 (owner, 2026-11-05): the dictionaries' M key, the one sign-in button, and the
-# card of keyboard shortcuts (web/keyboard_shortcuts.py). Approved by the owner, 2026-11-05; the
-# M-key hint is the owner's own wording.
+# card of keyboard shortcuts (web/keyboard_shortcuts.py). Approved by the owner, 2026-11-05.
+# After the owner's touchpad test (2026-11-05: D or M tapped, Alt + a click, Esc): the key hint,
+# approved word for word in the Help text; the phone chip's "Look up in the dictionary" (owner);
+# DRAFTS: "or", "then", "Close the dictionary".
 TRANSLATIONS.update({
-    "Press M (or מ) and click a word while the key is still down, or select words and press M (or מ)":
-        "לחצו על M (או מ) ולחצו על מילה כשהמקש עדיין לחוץ, או בחרו מילים ולחצו על M (או מ)",
+    "Look up in the dictionary": "חיפוש במילון",
+    "Press D or M, then click a word (or click it with Alt held); or select words and press D or M":
+        "לחצו על D או M (או מ) ואז על מילה (או לחצו עליה כש-Alt לחוץ), או בחרו מילים ולחצו על D או M",
+    "or": "או",
+    "then": "ואז",
+    "Close the dictionary": "סגירת המילון",
     "Sign in or register": "התחברות או הרשמה",
     "On every page": "בכל עמוד",
     "Show this list": "הצגת הרשימה הזאת",

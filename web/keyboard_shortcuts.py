@@ -47,7 +47,9 @@ EVERY_PAGE = 'On every page'
 
 #: Words in a row's keys that are not keys: drawn as words, and translated. Key names
 #: (Enter, Space, Shift, letters) stay as printed on the keyboard.
-PLAIN_WORDS = ('click', 'Select words')
+PLAIN_WORDS = ('click', 'Select words', 'or', 'then')
+#: Words that join keys pressed one after the other or as alternatives: no "+" beside them.
+CONNECTORS = ('or', 'then')
 
 
 def sections(rtl: bool, dictionaries: bool) -> list[tuple[str, list[tuple[tuple[str, ...], str]]]]:
@@ -66,9 +68,13 @@ def sections(rtl: bool, dictionaries: bool) -> list[tuple[str, list[tuple[tuple[
         (('F',), 'Fullscreen Image'),
     ]
     if dictionaries:
+        # Owner, 2026-11-05: D or M tapped arms the next click (a held letter blocks a laptop
+        # touchpad), Alt + a click does the same, Esc closes the panel.
         browse += [
-            (('M', 'click'), 'Look up a word in the dictionaries'),
-            (('Select words', 'M'), 'Look up the selected words'),
+            (('D', 'or', 'M', 'then', 'click'), 'Look up a word in the dictionaries'),
+            (('Alt', 'click'), 'Look up a word in the dictionaries'),
+            (('Select words', 'D'), 'Look up the selected words'),
+            (('Esc',), 'Close the dictionary'),
         ]
     return [
         (EVERY_PAGE, [(('?',), 'Show this list'), (('/',), 'Jump to the search box')]),
@@ -128,7 +134,7 @@ def build_card(rtl: bool, dictionaries: Optional[bool] = None) -> ui.dialog:
                 for keys, text in rows:
                     with ui.element('div').classes('gs-shortcuts-keys'):
                         for i, key in enumerate(keys):
-                            if i:
+                            if i and key not in CONNECTORS and keys[i - 1] not in CONNECTORS:
                                 ui.label('+').classes('gs-shortcuts-plus')
                             if key in PLAIN_WORDS:
                                 ui.label(tr(key)).classes('gs-shortcuts-word')

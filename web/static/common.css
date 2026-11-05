@@ -603,6 +603,9 @@ body {
    NiceGUI column puts 1rem between its children; the rows set their own spacing. */
 .nav-list { gap: 0 !important; padding: 2px 0 8px; align-items: stretch !important; }
 .nav-rail-row { justify-content: flex-end; padding: 2px 8px 2px; }
+/* The sidebar is at the screen's left in both languages, so its button sits at the sidebar's
+   right edge, beside the page, in both: in Hebrew "end" is the left (owner, 2026-11-05). */
+[dir="rtl"] .q-drawer:not(.q-drawer--mini) .nav-rail-row { justify-content: flex-start; }
 .nav-separator { margin: 6px 16px !important; }
 
 .nav-item {
@@ -2887,8 +2890,19 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
    it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
 .gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
 .blau-hint { color: var(--text-muted, #64748b); }
-/* The switch's tooltip: what pressing it does, and under it the M key (owner, 2026-11-05). */
+/* The switch's tooltip: what pressing it does, and under it the look-up key (owner, 2026-11-05). */
 .blau-switch-tip .blau-key-hint { margin-top: 3px; font-size: 0.75rem; opacity: 0.85; }
+/* D or M tapped: the next click looks up, and the pointer says so over the text. */
+html.blau-armed [data-blau-pane] { cursor: help; }
+/* The phone's "Look up" chip under selected words (blau_lookup.js places it); under the
+   panel, which opens over it. */
+.blau-chip {
+    position: fixed; z-index: 2400; display: none;
+    padding: 6px 16px; border: 0; border-radius: 999px;
+    background: var(--primary-600, #059669); color: #ffffff;
+    font-size: 0.9rem; font-weight: 600; line-height: 1.4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
 /* One tab per dictionary (owner, 2026-11-04; plan D12), between the head and the scrolling
    body, so a long entry never hides the other tab. A tab with nothing for the word is greyed. */
 .gs-blau .dict-tabs {

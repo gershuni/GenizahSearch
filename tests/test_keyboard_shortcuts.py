@@ -99,12 +99,21 @@ def test_slash_finds_the_page_s_own_search_box():
     assert "'outlined rounded dense data-gs-primary-search'" in HOME
 
 
-def test_the_dictionary_rows_match_the_m_key_script():
-    assert "event.code === 'KeyM' || event.key === 'm' || event.key === 'M' || event.key === 'מ'" in BLAU_JS
+def test_the_dictionary_rows_match_the_key_script():
+    """D or M tapped then a click, Alt + a click, selected words + D, Esc (owner, 2026-11-05)."""
+    assert "event.code === 'KeyD' || event.code === 'KeyM'" in BLAU_JS
+    assert "var viaAlt = event.altKey" in BLAU_JS and "if (event.key === 'Escape') {" in BLAU_JS
     with_dict = [k for _, rows in ks.sections(False, True) for k, _ in rows]
     without = [k for _, rows in ks.sections(False, False) for k, _ in rows]
-    assert ('M', 'click') in with_dict and ('Select words', 'M') in with_dict
-    assert ('M', 'click') not in without
+    for keys in (('D', 'or', 'M', 'then', 'click'), ('Alt', 'click'), ('Select words', 'D'), ('Esc',)):
+        assert keys in with_dict and keys not in without, keys
+
+
+def test_no_plus_beside_or_and_then():
+    """"D or M then click" is pressed one after the other, not together."""
+    assert set(ks.CONNECTORS) <= set(ks.PLAIN_WORDS)
+    src = (REPO / 'web' / 'keyboard_shortcuts.py').read_text(encoding='utf-8')
+    assert 'if i and key not in CONNECTORS and keys[i - 1] not in CONNECTORS:' in src
 
 
 def test_the_space_rows_match_the_search_page_script():

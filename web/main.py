@@ -2138,8 +2138,11 @@ def create_layout():
     if drawer_mini:
         main_drawer.props('mini')
         ui.query('body').classes(add=NAV_MINI_BODY_CLASS)
-    _collapse_icon = 'chevron_right' if rtl_mode else 'chevron_left'
-    _expand_icon = 'chevron_left' if rtl_mode else 'chevron_right'
+    # The sidebar sits at the screen's LEFT edge in both languages (Quasar flips the
+    # Hebrew page's right-side drawer), so collapsing points left in both: the owner's
+    # screenshot (2026-11-05) showed `chevron_right` drawn as is, not mirrored, in Hebrew.
+    _collapse_icon = 'chevron_left'
+    _expand_icon = 'chevron_right'
 
     def _nav_row(icon, label, badge=None, *, active=False, on_click=None, mark=None):
         # A page is a link; "Keyboard shortcuts" (marked) opens the card, a button.

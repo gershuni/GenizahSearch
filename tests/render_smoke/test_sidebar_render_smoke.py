@@ -192,3 +192,18 @@ def test_signed_in_the_header_shows_the_account_icon_and_my_lists_in_its_menu():
             patch.object(auth_state.GlobalAuthState, 'is_admin', return_value=False), \
             patch('web.public_name.maybe_ask_public_name', side_effect=asked.append):
         _run_home_smoke(driver, lang='en')
+
+
+def test_the_rail_arrows_point_the_same_way_in_hebrew():
+    """The sidebar is at the screen's left in both languages, so collapsing points left in
+    both; in Hebrew they were reversed (owner's screenshot, 2026-11-05)."""
+    async def driver(user):
+        await user.open('/about')
+        toggle = _marked_element(user, 'nav-rail-toggle')
+        assert toggle.props.get('icon') == 'chevron_left'
+        _click_element(user, toggle)
+        assert toggle.props.get('icon') == 'chevron_right'
+        _click_element(user, toggle)
+        assert toggle.props.get('icon') == 'chevron_left'
+
+    _run_home_smoke(driver, lang='he')

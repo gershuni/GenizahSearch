@@ -379,7 +379,7 @@ def test_the_hebrew_ui_shows_the_site_s_line_only_and_its_own_words():
         assert any(t.startswith('המהדורה הדיגיטלית: פרויקט MiDRASH') for t in texts), 'MiDRASH, in Hebrew'
         assert 'מילון בלאו' in texts and 'עמ׳ 587' in texts and 'קלאסי' in texts
         assert 'לחיצה על מילה מחפשת אותה במילונים' in _visible_texts(user)
-        assert _switch_tip(user) == ['כיבוי המילונים', 'לחצו על M (או מ) ולחצו על מילה כשהמקש עדיין לחוץ, או בחרו מילים ולחצו על M (או מ)']
+        assert _switch_tip(user) == ['כיבוי המילונים', 'לחצו על D או M (או מ) ואז על מילה (או לחצו עליה כש-Alt לחוץ), או בחרו מילים ולחצו על D או M']
         # The Hebrew gloss comes first in a sense, the English after it.
         glosses = [e for e in _all_elements(user) if isinstance(e, ui.label) and 'gloss' in e.classes]
         assert [('he' in g.classes) for g in glosses[:2]] == [True, False]
