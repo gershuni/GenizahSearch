@@ -56,9 +56,12 @@ def test_every_browse_row_on_the_card_has_its_key_in_the_page_script():
 
 def test_the_browse_keys_leave_the_browser_s_own_shortcuts_alone():
     script = _browse_key_script()
-    guard = 'if (e.ctrlKey || e.altKey || e.metaKey) return;'
-    assert guard in script
-    assert script.index(guard) < script.index("action = 'fullscreen'")
+    for guard in ('if (e.ctrlKey || e.altKey || e.metaKey) return;',
+                  # Codex, PR #484: with the shortcuts card (or any dialog or menu) open, F, 0
+                  # and the arrows must not reach the manuscript behind it.
+                  "if (document.querySelector('.q-dialog, .q-menu')) return;"):
+        assert guard in script, guard
+        assert script.index(guard) < script.index("action = 'fullscreen'")
 
 
 def test_the_buttons_tooltips_name_their_keys():
@@ -76,7 +79,7 @@ def test_question_mark_and_slash_are_handled_on_every_page():
     assert "event.key === '/' || event.code === 'Slash'" in SHORTCUTS_JS
     # Never while typing in a box, never over a dialog, never with a modifier.
     assert 'if (inABox(event.target) || inABox(document.activeElement)) return;' in SHORTCUTS_JS
-    assert "if (document.querySelector('.q-dialog')) return;" in SHORTCUTS_JS
+    assert "if (document.querySelector('.q-dialog, .q-menu')) return;" in SHORTCUTS_JS
     assert 'event.ctrlKey || event.altKey || event.metaKey' in SHORTCUTS_JS
     # Every page loads the script, and has the trigger the card opens from.
     assert 'ui.add_head_html(_shortcuts_head_html(), shared=True)' in MAIN

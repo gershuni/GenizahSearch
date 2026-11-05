@@ -8,7 +8,7 @@
  *      go-to box, opening it first where it sits behind its button (below
  *      1024px; common.css `.header-search.is-open`).
  *
- * Neither key does anything while a box has the focus, while a dialog is open,
+ * Neither key does anything while a box has the focus, while a dialog or menu is open,
  * or with Ctrl, Alt or Cmd (those are the browser's). Both answer the key's
  * character and its physical key, so they work on a Hebrew layout too: there
  * the "/" key types ".", and "/" is on the Q key.
@@ -55,7 +55,7 @@
   document.addEventListener('keydown', function (event) {
     if (event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.defaultPrevented) return;
     if (inABox(event.target) || inABox(document.activeElement)) return;
-    if (document.querySelector('.q-dialog')) return;
+    if (document.querySelector('.q-dialog, .q-menu')) return;
     if (event.key === '?' || (event.code === 'Slash' && event.shiftKey)) {
       var trigger = document.querySelector(TRIGGER);
       if (!trigger) return;

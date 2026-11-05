@@ -5885,6 +5885,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         <script>
             document.addEventListener('keydown', function(e) {
                 if (e.ctrlKey || e.altKey || e.metaKey) return;
+                // A dialog or menu is open (the shortcuts card, a confirmation, a
+                // dropdown): its keys are its own, never the manuscript's behind it
+                // (Codex, PR #484). Browse's full-screen modes are classes, not dialogs.
+                if (document.querySelector('.q-dialog, .q-menu')) return;
                 // A page is loading: the old content is inert, so no second load
                 // from its (still clickable, programmatically) navigation buttons.
                 if (document.querySelector('.browse-loading')) return;
