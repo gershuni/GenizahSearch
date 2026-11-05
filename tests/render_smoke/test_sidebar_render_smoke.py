@@ -79,6 +79,29 @@ def test_the_sidebar_lists_the_pages_in_the_readers_order_without_titles():
     _run_home_smoke(driver, lang='en')
 
 
+
+def test_every_row_keeps_its_name_in_the_rail_and_the_shortcuts_button_answers_space():
+    """Codex, PR #484: in the icon rail the labels are hidden, so each row carries its own
+    aria-label; the "Keyboard shortcuts" row is a button and opens on Space too."""
+    async def driver(user):
+        await user.open('/about')
+        rows = [el for el in _all_elements(user) if 'nav-item' in _classes(el)]
+        named = {r.props.get('aria-label') for r in rows}
+        for label in WORK_ORDER + EXPLAIN_ORDER:
+            assert label in named, label
+        shortcuts = _marked_element(user, 'nav-shortcuts')
+        assert shortcuts.props.get('role') == 'button'
+        types = {l.type for l in shortcuts._event_listeners.values()}
+        assert {'click', 'keydown.enter', 'keydown.space.prevent'} <= types, types
+        home = [r for r in rows if r.props.get('aria-label') == 'Home'][0]
+        assert home.props.get('role') == 'link'
+        assert 'keydown.space.prevent' not in {l.type for l in home._event_listeners.values()}
+        _fire(user, shortcuts, 'keydown.space.prevent')
+        await asyncio.sleep(0.1)
+        assert len(_cards(user)) == 1
+
+    _run_home_smoke(driver, lang='en')
+
 def test_the_rail_button_collapses_the_sidebar_and_it_stays_collapsed():
     async def driver(user):
         await user.open('/about')

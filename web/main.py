@@ -2142,10 +2142,18 @@ def create_layout():
     _expand_icon = 'chevron_left' if rtl_mode else 'chevron_right'
 
     def _nav_row(icon, label, badge=None, *, active=False, on_click=None, mark=None):
+        # A page is a link; "Keyboard shortcuts" (marked) opens the card, a button.
+        is_button = mark is not None
         row = ui.row(wrap=False).classes(f'nav-item {"active" if active else ""}').props(
-            'role=link tabindex=0' if mark is None else 'role=button tabindex=0')
+            'role=button tabindex=0' if is_button else 'role=link tabindex=0')
+        # The row's own name: in the icon rail the label is hidden, and with it the name a
+        # screen reader announced (Codex, PR #484). The badge (Beta) stays visible text.
+        row.props['aria-label'] = label
         if on_click is not None:
             row.on('click', on_click).on('keydown.enter', on_click)
+            if is_button:
+                # A button answers Space too; without .prevent the page scrolls (Codex, PR #484).
+                row.on('keydown.space.prevent', on_click)
         if mark:
             row.mark(mark)
         with row:
