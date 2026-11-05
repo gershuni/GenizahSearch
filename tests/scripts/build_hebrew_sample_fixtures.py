@@ -28,7 +28,8 @@ Usage::
 
     python tests/scripts/build_hebrew_sample_fixtures.py
 
-Idempotent: regenerates the three files in place.
+Regenerates the three files in place. With the same font and PyMuPDF version,
+repeated runs produce identical files.
 """
 from __future__ import annotations
 
@@ -171,7 +172,8 @@ def _write_pdf(dest: str, lines: list[str], font_path: str) -> None:
                       "author": "GenizahSearch tests",
                       "creator": "tests/scripts/build_hebrew_sample_fixtures.py"})
     doc.subset_fonts()  # embed only the glyphs used: keeps the fixtures small
-    doc.save(dest, garbage=4, deflate=True)
+    # Avoid a fresh trailer ID when rebuilding the same fixture.
+    doc.save(dest, garbage=4, deflate=True, no_new_id=True)
     doc.close()
 
 
