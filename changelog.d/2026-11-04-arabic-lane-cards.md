@@ -1,7 +1,7 @@
 ## [Unreleased] -- Lane's Arabic-English Lexicon in its own tab on /browse (web, branch `claude/arabic-lane-cards`)
 
-Phase B of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md` (§7.2). Not deployed: the server needs
-`arabic_data/arabic.db`, and the wording is a draft for the owner.
+Phase B of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md` (§7.2). The owner passed the grading and
+approved the wording on 2026-11-05; the server needs `arabic_data/arabic.db` before Lane shows.
 
 - **One tab per dictionary** (owner, D12): the dictionary panel has a tab for Blau and one for
   Lane, between its head and its body, so a long entry in one never hides the other. It opens on
@@ -27,6 +27,9 @@ Phase B of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md` (§7.2). Not deployed: t
 - `shared/arabic_method.py`: the method v1-v4, moved verbatim out of
   `scripts/measure_arabic_readings.py` so the gate measures what is served (its numbers on the built
   file are unchanged).
+- Deploy: `scripts/deploy_arabic_sidecar.ps1 -Entries 47890` (owner), as Blau's -- the gate on the
+  local file, upload under a temporary name, the digest and the gate on the server, keep the served
+  file, swap, restart, the gate on the served file; the code must be on the server first.
 - `web/components/lane_panel.py` draws Lane's tab; `web/components/blau_panel.py` draws the tabs
   (`pick_tab` decides which opens), and `web/pages/browse.py` asks both dictionaries in one trip
   off the event loop.

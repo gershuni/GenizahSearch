@@ -306,6 +306,7 @@ must use a file written by rev. 4 or later.
     - سيدي, نحن, بن, ستين and الاثنين.
   - These are §4's weak step, and they are systematic.
 - **Pass or fail.** D9 sets no number for this grading; the owner decides on these figures.
+  **The owner passed it (2026-11-05), on these figures and the fixes below: Lane ships.**
 
 **Fixed the same day (the owner's go-ahead), and re-scored against the judges' roots.** Two changes,
 both on what the grading found:
@@ -601,12 +602,14 @@ sight, and the panel's title and hint named Blau alone. So:
 - **When nothing shows:** without the credit line, Lane has no tab (D3). For a word with no reading
   the tab is greyed and says nothing was found.
 
-**Owner decisions still open for phase B** (drafts in place, nothing deployed):
+**Owner decisions for phase B:**
 
-- the English and Hebrew wording of Lane's tab (`shared/genizah_translations.py`, marked DRAFTS;
-  its title is the owner's own; the panel's title, tabs, hint and switch are approved);
-- whether the two source lines are wanted, or the Perseus line alone (D3 asks only that one);
-- the server copy of `arabic_data/arabic.db` (74 MB) and the release.
+- the English and Hebrew wording of Lane's tab (`shared/genizah_translations.py`): **approved as
+  drafted, 2026-11-05** (its title is the owner's own; the panel's title, tabs, hint and switch were
+  approved 2026-11-04);
+- the two source lines beside the Perseus line: **kept**, in the same approval;
+- the D9 grading: **passed, 2026-11-05** (§5.4);
+- still open: the server copy of `arabic_data/arabic.db` (74 MB) and the release.
 
 The gate before deploy (D9):
 - the 200-word sample, graded by two AI judges at the owner's request (§5.4): the first reading is
@@ -650,7 +653,8 @@ The gate before deploy (D9):
 - **Licences**: three regimes on one card (Perseus conditions, CC BY-NC-SA, Blau's research-only
   permission); each card carries its own credit line.
 - **Size**: the built Lane sidecar is 73.7 MB (the word count is 808,441 rows of it); Lisān will
-  add about 31 MB. The deploy is server-copy-first, as Blau's.
+  add about 31 MB. The deploy is server-copy-first, as Blau's: `scripts/deploy_arabic_sidecar.ps1
+  -Entries 47890` (owner), the gate on the local file, the uploaded copy and the served file.
 - **The source moves.** Meiri's site is rebuilt (its manifest says 2026-11-01); a rebuild of the
   sidecar fetches anew and pins anew, and `meta.lane_source_built_at` and the sha256 of the pins
   say which snapshot a file holds.
