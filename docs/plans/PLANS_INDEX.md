@@ -1,6 +1,6 @@
 # GenizahSearch - Plans Index
 
-**Last Updated:** 2026-11-04
+**Last Updated:** 2026-11-05
 
 ---
 
@@ -9,6 +9,7 @@
 | Plan | Status | Description |
 |------|--------|-------------|
 | [ARABIC_DICTIONARY_LAYER_PLAN.md](ARABIC_DICTIONARY_LAYER_PLAN.md) | rev. 5 (2026-11-04): phase B built (Lane cards under Blau's, not deployed); owner ruled D1-D11 (Lane first, then Lisān; stdlib v3; cards under Blau's; Hebrew words given a card are not a gate); phase A built (`arabic_data/arabic.db`, its gate), nothing served; phase B next | Lane's *Lexicon* and *Lisān al-ʿArab* beside Blau on `/browse`: a Judeo-Arabic word read as Arabic, its readings ranked by an OpenITI word count, its root's articles shown; sources, licences, the letter map, three root methods and a gate on the PGP editions (`scripts/measure_arabic_readings.py`) |
+| [CATALOGUE_TEXT_SEARCH_PLAN.md](CATALOGUE_TEXT_SEARCH_PLAN.md) | rev. 3 (2026-11-05): settled by the owner (D1-D7 as recommended, `%` shortcut, refresh note); PR 1 (the data file) built on `claude/catalogue-text-data`, nothing served; PR 2 next | Find manuscripts by what their catalogue records say: one derived FTS5 sidecar over FJMS catalogue text, PGP descriptions, library titles and the automatic translations; a Catalogue mode, a zero-result offer, Latin-script routing, `search_mode='catalog'` on the API, an MCP tool, both apps |
 | [CATALOGUE_CRITERIA_PLAN.md](CATALOGUE_CRITERIA_PLAN.md) | rev. 4, settled by the owner (2026-11-01); D1-D22, R1-R3 ruled; PR 1a in progress | Find manuscripts by what the FJMS catalogue records (script, language, vocalization, columns, lines, physical status, material, attributes, computed data, bibliography): one criteria list in `shared/`, one FJMS-style panel for Catalog Browse and "Search only in..." on web and desktop, the API |
 | [FGP_SOURCE_FOLDERS_HANDOFF.md](FGP_SOURCE_FOLDERS_HANDOFF.md) | Handoff (2026-10-26); candidate built, not deployed | Where the FGP source-folders work stands, what exists and how to rerun it, the open decisions, the recommended order: release (web + desktop together), the chooser's one-row-per-image rule, the PDF-held Word rows, positions |
 | [FGP_SOURCE_FOLDERS_ASSESSMENT.md](FGP_SOURCE_FOLDERS_ASSESSMENT.md) | Gates 1-5 run (2026-10-25/26), Revisions 12-17 | The two FGP deliveries (FIST file store, word positions) against today's sidecar; the gate plan and its records; rules in FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md, FGP_TEXT_PIPELINE_RULES.md, FGP_CHOOSER_VALIDATION_RULES.md, FGP_POSITIONS_RULES.md |
