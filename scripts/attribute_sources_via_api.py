@@ -11,6 +11,8 @@ Strategy:
 4. Build complete SourceId/SubId → display name mapping
 5. Update enrichment DB
 
+Needs an FJMS account in the environment: FJMS_USERNAME and FJMS_PASSWORD.
+
 Usage:
     python scripts/attribute_sources_via_api.py              # dry run (report only)
     python scripts/attribute_sources_via_api.py --apply      # apply to enrichment DB
@@ -118,9 +120,14 @@ def login_fjms():
                        'AppleWebKit/537.36')
     })
 
+    username = os.environ.get('FJMS_USERNAME', '')
+    password = os.environ.get('FJMS_PASSWORD', '')
+    if not username or not password:
+        raise SystemExit("Set FJMS_USERNAME and FJMS_PASSWORD to log in to FJMS.")
+
     print("Logging in to FJMS...")
     resp = s.get('https://SSO.genizah.org/login/GetLoginUIT', params={
-        'username': 'Miriamg', 'password': 'Fgp123',
+        'username': username, 'password': password,
         'screenWidth': '1920', 'callback': 'cb',
     })
     m = re.search(r'"UIT":"([^"]+)"', resp.text)
