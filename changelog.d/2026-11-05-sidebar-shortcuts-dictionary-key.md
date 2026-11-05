@@ -50,4 +50,4 @@ own use (PostHog, 30 days to 2026-11-05).
 - **Labels (owner):** the phone chip says "Look up in the dictionary" (חיפוש במילון); the
   Parallels button "Add witness text" is הוספת עד נוסח (was הוספת נוסח עד); the account menu's
   "Logout" is התנתקות (was התנתק), in both apps.
-- New strings: 16. Approved by the owner: all but "or", "then" and "Close the dictionary".
+- New strings: 16, all approved by the owner.

@@ -6531,8 +6531,8 @@ TRANSLATIONS.update({
 # Before 9.14.0 (owner, 2026-11-05): the dictionaries' M key, the one sign-in button, and the
 # card of keyboard shortcuts (web/keyboard_shortcuts.py). Approved by the owner, 2026-11-05.
 # After the owner's touchpad test (2026-11-05: D or M tapped, Alt + a click, Esc): the key hint,
-# approved word for word in the Help text; the phone chip's "Look up in the dictionary" (owner);
-# DRAFTS: "or", "then", "Close the dictionary".
+# approved word for word in the Help text; the phone chip's "Look up in the dictionary"; "or",
+# "then", "Close the dictionary". All approved by the owner, 2026-11-05.
 TRANSLATIONS.update({
     "Look up in the dictionary": "חיפוש במילון",
     "Press D or M, then click a word (or click it with Alt held); or select words and press D or M":
