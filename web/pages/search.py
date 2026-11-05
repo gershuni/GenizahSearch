@@ -692,7 +692,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         h2(tr('PGP Tags'), classes='text-sm font-medium search-field-label', style='color: var(--success-600);')
                         tag_select = ui.select(
                             [], with_input=True, value=None
-                        ).classes('w-full text-lg').props('outlined dense clearable use-input input-debounce="200"')
+                        ).classes('w-full text-lg').props('outlined dense clearable use-input input-debounce="200"'
+                                                          ' data-gs-primary-search')  # "/" here in PGP Tags mode
                         tag_select.props(f'popup-content-class="max-h-64" label="{tr("Select a tag...")}"')
                     tag_column.set_visibility(False)
 

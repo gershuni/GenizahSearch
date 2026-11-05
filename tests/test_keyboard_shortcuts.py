@@ -93,10 +93,17 @@ def test_question_mark_and_slash_are_handled_on_every_page():
 def test_slash_finds_the_page_s_own_search_box():
     """Quasar puts the attribute on the <input> itself (2026-11-05: the script looked
     inside it and fell back to the header box on /search)."""
-    assert "primary.tagName === 'INPUT'" in SHORTCUTS_JS
+    assert "(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el" in SHORTCUTS_JS
     assert re.search(r"'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'\s*"
                      r"' data-gs-primary-search'", SEARCH)
     assert "'outlined rounded dense data-gs-primary-search'" in HOME
+    # In PGP Tags mode the query box is hidden and the tag selector shows: "/" goes to the first
+    # VISIBLE marked box, and the selector is marked too (Codex, PR #484).
+    assert re.search(r"'outlined dense clearable use-input input-debounce=\"200\"'\s*"
+                     r"' data-gs-primary-search'", SEARCH)
+    assert 'var marked = document.querySelectorAll(PRIMARY);' in SHORTCUTS_JS
+    assert 'if (visible(field)) return field;' in SHORTCUTS_JS
+    assert 'document.querySelector(PRIMARY)' not in SHORTCUTS_JS
 
 
 def test_the_dictionary_rows_match_the_key_script():

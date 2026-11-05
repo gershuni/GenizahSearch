@@ -30,13 +30,22 @@
     return !!el && el.getClientRects().length > 0;
   }
 
+  // Quasar puts the attribute on the <input> itself; a wrapper may carry it too. One box can
+  // stand in for another (/search: the query box, or the PGP tag selector in its mode), so the
+  // first VISIBLE marked box wins (Codex, PR #484: the first one was the hidden query box).
+  function primaryField() {
+    var marked = document.querySelectorAll(PRIMARY);
+    for (var i = 0; i < marked.length; i++) {
+      var el = marked[i];
+      var field = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el : el.querySelector('input, textarea');
+      if (visible(field)) return field;
+    }
+    return null;
+  }
+
   function focusSearch() {
-    // Quasar puts the attribute on the <input> itself; a wrapper may carry it too.
-    var primary = document.querySelector(PRIMARY);
-    var field = !primary ? null
-      : (primary.tagName === 'INPUT' || primary.tagName === 'TEXTAREA') ? primary
-      : primary.querySelector('input, textarea');
-    if (visible(field)) {
+    var field = primaryField();
+    if (field) {
       field.focus();
       if (field.select) field.select();
       return true;
