@@ -6,8 +6,8 @@ env/
 .idea/
 .vscode/
 
-# Local working folders (never committed)
-docs/outreach/
+# Personal local folders are ignored through .git/info/exclude (never pushed),
+# not here: a pattern in this public file names what it hides.
 
 # Local Data (Don't upload these huge files!)
 Transcriptions.txt
@@ -334,12 +334,6 @@ pgp_data/pgp-text/
 # app logs, and a config.pkl holding per-user desktop state. `Genizah_Index/`
 # is ignored above (the bare `Genizah_Index/` rule); this is the differently-named backup twin.
 /Genizah_Index.session-bak/
-
-# One-off PDF conversion/remapping scratch scripts. Not imported by either app.
-/ephraim_meiri_pdf_converter/
-
-# Local reference copy of a contributed prototype. Never commit.
-/seewald_addition/
 
 # Ad-hoc analysis output directory (per-run subfolders).
 /outputs/
