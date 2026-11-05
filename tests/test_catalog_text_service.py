@@ -185,6 +185,16 @@ def test_a_long_text_is_cut_around_its_match_without_cutting_words(service):
     assert body.split()[0] in service.record_text(hit.record_id).split()
 
 
+def test_a_phrase_snippet_shows_the_phrase_not_an_earlier_lone_word():
+    text = ("The marriage of the writer's daughter is mentioned first. "
+            + "Accounts of flax and silk follow at great length. " * 8
+            + "At the end: the marriage contract itself, with its witnesses.")
+    snippet = make_snippet(text, parse_query('"marriage contract"'), expand_prefixes=False)
+    assert "*marriage* *contract*" in snippet
+    assert snippet.startswith("…") and "daughter" not in snippet
+    assert snippet.count("*") == 4   # the lone "marriage" elsewhere is not marked
+
+
 def test_make_snippet_on_text_without_a_match():
     assert make_snippet("short text", parse_query("other"), expand_prefixes=False) == "short text"
     assert make_snippet("", parse_query("x"), expand_prefixes=False) == ""

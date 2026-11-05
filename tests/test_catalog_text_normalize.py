@@ -11,7 +11,7 @@ from shared.catalog_text_normalize import (
     can_expand,
     fts_match,
     hebrew_forms,
-    highlight_keys,
+    match_spans,
     is_hebrew_text,
     key,
     key_words,
@@ -105,13 +105,36 @@ def test_reader_input_never_reaches_fts5_syntax():
         assert all(re.fullmatch(r"[^\W_]+(?: [^\W_]+)*", k) for k in re.findall(r'"([^"]*)"', match))
 
 
-def test_can_expand_and_highlight_keys():
+def test_can_expand():
     assert can_expand(parse_query("כתובה"))
     assert not can_expand(parse_query("cheese"))
     assert not can_expand(parse_query('"כתובה"'))
-    keys = highlight_keys(parse_query('כתובה "marriage contract"'), expand_prefixes=True)
-    assert {"כתובה", "הכתובה", "marriage", "contract"} <= keys
-    assert highlight_keys(parse_query("כתובה"), expand_prefixes=False) == frozenset({"כתובה"})
+
+
+def _marked(text, query, expand_prefixes=False):
+    spans, anchor = match_spans(text, parse_query(query), expand_prefixes)
+    return [text[s:e] for s, e in spans], anchor
+
+
+def test_single_words_are_marked_wherever_they_stand():
+    text = "כתובה ושטר הכתובה"
+    assert _marked(text, "כתובה") == (["כתובה"], 0)
+    assert _marked(text, "כתובה", expand_prefixes=True) == (["כתובה", "הכתובה"], 0)
+
+
+def test_a_phrase_is_marked_only_where_its_words_stand_together():
+    text = "A marriage gift is listed; the marriage contract follows."
+    words, anchor = _marked(text, '"marriage contract"')
+    assert words == ["marriage", "contract"]
+    assert anchor == text.index("marriage contract")
+
+
+def test_the_anchor_is_the_first_phrase_match_even_after_a_single_word():
+    text = "Cheese and wine. Later: the marriage contract."
+    words, anchor = _marked(text, 'cheese "marriage contract"')
+    assert words == ["Cheese", "marriage", "contract"]
+    assert anchor == text.index("marriage contract")
+    assert _marked("nothing here", "cheese") == ([], None)
 
 
 def test_english_words_are_made_singular_and_nothing_else_is():

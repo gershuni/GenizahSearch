@@ -209,12 +209,35 @@ def can_expand(terms: list[Term]) -> bool:
     return any(not t.phrase and len(hebrew_forms(t.keys[0])) > 1 for t in terms)
 
 
-def highlight_keys(terms: list[Term], expand_prefixes: bool) -> frozenset[str]:
-    """The keys a snippet marks: every phrase word, and every form of every single word."""
-    keys: set[str] = set()
+def match_spans(text: str, terms: list[Term], expand_prefixes: bool) -> tuple[list[tuple[int, int]], int | None]:
+    """Where ``terms`` match in ``text``: the (start, end) of every matched word, in order, and the
+    offset a snippet should centre on.
+
+    A single word matches wherever its key (or, with ``expand_prefixes``, any of its
+    ``hebrew_forms``) stands. A phrase matches only where all its keys stand next to each other,
+    in order, as FTS5 matched it; its words elsewhere are not marked. The snippet centres on the
+    first phrase match when the query has a phrase (the part the reader asked for exactly), else on
+    the first matched word; ``None`` when nothing matches."""
+    toks = tokens(text)
+    flat = [(index, k) for index, tok in enumerate(toks) for k in tok.keys]
+    marked: set[int] = set()
+    phrase_starts: list[int] = []
+    singles: set[str] = set()
     for term in terms:
-        if term.phrase:
-            keys.update(term.keys)
-        else:
-            keys.update(hebrew_forms(term.keys[0]) if expand_prefixes else term.keys)
-    return frozenset(keys)
+        if not term.phrase:
+            singles.update(hebrew_forms(term.keys[0]) if expand_prefixes else term.keys)
+            continue
+        width = len(term.keys)
+        for j in range(len(flat) - width + 1):
+            if all(flat[j + m][1] == term.keys[m] for m in range(width)):
+                marked.update(flat[j + m][0] for m in range(width))
+                phrase_starts.append(flat[j][0])
+    for index, tok in enumerate(toks):
+        if any(k in singles for k in tok.keys):
+            marked.add(index)
+    spans = [(toks[i].start, toks[i].end) for i in sorted(marked)]
+    if phrase_starts:
+        anchor: int | None = toks[min(phrase_starts)].start
+    else:
+        anchor = spans[0][0] if spans else None
+    return spans, anchor

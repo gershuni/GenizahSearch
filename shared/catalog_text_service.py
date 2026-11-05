@@ -40,9 +40,8 @@ from shared.catalog_text_normalize import (
     Term,
     can_expand,
     fts_match,
-    highlight_keys,
+    match_spans,
     parse_query,
-    tokens,
 )
 from shared.thread_local_db import ThreadLocalConnection
 
@@ -236,22 +235,23 @@ class CatalogTextService:
         return row[0] if row else ""
 
     def snippet(self, hit: CatalogHit, result: CatalogResult) -> str:
-        """About ``SNIPPET_CHARS`` of the hit's original text around its first matched word, every
-        matched word inside ``*...*`` (the result cards' marker, ``SearchEngine.format_snippet``)."""
+        """About ``SNIPPET_CHARS`` of the hit's original text around its match (the first phrase
+        match when the query has a phrase, else the first matched word), every matched word inside
+        ``*...*`` (the result cards' marker, ``SearchEngine.format_snippet``)."""
         return make_snippet(self.record_text(hit.record_id), result.terms, expand_prefixes=not hit.exact)
 
 
 def make_snippet(text: str, terms: tuple[Term, ...] | list[Term], expand_prefixes: bool,
                  width: int = SNIPPET_CHARS) -> str:
-    """See ``CatalogTextService.snippet``. A literal ``*`` in the text becomes ``∗`` (U+2217), so
-    it can never open or close a marker."""
+    """See ``CatalogTextService.snippet``. A phrase's words are marked only where the phrase
+    stands (``match_spans``). A literal ``*`` in the text becomes ``∗`` (U+2217), so it can never
+    open or close a marker."""
     if not text:
         return ""
-    wanted = highlight_keys(list(terms), expand_prefixes)
-    marked = [(t.start, t.end) for t in tokens(text) if any(k in wanted for k in t.keys)]
+    marked, anchor = match_spans(text, list(terms), expand_prefixes)
     start, end = 0, len(text)
     if len(text) > width:
-        centre = marked[0][0] if marked else 0
+        centre = anchor if anchor is not None else 0
         start = max(0, centre - width // 3)
         end = min(len(text), start + width)
         start = max(0, end - width)
