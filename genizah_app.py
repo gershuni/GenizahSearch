@@ -109,6 +109,7 @@ from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.index_rebuild_bar import IndexRebuildBar, remaining_phrase
+from desktop.version_history import VersionHistoryDialog  # What's New in every version, 2026-11-05
 from desktop import startup_tips
 from desktop.startup_tips import TipStrip
 from desktop.marks_legend import make_marks_legend_button, sync_marks_legend_button
@@ -2745,6 +2746,10 @@ class GenizahGUI(QMainWindow):
         self.nav_shortcuts_btn = self.side_nav.add_button(
             "⌨️", tr("Keyboard shortcuts"), footer=True, shortcut="Ctrl+/")
         self.nav_shortcuts_btn.clicked.connect(self.open_shortcuts)
+        # Every version's news (2026-11-05); the ☰ menu lists it too (built from these).
+        self.nav_history_btn = self.side_nav.add_button(
+            "\U0001F195", tr("What's New in every version"), footer=True)
+        self.nav_history_btn.clicked.connect(self.show_version_history)
         self.nav_settings_btn = self.side_nav.add_button(
             "\u2699\uFE0F", tr("Settings"), footer=True, shortcut="Ctrl+,")
         self.nav_settings_btn.clicked.connect(self._open_settings_dialog)
@@ -2804,6 +2809,7 @@ class GenizahGUI(QMainWindow):
         self.update_bar = UpdateNotificationBar()
         self.update_bar.dismissed.connect(self.on_update_dismissed)
         self.update_bar.update_requested.connect(self.start_in_app_update)
+        self.update_bar.notes_requested.connect(self.show_update_notes)
         main_layout.addWidget(self.update_bar)
 
         # What's New Bar (Hidden by default)
@@ -34339,15 +34345,8 @@ class GenizahGUI(QMainWindow):
 
             # Show Feedback
             if is_manual:
-                # Dialog for manual - offer in-app update
-                msg = tr("A new version is available: {}").format(version)
-                reply = QMessageBox.question(
-                    self, tr("Update Available"),
-                    msg + "\n\n" + tr("Would you like to update now?"),
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.start_in_app_update(version, html_url, installer_url)
+                # What changed since this version, then Update Now / Later (2026-11-05).
+                self.show_update_notes(version, html_url, installer_url)
             else:
                 # Notification Bar for auto
                 self.update_bar.show_update(version, html_url, installer_url)
@@ -34457,6 +34456,19 @@ class GenizahGUI(QMainWindow):
     def on_whats_new_dismissed(self):
         """Save that the user has seen this What's New content."""
         save_app_config({'whats_new_seen': WHATS_NEW_CONTENT_VERSION})
+
+    def show_version_history(self):
+        """The side / ☰ menu's What's New in every version: the bundled history."""
+        from shared.whats_new_history import releases
+        VersionHistoryDialog(self, releases=releases()).exec()
+
+    def show_update_notes(self, version, html_url, installer_url):
+        """A newer version is out: what changed since this one (from the website), with
+        Update Now / Later. Update Now starts the in-app update."""
+        dlg = VersionHistoryDialog(self, current_version=APP_VERSION, update_to=version,
+                                   html_url=html_url)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.start_in_app_update(version, html_url, installer_url)
 
     def show_whats_new_dialog(self):
         """Show detailed What's New dialog."""

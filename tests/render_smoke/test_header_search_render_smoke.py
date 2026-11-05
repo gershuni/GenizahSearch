@@ -55,6 +55,23 @@ def test_enter_in_the_header_box_goes_where_the_input_belongs():
     _run_home_smoke(driver, lang='en')
 
 
+def test_the_header_has_no_vertical_padding():
+    """The 64px row fills the 64px header only with no padding above it: with the
+    header's own 16px (``q-py-none`` lost to it) the row sat 16px low and the 40px
+    box hung over the page under the header (owner's screenshot, 2026-11-05)."""
+    from tests.render_smoke.test_home_teaser_render_smoke import _all_elements
+
+    async def driver(user):
+        await user.open('/about')
+        headers = [el for el in _all_elements(user) if 'header-reveal-mobile' in getattr(el, '_classes', [])]
+        assert len(headers) == 1, [getattr(el, 'tag', None) for el in _all_elements(user)][:12]
+        style = headers[0]._style
+        assert style.get('height') == '64px'
+        assert style.get('padding-top') == '0' and style.get('padding-bottom') == '0', style
+
+    _run_home_smoke(driver, lang='en')
+
+
 def test_the_header_box_speaks_hebrew():
     async def driver(user):
         await user.open('/about')

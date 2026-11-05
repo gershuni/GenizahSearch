@@ -246,8 +246,9 @@ not ship.
   ة/ه, ى/ي and the hamza seats are folded. The conjunction and the article are peeled. The index
   is built in memory on first use (about 50 ms on the real file); the sidecar is unchanged.
 - **A disclaimer on every panel** (owner's review, same day; the Hebrew is the owner's): "מילון
-  בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. כדי לחפש פעלים ונטיות יש להקליד את השורש או את
-  צורת הבסיס." (`blau_panel.DISCLAIMER`). A word with no entry is usually an ordinary Arabic word
+  בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית. כדי לחפש פעלים ונטיות יש להקליד את השורש או את
+  צורת הבסיס." (`blau_panel.DISCLAIMER`; "בעיקר" / "mainly" replaced "רק" / "only", owner,
+  2026-11-05). A word with no entry is usually an ordinary Arabic word
   or an inflected form (אבו, לנא), not a word in another language, so the empty answer is back to
   the short "המילה לא נמצאה במילון." with the forms looked for.
 - **The site's top loading bar** started on Enter in any text box and was hidden only by a page

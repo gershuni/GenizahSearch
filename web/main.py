@@ -1734,7 +1734,8 @@ def create_layout():
     # WATCH THE LENGTH HERE. These are owner-worded (2026-08-26) and they are
     # sentences, not names. If the panel has to shrink, shorten the text; do not
     # introduce a third entry.
-    _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help')
+    # /whats-new is every version's news itself (2026-11-05).
+    _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help', '/whats-new')
 
     # Both entries land on a PREFILLED search rather than an empty form
     # (owner, 2026-08-26). A reader who has just been told a new search
@@ -1985,6 +1986,11 @@ def create_layout():
                                     'text-sm font-semibold text-primary hover:underline'
                                 ).style('display: block; margin-top: 10px; line-height: 1.5; '
                                         'text-align: center; text-wrap: balance;')
+                            # Every version's news, on its own page (2026-11-05).
+                            ui.link(tr("What's New in every version"), '/whats-new').classes(
+                                'text-sm text-secondary hover:underline'
+                            ).style('display: block; margin-top: 14px; text-align: center;').mark(
+                                'whats-new-all-versions')
 
                 # Mutable, because `_whats_new_unseen` is captured by value and
                 # both handlers below fire on every open. Without it the button
@@ -2017,7 +2023,11 @@ def create_layout():
 
     # === Build Header with correct DOM order ===
     # reveal: hide header on scroll down, show on scroll up (mobile-friendly)
-    with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style('height: 64px;'):
+    # No vertical padding, inline: `q-py-none` loses to the header's own 16px
+    # (measured 2026-11-05), and the 64px row below then sat 16px low -- the
+    # 40px go-to box hung over the page under the header (owner's screenshot).
+    with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style(
+            'height: 64px; padding-top: 0; padding-bottom: 0;'):
         # wrap=False: a NiceGUI row wraps by default, and this one sits in a
         # 64px header. In the English UI at 390px (Hebrew at 360px) the auth
         # group no longer fit beside the logo, wrapped to a second line and
@@ -2617,6 +2627,25 @@ def ai_tools_route():
     with content:
         from web.pages.ai_tools import create_ai_page
         create_ai_page()
+
+
+@ui.page('/whats-new', title="What's New | מה חדש — Dicta Genizah Search")
+def whats_new_route():
+    """What's New in every version (shared/whats_new_history.py; owner, 2026-11-05)."""
+    safe_user_set('current_page', '/whats-new')
+    ui.add_head_html(page_meta(
+        '/whats-new',
+        title="What's New | מה חדש — Dicta Genizah Search",
+        description="What's new in every version of Dicta Genizah Search, the website and the desktop app.",
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    content = create_layout()
+    with content:
+        from web.pages.whats_new import create_whats_new_page
+        create_whats_new_page()
 
 
 @ui.page('/start', title='Start Here | התחילו כאן — Dicta Genizah Search')

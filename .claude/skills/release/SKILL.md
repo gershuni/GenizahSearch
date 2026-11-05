@@ -109,6 +109,11 @@ Once texts are approved (or Phase 2 was skipped):
    - Edit `web/main.py` — update the What's New banner text
    - Edit `genizah_app.py` — update WhatsNewBar message + WhatsNewDialog content
    - Edit `CLAUDE.md` "Recently Changed" section — add entry
+   - Add the version's entry to `shared/whats_new_data.py` (newest first: title and items, each
+     a feature / improvement / fix, EN + HE, with the apps it is in), from the approved texts. It
+     feeds the website's `/whats-new`, `GET /api/whats-new` (the desktop update notice reads it) and
+     the desktop's "What's New in every version"; `tests/test_whats_new_history.py` fails while the
+     bumped version has no entry
    - Edit help files if applicable
 3. Run `python scripts/check_docs.py` to verify docs are still healthy
 4. Update `docs/OPEN_ISSUES.md` — mark any fixed issues, update timestamp
