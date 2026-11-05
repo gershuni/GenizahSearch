@@ -24,8 +24,8 @@ HISTORY = [
                 "apps": [
                     "web"
                 ],
-                "en": "Judeo-Arabic dictionaries on the manuscript page: press the dictionaries button (עع) at the bottom of the text pane, then click a word to see its entry in Blau's dictionary and in Lane's Lexicon.",
-                "he": "מילונים לערבית־יהודית! בעיון בכתבי יד תוכלו ללחוץ על כפתור המילונים (עع) בתחתית חלונית הטקסט. לחיצה על מילה תציג את ערכה במילון בלאו ובלקסיקון ליין."
+                "en": "Judeo-Arabic dictionaries on the manuscript page: press the dictionaries button (עع) at the bottom of the text pane, then click a word to see its entry in Blau's dictionary and in Lane's Lexicon. Or press D or M and then click a word, or select words and press D or M.",
+                "he": "מילונים לערבית־יהודית! בעיון בכתבי יד תוכלו ללחוץ על כפתור המילונים (עع) בתחתית חלונית הטקסט. לחיצה על מילה תציג את ערכה במילון בלאו ובלקסיקון ליין. אפשר גם ללחוץ על D או M ואז על מילה, או לבחור מילים וללחוץ על D או M."
             },
             {
                 "category": "feature",
@@ -77,6 +77,14 @@ HISTORY = [
                 ],
                 "en": "Zooming the manuscript image answers at once, and a double-click zooms in on that spot.",
                 "he": "הגדלת תמונת כתב היד מגיבה מיד, ולחיצה כפולה מגדילה את המקום שעליו לחצתם."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Keyboard shortcuts: press ? on any page for the list, and / to jump to the search box. On the manuscript page the arrow keys follow the page buttons, and F works on a Hebrew keyboard too.",
+                "he": "קיצורי מקלדת: הקישו ? בכל עמוד כדי לראות את הרשימה, ו-/ כדי לעבור לתיבת החיפוש. בעיון בכתבי יד מקשי החצים פועלים בכיוון של כפתורי העמודים, ו-F פועל גם במקלדת עברית."
             },
             {
                 "category": "fix",

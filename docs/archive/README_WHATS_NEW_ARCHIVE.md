@@ -7,6 +7,20 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.13.0? (the README's own text, 2026-11-02)
+
+**Find manuscripts by features**
+
+A new **Manuscript features** button, on Browse by Identification and under "Search only in..." (the desktop
+app's **Focus Search**), opens one window with what the catalogue records about each manuscript: period of copy,
+language and alphabet, script style and region, vocalization, columns and lines, physical status, material,
+attributes (illustration, colophon, massorah...) and measurements computed from the photographs. Tick values,
+choose "all except these", or ask for "not recorded"; every value shows how many manuscripts have it, and
+the window counts the matches before you apply it. Browse by Identification now lists all 255,723
+manuscripts, including the 29,169 with no catalogue record, and shows each record's full range of dates.
+The same features are in the public API (`filters.criteria`, `GET /api/criteria`) and in GenizahSearch for
+ChatGPT and Claude.
+
 ## What's New in Version 9.12.1? (the README's own text, 2026-10-30)
 
 **Keyboard shortcuts, round two**

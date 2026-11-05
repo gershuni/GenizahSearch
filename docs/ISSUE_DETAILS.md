@@ -4246,3 +4246,136 @@ rebuilds its filter dict from its own controls and has no library control, so it
 OK installs, drop the library: Vellum + CUL hands over {A}, opening the dialog and pressing OK gives
 {A, B}. Fix sketch: keep keys the dialog does not edit (`library`) in the dict it returns, and pass
 `meta_mgr` to its FilterCountWorker so the count intersects them, as `_remove_filter` already does.
+
+## GS-287
+
+**A broad Title/Shelfmark search from a background API job gets the worker's full time limit after the server already resolved its manuscripts** · P3 · API and AI · ❌ Open · opened 2026-11-03
+
+Where: `web/research_jobs.py::IsolatedEngine.__getattr__` (the `_TO_WORKER` branch after `_metadata_search`)
+
+Since PR #468 the server process resolves a Title/Shelfmark search's manuscripts
+(`SearchEngine.metadata_search_ids`) before the search is handed to a research worker,
+and the worker is given `Config.WEB_SEARCH_TIME_LIMIT` as its `time_limit`. Inside a
+`shared_time_limit()` (a refinement chain on the website) the resolution time is
+deducted and the worker gets what is left; with no shared limit, which is every
+background job of `POST /api/search/jobs` (`api_engine` sets no deadline there), the
+payload keeps the full limit, so the job's allowance grows by the resolution time.
+Before, the worker resolved them itself, inside its own `_time_limited` deadline
+(counted from when the job left the queue). Codex review of PR #468, round 3.
+
+Size: milliseconds once the catalogue index is built (`prewarm_shelfmark_search` at
+server start); up to ~2 s for a Shelfmark search in the first seconds after a restart
+(a cold index build) and ~0.3 s for a Title search (its substring scan). Fix sketch:
+in the `_TO_WORKER` branch, with `shared is None`, set
+`time_limit = max(time_limit - elapsed, 0.001)` where `elapsed` is what
+`_metadata_search` spent (return it beside the sentinel, or stamp it on `arguments`
+and pop it), and pin it with a test like
+`test_a_broad_search_s_resolution_comes_off_the_worker_s_time_limit` without the
+shared context.
+
+## GS-288
+
+**The Blau gate does not check form-level cross-reference targets** · P3 · Data and sidecars · ❌ Open · opened 2026-11-03
+
+Where: `scripts/verify_blau_sidecar.py` (the cross-reference checks); `scripts/build_blau_sidecar.py` (`forms.target_ids`)
+
+Codex round 5 on PR #472 (`7fca394c`), recorded rather than fixed because the review budget was spent.
+The gate verifies that every `roots.target_id` names a root, but the builder also stores the
+targets of the `cross_reference` segments inside forms as `forms.target_ids` (a JSON list), and no
+check reads them: a form whose target was corrupted after the build, or a source release that
+points a form at an entry it does not ship, passes the gate and leaves a dead link for the phase-2
+companion card.
+
+Measured on the real release-1.1 file (2026-11-03): 860 forms carry targets, 862 ids in all; 688
+resolve to a root and **174 to a stem** (`blau-st-…`), none to a sub-entry, none unresolved. So the
+check must look in `roots` and `stems` (and, to be safe, `sub_entries` and `forms`), not in `roots`
+alone, or the real file would fail it.
+
+Fix sketch (two parts, ~15 lines): in the gate, parse every non-NULL `forms.target_ids`, count the
+ids absent from `roots ∪ sub_entries ∪ stems ∪ forms`, and fail on any; in the builder, pin
+`meta.form_targets` (862) and `meta.form_targets_unresolved` (0) and compare them in the gate like
+`cross_references` / `cross_references_unresolved`, so a later release's gaps are reported as
+differences rather than hidden. One test on the synthetic fixture: point `blau-f-000004`'s
+`target_ids` at `blau-e-999999` and expect FAIL.
+
+## GS-289
+
+**A forced worktree removal walks junctions into the main checkout's data folders** · P2 · Server and operations · ❌ Open · opened 2026-11-04
+
+Where: `.claude/worktrees/*` cleanup (`git worktree remove --force`, `rm -rf`); `scripts/init.ps1`, `scripts/check_worktree_links.ps1`
+
+What happened. On 2026-11-03 a worktree session made directory junctions inside its worktree
+(`cmd /c mklink /J nli_data C:\GenizahSearch\nli_data`, likewise `pgp_data`, `fist_data` and
+`fgp_data`) so its dev server would find the gitignored sidecars a worktree does not carry. On
+2026-11-04 at 00:11 a cleanup session working in the main checkout ran `git worktree remove --force`
+and then `rm -rf` on that worktree. Git for Windows and MSYS `rm` walk a junction as a directory, so
+the main checkout's `nli_data/` and `fgp_data/` were emptied (`pgp_data/` and `fist_data/`
+survived; why is not established). Nothing reached the Recycle Bin, and the session reported only
+that the worktrees were gone.
+
+Lost: `nli_data/nli_crossref.db` (272,809,984 bytes) and all of `fgp_data/`: the served
+`fgp_transcriptions.db` (v2.0.0, 59,062 rows), the kept June sidecar
+`fgp_transcriptions.pre_9110.db`, `nuscha_hidden_layer.db`, `inventory/` (inventory.db,
+pdf_text_cache.db, fgp_transcriptions.candidate.db, the glyph re-read rounds r1-r6) and
+`metadata/`. Recovered the same day: the two served files, from the 2026-11-03 desktop build
+output `dist/GenizahSearchPro/_internal/nli_data/` and `.../fgp_data/` (same sizes, quick_check
+ok, row counts match; the server's copies were never touched, and it keeps the June file as
+`fgp_transcriptions.db.prev-<stamp>`). Still lost: the FGP inventory candidates, the hidden layer
+and the local June sidecar, which existed nowhere else; rebuilding them means re-running the FGP
+inventory gates (`docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md`), an owner decision.
+
+What the 2026-11-04 change adds, and what it does not. The rule in `CLAUDE.md` ("How to work
+here": a worktree never links to the main checkout's data; copy a sidecar under
+`%LOCALAPPDATA%\GenizahSearchPro\data\<dir>\` or set `GENIZAH_FJMS_DB_PATH`),
+`scripts/check_worktree_links.ps1` (names every reparse point anywhere under a worktree, never
+stepping into one, exit 1; a folder it cannot read makes the scan fail closed, exit 2) and `scripts/init.ps1` running it in every worktree and, from the main
+checkout, over `.claude/worktrees/*`. Nothing BLOCKS `git worktree remove --force` or `rm -rf` on a
+worktree that still holds a junction: the guard is advisory, and a session that skips `init.ps1`
+sees no warning. Closing this row = a removal path that refuses while a reparse point exists
+(a wrapper the cleanup step must use, or a hook), plus the local-only FGP artifacts rebuilt or
+written off.
+
+## GS-290
+
+**The FGP gate-4 release-check test fails on one slow timing sample** · P3 · Build, CI and tests · ❌ Open · opened 2026-11-05
+
+Where: `tests/test_fgp_gate4_chooser_validation.py::test_release_check_requires_the_file_gate_4_validated`, `scripts/fgp_gate4_chooser_validation.py` (C6 latency, the `latency.ratio_vs_today` budget)
+
+On CI run 41995209918 (PR #483, which touches nothing FGP) the Ubuntu shard 3/3 failed this test on
+C6 alone: `C6_latency.load.cand: expected p95 <= 500.0 ms, got p95 129.73 ms, max 129.73 ms`. The
+absolute budget held. What failed is the ratio check: the candidate's p95 must be at most 1.5x
+today's p95 plus the floor. `check_defaults` times one load per reference manuscript, four on the
+test's fixture, so the p95 is in effect the slowest single load (here p95 = max = 129.73 ms). One
+slow load on a shared runner (a GC pause, a cold page) therefore fails the whole release check,
+even after the one warm-up per database. The Windows shard 3/3 passed the same commit. The test cannot run
+in a worktree (it needs the gitignored `ephraim_meiri_pdf_converter/pdf_to_docx.py`), so it was
+not reproduced locally.
+
+Fix sketch: in the test, not the gate (the gate's tolerances are declared, never moved), time
+enough loads on the fixture for a p95 to mean something, or skip the ratio check when either side
+has fewer than N samples, saying so in the report row.
+
+## GS-291
+
+**A list upload racing the user's edits can fail with "dictionary changed size during iteration"** · P3 · Desktop app · ❌ Open · opened 2026-11-05
+
+Where: `shared/lists_sync.py` (the upload's `try` block, `logger.error(f"Error syncing to cloud: {e}")` near line 1196); `tests/test_list_sync_identity.py::test_an_auto_upload_racing_the_user_on_another_thread_succeeds`
+
+On CI run 42001452091 (PR #483, which touches nothing in list sync), the Windows shard 1/3 failed
+the race test. The second of its four uploads returned
+`error = 'dictionary changed size during iteration'`, logged as
+`ERROR shared.lists_sync: Error syncing to cloud: dictionary changed size during iteration`. The
+test runs an upload while another thread adds entries to the same store (switch interval
+1e-5 s), and it passed on the other shards and on earlier runs. So somewhere in the upload path a
+dict the user's thread mutates is iterated live. Most loops over `store['items']` already copy
+first (`list(...values())`, lines 275, 327, 358, 412, 422, 524, 1968, 1977, 2771), so the site is
+another one: a nested dict of an entry or list, or a generator such as `_records(item)`.
+
+**Not identified:** the error is logged without a traceback, so the run does not say which loop
+it was. In production this means an upload round fails and is retried later; no data is lost, as
+far as the test shows.
+
+Fix sketch: log that exception with `exc_info=True` so the next occurrence names the line; then
+copy that iteration (or snapshot the store under the lists manager's lock at the start of the
+upload). Run the race test in a loop on Windows (`pytest -k racing_the_user --count 50` with
+pytest-repeat, or a shell loop) to confirm it.

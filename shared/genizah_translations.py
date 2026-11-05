@@ -6392,6 +6392,11 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v9.14.0 web What's New entry (2026-11-05), approved with the release texts.
+TRANSLATIONS.update({
+    "New: Judeo-Arabic dictionaries! On the manuscript page, press the dictionaries button (עع) at the bottom of the text pane; clicking a word then shows its entry in Blau's dictionary and in Lane's Lexicon":
+        'חדש: מילונים לערבית־יהודית! בעיון בכתבי יד תוכלו ללחוץ על כפתור המילונים (עع) בתחתית חלונית הטקסט. לחיצה על מילה תציג את ערכה במילון בלאו ובלקסיקון ליין',
+})
 # v9.13.0 web What's New entry and desktop What's New bar and dialog (2026-11-01),
 # approved with the release texts.
 TRANSLATIONS.update({

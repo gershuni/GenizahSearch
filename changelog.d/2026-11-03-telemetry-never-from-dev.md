@@ -1,3 +1,0 @@
-## [Unreleased] -- Developer runs no longer send telemetry (desktop, branch `claude/test-telemetry-guard-341b57`)
-
-pytest blanks `POSTHOG_API_KEY` for the whole process (`tests/conftest.py`, and the `scripts/run_local_tests.py` children), which stops tests such as the NLI breaker suites from emitting `nli_breaker_opened` with real keys. A desktop run from source (`not sys.frozen`) blocks every PostHog delivery path unless `GENIZAH_TELEMETRY_FORCE=1` (`shared.posthog_server.set_delivery_blocked`); the frozen `.exe` and the web app are unchanged. Guard: `tests/test_telemetry_never_leaves_dev_machine.py`.

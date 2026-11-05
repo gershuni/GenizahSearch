@@ -4,6 +4,515 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.14.0] - 2026-11-05 — Dictionaries and search improvements
+
+Judeo-Arabic dictionaries on /browse behind the reader's switch: Blau's dictionary (PRs #472 #473 #475) and
+Lane's Arabic-English Lexicon in its own tab (#477 #478 #480); a go-to box in the header and the homepage box
+routing by the /search recogniser (#476); the desktop Go to and "Did you mean" (#479); shelfmark lookups at once
+(#468); NLI catalogue records and manifests kept on disk (#470); zoom in the browser (#471); shelfmarks and
+wrong-layout Hebrew in the /search box (#469); sign-in dead ends (#463); API daily and interactive budgets
+(#466); /ai leads with the MCP server (#465); developer runs send no telemetry (#464); a link-opened search
+pinned (#467); no junctions into the main checkout (#474); the findings render harness (#481); What's New
+in every version (website page, API, desktop dialog and update notes) and the header box inside the header
+(#482); before the release, the dictionaries' look-up key (D or M, Alt + a click, a phone chip, Esc), a
+denser sidebar with an icon rail in the readers' order, a keyboard-shortcuts card, one sign-in button and the
+owner's Help Center corrections (#484); the data file of the coming catalogue text search, not served yet
+(#483); maintenance: the deploy scripts reach the server by the `genizah-prod` SSH alias, CI's token is
+read-only, and the PDF test fixtures are rebuilt the same way every time (#485). Web and desktop: installer
+9.14.0. Two new web sidecars, `blau_data/blau.db` and `arabic_data/arabic.db` (schema 1.0.0 each), deployed
+by `scripts/deploy_blau_sidecar.ps1` and `scripts/deploy_arabic_sidecar.ps1` after the code; not bundled in
+the installer. Web What's New "9.14.0-dictionaries"; no desktop What's New (content version stays 9.13.0);
+web Help (EN/HE) describes the dictionaries and their keys.
+
+### What's New in every version, and the update notice shows what changed (web + desktop, PR #482)
+
+Owner, 2026-11-05: a What's New for every version from 9.0.0, on the website and in the desktop app,
+and the desktop update notice showing the changes between the reader's version and the new one.
+
+- **One history, four surfaces.** `shared/whats_new_history.py` reads and checks the entries in
+  `shared/whats_new_data.py`: per release its date, the apps it shipped to, a title and its items,
+  each a new feature, an improvement or a fix, in English and Hebrew, with the app a reader sees it
+  in. The entries for 9.0.0-9.13.1 were written from each release's approved What's New texts, its
+  GitHub notes and its CHANGELOG section. `tests/test_whats_new_history.py` fails while
+  `version.APP_VERSION` has no entry, so each release adds its own. An entry newer than the running
+  app's version is not shown anywhere (it is written with the release texts, before the bump).
+- **Website:** `/whats-new` (`web/pages/whats_new.py`), linked from the header's What's New panel
+  ("What's New in every version"; the panel is not shown on the page itself), and in the static
+  sitemap. `GET /api/whats-new?since=&upto=&app=web|desktop` serves the same entries in both
+  languages, cacheable for an hour; a malformed version or app answers 400 `invalid_request`.
+- **Desktop:** "What's New in every version" in the side menu and the ☰ menu, and "All versions" in
+  the What's New dialog, open `desktop/version_history.py::VersionHistoryDialog` on the bundled
+  history. The update bar gains "What's new?", and a manual check that finds a newer version now
+  opens the same dialog in update mode: the changes since this copy's version, read from the website
+  in `ReleaseNotesThread` (an installed copy cannot know newer entries), with Update Now / Later; if
+  the website cannot answer, it says so and links the GitHub release page.
+- **The header's search box sits inside the header.** `q-py-none` lost to the header's own 16px
+  padding, so the 64px row sat 16px low and the 40px go-to box hung over the page below the header;
+  the header now sets no vertical padding inline (`tests/render_smoke/test_header_search_render_smoke.py`).
+
+- **The dictionary panel's disclaimer** now says Blau's dictionary records *mainly* (בעיקר) meanings
+  particular to Judeo-Arabic, not *only* (רק) (owner, 2026-11-05, with the Help text).
+
+Tests: `tests/test_whats_new_history.py` (entries, readers, the API, the dialog's HTML),
+`tests/test_version_history_qt.py` (the dialog, the update notes with the fetch stubbed, the bar,
+the manual-check call site).
+
+### The dictionaries' look-up key and phone chip, a denser sidebar with an icon rail, the shortcuts card, one sign-in button (web, PR #484)
+
+Owner, 2026-11-05, before 9.14.0. The sidebar order and the shortcuts work come from the readers'
+own use (PostHog, 30 days to 2026-11-05).
+
+- **Dictionaries without the switch.** On Browse, wherever a dictionary is served (the page marks
+  the pane `data-blau-pane`; `web/static/js/blau_lookup.js`):
+  - D or M tapped arms the next click, which looks up the word under it; held with a mouse, every
+    click while it is down. The owner's first test held M on a laptop touchpad and it failed:
+    Windows ignores the touchpad while a letter key is held. So a tap is enough, and Alt + a click
+    does the same (the touchpad is not blocked for Alt). The pointer shows `help` over the text
+    while armed.
+  - Words selected and D or M looks up the selection (its first six words with Hebrew letters,
+    line numbers and punctuation dropped).
+  - On a phone, selected words show a "Look up" chip under them (`data-blau-chip`, translated).
+  - Esc closes the panel, from its own box too.
+  - D and M by name, by the Hebrew letter, or by the physical key; never while a box has the focus,
+    a dialog or menu is open, or with Ctrl/Cmd. The switch's tooltip names the key under what
+    pressing it does. `dictionary_lookup` counts `how` = `key` / `alt` / `selection` / `chip`
+    beside `word` and `box`.
+- **Sidebar.** No "NAVIGATION" / "TOOLS" titles; rows 34px apart (were about 64); 256px wide (was
+  280) with no padding of its own. The order is the readers': Home, Search, Browse by Shelfmark,
+  Find Parallels, Browse by Identification, Joins Lab, Computed Identifications, Atlas, Fragment
+  Puzzle, Community, My Lists; then Start Here, About the Genizah, AI tools, Help Center, Download
+  App, Settings, Keyboard shortcuts. A button at its top collapses it to a 64px icon rail (Quasar's
+  `mini`; tooltips name the icons there, and every row has an `aria-label`), remembered per visitor
+  (`drawer_mini`); its arrows point the same way in both languages (the sidebar is at the left in
+  both). Below 1024px the overlay drawer is unchanged.
+- **Keyboard shortcuts.** `?`, or "Keyboard shortcuts" in the sidebar (Enter or Space), opens a card
+  listing them (`web/keyboard_shortcuts.py`, `web/static/js/shortcuts.js`, loaded with the layout);
+  `/` jumps to the page's search box (/search, the homepage) or the header's go-to box. Browse's
+  buttons name their keys in their tooltips. Fixed on Browse: F now works on a Hebrew layout;
+  Ctrl+F and Ctrl++ no longer also toggle full screen and zoom the image; the arrows follow the page
+  as the buttons do (in English, → is the next page; it was the previous); 0 resets the view. No
+  key reaches the page while a dialog or menu is open.
+- **Header.** Signed out, one "Sign in" button (its dialog has the Register tab). Signed in, the
+  account icon alone: the name heads its menu and is the icon's tooltip, and the menu gains My
+  Lists.
+- **Help Center** (`web/pages/help.py`, both languages): a section after the Introduction on the
+  keys, the icon rail and the one sign-in button (`help-shortcuts`), and in "Browse by Shelfmark"
+  the dictionaries (the owner's approved release bullet) and their look-up key, shown only where a
+  dictionary is served. The Hebrew reworded in 37 places the owner approved (among them "ניקוד"
+  for a match's score, "חלופי אותיות", "ה"א הידיעה הערבית", "צפיין", the calques "בקרים",
+  "ספינרים", "מגדירים", "קבוצות שורה", and one spelling each of שאילתה and מטא-נתונים); the
+  same sentences in the desktop `Help.html` follow. The volume selector's bullet loses its
+  release-note words in both languages, and the two old 🆕 marks go. The Hebrew introduction names
+  the site אתר הגניזה של דיקטה (owner). Fixed: a list under a line of text with no blank line
+  between rendered as one run-on paragraph, in some fifteen sections of both languages; every
+  block now goes through `_md`, which adds markdown2's `cuddled-lists`.
+- **The owner's Help corrections** (tracked changes in a Word copy of the Hebrew page, mirrored in
+  English): shorter Exact, Variants, Fuzzy and search-history entries, Regex points to Responsa
+  style, "Search only in..." says its data is FGP's and incomplete, the RNL example for the
+  library filter, "N" manuscripts vs results, tags instead of chips, a "deep" search depth, and
+  some sentences dropped (among them the My Library credit line, at the owner's edit). The
+  Hebrew syntax table shows each cell in its own direction: in left-to-right cells every prefix
+  (`#מילה`, `%מילה`, `*מילה`) read as a suffix to a Hebrew reader. The rail's arrows in the
+  Hebrew text sit in `<bdi dir="ltr">`, so they show as the buttons do. A confidence tier shows
+  only what was measured: no sample line of three "not yet measured", no audit line repeating
+  its status (`_measured_sample_parts`).
+- **Labels (owner):** the phone chip says "Look up in the dictionary" (חיפוש במילון); the
+  Parallels button "Add witness text" is הוספת עד נוסח (was הוספת נוסח עד); the account menu's
+  "Logout" is התנתקות (was התנתק), in both apps.
+- New strings: 16, all approved by the owner.
+
+### Catalogue text search, part 1: the data file (web + desktop, PR #483)
+
+The data layer of a new search over what the catalogues say about each manuscript
+(`docs/plans/CATALOGUE_TEXT_SEARCH_PLAN.md`, settled by the owner 2026-11-05). Nothing is
+served yet: no search mode, no page, no API change.
+
+- `scripts/build_catalog_text_sidecar.py` builds `catalog_data/catalog_text.db` (about 730 MB,
+  3.5 minutes) from the FJMS catalogue text and its automatic translations, the PGP English
+  descriptions, `libraries.csv` titles and their English translations: one row per record and
+  manuscript, its words in a contentless FTS5 index weighted title > description > full text.
+  PGP's Hebrew translations stay out (withheld since 2026-09-21). The work-title and author
+  translations, keyed by title id and author text, go to every manuscript that carries them;
+  placeholder titles and authors ("Unknown", לא ידוע, לא מזוהה) are left out.
+- `shared/catalog_text_normalize.py`: one key for text and query (nikud and accents dropped,
+  abbreviation quote marks dropped so רמב"ם = רמב״ם = רמבם, final letters folded, English made
+  singular), Hebrew prefixes on query words, quoted phrases, and no route from the query to FTS5
+  syntax.
+- `shared/catalog_text_service.py`: the fail-closed reader (one hit per manuscript, words as
+  typed before prefixed forms, originals before automatic translations, a translations switch,
+  snippets with the matched words marked); `CATALOG_TEXT_SEARCH_ENABLED`, default off.
+- `scripts/verify_catalog_text_sidecar.py`: the gate, shown failing on ten kinds of damage.
+- `scripts/sample_fjms_translations.py` and a two-reader audit of 150 FJMS automatic
+  translations (decision D2): 14.0% wrong or garbage (95% CI 8.4-19.6%), against 27.8% for the
+  withheld PGP translations, so translations are searched, labelled, with a switch.
+
+### A closed research pool is never reused (web, PR #478)
+
+`web/research_jobs.py::shutdown_research` now resets the research queue and its wait pool after
+closing them, so a later lifespan in the same process builds fresh ones. Before, a test that ran the
+app's lifespan left a shut-down pool behind, and any later `/api/search` or `/api/parallels` test in
+that process answered 500 ("cannot schedule new futures after shutdown"). It surfaced when CI's chunks
+reshuffled on PR #478 (`tests/test_parallels_api.py`, then `tests/test_web_saved_joins_isolation.py`,
+then `tests/test_search_api_soak.py`). The server calls it once, at exit, so serving is unchanged.
+`tests/test_research_jobs.py::test_a_shutdown_leaves_no_closed_pool_behind` pins it.
+
+### A search box in the header, and the homepage box sends words to search (web, PR #476)
+
+- **Homepage box:** only a real shelfmark (`ts 20.57`, `add 3356`, the NLI catalogue form, a library-prefixed one) goes to Browse; a corpus system number still opens that manuscript; everything else -- English words, `Psalm 23`, Hebrew typed on the English layout (`dcuk`) -- goes to `/search`, which offers "Did you mean <Hebrew>?" for the last (#469). Before, all Latin text went to Browse as a shelfmark and ended on "No manuscript found" (PostHog review 2026-11-03). `web/home_query.py::home_query_target` now routes by the /search box's own recogniser (`web/search_box_input.py::search_box_input_kind`); bare numbers that are not a corpus system number are searched, not looked up. Latin text with a digit that the rules call text is first looked up in the catalogue (`MetadataManager.has_shelfmark`, a binary search of the Shelfmark search index built at server start), so `Mingana 9` and `P. Mich. Inv. 531` still open Browse. The recogniser (shared with /search) also takes a Roman numeral with a letter (`Moss. IIIa,20`), `=` and `_`, and accented catalogue names (Codex on #476): every one of the 715,473 digit-bearing libraries.csv shelfmark strings is now recognised or found (each record's other call numbers are in the index as 64-bit hashes, ~2.4 MB).
+- **Header box:** the old "Quick search..." box (text only, unencoded URL, hidden under 768px) is replaced by a go-to box with the homepage's routing, on every page, `/` and `/search` included (owner: a way to jump to any manuscript from anywhere), with the placeholder "Search text or go to a shelfmark..." ("חפשו טקסט או עברו למספר מדף...", the owner's Hebrew). From 1024px it sits in the header; below, a search button opens it across the bar (Esc or the close button folds it). On a phone the header groups keep to one line beside the button.
+- Tests: `tests/test_home_query_routing.py`, `tests/render_smoke/test_header_search_render_smoke.py`, `tests/test_phone_layout_rules.py`.
+
+### The dictionaries switch on /browse says what it is (web, PR #480)
+
+The owner found the click-a-word dictionaries too hidden: a grey `translate` icon in the version
+row, named only in a hover tooltip a phone never shows. Option A of the discussion
+(`docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1); ruling (c) stands: the reader still turns the
+dictionaries on, and nothing is guessed from the text or the catalogue.
+
+- **The letters עع** (Hebrew ʿayin beside Arabic ʿayn, the owner's choice) replace the icon, drawn
+  as outlines from Noto Sans Hebrew Bold and Noto Naskh Arabic Bold (SIL OFL), so they look the same
+  on every device and need no Arabic font (`web/components/blau_panel.py::GLYPH_SVG`).
+- **A label from 640px**, the owner's wording: "חדש! מילונים לערבית־יהודית!" / "New! Judeo-Arabic
+  dictionaries!", highlighted in amber, until the visitor first turns the dictionaries on; then
+  "מילונים לערבית־יהודית" / "Judeo-Arabic dictionaries" for good (`ui.dictionaries_seen`, cleared by
+  `/reset-hints`). On a phone, the letters alone: amber with a dot while new. The label is also
+  the switch's spoken name.
+- **The state colours show.** The switch was a Quasar `primary` button, whose `text-primary` is
+  `!important`, so its grey "off" rule never applied; it is created without a colour now.
+- **PostHog**, beside `browse_manuscript`: `dictionary_switch` {on, was_new}, `dictionary_lookup`
+  {how: word | box, blau, lane: found something}, `dictionary_tab` {tab}. The word is never sent.
+
+### The desktop Go to box searches words, and the Search tab offers "Did you mean <Hebrew>?" (desktop, PR #479)
+
+- **Go to (Ctrl+G / Ctrl+O):** routes as the website's homepage and header boxes do (#476): a system number (either namespace) or an FL number opens in Browse as before; a real shelfmark (`ts 20.57`, `add 3356`, the NLI catalogue form, or one the catalogue holds, `Mingana 9`) opens in Browse; everything else -- English words, `Psalm 23`, a bare number, Hebrew typed on the English layout (`dcuk`) -- runs as a text search in the Search tab. Before, every Latin-script line went to Browse as a shelfmark and ended on "No manuscript found". One rule for both apps: the recogniser moved from `web/search_box_input.py` to `shared/search_box_input.py`, with `go_to_kind` shared by `web/home_query.py` and `shared/quick_open.py`. The catalogue's Shelfmark search index is built in a background thread at start (it was built on the first Browse shelfmark lookup).
+- **"Did you mean <Hebrew>?"** under a text search (Exact, Variants, Fuzzy) that found nothing, when the query reads as Hebrew on the Hebrew keyboard layout and the corpus has those words (`SearchEngine.words_occur`, asked off the UI thread): shown inside the results box, where the rows would be; the Hebrew is a link that runs it in the same mode (as the website's /search, #469). Approved strings reused; no new strings.
+- The website's /search shelfmark auto-detect ("Searched as a shelfmark.") is not on the desktop Search tab: see the PR.
+- Tests: `tests/test_quick_open.py`, `tests/test_desktop_layout_suggestion.py`.
+
+### Blau's dictionary: the reader turns it on, and can type a word (web, PR #475)
+
+The owner's rulings of 2026-11-04 on the phase-2 companion of `docs/plans/BLAU_DICTIONARY_PLAN.md`:
+the page does not guess the text's language, a reader can type a word, and close spellings
+are not offered.
+
+- **The reader's switch.** On `/browse` a dictionary button (`translate`) sits in the version
+  row beside the line-number toggle. It is OFF by default, and the choice is remembered per
+  visitor (`ui.blau_lookup`). While it is off, the pane is not marked, there is no hint, and a
+  click on a word does nothing. While it is on, the hint shows, the pane's words are looked up,
+  and a "type a word" button (`keyboard`) opens the panel with an empty box.
+- **The box.** Every panel now has a box at its top holding the word it shows. Enter, or the
+  search button, looks up what the box holds, so a misread word can be corrected and looked up
+  again. A word typed in Arabic script is looked up against the entries', sub-entries' and
+  forms' Arabic spellings (`shared/blau_service.py::arabic_key`: `normalize_arabic`, the
+  extraction's broken spacing undone, ة/ه, ى/ي and the hamza seats folded; the conjunction and
+  the article peeled). This is an index built in memory on first use: the sidecar is unchanged.
+- **The MiDRASH project is credited** on every panel, under the print credit: the digital edition
+  is MiDRASH's, funded by the European Union (ERC, MiDRASH, 101071829), linked to the site's
+  about page, which names the team (owner, at Ephraim Meiri's request).
+- **A disclaimer on every panel** (the owner's words): Blau's dictionary records only meanings
+  particular to Judeo-Arabic; to look up verbs and inflected forms, type the root or the base
+  form. The empty answer stays short.
+- **The top loading bar** no longer runs on for 15 seconds after Enter in the dictionary box or
+  in the `/search` query box: Enter inside `[data-no-loading-bar]` does not start it
+  (`web/main.py`). Both boxes do their work in the page.
+- **The dot above.** A word now also reaches an entry whose name is several words and begins with
+  it: דלך shows ذلك (the entry "ד̇לך ו") beside دلك. A word written with the dot (an apostrophe or
+  geresh after ג ד ט צ ת כ, or U+0307) lists the dotted reading first and marks the others
+  "spelled without the dot"; the box's placeholder says "ד' for ד̇".
+- **The click script** asks the server to close only when something is open (the panel shown,
+  or a word marked), so with the switch off a click on the page sends nothing.
+- **Close spellings were measured and dropped.** Trying an unknown word with one letter swapped
+  (the HTR confusion pairs of `shared/unified_variants.py`) was built and measured against the
+  PGP Judeo-Arabic editions, aligned word by word with the automatic text of the same pages
+  (`scripts/measure_blau_close_spellings.py`). About 1 offer in 20 was right, at every word
+  length and pair count: most words with no entry were read correctly, and the dictionary simply
+  lacks them. The owner dropped the feature; the script stays for a later attempt.
+
+### Blau's dictionary on /browse: click a word for its entry (web, PR #473)
+
+Phase 2 of `docs/plans/BLAU_DICTIONARY_PLAN.md`, website only (owner ruling (b), 2026-11-03).
+
+- On `/browse`, a click on a word of the transcription opens Joshua Blau's *Dictionary of
+  Mediaeval Judaeo-Arabic Texts* (2006, blau-dict.netlify.app) beside the word (a sheet at the
+  foot of a phone): one card per entry the word reaches -- the entry name, the Arabic spelling,
+  the printed page, the senses with their Hebrew and English glosses, binyan and flags, the
+  matched form first -- in the order the word's candidate stems were tried (the word, then one
+  proclitic peeled, then one pronoun suffix), with a link to the entry on the site; a word found
+  only inside the dictionary's example phrases is listed apart. The site's credit line is on
+  every panel (ruling (a)). `web/components/blau_panel.py`, `web/static/js/blau_lookup.js`.
+- `shared/blau_service.py` reads `blau_data/blau.db` read-only and fail-closed: a file that is
+  absent, of another schema version, keyed by another normalizer, without the credit line,
+  without the lookup index, with a row count that disagrees with `meta`, or that fails
+  `quick_check` is not served, and the page is then what it was before (no script, no panel).
+  Kill switch `BLAU_DICTIONARY_ENABLED=0`. The sidecar is checked once at startup.
+- Deploy: `scripts/deploy_blau_sidecar.ps1` (owner) -- the gate on the local file, upload under a
+  temporary name, the gate on the server copy, swap, restart, the gate on the served file.
+
+### Arabic dictionary sidecar, phase A: Lane, a word count and a closed-class table (ci, PR #478)
+
+Phase A of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md`, on the owner's rulings of 2026-11-04: no UI
+yet, nothing served, nothing bundled.
+
+- `scripts/build_arabic_sidecar.py` fetches its sources into an empty folder (every file pinned by
+  sha256) and builds `arabic_data/arabic.db`: Lane's *Arabic-English Lexicon* (47,855 articles
+  under 4,619 roots, from Ephraim Meiri's parse of the Perseus TEI; 35 entries the source gives no
+  root are counted and left out; a heading that joins spellings of a root is split into them),
+  Lane's 42,351 one-word headwords as a form-to-root table, an
+  OpenITI word count (808,441 rows from 247 million tokens of 2,816 texts dated 250-650 AH) and a
+  141-row closed-class table (`scripts/arabic_closed_class.json`). The Perseus credit line and
+  availability statement are checked against the source and kept in `meta`. It fails on a file
+  that differs from its pin, a count the source contradicts, an OpenITI manifest that is not the
+  whole D7 selection (recomputed from the pinned release metadata) or a closed-class row Lane
+  cannot answer, and refuses to replace a sidecar that holds more rows unless `--force`.
+- `shared/arabic_normalize.py`: a Judeo-Arabic word's Arabic readings (`readings`), the frequency
+  key (`skeleton`) and the root key (`root_key`), moved out of `scripts/measure_arabic_readings.py`.
+- `scripts/verify_arabic_sidecar.py --expect-entries 47890` is the gate: integrity, schema, counts
+  against `meta`, the frequency counts summing to the tokens counted, the texts counted against the
+  selection, every key recomputed with the running normalizer, the credit line; fails rather
+  than skips.
+- `scripts/measure_arabic_readings.py --sidecar` measures the plan's gate on the built file.
+- `arabic_data/` is gitignored; one row in `docs/architecture/DATA_LIFECYCLE.md`.
+
+### Lane's Arabic-English Lexicon in its own tab on /browse (web, PR #480)
+
+Phase B of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md` (§7.2). The owner passed the grading and
+approved the wording on 2026-11-05; the server needs `arabic_data/arabic.db` before Lane shows.
+
+- **One tab per dictionary** (owner, D12): the dictionary panel has a tab for Blau and one for
+  Lane, between its head and its body, so a long entry in one never hides the other. It opens on
+  the tab the reader last chose while that dictionary has something for the word, else on the
+  first that has; a tab with nothing is greyed. The panel is there when either dictionary is
+  served (one alone: no tab row, its name in the head). Its title, hint and switch name no one
+  dictionary ("Dictionaries", "Click a word to look it up in the dictionaries").
+- In Lane's tab: the clicked or typed word's Arabic
+  readings as chips, the commonest in an OpenITI word count first (a click looks another reading up
+  in the box), and the first reading's root card with Lane's entries, those whose headword is the
+  reading first, cut short and linked to the entry on semitic.lang.emeiri.org. On every Lane
+  section, the Perseus credit line verbatim, then the entries' source and the ranking's. A word
+  typed in Arabic letters is its own reading.
+- **Roots fixed after the grading (plan §5.4).** Two AI judges graded the 200-word sample, and
+  the fix follows what they found. On the same sample, the root is right 75.0% → 92.2%.
+  - The closed-class table grows from 141 to 181 rows: frequent forms filed under the wrong root,
+    such as مولاي (not مول 'wealth'), ستين (not تين 'fig'), بن (not 'coffee'), قلت and كنت.
+  - A card on a root Lane splits in two (بوع / بيع) is titled by the heading of its matched entry,
+    or else by the larger heading.
+- `shared/arabic_service.py`: the read-only, fail-closed reader of `arabic_data/arabic.db`
+  (schema and normalizer versions, tables, lookup indexes, row counts, the credit line,
+  `quick_check`); kill switch `LANE_DICTIONARY_ENABLED` (default on, read live).
+- `shared/arabic_method.py`: the method v1-v4, moved verbatim out of
+  `scripts/measure_arabic_readings.py` so the gate measures what is served (its numbers on the built
+  file are unchanged).
+- Deploy: `scripts/deploy_arabic_sidecar.ps1 -Entries 47890` (owner), as Blau's -- the gate on the
+  local file, upload under a temporary name, the digest and the gate on the server, keep the served
+  file, swap, restart, the gate on the served file; the code must be on the server first.
+- `web/components/lane_panel.py` draws Lane's tab; `web/components/blau_panel.py` draws the tabs
+  (`pick_tab` decides which opens), and `web/pages/browse.py` asks both dictionaries in one trip
+  off the event loop.
+
+### Developer runs no longer send telemetry (desktop, PR #464)
+
+pytest blanks `POSTHOG_API_KEY` for the whole process (`tests/conftest.py`, and the `scripts/run_local_tests.py` children), which stops tests such as the NLI breaker suites from emitting `nli_breaker_opened` with real keys. A desktop run from source (`not sys.frozen`) blocks every PostHog delivery path unless `GENIZAH_TELEMETRY_FORCE=1` (`shared.posthog_server.set_delivery_blocked`); the frozen `.exe` and the web app are unchanged. Guard: `tests/test_telemetry_never_leaves_dev_machine.py`.
+
+### Sign-in dead ends: "Forgot password?" and "Resend confirmation email" under the error (web, PR #463)
+
+A failed password sign-in now offers the way out: wrong email or password shows a "Forgot password?" button under the error (opens the existing recovery dialog); an unconfirmed email shows "Resend confirmation email" (one send per 60 s per dialog, one neutral answer whatever Supabase says, PostHog `confirmation_resent` without the address). New `supabase_client.resend_confirmation_email`; `auth_state.login_error_affordance`. No What's New.
+
+### Shelfmark lookups answer at once (web + desktop, PR #468)
+
+A public-API search with `search_mode=shelfmark` took 10 s or more on most calls
+(PostHog, 2026-11-03: 262 of 437 requests in 14 days, 56 of them a 504
+`core_timeout`), and the website's Shelfmark mode 3 s at the median. Two causes:
+
+- `MetadataManager.search_by_meta` normalized every one of the 255,723 catalogue
+  records on every search, 3.5-4.8 s for a lookup that returns one manuscript. The
+  catalogue is now normalized once into an index (`_ShelfmarkSearchIndex`, ~2 s,
+  ~45 MiB, built at server start in the background and on the desktop's first
+  Shelfmark search) that narrows a query to the records that can match it; the
+  old loop's rules then decide over those, so the answer is the loop's
+  (`tests/test_shelfmark_search_path.py` checks it against the loop, on a synthetic
+  catalogue that exercises every rule and on the real corpus). The NLI cache's
+  shelfmarks are normalized as they are met and kept while unchanged.
+- On the web, every search went to a research worker: a subprocess that loads the
+  catalogue (~6 s unless one was started ahead) and serves one search, behind a
+  queue with one slot by default, so a lookup waited for the worker and for whoever
+  was searching. `IsolatedEngine` now resolves a Title/Shelfmark search's manuscripts
+  in the server process and runs a lookup of up to 100 manuscripts
+  (`INLINE_METADATA_ROWS`) in the calling thread; a broader search still goes to a
+  worker, with its manuscripts, so the worker skips the catalogue too. The API's
+  response envelope and `search_mode_value` telemetry are unchanged.
+
+Measured in-process on the dev machine (the ratio is what counts; production is
+Linux): `execute_search` for 13 single-shelfmark lookups across CUL, JTS, Oxford,
+RNL, Mosseri, Halper, BL and Gaster went from 3.7-4.7 s each to 4-26 ms; the broad
+`T-S 12` (10,401 rows) from 9.9 s to 1.2 s.
+
+### A link-opened search is pinned to start before the page connects (web, PR #467)
+
+#### Tests
+- `tests/render_smoke/test_search_url_open_dispatch.py`: on the real `/search` page in a NiceGUI
+  User simulation whose socket handshake is withheld, a search opened from its address
+  (`/search?q=...`) must reach the engine before the browser connects, and a typed
+  search must reach it without a browser round trip. Pins the v9.11.1 fix (`bde98fb7`:
+  the phone fold's awaited `window.innerWidth` held every link-opened search until the
+  page had loaded and connected, +1.6 s of server time in production, ux_timing
+  2026-10-24..29). Against that code both tests fail; measured on it with the handshake
+  1 s late: 2.07 s link-opened / 1.08 s typed server time against 0.12 / 0.12 s now.
+- The 2026-11-03 PostHog review's "search by URL 2.4x slower than typed" (30-day p50) is
+  that pre-fix window: from the 10-30 deploy the `nav` server p50 is 0.99 s against
+  1.02 s typed (48 and 125 events). No page change.
+
+### Shelfmarks and wrong-layout Hebrew in the search box (web, PR #469)
+
+Two kinds of zero-result search the 2026-11-03 PostHog review found (readers with an
+English browser hit zero results 53% of the time against 33% for Hebrew-browser readers;
+every Latin-script search found nothing).
+
+#### Shelfmarks typed into the search box
+- A shelfmark typed into the /search box (`ts 20.57`, `t-s ns 307.61b`, `add 3356`,
+  `ts k2.27`, `t-s 10g4.5`, `tad c2.1`, `5559a.10`) ran as a text search and found nothing.
+  In a text mode it now runs in the page's Shelfmark mode, as the `#` prefix would, with
+  "Searched as a shelfmark." under the count and a "Search as text instead" link that runs
+  the same query as text; a corpus system number opens that manuscript in Browse, as the
+  homepage box does. The mode selector is left as it was, so the next query is text again;
+  a Hebrew query, a prefixed one, and every other mode are untouched. The recogniser is the
+  homepage box's (`web/home_query.py`: a corpus sys_id, a Hebrew or Arabic letter means
+  text), narrowed for a box that also takes words: a shelfmark must have a digit, every run
+  of four or more letters in it must be a word catalogue shelfmarks carry (`Moss`, `Misc`,
+  `Gaster`; a Roman numeral; a library name in front is taken off first) and it must have
+  the shape of one -- a dotted number or a letter-digit run, or a collection prefix (`T-S`,
+  `ENA`, `Add.`), a library name or the NLI catalogue's own form first
+  (`web/search_box_input.py::search_box_input_kind`), so `Psalm 23`, `version 1.2`,
+  `COVID19` and a bare `12` stay text. New Search clears the line with everything else.
+
+#### Hebrew typed with the keyboard still on English
+- "Did you mean <Hebrew>?" under "0 Results" for a Latin-script query that spells Hebrew on
+  the Israeli standard layout (`dcuk` = גבול, `fufch anh` = כוכבי שמי, `bghkv` = נעילה;
+  `shared/keyboard_layout.py`), offered only when the corpus holds those words
+  (`SearchEngine.words_occur`: one count query in the server process, limit 1, off the
+  loop -- never a research worker). The Hebrew is a link to the same search in the same
+  mode; the click runs it on the page. PostHog `search_suggestion` (`kind='layout'`,
+  `taken` false when shown, true when taken) measures uptake.
+
+#### Tests
+- `tests/test_keyboard_layout.py`, `tests/test_search_box_input.py` (pure);
+  `tests/render_smoke/test_search_box_input_render_smoke.py` pins the page: which mode
+  reaches the engine for which input, the notice and its link, the suggestion, its link's
+  address, the two captures, and that a Hebrew query runs as before.
+
+### /browse keeps its catalogue record and images through an NLI outage (web + desktop, PR #470)
+
+The National Library of Israel's catalogue and IIIF servers fail in streaks: PostHog
+counted 4,338 openings of the shared NLI circuit breaker in the 30 days to 2026-11-03
+(about 750 of them from local test runs, since stopped). For the whole of each
+breaker window, and on every 5xx or timeout outside one, `fetch_marc_data` and
+`fetch_iiif_manifest` answered empty, so /browse -- the most-used page -- lost the
+manuscript's catalogue record, its image labels and, for a manuscript with no other
+image source, its images, and the empty answer replaced the good one in the saved
+NLI cache.
+
+Both answers are now kept on disk once parsed, the way thumbnails and image ids
+already are: `shared/nli_metadata_store.py`, one SQLite file
+(`<INDEX_DIR>/nli_metadata.db`, `NLI_METADATA_STORE_FILE`) beside the FL-id store,
+read by both apps.
+
+- A row younger than `NLI_METADATA_STORE_TTL` (30 days) answers without a network
+  call. An older one is refreshed; when NLI cannot answer -- breaker open, negative
+  cache, 5xx, 429, timeout, connection error, or an unparseable body -- the old row
+  is served instead, marked `stale: True` with its `fetched_at`, and the breaker and
+  the per-manuscript negative cache record the failure as before.
+- Only a parse with content is written: an error page served with status 200, an
+  empty manifest or a record with no fields never replaces the last good copy. Such
+  an empty answer is no answer: it is not a breaker success, it goes into the
+  per-manuscript negative cache as a 404 does, and the stored copy is served.
+- The manifest memory cache, which had no lifetime, now ages with the same TTL: a
+  server running past it asks NLI again, and a TTL of 0 asks on every call.
+- Synthetic sys_ids reach neither the store nor the network (Phase 85 D-14); the
+  store refuses them too.
+- The file is capped at `NLI_METADATA_STORE_MAX_ROWS` (200,000, about 2 KB a row),
+  pruned oldest-fetched first at each write and at web startup; counters, row count
+  and size are in `/_internal/memstat` under `nli_metadata_store`. Safe to delete.
+- The web's /browse shows a quiet note under the image, "Catalogue details from
+  <date>", when what it is showing came from the stored copies; `enrich_metadata`
+  records the oldest such date as `nli_stale_from` and clears it once NLI answers.
+
+`tests/test_nli_metadata_store.py` pins each of these against `MetadataManager`
+with a fake session; the ten fetch-path tests fail on the previous code.
+
+### Zoom on the manuscript page answers at once (web, PR #471)
+
+#### Changed
+- **Zooming the image on `/browse`**: the + and − buttons, the + / − keys and
+  the mouse wheel now zoom in the browser itself, with no round-trip to the
+  server, and each step multiplies the level by 1.5 (100% → 150% → 225% → 338%
+  → 506% → 759% → 800%) instead of adding 25%; the range is 25%–800%. The
+  wheel zooms at the pointer; a double-click (double-tap on a phone) zooms to
+  200% at that point and, from any zoomed level, back to the whole page.
+  PostHog's 30 days to 2026-11-03 held 50 rage clicks by 19 readers on the +
+  button (9 by 8 on −, 4 by 3 on reset), the only real rage-click target on
+  the site: each click added a linear 0.25 and went through the server.
+- The page still learns the level (`browse_zoom` event, `web/pages/browse_state.py::clamp_zoom`),
+  so a page it rebuilds (Prev/Next, Show Metadata, Edit) draws the image at the
+  zoom the reader sees; a rotation never pushes a scale back (`setRotation`).
+  Where the toolbar's percentage is hidden (a phone), a badge over the image
+  shows the level for a moment after each change. The fullscreen editor's
+  image uses the same shared viewer (`createManuscriptViewer`) instead of an
+  inline copy with its own wheel step, so it pinches and double-taps too.
+- `web/static/manuscript_viewer.js` (shared with `/search` and the Compare
+  panes): `zoomBy(factor, x, y)`, `fit()`, `toggleZoomAt()`, `setRotation()`,
+  `onChange` option, `MAX_ZOOM` 8; `zoomStep` and the 0.25 steps are gone.
+  `/browse` stamps the script URL with the file's hash so a page built after a
+  deploy never runs an hour-old cached viewer.
+
+#### Tests
+- `tests/test_browse_zoom_steps.py` (the step arithmetic, the clamps, and the
+  JS and Python constants in step), `tests/test_manuscript_viewer_js.py`
+  (`tests/js/manuscript_viewer_zoom_check.js` under node: anchoring, wheel,
+  double-click/tap, pinch, debounced reporting, take-over of a rebuilt image),
+  `tests/render_smoke/test_browse_zoom_render_smoke.py` (the buttons carry no
+  server click handler; the event sets the state; a rebuilt page keeps it).
+
+### Blau dictionary sidecar: the data layer for a Judeo-Arabic companion (ci, PR #472)
+
+Phase 1 of `docs/plans/BLAU_DICTIONARY_PLAN.md`: no UI yet, nothing served, nothing bundled.
+
+- `scripts/build_blau_sidecar.py` builds `blau_data/blau.db` from the JSON published at
+  blau-dict.netlify.app (Joshua Blau, *A Dictionary of Mediaeval Judaeo-Arabic Texts*, 2006;
+  digital edition release 1.1): 3,047 roots, 3,665 sub-entries, 8,295 stems, 12,753 forms
+  (Judeo-Arabic text, Arabic spelling, Hebrew and English glosses, flags, printed page, the
+  segments for rendering), 41,970 citations with their bibliography ids, 337 sources, a `meta`
+  table (schema and source versions, digests, row counts, build time, the site's credit line)
+  and `forms_norm`, 41,932 lookup keys. The build fails on a missing, empty, truncated or
+  non-v6 download and refuses to replace a sidecar that holds more rows unless `--force`.
+- `shared/blau_normalize.py`: `normalize_ja`, the one key a dictionary form and a corpus token
+  share (combining marks, the corpus's apostrophe/geresh and brackets dropped, finals folded),
+  `normalize_arabic`, and `candidate_stems` (one proclitic layer and one pronoun suffix peeled;
+  not a lemmatizer).
+- `scripts/verify_blau_sidecar.py --expect-roots 3047 --expect-forms 12753` is the gate:
+  integrity, schema, counts against `meta`, every lookup key recomputed with the running
+  normalizer, dangling targets and sources; fails rather than skips.
+- `blau_data/` is gitignored; one row in `docs/architecture/DATA_LIFECYCLE.md`.
+
+### Public API: a daily budget per address and a concurrency budget for interactive searches (web, PR #466)
+
+After the 2026-11-03 PostHog review: one address pulled 8,036 requests through the API in six hours (7,459 `browse`, 573 `search`) at about 20 a minute, under the per-minute bucket almost throughout, and reader search p50 server time doubled that evening because the API's synchronous exact/title/shelfmark/responsa searches had no concurrency budget and stacked up in the research queue every visitor shares.
+
+#### Added
+- **`SEARCH_API_DAILY_LIMIT`** (default 2,000; 0 disables): one trailing-24 h request budget per address across `/api/search`, `/api/browse` and `/api/parallels` (`web/api_hardening.py::DailyBudget`). Over it: `429 daily_limit_reached` with `Retry-After` set to the time until enough of the oldest requests leave the window for the bucket to fall under the current limit (the oldest one normally; a later one right after the limit was lowered below a bucket's size). Checked after the per-minute limiter and before validation, so a rate-refused request and the over-budget attempt itself spend nothing, while a request later refused as invalid (400) or busy (503) still counts. Capabilities and criteria are not counted.
+- **`SEARCH_API_INTERACTIVE_CONCURRENCY`** (default 2): a semaphore budget for synchronous non-heavy `/api/search` modes, the same machinery as the heavy budget (`_InteractiveSemaphoreState`). Over it: `503 search_busy` at once, with `Retry-After`, instead of a 30 s wait for a 504. Background jobs bypass it, as they bypass the heavy budget.
+- `/api/capabilities` `limits` now carries `interactive_concurrency` and `daily_requests_per_address`, from the same resolvers the handlers use.
+- Error codes `search_busy` (503) and `daily_limit_reached` (429) in `shared/api_errors.py`.
+
+#### Not covered
+- A pull spread over many addresses, each under both budgets (eight addresses ran ~350 `browse` calls each in one hour on 2026-10-28), is not stopped; `browse` is cheap and the data is public on the site. An API-key tier for bulk access is the owner's call.
+
+### The /ai page leads with the MCP server; the GPT is retired gracefully (web, PR #465)
+
+With `MCP_ENABLED` on, `/ai` opens with the MCP server (address, how to add it in Claude and in
+any MCP client, example questions), then the skill and the public API, and shows the GPT card
+last with a note that OpenAI retires custom GPTs on 2026-12-11. The GPT card disappears when
+its setting is off (a ChatGPT plugin live, or after the retirement); `/chatgpt` keeps redirecting
+until then. With `MCP_ENABLED` off the page is unchanged.
+
 ## [9.13.1] - 2026-11-03 — Manuscript features in the Joins Lab
 
 The Manuscript features of 9.13.0 now filter the Joins Lab's candidates on both apps, and replace the

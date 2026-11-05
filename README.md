@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.13.1
+# Dicta Genizah Search Pro 9.14.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,22 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.13.0?
+## What's New in Version 9.14.0?
 
-**Find manuscripts by features**
+**Dictionaries and search improvements**
 
-A new **Manuscript features** button, on Browse by Identification and under "Search only in..." (the desktop
-app's **Focus Search**), opens one window with what the catalogue records about each manuscript: period of copy,
-language and alphabet, script style and region, vocalization, columns and lines, physical status, material,
-attributes (illustration, colophon, massorah...) and measurements computed from the photographs. Tick values,
-choose "all except these", or ask for "not recorded"; every value shows how many manuscripts have it, and
-the window counts the matches before you apply it. Browse by Identification now lists all 255,723
-manuscripts, including the 29,169 with no catalogue record, and shows each record's full range of dates.
-The same features are in the public API (`filters.criteria`, `GET /api/criteria`) and in GenizahSearch for
-ChatGPT and Claude.
+On the website's manuscript page, a new **עع** switch turns on two dictionaries for Judeo-Arabic texts: click
+a word, or type one, to see its entries in Joshua Blau's *Dictionary of Mediaeval Judaeo-Arabic Texts* (the
+MiDRASH project's digital edition) and, in a second tab, its Arabic readings and root in Lane's
+*Arabic-English Lexicon*. Pressing **D** or **M** and then clicking a word looks it up too. Every page of the
+website now has a search box in its header: type text to search it, or a shelfmark to open the manuscript.
+Press **?** on any page for the keyboard shortcuts. In the desktop app, **Go to** (Ctrl+G) routes the same way, and a
+search typed in Hebrew with the keyboard still on English offers "Did you mean …?". In both apps, searches by
+shelfmark answer at once, and manuscripts opened before keep their catalogue details when the National Library
+of Israel's servers do not answer. A new **What's New** page lists every version since 9.0.0, and the desktop
+app's update notice shows what changed since your version.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.12.1) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.13.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -98,7 +99,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.13.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.14.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

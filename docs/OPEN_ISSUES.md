@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-02 (archived GS-286). 169 open: P1 0, P2 41, P3 128.
+> **Last Updated:** 2026-11-05 (folded 5 fragment(s) from `docs/open_issues.d/`: 2026-11-03-api-metadata-worker-limit-after-resolution.md, 2026-11-03-blau-gate-form-level-targets.md, 2026-11-04-worktree-junctions-emptied-main-data.md, 2026-11-05-fgp-gate4-latency-ratio-flake.md, 2026-11-05-list-sync-upload-dict-race.md). 174 open: P1 0, P2 42, P3 132.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,16 +24,16 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 5 | 9 |
-| Desktop app | 0 | 9 | 27 | 36 |
+| Desktop app | 0 | 9 | 28 | 37 |
 | Website | 0 | 5 | 23 | 28 |
-| API and AI | 0 | 2 | 1 | 3 |
+| API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
-| Data and sidecars | 0 | 5 | 6 | 11 |
-| Build, CI and tests | 0 | 0 | 3 | 3 |
+| Data and sidecars | 0 | 5 | 7 | 12 |
+| Build, CI and tests | 0 | 0 | 4 | 4 |
 | Documentation | 0 | 0 | 3 | 3 |
-| Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **41** | **128** | **169** |
+| Server and operations | 0 | 3 | 1 | 4 |
+| **Total** | **0** | **42** | **132** | **174** |
 
 ## P1 - Critical
 
@@ -124,6 +124,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-289](ISSUE_DETAILS.md#gs-289) | A forced worktree removal walks junctions into the main checkout's data folders | `.claude/worktrees/*` cleanup (`git worktree remove --force`, `rm -rf`); `scripts/init.ps1`, `scripts/check_worktree_links.ps1` | 2026-11-04 | ❌ Open |
 | [GS-37](ISSUE_DETAILS.md#gs-37) | deploy.sh runs git reset --hard before pip, so a failed pip leaves new code on disk under the old process | `deploy.sh` | 2026-10-20 | ❌ Partly fixed |
 | [GS-38](ISSUE_DETAILS.md#gs-38) | A tracked planning deploy log quotes the backup password of the retired local Postgres, in a public repo | a `.planning` deploy log (the path is in the 2026-10-20 review notes, not repeated here) | 2026-10-20 | ❌ Open |
 
@@ -169,6 +170,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-291](ISSUE_DETAILS.md#gs-291) | A list upload racing the user's edits can fail with "dictionary changed size during iteration" | `shared/lists_sync.py` (the upload's `try` block, `logger.error(f"Error syncing to cloud: {e}")` near line 1196); `tests/test_list_sync_identity.py::test_an_auto_upload_racing_the_user_on_another_thread_succeeds` | 2026-11-05 | ❌ Open |
 | [GS-284](ISSUE_DETAILS.md#gs-284) | "Search in these results" drops the Catalog tab's text, PGP and edition filters | `genizah_app.py::_catalog_build_browse_filters`, `_CatalogHandoffWorker`, `_catalog_on_handoff_scope` | 2026-11-01 | ❌ Open |
 | [GS-285](ISSUE_DETAILS.md#gs-285) | Opening "Search only in..." loses a library restriction handed over from the Catalog tab | `desktop/dialogs_filter.py::PreSearchFilterDialog._get_current_filter_dict` | 2026-11-01 | ❌ Open |
 | [GS-66](ISSUE_DETAILS.md#gs-66) | Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file | `desktop/image_loader.py::ImageLoaderThread.run` (line 68); metadata_manager._resolve_thumbnail | 2026-10-21 | ❌ Open |
@@ -229,6 +231,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-287](ISSUE_DETAILS.md#gs-287) | A broad Title/Shelfmark search from a background API job gets the worker's full time limit after the server already resolved its manuscripts | `web/research_jobs.py::IsolatedEngine.__getattr__` (the `_TO_WORKER` branch after `_metadata_search`) | 2026-11-03 | ❌ Open |
 | [GS-112](ISSUE_DETAILS.md#gs-112) | Per-IP limits will key IPv6 visitors per address (/128) once the realip snippet is installed | `web/api_hardening.py::_resolve_rate_limit_key`, the puzzle limiter in `web/api.py` | 2026-10-07 | ❌ Open |
 
 ### Discovery
@@ -283,6 +286,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-288](ISSUE_DETAILS.md#gs-288) | The Blau gate does not check form-level cross-reference targets | `scripts/verify_blau_sidecar.py` (the cross-reference checks); `scripts/build_blau_sidecar.py` (`forms.target_ids`) | 2026-11-03 | ❌ Open |
 | [GS-279](ISSUE_DETAILS.md#gs-279) | Our copy of CUDL's item list lacks items CUDL publishes, so their records get no Cambridge link | `cambridge_genizah.json` -> `nli_data/nli_crossref.db` (`cambridge_manifests`, built by `scripts/import_nli_crossref.py`) | 2026-10-29 | ❌ Open |
 | [GS-272](ISSUE_DETAILS.md#gs-272) | FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship | `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py` | 2026-10-26 | ❌ Partly fixed |
 | [GS-151](ISSUE_DETAILS.md#gs-151) | A failed NLI metadata fetch is cached as "Unknown" (and saved, on the desktop) | `shared/metadata_manager.py::fetch_nli_data`, `batch_fetch_shelfmarks` (+ `save_caches`) | 2026-09-25 | ❌ Open |
@@ -294,6 +298,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-290](ISSUE_DETAILS.md#gs-290) | The FGP gate-4 release-check test fails on one slow timing sample | `tests/test_fgp_gate4_chooser_validation.py::test_release_check_requires_the_file_gate_4_validated`, `scripts/fgp_gate4_chooser_validation.py` (C6 latency, the `latency.ratio_vs_today` budget) | 2026-11-05 | ❌ Open |
 | [GS-281](ISSUE_DETAILS.md#gs-281) | Collecting the Joins Lab compare-details Qt test makes the Responsa refusal tests fail | `tests/test_join_workbench_compare_details_qt.py` (the polluter); `tests/test_responsa_api_refusal.py`, `tests/test_responsa_refusal_surfaces.py`, `tests/test_responsa_star_crossings.py` (the victims) | 2026-10-30 | ❌ Open |
 | [GS-282](ISSUE_DETAILS.md#gs-282) | The Fragment Puzzle close tests and the update-check thread tests fail when run with other desktop tests | `tests/test_puzzle_canvas_integrity.py`, `tests/test_update_check_thread_lifetime_qt.py` (victims; polluter not found yet) | 2026-10-30 | ❌ Open |
 | [GS-271](ISSUE_DETAILS.md#gs-271) | The tracker scripts' atomic write does not keep a POSIX file's group | `scripts/open_issues_model.py::write_text` | 2026-10-25 | ❌ Open |
