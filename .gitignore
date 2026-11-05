@@ -6,7 +6,7 @@ env/
 .idea/
 .vscode/
 
-# Outreach (private contacts and emails)
+# Local working folders (never committed)
 docs/outreach/
 
 # Local Data (Don't upload these huge files!)
@@ -104,7 +104,7 @@ app.pid
 .env
 backend_legacy/
 
-# API keys / test files
+# Local scratch files
 TestLLMAPIsProgram.cs
 
 # ── Root debris prevention (Phase 65 HYGN-03/HYGN-04) ──────────────
@@ -220,7 +220,7 @@ same_work_spike/probe/results/p_calibration_final.md
 # SEED-029 research spike (internal — not for GitHub)
 same_work_spike/
 
-# Research tooling with restricted-source references (internal — not for GitHub)
+# Local research tooling (never commit)
 corpus_mapper/
 corpus_mapper_output/
 
@@ -338,9 +338,7 @@ pgp_data/pgp-text/
 # One-off PDF conversion/remapping scratch scripts. Not imported by either app.
 /ephraim_meiri_pdf_converter/
 
-# Contributed local-extension prototype from Yehuda Seewald (יהודה זייבלד) —
-# includes seewald_emails.txt, i.e. PRIVATE CORRESPONDENCE. Never commit; same
-# posture as docs/outreach/ at line 10.
+# Local reference copy of a contributed prototype. Never commit.
 /seewald_addition/
 
 # Ad-hoc analysis output directory (per-run subfolders).

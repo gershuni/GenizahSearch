@@ -5,6 +5,11 @@ on:
     branches: [master-main]
   pull_request:
 
+# Every job only reads the repository. The token gets no write scope, so a
+# compromised step or dependency cannot push, tag or comment with it.
+permissions:
+  contents: read
+
 # A new push to a pull request cancels that PR's run still in progress: only
 # the newest commit's result decides anything, and PR #402 had seven full runs
 # in ~3 hours, an older one still running next to its replacement. A branch

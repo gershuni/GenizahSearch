@@ -346,7 +346,7 @@ because they are the top of the chain);
 the server's variables.
 
 **Instruction files and repository metadata** -- stay: `README.md`, `CHANGELOG.md`, `CLAUDE.md`,
-`AGENTS.md`, `CONTRIBUTING.md`, `.cursorrules`, `LICENSE`, `.gitignore`, `.gitattributes`.
+`AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `.cursorrules`, `LICENSE`, `.gitignore`, `.gitattributes`.
 
 **Archived in Round 1** (moved under `docs/archive/`, nothing deleted):
 `start_servers.sh` (launches the removed backend process), `web_pilot.py` (unreferenced),
