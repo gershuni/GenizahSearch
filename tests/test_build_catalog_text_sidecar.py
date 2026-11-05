@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_text_fixture import A, C, D, E, F, G, H, build_args, write_inputs  # noqa: E402
+from catalog_text_fixture import A, C, D, E, F, G, H, M, build_args, write_inputs  # noqa: E402
 from scripts.build_catalog_text_sidecar import (  # noqa: E402
     COLUMN_OF,
     EXIT_REFUSED,
@@ -95,6 +95,23 @@ def test_translations_are_marked_automatic(built):
     records = _records(out)
     assert (D, "fjms", "FreeDesc", "en", 1, "Marriage contract (ketubba) of Sitt al-Dar") in records
     assert (D, "fjms", "FreeDesc", "he", 0, "כתובת סת אלדאר") in records
+
+
+def test_title_and_author_translations_reach_the_manuscripts_that_carry_them(built):
+    out, _ = built
+    records = _records(out)
+    for sys_id in (H, M):
+        assert (sys_id, "fjms", "GenizahTitleEngTitle", "en", 1, "Questions and Answers") in records
+    assert (C, "fjms", "AuthorText", "en", 1, "Nathan ben Nahorai") in records
+    assert not [r for r in records if r[5] == "Orphan title"]
+    assert _meta(out)["skipped_fjms_GenizahTitleEngTitle_unmapped"] == "2"   # the -1 and the orphan
+
+
+def test_unknown_titles_and_authors_are_not_indexed(built):
+    out, _ = built
+    texts = {r[5] for r in _records(out)}
+    assert not texts & {"לא ידוע", "לא מזוהה", "Unknown"}
+    assert int(_meta(out)["skipped_fjms_placeholder"]) >= 3   # G's title, K's author and its translation
 
 
 def test_a_pgp_description_goes_to_every_manuscript_of_its_document(built):

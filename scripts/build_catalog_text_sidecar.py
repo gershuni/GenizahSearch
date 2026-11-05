@@ -8,7 +8,9 @@ from four read-only inputs the apps already carry, and the build changes none of
 - the FJMS sidecar (``fist_data/fjms_enrichment.db``): work titles, titles, comments, colophons,
   authors, places, running titles, free descriptions, full catalogue texts, textual frames,
   mentions, and the automatic translations (``fjms_translations``, except the person
-  descriptions, which describe people, not manuscripts);
+  descriptions, which describe people, not manuscripts). The work-title and author translations
+  are keyed by the title id and the author's text, not by a manuscript, and go to every
+  manuscript whose catalogue record carries that title or author (``ENTITY_KEYED_TRANSLATIONS``);
 - the PGP sidecar (``pgp_data/pgp.db``): each document's English description, for every
   manuscript the document lies on (``document_fragments.sys_id``). PGP's Hebrew translations are
   NOT read: they are withheld by the owner's decision of 2026-09-21
@@ -21,8 +23,9 @@ normalized words (``shared.catalog_text_normalize.key``) in the contentless FTS5
 ``catalog_fts``. Each row's words go in one of three columns by weight: ``title``, ``description``
 or ``fulltext`` (``COLUMN_OF``). A text identical, after normalization, to one already stored for
 the same manuscript is stored once. Originals are read before translations, so an automatic
-translation that repeats an original adds nothing. Placeholder titles ("Cannot be determined from
-the catalog") and rows whose sys_id is not a corpus sys_id are left out and counted.
+translation that repeats an original adds nothing. Placeholder titles and authors ("Cannot be
+determined from the catalog", לא ידוע, לא מזוהה, "Unknown", ``PLACEHOLDER_KEYS``) and rows whose
+sys_id is not a corpus sys_id are left out and counted.
 
     python scripts/build_catalog_text_sidecar.py
     python scripts/verify_catalog_text_sidecar.py --db catalog_data/catalog_text.db --expect-rows <N>
@@ -43,7 +46,7 @@ import os
 import sqlite3
 import sys
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,11 +97,30 @@ COLUMN_OF = {
 SOURCES = ("fjms", "pgp", "libraries")
 #: Translated FJMS fields left out: they describe people, not manuscripts.
 EXCLUDED_TRANSLATION_FIELDS = ("PersonEngDesc", "PersonHebDesc")
-#: Title segments that say the catalogue could not decide (compared by key, any case/period).
+#: Title and author segments that only say the catalogue could not decide (compared by key, any
+#: case or period). FJMS writes the unknown work as GenizahTitleId -1 (לא ידוע) or -999 (לא מקודד /
+#: Not Coded), the unknown author as לא מזוהה, translated "Unknown": indexed, they would put
+#: "Unknown" on about a thousand manuscripts.
 PLACEHOLDER_KEYS = frozenset({
     key("Cannot be determined from the catalog"),
     key("לא ניתן להכרעה מתוך הקטלוג"),
+    key("לא ידוע"),
+    key("לא ניתן לדעת"),
+    key("לא מזוהה"),
+    key("לא מקודד"),
+    key("Not Coded"),
+    key("Unknown"),
 })
+#: The fields whose values may be placeholders (``PLACEHOLDER_KEYS``): titles and authors.
+PLACEHOLDER_FIELDS = frozenset({
+    "GenizahTitle", "GenizahTitleEng", "GenizahTitleEngTitle", "Title", "TitleHeb", "AuthorText",
+    "title", "title_en",
+})
+#: Translated FJMS fields whose ``fjms_translations.alma_id`` is NOT a manuscript: the work title
+#: is keyed by ``GenizahTitleId`` and the author by the author's text
+#: (scripts/translate_fjms_catalog.py). Each translation goes to every manuscript whose catalogue
+#: record carries that title or author.
+ENTITY_KEYED_TRANSLATIONS = frozenset({"GenizahTitleEngTitle", "AuthorText"})
 #: Columns of FJMS ``catalog`` read per record, with the field name each is stored under.
 CATALOG_COLUMNS = (
     ("GenizahTitleOrgTitle", "GenizahTitle"),
@@ -167,6 +189,11 @@ class Writer:
             self.skipped[f"{source}_bad_sys_id"] += 1
             return
         column = COLUMN_OF[(source, field)]
+        if field in PLACEHOLDER_FIELDS:
+            text = drop_placeholders(text)
+            if not text:
+                self.skipped[f"{source}_placeholder"] += 1
+                return
         norm = key(text)
         if not norm:
             self.skipped[f"{source}_no_words"] += 1
@@ -251,15 +278,42 @@ def read_fjms(path: Path, writer: Writer, facts: dict[str, str]) -> None:
 def read_fjms_translations(path: Path, writer: Writer) -> None:
     conn = _open_ro(path)
     try:
+        # The work-title and author translations are keyed by the title id and the author's text
+        # (ENTITY_KEYED_TRANSLATIONS); these maps lead each one to its manuscripts. A negative
+        # title id is FJMS's "unknown" / "not coded" and leads nowhere.
+        by_title: dict[str, list[str]] = defaultdict(list)
+        for title_id, alma in conn.execute(
+            "SELECT DISTINCT GenizahTitleId, AlmaId FROM catalog "
+            "WHERE GenizahTitleId IS NOT NULL AND GenizahTitleId >= 0 ORDER BY 1, 2"
+        ):
+            by_title[str(title_id)].append(alma)
+        by_author: dict[str, list[str]] = defaultdict(list)
+        for author, alma in conn.execute(
+            "SELECT DISTINCT AuthorText, AlmaId FROM catalog "
+            "WHERE AuthorText IS NOT NULL AND AuthorText <> '' ORDER BY 1, 2"
+        ):
+            by_author[author].append(alma)
         placeholders = ",".join("?" * len(EXCLUDED_TRANSLATION_FIELDS))
-        for sid, field, value in conn.execute(
+        for entity, field, value in conn.execute(
             f"SELECT alma_id, field_name, translated_text FROM fjms_translations "
             f"WHERE field_name NOT IN ({placeholders}) ORDER BY id",
             EXCLUDED_TRANSLATION_FIELDS,
         ):
             if ("fjms", field) not in COLUMN_OF:
                 raise SourceError(f"{path}: fjms_translations field {field!r} has no column; add it to COLUMN_OF")
-            writer.add(sid, "fjms", field, value, automatic=True)
+            if field == "GenizahTitleEngTitle":
+                targets = by_title.get(str(entity or "").strip(), [])
+            elif field == "AuthorText":
+                targets = by_author.get(entity or "", [])
+            else:
+                targets = [entity]
+            if not targets:
+                writer.skipped[f"fjms_{field}_unmapped"] += 1
+                continue
+            for sys_id in targets:
+                writer.add(sys_id, "fjms", field, value, automatic=True)
+    except sqlite3.Error as exc:
+        raise SourceError(f"{path}: {exc}") from exc
     finally:
         conn.close()
 

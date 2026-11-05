@@ -8,7 +8,9 @@ served yet: no search mode, no page, no API change.
   3.5 minutes) from the FJMS catalogue text and its automatic translations, the PGP English
   descriptions, `libraries.csv` titles and their English translations: one row per record and
   manuscript, its words in a contentless FTS5 index weighted title > description > full text.
-  PGP's Hebrew translations stay out (withheld since 2026-09-21).
+  PGP's Hebrew translations stay out (withheld since 2026-09-21). The work-title and author
+  translations, keyed by title id and author text, go to every manuscript that carries them;
+  placeholder titles and authors ("Unknown", לא ידוע, לא מזוהה) are left out.
 - `shared/catalog_text_normalize.py`: one key for text and query (nikud and accents dropped,
   abbreviation quote marks dropped so רמב"ם = רמב״ם = רמבם, final letters folded, English made
   singular), Hebrew prefixes on query words, quoted phrases, and no route from the query to FTS5

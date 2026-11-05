@@ -114,12 +114,19 @@ pairs (וה, וב, ול, שה, מה, בה, לה). Three things the numbers say:
 `scripts/build_catalog_text_sidecar.py` on the main checkout's sidecars (FJMS 5.1.0, PGP of
 2026-09-22, `libraries.csv`, `libraries_translations.db`), into the scratchpad:
 
-- **2,442,250 records over 218,839 manuscripts, 730 MB, built in 3.5-5 minutes** (the dedup
+- **2,456,035 records over 218,839 manuscripts, 732 MB, built in 3.5-5 minutes** (the dedup
   hashing and the key computed per record make it slower than the prototype's 97 s). By source:
-  FJMS 1,457,084 original + 675,970 automatic, PGP 37,153, library titles 166,889 + 105,154
-  automatic. Left out: 594,810 FJMS and 104,723 library texts that repeat a text already stored
-  for the same manuscript, and **871 FJMS rows whose AlmaId is not a corpus sys_id**.
-- **The gate passes** on it in 3 minutes (`--expect-rows 2442250`, 2,000 sampled records re-keyed,
+  FJMS 1,455,314 original + 691,708 automatic, PGP 37,153, library titles 166,888 + 104,972
+  automatic. Left out: 596,160 FJMS and 104,854 library texts that repeat a text already stored
+  for the same manuscript, 3,761 placeholder titles and authors (לא ידוע, לא מזוהה, "Unknown",
+  "Not Coded"), and 91 work-title translations whose title id no catalogue record carries.
+- **Work-title and author translations are keyed by the title id and the author's text**, not by
+  a manuscript (`scripts/translate_fjms_catalog.py`; found by the Codex review of PR 1, #483). The
+  first build passed those ids as sys_ids and dropped all 871 of them (624 work titles, 247
+  authors). Each one now goes to every
+  manuscript whose catalogue record carries that title or author: 13,745 manuscripts through
+  their work titles and 1,476 through their authors ("Nathan ben Nahorai" finds 35).
+- **The gate passes** on it in 3 minutes (`--expect-rows 2456035`, 2,000 sampled records re-keyed,
   eight canaries, `quick_check`).
 - **English plurals** were measured before the rule in §4.2 was added: the plural alone added
   31-64% more manuscripts (letter 18,449 -> 28,567 with letters; contract 1,914 -> 3,097; prayer
@@ -400,8 +407,10 @@ Added at the same time: the `%` shortcut (§4.4) and the refresh note (§4.6).
   (§4.4, all three prefix maps, Responsa's `%word` untouched); §4.6 on PGP and NLI records changing
   (a rebuild in every refresh, a startup drift warning; no date shown in results, owner); PR 2 and 3 scope
   updated.
-- **rev. 3 (2026-11-05):** PR 1 built. §3.1 records the first real build: 2,442,250 records, 218,839
+- **rev. 3 (2026-11-05):** PR 1 built. §3.1 records the first real build: 2,456,035 records, 218,839
   manuscripts, 730 MB, the gate passing, the plural measurement, and 0.3-1.2 s for the commonest
   words, so PR 2 runs the search off the event loop. §3.2 records the D2 audit: 14.0% wrong or
   garbage, FullText weakest, switch ON. §4.2: English words made singular by our own rule instead
-  of Porter. §4.1 updated to what was built.
+  of Porter. §4.1 updated to what was built. The Codex review of #483 found the work-title and author translations keyed by
+  entity, not manuscript; they now fan out to their manuscripts, and placeholder titles and
+  authors are left out.

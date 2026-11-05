@@ -26,7 +26,8 @@ G = "990000000000000007"  # library title with a placeholder segment
 H = "990000000000000008"  # רמב"ם typed with an ASCII quote
 I = "990000000000000009"  # a word with nikud
 J = "990000000000000010"  # a literal * in the text
-K = "990000000000000011"  # a long text with cheese in the middle
+K = "990000000000000011"  # a long text with cheese in the middle; an unknown author
+M = "990000000000000012"  # shares a work title (id 3000) with H: one translation, two manuscripts
 
 LONG_TEXT = ("Letter about trade in the Mediterranean. " * 6
              + "The writer mentions a shipment of cheese from Sicily. "
@@ -39,7 +40,7 @@ def write_fjms(path: Path, extra_translations=()) -> Path:
         CREATE TABLE meta (key TEXT, value TEXT);
         CREATE TABLE catalog (AlmaId TEXT, GenizahTitleOrgTitle TEXT, GenizahTitleEngTitle TEXT, Title TEXT,
             TitleHeb TEXT, TextualFrameHeb TEXT, TextualFrameEng TEXT, Comment TEXT, Colophon TEXT,
-            AuthorText TEXT, CopyPlace TEXT);
+            AuthorText TEXT, CopyPlace TEXT, GenizahTitleId INTEGER);
         CREATE TABLE catalog_running_titles (AlmaId TEXT, RunningTitle TEXT);
         CREATE TABLE catalog_free_desc (AlmaId TEXT, FreeDesc TEXT);
         CREATE TABLE catalog_full_texts (AlmaId TEXT, FullText TEXT);
@@ -49,11 +50,14 @@ def write_fjms(path: Path, extra_translations=()) -> Path:
             translated_text TEXT);
     """)
     conn.executemany("INSERT INTO meta VALUES (?, ?)", [("version", "5.1.0"), ("created", "2026-03-11T06:25:38")])
-    conn.executemany("INSERT INTO catalog VALUES (?,?,?,?,?,?,?,?,?,?,?)", [
-        (A, "כתובה", None, None, None, "תפילין", None, None, None, None, None),
-        (A, "כתובה", None, None, None, None, None, None, None, None, None),   # second record, same title
-        (C, "שטר", None, None, None, None, None, None, None, None, None),
-        (G, None, None, None, None, None, None, None, None, None, None),
+    conn.executemany("INSERT INTO catalog VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (A, "כתובה", None, None, None, "תפילין", None, None, None, None, None, 1000),
+        (A, "כתובה", None, None, None, None, None, None, None, None, None, 1000),   # second record, same title
+        (C, "שטר", None, None, None, None, None, None, None, "נתן בן נהוראי", None, 2000),
+        (G, "לא ידוע", None, None, None, None, None, None, None, None, None, -1),    # FJMS's unknown work
+        (H, "שאלות ותשובות", None, None, None, None, None, None, None, None, None, 3000),
+        (M, "שאלות ותשובות", None, None, None, None, None, None, None, None, None, 3000),
+        (K, None, None, None, None, None, None, None, None, "לא מזוהה", None, None),     # FJMS's unknown author
     ])
     conn.executemany("INSERT INTO catalog_running_titles VALUES (?, ?)", [
         (H, 'תשובות רמב"ם'),
@@ -79,6 +83,12 @@ def write_fjms(path: Path, extra_translations=()) -> Path:
         (D, "FreeDesc", "Marriage contract (ketubba) of Sitt al-Dar"),
         (A, "RunningTitle", "כתובה"),        # identical to an original of A: left out
         (A, "PersonEngDesc", "A person, not a manuscript"),
+        # Keyed by the work title's id and by the author's text, not by a manuscript:
+        ("3000", "GenizahTitleEngTitle", "Questions and Answers"),   # to H and M
+        ("-1", "GenizahTitleEngTitle", "Unknown"),                   # the unknown work: nowhere
+        ("5555", "GenizahTitleEngTitle", "Orphan title"),            # no catalogue record: nowhere
+        ("נתן בן נהוראי", "AuthorText", "Nathan ben Nahorai"),       # to C
+        ("לא מזוהה", "AuthorText", "Unknown"),                       # to K, but a placeholder
         *extra_translations,
     ]
     conn.executemany("INSERT INTO fjms_translations (alma_id, field_name, translated_text) VALUES (?, ?, ?)", rows)

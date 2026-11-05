@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_text_fixture import A, B, C, D, E, F, H, I, J, K, build_sidecar  # noqa: E402
+from catalog_text_fixture import A, B, C, D, E, F, H, I, J, K, M, build_sidecar  # noqa: E402
 from scripts.build_catalog_text_sidecar import SCHEMA_VERSION as BUILDER_SCHEMA_VERSION  # noqa: E402
 from shared import catalog_text_service as svc  # noqa: E402
 from shared.catalog_text_service import CatalogTextService, make_snippet  # noqa: E402
@@ -110,6 +110,12 @@ def test_every_spelling_of_an_abbreviation_and_of_a_pointed_word(service):
         assert H in _ids(service.search(query)), query
     assert _ids(service.search("שלום")) == [I]
     assert _ids(service.search("שָׁלוֹם")) == [I]
+
+
+def test_work_title_and_author_translations_are_found(service):
+    assert set(_ids(service.search("questions answers"))) == {H, M}
+    assert _ids(service.search("Nahorai")) == [C]
+    assert _ids(service.search("unknown")) == []
 
 
 def test_an_english_plural_finds_the_singular_and_the_reverse(service):
