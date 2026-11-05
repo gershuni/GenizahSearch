@@ -1107,10 +1107,6 @@ POSTHOG_SCRIPT += _ux_timing_head_html()
 from web.reconnect_backoff import head_html as _reconnect_backoff_head_html  # noqa: E402
 ui.add_head_html(_reconnect_backoff_head_html(), shared=True)
 
-# Keyboard shortcuts on every page: ? opens their card, / the search box (web/keyboard_shortcuts.py).
-from web.keyboard_shortcuts import head_html as _shortcuts_head_html  # noqa: E402
-ui.add_head_html(_shortcuts_head_html(), shared=True)
-
 
 # posthog_capture moved to web/analytics.py to avoid circular imports
 from web.analytics import posthog_capture  # noqa: F401 — re-export
@@ -2095,7 +2091,13 @@ def create_layout():
     # The card of keyboard shortcuts (web/keyboard_shortcuts.py): "?" on any page
     # dispatches its event on this hidden element, and the sidebar's "Keyboard
     # shortcuts" calls the same function. Built on first use, once per page.
+    # The key script is loaded HERE, with the trigger, not shared: the few routes
+    # without this layout (/privacy-extension, /reset-hints, /auth/callback) have
+    # neither the card nor a search box, so there "?" and "/" are the browser's
+    # (Codex, PR #484).
     from web.keyboard_shortcuts import SHORTCUT_EVENT, TRIGGER_CLASS, build_card
+    from web.keyboard_shortcuts import head_html as _shortcuts_head_html
+    ui.add_head_html(_shortcuts_head_html())
     shortcuts_trigger = ui.element('div').classes(f'{TRIGGER_CLASS} hidden')
     _shortcuts_card = {'dialog': None}
 

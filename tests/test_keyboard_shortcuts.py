@@ -81,8 +81,11 @@ def test_question_mark_and_slash_are_handled_on_every_page():
     assert 'if (inABox(event.target) || inABox(document.activeElement)) return;' in SHORTCUTS_JS
     assert "if (document.querySelector('.q-dialog, .q-menu')) return;" in SHORTCUTS_JS
     assert 'event.ctrlKey || event.altKey || event.metaKey' in SHORTCUTS_JS
-    # Every page loads the script, and has the trigger the card opens from.
-    assert 'ui.add_head_html(_shortcuts_head_html(), shared=True)' in MAIN
+    # The layout loads the script together with the trigger the card opens from (Codex, PR
+    # #484: shared, it ran on the layout-less routes, where "?" found no trigger).
+    layout = MAIN[MAIN.index('def create_layout('):]
+    assert 'ui.add_head_html(_shortcuts_head_html())' in layout
+    assert 'ui.add_head_html(_shortcuts_head_html(), shared=True)' not in MAIN
     assert "shortcuts_trigger = ui.element('div').classes(f'{TRIGGER_CLASS} hidden')" in MAIN
     assert 'shortcuts_trigger.on(SHORTCUT_EVENT, lambda _e: open_shortcuts_card())' in MAIN
 

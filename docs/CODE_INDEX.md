@@ -1368,7 +1368,7 @@ A website restart must not reload every open tab at once (2026-10-21). Browser s
 
 ## web/keyboard_shortcuts.py
 
-The website's keyboard shortcuts and the card that lists them (owner, 2026-11-05). Browser side: `web/static/js/shortcuts.js` (`?` opens the card, `/` jumps to the page's `data-gs-primary-search` box or the header's go-to box), loaded on every page with `ui.add_head_html(..., shared=True)` in web/main.py; the card opens on the page's hidden `.gs-shortcuts-trigger` (`gs-shortcuts`) and from the sidebar's "Keyboard shortcuts".
+The website's keyboard shortcuts and the card that lists them (owner, 2026-11-05). Browser side: `web/static/js/shortcuts.js` (`?` opens the card, `/` jumps to the page's `data-gs-primary-search` box or the header's go-to box), loaded by `create_layout` in web/main.py together with the trigger (not shared: the layout-less routes have no card); the card opens on the page's hidden `.gs-shortcuts-trigger` (`gs-shortcuts`) and from the sidebar's "Keyboard shortcuts".
 - **Function** `sections` — the card's rows, `(keys, what they do)`, each a key a script handles: browse's key script (arrows by the page's direction, +, −, 0, F), `blau_lookup.js` (M), `search.py` (Space); `PLAIN_WORDS` are actions, not keys
 - **Function** `strings` — every string the card translates (tested against `TRANSLATIONS`)
 - **Function** `head_html` — the versioned `<script ... defer>` line; `''` when the file is missing

@@ -105,6 +105,7 @@ def test_question_mark_and_the_sidebar_open_the_card_of_shortcuts():
         assert _cards(user) == []
         triggers = [el for el in _all_elements(user) if 'gs-shortcuts-trigger' in _classes(el)]
         assert len(triggers) == 1
+        assert '/static/js/shortcuts.js?v=' in user._client._head_html, 'the key script comes with the trigger'
         _fire(user, triggers[0], 'gs-shortcuts')
         await asyncio.sleep(0.1)
         [card] = _cards(user)
