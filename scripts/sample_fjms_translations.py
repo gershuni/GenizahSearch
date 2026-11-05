@@ -127,15 +127,16 @@ def draw_from_sidecar(db_path: Path, sidecar_path: Path, n: int, seed: int) -> l
                     (sys_id,))]
             else:
                 keys = [sys_id]
+            # Every key at once, in id order: the builder reads translations by id and keeps the
+            # first that gives a manuscript a text, so the lowest matching id is the record's source
+            # (whatever order the catalogue lists a manuscript's titles or authors in).
             source = None
-            for key in keys:
-                for row in conn.execute(
-                    "SELECT id, direction, original_text, translated_text, model_version FROM fjms_translations "
-                    "WHERE alma_id = ? AND field_name = ? ORDER BY id", (key, field)):
-                    if _stored_text(field, row[3]) == text:
-                        source = row
-                        break
-                if source:
+            marks = ",".join("?" * len(keys))
+            for row in conn.execute(
+                "SELECT id, direction, original_text, translated_text, model_version FROM fjms_translations "
+                f"WHERE field_name = ? AND alma_id IN ({marks}) ORDER BY id", (field, *keys)) if keys else ():
+                if _stored_text(field, row[3]) == text:
+                    source = row
                     break
             if source is None:
                 raise SystemExit(f"record {record_id} ({sys_id}, {field}) has no fjms_translations row: "
