@@ -301,6 +301,13 @@ def test_the_look_up_key_works_wherever_a_dictionary_is_served():
     assert "repeated = false;\n    if (lookUpSelection(pop, true)) { arm(false); return; }" in JS
     assert "if (isLookupKey(event) && repeated) arm(false);" in JS
     assert "if (armed && !repeated) arm(false);     // a tapped key arms one click" in JS
+    # ...used up by a click on the panel's or the switch's own controls too (Codex, PR #484):
+    # the disarm comes before their early returns.
+    click = JS[JS.index("document.addEventListener('click'"):]
+    disarm = click.index("if (armed && !repeated) arm(false);")
+    assert disarm < click.index("if (pop.contains(event.target)) {")
+    assert disarm < click.index("if (opener) {")
+    assert click.index("var viaKey = ") < disarm
     assert f"var ARMED = '{blau_panel.ARMED_CLASS}';" in JS and f"html.{blau_panel.ARMED_CLASS} [data-blau-pane]" in CSS
     # Alt + a click looks up too; a plain click only where the switch is on.
     assert "var viaAlt = event.altKey && !event.ctrlKey && !event.metaKey;" in JS

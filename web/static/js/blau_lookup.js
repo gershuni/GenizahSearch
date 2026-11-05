@@ -303,6 +303,10 @@
   document.addEventListener('click', function (event) {
     var pop = document.querySelector(POPOVER);
     if (!pop) return;                       // no dictionary on this page
+    var viaAlt = event.altKey && !event.ctrlKey && !event.metaKey;
+    var viaKey = viaAlt || (armed && !event.ctrlKey && !event.metaKey);
+    // Before the panel's and the switch's own clicks return (Codex, PR #484): those use it up too.
+    if (armed && !repeated) arm(false);     // a tapped key arms one click, wherever it lands
     if (pop.contains(event.target)) {       // the panel's own controls
       var closing = event.target.nodeType === 1 ? event.target.closest('.' + CLOSE) : null;
       if (closing) clearHit();              // the page hides the popover; the word's mark goes with it
@@ -316,9 +320,6 @@
       dispatch(pop, 'blau-open');
       return;
     }
-    var viaAlt = event.altKey && !event.ctrlKey && !event.metaKey;
-    var viaKey = viaAlt || (armed && !event.ctrlKey && !event.metaKey);
-    if (armed && !repeated) arm(false);     // a tapped key arms one click, wherever it lands
     // Words selected with the key armed (or Alt held): the selection, not the word under the pointer.
     if (viaKey && target && paneOf(target, true) && lookUpSelection(pop, true)) return;
     var pane = target ? paneOf(target, viaKey) : null;
