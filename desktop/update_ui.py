@@ -40,6 +40,8 @@ class UpdateNotificationBar(QFrame):
 
     dismissed = pyqtSignal(str) # Emits version string on dismiss
     update_requested = pyqtSignal(str, str, str)  # version, html_url, installer_url
+    # "What's new?": what changed since this copy's version (2026-11-05).
+    notes_requested = pyqtSignal(str, str, str)  # version, html_url, installer_url
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,6 +64,13 @@ class UpdateNotificationBar(QFrame):
         self.btn_download.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_download.clicked.connect(self.on_download)
 
+        self.btn_notes = QPushButton(tr("What's new?"))
+        self.btn_notes.setFlat(True)
+        self.btn_notes.setStyleSheet("color: #0c5460; text-decoration: underline; border: none; "
+                                     "background: transparent; font-weight: bold;")
+        self.btn_notes.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_notes.clicked.connect(self.on_notes)
+
         self.btn_dismiss = QPushButton("✕")
         self.btn_dismiss.setToolTip(tr("Dismiss until next version"))
         self.btn_dismiss.setStyleSheet("""
@@ -73,11 +82,16 @@ class UpdateNotificationBar(QFrame):
 
         layout.addWidget(self.lbl_msg)
         layout.addStretch()
+        layout.addWidget(self.btn_notes)
+        layout.addSpacing(6)
         layout.addWidget(self.btn_download)
         layout.addSpacing(10)
         layout.addWidget(self.btn_dismiss)
 
         self.hide()
+
+    def on_notes(self):
+        self.notes_requested.emit(self.version_tag, self.html_url, self.installer_url)
 
     def show_update(self, version: str, html_url: str, installer_url: str = ""):
         self.version_tag = version
@@ -360,11 +374,23 @@ class WhatsNewDialog(QDialog):
         btn_ok.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border-radius: 4px; padding: 8px 24px; font-size: 14px;")
         btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_ok.clicked.connect(self.accept)
+        # Every version's news (2026-11-05).
+        self.btn_all_versions = QPushButton(tr("All versions"))
+        self.btn_all_versions.setFlat(True)
+        self.btn_all_versions.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_all_versions.setStyleSheet("color: #065f46; text-decoration: underline; border: none;")
+        self.btn_all_versions.clicked.connect(self._open_all_versions)
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_layout.addWidget(btn_ok)
+        btn_layout.addWidget(self.btn_all_versions)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
+
+    def _open_all_versions(self):
+        from desktop.version_history import VersionHistoryDialog
+        from shared.whats_new_history import releases
+        VersionHistoryDialog(self, releases=releases()).exec()
 
 
 class UpdateProgressDialog(QDialog):

@@ -6466,9 +6466,9 @@ TRANSLATIONS.update({
     "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.":
         "אפשר להקליד מילה ערבית־יהודית באותיות עבריות, או מילה ערבית.",
     # The disclaimer on every panel: the Hebrew is the owner's own wording (2026-11-04).
-    "Blau's dictionary records only meanings particular to Judeo-Arabic. "
+    "Blau's dictionary records mainly meanings particular to Judeo-Arabic. "
     "To look up verbs and inflected forms, type the root or the base form.":
-        "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
+        "מילון בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית. "
         "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
     "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
     # The digital edition's credit under the print credit (owner, 2026-11-04, at Ephraim Meiri's request).
@@ -6493,8 +6493,9 @@ TRANSLATIONS.update({
     "New! Judeo-Arabic dictionaries!": "חדש! מילונים לערבית־יהודית!",
     "Judeo-Arabic dictionaries": "מילונים לערבית־יהודית",
 })
-# Lane's Lexicon in its tab (web/components/lane_panel.py, phase B, 2026-11-04). DRAFTS for the
-# owner's approval. The Perseus credit line itself is not translated: it is shown verbatim (D3).
+# Lane's Lexicon in its tab (web/components/lane_panel.py, phase B, 2026-11-04). Approved by the
+# owner as drafted, both source lines included, 2026-11-05 ("Approve as is"). The Perseus credit
+# line itself is not translated: it is shown verbatim (D3).
 TRANSLATIONS.update({
     "Lane's Arabic-English Lexicon": "הלקסיקון הערבי-אנגלי של ליין",  # the owner's wording, 2026-11-04
     "Arabic readings, commonest first": "קריאות בערבית, הנפוצה תחילה",
@@ -6508,4 +6509,22 @@ TRANSLATIONS.update({
         "ערכי ליין מתוך semitic.lang.emeiri.org (אפרים מאירי).",
     "Readings ranked by a word count of the OpenITI corpus.":
         "הקריאות מדורגות לפי ספירת מילים בקורפוס OpenITI.",
+})
+# What's New in every version (shared/whats_new_history.py; web /whats-new, the desktop dialog and
+# update notice, 2026-11-05). Approved by the owner as drafted, 2026-11-05 (reviewed in the wordings docx).
+TRANSLATIONS.update({
+    "What's New in every version": "מה חדש בכל גרסה",
+    "Every version since 9.0.0, newest first.": "כל הגרסאות מאז 9.0.0, מהחדשה לישנה.",
+    "New features": "תכונות חדשות",
+    "Improvements": "שיפורים",
+    "Fixes": "תיקונים",
+    "Website": "אתר",
+    "Desktop app": "אפליקציית שולחן עבודה",
+    "Version {version}": "גרסה {version}",
+    "All versions": "כל הגרסאות",
+    "What's new?": "מה חדש?",
+    "What's new since your version ({version})": "מה חדש מאז הגרסה שלכם ({version})",
+    "Loading the list of changes...": "טוען את רשימת השינויים...",
+    "The list of changes could not be loaded.": "לא ניתן היה לטעון את רשימת השינויים.",
+    "Release notes on GitHub": "פרטי הגרסה ב-GitHub",
 })
