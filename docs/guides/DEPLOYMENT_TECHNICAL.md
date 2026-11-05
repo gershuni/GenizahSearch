@@ -1125,6 +1125,7 @@ All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be 
 | `pgp.db` | `pgp_data/` | ~156 MB | 1.1.0 | PGP documents (36.6K), sources (10.4K), footnotes (23.8K), fragments (37.4K), meta. **No `pgp_translations`** -- withheld by owner decision (`docs/plans/PGP_TRANSLATION_QUALITY.md`); `scripts/check_shipping_sidecar.py` refuses a copy that carries it |
 | `libraries_translations.db` | project root | 76 MB | - | Dicta translations for library titles (~185K records, Hebrew↔English) |
 | `blau.db` | `blau_data/` | 32 MB | 1.0.0 | Joshua Blau's *Dictionary of Mediaeval Judaeo-Arabic Texts* (2006; blau-dict.netlify.app release 1.1): roots (3,047), sub-entries (3,665), stems (8,295), forms (12,753), citations (41,970), sources (337), `forms_norm` lookup keys (41,932), `meta` with the credit line. Read by `shared/blau_service.py` for `/browse`; deploy with `scripts/deploy_blau_sidecar.ps1 -Roots 3047 -Forms 12753` (the gate before the upload, on the uploaded copy and on the served file; the code must be on the server first, since the gate imports from the repository) |
+| `arabic.db` | `arabic_data/` | 74 MB | 1.0.0 | Lane's *Arabic-English Lexicon* (47,855 articles under 4,619 roots, from Ephraim Meiri's parse of the Perseus TEI), the form-to-root table, an OpenITI word count (808,441 rows) and the closed-class table (181), `meta` with the Perseus credit line. Read by `shared/arabic_service.py` for Lane's tab on `/browse`; deploy with `scripts/deploy_arabic_sidecar.ps1 -Entries 47890` (same three gates as Blau's; the code must be on the server first) |
 
 #### Initial Upload to Server
 
@@ -1141,6 +1142,8 @@ scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazona
 # blau.db likewise goes through its script: the gate runs on the local file, on the uploaded
 # copy and on the served file, and the swap happens only when all three pass.
 #   powershell -File scripts/deploy_blau_sidecar.ps1 -Roots 3047 -Forms 12753
+# arabic.db (Lane's Lexicon) the same way, after the code of PR #480 is on the server:
+#   powershell -File scripts/deploy_arabic_sidecar.ps1 -Entries 47890
 
 scp libraries_translations.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/
 

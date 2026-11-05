@@ -102,7 +102,8 @@ SEARCH_CLASS = 'blau-search'
 #: The disclaimer at the top of EVERY panel (owner, 2026-11-04, the Hebrew in the
 #: owner's words): a word with no entry is usually an ordinary Arabic word, which
 #: Blau does not record, or a verb or inflected form whose base was not found.
-DISCLAIMER = ("Blau's dictionary records only meanings particular to Judeo-Arabic. "
+#: "mainly", not "only" (owner, 2026-11-05, with the Help text).
+DISCLAIMER = ("Blau's dictionary records mainly meanings particular to Judeo-Arabic. "
               "To look up verbs and inflected forms, type the root or the base form.")
 DISCLAIMER_CLASS = 'blau-disclaimer'
 #: The digital edition's credit, under the print credit on EVERY panel (owner,

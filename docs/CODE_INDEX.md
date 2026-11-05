@@ -3707,3 +3707,36 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `map_keys_to_hebrew` (Line 40) — *text* read key by key on the Hebrew layout, or None when a character
 - **Function** `is_latin_query` (Line 55) — ASCII with at least one Latin letter: what a wrong-layout query looks like.
 - **Function** `layout_suggestion` (Line 60) — The Hebrew a Latin-script query spells on the Hebrew layout, or None.
+
+## shared/whats_new_history.py
+
+- **Function** `version_key` (Line 46) — ``'9.13.1'`` (or ``'v9.13.1'``) -> ``(9, 13, 1)``; anything else raises ValueError.
+- **Function** `_for_app` (Line 54) — A copy of ``release`` with only the items ``app`` shows (all of them for None);
+- **Function** `releases` (Line 63) — Every release, newest first; with ``app``, only the items that app shows, and only
+- **Function** `releases_between` (Line 76) — The releases after ``since`` up to and including ``upto`` (no upper bound when
+- **Function** `localize` (Line 86) — One release in one language: ``{'version', 'date', 'apps', 'title', 'sections'}``,
+- **Function** `app_note` (Line 106) — The label to show beside an item that is in one app only (English key), else None.
+- **Function** `problems` (Line 116) — Everything wrong with the entries, one sentence each (empty when they are sound).
+- **Function** `to_public` (Line 166) — A release as ``GET /api/whats-new`` serves it (both languages).
+- **Function** `from_public` (Line 178) — The releases in a ``GET /api/whats-new`` answer, checked; raises ValueError on
+
+## desktop/version_history.py
+
+- **Function** `render_html` (Line 44) — The releases as the dialog's HTML: a heading per version, then its categories.
+- **Class** `ReleaseNotesThread` (Line 71) — Fetches the entries between two versions from the website, off the UI thread.
+    - Method `__init__` (Line 79)
+    - Method `run` (Line 84)
+- **Function** `_strip_v` (Line 102)
+- **Class** `VersionHistoryDialog` (Line 106) — The history (``releases`` given) or, with ``update_to``, the changes since this
+    - Method `__init__` (Line 110)
+    - Method `done` (Line 179) — Closing while the fetch still runs hands the thread to the keeper (a dropped
+    - Method `set_releases` (Line 192)
+    - Method `set_loading` (Line 196)
+    - Method `set_failed` (Line 199)
+    - Method `_on_notes` (Line 203)
+    - Method `_open_release_page` (Line 211)
+
+## web/pages/whats_new.py
+
+- **Function** `_release` (Line 40)
+- **Function** `create_whats_new_page` (Line 58) — The page body (the route in web/main.py adds the head and the layout).

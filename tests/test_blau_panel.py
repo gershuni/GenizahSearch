@@ -194,11 +194,12 @@ def test_a_lookup_opens_on_the_reader_s_tab_while_it_has_an_answer():
 
 
 def test_the_disclaimer_is_the_owner_s_hebrew():
-    """Owner, 2026-11-04: a disclaimer on every panel, in these words."""
+    """Owner, 2026-11-04: a disclaimer on every panel, in these words ("mainly", not
+    "only": owner, 2026-11-05)."""
     from shared.genizah_translations import TRANSLATIONS
 
     assert TRANSLATIONS[blau_panel.DISCLAIMER] == (
-        "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
+        "מילון בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית. "
         "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.")
 
 

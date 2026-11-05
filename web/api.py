@@ -506,6 +506,7 @@ def init_api_routes(app_override=None):
             ('/browse', '0.6', 'daily'),
             ('/about', '0.6', 'monthly'),
             ('/help', '0.5', 'monthly'),
+            ('/whats-new', '0.4', 'monthly'),
             ('/download', '0.5', 'monthly'),
             ('/accessibility', '0.3', 'yearly'),
         ]
@@ -831,6 +832,37 @@ def init_api_routes(app_override=None):
             _nli_cache_time[cache_key] = _time.time()
             _prune_nli_memory_cache_locked(_time.time())
         return []
+
+    @target_app.get('/api/whats-new')
+    def whats_new_api(since: Optional[str] = None, upto: Optional[str] = None,
+                      app: Optional[str] = None):
+        """What's New in every version (shared/whats_new_history.py), both languages.
+
+        ``since``: only the releases after it; ``upto``: up to and including it;
+        ``app``: ``web`` or ``desktop``, only the items that app shows. The desktop
+        update notice asks ``?since=<its version>&upto=<the new one>&app=desktop``.
+        Public and cheap (a module constant): cacheable for an hour.
+        """
+        from starlette.responses import JSONResponse
+        from shared import whats_new_history as wnh
+        try:
+            if app is not None and app not in wnh.APPS:
+                raise ValueError(f'app must be one of {list(wnh.APPS)}')
+            if since:
+                found = wnh.releases_between(since, upto, app=app)
+            elif upto:
+                high = wnh.version_key(upto)
+                found = [r for r in wnh.releases(app) if wnh.version_key(r['version']) <= high]
+            else:
+                found = wnh.releases(app)
+        except ValueError as exc:
+            return JSONResponse({'error': 'invalid_request', 'message': str(exc)}, status_code=400)
+        newest = wnh.releases()
+        return JSONResponse(
+            {'latest': newest[0]['version'] if newest else None,
+             'releases': [wnh.to_public(r) for r in found]},
+            headers={'Cache-Control': 'public, max-age=3600'},
+        )
 
     @target_app.get('/api/fl_ids/{sys_id}')
     def get_fl_ids(sys_id: str):
