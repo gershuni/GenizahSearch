@@ -173,8 +173,18 @@ signal, not a rate. 18 of the 21 bad rows would mislead a word search: a wrong t
 folio or verse number, a dropped shelfmark, "cantillated" rendered as "vocalized" (three times),
 and one translation that invents some thirty catalogue entries. **Under D2 (a) the translations
 are searched, every such hit is labelled "automatic translation", and the switch starts ON.**
-The verdict files are in the session scratchpad. To rerun the audit, draw the sample again with
-the script above (same seed).
+**Which translations the audit measured.** The sample was drawn from the `fjms_translations`
+table, not from the built file, and the two populations differ (pointed out by the Codex review
+of #483). 146 of the 150 sampled rows enter the sidecar; the 4 that do not were left out as
+duplicates of an original of the same manuscript, including 1 of the 3 garbage rows (a
+"translation" that is the English original verbatim). **Among the 146 indexed rows: 20 wrong or
+garbage, 13.7% (95% CI 8.1-19.3%)**, so the ruling stands. Not measured: the work-title and author
+translations, which reach many manuscripts each and make up 16,885 of the file's 691,708
+automatic FJMS records (2.4%); the sample held none. A later audit should draw from the file
+itself: `scripts/sample_fjms_translations.py --sidecar catalog_data/catalog_text.db` samples its
+automatic records uniformly and traces each to its translation row. On today's file that draw
+holds 2 work-title translations in 150. The verdict files are in the session scratchpad; the
+table sample is reproduced by the same script without `--sidecar` (seed 20261105).
 
 ## 4. Design
 
@@ -413,4 +423,6 @@ Added at the same time: the `%` shortcut (§4.4) and the refresh note (§4.6).
   garbage, FullText weakest, switch ON. §4.2: English words made singular by our own rule instead
   of Porter. §4.1 updated to what was built. The Codex review of #483 found the work-title and author translations keyed by
   entity, not manuscript; they now fan out to their manuscripts, and placeholder titles and
-  authors are left out.
+  authors are left out. The audit's population was the translation table, not the file: 146 of its 150 rows are
+  indexed, 13.7% bad among them (§3.2), and the sampler gained `--sidecar` to draw what the file
+  holds.

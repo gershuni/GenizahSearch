@@ -47,7 +47,7 @@ def write_fjms(path: Path, extra_translations=()) -> Path:
         CREATE TABLE catalog_textual_frames (AlmaId TEXT, TextualFrameHeb TEXT, TextualFrameEng TEXT);
         CREATE TABLE catalog_mentions (AlmaId TEXT, Mention TEXT, MentionDesc TEXT);
         CREATE TABLE fjms_translations (id INTEGER PRIMARY KEY, alma_id TEXT, field_name TEXT,
-            translated_text TEXT);
+            original_text TEXT, translated_text TEXT, direction TEXT, model_version TEXT);
     """)
     conn.executemany("INSERT INTO meta VALUES (?, ?)", [("version", "5.1.0"), ("created", "2026-03-11T06:25:38")])
     conn.executemany("INSERT INTO catalog VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
