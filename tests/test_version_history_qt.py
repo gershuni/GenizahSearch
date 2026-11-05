@@ -54,6 +54,31 @@ def fake_thread(monkeypatch):
     return _FakeThread
 
 
+@pytest.mark.parametrize('w, h', [(640, 360), (1092, 580), (1920, 1040), (400, 250)])
+def test_the_dialog_fits_the_screen(w, h):
+    """Codex, PR #482: 1920x1080 at 300% leaves about 640x360; the dialog (and with it
+    Update Now / Later) must fit inside the frame allowance, the minimum never above it."""
+    from PyQt6.QtCore import QSize
+    minimum, size = vh.fit_size(QSize(w, h))
+    room = QSize(w, h) - vh.FRAME_ALLOWANCE
+    assert size.width() <= room.width() and size.height() <= room.height()
+    assert minimum.width() <= size.width() and minimum.height() <= size.height()
+    assert size.width() <= vh.PREFERRED_SIZE.width() and size.height() <= vh.PREFERRED_SIZE.height()
+
+
+def test_the_update_dialog_keeps_its_buttons_on_a_short_screen(fake_thread, monkeypatch):
+    from PyQt6.QtCore import QRect
+
+    class _Screen:
+        def availableGeometry(self):
+            return QRect(0, 0, 640, 360)
+    monkeypatch.setattr(vh.QApplication, 'primaryScreen', staticmethod(lambda: _Screen()))
+    dlg = vh.VersionHistoryDialog(None, current_version='9.13.1', update_to='9.14.0')
+    assert dlg.minimumHeight() <= 360 - vh.FRAME_ALLOWANCE.height()
+    assert dlg.height() <= 360 - vh.FRAME_ALLOWANCE.height()
+    dlg.deleteLater()
+
+
 def test_the_history_dialog_lists_every_bundled_release():
     dlg = vh.VersionHistoryDialog(None, releases=wnh.releases())
     text = dlg.browser.toPlainText()

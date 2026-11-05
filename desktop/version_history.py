@@ -20,9 +20,10 @@ import html
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import QThread, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QSize, QThread, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -109,6 +110,26 @@ def _strip_v(version: str) -> str:
     return str(version or '').strip().lstrip('vV')
 
 
+#: The size the dialog asks for, and the least it keeps: the list scrolls, the buttons stay.
+PREFERRED_SIZE = QSize(640, 640)
+SMALLEST_SIZE = QSize(300, 220)
+#: Room left for the window frame and title bar inside the screen's available area.
+FRAME_ALLOWANCE = QSize(40, 70)
+
+
+def fit_size(available: QSize) -> tuple[QSize, QSize]:
+    """``(minimum, size)`` for a screen whose available area is ``available``: the preferred
+    size shrunk to what the screen holds with the frame, the minimum never above that.
+    1920x1080 at 300% leaves about 640x360 logical pixels; a fixed 520x480 minimum put
+    Update Now / Later below the screen's edge (Codex, PR #482)."""
+    room_w = max(available.width() - FRAME_ALLOWANCE.width(), 1)
+    room_h = max(available.height() - FRAME_ALLOWANCE.height(), 1)
+    minimum = QSize(min(SMALLEST_SIZE.width(), room_w), min(SMALLEST_SIZE.height(), room_h))
+    size = QSize(max(min(PREFERRED_SIZE.width(), room_w), minimum.width()),
+                 max(min(PREFERRED_SIZE.height(), room_h), minimum.height()))
+    return minimum, size
+
+
 class VersionHistoryDialog(QDialog):
     """The history (``releases`` given) or, with ``update_to``, the changes since this
     copy's version, loaded from the website, with Update Now / Later."""
@@ -120,8 +141,11 @@ class VersionHistoryDialog(QDialog):
         self._thread: Optional[ReleaseNotesThread] = None
         self.update_mode = bool(update_to)
         self.setModal(True)
-        self.setMinimumSize(520, 480)
-        self.resize(640, 640)
+        screen = (parent.screen() if parent is not None else None) or QApplication.primaryScreen()
+        minimum, size = fit_size(screen.availableGeometry().size() if screen is not None
+                                 else PREFERRED_SIZE + FRAME_ALLOWANCE)
+        self.setMinimumSize(minimum)
+        self.resize(size)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         if _lang() == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
