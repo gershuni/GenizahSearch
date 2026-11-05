@@ -633,6 +633,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # data-no-loading-bar: the search runs in the page with its own
                             # progress bar; the site's top bar would run on 15 s (web/main.py).
                             'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
+                            ' data-gs-primary-search'  # "/" jumps here (web/keyboard_shortcuts.py)
                         ).style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
 

@@ -22,6 +22,17 @@
  *     is not marked, and a click on the page asks the server nothing.
  * The reader's switch (blau_panel.PREF_KEY) is the pane's attribute: the page
  * adds or removes it, and this script reads it on every click.
+ * The M key (owner, 2026-11-05) looks up at any time, the switch on or off, in
+ * a pane the page marks `data-blau-pane` wherever a dictionary is served:
+ *   - a click while M is held looks up the word under the pointer, as a click
+ *     does with the switch on (`how: 'key'`);
+ *   - M pressed while words of the pane are selected, or a selection made while
+ *     M is held, looks up the selection (`how: 'selection'`): its first words
+ *     that hold Hebrew letters, without what stands around them (line numbers,
+ *     punctuation).
+ * M is the key `m`/`M`, the Hebrew letter on a Hebrew layout (`מ`), or the
+ * physical M key on any layout; never while a box has the focus or with Ctrl,
+ * Alt or Cmd (those are the browser's).
  * The word is what sits between two non-word characters in the text node
  * under the pointer: Hebrew letters, combining marks, the apostrophe and
  * geresh family the transcriptions write the Judeo-Arabic letters with.
@@ -33,6 +44,8 @@
 
   var POPOVER = '.gs-blau-popover';
   var PANE = '[data-blau-lookup]';
+  var KEY_PANE = '[data-blau-pane]';   // where the M key looks up, the switch on or off
+  var SELECTION_WORDS = 6;            // a selection is looked up by its first words
   var HIT = 'blau-word-hit';
   var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
   var OPEN = 'blau-open';     // the "type a word" button (this script opens the panel)
@@ -122,6 +135,69 @@
     return pop.style.display !== 'none';
   }
 
+  // Is M held (the key that looks up with the switch off)?
+  var keyHeld = false;
+
+  function isLookupKey(event) {
+    return event.code === 'KeyM' || event.key === 'm' || event.key === 'M' || event.key === 'מ';
+  }
+
+  function inABox(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  }
+
+  function paneOf(node, viaKey) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el) return null;
+    return el.closest(PANE) || (viaKey ? el.closest(KEY_PANE) : null);
+  }
+
+  // The selected words of a pane: {text, rect}, or null when nothing of a pane
+  // is selected or the selection holds no Hebrew letters.
+  function selectedWords(viaKey) {
+    var sel = window.getSelection ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var range = sel.getRangeAt(0);
+    if (!paneOf(range.commonAncestorContainer, viaKey)) return null;
+    var words = [];
+    var parts = sel.toString().split(/\s+/);
+    for (var i = 0; i < parts.length && words.length < SELECTION_WORDS; i++) {
+      var part = parts[i];
+      var start = 0, end = part.length;
+      while (start < end && !WORD_CHAR.test(part.charAt(start))) start++;
+      while (end > start && !WORD_CHAR.test(part.charAt(end - 1))) end--;
+      part = part.slice(start, end);
+      if (/[א-ת]/.test(part)) words.push(part);
+    }
+    if (!words.length) return null;
+    return { text: words.join(' '), rect: range.getBoundingClientRect() };
+  }
+
+  function lookUpSelection(pop, viaKey) {
+    var picked = selectedWords(viaKey);
+    if (!picked) return false;
+    clearHit();
+    place(pop, picked.rect);
+    dispatch(pop, 'blau-lookup', { word: picked.text, how: 'selection' });
+    return true;
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;
+    if (inABox(event.target) || inABox(document.activeElement)) return;
+    keyHeld = true;
+    if (event.repeat) return;
+    var pop = document.querySelector(POPOVER);
+    if (pop) lookUpSelection(pop, true);
+  });
+  document.addEventListener('keyup', function (event) {
+    if (isLookupKey(event)) keyHeld = false;
+  });
+  // A key released in another window never reaches this page.
+  window.addEventListener('blur', function () { keyHeld = false; });
+
   document.addEventListener('click', function (event) {
     var pop = document.querySelector(POPOVER);
     if (!pop) return;                       // no dictionary on this page
@@ -138,7 +214,10 @@
       dispatch(pop, 'blau-open');
       return;
     }
-    var pane = target ? target.closest(PANE) : null;
+    var viaKey = keyHeld && !event.ctrlKey && !event.altKey && !event.metaKey;
+    // A selection made while M is held: look up the selection, not the word under the pointer.
+    if (viaKey && target && paneOf(target, true) && lookUpSelection(pop, true)) return;
+    var pane = target ? paneOf(target, viaKey) : null;
     // Something to close: the popover is up, or a word is marked (its lookup
     // may still be running; the close makes it stale).
     var open = shown(pop) || document.querySelector('.' + HIT) !== null;
@@ -155,6 +234,6 @@
     var rect = markWord(caret.node, word) ||
       { left: event.clientX, right: event.clientX, top: event.clientY, bottom: event.clientY, width: 0 };
     place(pop, rect);
-    dispatch(pop, 'blau-lookup', { word: word.text });
+    dispatch(pop, 'blau-lookup', { word: word.text, how: viaKey ? 'key' : 'word' });
   });
 })();

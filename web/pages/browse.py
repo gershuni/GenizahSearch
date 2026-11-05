@@ -4493,7 +4493,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=lambda: load_page(direction=-1)
                             ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" data-ux="browse_page" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
-                            )
+                            ).tooltip(f'{tr("Previous Page")} ({"→" if is_rtl() else "←"})')
 
                             # Only use folio-label dropdown when crossref image count
                             # matches the page count from the search index.  When they
@@ -4549,7 +4549,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=lambda: load_page(direction=1)
                             ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" data-ux="browse_page" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
-                            )
+                            ).tooltip(f'{tr("Next Page")} ({"←" if is_rtl() else "→"})')
 
                             ui.button(
                                 tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
@@ -4862,29 +4862,29 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         return ((blau_service.lookup(word) if blau_service.is_available() else None),
                                 (lane_service.lookup(word) if lane_service.is_available() else None))
 
-                    async def _blau_answer(word, request, focus=False):
+                    async def _blau_answer(word, request, focus=False, how='word'):
                         answers = await run.io_bound(_both_lookups, word)
                         if answers is None or blau_popover.is_deleted or request != _blau_request['value']:
                             return
                         result, lane = answers
                         _blau_draw(result, focus, lane)
                         posthog_capture(blau_panel.POSTHOG_LOOKUP,
-                                        blau_panel.lookup_event(focus, result, lane), client=_blau_client)
+                                        blau_panel.lookup_event(focus, result, lane, how), client=_blau_client)
 
-                    def _blau_start(word, focus):
+                    def _blau_start(word, focus, how='word'):
                         # Synchronous on purpose: the counter must move in the
                         # order the clicks arrived, before any of their lookups
                         # runs. An async handler is a task that starts later,
                         # and a close handled in between would be counted
                         # before the lookup it was meant to cancel.
                         _blau_request['value'] += 1
-                        background_tasks.create(_blau_answer(word, _blau_request['value'], focus),
+                        background_tasks.create(_blau_answer(word, _blau_request['value'], focus, how),
                                                 name='blau-lookup')
 
                     def _blau_lookup(e):
                         word = blau_panel.lookup_word(e.args)
                         if word:
-                            _blau_start(word, False)
+                            _blau_start(word, False, blau_panel.lookup_how(e.args))
 
                     def _blau_search(word):
                         # The box at the top of the panel (typed, or a
@@ -4932,9 +4932,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if _ox_direct_link:
                                         ui.link(tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True).classes('text-xs').style('color: #9ecbff;').props('data-role="oxford-direct-link"')
                                 with ui.row().classes('gap-1 browse-image-tools') as _image_tools_row:
-                                    ui.button(icon='remove').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').on('click', js_handler=ZOOM_OUT_JS).tooltip(tr('Zoom out'))
+                                    ui.button(icon='remove').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').on('click', js_handler=ZOOM_OUT_JS).tooltip(f'{tr("Zoom out")} (−)')
                                     ui.label(f'{zoom_percent(state.zoom_level)}%').classes('zoom-level-label text-white text-sm px-2')
-                                    ui.button(icon='add').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').on('click', js_handler=ZOOM_IN_JS).tooltip(tr('Zoom in'))
+                                    ui.button(icon='add').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').on('click', js_handler=ZOOM_IN_JS).tooltip(f'{tr("Zoom in")} (+)')
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='rotate_left', on_click=rotate_left).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
                                     
@@ -4946,9 +4946,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     
                                     ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='restart_alt').props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}" data-action="zoom-reset"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(tr('Reset View'))
+                                    ui.button(icon='restart_alt').props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}" data-action="zoom-reset"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(f'{tr("Reset View")} (0)')
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(tr('Fullscreen Image'))
+                                    ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(f'{tr("Fullscreen Image")} (F)')
 
                             # Image adjustment controls row
                             with ui.row().classes('w-full items-center gap-2 px-3 py-1 print-hide browse-image-adjust').style(
@@ -5314,6 +5314,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             blau_lookup_on = dict_on and blau_panel.lookup_on()
                             if blau_lookup_on:
                                 text_container.props(blau_panel.PANE_ATTR)
+                            # The M key looks up here with the switch off too
+                            # (owner, 2026-11-05; blau_lookup.js).
+                            if dict_on:
+                                text_container.props(blau_panel.KEY_PANE_ATTR)
                             current_text = {'value': page.text}
 
                             def render_text_content(text: str):
@@ -5431,8 +5435,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 blau_panel.GLYPH_CLASS)
                                             blau_label = ui.label(blau_panel.switch_label(blau_new)).classes(
                                                 blau_panel.LABEL_CLASS)
-                                            blau_switch_tip = ui.tooltip(
-                                                blau_panel.switch_tooltip(blau_lookup_on))
+                                            # What pressing it does, and under it the M key,
+                                            # which works either way (owner, 2026-11-05).
+                                            with ui.tooltip().classes(blau_panel.TIP_CLASS):
+                                                blau_switch_tip = ui.label(
+                                                    blau_panel.switch_tooltip(blau_lookup_on))
+                                                ui.label(tr(blau_panel.KEY_HINT)).classes(
+                                                    blau_panel.KEY_HINT_CLASS)
                                         blau_hint = ui.label(tr('Click a word to look it up in the dictionaries')).classes(
                                             f'text-xs {blau_panel.HINT_CLASS} print-hide')
                                         blau_type = ui.button(icon='keyboard').props(
@@ -5865,38 +5874,32 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         else:  # action == 'none'
             update_content()
 
-        # Add keyboard event handlers
+        # Keyboard shortcuts (listed on the card, web/keyboard_shortcuts.py; each
+        # button's tooltip names its key). The arrows follow the page as the
+        # buttons do: in Hebrew the next page is to the left, in English to the
+        # right. F and 0 by the physical key too, so they work on a Hebrew
+        # layout (F types כ there). Never with Ctrl/Alt/Cmd: Ctrl+F is the browser's
+        # find and Ctrl++ its zoom, and they used to toggle full screen and zoom
+        # the image as well (2026-11-05).
         ui.add_body_html('''
         <script>
             document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey || e.altKey || e.metaKey) return;
                 // A page is loading: the old content is inert, so no second load
                 // from its (still clickable, programmatically) navigation buttons.
                 if (document.querySelector('.browse-loading')) return;
                 // Ignore if focused on any text input element
                 const tag = document.activeElement.tagName;
                 if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;
-
-                switch(e.key) {
-                    case 'ArrowLeft':
-                        // Navigate to next page (RTL)
-                        document.querySelector('[data-action="next"]')?.click();
-                        break;
-                    case 'ArrowRight':
-                        // Navigate to previous page (RTL)
-                        document.querySelector('[data-action="prev"]')?.click();
-                        break;
-                    case '+':
-                    case '=':
-                        document.querySelector('[data-action="zoom-in"]')?.click();
-                        break;
-                    case '-':
-                        document.querySelector('[data-action="zoom-out"]')?.click();
-                        break;
-                    case 'f':
-                    case 'F':
-                        document.querySelector('[data-action="fullscreen"]')?.click();
-                        break;
-                }
+                const rtl = __BROWSE_RTL__;
+                let action = null;
+                if (e.key === 'ArrowLeft') action = rtl ? 'next' : 'prev';
+                else if (e.key === 'ArrowRight') action = rtl ? 'prev' : 'next';
+                else if (e.key === '+' || e.key === '=') action = 'zoom-in';
+                else if (e.key === '-') action = 'zoom-out';
+                else if (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0') action = 'zoom-reset';
+                else if (e.code === 'KeyF' || e.key === 'f' || e.key === 'F') action = 'fullscreen';
+                if (action) document.querySelector('[data-action="' + action + '"]')?.click();
             });
         </script>
-        ''')
+        '''.replace('__BROWSE_RTL__', 'true' if is_rtl() else 'false'))

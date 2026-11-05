@@ -1107,6 +1107,10 @@ POSTHOG_SCRIPT += _ux_timing_head_html()
 from web.reconnect_backoff import head_html as _reconnect_backoff_head_html  # noqa: E402
 ui.add_head_html(_reconnect_backoff_head_html(), shared=True)
 
+# Keyboard shortcuts on every page: ? opens their card, / the search box (web/keyboard_shortcuts.py).
+from web.keyboard_shortcuts import head_html as _shortcuts_head_html  # noqa: E402
+ui.add_head_html(_shortcuts_head_html(), shared=True)
+
 
 # posthog_capture moved to web/analytics.py to avoid circular imports
 from web.analytics import posthog_capture  # noqa: F401 — re-export
@@ -1593,6 +1597,13 @@ def _resolve_ui_language() -> str:
 # Layout Components
 # ============================================================================
 
+# The sidebar's icon rail (owner, 2026-11-05): the visitor's choice, the class on <body> while
+# it is collapsed, and the class of the tooltips that name each icon there (common.css shows
+# them only while the body has the class: in the full sidebar the label is beside the icon).
+NAV_MINI_KEY = 'drawer_mini'
+NAV_MINI_BODY_CLASS = 'gs-nav-mini'
+NAV_MINI_TIP_CLASS = 'nav-mini-tip'
+
 # The header's go-to box (render_header_center). Below 1024px the box is closed behind a search button. Opening and closing
 # only toggle a class on the header row (common.css draws the field across the
 # header while it is set) and move the focus, so they run in the browser.
@@ -2072,14 +2083,30 @@ def create_layout():
     # and keeps the width for the page; the sidebar stays open from 1024px.
     main_drawer = (
         ui.drawer(side=drawer_side, value=False, bordered=True)
-        .classes('shadow-xl')
-        .props('width=280 breakpoint=1023')
+        .classes('shadow-xl gs-main-drawer')
+        .props('width=256 mini-width=64 breakpoint=1023')
     )
     if drawer_open:
         # Only when the reader has not explicitly closed it. An explicit close
         # is a preference and must survive on desktop too, so `show-if-above`
         # is withheld in that case rather than overriding them every load.
         main_drawer.props('show-if-above')
+
+    # The card of keyboard shortcuts (web/keyboard_shortcuts.py): "?" on any page
+    # dispatches its event on this hidden element, and the sidebar's "Keyboard
+    # shortcuts" calls the same function. Built on first use, once per page.
+    from web.keyboard_shortcuts import SHORTCUT_EVENT, TRIGGER_CLASS, build_card
+    shortcuts_trigger = ui.element('div').classes(f'{TRIGGER_CLASS} hidden')
+    _shortcuts_card = {'dialog': None}
+
+    def open_shortcuts_card():
+        dialog = _shortcuts_card['dialog']
+        if dialog is None or dialog.is_deleted:
+            with shortcuts_trigger:
+                dialog = _shortcuts_card['dialog'] = build_card(rtl_mode)
+        dialog.open()
+
+    shortcuts_trigger.on(SHORTCUT_EVENT, lambda _e: open_shortcuts_card())
 
     # Content Area
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
@@ -2099,34 +2126,70 @@ def create_layout():
     if 'menu_btn' in refs:
         refs['menu_btn'].on('click', toggle_drawer)
 
+    # The sidebar (owner, 2026-11-05): no section titles, denser rows, and an icon rail
+    # (Quasar's `mini`) the reader can collapse it to, remembered per visitor like
+    # `drawer_open`. Below the drawer's breakpoint it is the overlay drawer, where
+    # Quasar ignores `mini`. The order is the readers' (PostHog, 30 days to
+    # 2026-11-05): the pages people work in first, by how many readers opened them
+    # from the sidebar and at all, then the pages that explain the site.
+    drawer_mini = bool(safe_user_get(NAV_MINI_KEY, False))
+    if drawer_mini:
+        main_drawer.props('mini')
+        ui.query('body').classes(add=NAV_MINI_BODY_CLASS)
+    _collapse_icon = 'chevron_right' if rtl_mode else 'chevron_left'
+    _expand_icon = 'chevron_left' if rtl_mode else 'chevron_right'
+
+    def _nav_row(icon, label, badge=None, *, active=False, on_click=None, mark=None):
+        row = ui.row(wrap=False).classes(f'nav-item {"active" if active else ""}').props(
+            'role=link tabindex=0' if mark is None else 'role=button tabindex=0')
+        if on_click is not None:
+            row.on('click', on_click).on('keydown.enter', on_click)
+        if mark:
+            row.mark(mark)
+        with row:
+            ui.icon(icon).classes('nav-item-icon')
+            ui.label(label).classes('nav-item-label nav-mini-hide')
+            if badge:
+                ui.label(badge).classes('nav-item-badge nav-mini-hide')
+            # Only in the rail, where the label is hidden (common.css, NAV_MINI_BODY_CLASS).
+            ui.tooltip(label).classes(NAV_MINI_TIP_CLASS).props('anchor="center end" self="center start"')
+        return row
+
     with main_drawer:
-        with ui.column().classes('h-full'):
-            # Navigation Section
-            with ui.column().classes('flex-grow py-4'):
-                ui.label(tr('NAVIGATION')).classes('nav-section-label')
+        with ui.column().classes('h-full w-full no-wrap'):
+            with ui.column().classes('flex-grow w-full items-stretch nav-list'):
+                with ui.row(wrap=False).classes('nav-rail-row w-full'):
+                    nav_rail_btn = ui.button(
+                        icon=_expand_icon if drawer_mini else _collapse_icon,
+                    ).props('flat round dense size=sm').classes('nav-rail-btn').mark('nav-rail-toggle')
+                    _rail_label = tr('Expand menu') if drawer_mini else tr('Collapse menu')
+                    nav_rail_btn.props(f'aria-label="{_rail_label}"')
+                    with nav_rail_btn:
+                        nav_rail_tip = ui.tooltip(_rail_label)
+
+                def toggle_rail():
+                    mini = not bool(safe_user_get(NAV_MINI_KEY, False))
+                    safe_user_set(NAV_MINI_KEY, mini)
+                    if mini:
+                        main_drawer.props('mini')
+                        ui.query('body').classes(add=NAV_MINI_BODY_CLASS)
+                    else:
+                        main_drawer.props(remove='mini')
+                        ui.query('body').classes(remove=NAV_MINI_BODY_CLASS)
+                    label = tr('Expand menu') if mini else tr('Collapse menu')
+                    nav_rail_btn.props(f'icon={_expand_icon if mini else _collapse_icon} aria-label="{label}"')
+                    nav_rail_tip.text = label
+
+                nav_rail_btn.on_click(toggle_rail)
 
                 nav_items = [
                     ('/', 'home', tr('Home'), None),
-                    ('/start', 'explore', tr('Start Here'), None),
-                    ('/about', 'info', tr('About the Genizah'), None),
-                    ('/ai', 'smart_toy', 'כלי AI' if get_language() == 'he' else 'AI tools', None),
                     ('/search', 'search', tr('Search'), None),
-                    ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse by Shelfmark'), None),
+                    ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
-                    ('/discoveries', 'lightbulb', tr('Community'), None),
-                    ('/lists', 'star', tr('My Lists'), None),
                     ('/joins-lab', 'join_inner', tr('Joins Lab'), None),
                 ]
-                if WEB_PUZZLE_ENABLED:
-                    nav_items.append(('/puzzle', 'extension', tr('Fragment Puzzle'), None))
-                # Phase 133 (ATLAS-01, MEDIUM-6): gate on the SAME availability
-                # predicate as the /atlas route + data routes (NOT just the flag)
-                # so a flag-ON/asset-missing window never advertises a broken
-                # link. "The Genizah Atlas" / "Beta" — never "Discoveries"
-                # (Pitfall #8: the existing /discoveries nav item is unrelated).
-                if atlas_preview_available():
-                    nav_items.append(('/atlas', 'hub', tr('The Genizah Atlas'), tr('Beta')))
                 # Phase 136 (NOVEL-01/PANEL-02, plan 136-16): the corpus-wide
                 # "Computed Identifications" findings page. Gated on the SAME
                 # discovery_available() predicate as its route (the flag ANDed
@@ -2134,7 +2197,7 @@ def create_layout():
                 # alone) so a flag-ON/sidecar-missing window never advertises a
                 # link to a page that clean-hides. In the unavailable state the
                 # entry is NOT RENDERED AT ALL — never rendered-and-disabled.
-                # NOTE: the '/discoveries' entry above is the PRE-EXISTING
+                # NOTE: the '/discoveries' entry below is the PRE-EXISTING
                 # Supabase Community page and is unrelated to this work; the nav
                 # label here survived a three-way naming constraint (see the
                 # tr() block in genizah_translations.py).
@@ -2145,34 +2208,44 @@ def create_layout():
                         tr('Computed Identifications'),
                         tr('Beta'),
                     ))
+                # Phase 133 (ATLAS-01, MEDIUM-6): gate on the SAME availability
+                # predicate as the /atlas route + data routes (NOT just the flag)
+                # so a flag-ON/asset-missing window never advertises a broken
+                # link. "The Genizah Atlas" / "Beta" — never "Discoveries"
+                # (Pitfall #8: the /discoveries nav item is unrelated).
+                if atlas_preview_available():
+                    nav_items.append(('/atlas', 'hub', tr('The Genizah Atlas'), tr('Beta')))
+                if WEB_PUZZLE_ENABLED:
+                    nav_items.append(('/puzzle', 'extension', tr('Fragment Puzzle'), None))
+                nav_items += [
+                    ('/discoveries', 'lightbulb', tr('Community'), None),
+                    ('/lists', 'star', tr('My Lists'), None),
+                ]
 
                 for path, icon, label, badge in nav_items:
-                    is_active = current_page == path
+                    _nav_row(icon, label, badge, active=current_page == path,
+                             on_click=lambda p=path: nav_to(p))
 
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
-                        ui.icon(icon).classes('nav-item-icon')
-                        ui.label(label)
-                        if badge:
-                            ui.label(badge).classes('nav-item-badge')
-
-                ui.separator().classes('my-4 mx-6')
-
-                ui.label(tr('TOOLS')).classes('nav-section-label')
+                ui.separator().classes('nav-separator')
 
                 tool_items = [
+                    ('/start', 'explore', tr('Start Here'), None),
+                    ('/about', 'info', tr('About the Genizah'), None),
+                    ('/ai', 'smart_toy', 'כלי AI' if get_language() == 'he' else 'AI tools', None),
+                    ('/help', 'help_center', tr('Help Center'), None),
                     ('/download', 'download', tr('Download App'), None),
                     ('/settings', 'settings', tr('Settings'), None),
-                    ('/help', 'help_center', tr('Help Center'), None),
                 ]
 
                 for path, icon, label, badge in tool_items:
-                    is_active = current_page == path
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
-                        ui.icon(icon).classes('nav-item-icon')
-                        ui.label(label)
+                    _nav_row(icon, label, badge, active=current_page == path,
+                             on_click=lambda p=path: nav_to(p))
+                # Not a page: the card of keyboard shortcuts ("?" opens it too).
+                _nav_row('keyboard', tr('Keyboard shortcuts'), on_click=lambda: open_shortcuts_card(),
+                         mark='nav-shortcuts')
 
             # Footer Section
-            with ui.column().classes('sidebar-footer gap-4'):
+            with ui.column().classes('sidebar-footer gap-2 nav-mini-hide'):
                 # Translation Toggle (show/hide machine translations)
                 show_translations = safe_user_get('show_translations', False)
 

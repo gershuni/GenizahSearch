@@ -282,3 +282,49 @@ def test_render_lookup_draws_nothing_without_a_credit_line():
     assert blau_panel.render_lookup(empty_lookup("כתאב"), credit_he="   ") is False
     assert blau_panel.render_lookup(None, lane=empty_lane("כתאב"), lane_credit=" ") is False
     assert blau_panel.render_lookup(None, credit_he="a credit") is False, "no dictionary served"
+
+
+def test_the_m_key_looks_up_wherever_a_dictionary_is_served():
+    """Owner, 2026-11-05: M + a click, or selected words + M, with the switch on or off.
+    The page marks the pane for the key whenever a dictionary is served; the switch's
+    attribute stays the plain click's."""
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert f"'[{blau_panel.KEY_PANE_ATTR}]'" in JS
+    marked = browse[browse.index("blau_lookup_on = dict_on and blau_panel.lookup_on()"):]
+    marked = marked[:marked.index("current_text = {'value': page.text}")]
+    assert "if dict_on:\n                                text_container.props(blau_panel.KEY_PANE_ATTR)" in marked
+    # A click looks up in the key's pane only while M is held; a plain click only where the switch is on.
+    assert "return el.closest(PANE) || (viaKey ? el.closest(KEY_PANE) : null);" in JS
+    assert "var pane = target ? paneOf(target, viaKey) : null;" in JS
+    # Never while typing (the panel's own box takes an M), never with Ctrl/Alt/Cmd.
+    assert "if (inABox(event.target) || inABox(document.activeElement)) return;" in JS
+    assert "if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;" in JS
+    assert "window.addEventListener('blur', function () { keyHeld = false; });" in JS
+
+
+def test_a_selection_is_looked_up_by_its_words():
+    assert "dispatch(pop, 'blau-lookup', { word: picked.text, how: 'selection' });" in JS
+    assert "SELECTION_WORDS = 6" in JS and "if (/[\u05d0-\u05ea]/.test(part)) words.push(part);" in JS
+    assert "how: viaKey ? 'key' : 'word'" in JS
+
+
+def test_how_a_lookup_started_is_counted():
+    assert blau_panel.lookup_how({"detail": json.dumps({"word": "x", "how": "key"})}) == "key"
+    assert blau_panel.lookup_how(json.dumps({"word": "x", "how": "selection"})) == "selection"
+    for args in (None, "not json", {"detail": json.dumps({"word": "x"})}, {"detail": json.dumps({"how": "evil"})}):
+        assert blau_panel.lookup_how(args) == "word", args
+    assert blau_panel.lookup_event(False, empty_lookup("x"), None, "key")["how"] == "key"
+    assert blau_panel.lookup_event(True, empty_lookup("x"), None, "key")["how"] == "box"
+    assert blau_panel.lookup_event(False, empty_lookup("x"), None, "nonsense")["how"] == "word"
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "_blau_start(word, False, blau_panel.lookup_how(e.args))" in browse
+
+
+def test_the_switch_s_tooltip_names_the_m_key_in_both_languages():
+    from shared.genizah_translations import TRANSLATIONS
+
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "ui.label(tr(blau_panel.KEY_HINT)).classes(" in browse
+    assert blau_panel.KEY_HINT == "Press M (or מ) and click a word while the key is still down, or select words and press M (or מ)"
+    assert TRANSLATIONS[blau_panel.KEY_HINT].strip()
+    assert f".{blau_panel.TIP_CLASS} .{blau_panel.KEY_HINT_CLASS}" in CSS

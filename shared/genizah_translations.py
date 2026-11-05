@@ -6528,3 +6528,21 @@ TRANSLATIONS.update({
     "The list of changes could not be loaded.": "לא ניתן היה לטעון את רשימת השינויים.",
     "Release notes on GitHub": "פרטי הגרסה ב-GitHub",
 })
+# Before 9.14.0 (owner, 2026-11-05): the dictionaries' M key, the one sign-in button, and the
+# card of keyboard shortcuts (web/keyboard_shortcuts.py). Approved by the owner, 2026-11-05; the
+# M-key hint is the owner's own wording.
+TRANSLATIONS.update({
+    "Press M (or מ) and click a word while the key is still down, or select words and press M (or מ)":
+        "לחצו על M (או מ) ולחצו על מילה כשהמקש עדיין לחוץ, או בחרו מילים ולחצו על M (או מ)",
+    "Sign in or register": "התחברות או הרשמה",
+    "On every page": "בכל עמוד",
+    "Show this list": "הצגת הרשימה הזאת",
+    "Jump to the search box": "מעבר לתיבת החיפוש",
+    "Look up a word in the dictionaries": "חיפוש מילה במילונים",
+    "Look up the selected words": "חיפוש המילים המסומנות במילונים",
+    "Run the search": "הפעלת החיפוש",
+    "Scroll the results down": "גלילת התוצאות למטה",
+    "Scroll the results up": "גלילת התוצאות למעלה",
+    "click": "לחיצה",
+    "Select words": "סימון מילים",
+})

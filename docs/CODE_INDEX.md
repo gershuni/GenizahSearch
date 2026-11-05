@@ -1366,6 +1366,14 @@ A website restart must not reload every open tab at once (2026-10-21). Browser s
 - **Function** `enabled` / `config` — the switch (independent of `POSTHOG_API_KEY`) and the three numbers the browser reads
 - **Script** `reconnect_backoff.js` — an accessor on `window.io` wraps socket.io's `io(url, opts)`: merges `reconnectionDelay`/`reconnectionDelayMax`/`randomizationFactor` (caller keys win) and delays NiceGUI's `connect_error` handler for "Implicit handshake failed" and "timeout" by `base * 2^n`, jittered x0.5-1.5 (n: consecutive reloads in `sessionStorage['gs_reload_n']`, reset after 60 s connected); a hidden tab waits for `visibilitychange`; other errors pass through; `posthog.capture('reload_scheduled', ...)` before the deferred handler
 
+## web/keyboard_shortcuts.py
+
+The website's keyboard shortcuts and the card that lists them (owner, 2026-11-05). Browser side: `web/static/js/shortcuts.js` (`?` opens the card, `/` jumps to the page's `data-gs-primary-search` box or the header's go-to box), loaded on every page with `ui.add_head_html(..., shared=True)` in web/main.py; the card opens on the page's hidden `.gs-shortcuts-trigger` (`gs-shortcuts`) and from the sidebar's "Keyboard shortcuts".
+- **Function** `sections` — the card's rows, `(keys, what they do)`, each a key a script handles: browse's key script (arrows by the page's direction, +, −, 0, F), `blau_lookup.js` (M), `search.py` (Space); `PLAIN_WORDS` are actions, not keys
+- **Function** `strings` — every string the card translates (tested against `TRANSLATIONS`)
+- **Function** `head_html` — the versioned `<script ... defer>` line; `''` when the file is missing
+- **Function** `dictionaries_served` / `build_card` — the M rows only where a dictionary is served; the card as a dialog built in the caller's slot
+
 ## web/ai_listings.py
 
 Which AI listings are live, from production settings (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md).

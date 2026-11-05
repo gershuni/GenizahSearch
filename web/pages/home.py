@@ -161,7 +161,9 @@ def create_page():
                     # off even on desktop.
                     hero_search = ui.input(
                         placeholder=tr('Text, shelfmark or system ID')
-                    ).classes('flex-grow hero-search-input').props('outlined rounded dense').style(
+                    ).classes('flex-grow hero-search-input').props(
+                        'outlined rounded dense data-gs-primary-search'  # "/" jumps here
+                    ).style(
                         'font-size: 1.1rem;'
                     ).on('keydown.enter', _navigate_search).mark('home-hero-search')
                     ui.button(
