@@ -99,14 +99,15 @@ def test_invalid_requests_gate_and_rate_limit_never_load():
         assert response.status_code == 429 and response.headers['Retry-After'] == '12'
 
 
-def test_failure_and_oversize_are_errors(monkeypatch):
+@pytest.mark.parametrize('failure_type', [RuntimeError, ValueError])
+def test_failure_and_oversize_are_errors(monkeypatch, failure_type):
     with TestClient(app_for(lambda *args: ([{'citation': 'x' * 71000}], 'local_records'))) as client:
         assert client.get(BASE).json()['error']['code'] == 'details_too_large'
     monkeypatch.setattr(details, 'MAX_SECTION_BYTES', 10)
     with TestClient(app_for(lambda *args: ([{'citation': 'long citation'}], 'local_records'))) as client:
         assert client.get(BASE).status_code == 503
     def failed(*args):
-        raise RuntimeError('private diagnostic')
+        raise failure_type('private diagnostic')
     with TestClient(app_for(failed)) as client:
         response = client.get(BASE)
         assert response.status_code == 503 and 'private diagnostic' not in response.text

@@ -116,8 +116,9 @@ def register_manuscript_details(app, owner, loader=load_web_section, limiter=Non
                 record = await asyncio.wait_for(asyncio.shield(active[key]), timeout=WAIT_SECONDS)
             except TimeoutError:
                 return error('details_pending', 'Local details retrieval is still running; retry the same request later.', 503, {'Retry-After': '5'})
-            except ValueError as exc:
-                return error('details_too_large', str(exc), 503)
+            except ValueError:
+                return error('details_too_large',
+                             'Section could not be prepared within the transfer allowance; consult the website.', 503)
             except Exception:
                 return error('details_unavailable', 'The local source lookup failed; no conclusion about records can be drawn.', 503)
         rows = record['rows']

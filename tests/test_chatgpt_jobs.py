@@ -26,6 +26,23 @@ def make_app(monkeypatch, handler):
 BODY = {'query': 'משה בן אלעזר', 'search_mode': 'variants', 'limit': 5}
 
 
+def test_job_value_error_does_not_expose_diagnostics(monkeypatch):
+    async def handler(request: Request):
+        raise ValueError('private diagnostic from the search handler')
+
+    app, _ = make_app(monkeypatch, handler)
+    with TestClient(app) as client:
+        token = client.post('/api/chatgpt/search/jobs', json=BODY).json()['job_id']
+        deadline = time.monotonic() + 5
+        while True:
+            response = client.get('/api/chatgpt/jobs/' + token)
+            if response.status_code != 202 or time.monotonic() >= deadline:
+                break
+        assert response.status_code == 503
+        assert response.json()['error']['code'] == 'chatgpt_storage_limit'
+        assert 'private diagnostic' not in response.text
+
+
 def test_search_survives_short_polls_and_ip_change(monkeypatch):
     async def exercise():
         finish = asyncio.Event()

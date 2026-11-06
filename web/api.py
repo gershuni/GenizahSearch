@@ -341,6 +341,17 @@ def stamp_download_done(response, token):
     return response
 
 
+def _export_bad_request(error):
+    """Preserve known user messages without exposing arbitrary exceptions."""
+    messages = {
+        'No results to export': 'No results to export',
+        'List is empty': 'List is empty',
+        'No parallels results to export': 'No parallels results to export',
+        'No browse data to export': 'No browse data to export',
+    }
+    return Response(messages.get(str(error), 'Invalid export request'), status_code=400)
+
+
 def init_api_routes(app_override=None):
     """Register API routes for image proxy and exports.
 
@@ -1441,8 +1452,9 @@ def init_api_routes(app_override=None):
                     content=f"Failed to fetch Cambridge image: {resp.status_code}",
                     status_code=resp.status_code,
                 )
-        except Exception as e:
-            return Response(content=f"Error fetching Cambridge image: {e}", status_code=500)
+        except Exception:
+            logger.exception("Error fetching Cambridge image")
+            return Response(content="Error fetching Cambridge image", status_code=500)
 
     # Manchester image cache: (sys_id, page, width) -> (content, content_type)
     _manchester_image_cache = _make_image_cache('image_manchester')
@@ -1498,8 +1510,9 @@ def init_api_routes(app_override=None):
                 return Response(content=resp.content, media_type=content_type)
             else:
                 return Response(content=f"Failed to fetch Manchester image: {resp.status_code}", status_code=resp.status_code)
-        except Exception as e:
-            return Response(content=f"Error fetching Manchester image: {e}", status_code=500)
+        except Exception:
+            logger.exception("Error fetching Manchester image")
+            return Response(content="Error fetching Manchester image", status_code=500)
 
     # JTS image cache: (sys_id, page, width) -> (content, content_type)
     _jts_image_cache = _make_image_cache('image_jts')
@@ -1555,8 +1568,9 @@ def init_api_routes(app_override=None):
                 return Response(content=resp.content, media_type=content_type)
             else:
                 return Response(content=f"Failed to fetch JTS image: {resp.status_code}", status_code=resp.status_code)
-        except Exception as e:
-            return Response(content=f"Error fetching JTS image: {e}", status_code=500)
+        except Exception:
+            logger.exception("Error fetching JTS image")
+            return Response(content="Error fetching JTS image", status_code=500)
 
     def _extract_folio_number(shelfmark: str) -> int:
         """Extract folio number from Oxford shelfmark like 'MS heb. f.21/21' -> 21"""
@@ -2508,7 +2522,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.error(f"Export Excel error: {e}")
             return Response("Export failed", status_code=500)
@@ -2674,7 +2688,7 @@ def init_api_routes(app_override=None):
                 # returning an outage envelope, because an unknown value there is a
                 # bad REQUEST and not a service state -- so it must not be dressed
                 # up as one.
-                return Response(str(e), status_code=400)
+                return _export_bad_request(e)
 
             status = envelope.get('status')
             if status == 'busy':
@@ -2757,7 +2771,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.error(f"Export Word error: {e}")
             return Response("Export failed", status_code=500)
@@ -2791,7 +2805,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.error(f"Export Parallels Excel error: {e}")
             return Response("Export failed", status_code=500)
@@ -2824,7 +2838,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.error(f"Export Parallels Word error: {e}")
             return Response("Export failed", status_code=500)
@@ -2884,7 +2898,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.exception(f"Export JSON error: {e}")
             return Response("Export failed", status_code=500)
@@ -2941,7 +2955,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.exception(f"Export Parallels JSON error: {e}")
             return Response("Export failed", status_code=500)
@@ -2965,7 +2979,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.error(f"Export Browse Word error: {e}")
             return Response("Export failed", status_code=500)
@@ -3004,7 +3018,7 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
-            return Response(str(e), status_code=400)
+            return _export_bad_request(e)
         except Exception as e:
             logger.error(f"Export List Excel error: {e}")
             return Response("Export failed", status_code=500)
