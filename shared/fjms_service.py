@@ -4445,7 +4445,7 @@ def _parse_marc_bib_string(marc_str: str) -> dict:
         result['year'] = year_match.group(1)
 
     # Extract page references - Hebrew patterns first (more common in MARC)
-    heb_match = re.search(r"עמ(?:וד|['\u2019])\s*([\w\d,/ -–]+?)(?:\s*\(|$)", s)
+    heb_match = re.search(r"עמ(?:וד|['\u2019])\s*([\w\d,/ \-–]+?)\.?(?:\s*\(|$)", s)
     if heb_match:
         result['pages'] = heb_match.group(1).strip().rstrip('.')
     else:

@@ -75,8 +75,9 @@ def register_chatgpt_jobs(app, handlers, prepare, finish, owner):
                 job.response = Response(status_code=200)
             else:
                 job.response = finish(response)
-        except ValueError as exc:
-            job.response = error('chatgpt_storage_limit', str(exc), 503)
+        except ValueError:
+            job.response = error('chatgpt_storage_limit',
+                                 'Search results could not be stored within the transfer allowance; narrow the query or try later.', 503)
         except TimeoutError:
             job.response = error('research_job_timeout', 'Search exceeded the background job allowance. No complete result is available.', 504)
         except asyncio.CancelledError:

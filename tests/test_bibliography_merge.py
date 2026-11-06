@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Tests for bibliography helpers in shared/fjms_service.py."""
 
+import pytest
+
 from shared.fjms_service import (
     format_page_ref, _parse_marc_bib_string,
     _parse_marc_annotations, strip_marc_annotation_suffix, _ts_symbol,
@@ -64,6 +66,25 @@ class TestParseMarcBibString:
     def test_hebrew_page_range(self):
         result = _parse_marc_bib_string("שלום, כתבי יד, עמ' 15-20")
         assert result['pages'] == '15-20'
+
+    def test_hebrew_letter_pages_and_en_dash(self):
+        result = _parse_marc_bib_string("מחבר, כותרת, עמ' א–יב")
+        assert result['pages'] == 'א–יב'
+
+    @pytest.mark.parametrize('pages', ['15', '15-20', 'א–יב'])
+    @pytest.mark.parametrize('suffix', ['.', '. (דיון)', '.   (דיון)'])
+    def test_hebrew_pages_with_terminal_period(self, pages, suffix):
+        result = _parse_marc_bib_string(f"מחבר, כותרת, עמ' {pages}{suffix}")
+        assert result['pages'] == pages
+
+    def test_page_field_does_not_consume_annotation(self):
+        result = _parse_marc_bib_string("מחבר, כותרת, עמ' 15–20 (דיון)")
+        assert result['pages'] == '15–20'
+
+    @pytest.mark.parametrize('pages', ['<15>', '<15>.', '15<script>.', '15<script>. (דיון)'])
+    def test_page_field_does_not_accept_markup(self, pages):
+        result = _parse_marc_bib_string(f"מחבר, כותרת, עמ' {pages}")
+        assert result['pages'] == ''
 
     def test_year_extraction(self):
         result = _parse_marc_bib_string("Author, Title from 1523 edition")
