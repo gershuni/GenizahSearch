@@ -89,7 +89,7 @@ Full reference, curl examples, and interactive Swagger UI: [docs/SEARCH_API.md](
 
 ## Getting Started
 
-### Web (Recommended)
+### Web 
 
 Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Genizah Search immediately.
 
@@ -102,8 +102,6 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 1. **Download:** the installer (`GenizahSearchPro_V9.14.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
-
-> **Antivirus Note:** Some antivirus software (Avast, AVG, Windows Defender) may flag the installer as suspicious. These are **false positives** caused by PyInstaller packaging. See [ANTIVIRUS_INFO.txt](ANTIVIRUS_INFO.txt) for details and solutions.
 
 ---
 
@@ -150,4 +148,4 @@ then the steps it prints.
 
 **Acknowledgments:**
 Assisted by **Claude**, **Gemini**, and **GPT**.
-Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
+Special thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
