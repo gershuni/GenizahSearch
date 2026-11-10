@@ -1,6 +1,6 @@
 ---
 name: release
-description: "Release GenizahSearch — version bump, What's New drafting, code review, build, deploy, GitHub release. Supports: web-only, desktop-only, or both."
+description: "Release GenizahSearch — version bump, What's New drafting, code review, release PR, publish, build, GitHub release, deploy. Supports: web-only, desktop-only, or both."
 user-invocable: true
 ---
 
@@ -8,7 +8,34 @@ user-invocable: true
 
 You are orchestrating a release of GenizahSearch. This is a multi-step, partially interactive process. Follow each phase in order. Do NOT skip phases. Mark each phase clearly in your output.
 
+## Where a release happens
+
+- **This checkout is the development repository** (`origin`). All release changes reach its
+  `master-main` through a pull request that the owner squash-merges in the browser. Never commit on
+  `master-main`, never push it, and never run `gh pr merge`.
+- **The public repository receives only `master-main` and tags, through the publishing step kept in
+  the private repository.** The GitHub Release and the website deploy also go only through the
+  wrappers kept there. Never push to the public repository and never run `gh release create` or
+  `gh release upload` yourself. The exact commands are in the private repository's
+  `docs/guides/RELEASE_PROCEDURE.md`; read it before Phase 7.
+- **Order:** release PR merged -> publish that commit -> the full public CI passes on exactly that
+  commit -> (desktop or both) build the installer from exactly that commit and test it -> tag the
+  commit and publish the tag -> GitHub Release -> deploy that commit. The tag comes last of the
+  checks, because a public tag can never be moved: anything that fails before it (the publishing
+  step, the public CI, the packaging smoke, the installer test) is fixed through a new PR, and the
+  fixed commit becomes the release commit under the same version.
+- **The owner approves each outward step** (opening the PR, the real publish, the release, the
+  deploy) in that moment. The owner runs the deploy.
+
 ## Phase 0: Gather Release Intent
+
+First stand on the current development `master-main`, so that everything below is read from the
+commit being released (not from a stale or feature branch):
+
+```bash
+git fetch origin
+git switch --detach origin/master-main
+```
 
 Ask the user:
 1. **What version?** (suggest next patch/minor/major based on current `version.py`)
@@ -16,6 +43,12 @@ Ask the user:
 3. **One-line summary** of the release theme (e.g., "Image adjustment controls")
 
 Read `version.py` to show the current version. Read recent `git log --oneline -20` and `docs/OPEN_ISSUES.md` to understand what's changed since last release.
+
+Then start the release branch at that same commit:
+
+```bash
+git switch -c release/vX.Y.Z
+```
 
 ## Phase 1: Pre-Flight Code Review
 
@@ -33,7 +66,7 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
   release that touches the Atlas builder or its baked asset also needs the atlas-bake lane CI
   keeps separate (`requirements-atlas-bake.txt` deps): `pip install -r requirements-atlas-bake.txt`
   then `pytest tests/atlas_bake -m atlas_bake`; the default runner deselects it.
-- **`python -m ruff check .` — explicit ruff pass** (per project memory: v7.12.0 CI failed on F401 unused imports; pre-flight must run ruff as its own line item, not implied by pytest)
+- **`python -m ruff check .` — explicit ruff pass** (v7.12.0 CI failed on F401 unused imports; pre-flight must run ruff as its own line item, not implied by pytest)
 - `python scripts/check_docs.py` — documentation health OK? (NOTE: on Windows console may fail with UnicodeEncodeError on emoji — that's environment-only, not a blocker)
 - **`requirements.txt` vs `requirements-lock.txt` consistency** — every runtime dep in `requirements.txt` must have a matching pin in `requirements-lock.txt`. CI installs from the lock file, so a `requirements.txt` addition that's not lock-pinned breaks CI on the release commit. Diff check:
   ```bash
@@ -42,12 +75,16 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
     <(grep -v '^#' requirements.txt | sed 's/[<>=!].*//' | tr '[:upper:]' '[:lower:]' | sort -u) \
     <(grep -v '^#' requirements-lock.txt | sed 's/==.*//' | tr '[:upper:]' '[:lower:]' | sort -u)
   ```
-  If anything prints, those packages are in `requirements.txt` but absent from the lock file — block the release until they're added to `requirements-lock.txt`. (Phase 95 / v7.14.0 hit this: pymupdf was in `requirements.txt` but missing from the lock, so CI failed post-push.)
+  If anything prints, those packages are in `requirements.txt` but absent from the lock file — block the release until they're added to `requirements-lock.txt`. (v7.14.0 hit this: pymupdf was in `requirements.txt` but missing from the lock, so CI failed post-push.)
 - No `TODO(release)` or `FIXME(urgent)` markers in recently changed files
 - `OPEN_ISSUES.md` — any critical/blocking issues still open?
 - Grep for `print(` debug statements in recently committed code (last 5 commits)
 - Version consistency: `version.py`, `CompileScriptGenizah.iss`, `version_info.txt`, `README.md` all match current version (not yet bumped)
-- **`tests/test_release_artifacts.py` `_TARGET_VERSION`** — per project memory, `bump_version.py` does NOT update this constant. Check its current value matches the pre-bump version; you'll need to bump it manually in Phase 3.
+- **`tests/test_release_artifacts.py` `_TARGET_VERSION`** — `bump_version.py` does NOT update this constant. Check its current value matches the pre-bump version; you'll need to bump it manually in Phase 3.
+
+The development repository runs only the light CI check; the full suite runs in the public
+repository after publishing (Phase 7). The local runs above are what stands between a mistake and a
+red public CI, so do not skip them.
 
 **Report** findings to the user. If there are blockers, stop and ask how to proceed. If there are warnings, list them and ask for confirmation to continue.
 
@@ -68,7 +105,7 @@ This is a multi-round interactive process. Do NOT rush it.
 ### Step 2b: Draft requested release texts
 Present drafts for whichever items the user wants. The full menu is:
 
-1. **CHANGELOG.md entry** — Full detailed changelog section with `### New Features`, `### Improvements`, `### Bug Fixes` subsections as appropriate. Technical but readable.
+1. **CHANGELOG.md entry** — Full detailed changelog section with `### New Features`, `### Improvements`, `### Bug Fixes` subsections as appropriate. Technical but readable. Cite versions, not PR numbers: development PR numbers do not exist in the public repository.
 
 2. **README.md "What's New" section** — 1-2 paragraphs + bullet points for the version. User-facing, not too technical.
 
@@ -88,6 +125,9 @@ Present drafts for whichever items the user wants. The full menu is:
    - `web/pages/help.py` — both `_create_english_content()` and `_create_hebrew_content()`
    - `Help.html` — desktop help file
 
+Every text that goes public (changelog, README, GitHub Release notes, tag message) describes only
+the change and its observable effects for users.
+
 ### Step 2c: Review loop
 Present all requested drafts to the user at once. Ask:
 > "Please review these drafts. Tell me what to change — wording, emphasis, additions, removals. We can do as many rounds as you need."
@@ -99,7 +139,7 @@ Iterate until the user approves. Pay attention to:
 
 ## Phase 3: Version Bump + Apply Texts
 
-Once texts are approved (or Phase 2 was skipped):
+Once texts are approved (or Phase 2 was skipped), on the release branch:
 
 1. Run `python scripts/bump_version.py X.Y.Z` — updates version.py, version_info.txt, CompileScriptGenizah.iss, README.md
 2. Apply all approved text changes (only those drafted in Phase 2):
@@ -119,11 +159,12 @@ Once texts are approved (or Phase 2 was skipped):
 
 ## Phase 4: "Did You Forget?" Checklist
 
-Present this checklist BEFORE building or deploying. Adapt it based on what was done in Phase 2 (mark N/A for skipped items):
+Present this checklist BEFORE the release PR. Adapt it based on what was done in Phase 2 (mark N/A for skipped items):
 
 ```
 RELEASE CHECKLIST — vX.Y.Z
 ==============================
+[ ] On a release branch from origin/master-main (not on master-main)
 [ ] Version bumped in all files (version.py, .iss, version_info.txt, README)
 [ ] tests/test_release_artifacts.py _TARGET_VERSION manually bumped (bump_version.py misses it)
 [ ] CHANGELOG.md has new section with correct date
@@ -133,7 +174,7 @@ RELEASE CHECKLIST — vX.Y.Z
 [ ] Desktop What's New bar + dialog updated (or N/A)
 [ ] Help pages updated (or N/A)
 [ ] OPEN_ISSUES.md up to date
-[ ] All tests passing
+[ ] All tests passing (default, render_smoke for web, gui for desktop)
 [ ] ruff explicit pass (python -m ruff check .)
 [ ] requirements.txt ↔ requirements-lock.txt diff is empty (CI uses the lock file; missing deps break CI)
 [ ] No uncommitted changes (besides release changes)
@@ -146,7 +187,7 @@ FOR WEB:
 [ ] No breaking changes to web-only features
 ```
 
-Ask: "Anything else you want to verify before we build and deploy?"
+Ask: "Anything else you want to verify before the release PR?"
 
 ## Phase 5: Release Summary + Confirmation
 
@@ -169,15 +210,74 @@ Example:
 ```
 ACTIONS — vX.Y.Z: <theme>
 ===================================
-Commit & tag:  vX.Y.Z on master-main
-Desktop build: PyInstaller + Inno Setup installer   (or "skipped — web only")
-Web deploy:    deploy.sh on the server                      (or "skipped — desktop only")
-GitHub release: with installer upload                (or "skipped — web only")
+Release PR:     release/vX.Y.Z -> master-main in the development repository (you merge it)
+Publish:        the merged commit through the publishing step, then the full public CI on it
+Desktop build:  PyInstaller + Inno Setup from exactly that commit, then your installer test
+                                                                    (or "skipped — web only")
+Tag:            vX.Y.Z on that commit, published on its own
+GitHub release: through the release wrapper, with the installer    (or "skipped — web only")
+Web deploy:     the deploy step, exactly that commit (you run it)   (or "skipped — desktop only")
 ```
 
-Ask: "Does this look right? Proceed with build and deploy?"
+Ask: "Does this look right? Proceed with the release PR?"
 
-## Phase 6: Build (Desktop only — skip for web-only releases)
+## Phase 6: Release PR (development repository)
+
+1. **Stage the release changes by name** and commit. Never `git add -A` or `git add .`: the
+   checkout holds data and local files that must never be committed.
+   ```bash
+   git status --porcelain
+   git add version.py version_info.txt CompileScriptGenizah.iss README.md CHANGELOG.md CLAUDE.md
+   git add <every other file this release changed, by name>
+   git commit -F <message file>     # first line: release: vX.Y.Z — <theme>
+   ```
+2. **Push the branch and open the PR** (ask first). The squash-merge uses the PR title as the
+   commit message, so the title is the release commit's message: `release: vX.Y.Z — <theme>`.
+   ```bash
+   git push -u origin HEAD         # the release branch you are on (release/vX.Y.Z, or a -fixN branch)
+   gh pr create --base master-main --title "release: vX.Y.Z — <theme>" --body-file <body file>
+   ```
+3. **The owner squash-merges it in the browser.** Note the merge commit's FULL id (40 characters)
+   and wait until the development repository's light CI check on EXACTLY that commit has
+   completed successfully (a run for another commit proves nothing):
+   ```bash
+   git fetch origin
+   git log -1 --format=%H origin/master-main
+   gh run list --commit <full merge commit id> --json headSha,workflowName,status,conclusion
+   ```
+   A red light check stops the release; fix it as described in "Fixing a failure before the
+   tag" (after Phase 8), never on this already merged branch. From the merge until the tag is
+   published (Phase 9), nothing else may be merged into the development `master-main`: the release
+   tag must point at its tip. Keep the recorded id: every later phase uses exactly it.
+
+## Phase 7: Publish, Public CI
+
+1. **Publish the merged commit** through the publishing step in the private repository: a dry run
+   first, then the real run with the merged commit as the expected candidate (the owner approves
+   the real run). No tag yet. The commands are in `docs/guides/RELEASE_PROCEDURE.md` there.
+   - If it **refuses**, nothing was published. Report what it names and stop; never work around it.
+2. **REQUIRED — the full public CI must pass on exactly that commit.** Only the public repository
+   runs the heavy jobs (Ubuntu, Python 3.11, installs from `requirements-lock.txt`). The local
+   run can be green while CI fails to even collect tests (v7.14.0: 8 collection errors on
+   `ModuleNotFoundError: No module named 'fitz'`). Watch the public CI run for the published
+   commit (the procedure document shows how). **If it fails:** STOP. No tag, no release, no
+   deploy. Fix it as described in "Fixing a failure before the tag" (after Phase 8).
+
+## Phase 8: Build (Desktop only — skip for web-only releases)
+
+Build from a checkout that is EXACTLY the published commit, with a clean `git status` and the data
+folders the installer bundles (the main checkout, not a worktree: worktrees have no data). Check out
+the recorded id itself, never "the newest `master-main`":
+
+```bash
+git switch --detach <full published commit id>
+git rev-parse HEAD                 # must equal the published commit
+git status --porcelain             # must print nothing
+```
+
+If anything in this phase fails (the build, the packaging smoke, Inno Setup, the installer test)
+and the fix needs a change in the repository, follow "Fixing a failure before the tag" below.
+Nothing is tagged yet, so the version number stays.
 
 > **Running `build_app.bat` reliably (learned the hard way — v8.0.0 burned ~5 failed
 > attempts).** A bare `cmd /c build_app.bat` from the PowerShell/Bash tool fails with
@@ -195,7 +295,7 @@ Ask: "Does this look right? Proceed with build and deploy?"
 >
 > **Proven invocation (PowerShell tool; OK to run in background):**
 > ```powershell
-> Set-Location -LiteralPath 'C:\Genizahsearch'; [Environment]::CurrentDirectory = 'C:\Genizahsearch'; cmd /c "C:\Genizahsearch\build_app.bat"; Write-Output "BUILD_EXIT=$LASTEXITCODE"
+> $repo = (git rev-parse --show-toplevel) -replace '/', '\'; Set-Location -LiteralPath $repo; [Environment]::CurrentDirectory = $repo; cmd /c "$repo\build_app.bat"; Write-Output "BUILD_EXIT=$LASTEXITCODE"
 > ```
 
 1. Run `build_app.bat` (via the invocation above) — PyInstaller build (several minutes)
@@ -210,114 +310,108 @@ Ask: "Does this look right? Proceed with build and deploy?"
      (`python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec`, `build_app.bat:13-21`), so the
      maintained `collect_all('pymupdf')`/`collect_all('zstandard')`/`collect_all('lxml')` calls and the
      `fitz`/`openpyxl`/`defusedxml` hidden imports are used as committed. The build does not rewrite
-     the spec; **commit any spec edit before building**.
+     the spec; a spec change goes through the release PR like any other file.
 2. Run Inno Setup CLI to create installer (same CWD caveat — full paths):
    ```powershell
-   Set-Location -LiteralPath 'C:\Genizahsearch'; [Environment]::CurrentDirectory = 'C:\Genizahsearch'; & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'C:\Genizahsearch\CompileScriptGenizah.iss'; Write-Output "ISCC_EXIT=$LASTEXITCODE"
+   $repo = (git rev-parse --show-toplevel) -replace '/', '\'; Set-Location -LiteralPath $repo; [Environment]::CurrentDirectory = $repo; & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "$repo\CompileScriptGenizah.iss"; Write-Output "ISCC_EXIT=$LASTEXITCODE"
    ```
    - Verify the output `.exe` installer was created (`dist/GenizahSearchPro_VX.Y.Z_Setup.exe`)
    - (Inno compresses the ~2.3 GB payload with LZMA — allow ~5 min.)
-3. Report build output sizes to user
+3. Report build output sizes to user. `git status --porcelain` must still print nothing.
 
 ### Desktop Installer Test Gate
 
-**Do NOT proceed to deploy until the user confirms they tested the installer.**
+**Do NOT proceed until the user confirms they tested the installer.**
 
 Ask: "Please install and launch the built installer to verify it works. Confirm when ready to continue."
 
-Wait for the user's confirmation before moving to Phase 7.
+Wait for the user's confirmation before moving to Phase 9.
 
-## Phase 7: Commit, Tag & Deploy
+### Fixing a failure before the tag
 
-After user confirms:
+A failure after the release PR is merged — the light check (Phase 6), the public CI (Phase 7), or
+the build, packaging smoke or installer test (Phase 8) — is fixed under the same version, because
+nothing is tagged yet. The checkout is then on the merged release branch
+or detached at the published commit, and neither is a place for the fix: start a NEW branch from
+the current development `master-main` first (the freeze means it is still the published commit):
 
-1. **Stage and commit** all release changes:
-   ```
-   git add -A
-   git commit -m "release: vX.Y.Z — <theme>"
-   ```
+```bash
+git fetch origin
+git switch -c release/vX.Y.Z-fix1 origin/master-main
+```
 
-2. **Tag** the release:
-   ```
-   git tag -a vX.Y.Z -m "vX.Y.Z: <theme>"
-   ```
+Make the fix there, then run Phase 6 again with this branch (push it, open its PR titled
+`release: vX.Y.Z — fix: <what>`; the owner merges it; its light check on the new merge commit),
+then Phases 7-8 for that merge commit, which becomes the release commit. Number further fixes `-fix2`, `-fix3`.
 
-3. **Push** (ask for confirmation first):
-   ```
-   git push origin master-main --tags
-   ```
+## Phase 9: Tag
 
-3.5. **REQUIRED — Watch CI on the release commit.** Never assume CI will pass just because the local pytest run passed. CI installs from `requirements-lock.txt` (not `requirements.txt`), runs on Ubuntu-latest with Python 3.11, and exercises a different subset of the suite. The local test run can be green while CI fails to even collect tests (the v7.14.0 release hit exactly this: 8 collection errors on `ModuleNotFoundError: No module named 'fitz'` because `pymupdf` was missing from the lock file).
+Only after the full public CI passed on the recorded commit (Phase 7) and, for a desktop or both
+release, after the user confirmed the installer test (Phase 8). Tag exactly that commit
+(annotated; the tagger is this checkout's configured identity), push the tag to the development
+repository, and publish the tag on its own through the publishing step: a dry run, then the real
+run naming the tag as the release tag and the same commit as the expected candidate (owner
+approves):
 
-   ```bash
-   # Find the latest CI run for the release commit
-   gh run list --branch master-main --limit 3
-   # Once you know the run ID, watch until it finishes
-   gh run watch <run-id>  # blocks until completion, streams logs
-   ```
+```bash
+git tag -a vX.Y.Z <full published commit id> -m "vX.Y.Z: <theme>"
+git push origin vX.Y.Z
+```
 
-   Alternatively, use the Monitor tool with a polling `gh run view` loop until the run reaches `completed` status.
+Once the tag is public, other PRs may be merged again.
 
-   **If CI passes:** continue to step 4 (deploy web).
+## Phase 10: GitHub Release — DESKTOP OR BOTH ONLY. NEVER for web-only releases.
 
-   **If CI fails:** STOP. Do NOT deploy to production with a red CI run on the release commit. Read the failure logs (`gh run view <id> --log-failed`), diagnose root cause, push a hotfix commit, and re-watch CI. Only proceed to deploy once CI is green. (For the v7.14.0 incident the user accepted that web+desktop were already deployed and live, but the right default is to gate deploy on CI — not parallel.)
+**Why this matters:** the installed desktop app polls `https://api.github.com/repos/gershuni/GenizahSearch/releases/latest` (`UpdateCheckerThread` in `desktop/gui_threads.py`) and prompts every desktop user to update whenever a new tag becomes `latest`. A web-only GitHub release has no installer attached, so the prompt sends users to a release page they cannot install from. **Past incident: v7.9.3 (web-only) created a release, every desktop user was prompted to "update" to a no-installer page.**
 
-4. **Deploy web** (if web or both):
-   - Run: `ssh genizah-prod "cd ~/GenizahSearch && ./deploy.sh master-main <full commit id>"` (or
-     run `deploy.bat` and paste the id when it asks), with the id of the published release commit whose CI just passed:
-     deploy.sh deploys exactly that commit and refuses an id that is not yet published
-   - Verify service restarted successfully
+- **If web-only:** SKIP this phase entirely. The tag itself is fine (tags do not appear in
+  `/releases/latest`); only the GitHub Release object triggers the desktop update prompt.
+- **If desktop or both:** make the release only through the release wrapper in the private
+  repository (see its `docs/guides/RELEASE_PROCEDURE.md`): it checks the build output and the
+  notes, freezes the installer, and creates the release only for a published tag whose public CI
+  passed. Run its check first and show the owner what it reports; the owner approves the frozen
+  installer by its hash before the real run. If it refuses, report what it names and stop.
 
-5. **Web smoke test** (if web or both):
+## Phase 11: Deploy (web or both)
+
+1. **Deploy exactly the published commit** with the deploy step in the private repository (its
+   procedure document): it checks that the id is published and that the full public CI passed on
+   it, then the server deploys that commit and nothing else. **The owner runs it**; give the
+   command and wait for the output.
+   - Sidecar databases that the release needs go to the server with their own deploy scripts,
+     in the order the release notes say (code first, or data first).
+2. **Web smoke test:**
    - Use WebFetch to GET `https://genizahsearch.com` — verify HTTP 200
    - Check that the response body contains the new version string (X.Y.Z)
-   - If the smoke test fails, alert the user immediately and suggest rollback (see Phase 9)
-
-6. **Create GitHub Release** — **DESKTOP OR BOTH ONLY. NEVER for web-only releases.**
-
-   **Why this matters:** the installed desktop app polls `https://api.github.com/repos/gershuni/GenizahSearch/releases/latest` (`UpdateCheckerThread` in `desktop/gui_threads.py`) and prompts every desktop user to update whenever a new tag becomes `latest`. A web-only GitHub release has no installer attached, so the prompt sends users to a release page they cannot install from. **Past incident: v7.9.3 (web-only) created a release, every desktop user was prompted to "update" to a no-installer page.**
-
-   - **If web-only:** SKIP this step entirely. Do NOT run `gh release create`. The git tag itself is fine (tags do not appear in `/releases/latest`); only the GitHub Release object triggers the desktop update prompt.
-   - **If desktop or both:**
-     ```
-     gh release create vX.Y.Z --title "vX.Y.Z: <theme>" --notes-file -
-     ```
-     - Then upload the installer (required — a release without one strands desktop users):
-     ```
-     gh release upload vX.Y.Z <installer-path>
-     ```
-
-7. **Post-deploy verification**:
+   - If the smoke test fails, alert the user immediately and suggest rollback (see Phase 13)
+3. **Post-deploy verification**:
    - For web: confirm smoke test passed, suggest user also checks manually
    - For desktop: remind to verify the installer download works from GitHub releases
 
-## Phase 8: Wrap Up
+## Phase 12: Wrap Up
 
 - Summarize what was released
-- **Final CI confirmation:** run `gh run list --branch master-main --limit 3` and confirm the latest run (release commit + any hotfixes) is `completed success`. If still in-progress, set a Monitor and don't declare the release done until it lands green.
+- Put the main checkout back on its branch (`git switch master-main`, then
+  `git pull --ff-only origin master-main`); a desktop build left it on the release commit.
+- **Final CI confirmation:** the public CI run on the published commit is `completed success`.
+  If still in progress, don't declare the release done until it lands green.
 - List any deferred items or known issues for next release
 - Remind about any follow-up tasks (e.g., "announce to users", "monitor error tracking")
 
-## Phase 9: Rollback (only if something goes wrong)
+## Phase 13: Rollback (only if something goes wrong)
 
 This phase is NOT part of the normal flow. Only use if the deploy fails or the user reports a critical issue.
 
-**Web rollback:**
-```bash
-# SSH to server, revert to previous commit
-ssh genizah-prod "cd ~/GenizahSearch && git checkout HEAD~1 && sudo systemctl restart genizah-web"
-```
+**Web rollback:** deploy the previous published commit with the same deploy step (the server
+deploys any published commit, and only those). Never change files or check out commits on the
+server by hand.
 
 **Desktop rollback:**
 - The previous installer is still on GitHub releases — users can download it
 - No action needed server-side
 
-**Git rollback (if needed):**
-```bash
-# Revert the release commit (creates a new commit, safe)
-git revert HEAD --no-edit
-git push origin master-main
-# Do NOT delete the tag yet — discuss with user first
-```
+**Code rollback (if needed):** revert the release commit through a new PR in the development
+repository, then publish it like any other change. Never delete, move or re-point a public tag:
+public tags never change.
 
 Always explain what happened and why before executing any rollback.
