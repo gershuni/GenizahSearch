@@ -82,7 +82,7 @@ Write-Host "   this sidecar was built from $Contract"
 # the stale reader meets the new sidecar indefinitely. deploy.sh writes .deployed_revision
 # after a successful restart, so that file is the only honest answer.
 ssh $RemoteHost "set -e; cd $RemoteRepo; test -s .deployed_revision; git fetch -q origin; git merge-base --is-ancestor $Contract `$(cat .deployed_revision)"
-if ($LASTEXITCODE -ne 0) { Fail "the running genizah-web does not have $Contract, the commit this sidecar was built from -- or $RemoteRepo/.deployed_revision is missing, which means the service has not completed a ./deploy.sh run since this check was introduced. A checkout alone is not enough: the process in memory is what reads the sidecar. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main'), then re-run this. Nothing was uploaded" }
+if ($LASTEXITCODE -ne 0) { Fail "the running genizah-web does not have $Contract, the commit this sidecar was built from -- or $RemoteRepo/.deployed_revision is missing, which means the service has not completed a ./deploy.sh run since this check was introduced. A checkout alone is not enough: the process in memory is what reads the sidecar. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main <published commit id>'), then re-run this. Nothing was uploaded" }
 
 Write-Host "== 3/4 upload: $Sidecar -> ${RemoteHost}:$RemotePath"
 scp $Sidecar "${RemoteHost}:$RemotePath"

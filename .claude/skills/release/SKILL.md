@@ -263,7 +263,9 @@ After user confirms:
    **If CI fails:** STOP. Do NOT deploy to production with a red CI run on the release commit. Read the failure logs (`gh run view <id> --log-failed`), diagnose root cause, push a hotfix commit, and re-watch CI. Only proceed to deploy once CI is green. (For the v7.14.0 incident the user accepted that web+desktop were already deployed and live, but the right default is to gate deploy on CI — not parallel.)
 
 4. **Deploy web** (if web or both):
-   - Run: `ssh genizah-prod "cd ~/GenizahSearch && ./deploy.sh"`
+   - Run: `ssh genizah-prod "cd ~/GenizahSearch && ./deploy.sh master-main <full commit id>"` (or
+     run `deploy.bat` and paste the id when it asks), with the id of the published release commit whose CI just passed:
+     deploy.sh deploys exactly that commit and refuses an id that is not yet published
    - Verify service restarted successfully
 
 5. **Web smoke test** (if web or both):
