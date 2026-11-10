@@ -142,7 +142,16 @@ Planning records, operations guides and research notes live in a separate privat
 checked out beside this one at `C:\GenizahSearch-private` with the same relative paths. Tests
 find it through `GENIZAH_PRIVATE_DIR` or that sibling folder, and skip when it is absent. Never
 copy its contents, people's names, machine paths, server details or owner quotes into this public
-repository. Write planning notes there, never here.
+repository. Write planning notes there, never here. Its `docs/guides/REPOSITORY_LAYOUT.md` maps the
+repositories and folders.
+
+**History before 2026-11-10.** This repository's history begins on 2026-11-10.
+- Commit ids from before then (in this file, `CHANGELOG.md` and the private plans) belong to the
+  earlier repository and do not exist here.
+- PR numbers belong to the repository that holds them. Numbering began again at #1 on 2026-11-10, so a
+  number from before then names a different PR today.
+- Work begun there is carried over as a patch on a new branch from `origin/master-main`, never merged,
+  cherry-picked or rebased across. `REPOSITORY_LAYOUT.md` gives the steps.
 
 ## Code Style
 
