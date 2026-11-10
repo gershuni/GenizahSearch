@@ -1,0 +1,178 @@
+{
+  "description": "Three RTL words in SEPARATE rawdict spans with realistic word spacing (~10pt edge gap, ~0.9*em). De-space splits them by the EDGE-GAP rule, NOT by the span boundary (span/font is no longer a corroboration signal — 2026-05-31 revision). Must NOT collapse to the spike-residual over-merge 'ישנואצליוסף'.",
+  "expected_despaced": "ישנו אצל יוסף",
+  "expected_reordered": "ישנו אצל יוסף",
+  "lines": [
+    {
+      "bbox": [
+        310.5,
+        40.0,
+        399.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "י",
+              "bbox": [
+                392.5,
+                40.0,
+                399.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                386.5,
+                40.0,
+                393.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "נ",
+              "bbox": [
+                380.5,
+                40.0,
+                387.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                374.5,
+                40.0,
+                381.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            }
+          ]
+        },
+        {
+          "font": "FrankRuehl",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "א",
+              "bbox": [
+                357.5,
+                40.0,
+                364.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 4
+            },
+            {
+              "c": "צ",
+              "bbox": [
+                351.5,
+                40.0,
+                358.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 5
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                345.5,
+                40.0,
+                352.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 6
+            }
+          ]
+        },
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "י",
+              "bbox": [
+                328.5,
+                40.0,
+                335.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 7
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                322.5,
+                40.0,
+                329.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 8
+            },
+            {
+              "c": "ס",
+              "bbox": [
+                316.5,
+                40.0,
+                323.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 9
+            },
+            {
+              "c": "ף",
+              "bbox": [
+                310.5,
+                40.0,
+                317.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 10
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

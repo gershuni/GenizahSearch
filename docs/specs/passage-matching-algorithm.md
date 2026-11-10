@@ -1,0 +1,755 @@
+# Passage-Matching Algorithm (v1)
+
+**Status:** specification. Implementable without access to any gitignored research tree.
+**Scope:** the character-level passage matcher — normalization, gram indexing, candidate
+generation, verification, acceptance boundaries, hygiene, and the interactive query budget.
+**Audience:** anyone implementing or auditing passage retrieval in either app.
+
+This document exists because the algorithm had no single home. It was distributed across a
+gitignored method report (which specifies fragment-to-fragment matching in full but treats the
+fragment-to-reference direction at design level only), the code of three research scripts, and
+roughly ten `discovery-*` specs that each cover one downstream concern. Every constant below is
+traceable — see the source map at the end.
+
+**Vocabulary note.** Reference corpora are named by their internal source codes (`sefaria`, `ja`,
+`msource`).
+
+---
+
+## 1. What problem this solves
+
+Given a query text and a corpus of manuscript transcriptions, find the corpus locations that
+carry the same passage — robustly to:
+
+- **character noise.** The transcription corpus has a measured letter-level character error rate
+  of **20.1% micro-average, 16.6% median page** (p25 8.9%, p90 42%), from aligning 209 pages
+  against independent human transcriptions.
+- **unreliable word segmentation.** The dominant error class is split and merged tokens, plus
+  whole lines of bracket shards. This is why the algorithm is character-based: no amount of
+  per-term fuzziness repairs a boundary error.
+- **orthographic variation.** Plene/defective spelling, final-letter forms, Judeo-Arabic
+  diacritics.
+- **scribal variation.** No two manuscript copies of a text are verbatim identical.
+- **partial overlap.** A 50-letter quotation inside two otherwise unrelated pages is a
+  *positive*, not noise.
+
+Consequence of the noise measurement, and the fact that drives every threshold below: two
+independent copies of *identical* text at 15% CER per side differ by **26–30% of letters**. An
+edit-density acceptance threshold of 0.30 therefore sits exactly **at** the two-sided noise
+floor.
+
+---
+
+## 2. Why seed-and-extend, and not set similarity or embeddings
+
+Recorded because the question recurs and the answer is counter-intuitive.
+
+1. **The arithmetic.** At 10% CER per side, two copies of identical text have character 4/5/6-gram
+   Jaccard of about 0.27 / 0.21 / 0.17. A 32-band by 4-row LSH captures 2–15% of true pairs in
+   that regime; widening bands to reach J of about 0.2 pulls in the 0.03–0.05 background Jaccard
+   of *unrelated* Hebrew pages. There is no usable operating point.
+2. **The quotation case is structurally invisible to windowed set similarity.** A 50-character
+   quote inside a 300-character window is Jaccard 0.09 or less with zero noise. Seed-and-extend
+   measures the right objective: *does a contiguous-ish aligned span exist?*
+3. **Published precedent.** Noisy-OCR duplicate detection measures true-duplicate Jaccard at
+   0.23–0.30, with 19% of true pairs sharing no 10-gram; a BLAST-based pipeline recovered 2–3x
+   more reuse than a set-similarity baseline on noisy OCR precisely because seed-and-extend
+   *scores* mismatches instead of requiring set overlap.
+
+Dense embeddings are deferred on the same evidence: published wins for dense retrieval over
+lexical methods are on paraphrase and allusion gold sets, not verbatim-ish reuse under noise, and
+retrieval quality degrades sharply above about 5% WER. If lexical recall ever plateaus, the
+designated fallback is a manuscript-domain encoder contrastively fine-tuned on synthetically
+noised pairs — not a general multilingual model.
+
+---
+
+## 3. Normalization — one union view (`normalizer_version: 1`)
+
+Design principle: **spaces carry no signal.** Matching operates on a space-free letter stream,
+with an offset map for projecting any matched span back onto the original text for display.
+
+Steps, in order:
+
+1. Unicode **NFC**.
+2. Fold final letters: `ך ם ן ף ץ` to `כ מ נ פ צ`.
+3. Keep **only** Hebrew base letters `U+05D0`–`U+05EA` (alef through tav). Everything else is a
+   separator and is **dropped**: nikud, cantillation, every combining mark including the
+   Judeo-Arabic upper dot `U+0307`, punctuation, brackets, geresh, gershayim, quotes,
+   apostrophes, digits, Latin, and **all whitespace**.
+4. Emit `(stream, offsets)` where `offsets[i]` is the index **in the NFC-normalized original** of
+   the letter at stream position `i`.
+
+Note the fold precedes the range test, so a final letter is folded and kept rather than dropped.
+`offsets` indexes NFC text, not the raw input — NFC may shift positions, and NFC text is what is
+stored and displayed.
+
+**Span projection** maps a stream span from `start` to `end` back to original text with optional
+context padding: take `offsets[start]` and `offsets[end-1] + 1`, expand by the pad, clamp to the
+text bounds. This is the only sanctioned way to render human-facing evidence.
+
+**The normalizer is versioned and is a hard artifact-identity input.** Any change to the
+alphabet, the folding, or the offset semantics invalidates every built index. Version it in the
+artifact manifest and refuse to load on mismatch.
+
+Designed but **not enabled**: a "matres-light" second view folding plene and defective spelling
+into the same gram set. It awaits validation on known plene/defective witness pairs. If enabled
+it must be unioned into the same index, never built as a second index.
+
+---
+
+## 4. Gram coding
+
+Character **5-grams** (`K = 5`) over the normalized stream, encoded as a base-27 positional
+integer:
+
+```
+code = 0
+for j in 0 .. K-1:
+    code = code * 27 + (ord(stream[position + j]) - 0x05D0)
+```
+
+The alphabet is 27 symbols (alef through tav after final folding), so the code space is
+`27^5 = 14,348,907` — comfortably under `2^24 = 16,777,216`. A CSR offset array therefore needs
+`27^5 + 1` entries; sizing it to `2^24 + 1` instead wastes 2.4M slots (9.7 MB at uint32) for
+simpler indexing. Either is acceptable as long as the manifest records which.
+
+A stream of length `L` yields `max(0, L - K + 1)` grams. Grams **must not cross a record
+boundary**; the builder asserts this.
+
+---
+
+## 5. Index orientation — the three arrangements
+
+The same engine admits three arrangements, distinguished only by which side is persisted. This
+distinction is the single most important thing in this document, and it was previously implicit
+in code.
+
+| Arrangement | Index persisted over | Streamed side | Cost | Use |
+|---|---|---|---|---|
+| **A. Reference-resident** | reference works | corpus records | O(corpus) per pass | Batch identification: label every record with the works it carries |
+| **B. Query-resident** | a batch of query texts | corpus records | O(corpus) per pass | Batch recovery: give one work's grams immunity from a global corpus DF cap |
+| **C. Corpus-resident** | **corpus records** | **the query** | O(query x postings admitted) | **Interactive retrieval — what a search surface needs** |
+
+A and B are both O(corpus) per pass, which is fine when hundreds of queries amortize over one
+sweep and useless for a single interactive query. **C is the inversion an interactive surface
+requires, and it is the one no research script implements.**
+
+Sections 6 through 9 are orientation-neutral. Section 10 covers what changes for C.
+
+---
+
+## 6. Candidate generation — diagonal-keyed two-hit
+
+A location becomes a candidate only if the two sides share **at least 2 distinct grams on
+(nearly) the same alignment diagonal**.
+
+- For each shared gram occurrence at positions `(pos_a, pos_b)`, compute the diagonal bucket
+  `(pos_a - pos_b) // BAND` with `BAND = 20`.
+- Accumulate per key `(a, b, bucket)` a **fixed-size** record
+  `[count, min_a, max_a, min_b, max_b]`. No position lists are stored, so memory per candidate is
+  O(1).
+- A candidate is emitted when a bucket cluster (bucket plus or minus 1, a diagonal tolerance of
+  20–40 letters) reaches `count >= MIN_ANCHORS = 2`. The cluster's min and max extents seed the
+  verification span.
+
+### 6.1 Distinctness — a decision this spec settles
+
+"Two distinct grams" needs enforcing, and the research code enforces it two different ways:
+
+- The pair-wise engine dedupes postings to the **first position per (gram, record)** before
+  accumulating, so one repeated gram cannot satisfy the two-hit rule by itself. Exact, but it
+  discards positions and therefore blurs span extents.
+- The asymmetric matcher keeps **all** positions and does not track gram identity during
+  accumulation, so two hits from one repeated gram *can* create a candidate. This is a deliberate
+  relaxation and it costs precision.
+
+**For arrangement C, do neither.** Keep all positions — accurate span extents are needed for
+display — and enforce distinctness explicitly: sort hits by `(record, bucket, gram_code)` and
+count **distinct gram codes** per cluster with a first-occurrence mask. That is one extra reduce
+over data already sorted, it is exact, and it preserves positions. Any implementation that
+adopts the relaxation instead must say so in the result envelope.
+
+---
+
+## 7. Verification
+
+For each candidate: extend the cluster extent by `MARGIN = 30` letters on each side, extract the
+two substreams, and compute Levenshtein distance (`rapidfuzz`, with a score cutoff for early
+exit).
+
+- `aligned_len = max(len(span_a), len(span_b))`
+- `density = levenshtein_distance / aligned_len` — 0 is identical, and **unrelated Hebrew letter
+  streams align at density of about 0.60**. That random floor is the reference point that makes
+  long noisy spans statistically safe.
+
+Reject if the shorter span is below the minimum-span contract (section 8), or if `density`
+exceeds the acceptance boundary.
+
+### 7.1 The two acceptance boundaries, and why there are two
+
+Under the two-hit rule, candidate survival scales as `p^2` when only one side is noisy and `p^4`
+when both are, where `p` is the probability that a single gram survives on a noisy side — two
+required anchors, times the number of noisy sides each must survive. The one-sided regime is
+therefore fundamentally easier, and it can afford a **tighter** boundary because its true
+matches are cleaner.
+
+| Regime | Span length (letters) | Max density |
+|---|---|---|
+| **One-sided** — clean query against noisy corpus | 40–99 | **0.28** |
+| | 100 and above | **0.35** |
+| **Two-sided** — noisy query against noisy corpus | 40–99 | **0.30** |
+| | 100–199 | **0.386** |
+| | 200 and above | **0.418** |
+
+The two-sided boundary is sloped because a flat 0.30 rule sits at the two-sided noise floor and
+clips high-noise true pairs, while a flat 0.45 admits short random near-matches. The resolution
+is length-dependent: short evidence must be clean, long evidence may be noisy — a 300-letter
+span at density 0.42 is statistically unreachable by chance against a 0.60 random floor.
+
+**Calibration provenance, and an asymmetry between the two rows.** The **two-sided** thresholds are the 95th percentile of true-pair
+densities per length band, fitted per ground-truth family and constrained monotone
+non-decreasing. Measured recall at that boundary: catalog joins 1.00, title-groups 0.984,
+liturgical witness pairs 0.974. Human validation on a 164-pair graded sample found the 0.40–0.45
+density band to be **97% real shared text**.
+
+The **one-sided** thresholds are **not** a fit. They are implementation constants in the
+asymmetric matcher, justified by the survival argument above but never calibrated against a
+labelled set. The table presents both rows with equal authority; they do not have it, and the
+one-sided row is the weaker of the two.
+
+### 7.2 Which boundary an interactive query uses
+
+The regime depends on whether the **query** is clean, and that is **not inferable from the query
+text** — there is no answer-side error rate to observe, and spelling, word length and rare-gram
+density are weak proxies.
+
+So it is **user-declared, not detected.** Default to **one-sided**, because the common case is a
+pasted printed edition or critical text, and expose an explicit "my text is a transcription"
+control that selects the two-sided boundary. The chosen regime is reported in the result
+envelope and in exports, so a reader can tell which rule produced the evidence.
+
+**Not implemented:** confusion-weighted substitution costs. The confusion matrix is measured and
+available (top confusions yod/vav 620, dalet/resh 597, bet/kaf 485, then het/he, he/tav, he/qof),
+and weighting these below arbitrary substitutions would sharpen the separation between
+transcription noise and genuine textual difference. Designed, not built.
+
+---
+
+## 8. Minimum span — one contract
+
+The research code is inconsistent: the method report states **25** letters, the asymmetric
+matcher uses **30**, and both query-shaped scripts use **40**. A reader cannot tell which is
+authoritative, so this spec settles it.
+
+**`MIN_SPAN` = 40 normalized letters.**
+
+Rationale: the two implementations actually shaped like this use case — a text used as a query
+against the whole corpus — both independently chose 40 after operating at scale. An interactive
+surface shows its top results directly to a reader, so precision at the short end matters more
+than in a batch pass whose output is filtered downstream. Forty letters is roughly 8–10 Hebrew
+words, a defensible floor for calling something a parallel. The lower floors belong to batch
+contexts that have downstream filtering.
+
+Two consequences to hold onto:
+
+1. **This is the structural floor on query length.** A query shorter than `MIN_SPAN` cannot be
+   extended beyond its own length and can therefore never produce an accepted span. It is *not* a
+   word count: two distinct 5-grams need only six letters, and one long word can supply several
+   anchors. Express every user-facing guard in normalized letters.
+2. **`MIN_SPAN` is query policy, not an artifact input.** Changing it does not invalidate a built
+   index, provided normalization, gram width and stride are unchanged. Version it in result
+   envelopes and evaluation manifests; do **not** wire it to a rebuild trigger.
+
+---
+
+### 8.1 The margin decides short spans, not the span floor (2026-08-24)
+
+`MIN_SPAN` is only half of the short-match story, and the other half was implicit in a
+constant. Verification extends the matched region by `MARGIN` letters on each side before
+computing edit density (section 7). At `MIN_SPAN = 40` that 30-letter window is a 75% overhead
+and harmless. **Below about 25 it decides the outcome**: a true 9-letter shared run is scored
+across roughly 70 letters of unrelated flanking text and lands near 0.85 density, far above any
+boundary this spec defines.
+
+The consequence, measured after the anchor tier failed its Antiochus deck: **lowering
+`min_span` alone changes nothing.** `rejected_short` falls to zero and `rejected_density`
+absorbs every candidate it used to reject — the search looks looser and returns the same
+records.
+
+This matters because short contiguous evidence is exactly what the cross-version cases carry.
+A proper noun transliterated into a Judeo-Arabic translation is the *same Hebrew letters* as in
+the Aramaic original, so a translation genuinely shares 7–14 letter runs with the query — real
+contiguous alignments, not the scattered-gram coincidence the anchor tier chased. That is why
+word-chunk matching found the Arabic Antiochus versions and every letter preset missed them.
+
+The margin is therefore **query policy** (`verify_margin`), not a module constant, and it must
+be swept together with `min_span`. Measured on a synthetic fixture (43 records; a clean copy, a
+15%-CER noisy copy, a "translation" sharing only three 7–12 letter names, and random-text
+distractors):
+
+| `verify_margin` | `min_span` | clean copy | 15%-CER copy | translation | false hits |
+|---|---|---|---|---|---|
+| 30 | 40 | found | found | **missed** | 0 |
+| 30 | 10 | found | found | **missed** | 0 |
+| **8** | **10** | found | found | **found** | **0** |
+| 4 | 10 | found | found | found | 1 |
+| 2 | 10 | found | found | found | 3 |
+
+`min_anchors = 1` and uncapped verification were tested in the same sweep and contributed
+nothing: a 9-letter name already yields 5 grams, so it clears the two-hit rule, and dropping to
+1 multiplied candidates ~5x with no new finds.
+
+The deck, the scorer and the five graded runs are committed at
+[`eval/antiochus/`](../../eval/antiochus/README.md) — every figure below is reproducible with
+`python scripts/score_antiochus_deck.py --all`, and a new policy is put on the same scale with
+`--run`. Read that README's "Known limits" before quoting a number: this is one query, the deck
+is a union of runs rather than the corpus, and the verdicts are LLM adjudication that was
+spot-checked, not audited.
+
+**Measured on the real corpus, 2026-08-24.** The synthetic pair (10, 8) was far too loose at
+700K records — 236 manuscripts at 32% precision, because chance 10-letter collisions are common
+in real Hebrew and rare in random text. The measured operating point is **(28, 12)**, offered
+as the `short` passage-length profile:
+
+| profile | manuscripts | precision | recall (of 83) |
+|---|---|---|---|
+| `normal` (40, 30) on widest-40 | 56 | 100% | 67% |
+| `short` (28, 12) on widest-40 | 104 | 61% | 72% |
+
+`short` adds five graded positives and one witness **no method had returned before**, word-chunk
+matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach cross-language
+witnesses — 1 of 20 — and score gives no usable cutoff inside the added rows (positives at
+35/35/39/58/255 against noise spanning 31–55), so the added tail is a skim, not a ranking.
+
+Because the two parameters are one decision, they are offered to users as a joint **profile**
+and never as independent controls: a slider on the span floor alone would visibly do nothing
+and read as a broken feature.
+
+---
+
+## 9. Stage-0 hygiene — mandatory, not optional
+
+The false-positive classes are empirically known and **all of them are mechanical**. Skipping
+this stage produces impressive-looking results that are artifacts of photography and
+cataloguing. Two measurements make the point: of the physically-joined fragment pairs that
+appeared to share text, **36 of 36** turned out to be duplicate photography; of short-span
+pairs, **6 of 8** were microfilm title sheets.
+
+### 9.1 Pre-index record exclusions
+
+Applied while streaming the corpus, before indexing. Each returns a drop reason, and every count
+is reported — never silently skipped.
+
+| Reason | Rule |
+|---|---|
+| `short` | fewer than **80** Hebrew letters |
+| `target_sheet` | at least 4 of the microfilm-card template words, or at least 3 of them with fewer than 400 letters |
+| `library_stamp` | fewer than 400 letters and matching the library ownership-stamp pattern |
+
+The stamp class was found late: a single apparent "unit" of 2,618 manuscripts sharing nothing but
+a photographed ownership stamp. Both stamp and target-sheet records match each other across
+entirely unrelated manuscripts, which is what makes them dangerous rather than merely useless.
+
+**The 80-letter floor costs measured witnesses (2026-08-24, decision open).** Four of the
+Antiochus deck's missed positives were missing because their text side fell under the floor at
+build time (Ms. H 7's Antiochus records, T-S AS 67.25's second side, ENA 1629.10, parts of
+Ms. C 24) — no query policy can find a record that is not in the index. A measurement rebuild
+with the floor at **30** indexed 759,224 records (+56,758; the other two rules caught more of
+the newly admitted tiny records — `target_sheet` 9,007 → 16,698, `library_stamp` 5,397 →
+6,535), and on the deck it was strictly positive: +2 positives at `normal` depth (Ms. H 7,
+T-S AS 67.25), no positive lost at any depth, burden +1–3 manuscripts, latency unchanged.
+One query, one deck; whether the production floor moves is an owner decision, and the
+`short` exclusion's junk exposure on *other* queries is unmeasured.
+
+### 9.2 Duplicate-photography detection (post-verify)
+
+The subtlest duplicate class is the **same physical page photographed twice** — different image
+ids, different system numbers, independently transcribed, extremely high text similarity. These
+masquerade as spectacular discoveries.
+
+The tell: **line breaks are a property of the physical page.** Two genuine textual witnesses
+never agree on line breaks; two photographs of one page must.
+
+Detector: split both texts into lines, normalize each line, keep lines of at least 10 letters,
+require at least 4 such lines on both sides, then walk the two line lists in order, matching each
+left line against the next **3** right candidates at normalized Levenshtein of 0.30 or less.
+Agreement of **0.60** or more means duplicate photography. Measured **precision 100% (31 of 31),
+recall 74%**; the remainder is covered by the two cheaper tiers.
+
+Cheaper tiers, applied first: collapse identical image ids (one photograph catalogued under
+several system numbers), and flag different system numbers resolving to one physical shelfmark.
+
+### 9.3 Bounding it on an interactive surface
+
+Pairwise line agreement is quadratic in returned records. On a query path it must be bounded:
+apply it only within score-adjacent neighbourhoods of the top-N rendered results, and report both
+the cap and the number of suppressed records. Unbounded, this stage becomes the latency budget.
+
+---
+
+## 10. Document frequency, and the interactive budget
+
+### 10.1 What the batch arrangements do, and why it does not transfer
+
+The pair-wise arrangement bands grams by document frequency: drop DF = 1 (cannot form a pair),
+drop DF above **100 records**, and cap posting length at **3,000**. The reason is quadratic
+candidate volume — formulaic material generates noise pairs without bound.
+
+The measured effect is counter-intuitive and worth stating plainly: **DF-banding *improves*
+recall on liturgical text.** Under a bounded per-pair anchor budget, common grams spread anchors
+across many false diagonals; banding spends the budget on distinctive grams that concentrate on
+the true diagonal. On a liturgical witness set, DF = 50/30 found **415 of 699** witness pairs
+against **135** with no DF filter. The intuition "protect formulaic genres from DF filtering" is
+exactly backwards.
+
+The cap is an **absolute** record count, so it becomes relatively stricter as the corpus grows.
+Candidate volume therefore does not extrapolate linearly from a pilot and must be measured at
+scale.
+
+**The cap is also the known recall frontier.** In the asymmetric matcher, `REF_DF_CAP = 128` is a
+**raw posting count** cap — not a document-frequency cap — and it drops **all** postings of any
+code over the cap. That makes matching non-monotonic in reference-corpus size: appending new
+material can silently delete seeds for old, unrelated material. It measurably did — one append
+deleted 103 live identifications. The query-shaped script diagnosed this and replaced it with a
+**distinct-work** DF cap that keeps every posting of a surviving code, so a formula repeated 100
+times inside one work has distinct-work count 1 and always survives.
+
+### 10.1a Two different statistics, easily confused
+
+The batch findings above are stated in terms of **document frequency** -- distinct records
+containing a gram. The pair-wise engine computes exactly that, because it deduplicates postings
+to the first position per `(gram, record)` before banding.
+
+The corpus-resident artifact of section 5 does **not** store that. It keeps every position, on
+purpose, because span extents need them, so its per-code count is an **occurrence count**, not a
+document frequency. The two differ by the within-record repetition rate: measured on a
+60,000-record slice, 27.76 postings per held code against 25.49 records per held code.
+
+Record DF is not stored but is cheap to derive, because postings within a code are ordered by
+`(record, position)` -- distinct records equal the number of positions where the record index
+changes, which is one vectorized pass. If a policy ever needs it, it should become a stored
+artifact of `4 x (27^5 + 1)` bytes rather than a per-query scan. Until then, do not describe the
+stored statistic as document frequency.
+
+### 10.2 What an interactive query needs instead
+
+A single query against a corpus has **no quadratic pair explosion** — cost is linear in postings
+admitted — so it does not need a global DF cap. But it does not follow that common grams are
+harmless: the DF-banding finding above is about the *anchor budget*, and a query has one of those
+too. What a query needs is a **bounded, deterministic posting budget**, and that budget must not
+be spent rarest-first:
+
+- The rarest grams in a noisy query are disproportionately the **corrupted** ones. Rarest-first
+  spends the whole budget on the least reliable end of the distribution.
+- Rarest-first is **non-monotonic in query length**: appending text introduces rarer grams that
+  displace anchors the shorter query used, so a longer query can return fewer results.
+- **Band reservation can create its own non-monotonicity** — an added suffix can fill a band's
+  reserved slot and displace an earlier anchor, and an under-used band can waste budget.
+
+So the policy is specified rather than left to implementation:
+
+| Element | Contract |
+|---|---|
+| Bands | log-DF bands, **edges read from the artifact manifest** — a frozen artifact property, not a runtime guess |
+| Deduplication | query grams deduplicated before allocation |
+| Budget unit | **postings**, declared explicitly |
+| Selection and overflow order | the stable total order `(band, df, gram_code, first_query_position)` |
+| Reservation | explicit per-band reservation with **deterministic borrowing** when a band is under-filled |
+| Reporting | policy version, excluded grams and excluded postings, in the result envelope |
+| Caps | candidate cap and verification cap, each with a stable overflow order and an explicit `truncated` state |
+| Monotonicity | a **pass/fail** criterion — a bounded regression tolerance on held-out positives — not merely a test that detects the problem |
+
+The three allocation policies (no cap, band-allocated, rarest-first) are to be compared **under
+identical budgets** on measured recall before one is adopted. This spec fixes the *contract*, not
+the winner.
+
+### 10.2a Budget starvation on long queries — the depth axis (2026-08-24)
+
+The default budgets were tuned on short queries and quietly starve long ones. The Antiochus
+query (5,979 letters) carries **10.6M postings; `posting_budget = 500,000` admits under 5%** of
+them, so true candidates never even form clusters — and the ~26K clusters that do form compete
+for `verify_cap = 3,000`, which crowds weak-but-real witnesses below the cap (the envelope said
+`verify_truncated`; no surface showed it). Two prior findings misled here: the 2026-08-20 cap
+sweep that "changed self-retrieval not at all" measured strong verbatim matches, not marginal
+witnesses; and the near-miss analysis of section 8.1 was itself run under the starved budget,
+so some "zero-candidate" records actually had candidates the budget had excluded.
+
+Raising the three caps **together** (more budget without more verification changes almost
+nothing) is a pure query-policy change, offered as the third composition axis
+(`passage_policy.DEPTH_PROFILES`), measured on the 83-positive deck at max-40+short:
+
+| depth | (budget, verify, candidates) | manuscripts | recall | frontier | local time |
+|---|---|---|---|---|---|
+| `normal` | (500K, 3K, 200K) | 189 | 76% | 1/20 | 0.6s |
+| `deep` | (2M, 50K, 500K) | ~508 | 81% | 5/20 | 4–8s |
+| `deepest` | (5M, 50K, 500K) | ~1,683 | 84% | 7/20 | 11–19s |
+
+(`frontier` = the 20 positives only chunk-2 had ever returned, per `eval/antiochus/README.md`;
+recall figures are the by-sys-id join — the canonical scorer's stricter shelfmark join reads
+72%/77%/80% on the same runs.) `deep` recovers a running Aramaic copy (T-S AS 67.25) and three
+catalogued Megillat Antiochus witnesses; `deepest` additionally reaches an Arabic tafsir, a
+rhymed Hebrew reworking and a very damaged copy. The caps are **non-monotonic in each other**:
+recovered sets at different (budget, verify) points are not nested (Ms. 10808.8 is found at
+2M/50K and lost at uncapped/200K, where 1.6M candidates change the verification order). That is
+why depth ships as a few named, hashed profiles and never as sliders.
+
+Latency scales with the budget — the work *is* the postings — so depth is a per-query
+researcher decision, not a new default. The short-query instruments have not been re-measured
+under `deep`/`deepest` (they never hit the default budget, so no change is *expected*, but that
+is an inference, not a measurement).
+
+**Confirmed on a second, independent instrument (2026-08-24).** Birkat Hamazon, scored against
+the witness census in `same_work_spike/probe/data/bh_witnesses.json` — 471 sigla from a
+critical edition's own index resolved to sys_ids, an oracle independent of any search run
+(unlike the union-of-runs Antiochus deck). Query: the staged liturgy reference text; index
+coverage ceiling 421/471 witnesses reachable (floor-80), 442/471 (floor-30). On a
+many-witness liturgical text the starvation is far worse than on Antiochus — the query drowns
+in its own candidates (650K clusters at 5M postings) and `verify_cap = 3,000` buries most true
+witnesses:
+
+| config (floor-80) | manuscripts | witness recall (of reachable) | time |
+|---|---|---|---|
+| widest-40, `normal` | 1,341 | 35% | 0.9s |
+| max-40+short, `normal` | 1,567 | 36% | 0.4s |
+| max-40+short, `deep` | 6,491 | **80%** | 4.7s |
+| max-40+short, `deepest` | 7,212 | 81% | 10s |
+| heroic (all postings, 500K verify) | 11,273 | 83% | 71s |
+
+Two things Antiochus could not show: **width barely matters when the verify cap binds** (35%
+vs 36% at `normal` — the boundary was never the constraint on this query), and **`deep` is the
+knee** (deepest buys 1 point for 2× time; the heroic point 3 more for 7×). The returned-set
+share found in the oracle (~6% at `deep`) is *not* a precision figure — the census is one
+edition's list, and the corpus holds unlisted witnesses in quantity. Floor-30 raised the
+reachable ceiling by 21 witnesses but found at most +5 of them: the newly indexed sub-80-letter
+records rarely clear the span floor on this text.
+
+**Query hygiene dominates the caps (same day, same census).** The composite liturgy query
+above carried Psalm preludes and Al-HaNissim, which spent its budget on Bible/siddur matches.
+Re-run with the 17 *clean, complete* Birkat Hamazon texts of
+`same_work_spike/probe/data/full_birkot_hamazon.txt` (each a single rite's full text from a
+known Genizah fragment, 456–4,243 letters), floor-30 index, max-40+short:
+
+| configuration | witness recall (of 442 reachable) | cost |
+|---|---|---|
+| one clean text, `normal` | 50–69% each (mean 59%) | <1s per query |
+| union of 17, `normal` | **85%** (3,857 distinct mss) | 12s total |
+| union of 17, `deep` | **93%** (12,979 distinct mss) | 105s total |
+| union of 17, `deepest` | 91% — *lower*: the cap non-monotonicity again | 235s |
+
+A single clean text at `normal` beats the composite query at any depth; variant texts unioned
+at `normal` beat the composite's 71-second heroic ceiling. The 32 reachable witnesses no query
+finds are transcription-quality misses, not engine misses: 31 are stubs (32–707 indexed
+letters, mostly one or two records) and the one well-covered exception (T-S 8H 22.4, 15
+records) is scrambled HTR far beyond the measured CER p90 — on this census the engine has
+effectively exhausted what the corpus text allows. Returned manuscripts outside the census are
+not all noise: the census is comprehensive for its edition, and the searches are expected to
+surface additional genuine witnesses beyond it (per the owner, 2026-08-24).
+
+### 10.2b Several witnesses of one work — rank fusion, never concatenation (2026-08-24)
+
+Section 10.2a raises the budget for one query. This is the other half of the same problem: one
+text per work is not enough, and no budget fixes that.
+
+All Birkat Hamazon figures below were measured **through the shipped code**
+(`PassageSearcher` + `shared/passage_fusion.py`) at policy `max-40+short`,
+normal depth, floor30_v1, on 2026-08-24.
+
+**Read the denominator before comparing these to SS10.2a.** That table counts
+"of 442 reachable"; this one counts index membership over a 673-entry census,
+giving **614** (59 census entries have no indexed text at all, and a search
+cannot be held to those). The two fractions are not comparable. In absolute
+terms the shipped path finds **455** census manuscripts against SS10.2a's
+85% of 442 = 376, so it retrieves more, not less — it simply reports a
+smaller fraction of a larger denominator. Quote counts with their
+denominators; a bare percentage from either table means nothing on its own.
+
+| finding | evidence |
+|---|---|
+| One witness under-reaches | Birkat Hamazon: the best single witness reaches **348/614 = 56.7%** of the reachable census; the same 17 searched separately and merged reach **455/614 = 74.1%**. Page path and API path return the same 455 |
+| Concatenation is actively harmful **here** | The 17 joined into one 33,180-char query admit **499,662 of 21,093,233 postings (2.4%)**, hit the 3,000 verify cap against 27,106 candidates, and reach **296/614 = 48.2%** — *worse than the best single witness*. On Antiochus recursion **every** concatenated round scored below the seed alone (43–46 positives vs 50; design harness) |
+| Fusion must be by RANK | `score` is matched **query** letters, so a long witness mechanically outscores a short one. RRF (k=60) ties sum-of-scores at similar lengths (BH) and beats it decisively at mixed ones (Antiochus, 1,153–5,979 letters: 18/26 positives in the top 50/100 against 10/19) |
+| Length normalisation is dead | Worse than raw score at every cut-off on both instruments |
+| Recursion works, and promotion is safe | Seed → top-5 → repeat: frontier coverage **2 → 4 → 7 → 9 of 20**, positives 50 → 57 of 68, monotone over three rounds. All 15 promoted witnesses were graded positives |
+| The cost is the first page | Rows 191 → 2,795; positives in the top 100 fall 48 → 32. Reach up, precision down |
+| Witness quality varies enormously | Of 10 manuscript transcriptions used as witnesses, six found **zero** positives and added ~3,200 junk rows; the best found 19 |
+
+**Why concatenation starves here and not everywhere.** The budget of section 10.2 is spent
+*per query*, so joining witnesses makes one long query that admits a smaller fraction of its own
+postings. This does **not** generalise. The chunk engine
+(`SearchEngine.search_composition_logic`) decomposes a query into independent per-chunk Tantivy
+lookups with no shared budget, and there concatenation and union were measured to return the
+**identical** manuscript set — 392 both ways, empty difference in both directions — at *lower*
+cost (944 s vs 1,234 s). Desktop's `run_recursive_composition`, which concatenates, is therefore
+correct for its own engine; the rule below is scoped to `method='passage'` and must stay scoped.
+
+Multi-witness on the chunk engine buys almost nothing regardless: **+2 positives of 74, zero
+frontier**, at 4–6× the time, while *degrading* the first hundred (27 → 22–23). Hence the web
+surface offers it for letter-level search only.
+
+**The rule.** Search each witness separately; fuse by `Σ 1/(60 + rank_within_that_witness)`.
+`shared/passage_fusion.py` is the single definition, with two callers (`witnesses[]` on
+`POST /api/parallels` fans out inside one request; `web/pages/parallels.py` accumulates across
+one request per witness, which is what makes an R-round expansion cost `1 + rounds × K`
+searches rather than re-running everything on every addition).
+
+**`score` stays matched letters, from the witness the row renders.** The RRF sum lives in a
+separate `fusion_score`. Overwriting `score` would make the group cap fusion-aware for free but
+would silently turn ~214 into ~0.03 in every badge and export column that reads it.
+
+Two corrections to earlier drafts of this paragraph, both found by review:
+
+* It said the fused row reports *the best single witness's* score — `max()` across every
+  contributor. That contradicted the winner rule one paragraph above: the row shows the winning
+  witness's label and highlighted span, so a score from a louder witness described text nobody
+  could see. `score` now comes from the same row as the evidence, and the maximum is reported
+  as `witness_fusion.best_witness_score`, where its meaning is stated.
+* It said `aggregate_score` / `sort_score` follow the fusion key wherever groups are ranked by
+  fusion. They deliberately do **not**. Summing fusion into `aggregate_score` turned the public
+  `score` into ~0.03 on multi-witness responses — the exact defect the paragraph above warns
+  about, reintroduced at the serializer. Group ORDER follows the fusion key; `aggregate_score`,
+  `sort_score` and `score` are always matched letters. A consumer re-sorting a multi-witness
+  response by `score` therefore gets a different order than the array's, which is documented in
+  `docs/SEARCH_API.md` rather than papered over.
+
+**`chunk_index` is per witness.** It is the ordinal of a span's query-side start offset among
+all distinct start offsets for that query — a position in the pasted composition, comparable
+across records. With several witnesses it is comparable only *within* one: offset 200 of witness
+A and offset 200 of witness B are different places in different texts. Every fused row records
+the witness that produced it (`witness_id`), and the winning witness supplies every rendered
+field, because projecting one witness's spans through another's offset map yields a highlight
+that points at the wrong letters and still looks entirely plausible.
+
+**A record is filtered only when every witness that matched it filtered it.** Otherwise the
+"known source text" filter would get stricter the more witnesses are added — the opposite of
+what the control says it does.
+
+### 10.3 Position stride
+
+Indexing every position is the default. Indexing every second or third position reduces the
+artifact proportionally, and with `MIN_SPAN = 40` and a two-distinct-gram requirement the recall
+cost should be small — but it is unmeasured, so stride is a measured decision, recorded in the
+manifest, not an assumption. Note that DF = 1 singletons are **kept** here, unlike the pair-wise
+arrangement: a singleton cannot form a pair, but it is a perfectly good query anchor.
+
+### 10.4 The anchor-evidence tier — measured, rejected, removed
+
+Recorded so it is not reinvented. Span acceptance is a contiguous-alignment detector, and it
+cannot reach witnesses that share no contiguous run with the query: translations, rhymed
+reworkings, rubrics that only *name* the work. An "anchor-evidence" tier was built to cover
+that class — report records that share many distinct DF-capped gram codes with the query but
+produce no accepted span — and measured twice on the Antiochus query against an 83-positive
+adjudicated deck ([`eval/antiochus/`](../../eval/antiochus/README.md)).
+**Both runs failed, and the second was worse than the first.**
+
+| build | anchor-tier precision | recall | targets recovered |
+|---|---|---|---|
+| count of shared codes | 4% | 77% | 4 of 20 |
+| rarity-gated + weight-ordered | 1% | 73% | 1 of 20 |
+
+The mechanism is instructive. Counting shared codes ranks by **record length**: the 300-record
+cap filled with 99 כתובים, 35 Daniel and 25 Targum manuscripts sharing 14–37 ubiquitous grams,
+while the four real finds sat at 14–15 on the cap floor. Gating on rarity did not fix it — it
+merely resampled the same noise pool at a lower count band (7–22) and dropped three of the four
+real finds. At ~1,000 query grams against ~700K records, "shares a handful of moderately rare
+5-grams" is what **coincidence** looks like; the base rate swamps the signal.
+
+And the targets could not win that competition anyway, because they have almost no letter-level
+evidence to compete with: a Judeo-Arabic translation shares essentially nothing with an Aramaic
+query beyond a few transliterated names. Cross-language retrieval needs a different mechanism
+(entity matching, a bilingual lexicon), not a better threshold on this one.
+
+The tier was removed on 2026-08-24. What survived it is more useful than it was: the
+`verify_margin` finding (section 8.1), which came out of asking why short matches never
+surfaced, and the operational conclusion that the recall gap for this class belongs to
+word-chunk matching plus vocabulary triage, not to the letter engine.
+
+---
+
+## 11. Parameter table
+
+| Stage | Parameter | Value | Provenance |
+|---|---|---|---|
+| Normalization | alphabet | `U+05D0`–`U+05EA`, finals folded, space-stripped | `normalize.py::norm_stream` |
+| | normalizer version | 1 | this spec |
+| Gram coding | `K` | 5 letters | `engine_np.py::_gram_codes` |
+| | encoding | base-27 positional; code space `27^5 = 14,348,907` | `engine_np.py` (`BASE = 27`) |
+| Candidates | `BAND` | 20 letters; cluster = bucket plus or minus 1 | `engine_np.py`, `track1_match.py` |
+| | `MIN_ANCHORS` | 2 **distinct** gram codes | section 6.1 |
+| Verification | `MARGIN` / `verify_margin` | 30 letters each side (policy, section 8.1) | `track1_match.py`, `motif_query.py`, `work_query.py` |
+| | `MIN_SPAN` | **40** normalized letters | section 8 — settles a 25/30/40 conflict |
+| | random-alignment floor | density about 0.60 | method report |
+| | one-sided boundary | 0.28 below 100 letters, 0.35 at 100 and above | `track1_match.py::accept_density` |
+| | two-sided boundary | 0.30 below 100, 0.386 for 100–199, 0.418 at 200 and above | `motif_query.py` and `work_query.py::accept_density`; fitted by `roc_boundary.py` |
+| Stage-0 | min record letters | 80 | `stage0.py::MIN_STREAM_LETTERS` |
+| | target-sheet rule | 4 or more template words, or 3 or more with fewer than 400 letters | `stage0.py::page_filter` |
+| | library-stamp rule | fewer than 400 letters and a stamp-pattern match | `stage0.py::page_filter` |
+| | line-agreement threshold | 0.60 or more of lines (10 or more letters, 4 or more lines) matching in order at norm-Lev 0.30 or less, lookahead 3 | `stage0.py::line_agreement` |
+| DF — batch, pair-wise | DF drop | above 100 records, absolute | method report |
+| | posting cap | 3,000 | method report |
+| DF — batch, asymmetric | `REF_DF_CAP` | 128 raw postings per code — **known non-monotonic**, section 10.1 | `track1_match.py` |
+| DF — interactive | policy | band-allocated posting budget, section 10.2 | this spec |
+| Length profile | `min_span` / `verify_margin` | `normal` = (40, 30), `short` = (28, 12) | `passage_policy.py::LENGTH_PROFILES`, section 8.1 |
+| Depth profile | `posting_budget` / `verify_cap` / `candidate_cap` | `normal` = (500K, 3K, 200K), `deep` = (2M, 50K, 500K), `deepest` = (5M, 50K, 500K) | `passage_policy.py::DEPTH_PROFILES`, section 10.2a |
+| Measured noise | letter CER | 20.1% micro, 16.6% median, p25 8.9%, p90 42% | 209-page alignment against human transcriptions |
+| Corpus | records / letters | 948,549 records, 602,598,330 normalized letters, longest record 11,809 | measured 2026-08-20 |
+
+---
+
+## 12. What is **not** established
+
+Stated so no reader mistakes any of it for settled.
+
+1. **Corpus-wide precision has never been measured.** Every published precision figure is either
+   from a deliberately enriched pilot or is per-band on a stratified sample. The headline pilot
+   numbers (110 of 111, or 99.1%, after hygiene filtering; 1 of 164 actually spurious) come from a
+   sample enriched with related material and overstate corpus-wide precision.
+2. **Corpus-wide recall is unobtainable in principle.** It would require knowing every location
+   carrying a given text. Recall claims must name their oracle and that oracle's coverage.
+3. **Confusion-weighted alignment costs** are designed and the matrix is measured; not built.
+4. **The matres-light normalization view** is designed; unvalidated on plene/defective pairs.
+5. **Judeo-Arabic has no evaluation stratum.** The graded sample was predominantly Hebrew.
+   Per-language DF tables and strata are designed, not built.
+6. **The pilot-to-corpus candidate-volume curve** must be measured, not extrapolated — the
+   absolute DF cap self-tightens with scale, which makes pilot extrapolation pessimistic by an
+   unquantified amount.
+7. **Interactive latency for arrangement C is unmeasured.** No research script implements it.
+8. **Stride's recall cost is unmeasured** (section 10.3).
+9. **Post-Stage-0 short-span precision is unmeasured.** The finding that 6 of 8 short-span pairs
+   were microfilm title sheets was recorded before the hygiene filter existed -- the method
+   report says short spans are unusable "until this filter is in place", and it now is. That is
+   not the same as showing those six are excluded, that the other two are safe, or that short
+   spans inside otherwise long records are safe. The narrow claim is that Stage-0 removes a major
+   short-span junk class; residual precision has not been measured.
+10. **The method report's "low-entropy heuristic" for target sheets was never implemented** --
+    not in the research `stage0.py`, and not in the port. Only the template-keyword and length
+    rules exist. The report describes a filter that has never run.
+11. **There is no rarity cliff between 25 and 40 letters.** A corpus-derived deterministic
+    stratified sample of 4,155 real windows per length, over a 60,000-record slice, puts the
+    median record-DF of a window's grams at 152 / 151 / 151 / 151 for lengths 25 / 30 / 35 / 40,
+    and the share of windows whose median gram exceeds 200 records at 36.7% / 36.4% / 35.8% /
+    34.9%. The hypothesis that 25 lands on a formulaic band which 40 clears -- suggested by a
+    table of ten hand-picked formulas -- is **not supported** against the corpus. Any case for 40
+    over 25 must rest on chance-match probability under the length x density rule, not on rarity,
+    and must be measured rather than argued.
+9. **The transcription corpus self-describes as preliminary.** Segmentation and reading-order
+   errors are part of the measured noise; an improved release would move every number here.
+
+---
+
+## 13. Source map
+
+The algorithm was reconstructed from the sources below, all of which live in a gitignored
+research tree. **This document is the tracked authority**: where they disagree with it, this
+document governs; where it is silent, they are the record.
+
+| Source | What it authoritatively covers |
+|---|---|
+| method report (`METHOD.md`) | the pair-wise arrangement end to end; the noise measurement; boundary calibration; hygiene rationale; evaluation design |
+| `normalize.py` | section 3 normalization and span projection |
+| `engine_np.py` | section 4 gram coding; section 6 diagonal accumulation; bit-budget history |
+| `track1_match.py` | arrangement A; the one-sided boundary; `REF_DF_CAP` and its defect |
+| `work_query.py`, `motif_query.py` | arrangement B; the two-sided boundary in a query context; the distinct-work DF cap; `MIN_SPAN = 40` |
+| `stage0.py` | section 9 hygiene rules and thresholds |
+| `roc_boundary.py` | the two-sided boundary fit |
+| [discovery-sidecar-schema-v1.md](discovery-sidecar-schema-v1.md) | the downstream data contract, not the algorithm |

@@ -1,0 +1,940 @@
+{
+  "description": "REAL glyph trace from דו שיח בין חכמים - תיאודור דרייפוס.pdf page 97. Guards the 2026-05-31 b space-glyph word-boundary (N1) and embedded-number bidi (N3) de-space revision.",
+  "source_page": 97,
+  "raw_visual": "(., בקיצורו בספרנו, לעיל ולהלן, ׳הלוי׳ נוראה פרק ב, לעיל-Berlin, 1927 ",
+  "pipeline_output": "1927,-Berlin, בקיצורו בספרנו, לעיל ולהלן, ׳הלוי׳ נוראה פרק ב, לעיל.(",
+  "must_contain": [
+    "1927"
+  ],
+  "must_not_contain": [
+    "7291"
+  ],
+  "lines": [
+    {
+      "bbox": [
+        42.52,
+        483.34,
+        289.04,
+        491.3
+      ],
+      "spans": [
+        {
+          "font": "real",
+          "size": 7.96,
+          "chars": [
+            {
+              "c": "(",
+              "bbox": [
+                42.52,
+                483.34,
+                44.93,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": ".",
+              "bbox": [
+                45.49,
+                483.34,
+                47.68,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": ",",
+              "bbox": [
+                242.92,
+                483.34,
+                245.11,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": " ",
+              "bbox": [
+                239.26,
+                483.34,
+                241.01,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": "ב",
+              "bbox": [
+                235.54,
+                483.34,
+                239.26,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 4
+            },
+            {
+              "c": "ק",
+              "bbox": [
+                230.42,
+                483.34,
+                235.02,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 5
+            },
+            {
+              "c": "י",
+              "bbox": [
+                227.28,
+                483.34,
+                229.91,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 6
+            },
+            {
+              "c": "צ",
+              "bbox": [
+                223.05,
+                483.34,
+                226.77,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 7
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                220.34,
+                483.34,
+                222.53,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 8
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                216.11,
+                483.34,
+                219.83,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 9
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                213.4,
+                483.34,
+                215.59,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 10
+            },
+            {
+              "c": " ",
+              "bbox": [
+                209.63,
+                483.34,
+                211.38,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 11
+            },
+            {
+              "c": "ב",
+              "bbox": [
+                205.91,
+                483.34,
+                209.63,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 12
+            },
+            {
+              "c": "ס",
+              "bbox": [
+                200.71,
+                483.34,
+                205.53,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 13
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                196.38,
+                483.34,
+                200.33,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 14
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                192.28,
+                483.34,
+                196.0,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 15
+            },
+            {
+              "c": "נ",
+              "bbox": [
+                189.27,
+                483.34,
+                191.9,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 16
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                186.69,
+                483.34,
+                188.89,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 17
+            },
+            {
+              "c": ",",
+              "bbox": [
+                184.12,
+                483.34,
+                186.31,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 18
+            },
+            {
+              "c": " ",
+              "bbox": [
+                180.21,
+                483.34,
+                181.96,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 19
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                176.7,
+                483.34,
+                180.21,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 20
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                172.18,
+                483.34,
+                175.9,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 21
+            },
+            {
+              "c": "י",
+              "bbox": [
+                168.75,
+                483.34,
+                171.38,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 22
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                164.44,
+                483.34,
+                167.95,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 23
+            },
+            {
+              "c": " ",
+              "bbox": [
+                160.29,
+                483.34,
+                162.04,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 24
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                158.1,
+                483.34,
+                160.29,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 25
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                153.97,
+                483.34,
+                157.48,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 26
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                148.75,
+                483.34,
+                153.35,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 27
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                144.62,
+                483.34,
+                148.13,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 28
+            },
+            {
+              "c": "ן",
+              "bbox": [
+                141.81,
+                483.34,
+                144.01,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 29
+            },
+            {
+              "c": ",",
+              "bbox": [
+                139.0,
+                483.34,
+                141.19,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 30
+            },
+            {
+              "c": " ",
+              "bbox": [
+                135.46,
+                483.34,
+                137.21,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 31
+            },
+            {
+              "c": "׳",
+              "bbox": [
+                133.27,
+                483.34,
+                135.46,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 32
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                128.28,
+                483.34,
+                132.88,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 33
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                124.38,
+                483.34,
+                127.89,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 34
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                121.8,
+                483.34,
+                123.99,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 35
+            },
+            {
+              "c": "י",
+              "bbox": [
+                118.78,
+                483.34,
+                121.41,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 36
+            },
+            {
+              "c": "׳",
+              "bbox": [
+                116.2,
+                483.34,
+                118.39,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 37
+            },
+            {
+              "c": " ",
+              "bbox": [
+                112.7,
+                483.34,
+                114.45,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 38
+            },
+            {
+              "c": "נ",
+              "bbox": [
+                110.07,
+                483.34,
+                112.7,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 39
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                107.38,
+                483.34,
+                109.57,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 40
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                103.15,
+                483.34,
+                106.87,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 41
+            },
+            {
+              "c": "א",
+              "bbox": [
+                98.27,
+                483.34,
+                102.65,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 42
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                93.16,
+                483.34,
+                97.76,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 43
+            },
+            {
+              "c": " ",
+              "bbox": [
+                89.84,
+                483.34,
+                91.59,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 44
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                85.9,
+                483.34,
+                89.84,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 45
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                81.81,
+                483.34,
+                85.53,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 46
+            },
+            {
+              "c": "ק",
+              "bbox": [
+                76.84,
+                483.34,
+                81.44,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 47
+            },
+            {
+              "c": " ",
+              "bbox": [
+                73.16,
+                483.34,
+                74.91,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 48
+            },
+            {
+              "c": "ב",
+              "bbox": [
+                69.44,
+                483.34,
+                73.16,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 49
+            },
+            {
+              "c": ",",
+              "bbox": [
+                67.0,
+                483.34,
+                69.19,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 50
+            },
+            {
+              "c": " ",
+              "bbox": [
+                63.28,
+                483.34,
+                65.03,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 51
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                59.77,
+                483.34,
+                63.28,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 52
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                55.49,
+                483.34,
+                59.22,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 53
+            },
+            {
+              "c": "י",
+              "bbox": [
+                52.31,
+                483.34,
+                54.93,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 54
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                48.24,
+                483.34,
+                51.75,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 55
+            },
+            {
+              "c": "-",
+              "bbox": [
+                244.78,
+                483.34,
+                248.29,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 56
+            },
+            {
+              "c": "B",
+              "bbox": [
+                247.96,
+                483.34,
+                253.24,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 57
+            },
+            {
+              "c": "e",
+              "bbox": [
+                252.91,
+                483.34,
+                256.43,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 58
+            },
+            {
+              "c": "r",
+              "bbox": [
+                256.1,
+                483.34,
+                259.62,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 59
+            },
+            {
+              "c": "l",
+              "bbox": [
+                259.29,
+                483.34,
+                261.49,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 60
+            },
+            {
+              "c": "i",
+              "bbox": [
+                261.16,
+                483.34,
+                263.36,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 61
+            },
+            {
+              "c": "n",
+              "bbox": [
+                263.03,
+                483.34,
+                267.43,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 62
+            },
+            {
+              "c": ",",
+              "bbox": [
+                267.1,
+                483.34,
+                269.29,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 63
+            },
+            {
+              "c": " ",
+              "bbox": [
+                269.29,
+                483.34,
+                271.04,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 64
+            },
+            {
+              "c": "1",
+              "bbox": [
+                272.58,
+                483.34,
+                276.08,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 65
+            },
+            {
+              "c": "9",
+              "bbox": [
+                276.31,
+                483.34,
+                279.82,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 66
+            },
+            {
+              "c": "2",
+              "bbox": [
+                280.05,
+                483.34,
+                283.56,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 67
+            },
+            {
+              "c": "7",
+              "bbox": [
+                283.79,
+                483.34,
+                287.29,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 68
+            },
+            {
+              "c": " ",
+              "bbox": [
+                287.29,
+                483.34,
+                289.04,
+                491.3
+              ],
+              "font": "David-Bold",
+              "size": 7.96,
+              "span_id": 0,
+              "original_order": 69
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

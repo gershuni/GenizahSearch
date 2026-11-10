@@ -1,0 +1,83 @@
+================================================================================
+                    ANTIVIRUS FALSE POSITIVE INFORMATION
+                       מידע על זיהוי שגוי של אנטיוירוס
+================================================================================
+
+ENGLISH
+-------
+
+Some antivirus programs (Avast, AVG, Windows Defender) may flag
+GenizahSearchPro as suspicious during installation.
+
+THIS IS A FALSE POSITIVE - the software is completely safe.
+
+Why does this happen?
+The application is built using PyInstaller, a standard tool for creating
+Windows applications from Python code. The way PyInstaller packages
+applications sometimes triggers antivirus heuristics, even though the
+software contains no malicious code.
+
+How to install:
+
+Option 1: Add an exception
+   1. Open your antivirus program
+   2. Go to Settings > Exceptions (or Exclusions)
+   3. Add the installation folder to the exceptions list
+   4. Run the installer again
+
+Option 2: Temporarily disable protection
+   1. Temporarily disable your antivirus real-time protection
+   2. Run the installer
+   3. After installation, add the program folder to exceptions
+   4. Re-enable your antivirus protection
+
+Option 3: Restore from quarantine
+   If the antivirus already quarantined the file:
+   1. Open your antivirus program
+   2. Go to Quarantine / Virus Chest
+   3. Find GenizahSearchPro files
+   4. Select "Restore" and "Add to exceptions"
+
+The source code is open and available at:
+https://github.com/gershuni/GenizahSearch
+
+================================================================================
+
+עברית
+-----
+
+חלק מתוכנות האנטיוירוס (Avast, AVG, Windows Defender) עשויות לסמן את
+GenizahSearchPro כחשוד במהלך ההתקנה.
+
+זהו זיהוי שגוי (False Positive) - התוכנה בטוחה לחלוטין.
+
+למה זה קורה?
+התוכנה נבנית באמצעות PyInstaller, כלי סטנדרטי ליצירת תוכנות Windows מקוד
+Python. הדרך שבה PyInstaller אורז תוכנות לפעמים מפעילה התראות של אנטיוירוס,
+למרות שהתוכנה לא מכילה קוד זדוני.
+
+איך להתקין:
+
+אפשרות 1: הוספת חריגה
+   1. פתחו את תוכנת האנטיוירוס
+   2. עברו להגדרות > חריגות (Exceptions)
+   3. הוסיפו את תיקיית ההתקנה לרשימת החריגות
+   4. הריצו את ההתקנה שוב
+
+אפשרות 2: השבתה זמנית של ההגנה
+   1. השביתו זמנית את ההגנה בזמן אמת של האנטיוירוס
+   2. הריצו את ההתקנה
+   3. לאחר ההתקנה, הוסיפו את תיקיית התוכנה לחריגות
+   4. הפעילו מחדש את האנטיוירוס
+
+אפשרות 3: שחזור מהסגר
+   אם האנטיוירוס כבר העביר את הקובץ להסגר:
+   1. פתחו את תוכנת האנטיוירוס
+   2. עברו להסגר / Quarantine
+   3. מצאו את קבצי GenizahSearchPro
+   4. בחרו "שחזר" ו"הוסף לחריגות"
+
+קוד המקור פתוח וזמין ב:
+https://github.com/gershuni/GenizahSearch
+
+================================================================================

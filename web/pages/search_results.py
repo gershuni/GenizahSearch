@@ -1,0 +1,2711 @@
+# -*- coding: utf-8 -*-
+"""
+Search Results Rendering Functions
+
+Extracted from web/pages/search.py (Phase 72, Plan 02).
+Contains the four main rendering functions (toggle_expansion, render_results,
+create_result_card, open_advanced_dialog) plus two standalone helpers
+(copy_result_text, show_add_to_list_dialog).
+
+Each function that was a closure in create_search_page() now takes explicit
+search_state and refs parameters instead of capturing them via closure.
+"""
+from __future__ import annotations
+
+from nicegui import ui, run
+from web.safe_storage import safe_user_get as _safe_get
+from web.state import state
+from web.pages.search_helpers import compute_selected_uids
+from web.translations import tr, is_rtl, get_language, in_visitor_language
+from web.ux_timing import ux_done
+from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
+from web.components.filter_panel import persist_value
+from web.pages.browse_state import page_has_reading_view
+from web.pages.search_state import (
+    AdvancedViewState, domain_display_name, save_post_filters_with_run,
+)
+from web.services import (
+    get_service,
+    get_oxford_direct_image_url,
+    is_oxford_manuscript,
+)
+from web.page_count import apply_page_count, count_pages
+from shared.synthetic_sys_id import is_synthetic_sys_id
+from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
+from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
+from genizah_core import SearchEngine, get_library_display, resolve_volume_suffix
+from web.document_service import (
+    get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page,
+)
+from shared.fgp_service import (
+    get_fgp_sources_for_fragment, filter_sources_for_page, displayed_folio_label,
+    displayed_fgp_image_number, fgp_needs_full_htr, choose_default_source, decode_stored_entities,
+)
+from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
+from urllib.parse import quote
+from web.components.typography import h3
+from web.clipboard import copy_text_to_clipboard
+import logging
+import re
+from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded, search_budget
+import html
+import asyncio
+import time
+
+logger = logging.getLogger(__name__)
+
+# Sentinels around a match while the text is still raw (as shared/joins_lab.py marks it):
+# the pattern must see the text's own quotes, which escaping would turn into entities.
+_HL_START, _HL_END = '\x01', '\x02'
+
+
+def highlight_full_text_html(text, pattern):
+    """(html, stopped): *text* HTML-escaped, every match of *pattern* in a highlight span.
+
+    The pattern runs over the RAW text and the result is escaped around the marks: run
+    over escaped text, ``"`` and ``'`` were ``&quot;`` / ``&#x27;`` when matched, so the
+    mark-tolerant pattern for ``רת`` never marked ``ר"ת`` (2026-10-21, Codex). *stopped*:
+    the highlighting hit its time limit; the text is then shown unmarked."""
+    raw = text.replace(_HL_START, '').replace(_HL_END, '')
+    if not pattern:
+        return html.escape(raw), False
+    flags = re.IGNORECASE
+    if '\\n' in pattern or pattern.startswith('^'):
+        flags |= re.MULTILINE
+    try:
+        with search_budget(seconds=0.25):
+            marked = compile_search_regex(pattern, flags).sub(
+                lambda m: _HL_START + m.group(0) + _HL_END if m.group(0) else '', raw)
+    except SearchBudgetExceeded:
+        return html.escape(raw), True
+    except re.error:
+        return html.escape(raw), False
+    return (html.escape(marked).replace(_HL_START, '<span class="highlight-match">')
+            .replace(_HL_END, '</span>')), False
+
+
+# ---------------------------------------------------------------------------
+# SEED-033 Option A — search-scoped source selection
+# ---------------------------------------------------------------------------
+_SNIPPET_MATCH_RE = re.compile(r'\*([^*]+)\*')
+
+
+def _snippet_match_phrase(snippet: str) -> str:
+    """The first ``*...*``-marked matched phrase in a search ``snippet``,
+    whitespace-collapsed, for the ``/browse?highlight=`` deep-link param.
+
+    Lets the browse page's version chooser prefer whichever source (PGP/FGP
+    edition, or V0.8) actually CONTAINS what the user searched for, instead of
+    silently defaulting to a transcription that never mentions it (SEED-033).
+    Empty when the snippet carries no match markers.
+    """
+    if not snippet or '*' not in snippet:
+        return ''
+    m = _SNIPPET_MATCH_RE.search(snippet)
+    if not m:
+        return ''
+    # A match spanning a line break carries the UI's line-break sentinel
+    # (SearchEngine.highlight renders '\n' as ' \u2016 ' for the results table).
+    # Source texts have no such character, so leaving it in guarantees the
+    # `must_contain` lookup misses -- on exactly the multi-line hits that most
+    # need it (Codex P2, 2026-09-02). Restore it to a plain space.
+    phrase = m.group(1).replace('\u2016', ' ')
+    return re.sub(r'\s+', ' ', phrase).strip()
+
+
+
+def _hit_scope_phrase(snippet, adv_state, page):
+    """The snippet's matched phrase, but only on the page the hit belongs to.
+
+    Advanced View's Next/Previous re-renders the SAME search result, so ``snippet``
+    still describes the original hit page. Passing its phrase on every folio let a
+    whole-document source containing the old hit become the default on an unrelated
+    one (Codex P2, 2026-09-02). The first page rendered for a result claims the
+    scope; any other page gets None.
+    """
+    phrase = _snippet_match_phrase(snippet)
+    if not phrase or page is None:
+        return None
+    current = (getattr(page, 'sys_id', None),
+               getattr(adv_state, 'volume_ie', None),
+               getattr(page, 'p_num', None))
+    if getattr(adv_state, 'hit_scope', None) is None:
+        adv_state.hit_scope = current
+        return phrase
+    return phrase if adv_state.hit_scope == current else None
+
+
+def _page_of_pages(p_num, total_pages) -> str:
+    """'Page 2/4'; just 'Page 2' while the count is not known (0) -- never 'Page 1/0'."""
+    return f"{tr('Page')} {p_num}/{total_pages}" if total_pages else f"{tr('Page')} {p_num}"
+
+
+def _quick_view_has_reading_view(sys_id, page, current_text) -> bool:
+    """Whether Quick View offers its version chooser, Edit, Comment and Joins for ``page``.
+
+    As Browse (``web.pages.browse_state.page_has_reading_view``): a page without an automatic transcription gets
+    them too, its automatic text taken as empty, so an FGP or PGP edition of the page shows with the chooser
+    (owner, 2026-10-27); a synthetic catalogue-only record does not. ``current_text`` is the result's own text
+    when the page could not be fetched (``page`` is None), as before.
+    """
+    return bool(sys_id) and (bool(current_text) or page_has_reading_view(page))
+
+
+# ---------------------------------------------------------------------------
+# Quick View text -> HTML (escaped by construction)
+# ---------------------------------------------------------------------------
+
+def _apply_highlight_marks(text: str, terms: list) -> str:
+    """Quick View text as HTML: escaped, search terms marked, newlines as <br>.
+
+    The result goes to ``ui.html(..., sanitize=False)``, so the only markup in it
+    is what this function writes itself. Transcription notation such as
+    ``<upside down>`` or ``al-Ṣa<y>dalānī`` stays visible text.
+
+    Terms are matched exactly (case-sensitive) on the RAW text, all at once with
+    one alternation, longest first, so a later term can never match inside
+    markup an earlier term inserted, and overlapping terms never nest. A mark
+    that crosses a line break is closed and reopened on each line, so every row
+    of the line-numbered grid (render_line_numbered_html) has balanced tags.
+    Pure function: no ui.* calls (it runs from version_selector's deferred path).
+    """
+    if not text:
+        return ''
+    uniq = sorted({t for t in (terms or []) if t}, key=lambda t: (-len(t), t))
+    if not uniq:
+        return html.escape(text).replace('\n', '<br>')
+    rx = re.compile('|'.join(re.escape(t) for t in uniq))
+    out = []
+    pos = 0
+    for m in rx.finditer(text):
+        out.append(html.escape(text[pos:m.start()]))
+        out.append('\n'.join(
+            f'<mark class="highlight-match">{html.escape(part)}</mark>' if part else ''  # common.css: readable in light AND dark
+            for part in m.group(0).split('\n')
+        ))
+        pos = m.end()
+    out.append(html.escape(text[pos:]))
+    return ''.join(out).replace('\n', '<br>')
+
+
+def _fgp_text_for_display(text) -> str:
+    """Decode the HTML entities FGP sidecar text stores ('&deg;' and a few others).
+
+    Quick View used to hand FGP text to the browser unescaped, which decoded
+    them; now that the text is escaped, decode them ONCE here so '&deg;' keeps
+    showing as a degree sign. Since GS-60 `shared.fgp_service` decodes FGP text
+    for every surface when it reads a row, so for sidecar text this is a no-op
+    kept as a guard; the desktop no longer renders FGP text as Qt HTML (GS-275).
+    It uses the service's own rule, one layer: a bare `html.unescape` also read
+    the semicolon-less `&deg&` of row 26994, which no other surface does (Codex).
+    """
+    return decode_stored_entities(text, layers=1) if text else ''
+
+# ---------------------------------------------------------------------------
+# Bidi isolation (Finding #15)
+# ---------------------------------------------------------------------------
+# Shelfmarks ("T-S NS 192.21") and mixed Hebrew/Latin titles must be bidi-
+# isolated so their Latin letters / digits don't reorder against the
+# surrounding RTL UI. We render them as a <bdi> element (which carries an
+# implicit unicode-bidi: isolate + dir=auto), and ALSO set dir="auto" +
+# unicode-bidi: isolate explicitly so the contract is visible to tests and
+# robust across browsers. Text is HTML-escaped because it is user/corpus data.
+_BIDI_ISOLATE_STYLE = "unicode-bidi: isolate;"
+
+
+def _isolated_label(text, *, classes='', style=''):
+    """Render `text` as a bidi-isolated <bdi> via ui.html (text is escaped).
+
+    Returns the created ui.html element so callers can chain .tooltip()/.style().
+    """
+    safe = html.escape(str(text if text is not None else ''))
+    extra = (style + ' ' if style else '') + _BIDI_ISOLATE_STYLE
+    el = ui.html(f'<bdi dir="auto">{safe}</bdi>', sanitize=False)
+    if classes:
+        el.classes(classes)
+    el.style(extra)
+    return el
+
+
+# ---------------------------------------------------------------------------
+# Standalone helpers (zero closure dependencies)
+# ---------------------------------------------------------------------------
+
+async def copy_result_text(text):
+    """Copy text to the clipboard exactly; the toast reports the browser's answer.
+
+    Async: the button lambdas return this coroutine and NiceGUI awaits it.
+    """
+    await copy_text_to_clipboard(text)
+
+def show_add_to_list_dialog(result):
+    from web.components import show_add_to_list_dialog as show_dialog
+    display = result.get('display', {})
+    sys_id = display.get('id')
+    if not sys_id:
+        ui.notify(tr('Cannot add: missing system ID'), type='warning')
+        return
+    if not state.lists_mgr:
+        ui.notify(tr('Lists manager not available'), type='warning')
+        return
+    shelfmark = display.get('shelfmark', 'Unknown')
+    show_dialog(
+        sys_id=sys_id,
+        shelfmark=shelfmark,
+        lists_mgr=state.lists_mgr,
+        note_default='',  # Empty by default
+        fl_id=None
+    )
+
+
+
+# ---------------------------------------------------------------------------
+# Core rendering functions (take search_state + refs as parameters)
+# ---------------------------------------------------------------------------
+
+def _set_expansion_aria(search_state, index, expanded):
+    """Reflect accordion open/closed state on the clickable toggle (#26).
+
+    The toggle element carries role=button + aria-expanded; keep that in sync
+    so screen-reader users hear "expanded"/"collapsed".
+    """
+    toggle_refs = getattr(search_state, 'expansion_toggle_refs', {})
+    el = toggle_refs.get(index)
+    if el is not None and not getattr(el, 'is_deleted', False):
+        el.props(f'aria-expanded={"true" if expanded else "false"}')
+
+
+def toggle_expansion(search_state, refs, index):
+    """Toggle inline accordion expansion for a result card.
+
+    #25: visibility is driven through NiceGUI state (set_visibility) instead of
+    imperative inline display:none/block, and aria-expanded is kept in sync (#26).
+    """
+    def _mark_card(ref, expanded: bool):
+        # `is-expanded` on the card: common.css hides the snippet while the
+        # full text is open in its place (owner's mockup, 2026-10-22).
+        card = getattr(getattr(ref, 'parent_slot', None), 'parent', None)
+        if card is not None and not card.is_deleted:
+            if expanded:
+                card.classes(add='is-expanded')
+            else:
+                card.classes(remove='is-expanded')
+
+    if search_state.expanded_index == index:
+        # Collapse current
+        ref = search_state.expansion_refs.get(index)
+        if ref and not ref.is_deleted:
+            ref.set_visibility(False)
+            _mark_card(ref, False)
+        _set_expansion_aria(search_state, index, False)
+        search_state.expanded_index = None
+    else:
+        # Collapse old if any
+        if search_state.expanded_index is not None:
+            old_ref = search_state.expansion_refs.get(search_state.expanded_index)
+            if old_ref and not old_ref.is_deleted:
+                old_ref.set_visibility(False)
+                _mark_card(old_ref, False)
+            _set_expansion_aria(search_state, search_state.expanded_index, False)
+        # Expand new
+        ref = search_state.expansion_refs.get(index)
+        if ref and not ref.is_deleted:
+            ref.set_visibility(True)
+            _mark_card(ref, True)
+        _set_expansion_aria(search_state, index, True)
+        search_state.expanded_index = index
+        # Trigger lazy text loading if registered for this card
+        lazy_loaders = getattr(search_state, '_lazy_loaders', {})
+        if index in lazy_loaders:
+            async def _run_lazy(fn=lazy_loaders[index]):
+                with refs.page_client:
+                    await fn()
+            # Cat-2: client context re-entry required - _run_lazy uses `with refs.page_client:`.
+            asyncio.ensure_future(_run_lazy())
+
+
+def render_results(search_state, refs, results, page=None, scroll_to_top=False, reset_expansion=True):
+    refs.results_container.clear()
+    # Phase 55: Apply "all terms" post-filter if active
+    if search_state._all_terms_filter and search_state.refinement_chain:
+        common_uids = compute_all_terms_filter(search_state.refinement_chain)
+        if common_uids is not None:
+            results = [r for r in results if (r.get('uid') or r.get('display', {}).get('id')) in common_uids]
+    search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
+    # Phase 88: Sync per-session export payload with displayed (post-filter) results (singleton mirror removed).
+    from web.export_state import update_search_export_results
+    update_search_export_results(results)
+
+    # Handle expansion state
+    _was_expanded = None
+    if reset_expansion:
+        search_state.expanded_index = None
+        search_state.expansion_refs = {}
+    else:
+        _was_expanded = search_state.expanded_index
+        search_state.expansion_refs = {}
+        search_state.expanded_index = None
+
+    # Use provided page or keep stored page
+    if page is not None:
+        search_state.current_page = page
+    # Clamp page to valid range
+    total = len(results)
+    total_pages = max(1, (total + refs.page_size - 1) // refs.page_size)
+    if search_state.current_page >= total_pages:
+        search_state.current_page = 0
+
+    # Show loading spinner when search is running - prominent so user knows it's working
+    if search_state.is_running:
+        with refs.results_container:
+            with ui.column().classes('w-full h-64 items-center justify-center'):
+                ui.spinner('bars', size='xl', color='primary').classes('mb-4')
+                ui.label(tr("Searching...")).classes('text-xl font-bold animate-pulse').style('color: var(--primary-600);')
+        return
+
+    if not results:
+        with refs.results_container:
+            # Phase 55: Zero-result refinement recovery (D-14a)
+            if getattr(search_state, '_zero_result_refine', False):
+                with ui.column().classes('w-full h-64 items-center justify-center'):
+                    ui.label(tr('0 results within current scope')).classes('text-lg py-4 text-center w-full')
+                    ui.button(
+                        tr('Back to previous step'), icon='undo',
+                        on_click=lambda _ss=search_state, _r=refs: _r.undo_zero_result_refine()
+                    ).classes('mx-auto')
+            else:
+                with ui.column().classes('w-full h-64 items-center justify-center'):
+                    ui.icon('search').classes('text-5xl').style('color: var(--text-muted);')
+                    ui.label(tr("Ready to search.")).classes('mt-4').style('color: var(--text-muted);')
+        refs.update_search_within_btn()
+        refs.update_refinement_strip()
+        return
+
+    # Calculate page slice
+    page_idx = search_state.current_page
+    start = page_idx * refs.page_size
+    end = min(start + refs.page_size, total)
+    page_results = results[start:end]
+
+    with refs.results_container:
+        # Pagination controls at top (always reserve space to prevent CLS)
+        if total_pages > 1:
+            with ui.row().classes('w-full justify-between items-center px-4 pt-2'):
+                ui.label(f"{start + 1}-{end} {tr('of')} {total}{'+' if search_state.result_count_capped else ''}"
+                         ).classes('text-sm').style('color: var(--text-muted);')
+                def on_page_change_top(e, _ss=search_state, _r=refs):
+                    _ss.current_page = e.value - 1  # ui.pagination is 1-indexed
+                    render_results(_ss, _r, results, page=_ss.current_page, scroll_to_top=True)
+                ui.pagination(1, total_pages, value=page_idx + 1,
+                    on_change=on_page_change_top).props('max-pages=7 boundary-numbers')
+        else:
+            # Invisible placeholder reserving same height as pagination row
+            ui.element('div').classes('pagination-placeholder').style('height: 40px; visibility: hidden;')
+
+        # Render only this page of results. `density-compact` / `density-comfortable`
+        # (common.css) is this visitor's row density, toggled live from the toolbar.
+        _density = _safe_get('search_density', 'compact') or 'compact'
+        with ui.column().classes(f'w-full gap-2 p-4 results-list density-{_density}') as _results_list:
+            refs.results_list = _results_list
+            for i, res in enumerate(page_results):
+                create_result_card(search_state, refs, start + i, res)
+
+        # Re-expand previously open card after enrichment rerender
+        if not reset_expansion and _was_expanded is not None and _was_expanded in search_state.expansion_refs:
+            toggle_expansion(search_state, refs, _was_expanded)
+
+        # Pagination controls at bottom (always reserve space to prevent CLS)
+        if total_pages > 1:
+            with ui.row().classes('w-full justify-center items-center px-4 pb-2'):
+                def on_page_change_bottom(e, _ss=search_state, _r=refs):
+                    _ss.current_page = e.value - 1
+                    render_results(_ss, _r, results, page=_ss.current_page, scroll_to_top=True)
+                ui.pagination(1, total_pages, value=page_idx + 1,
+                    on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
+        else:
+            ui.element('div').classes('pagination-placeholder').style('height: 40px; visibility: hidden;')
+
+        # Collapsible excluded results section (domain-excluded)
+        excluded = search_state.domain_excluded_results
+        if excluded:
+            with ui.expansion(
+                text=f"{tr('Excluded Results')} ({len(excluded)})",
+                icon='filter_alt',
+                value=False  # collapsed by default
+            ).classes('w-full').style(
+                'border: 1px solid var(--accent-amber); border-radius: 8px; margin-top: 16px; overflow: hidden;'
+            ).props('dense header-class="text-amber-8 text-subtitle1 text-weight-medium"'):
+                # Show up to 50 excluded results with their reasons
+                EXCLUDED_DISPLAY_LIMIT = 50
+                for i, excl_item in enumerate(excluded[:EXCLUDED_DISPLAY_LIMIT]):
+                    excl_result = excl_item['result']
+                    excl_reason = excl_item.get('reason', '')
+                    excl_display = excl_result.get('display', {})
+                    excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
+                    excl_title = excl_display.get('title', '')
+                    with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
+                        'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
+                    ).props('data-ux=result_quick_view').on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
+                        _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
+                            'color: var(--text-secondary); max-width: 200px;'
+                        ))
+                        if excl_title:
+                            title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
+                            _isolated_label(title_short, classes='text-xs truncate', style=(
+                                'color: var(--text-muted); min-width: 0; flex: 1 1 0;'
+                            ))
+                        ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                            'background: #fff3cd; color: #856404; white-space: nowrap;'
+                        )
+                if len(excluded) > EXCLUDED_DISPLAY_LIMIT:
+                    ui.label(
+                        f"... {tr('and')} {len(excluded) - EXCLUDED_DISPLAY_LIMIT} {tr('more')}"
+                    ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
+
+        # Collapsible word search excluded results section
+        ws_excluded = search_state.word_search_excluded_results
+        if ws_excluded:
+            with ui.expansion(
+                text=f"{tr('Excluded Results')} ({len(ws_excluded)})",
+                icon='remove_circle_outline',
+                value=False  # collapsed by default
+            ).classes('w-full').style(
+                'border: 1px solid var(--accent-amber); border-radius: 8px; margin-top: 8px; overflow: hidden;'
+            ).props('dense header-class="text-amber-8 text-subtitle1 text-weight-medium"'):
+                WS_EXCLUDED_LIMIT = 50
+                for i, excl_item in enumerate(ws_excluded[:WS_EXCLUDED_LIMIT]):
+                    excl_result = excl_item['result']
+                    excl_display = excl_result.get('display', {})
+                    excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
+                    excl_title = excl_display.get('title', '')
+                    excl_sys_id = excl_display.get('id')
+                    with ui.row().classes('w-full items-center gap-2 py-1 px-2').style(
+                        'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
+                    ):
+                        # Restore button
+                        def _restore_word_result(sid=excl_sys_id):
+                            search_state.word_search_excluded_ids.discard(sid)
+                            persist_value('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
+                            save_post_filters_with_run(search_state)
+                            refs.apply_word_search_exclusions_and_render()
+                        ui.button(icon='add_circle_outline', on_click=_restore_word_result).props(
+                            f'flat round dense size=xs aria-label="{tr("Restore")}"'
+                        ).style('color: var(--text-muted);').tooltip(tr('Restore'))
+                        with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').props('data-ux=result_quick_view').on(
+                            'click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)
+                        ):
+                            _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
+                                'color: var(--text-secondary); max-width: 200px;'
+                            ))
+                            if excl_title:
+                                title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
+                                _isolated_label(title_short, classes='text-xs truncate', style=(
+                                    'color: var(--text-muted); min-width: 0; flex: 1 1 0;'
+                                ))
+                if len(ws_excluded) > WS_EXCLUDED_LIMIT:
+                    ui.label(
+                        f"... {tr('and')} {len(ws_excluded) - WS_EXCLUDED_LIMIT} {tr('more')}"
+                    ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
+                # Clear all word search exclusions button
+                with ui.row().classes('w-full justify-end py-2 px-2'):
+                    def _clear_word_exclusions():
+                        search_state.word_search_excluded_ids.clear()
+                        persist_value('word_search_excluded_ids', [])
+                        save_post_filters_with_run(search_state)
+                        refs.apply_word_search_exclusions_and_render()
+                    ui.button(tr('Clear All Exclusions'), icon='clear_all',
+                              on_click=_clear_word_exclusions).props('flat dense no-caps size=sm')
+
+        # Phase 56: Collapsible manuscript excluded results section
+        ms_excluded = search_state.manuscript_excluded_results
+        if ms_excluded:
+            with ui.expansion(
+                text=f"{tr('Excluded manuscripts')} ({len(ms_excluded)})",
+                icon='person_remove',
+                value=False
+            ).classes('w-full').style(
+                'border: 1px solid var(--accent-red, #ef4444); border-radius: 8px; margin-top: 8px; overflow: hidden;'
+            ).props('dense header-class="text-red-8 text-subtitle1 text-weight-medium"'):
+                MS_EXCL_LIMIT = 50
+                for i, excl_item in enumerate(ms_excluded[:MS_EXCL_LIMIT]):
+                    excl_result = excl_item['result']
+                    excl_reason = excl_item.get('reason', '')
+                    excl_display = excl_result.get('display', {})
+                    excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
+                    excl_title = excl_display.get('title', '')
+                    with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
+                        'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
+                    ).props('data-ux=result_quick_view').on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
+                        _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
+                            'color: var(--text-secondary); max-width: 200px;'
+                        ))
+                        if excl_title:
+                            title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
+                            _isolated_label(title_short, classes='text-xs truncate', style=(
+                                'color: var(--text-muted); min-width: 0; flex: 1 1 0;'
+                            ))
+                        ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                            'background: var(--accent-red, #fecaca); color: var(--text-on-accent, #991b1b); white-space: nowrap;'
+                        )
+                if len(ms_excluded) > MS_EXCL_LIMIT:
+                    ui.label(
+                        f"... {tr('and')} {len(ms_excluded) - MS_EXCL_LIMIT} {tr('more')}"
+                    ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
+
+    # Phase 55: Update refinement UI after rendering results
+    refs.update_search_within_btn()
+    refs.update_refinement_strip()
+
+    # Scroll to top of results after page change. On a phone the results pane
+    # does not scroll (the page does; common.css `.search-shell`), so the
+    # document is scrolled instead.
+    if scroll_to_top:
+        refs.results_container.run_method('setScrollPosition', 'vertical', 0)
+        with refs.results_container:
+            ui.run_javascript('if (window.innerWidth <= 640) window.scrollTo({top: 0});')
+
+
+
+def render_preview_results(search_state, refs, rows):
+    """Show the rows found so far while the search is still running.
+
+    *rows* are the start of the final list, in its order (the engine's preview
+    contract; the page asks for them only when no filter could hide one), so
+    card numbers and selections keep their meaning when the completed search
+    renders the whole list. The export payload, filters and pagination are left
+    to that render.
+    """
+    refs.results_container.clear()
+    search_state.displayed_results = rows
+    search_state.expanded_index = None
+    search_state.expansion_refs = {}
+    with refs.results_container:
+        with ui.row().classes('w-full items-center gap-2 px-4 pt-3'):
+            ui.spinner(size='sm', color='primary')
+            ui.label(tr('Still searching. The first results:')).classes('text-sm').style(
+                'color: var(--text-muted);')
+        with ui.column().classes('w-full gap-2 p-4'):
+            for i, res in enumerate(rows[:refs.page_size]):
+                create_result_card(search_state, refs, i, res)
+
+
+def create_result_card(search_state, refs, index, result):
+    display = result.get('display', {})
+    shelfmark = display.get('shelfmark', 'Unknown')
+    title = display.get('title', '')
+    snippet = result.get('snippet', '')
+    library_code = display.get('library_code', '')
+    sys_id = display.get('id')
+
+    # Truncate title for display
+    title_short = (title[:60] + '...') if title and len(title) > 60 else title
+
+    # `result-card` / `result-snippet` (common.css): the compact density is one
+    # header line -- checkbox, shelfmark, badges, the title cut to the width, the
+    # actions -- over a two-line snippet (three on a phone); the comfortable
+    # density is the older card. The top row never wraps, so the checkbox stays
+    # beside the badges instead of taking a line of its own.
+    with ui.card().classes(
+        'w-full p-4 cursor-pointer transition-all hover:shadow-md result-card'
+    ).style('border-radius: 10px;') as card:
+        with ui.row(wrap=False).classes('w-full items-start justify-between'):
+            # Checkbox for selection
+            with ui.column().classes('justify-center'):
+                def toggle_card_selection(e, idx=index):
+                    if e.value:
+                        search_state.selected_indices.add(idx)
+                    else:
+                        search_state.selected_indices.discard(idx)
+                    refs.update_selection_ui()
+                    # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
+                    _selected_uids = compute_selected_uids(search_state)
+                    from web.export_state import update_search_export_selection
+                    update_search_export_selection(_selected_uids)
+
+                result_checkbox = ui.checkbox(
+                    value=index in search_state.selected_indices,
+                    on_change=toggle_card_selection
+                ).props('dense')
+
+            # Main content (clickable — toggles inline accordion).
+            # M3 + #26: expose button semantics so keyboard + screen-reader users can
+            # operate the accordion. role=button + tabindex make it focusable/activatable;
+            # aria-expanded reflects state; aria-controls points at the expansion panel.
+            # The expansion panel below uses the matching id (see _expand_panel_id).
+            _expand_panel_id = f'result-expand-{index}'
+            # `result-head`: on wide screens in the compact density this column
+            # lays out as ONE line (badges, then the title cut to the width).
+            _content_col = ui.column().classes('flex-grow min-w-0 gap-1 cursor-pointer result-head')
+            _content_col.props(
+                f'role=button tabindex=0 aria-expanded=false aria-controls="{_expand_panel_id}" '
+                f'aria-label="{tr("Toggle full text and image")}"'
+            )
+            search_state.expansion_toggle_refs = getattr(search_state, 'expansion_toggle_refs', {})
+            search_state.expansion_toggle_refs[index] = _content_col
+            _content_col.on('click', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            # Enter / Space activate, matching native button behavior. keydown.space.prevent
+            # stops the page from scrolling on Space. The `.self` modifier (GitHub Codex
+            # PR #300 P2) gates the handler on the wrapper being the event TARGET, so
+            # Enter/Space on a nested control (visual-similarity / title-swap button) does
+            # NOT bubble up and toggle the card -- click is already shielded via click.stop
+            # on those children, but keydown was not.
+            _content_col.on('keydown.enter.self', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            _content_col.on('keydown.space.self.prevent', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            with _content_col:
+                with ui.row().classes('items-center gap-2 flex-wrap result-badges'):
+                    # Shelfmark first (owner's mockup, 2026-10-22); the index chip
+                    # goes last through CSS order (`result-index`).
+                    _isolated_label(shelfmark, classes='font-bold break-all result-shelfmark', style='color: var(--primary-700);')
+                    ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0 result-index').style(
+                        'background: var(--bg-tertiary); color: var(--text-muted);'
+                    )
+                    # Library badge (if available)
+                    if library_code:
+                        from genizah_core import get_library_display
+                        full_name = get_library_display(library_code, short=False, lang=get_language())
+                        ui.label(library_code).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                            'background: var(--primary-100); color: var(--primary-700);'
+                        ).tooltip(full_name)
+                    # PGP transcription indicator
+                    if sys_id and sys_id in search_state.transcription_sys_ids:
+                        ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                            'background: var(--success-100); color: var(--success-700); font-weight: 600;'
+                        ).tooltip(tr('Has PGP info'))
+                    # SEED-022: source-agnostic manual-transcription indicator (icon +
+                    # tooltip). Additive; sits beside the PGP badge with a distinct
+                    # (amber) hue. Shown when the mss has any readable manual
+                    # transcription/translation (PGP text ∪ FGP).
+                    if sys_id and sys_id in getattr(search_state, 'manual_transcription_sys_ids', set()):
+                        ui.icon('description').classes('text-sm shrink-0').props(
+                            f'role=img aria-label="{tr("scholarly transcription/translation available")}"'
+                        ).style(
+                            'color: var(--accent-amber, #b45309);'
+                        ).tooltip(tr('scholarly transcription/translation available'))
+                    # Domain indicator
+                    if sys_id and search_state.result_domains:
+                        domains_for_result = search_state.result_domains.get(sys_id, [])
+                        if domains_for_result:
+                            primary_domain = domains_for_result[0]
+                            domain_text = domain_display_name(search_state, primary_domain)
+                            if len(domains_for_result) > 1:
+                                extra = len(domains_for_result) - 1
+                                tooltip_text = ', '.join(domain_display_name(search_state, d) for d in domains_for_result)
+                                with ui.row().classes('items-center gap-0'):
+                                    ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                        'background: #f3e8ff; color: #7c3aed;'
+                                    )
+                                    ui.label(f'+{extra}').classes('text-xs px-1 py-0.5 rounded shrink-0 cursor-help').style(
+                                        'background: #ede9fe; color: #7c3aed;'
+                                    ).tooltip(tooltip_text)
+                            else:
+                                ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                    'background: #f3e8ff; color: #7c3aed;'
+                                )
+                    # Printed material indicator
+                    if sys_id and sys_id in search_state.printed_ids:
+                        from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
+                        _bg, _fg = PRINTED_BADGE_COLORS
+                        _plabel = PRINTED_LABEL_HE if get_language() == 'he' else PRINTED_LABEL_EN
+                        ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
+                            f'background: {_bg}; color: {_fg};'
+                        )
+                    # Phase 57 JOIN-03: Visual Similarity icon in badge row
+                    _has_vs = sys_id and search_state.vs_availability.get(sys_id)
+                    if _has_vs:
+                        _vs_expanded_state = {'value': False, 'loaded': False}
+                        # Define toggle function -- container will be set below
+                        _vs_container_ref = [None]
+
+                        async def _toggle_vs_partners(s_id=sys_id, exp=_vs_expanded_state, cref=_vs_container_ref):
+                            container = cref[0]
+                            if container is None:
+                                return
+                            exp['value'] = not exp['value']
+                            if exp['value']:
+                                container.classes(remove='hidden')
+                                if not exp['loaded']:
+                                    exp['loaded'] = True
+                                    try:
+                                        from shared.visual_similarity_service import get_vs_service
+                                        _svc = get_vs_service(thread_safe=True)
+                                        _top3 = await run.io_bound(_svc.get_suggestions, s_id, 3)
+                                        with container:
+                                            ui.label(tr('Visual similarity partners')).classes('text-xs font-semibold').style('color: #ef6c00;')
+                                            for _p in _top3:
+                                                _cb = state.meta_mgr.csv_bank if state.meta_mgr else None
+                                                _p_meta = _cb.get(_p['alma_id']) if _cb else None
+                                                _p_sm = _p_meta.get('shelfmark', _p['alma_id']) if _p_meta else _p['alma_id']
+                                                with ui.row().classes('items-center gap-1'):
+                                                    ui.badge(f'#{_p["rank"]}').props('color=deep-orange-1 text-color=deep-orange-9').classes('text-xs')
+                                                    ui.link(_p_sm, f'/browse?sys_id={_p["alma_id"]}').classes('text-xs')
+                                    except Exception:
+                                        with container:  # Visual similarity lookup failed; continue
+                                            ui.label(tr('Could not load visual similarity data. Try again later.')).classes('text-xs').style('color: var(--text-muted);')
+                            else:
+                                container.classes(add='hidden')
+
+                        ui.button(icon='compare', on_click=_toggle_vs_partners).props(
+                            f'flat dense round size=xs aria-label="{tr("Visual similarity partners")}"'
+                        ).style('color: #ef6c00;').tooltip(tr('Visual similarity partners'))
+
+                    # Phase 999.1 (FOLIO-01): page/image number chip after shelfmark for desktop parity.
+                    # Source: display['img'] — same field desktop COL_IMG renders (genizah_app.py:16111).
+                    # D-02 / D-02a: just the number, no prefix, no separator char; falsy → render nothing.
+                    # D-04 (revised 2026-05-15): chip styling IS allowed, but position stays after
+                    # the shelfmark — must NOT be moved into the left-side colored-pill cluster.
+                    # Theme-aware via existing CSS vars — adapts to light / parchment / dark modes.
+                    # D-05 (revised 2026-05-18 after Task 2 smoke check): descriptive tooltip is
+                    # allowed; still no click handler and no link.
+                    _img_num = display.get('img')
+                    if _img_num:
+                        ui.label(str(_img_num)).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                            'background: var(--bg-tertiary); color: var(--text-muted); '
+                            'min-width: 2.4em; text-align: center;'
+                        ).tooltip(tr('Image number'))
+
+                # Phase 57 JOIN-03: Partner container placed outside badge row, inside content column
+                if _has_vs:
+                    _vs_partner_container = ui.column().classes('hidden w-full gap-0 py-1 px-2').style(
+                        'background: #fff3e0; border-radius: 6px; margin-top: 4px;'
+                    )
+                    _vs_container_ref[0] = _vs_partner_container
+
+                # Title and optional translated description (Phase 46)
+                _show_trans = _safe_get('show_translations', False)
+                _title_info = search_state.title_translations.get(sys_id) if sys_id else None
+                if _title_info:
+                    _lang = get_language()
+                    _he = _title_info.get('hebrew_title') or ''
+                    _en = _title_info.get('english_title') or ''
+                    _en_he = _title_info.get('english_title_he') or ''
+                    if _lang == 'he':
+                        if _he.strip():
+                            if _en_he.strip() and len(_he) < 15:
+                                _resolved_title = f"{_he} — {_en_he}"
+                            else:
+                                _resolved_title = _he
+                        else:
+                            _resolved_title = _en_he or _en or title
+                    else:
+                        _resolved_title = _en or _he or title
+                    _resolved_short = (_resolved_title[:60] + '...') if _resolved_title and len(_resolved_title) > 60 else (_resolved_title or '')
+                else:
+                    _resolved_title = title
+                    _resolved_short = title_short
+                _trans_info = search_state.translation_data.get(sys_id) if sys_id and _show_trans else None
+                _ui_lang = get_language()
+                if _trans_info and _trans_info.get('description_he') and _ui_lang == 'he':
+                    _desc_he = _trans_info['description_he']
+                    _desc_short = (_desc_he[:80] + '...') if len(_desc_he) > 80 else _desc_he
+                    _orig = _resolved_short if _resolved_short else ''
+                    _ts = {'showing_original': False}
+                    with ui.row().classes('items-center gap-1 result-title'):
+                        _tl = ui.label(_desc_short).classes('text-xs').style(
+                            'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
+                        )
+                        def _make_compact_toggle(label_el, badge_el_ref, orig_text, trans_text, flag):
+                            def handler():
+                                flag['showing_original'] = not flag['showing_original']
+                                if flag['showing_original']:
+                                    label_el.text = orig_text
+                                    label_el.style('color: var(--text-tertiary); direction: ltr; word-wrap: break-word;')
+                                    badge_el_ref[0].text = tr('Original')
+                                else:
+                                    label_el.text = trans_text
+                                    label_el.style('color: var(--text-tertiary); direction: rtl; word-wrap: break-word;')
+                                    badge_el_ref[0].text = tr('Translated')
+                            return handler
+                        _tb_ref = [None]
+                        _toggle_fn = _make_compact_toggle(_tl, _tb_ref, _orig, _desc_short, _ts)
+                        _tb = ui.button(tr('Translated')).props(
+                            'flat dense no-caps size=xs'
+                        ).classes('text-xs px-1 py-0 rounded shrink-0').style(
+                            'background: #e0f2fe !important; color: #0369a1 !important; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                        )
+                        _tb.on('click.stop', _toggle_fn)
+                        _tb_ref[0] = _tb
+                        from web.components.translation_report import create_report_button
+                        create_report_button(
+                            dataset='pgp', record_id=str(search_state.translation_data.get(sys_id, {}).get('pgpid', sys_id)),
+                            field_name='description', direction='en2he',
+                            source_text=_orig, translated_text=_desc_short,
+                        )
+                elif _resolved_short:
+                    _dir = 'ltr' if (_title_info and get_language() != 'he' and _title_info.get('english_title')) else 'rtl'
+                    _orig_title = title
+                    _orig_short = (title[:60] + '...') if title and len(title) > 60 else (title or '')
+                    if _title_info and _orig_short and _orig_short != _resolved_short:
+                        _tt_st = {'showing_original': False}
+                        with ui.row().classes('items-center gap-0 result-title'):
+                            _tt_lbl = ui.label(_resolved_short).classes('text-xs').props('dir="auto"').style(
+                                f'color: var(--text-tertiary); direction: {_dir}; unicode-bidi: isolate; word-wrap: break-word;'
+                            )
+                            def _make_title_toggle(lbl, orig, resolved, orig_dir, res_dir, flag):
+                                def handler():
+                                    flag['showing_original'] = not flag['showing_original']
+                                    if flag['showing_original']:
+                                        lbl.text = orig
+                                        lbl.style(f'color: var(--text-tertiary); direction: {orig_dir}; unicode-bidi: isolate; word-wrap: break-word;')
+                                    else:
+                                        lbl.text = resolved
+                                        lbl.style(f'color: var(--text-tertiary); direction: {res_dir}; unicode-bidi: isolate; word-wrap: break-word;')
+                                return handler
+                            ui.button(icon='swap_horiz').props(
+                                f'flat dense round size=xs aria-label="{tr("Show original title")}"'
+                            ).style(
+                                'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
+                            ).tooltip(tr('Show original title')).on(
+                                'click.stop', _make_title_toggle(_tt_lbl, _orig_short, _resolved_short, 'rtl', _dir, _tt_st)
+                            )
+                    else:
+                        ui.label(_resolved_short).classes('text-xs result-title').props('dir="auto"').style(
+                            f'color: var(--text-tertiary); direction: {_dir}; unicode-bidi: isolate; word-wrap: break-word;'
+                        )
+
+        # Action buttons row (on the card, always visible)
+            with ui.row().classes('gap-1 result-actions'):
+                # Browse
+                if sys_id:
+                    # Page identity for the browse deep-link. A bare /browse?sys_id=
+                    # is NOT a harmless degradation: browse then resolves the first
+                    # p_num==1 page of the FIRST volume, which for a multi-IE
+                    # manuscript is a different folio than the one that matched.
+                    # So derive each component independently, and fall back from
+                    # raw_header to uid -- the uid ('IE..._P..._FL...') carries
+                    # ie_id/p_num/fl_id on its own even when raw_header is missing,
+                    # empty, or unparseable.
+                    _card_fl_id = None
+                    _card_ie_id = None
+                    _card_p_num = None
+                    if state.meta_mgr:
+                        for _id_src in (result.get('raw_header'), result.get('uid')):
+                            if not _id_src or (_card_fl_id and _card_ie_id and _card_p_num):
+                                continue
+                            try:
+                                _parsed = state.meta_mgr.parse_full_id_components(_id_src)
+                            except Exception:
+                                continue  # unparseable source; try the next one
+                            _card_fl_id = _card_fl_id or _parsed.get('fl_id')
+                            _card_ie_id = _card_ie_id or _parsed.get('ie_id')
+                            _card_p_num = _card_p_num or _parsed.get('p_num')
+                    _card_browse_url = f'/browse?sys_id={sys_id}'
+                    if _card_fl_id:
+                        _card_browse_url += f'&fl_id={_card_fl_id}'
+                    if _card_ie_id:
+                        _card_browse_url += f'&volume_ie={_card_ie_id}'
+                    if _card_p_num:
+                        _card_browse_url += f'&page={_card_p_num}'
+                    # SEED-033 Option A: carry the matched phrase so the browse
+                    # page's version chooser can default to whichever source
+                    # actually contains it.
+                    _card_phrase = _snippet_match_phrase(snippet)
+                    if _card_phrase:
+                        _card_browse_url += f'&highlight={quote(_card_phrase)}'
+                    with ui.link(target=_card_browse_url).classes('no-underline'):
+                        ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
+
+                # Quick View (was Advanced View)
+                ui.button(
+                    icon='open_in_full',
+                    on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
+                ).props(f'flat round dense size=sm data-ux=result_quick_view aria-label="{tr("Quick View")}"').tooltip(tr('Quick View'))
+
+                # Add to List
+                def make_star_handler(r):
+                    def handler():
+                        show_add_to_list_dialog(r)
+                    return handler
+                result_sys_id = result.get('display', {}).get('id')
+                result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
+                ui.button(
+                    icon='star' if result_in_list else 'star_border',
+                    on_click=make_star_handler(result)
+                ).props(f'flat round dense size=sm aria-label="{tr("In List") if result_in_list else tr("Add to List")}"').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
+
+                # Catalog Records
+                if sys_id:
+                    cat_count = search_state.catalog_source_counts.get(sys_id, 0)
+                    from web.components.catalog_dialog import show_catalog_dialog
+                    cat_btn = ui.button(
+                        icon='description',
+                        on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
+                    ).props(f'flat round dense size=sm aria-label="{tr("Catalog Records")}"').tooltip(f'{tr("Catalog Records")} ({cat_count})')
+                    if cat_count == 0:
+                        cat_btn.disable()
+
+                # Joins icon (FND-04, D-20/D-21)
+                if sys_id:
+                    # Build deep link — reuse _card_ie_id parsed above (guarded inside Browse block at :587-598)
+                    _joins_url = f'/joins-lab?sys_id={sys_id}'
+                    # Re-parse _card_ie_id here in case Browse block was not entered (e.g. no sys_id in Browse)
+                    _joins_ie_id = None
+                    if 'raw_header' in result and state.meta_mgr:
+                        try:
+                            _joins_parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                            _joins_ie_id = _joins_parsed.get('ie_id')
+                        except Exception:
+                            pass
+                    if _joins_ie_id:
+                        _joins_url += f'&volume_ie={_joins_ie_id}'
+
+                    # WR-06: thread the result's pgpid through to create_joins_dialog
+                    # so fetch_connected_fragments does not have to resolve it from
+                    # document_id via an extra Supabase round-trip on every open. Use
+                    # the same translation_data lookup the rest of this module uses
+                    # (e.g. the PGP report button at :548). None when unavailable —
+                    # the dialog then falls back to the document_id resolution path.
+                    _joins_pgpid = None
+                    try:
+                        _td = search_state.translation_data.get(sys_id, {}) if sys_id else {}
+                        _joins_pgpid = _td.get('pgpid')
+                    except Exception:
+                        _joins_pgpid = None
+
+                    async def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
+                                                    pid=_joins_pgpid):
+                        """Fetch optional joins only after a visitor requests this card."""
+                        try:
+                            data = await run.io_bound(
+                                fetch_connected_fragments,
+                                shelfmark=sm,
+                                document_id=s,
+                                pgpid=pid,
+                            )
+                        except Exception:
+                            # The Lab remains useful when the optional lookup is unavailable.
+                            ui.navigate.to(url, new_tab=True)
+                            return
+                        if data is None:
+                            return  # cancelled or app stopping
+                        if data.get('total_joins', 0) > 0:
+                            create_joins_dialog(
+                                shelfmark=sm,
+                                document_id=s,
+                                pgpid=pid,
+                                find_joins_url=url,
+                            )
+                        else:
+                            ui.navigate.to(url, new_tab=True)
+
+                    joins_btn = ui.button(
+                        icon='link',
+                        on_click=_open_joins_for_card,
+                    ).props(f'flat round dense size=sm aria-label="{tr("Find Joins in the Joins Lab")}"').style(
+                        'color: var(--neutral-400);'
+                    ).tooltip(tr('Find Joins in the Joins Lab'))
+
+            # Snippet — enrich with earlier chain terms if refinement is active
+        if snippet:
+            if search_state.refinement_chain:
+                snippet = enrich_snippet_with_chain_terms(snippet, search_state.refinement_chain, refs.query_input.value)
+            snippet_html = SearchEngine.format_snippet(snippet)
+            with ui.element('div').classes('mt-3 p-3 rounded-lg text-sm result-snippet').style(
+                'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
+            ):
+                ui.html(snippet_html, sanitize=False)
+
+        # === Inline accordion expansion (image + full text only) ===
+        # #25: use NiceGUI visibility/state instead of imperative display:none/block.
+        # #26: id + role=region let the toggle's aria-controls target a labeled region.
+        expand_container = ui.column().classes('w-full result-inline-expand')
+        expand_container.props(f'id="{_expand_panel_id}" role=region aria-label="{tr("Full text and image")}"')
+        expand_container.set_visibility(False)
+        search_state.expansion_refs[index] = expand_container
+
+        # Build the URL now, but defer the hidden accordion's image request.
+        _img_url = None
+        if sys_id:
+            page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
+            # Add volume suffix for multi-IE manuscripts
+            _thumb_suffix = ''
+            if _card_ie_id:
+                from genizah_core import get_volumes_for_sys_id as _get_vols
+                _tvols = _get_vols(sys_id)
+                if _tvols:
+                    for _tv in _tvols:
+                        if _tv['ie_id'] == _card_ie_id:
+                            if _tv['suffix'] > 1:
+                                _thumb_suffix = f'&suffix={_tv["suffix"]}'
+                            break
+            # Phase 85 D-06: synthetic sys_ids skip the NLI image proxy URL
+            # so the search-result thumbnail doesn't try to load a 204 endpoint.
+            if is_synthetic_sys_id(sys_id):
+                _img_url = None
+            else:
+                _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300{_thumb_suffix}"
+            is_oxford = False
+            try:
+                from web.pages.browse import is_oxford_manuscript
+                is_oxford = is_oxford_manuscript(display.get('shelfmark', ''), display.get('library_code', ''))
+            except Exception:
+                pass  # NLI enrichment failed; continue without
+            if is_oxford:
+                try:
+                    from web.pages.browse import get_oxford_direct_image_url
+                    _ox_url = get_oxford_direct_image_url(display.get('shelfmark', ''), page_idx)
+                    if _ox_url:
+                        _img_url = _ox_url
+                    else:
+                        _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                except Exception:
+                    _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"  # Enrichment failed; continue with available data
+
+        with expand_container:
+            # The full text takes the snippet's place (common.css hides the
+            # snippet while the card `is-expanded`), a 150px thumbnail beside it
+            # opens the quick view, and the actions sit on one line under them;
+            # on a phone the thumbnail drops under the text (owner's mockup,
+            # 2026-10-22). The old layout kept the snippet, spent a line on
+            # Collapse alone and put a 250px thumbnail beside a 250px text box.
+            # The region still carries an aria-label for screen readers (#26).
+            _expand_row = ui.row().classes('w-full flex-wrap expand-row')
+            with _expand_row:
+                if _img_url:
+                    with ui.element('div').classes('cursor-pointer expand-thumb').props('data-ux=result_quick_view').on(
+                        'click', lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
+                    ):
+                        ui.html(
+                            f'<img src="{_img_url}" loading="lazy" decoding="async" alt="" '
+                            f'onerror="this.style.display=\'none\'" />',
+                            sanitize=False
+                        )
+                        _img_num = display.get('img')
+                        ui.label(
+                            (f"{tr('Page')} {_img_num} · " if _img_num else '') + tr('Quick View')
+                        ).classes('expand-caption')
+
+                # Right: full text container (populated immediately or lazy-loaded)
+                _text_col = ui.column().classes('flex-1 min-w-[200px] gap-2')
+
+            with ui.row().classes('w-full items-center expand-actions'):
+                ui.button(
+                    tr('Quick View'), icon='open_in_full',
+                    on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r),
+                ).props('outline dense no-caps size=sm color=primary data-ux=result_quick_view')
+                if sys_id:
+                    # The same deep link as the card's menu_book icon: fl_id,
+                    # volume_ie, page and the matched phrase. A bare sys_id
+                    # opens the first folio of the first volume, which in a
+                    # multi-IE manuscript is not the one that matched (Codex
+                    # on #434; the comment at _card_browse_url says why).
+                    with ui.link(target=_card_browse_url).classes('no-underline'):
+                        ui.button(tr('Browse Full Manuscript'), icon='menu_book').props(
+                            'outline dense no-caps size=sm color=primary'
+                        )
+                ui.space()
+                ui.button(
+                    tr('Collapse'), icon='expand_less',
+                    on_click=lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx),
+                ).props(f'flat dense no-caps size=sm aria-label="{tr("Collapse")}"')
+
+            def _render_full_text(text_col, text, pattern):
+                """Render highlighted full text into the given column."""
+                text_col.clear()
+                with text_col:
+                    if text:
+                        escaped, stopped = highlight_full_text_html(text, pattern)
+                        if stopped:
+                            ui.label('ההדגשה הופסקה מפני שחרגה ממגבלת הזמן.' if is_rtl()
+                                     else 'Highlighting stopped because it exceeded the time limit.')
+                        with ui.scroll_area().classes('w-full').style('max-height: 250px;'):
+                            with ui.element('div').classes('p-3 rounded-lg text-sm whitespace-pre-wrap expand-text').style(
+                                'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 0.95rem;'
+                            ):
+                                ui.html(escaped, sanitize=False)
+                    else:
+                        ui.label(tr('Full text not available')).style('color: var(--text-muted);')
+
+            # Populate text: immediately if available, lazy-load if not
+            full_text = result.get('full_text', '')
+            highlight_pattern = result.get('highlight_pattern', '')
+            if full_text:
+                _render_full_text(_text_col, full_text, highlight_pattern)
+            elif sys_id:
+                # Lazy-load: fetch full text when accordion first expands
+                _lazy_state = {'loaded': False}
+                _orig_toggle = None
+
+                async def _lazy_load_text(idx=index, r=result, tc=_text_col, hp=highlight_pattern, sid=sys_id, ls=_lazy_state):
+                    if ls['loaded']:
+                        return
+                    ls['loaded'] = True
+                    # #11: per-op pending feedback — show a spinner in this card's
+                    # text column while the page fetch runs (does not block the page).
+                    tc.clear()
+                    with tc:
+                        with ui.row().classes('items-center gap-2'):
+                            ui.spinner(size='sm').props('aria-hidden=true')
+                            ui.label(tr('Loading full text…')).classes('text-sm').style('color: var(--text-muted);')
+                    try:
+                        # Parse the page number INSIDE the guarded block: a missing
+                        # or non-numeric img must surface the error/Retry UI below
+                        # (and reset `loaded`), not raise after the spinner renders.
+                        try:
+                            p_num = int(r.get('display', {}).get('img', '1'))
+                        except (ValueError, TypeError):
+                            p_num = 1
+                        from web.services import get_service
+                        page_data = await run.io_bound(in_visitor_language(
+                            lambda: get_service().get_browse_page(sid, p_num=p_num)
+                        ))
+                        if page_data and page_data.text:
+                            r['full_text'] = page_data.text
+                            _render_full_text(tc, page_data.text, hp)
+                        else:
+                            logger.warning("Lazy load: no page data for sys_id=%s p_num=%d", sid, p_num)
+                            _render_full_text(tc, '', hp)  # shows "Full text not available"
+                    except Exception as e:
+                        logger.error("Lazy load error for sys_id=%s: %s", sid, e, exc_info=True)
+                        # #11: per-op failure feedback + retry, scoped to this card.
+                        ls['loaded'] = False
+                        tc.clear()
+                        with tc:
+                            with ui.column().classes('gap-2'):
+                                ui.label(tr('Could not load full text. Try again later.')).classes('text-sm').style(
+                                    'color: var(--accent-red, #ef4444);'
+                                )
+                                ui.button(
+                                    tr('Retry'), icon='refresh',
+                                    on_click=lambda: _lazy_load_text(),  # the coroutine: NiceGUI runs it in this page
+                                ).props('flat dense no-caps size=sm')
+
+                # Hook into toggle: load text on first expand
+                _orig_toggle_fn = lambda i, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, i)
+
+                def _make_lazy_toggle(idx, load_fn, orig_fn):
+                    def _toggle(i):
+                        orig_fn(i)
+                        if search_state.expanded_index == idx:
+                            # Cat-2: lazy toggle client-context re-entry - sync toggle helper
+                            # cannot await; load_fn hits run.io_bound under its own context.
+                            asyncio.ensure_future(load_fn())
+                    return _toggle
+
+                # Patch the click handler for this card to also trigger lazy load
+                # We do this by wrapping the card's click — find the content column and re-bind
+                # Simpler: just trigger lazy load whenever this card expands
+                search_state._lazy_loaders = getattr(search_state, '_lazy_loaders', {})
+                search_state._lazy_loaders[index] = _lazy_load_text
+
+
+
+def open_advanced_dialog(search_state, refs, index, result):
+    """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
+
+    When index is None, operates in standalone mode: wraps the single result in a list,
+    uses index=0, and disables navigation. This is used for excluded results and tag search.
+    """
+    standalone = (index is None)
+    # ux_timing: from here (the click) until the content is shown; the fetch runs
+    # in a task with no page of its own, so keep the page's client.
+    _ux_t0 = time.perf_counter()
+    try:
+        _ux_client = ui.context.client
+    except RuntimeError:
+        _ux_client = None
+    # PostHog: track result clicks
+    from web.analytics import posthog_capture
+    display = result.get('display', {}) if isinstance(result, dict) else {}
+    posthog_capture('result_opened', {
+        'shelfmark': display.get('shelfmark', '')[:80],
+        'sys_id': display.get('id', ''),
+        'result_index': index if not standalone else 0,
+    })
+
+    service = get_service()
+    adv_state = AdvancedViewState()
+    if standalone:
+        adv_state.current_result_idx = 0
+        adv_state.hit_scope = None
+        adv_state.results = [result]
+    else:
+        adv_state.current_result_idx = index
+        adv_state.hit_scope = None
+        adv_state.results = search_state.displayed_results
+
+    with ui.dialog().props('maximized') as dialog:
+        with ui.card().classes('w-full h-full flex flex-col').style('background: var(--bg-secondary);'):
+            # === Header Bar (compact: close, shelfmark, result nav, fullscreen) ===
+            adv_state.header_container = ui.row().classes('w-full px-4 py-2 items-center justify-between shrink-0').style(
+                'background: var(--bg-header); color: white;'
+            )
+            with adv_state.header_container:
+                # Left: Close and result counter
+                with ui.row().classes('items-center gap-2'):
+                    ui.button(icon='close', on_click=dialog.close).props(f'flat round color=white size=sm aria-label="{tr("Close")}"').tooltip(tr('Close'))
+                    if standalone:
+                        _sm = display.get('shelfmark', 'Unknown')
+                        adv_state.result_label = ui.label(_sm).classes('text-sm font-medium')
+                    else:
+                        adv_state.result_label = ui.label(
+                            f"{tr('Result')} {index + 1} / {len(adv_state.results)}"
+                        ).classes('text-sm font-medium')
+
+                # Center: Score badge (will be updated in-place)
+                adv_state.score_badge = ui.element('div').classes('flex items-center gap-2')
+
+                # Right: Navigation and Fullscreen
+                with ui.row().classes('items-center gap-2'):
+                    adv_state.prev_btn = ui.button(
+                        icon='chevron_right' if is_rtl() else 'chevron_left',
+                        on_click=lambda: navigate_result(-1)
+                    ).props(f'flat round color=white size=sm aria-label="{tr("Previous")}"').tooltip(tr('Previous'))
+
+                    adv_state.next_btn = ui.button(
+                        icon='chevron_left' if is_rtl() else 'chevron_right',
+                        on_click=lambda: navigate_result(1)
+                    ).props(f'flat round color=white size=sm aria-label="{tr("Next")}"').tooltip(tr('Next'))
+
+                    if standalone:
+                        adv_state.prev_btn.set_enabled(False)
+                        adv_state.next_btn.set_enabled(False)
+
+                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-400')
+
+                    def toggle_fullscreen():
+                        adv_state.is_fullscreen = not adv_state.is_fullscreen
+                        render_content(adv_state.results[adv_state.current_result_idx])
+
+                    ui.button(
+                        icon='fullscreen',
+                        on_click=toggle_fullscreen
+                    ).props(f'flat round color=white size=sm aria-label="{tr("Fullscreen")}"').tooltip(tr('Fullscreen'))
+
+            # === Info Bar (shelfmark, buttons, chips — rendered in render_content) ===
+            adv_state.info_bar_container = ui.element('div').classes('w-full shrink-0 adv-info-bar').style(
+                'background: var(--bg-primary); border-bottom: 1px solid var(--border-light);'
+            )
+
+            # === Main Content (refreshable container) ===
+            # `adv-scroll`: the scroll area's content box takes the dialog's
+            # width (common.css); Quasar sizes it to its content otherwise, and
+            # on a phone the panels ran 48px past the right edge (2026-10-22).
+            with ui.scroll_area().classes('flex-grow adv-scroll'):
+                adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-2 adv-content adv-tab-text')
+
+    def navigate_result(direction: int):
+        """Navigate to prev/next result with in-place update (no dialog close/reopen)."""
+        new_idx = adv_state.current_result_idx + direction
+        if 0 <= new_idx < len(adv_state.results):
+            adv_state.current_result_idx = new_idx
+            # A different hit owns a different page: let it claim the scope (Codex P2).
+            adv_state.hit_scope = None
+            load_result(new_idx)
+
+    async def count_pages_without_text(page):
+        """A manuscript without any automatic text comes with no page count (0): "Page 1/0", and no
+        paging. Its pages are its images (``web.page_count``, as in Browse). A count that needs the NLI
+        manifest does not hold the dialog up: the page renders without a total, and again with it."""
+        if page is None or page.total_pages:
+            return
+
+        selected = (adv_state.current_result_idx, adv_state.current_sys_id)
+
+        def late(count):
+            # Still the page on screen, of the result still selected (Next/Previous result changes the
+            # selection before its own page arrives; Codex on #454), in a dialog still open: render it
+            # again with its count.
+            if (adv_state.current_page is page and page.sys_id == adv_state.current_sys_id
+                    and (adv_state.current_result_idx, adv_state.current_sys_id) == selected
+                    and not adv_state.content_container.is_deleted
+                    and apply_page_count(page, count)):
+                adv_state.current_p_num, adv_state.total_pages = page.p_num, page.total_pages
+                render_content(adv_state.results[adv_state.current_result_idx])
+
+        # the volume whose images render_content shows (its _vol_suffix, from the same IE)
+        suffix = resolve_volume_suffix(page.sys_id, adv_state.volume_ie)
+        apply_page_count(page, await count_pages(page.sys_id, suffix=suffix, on_late=late))
+
+    def load_result(idx: int):
+        """Load a result into the dialog, updating UI in-place."""
+        result = adv_state.results[idx]
+        display = result.get('display', {})
+        adv_state.current_sys_id = display.get('id', '')
+
+        # Reset enrichment data for new result
+        adv_state.fjms_data = None
+        adv_state.crossref_data = None
+
+        # Update header label
+        adv_state.result_label.set_text(
+            f"{tr('Result')} {idx + 1} / {len(adv_state.results)}"
+        )
+
+        # Update navigation button states
+        adv_state.prev_btn.set_enabled(idx > 0)
+        adv_state.next_btn.set_enabled(idx < len(adv_state.results) - 1)
+
+        # Update score badge
+        adv_state.score_badge.clear()
+        sort_score = result.get('sort_score')
+        if sort_score is not None:
+            score_pct = min(100, max(0, int(sort_score)))
+            with adv_state.score_badge:
+                with ui.element('div').classes('flex items-center gap-2 px-3 py-1 rounded-full').style(
+                    'background: rgba(255,255,255,0.15);'
+                ):
+                    ui.icon('insights').classes('text-sm')
+                    ui.label(f"{tr('Score')}: {score_pct}").classes('text-sm font-medium')
+
+        # Load browse page data for this result
+        page_num_str = display.get('img', '1')
+        try:
+            initial_p_num = int(page_num_str) if page_num_str else 1
+        except (ValueError, TypeError):
+            initial_p_num = 1
+
+        adv_state.current_p_num = initial_p_num
+
+        # Extract volume IE from result header for multi-IE manuscripts
+        adv_state.volume_ie = None
+        if 'raw_header' in result and state.meta_mgr:
+            try:
+                _parsed_hdr = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                adv_state.volume_ie = _parsed_hdr.get('ie_id')
+            except Exception:
+                pass  # Browse enrichment failed; continue with available data
+
+        # Fetch page data asynchronously
+        async def fetch_and_render():
+            # Next/Previous result may choose another result while this one loads: then that
+            # one's own load renders it, and this one stops (Codex on #454).
+            selected = (adv_state.current_result_idx, adv_state.current_sys_id)
+
+            def superseded():
+                return (adv_state.current_result_idx, adv_state.current_sys_id) != selected
+
+            if adv_state.current_sys_id:
+                page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
+                    adv_state.current_sys_id, p_num=adv_state.current_p_num,
+                    volume_ie=adv_state.volume_ie
+                )))
+                await count_pages_without_text(page)
+                if superseded():
+                    return
+                adv_state.current_page = page
+                if page:
+                    adv_state.total_pages = page.total_pages
+                    adv_state.current_fl_id = page.fl_id
+            else:
+                adv_state.current_page = None
+                adv_state.total_pages = 1
+
+            # Fetch FJMS + crossref enrichment (kept only while this result is still the one chosen)
+            fjms_data = crossref_data = None
+            if adv_state.current_sys_id:
+                sid = adv_state.current_sys_id
+                try:
+                    from shared.fjms_service import get_fjms_service
+                    fjms = get_fjms_service(thread_safe=True)
+                    if fjms.is_available():
+                        fjms_data = await run.io_bound(lambda: {
+                            'catalog_records': fjms.get_catalog_records(sid),
+                            'domains': fjms.get_domains(sid),
+                            'bibliography': fjms.get_bibliography(sid),
+                            'source_names': fjms.get_source_names(sid),
+                            'catalog_refs': fjms.get_catalog_refs(sid),
+                        })
+                except Exception:
+                    pass  # Enrichment failed for this item; continue with available data
+                try:
+                    from shared.nli_crossref_service import get_nli_crossref_service
+                    svc = get_nli_crossref_service(thread_safe=True)
+                    if svc.is_available():
+                        crossref_data = await run.io_bound(
+                            lambda: svc.get_crossref_metadata(sid)
+                        )
+                except Exception:
+                    pass  # Enrichment failed for this item; continue with available data
+            if superseded():
+                return
+            adv_state.fjms_data, adv_state.crossref_data = fjms_data, crossref_data
+
+            render_content(result)
+            ux_done(_ux_client, 'result_quick_view', 'ok' if adv_state.current_page else 'error',
+                    server_ms=(time.perf_counter() - _ux_t0) * 1000,
+                    img_selector='img.adv-zoomable-image')
+
+        # Cat-2: deferred enrichment fetch after dialog mount - sync UI builder cannot await.
+        asyncio.ensure_future(fetch_and_render())
+
+    async def load_page(direction: int = 0, p_num: int = None):
+        """Load a specific page within the current manuscript."""
+        if not adv_state.current_sys_id:
+            return
+
+        selected = (adv_state.current_result_idx, adv_state.current_sys_id)
+        target_p_num = p_num if p_num is not None else adv_state.current_p_num
+        page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
+            adv_state.current_sys_id, p_num=target_p_num, direction=direction,
+            volume_ie=adv_state.volume_ie
+        )))
+
+        if page:
+            await count_pages_without_text(page)
+            if (adv_state.current_result_idx, adv_state.current_sys_id) != selected:
+                return  # another result was chosen meanwhile (Codex on #454)
+            adv_state.current_page = page
+            adv_state.current_p_num = page.p_num
+            adv_state.total_pages = page.total_pages
+            adv_state.current_fl_id = page.fl_id
+            render_content(adv_state.results[adv_state.current_result_idx])
+
+    # === Edit Mode Functions ===
+    def toggle_edit_mode(current_text: str):
+        """Enter edit mode with the current text."""
+        from web.auth_state import GlobalAuthState
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login to edit'), type='warning')
+            return
+
+        adv_state.edit_mode = True
+        adv_state.edit_text = current_text
+        adv_state.original_edit_text = current_text
+        adv_state.edit_notes = ""
+        adv_state.draft_saved = False
+        adv_state.draft_id = None
+        render_content(adv_state.results[adv_state.current_result_idx])
+
+    def cancel_edit(result):
+        """Cancel edit mode and return to view mode."""
+        adv_state.edit_mode = False
+        adv_state.edit_text = ""
+        adv_state.edit_notes = ""
+        adv_state.draft_saved = False
+        adv_state.draft_id = None
+        render_content(result)
+
+    def save_draft(sys_id: str, shelfmark: str, page_num: int, original_text: str):
+        """Save current edit as draft."""
+        from web.auth_state import GlobalAuthState
+        from web.supabase_client import create_correction, update_correction
+
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login to save'), type='warning')
+            return
+
+        user_id = GlobalAuthState.get_user_id()
+        text = adv_state.edit_text
+        notes = adv_state.edit_notes
+
+        try:
+            if adv_state.draft_id:
+                # Update existing draft
+                result = update_correction(adv_state.draft_id, {
+                    'corrected_text': text,
+                    'notes': notes
+                })
+            else:
+                # Create new draft
+                result = create_correction(
+                    author_id=user_id,
+                    sys_id=sys_id,
+                    shelfmark=shelfmark or '',
+                    page_number=page_num,
+                    original_text=original_text,
+                    corrected_text=text,
+                    notes=notes,
+                    status='draft'
+                )
+                if result.get('success') and result.get('correction'):
+                    adv_state.draft_id = result['correction'].get('id')
+
+            adv_state.draft_saved = True
+            ui.notify(tr('Draft saved'), type='positive')
+            render_content(adv_state.results[adv_state.current_result_idx])
+        except Exception as e:
+            ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
+
+    def submit_correction(sys_id: str, shelfmark: str, page_num: int, original_text: str, result):
+        """Submit correction for review or publish directly."""
+        from web.auth_state import GlobalAuthState
+        from web.supabase_client import create_correction, update_correction
+
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login to submit'), type='warning')
+            return
+
+        user_id = GlobalAuthState.get_user_id()
+        text = adv_state.edit_text
+        notes = adv_state.edit_notes
+
+        # Determine status based on role
+        if GlobalAuthState.is_admin() or GlobalAuthState.is_editor():
+            status = 'approved'
+        else:
+            status = 'pending'
+
+        try:
+            if adv_state.draft_id:
+                # Update existing draft to submitted
+                update_correction(adv_state.draft_id, {
+                    'corrected_text': text,
+                    'notes': notes,
+                    'status': status
+                })
+            else:
+                # Create new correction
+                create_correction(
+                    author_id=user_id,
+                    sys_id=sys_id,
+                    shelfmark=shelfmark or '',
+                    page_number=page_num,
+                    original_text=original_text,
+                    corrected_text=text,
+                    notes=notes,
+                    status=status
+                )
+
+            # Exit edit mode
+            adv_state.edit_mode = False
+            adv_state.edit_text = ""
+            adv_state.edit_notes = ""
+            adv_state.draft_saved = False
+            adv_state.draft_id = None
+
+            if status == 'approved':
+                ui.notify(tr('Correction published'), type='positive')
+            else:
+                ui.notify(tr('Correction submitted for review'), type='positive')
+
+            render_content(result)
+        except Exception as e:
+            ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
+
+    def render_content(result):
+        """Render the main content area."""
+        adv_state.content_container.clear()
+
+        # The PGP and FJMS sections are collapsed bars at the foot of the
+        # text (`adv-info`), filled in below; the info bar's PGP / FJMS
+        # buttons open them. On a phone those bars are the Info tab, so the
+        # shortcut selects that tab first -- under 640px the old JS click
+        # toggled a hidden section and seemed to do nothing (Codex on #434).
+        _info_sections = {}
+
+        async def _open_info_section(key):
+            section = _info_sections.get(key)
+            if section is None:
+                return
+            switched = False
+            try:
+                width = await ui.run_javascript('window.innerWidth', timeout=1.0)
+            except Exception:
+                width = None  # no answer in time: behave as on a wide screen
+            if isinstance(width, (int, float)) and width <= 640 and adv_tabs.value != 'info':
+                adv_tabs.value = 'info'  # fires _set_adv_tab
+                switched = True
+            # Switching to the tab shows the section open; on the tab already,
+            # or on a wide screen, the button toggles it as it always did.
+            section.value = True if switched else not section.value
+
+        display = result.get('display', {})
+        shelfmark = display.get('shelfmark', 'Unknown')
+        title = display.get('title', '')
+        sys_id = display.get('id', '')
+        snippet = result.get('snippet', '')
+        full_text = result.get('full_text', '')
+        source = display.get('source', '')
+        page_num = display.get('img', '')
+        library_code = display.get('library_code', '')
+
+        # Use current page data if available
+        page = adv_state.current_page
+        current_text = page.text if page else full_text
+        current_p_num = page.p_num if page else adv_state.current_p_num
+        total_pages = page.total_pages if page else 1
+        # The version chooser, Edit, Comment and Joins -- also on a page without an
+        # automatic transcription, whose text is then empty (as Browse, 2026-10-27).
+        reading_view = _quick_view_has_reading_view(sys_id, page, current_text)
+
+        # Fetch PGP transcription data for Advanced View
+        pgp_transcription = None
+        pgp_metadata = None
+        all_sources = None
+        _fgp_full_htr = None  # SEED-030: whole-MS HTR (set below only when needed)
+        if sys_id:
+            try:
+                all_sources_raw = get_all_sources_for_fragment(sys_id) or []
+                # Merge FGP transcriptions as additional, distinct sources (FGP-05).
+                if web_fgp_enabled():
+                    all_sources_raw = all_sources_raw + (get_fgp_sources_for_fragment(sys_id) or [])
+                # Centralized per-page filter (FGP-04.4): preserves PGP behavior;
+                # FGP rows are aligned to the displayed image by the EXACT FGP
+                # image number (c_number ↔ fgp_image_number_id), falling back to
+                # the folio label. Both multi-IE aware via total_pages.
+                _folio = displayed_folio_label(sys_id, current_p_num, total_pages)
+                _img_num = displayed_fgp_image_number(sys_id, current_p_num, total_pages)
+                # Pass the V0.8 page text so FGP editions align to it by textual
+                # similarity (robust where folio/positional matching can't).
+                all_sources = filter_sources_for_page(
+                    all_sources_raw, current_p_num, _folio, _img_num,
+                    page_text=current_text or '') or None
+
+                # SEED-030: whole-MS HTR for the FGP coverage check — only when a
+                # whole-document FGP edition is present (protects the hot path).
+                _fgp_full_htr = None
+                if all_sources and fgp_needs_full_htr(all_sources):
+                    try:
+                        _mpages = get_service().get_full_manuscript(sys_id) or []
+                        _fgp_full_htr = "\n".join((getattr(p, 'text', '') or '') for p in _mpages)
+                    except Exception:
+                        _fgp_full_htr = None
+
+                pgp_doc = get_document_for_fragment(sys_id, current_p_num)
+                if pgp_doc:
+                    pgpid = pgp_doc.get('pgpid')
+                    pgp_metadata = {
+                        'document_type': pgp_doc.get('document_type'),
+                        'tags': pgp_doc.get('tags', []),
+                        'description': pgp_doc.get('description'),
+                        'languages_primary': pgp_doc.get('languages_primary'),
+                        'languages_secondary': pgp_doc.get('languages_secondary'),
+                        'inferred_date_display': pgp_doc.get('inferred_date_display'),
+                        'doc_date_standard': pgp_doc.get('doc_date_standard'),
+                        'doc_date_original': pgp_doc.get('doc_date_original'),
+                        'inferred_date_rationale': pgp_doc.get('inferred_date_rationale'),
+                        'pgp_url': pgp_doc.get('pgp_url'),
+                        'pgpid': pgpid,
+                    }
+                    doc_relation = pgp_doc.get('doc_relation') or ''
+                    is_edition = 'Edition' in doc_relation or not doc_relation
+                    page_content = get_section_for_page(pgp_doc['transcription'], current_p_num) if pgp_doc.get('transcription') else None
+                    if is_edition and page_content:
+                        pgp_transcription = {
+                            'full_content': pgp_doc['transcription'],
+                            'content': page_content,
+                            'attribution': pgp_doc.get('transcription_source', 'PGP'),
+                            'pgp_url': pgp_doc.get('pgp_url'),
+                            'pgpid': pgpid
+                        }
+            except Exception as pgp_err:
+                logger.error(f"Advanced View: Failed to fetch PGP transcription: {pgp_err}")
+
+        # Extract FL ID and IE ID from header
+        fl_id = adv_state.current_fl_id
+        ie_id = None
+        if 'raw_header' in result and state.meta_mgr:
+            try:
+                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                if not fl_id:
+                    fl_id = parsed.get('fl_id')
+                ie_id = parsed.get('ie_id')
+            except Exception:
+                pass  # URL parse failed; return error response
+
+        # Determine if Oxford manuscript
+        is_oxford = is_oxford_manuscript(shelfmark, library_code)
+
+        # Compute image URL (with volume suffix for multi-IE manuscripts)
+        has_image = bool(sys_id)
+        page_idx = max(0, current_p_num - 1)
+        _vol_suffix = 1
+        if ie_id and sys_id:
+            from genizah_core import get_volumes_for_sys_id
+            _vols = get_volumes_for_sys_id(sys_id)
+            if _vols:
+                for _v in _vols:
+                    if _v['ie_id'] == ie_id:
+                        _vol_suffix = _v['suffix']
+                        break
+        if is_oxford and sys_id:
+            img_url = get_oxford_direct_image_url(shelfmark, page_idx)
+            if not img_url:
+                img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+        elif sys_id and is_synthetic_sys_id(sys_id):
+            # Phase 85 D-06: synthetic sys_ids have no NLI image source —
+            # advanced search dialog renders without an image (Phase 53 metadata-only)
+            img_url = None
+            has_image = False
+        elif sys_id:
+            _suffix_param = f'&suffix={_vol_suffix}' if _vol_suffix > 1 else ''
+            img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}{_suffix_param}"
+        else:
+            img_url = None
+
+        # Get library display name
+        library_name = ''
+        if library_code:
+            library_name = get_library_display(library_code, short=False, lang=get_language())
+        display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
+
+        # The result's snippet stands in for a missing text only on the result's own page
+        # (or when no page was fetched): on another page of the manuscript it is the hit
+        # page's text, not this one's -- there Browse says "No text available".
+        _on_result_page = page is None or str(page.p_num) == str(page_num)
+        snippet_text = snippet.replace('*', '') if (snippet and _on_result_page) else ''
+
+        # Use PGP transcription content if available, otherwise fall back to original.
+        # PGP-first; then FGP only if it clears the SEED-030 coverage bar (a partial
+        # /selected FGP excerpt must not default over the V0.8/HTR — same policy as
+        # the browse version chooser).
+        if all_sources:
+            # RENDER-ONLY (SEED-033 Option A, 2026-09-02): PGP-first, the FGP
+            # coverage/text-match rules and the search-scoped override all live
+            # in ``choose_default_source``. The matched phrase IS known here (the
+            # ``*...*`` snippet markers), so pass it -- this inline reader must
+            # never show a transcription that lacks the hit while the card right
+            # above it highlights that very hit.
+            _dec = choose_default_source(
+                all_sources, current_text or '',
+                full_htr_getter=lambda: _fgp_full_htr,
+                must_contain=_hit_scope_phrase(snippet, adv_state, page))
+            if _dec.get('eligible') and _dec.get('source'):
+                display_text = _dec['source'].get('content', current_text or '')
+                if _dec['source'].get('is_fgp'):
+                    display_text = _fgp_text_for_display(display_text)
+            else:
+                display_text = current_text or snippet_text
+        elif pgp_transcription and pgp_transcription.get('content'):
+            display_text = pgp_transcription['content']
+        else:
+            display_text = current_text or snippet_text
+
+        # Highlight terms come from the snippet's *...* match markers.
+        if snippet and '*' in snippet and display_text:
+            adv_state.highlight_terms = _SNIPPET_MATCH_RE.findall(snippet)
+        else:
+            adv_state.highlight_terms = []
+        text_html = _apply_highlight_marks(display_text or '', adv_state.highlight_terms)
+
+        with adv_state.content_container:
+
+            # ============================================================
+            # FULLSCREEN MODE - Compact layout with text and image only
+            # ============================================================
+            if adv_state.is_fullscreen:
+                # Hide the info bar in fullscreen mode
+                adv_state.info_bar_container.clear()
+                # Compact info bar
+                with ui.row().classes('w-full items-center justify-between p-2 mb-2 rounded-lg').style(
+                    'background: var(--bg-tertiary);'
+                ):
+                    # Left: Shelfmark and page info
+                    with ui.row().classes('items-center gap-3'):
+                        _isolated_label(display_shelfmark, classes='font-bold text-sm', style='color: var(--primary-700);')
+                        if title:
+                            # Resolve title by language
+                            _bar_title = title
+                            if sys_id and search_state.title_translations:
+                                _bar_tt = search_state.title_translations.get(sys_id)
+                                if _bar_tt:
+                                    _bar_lang = get_language()
+                                    _bar_title = (_bar_tt.get('english_title') or _bar_tt.get('hebrew_title') or title) if _bar_lang != 'he' else (_bar_tt.get('hebrew_title') or _bar_tt.get('english_title') or title)
+                            _bar_dir = 'ltr' if get_language() != 'he' else 'rtl'
+                            ui.label(f"| {_bar_title[:50]}{'...' if len(_bar_title) > 50 else ''}").classes('text-xs').props('dir="auto"').style(
+                                f'color: var(--text-muted); direction: {_bar_dir}; unicode-bidi: isolate;'
+                            )
+
+                    # Center: Page navigation
+                    with ui.row().classes('items-center gap-2'):
+                        if total_pages > 1:
+                            prev_pg_btn = ui.button(
+                                icon='chevron_right' if is_rtl() else 'chevron_left',
+                                on_click=lambda: load_page(direction=-1)
+                            ).props(f'flat round size=sm aria-label="{tr("Previous Page")}"').tooltip(tr('Previous Page'))
+                            prev_pg_btn.set_enabled(current_p_num > 1)
+
+                            ui.label(_page_of_pages(current_p_num, total_pages)).classes('text-sm font-medium')
+
+                            next_pg_btn = ui.button(
+                                icon='chevron_left' if is_rtl() else 'chevron_right',
+                                on_click=lambda: load_page(direction=1)
+                            ).props(f'flat round size=sm aria-label="{tr("Next Page")}"').tooltip(tr('Next Page'))
+                            next_pg_btn.set_enabled(current_p_num < total_pages)
+                        else:
+                            ui.label(f"{tr('Page')} 1").classes('text-sm')
+
+                    # Right: Action buttons
+                    with ui.row().classes('items-center gap-1'):
+                        if sys_id:
+                            browse_url = f'/browse?sys_id={sys_id}'
+                            if fl_id:
+                                browse_url += f'&fl_id={fl_id}'
+                            if ie_id:
+                                browse_url += f'&volume_ie={ie_id}'
+                            if current_p_num:
+                                browse_url += f'&page={current_p_num}'
+                            # SEED-033 Option A: carry the matched phrase.
+                            _phrase = _snippet_match_phrase(snippet)
+                            if _phrase:
+                                browse_url += f'&highlight={quote(_phrase)}'
+                            # Use ui.link for full page reload to ensure browse page recreates with PGP data
+                            with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
+                                ui.button(icon='menu_book').props(f'flat round size=sm aria-label="{tr("Browse")}"')
+
+                        if display_text:
+                            ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props(f'flat round size=sm aria-label="{tr("Copy")}"').tooltip(tr('Copy'))
+
+                        # Exit fullscreen
+                        def exit_fullscreen():
+                            adv_state.is_fullscreen = False
+                            render_content(result)
+                        ui.button(icon='fullscreen_exit', on_click=exit_fullscreen).props(f'flat round size=sm aria-label="{tr("Exit Fullscreen")}"').tooltip(tr('Exit Fullscreen'))
+
+                # Two-panel layout for fullscreen
+                with ui.row().classes('w-full gap-4 flex-nowrap').style('height: calc(100vh - 120px);'):
+                    # Text panel
+                    with ui.card().classes('flex-1 h-full overflow-hidden').style('border-radius: 12px;'):
+                        with ui.scroll_area().classes('w-full h-full'):
+                            with ui.element('div').classes('p-6').style(
+                                'direction: rtl; text-align: right; '
+                                'line-height: 2.4; font-size: 1.3rem; font-family: "SBL Hebrew", "David", serif;'
+                            ):
+                                if text_html:
+                                    ui.html(text_html, sanitize=False)
+                                else:
+                                    ui.label(tr('No text available')).style('color: var(--text-muted);')
+
+                    # Image panel (if available)
+                    if has_image and img_url:
+                        with ui.card().classes('flex-1 h-full overflow-hidden').style('border-radius: 12px;'):
+                            # Image controls
+                            with ui.row().classes('w-full items-center justify-between p-2').style('background: #1a1a1a;'):
+                                ui.label(tr('Image')).classes('text-white text-sm')
+                                with ui.row().classes('gap-1'):
+                                    ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props(f'flat round size=xs text-color=white aria-label="{tr("Zoom out")}"').tooltip(tr('Zoom out'))
+                                    ui.label('100%').classes('adv-zoom-label text-white text-xs px-1')
+                                    ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=xs text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
+                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props(f'flat round size=xs text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
+                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=xs text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
+
+                            # Image
+                            safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                            safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
+                            is_oxford_js = 'true' if is_oxford else 'false'
+
+                            _adv_thumb = safe_img_url
+                            _adv_full = safe_img_url
+                            if '/api/nli_image_by_sysid/' in safe_img_url:
+                                _sep = '&' if '?' in safe_img_url else '?'
+                                _adv_thumb = f"{safe_img_url}{_sep}width=400"
+                            with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: calc(100% - 48px);'):
+                                img_html = f'''<img src="{_adv_thumb}" data-full-src="{_adv_full}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')"/>'''
+                                ui.html(img_html, sanitize=False)
+                                ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
+
+                return  # Exit early for fullscreen mode
+
+            # ============================================================
+            # NORMAL MODE - Compact info bar + text/image panels
+            # ============================================================
+
+            # --- Prepare enrichment data ---
+            fjms_data = adv_state.fjms_data or {}
+            from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
+            fjms = get_fjms_service(thread_safe=True)
+            from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
+            from web.components.catalog_dialog import show_catalog_dialog
+
+            fjms_bib = fjms_data.get('bibliography', [])
+            marc_bib = []
+            try:
+                from web.state import state as app_state
+                if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
+                    cached = app_state.meta_mgr.nli_cache.get(sys_id, {})
+                    marc_bib = cached.get('marc', {}).get('bibliography', [])
+            except Exception:
+                pass  # Enrichment failed for this item; continue with available data
+            catalog_source_count = len(fjms_data.get('source_names', []))
+
+            # === Info Bar (outside scroll area) ===
+            adv_state.info_bar_container.clear()
+            with adv_state.info_bar_container:
+                with ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-1'):
+                    # Row 1: Shelfmark + action buttons
+                    with ui.row().classes('items-center justify-between w-full gap-2'):
+                        # Left: Shelfmark (compact)
+                        with ui.row().classes('items-center gap-2 min-w-0 flex-shrink'):
+                            _isolated_label(display_shelfmark, classes='text-sm font-bold truncate', style=(
+                                'color: var(--primary-700); max-width: 400px;'
+                            ))
+                            # Resolve translated title for info bar — always language-aware
+                            _adv_title = title
+                            if sys_id and search_state.title_translations:
+                                _adv_tt = search_state.title_translations.get(sys_id)
+                                if _adv_tt:
+                                    _lang = get_language()
+                                    if _lang == 'he':
+                                        _adv_title = _adv_tt.get('hebrew_title') or _adv_tt.get('english_title') or title
+                                    else:
+                                        _adv_title = _adv_tt.get('english_title') or _adv_tt.get('hebrew_title') or title
+                            if _adv_title:
+                                _adv_t_short = f'\u2014 {_adv_title[:60]}{"..." if _adv_title and len(_adv_title) > 60 else ""}'
+                                _adv_orig = f'\u2014 {title[:60]}{"..." if title and len(title) > 60 else ""}' if title else ''
+                                _adv_tt_resolved = search_state.title_translations.get(sys_id) if sys_id else None
+                                _adv_dir = 'ltr' if (get_language() != 'he' and _adv_tt_resolved and _adv_tt_resolved.get('english_title')) else 'rtl'
+                                if _adv_orig and _adv_orig != _adv_t_short:
+                                    _ib_st = {'showing_original': False}
+                                    with ui.row().classes('items-center gap-0 min-w-0'):
+                                        _ib_lbl = ui.label(_adv_t_short).classes('text-xs truncate').props('dir="auto"').style(
+                                            f'color: var(--text-muted); direction: {_adv_dir}; unicode-bidi: isolate; max-width: 350px;'
+                                        )
+                                        def _make_ib_toggle(lbl, orig, resolved, flag, resolved_dir):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                _dir = 'rtl' if flag['showing_original'] else resolved_dir
+                                                lbl.text = orig if flag['showing_original'] else resolved
+                                                lbl.style(f'color: var(--text-muted); direction: {_dir}; unicode-bidi: isolate; max-width: 350px;')
+                                            return handler
+                                        ui.button(icon='swap_horiz').props(
+                                            f'flat dense round size=xs aria-label="{tr("Show original title")}"'
+                                        ).style(
+                                            'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
+                                        ).tooltip(tr('Show original title')).on(
+                                            'click.stop', _make_ib_toggle(_ib_lbl, _adv_orig, _adv_t_short, _ib_st, _adv_dir)
+                                        )
+                                else:
+                                    ui.label(_adv_t_short).classes(
+                                        'text-xs truncate'
+                                    ).props('dir="auto"').style(f'color: var(--text-muted); direction: {_adv_dir}; unicode-bidi: isolate; max-width: 350px;')
+
+                        # Right: Action buttons
+                        with ui.row().classes('items-center gap-1 shrink-0 flex-wrap'):
+                            if sys_id:
+                                browse_url = f'/browse?sys_id={sys_id}'
+                                if fl_id:
+                                    browse_url += f'&fl_id={fl_id}'
+                                if ie_id:
+                                    browse_url += f'&volume_ie={ie_id}'
+                                if current_p_num:
+                                    browse_url += f'&page={current_p_num}'
+                                # SEED-033 Option A: carry the matched phrase.
+                                _phrase = _snippet_match_phrase(snippet)
+                                if _phrase:
+                                    browse_url += f'&highlight={quote(_phrase)}'
+                                with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
+                                    ui.button(icon='menu_book').props(f'flat round size=sm color=green aria-label="{tr("Browse Full Manuscript")}"')
+
+                            def make_add_handler(r):
+                                def handler():
+                                    show_add_to_list_dialog(r)
+                                return handler
+                            adv_result_sys_id = result.get('display', {}).get('id')
+                            adv_result_in_list = state.lists_mgr and adv_result_sys_id and state.lists_mgr.is_item_in_any_list(adv_result_sys_id)
+                            ui.button(icon='star' if adv_result_in_list else 'star_border', on_click=make_add_handler(result)).props(
+                                f'flat round size=sm aria-label="{tr("In List") if adv_result_in_list else tr("Add to List")}"'
+                            ).style('color: var(--accent-amber);').tooltip(tr('In List') if adv_result_in_list else tr('Add to List'))
+
+                            if WEB_PUZZLE_ENABLED:
+                                # Add to Puzzle button (Phase 49)
+                                def _make_puzzle_handler(sid=adv_result_sys_id, fid=fl_id):
+                                    def handler():
+                                        param = f'{sid},{fid}' if fid else str(sid)
+                                        ui.navigate.to(f'/puzzle?add={param}')
+                                    return handler
+                                ui.button(icon='extension', on_click=_make_puzzle_handler()).props(
+                                    f'flat round size=sm aria-label="{tr("Add to Puzzle")}"'
+                                ).tooltip(tr('Add to Puzzle'))
+
+                            if has_image:
+                                def toggle_image():
+                                    adv_state.show_image_panel = not adv_state.show_image_panel
+                                    render_content(result)
+                                ui.button(
+                                    icon='image' if adv_state.show_image_panel else 'hide_image',
+                                    on_click=toggle_image
+                                ).props(
+                                    f'flat round size=sm aria-label="{tr("Hide Image") if adv_state.show_image_panel else tr("Show Image")}"'
+                                ).tooltip(
+                                    tr('Hide Image') if adv_state.show_image_panel else tr('Show Image')
+                                )
+
+                            ui.separator().props('vertical').classes('h-4')
+
+                            # Bibliography / Catalog buttons
+                            if fjms_bib:
+                                fjms_dlg = create_fjms_bibliography_dialog(
+                                    fjms_bib, sys_id, shelfmark=shelfmark or '',
+                                )
+                                ui.button(
+                                    f'{tr("Bib")} ({len(fjms_bib)})',
+                                    icon='menu_book', on_click=fjms_dlg.open,
+                                ).props('outline dense size=sm').classes('text-xs').tooltip(tr('Bibliography FJMS'))
+                            if marc_bib:
+                                nli_dlg = create_nli_bibliography_dialog(
+                                    marc_bib, sys_id, shelfmark=shelfmark or '',
+                                )
+                                ui.button(
+                                    f'{tr("Ktiv")} ({len(marc_bib)})',
+                                    icon='menu_book', on_click=nli_dlg.open,
+                                ).props('outline dense size=sm').classes('text-xs').tooltip(tr('Bibliography Ktiv'))
+                            if catalog_source_count > 0:
+                                ui.button(
+                                    f'{tr("Cat")} ({catalog_source_count})',
+                                    icon='description',
+                                    on_click=lambda s=sys_id, sm=shelfmark or '': show_catalog_dialog(s, sm, fjms),
+                                ).props('outline dense size=sm').classes('text-xs').tooltip(tr('Catalog Records'))
+
+                            # PGP expander button
+                            if pgp_metadata:
+                                ui.button(
+                                    'PGP', icon='verified',
+                                    on_click=lambda: _open_info_section('pgp'),
+                                ).props('outline dense size=sm color=green').classes('text-xs')
+
+                            # FJMS expander button
+                            catalog_records = fjms_data.get('catalog_records')
+                            if catalog_records:
+                                ui.button(
+                                    'FJMS', icon='library_books',
+                                    on_click=lambda: _open_info_section('fjms'),
+                                ).props('outline dense size=sm color=purple').classes('text-xs')
+
+                    # Row 2: Chips (source, page, result#, domains)
+                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                        if source:
+                            with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
+                                'background: var(--primary-100); color: var(--primary-700);'
+                            ):
+                                ui.icon('source').classes('text-xs')
+                                ui.label(source).classes('text-xs font-medium')
+
+                        with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
+                            'background: var(--accent-blue); color: white;'
+                        ):
+                            ui.icon('description').classes('text-xs')
+                            ui.label(_page_of_pages(current_p_num, total_pages)).classes('text-xs font-medium')
+
+                        with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
+                            'background: var(--bg-tertiary); color: var(--text-secondary);'
+                        ):
+                            ui.icon('tag').classes('text-xs')
+                            ui.label(f"#{adv_state.current_result_idx + 1}").classes('text-xs font-medium')
+
+                        # Subject Domains inline
+                        domains = fjms_data.get('domains')
+                        if domains:
+                            lang = get_language()
+                            all_domain_names = {d['domain'] for d in domains}
+                            for dom in domains:
+                                parent = dom.get('parent_domain')
+                                if parent and parent in all_domain_names and parent != dom['domain']:
+                                    continue
+                                display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
+                                ui.link(
+                                    display_name,
+                                    f'/search?domain={quote(dom["domain"])}'
+                                ).classes('text-xs px-2 py-0.5 rounded-full no-underline').style(
+                                    'background: #f3e8ff; color: #7c3aed;'
+                                )
+
+                        # Printed material indicator in advanced view
+                        if adv_state.current_sys_id and adv_state.current_sys_id in search_state.printed_ids:
+                            from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
+                            from web.translations import get_language as _get_lang
+                            _bg, _fg = PRINTED_BADGE_COLORS
+                            _plabel = PRINTED_LABEL_HE if _get_lang() == 'he' else PRINTED_LABEL_EN
+                            with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
+                                f'background: {_bg}; color: {_fg};'
+                            ):
+                                ui.icon('print').classes('text-xs')
+                                ui.label(_plabel).classes('text-xs font-medium')
+
+            # Phone (owner's mockup, 2026-10-22): one panel at a time -- Text,
+            # Image, Info -- from tabs that common.css shows under 640px only;
+            # wider screens keep text and image side by side and never see them.
+            _active_tab = getattr(adv_state, 'active_tab', 'text') or 'text'
+            if _active_tab == 'image' and not (adv_state.show_image_panel and has_image and img_url):
+                _active_tab = 'text'
+
+            def _set_adv_tab(value):
+                adv_state.active_tab = value
+                adv_state.content_container.classes(
+                    remove='adv-tab-text adv-tab-image adv-tab-info', add=f'adv-tab-{value}')
+
+            adv_state.content_container.classes(
+                remove='adv-tab-text adv-tab-image adv-tab-info', add=f'adv-tab-{_active_tab}')
+            with ui.tabs(value=_active_tab, on_change=lambda e: _set_adv_tab(e.value)).classes(
+                'w-full adv-tabs'
+            ).props('dense no-caps active-color=primary indicator-color=primary align=justify') as adv_tabs:
+                ui.tab('text', label=tr('Text'), icon='notes')
+                if adv_state.show_image_panel and has_image and img_url:
+                    ui.tab('image', label=tr('Image'), icon='image')
+                ui.tab('info', label=tr('Info'), icon='info')
+
+            # === Two-Panel Layout: Text + Image ===
+            with ui.row().classes('w-full gap-4 flex-wrap lg:flex-nowrap'):
+                # Left Panel: Text content with inline editing
+                text_panel_classes = 'flex-1 min-w-[300px]' if adv_state.show_image_panel and has_image else 'w-full'
+
+                # Edit mode border styling
+                panel_border = ''
+                if adv_state.edit_mode:
+                    panel_border = 'border: 3px solid #27ae60;' if adv_state.draft_saved else 'border: 3px solid #f39c12;'
+
+                with ui.column().classes(text_panel_classes + ' gap-4 adv-text-col'):
+
+                    # Define text container and render function at this scope for version switching
+                    text_content_container = None
+                    current_display_text = {'value': display_text, 'html': text_html}
+
+                    def render_text_section(html_to_render: str):
+                        """Render pre-formatted HTML text content + optional line-number gutter (Phase 999.4).
+
+                        Quick View always passes pre-built highlight HTML from the
+                        module-level _apply_highlight_marks (escaped by construction); per D-10 the line
+                        count is taken from the SOURCE text (current_display_text['value']),
+                        not from the rendered HTML.
+                        """
+                        from web.safe_storage import safe_user_get
+                        from web.pages.browse import _render_line_numbered_html
+                        nonlocal text_content_container
+                        if text_content_container is None:
+                            return
+                        # D-07: line numbers ON by default; coerced to bool against type drift.
+                        show_ln = bool(safe_user_get('ui.show_line_numbers', True))
+                        source_text = current_display_text.get('value') or ''
+                        text_content_container.clear()
+                        with text_content_container:
+                            with ui.scroll_area().classes('w-full').style('max-height: 70vh;'):
+                                if source_text or html_to_render:
+                                    html_str = _render_line_numbered_html(
+                                        text=source_text,
+                                        highlight_html=html_to_render or '',
+                                        line_height="2.4",
+                                        font_size="1.2rem",
+                                        show_line_numbers=show_ln,
+                                    )
+                                    with ui.element('div').classes('p-6'):
+                                        ui.html(html_str, sanitize=False)
+                                else:
+                                    # a page with no automatic text and no edition (or that text chosen)
+                                    ui.label(tr('No text available')).classes('p-6').style('color: var(--text-muted);')
+                        text_content_container.update()
+
+                    # Page Text Section with inline editing. Built on a page with a reading view
+                    # even when nothing is shown yet: the chooser's default renders into it.
+                    if display_text or adv_state.edit_mode or reading_view:
+                        with ui.card().classes('w-full').style(f'border-radius: 16px; {panel_border}'):
+
+                            if adv_state.edit_mode:
+                                # === EDIT MODE ===
+                                # Edit toolbar
+                                with ui.row().classes('w-full items-center justify-between p-3 bg-gray-100 border-b'):
+                                    with ui.row().classes('items-center gap-2'):
+                                        ui.icon('edit').classes('text-primary')
+                                        ui.label(tr('Edit Mode')).classes('font-bold')
+                                        if adv_state.draft_saved:
+                                            ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
+                                        else:
+                                            ui.label(tr('Unsaved')).classes('text-orange-600 text-sm')
+
+                                    with ui.row().classes('gap-2'):
+                                        ui.button(tr('Cancel'), icon='close', on_click=lambda: cancel_edit(result)).props('flat dense color=grey')
+                                        ui.button(tr('Save'), icon='save', on_click=lambda: save_draft(sys_id, shelfmark, current_p_num, current_text or '')).props('flat dense color=primary')
+                                        ui.button(tr('Submit'), on_click=lambda: submit_correction(sys_id, shelfmark, current_p_num, current_text or '', result)).props('unelevated dense color=green')
+
+                                # Editable textarea
+                                textarea = ui.textarea(value=adv_state.edit_text).classes('w-full').props(
+                                    'borderless autofocus'
+                                ).style(
+                                    'direction: rtl; text-align: right; resize: none; min-height: 400px; padding: 16px; '
+                                    'font-family: "SBL Hebrew", "David", serif; font-size: 1.2rem; line-height: 2;'
+                                )
+                                textarea.bind_value(adv_state, 'edit_text')
+
+                                def on_edit_change():
+                                    if adv_state.draft_saved:
+                                        adv_state.draft_saved = False
+                                textarea.on('input', on_edit_change)
+
+                                # Notes field
+                                with ui.expansion(tr('Add Notes'), icon='note_add').classes('w-full border-t'):
+                                    ui.textarea(value=adv_state.edit_notes, placeholder=tr('Notes about your correction')).bind_value(adv_state, 'edit_notes').classes('w-full').props('outlined dense').style('direction: rtl;')
+
+                            else:
+                                # === VIEW MODE ===
+                                # Header with page info, page navigation, and actions
+                                with ui.row().classes('items-center justify-between w-full px-4 py-2 border-b').style('border-color: var(--border-light);'):
+                                    with ui.row().classes('items-center gap-2'):
+                                        ui.icon('article').classes('text-lg').style('color: var(--primary-600);')
+                                        ui.label(f"{tr('Page')} {current_p_num}").classes('text-sm font-bold')
+                                        word_count = len(display_text.split()) if display_text else 0
+                                        ui.label(f"({word_count} {tr('words')})").classes('text-xs').style('color: var(--text-muted);')
+
+                                        # Page navigation (merged into header)
+                                        if total_pages > 1:
+                                            ui.separator().props('vertical').classes('h-4 mx-1')
+                                            prev_page_btn = ui.button(
+                                                icon='chevron_right' if is_rtl() else 'chevron_left',
+                                                on_click=lambda: load_page(direction=-1)
+                                            ).props(f'flat round size=xs aria-label="{tr("Previous Page")}"').tooltip(tr('Previous Page'))
+                                            prev_page_btn.set_enabled(current_p_num > 1)
+
+                                            page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-20').props('dense outlined borderless')
+                                            ui.label(f"/{total_pages}").classes('text-xs').style('color: var(--text-secondary);')
+
+                                            async def go_to_page():
+                                                try:
+                                                    p = int(page_input.value) if page_input.value else 1
+                                                    p = max(1, min(total_pages, p))
+                                                    await load_page(p_num=p)
+                                                except (ValueError, TypeError):
+                                                    pass
+                                            page_input.on('keydown.enter', lambda: go_to_page())
+
+                                            next_page_btn = ui.button(
+                                                icon='chevron_left' if is_rtl() else 'chevron_right',
+                                                on_click=lambda: load_page(direction=1)
+                                            ).props(f'flat round size=xs aria-label="{tr("Next Page")}"').tooltip(tr('Next Page'))
+                                            next_page_btn.set_enabled(current_p_num < total_pages)
+
+                                    with ui.row().classes('gap-1'):
+                                        # Phase 999.4 — line-number toggle (D-08).
+                                        def _toggle_quick_view_line_numbers():
+                                            from web.safe_storage import safe_user_get, safe_user_set
+                                            current = bool(safe_user_get('ui.show_line_numbers', True))
+                                            safe_user_set('ui.show_line_numbers', not current)
+                                            render_text_section(current_display_text.get('html', ''))
+
+                                        ui.button(
+                                            icon='format_list_numbered',
+                                            on_click=_toggle_quick_view_line_numbers,
+                                        ).props(f'flat round size=sm aria-label="{tr("Toggle line numbers")}"').tooltip(tr('Toggle line numbers'))
+                                        # Copy the version on screen: handle_version_change updates
+                                        # current_display_text['value'] (raw text, never the 'html' key).
+                                        ui.button(icon='content_copy', on_click=lambda: copy_result_text(current_display_text.get('value') or '')).props(f'flat round size=sm aria-label="{tr("Copy Text")}"').tooltip(tr('Copy Text'))
+                                        # Edit starts from the automatic text -- empty on a page without
+                                        # one -- and is saved as the reader's version, as in Browse (GS-277).
+                                        if reading_view:
+                                            ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text or '')).props(f'flat round size=sm aria-label="{tr("Edit")}"').tooltip(tr('Edit'))
+
+                                # Text content - create container (same scope as outer text_content_container)
+                                text_content_container = ui.element('div').classes('w-full')
+
+                                # Initial render (use highlighted HTML)
+                                render_text_section(text_html)
+
+                    # Community Features Row (compact) - only in view mode
+                    if reading_view and not adv_state.edit_mode:
+                        with ui.row().classes('gap-2 flex-wrap items-center'):
+                            from web.components import (
+                                create_version_selector,
+                                create_comment_button, create_joins_button
+                            )
+
+                            def handle_version_change(new_text: str, version_info: dict):
+                                """Handle version selection - update displayed text."""
+                                if version_info.get('is_fgp') or version_info.get('source') == 'fgp':
+                                    new_text = _fgp_text_for_display(new_text)
+                                current_display_text['value'] = new_text
+                                # Re-apply search term highlighting to new version text
+                                new_html = _apply_highlight_marks(new_text or '', adv_state.highlight_terms)
+                                current_display_text['html'] = new_html
+                                render_text_section(new_html)
+                                source = version_info.get('source', 'unknown')
+
+                                if source == 'pgp':
+                                    attribution = version_info.get('attribution', 'PGP')
+                                    ui.notify(f"{tr('PGP Transcription')} - {attribution}", type='positive')
+                                elif source == 'translation':
+                                    attribution = version_info.get('attribution', '')
+                                    language = version_info.get('language', '')
+                                    ui.notify(f"{language} {tr('Translation')} - {attribution}", type='info')
+                                elif source == 'user' and version_info.get('author'):
+                                    ui.notify(f"{tr('Showing version by')} {version_info.get('author')}", type='info')
+                                elif source in ('V0.7', 'V0.8'):
+                                    ui.notify(f"{tr('Showing')} {source}", type='info')
+
+                            create_version_selector(
+                                document_id=sys_id,
+                                page_number=current_p_num,
+                                original_text=current_text or '',
+                                on_version_change=handle_version_change,
+                                pgp_transcription=pgp_transcription,
+                                all_sources=all_sources,
+                                full_original_text=_fgp_full_htr,
+                                # SEED-033 Option A -- Codex P2 (2026-09-02): the SAME
+                                # phrase the initial `display_text` decision above used.
+                                # Without it the selector's delayed loader re-ran the
+                                # chooser under plain PGP-first precedence and, ~0.1 s
+                                # later, replaced the hit-containing text with a
+                                # transcription that does not contain the hit.
+                                must_contain=_hit_scope_phrase(snippet, adv_state, page),
+                            )
+
+                            create_comment_button(
+                                document_id=sys_id,
+                                page_number=current_p_num,
+                                shelfmark=shelfmark,
+                                size='sm'
+                            )
+
+                            if shelfmark:
+                                def navigate_to_join(target_shelfmark: str):
+                                    dialog.close()
+                                    ui.navigate.to(f'/browse?shelfmark={target_shelfmark}')
+
+                                # D-20: pass find_joins_url so Quick View button/dialog carry Lab link
+                                _qv_joins_url = f'/joins-lab?sys_id={sys_id}'
+                                if adv_state.volume_ie:
+                                    _qv_joins_url += f'&volume_ie={adv_state.volume_ie}'
+
+                                create_joins_button(
+                                    shelfmark=shelfmark,
+                                    document_id=sys_id,
+                                    on_navigate=navigate_to_join,
+                                    find_joins_url=_qv_joins_url,
+                                )
+
+                # Right Panel: Image viewer (toggleable)
+                if adv_state.show_image_panel and has_image and img_url:
+                    with ui.column().classes('flex-1 min-w-[300px] adv-image-col'):
+                        with ui.card().classes('w-full').style('border-radius: 16px; overflow: hidden;'):
+                            # Image controls header: one row; the sliders sit
+                            # behind the `tune` button (owner's mockup, 2026-10-22).
+                            with ui.row().classes('w-full items-center justify-between p-3 adv-image-head').style(
+                                'background: #1a1a1a; border-radius: 8px 8px 0 0;'
+                            ):
+                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold adv-image-title')
+                                with ui.row().classes('gap-1') as _adv_tools_row:
+                                    ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}"').tooltip(tr('Zoom out'))
+                                    ui.label('100%').classes('adv-zoom-label text-white text-sm px-2')
+                                    ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='rotate_left', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateLeft()')).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
+                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
+
+                            # Image adjustment controls (hidden until `tune`)
+                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 adv-image-adjust').style(
+                                'background: #1a1a1a; border-top: 1px solid #333;'
+                            ) as _adv_adjust_row:
+                                ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
+                                adv_state.brightness_sl = ui.slider(
+                                    min=-100, max=100, step=1, value=0,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setBrightness({e.value})')
+                                ).props('dark dense').classes('w-24')
+                                ui.icon('contrast').classes('text-white text-sm').tooltip(tr('Contrast'))
+                                adv_state.contrast_sl = ui.slider(
+                                    min=-100, max=100, step=1, value=0,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setContrast({e.value})')
+                                ).props('dark dense').classes('w-24')
+                                ui.icon('timeline').classes('text-white text-sm').tooltip(tr('Gamma'))
+                                adv_state.gamma_sl = ui.slider(
+                                    min=20, max=300, step=1, value=100,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setGamma({e.value / 100})')
+                                ).props('dark dense').classes('w-24')
+                                ui.button(
+                                    icon='exposure',
+                                    on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Invert Colors")}"').tooltip(tr('Invert Colors'))
+                                def _adv_reset_adj():
+                                    if hasattr(adv_state, 'brightness_sl'): adv_state.brightness_sl.value = 0
+                                    if hasattr(adv_state, 'contrast_sl'): adv_state.contrast_sl.value = 0
+                                    if hasattr(adv_state, 'gamma_sl'): adv_state.gamma_sl.value = 100
+                                    ui.run_javascript('if(window.advViewer) window.advViewer.resetAdjustments()')
+                                ui.button(
+                                    icon='restart_alt',
+                                    on_click=_adv_reset_adj
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Reset Image")}"').tooltip(tr('Reset Image'))
+                            with _adv_tools_row:
+                                ui.button(
+                                    icon='tune', on_click=lambda: _adv_adjust_row.classes(toggle='is-open'),
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Image adjustments")}"').tooltip(tr('Image adjustments'))
+
+                            # Image display
+                            safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                            safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
+                            is_oxford_js = 'true' if is_oxford else 'false'
+
+                            _adv2_thumb = safe_img_url
+                            _adv2_full = safe_img_url
+                            if '/api/nli_image_by_sysid/' in safe_img_url:
+                                _sep = '&' if '?' in safe_img_url else '?'
+                                _adv2_thumb = f"{safe_img_url}{_sep}width=400"
+                            with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: 70vh;'):
+                                img_html = f'''
+                                <img
+                                    src="{_adv2_thumb}"
+                                    data-full-src="{_adv2_full}"
+                                    class="adv-zoomable-image"
+                                    style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"
+                                    draggable="false"
+                                    onload="if(window.advViewer) window.advViewer.init()"
+                                    onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')"
+                                />
+                                '''
+                                ui.html(img_html, sanitize=False)
+                                ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
+
+                            # Attribution footer. The image above can fall back to NLI
+                            # (handleImageError: Oxford proxy -> NLI manifest -> NLI
+                            # proxy), so the credit must be switchable, exactly as on the
+                            # browse page -- otherwise an NLI image keeps the Bodleian
+                            # credit. `switchImageCredit()` looks these attributes up by
+                            # `data-role="image-credit"` (Codex P2, 2026-09-02); there is
+                            # no link element here, and the helper tolerates its absence.
+                            _adv_credit_nli = 'הספרייה הלאומית / National Library of Israel'  # non-empty: switchImageCredit() skips a falsy value
+                            attribution = ''
+                            if is_oxford:
+                                attribution = OXFORD_IMAGE_CREDIT_EN
+                            elif page and page.attribution:
+                                attribution = page.attribution
+                            else:
+                                attribution = _adv_credit_nli
+                            with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
+                                'background: #2a2a2a; border-radius: 0 0 8px 8px;'
+                            ):
+                                ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
+                                _adv_credit_lbl = ui.label(attribution).classes('text-xs').style(
+                                    'color: #aaa; font-style: italic;')
+                                if is_oxford:
+                                    _adv_credit_lbl.props(
+                                        'data-role="image-credit" '
+                                        f'data-credit-oxford="{html.escape(attribution, quote=True)}" '
+                                        f'data-credit-nli="{html.escape(_adv_credit_nli, quote=True)}"'
+                                    )
+
+            # === Actions Section ===
+            with ui.card().classes('w-full p-6 adv-actions-card adv-info').style('border-radius: 16px; background: var(--bg-tertiary);'):
+                h3(tr('Actions'), classes='text-lg font-bold mb-4', style='color: var(--text-primary);')
+
+                with ui.row().classes('gap-4 flex-wrap'):
+                    if sys_id:
+                        browse_url = f'/browse?sys_id={sys_id}'
+                        if fl_id:
+                            browse_url += f'&fl_id={fl_id}'
+                        if ie_id:
+                            browse_url += f'&volume_ie={ie_id}'
+                        if current_p_num:
+                            browse_url += f'&page={current_p_num}'
+                        # SEED-033 Option A: carry the matched phrase.
+                        _phrase = _snippet_match_phrase(snippet)
+                        if _phrase:
+                            browse_url += f'&highlight={quote(_phrase)}'
+                        # Use ui.link for full page reload to ensure browse page recreates with PGP data
+                        with ui.link(target=browse_url).classes('btn-primary no-underline'):
+                            ui.icon('menu_book').classes('mr-2')
+                            ui.label(tr('Browse Full Manuscript'))
+
+                    text_for_parallels = current_text or snippet.replace('*', '')
+                    if text_for_parallels:
+                        ui.button(
+                            tr('Find Parallels'), icon='compare_arrows',
+                            on_click=lambda t=text_for_parallels: (
+                                dialog.close(),
+                                ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
+                            )
+                        ).props('outline')
+
+                    text_to_copy = current_text or snippet.replace('*', '')
+                    if text_to_copy:
+                        # View mode: copy the version on screen (handle_version_change
+                        # updates current_display_text['value']). Edit mode: the editor
+                        # shows the page text, so copy that.
+                        ui.button(
+                            tr('Copy Text'), icon='content_copy',
+                            on_click=lambda t=text_to_copy, on_screen=not adv_state.edit_mode: copy_result_text(
+                                (current_display_text.get('value') if on_screen else None) or t)
+                        ).props('outline')
+
+    # Initial load (use current_result_idx which handles standalone mode)
+
+            # (moved below the panels, owner's mockup 2026-10-22: catalog info is a collapsed bar at the foot; on a phone it is the Info tab)
+            # === Expandable PGP Metadata (inside scroll area, collapsed) ===
+            if pgp_metadata:
+                with ui.expansion(group='enrichment').classes('w-full pgp-expand adv-info').style(
+                    'border-left: 3px solid #27ae60; border-radius: 8px; margin-bottom: 4px;'
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("PGP Details")}"') as _pgp_section:
+                    _info_sections['pgp'] = _pgp_section
+                    with ui.row().classes('gap-6 flex-wrap'):
+                        doc_type = pgp_metadata.get('document_type')
+                        lang_primary = pgp_metadata.get('languages_primary')
+                        if doc_type or lang_primary:
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                type_parts = [p for p in [doc_type, lang_primary, pgp_metadata.get('languages_secondary')] if p]
+                                _type_text = ' \u00b7 '.join(type_parts)
+                                # Phase 46-06: Show pre-computed document_type_he when UI is Hebrew
+                                _adv_type_he = None
+                                _pgpid_for_type = pgp_metadata.get('pgpid')
+                                _show_type_trans = _safe_get('show_translations', False)
+                                _type_lang = get_language()
+                                if _show_type_trans and _type_lang == 'he' and _pgpid_for_type and search_state.translation_data:
+                                    _type_trans = search_state.translation_data.get(sys_id)
+                                    if _type_trans:
+                                        _adv_type_he = _type_trans.get('document_type_he')
+                                if _adv_type_he:
+                                    _type_st = {'showing_original': False, 'label': None, 'badge': None}
+                                    def _make_type_toggle(st, orig, trans):
+                                        def handler():
+                                            st['showing_original'] = not st['showing_original']
+                                            if st['showing_original']:
+                                                st['label'].set_text(orig)
+                                                st['label'].style('color: var(--text-primary); direction: ltr;')
+                                                st['badge'].set_text(tr('Original'))
+                                            else:
+                                                st['label'].set_text(trans)
+                                                st['label'].style('color: var(--text-primary); direction: rtl;')
+                                                st['badge'].set_text(tr('Translated'))
+                                        return handler
+                                    _type_handler = _make_type_toggle(_type_st, _type_text, _adv_type_he)
+                                    with ui.row().classes('items-center gap-1'):
+                                        _type_st['label'] = ui.label(_adv_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
+                                        _type_st['badge'] = ui.button(tr('Translated'), on_click=_type_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0').style(
+                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                        )
+                                else:
+                                    ui.label(_type_text).classes('text-sm').style('color: var(--text-primary);')
+
+                        inferred_display = pgp_metadata.get('inferred_date_display')
+                        doc_date_standard = pgp_metadata.get('doc_date_standard')
+                        doc_date_original = pgp_metadata.get('doc_date_original')
+                        if inferred_display or doc_date_standard or doc_date_original:
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                primary_date = inferred_display or doc_date_standard
+                                if primary_date:
+                                    ui.label(primary_date).classes('text-sm').style('color: var(--text-primary);')
+                                if doc_date_original and doc_date_original != primary_date:
+                                    ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
+
+                    tags = pgp_metadata.get('tags', [])
+                    if tags:
+                        with ui.row().classes('gap-1 flex-wrap mt-2'):
+                            for tag in tags:
+                                ui.badge(tag, color='green').props('outline clickable').classes(
+                                    'text-xs cursor-pointer'
+                                ).on('click', lambda t=tag: (dialog.close(), ui.navigate.to(f'/search?tag={quote(t)}')))
+
+                    description = (pgp_metadata.get('description') or '').strip()
+                    if description:
+                        with ui.column().classes('gap-1 mt-2'):
+                            ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            # Phase 46: Show translated description when toggle is on and UI is Hebrew
+                            _show_trans_adv = _safe_get('show_translations', False)
+                            _adv_pgpid = pgp_metadata.get('pgpid')
+                            _adv_trans_he = None
+                            _adv_lang = get_language()
+                            if _show_trans_adv and _adv_lang == 'he' and _adv_pgpid:
+                                try:
+                                    from shared.translation_service import TranslationService
+                                    _tsvc_adv = TranslationService(thread_safe=True)
+                                    _adv_trans_he = _tsvc_adv.get_pgp_description_he(_adv_pgpid)
+                                    _tsvc_adv.close()
+                                except Exception:
+                                    pass  # Translation lookup failed; continue without translation
+                            if _adv_trans_he:
+                                _adv_st = {'showing_original': False, 'label': None, 'badge': None}
+                                def _make_adv_toggle(st, orig, trans):
+                                    def handler():
+                                        st['showing_original'] = not st['showing_original']
+                                        if st['showing_original']:
+                                            st['label'].set_text(orig)
+                                            st['label'].style('color: var(--text-primary); direction: ltr; white-space: pre-wrap;')
+                                            st['badge'].set_text(tr('Original'))
+                                        else:
+                                            st['label'].set_text(trans)
+                                            st['label'].style('color: var(--text-primary); direction: rtl; white-space: pre-wrap;')
+                                            st['badge'].set_text(tr('Translated'))
+                                    return handler
+                                _adv_handler = _make_adv_toggle(_adv_st, description, _adv_trans_he)
+                                with ui.row().classes('w-full items-start gap-1'):
+                                    _adv_st['label'] = ui.label(_adv_trans_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                        'color: var(--text-primary); direction: rtl;'
+                                    )
+                                    _adv_st['badge'] = ui.button(tr('Translated'), on_click=_adv_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                        'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                    )
+                                    from web.components.translation_report import create_report_button
+                                    create_report_button(
+                                        dataset='pgp', record_id=str(_adv_pgpid),
+                                        field_name='description', direction='en2he',
+                                        source_text=description, translated_text=_adv_trans_he,
+                                    )
+                            else:
+                                ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
+
+                    if pgp_metadata.get('pgp_url'):
+                        ui.link(tr('View on PGP'), pgp_metadata['pgp_url'], new_tab=True).classes(
+                            'text-xs mt-2'
+                        ).style('color: var(--primary-600);')
+
+            # === Expandable FJMS Catalog (inside scroll area, collapsed) ===
+            catalog_records = fjms_data.get('catalog_records')
+            if catalog_records:
+                with ui.expansion(group='enrichment').classes('w-full fjms-expand adv-info').style(
+                    'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("FJMS Details")}"') as _fjms_section:
+                    _info_sections['fjms'] = _fjms_section
+                    merged = merge_catalog_records(catalog_records)
+                    lang = get_language()
+
+                    fjms_title = merged.get('title_heb') if lang == 'he' else merged.get('title')
+                    if fjms_title and fjms_title.strip():
+                        with ui.row().classes('gap-1 items-baseline'):
+                            ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(fjms_title).classes('text-sm').style('color: var(--text-primary);')
+
+                    if merged.get('author_text') and merged['author_text'].strip():
+                        with ui.row().classes('gap-1 items-baseline'):
+                            ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(merged['author_text']).classes('text-sm').style('color: var(--text-primary);')
+
+                    date_val = merged.get('copy_date')
+                    place_val = merged.get('copy_place')
+                    if date_val or place_val:
+                        with ui.row().classes('gap-4'):
+                            if date_val:
+                                with ui.row().classes('gap-1 items-baseline'):
+                                    ui.label(tr('Copy Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(str(date_val)).classes('text-sm').style('color: var(--text-primary);')
+                            if place_val:
+                                with ui.row().classes('gap-1 items-baseline'):
+                                    ui.label(tr('Place')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(place_val).classes('text-sm').style('color: var(--text-primary);')
+
+                    frames = merged.get('textual_frames', [])
+                    if frames:
+                        ui.label(tr('Content Identification')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
+                        max_initial = 10
+                        show_frames = frames[:max_initial] if len(frames) > max_initial else frames
+                        for frame in show_frames:
+                            text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
+                            if not text_f or not text_f.strip():
+                                text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
+                            if text_f and text_f.strip():
+                                category, content = parse_textual_frame(text_f)
+                                source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                with ui.row().classes('gap-1 items-baseline'):
+                                    if category:
+                                        ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                        ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                    else:
+                                        ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
+                                    if source_name and source_name.strip():
+                                        ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
+                        if len(frames) > max_initial:
+                            remaining = frames[max_initial:]
+                            with ui.expansion(f'{tr("Show all")} {len(frames)} {tr("identifications")}').classes('text-xs'):
+                                for frame in remaining:
+                                    text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                    if not text_f or not text_f.strip():
+                                        text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                    if text_f and text_f.strip():
+                                        category, content = parse_textual_frame(text_f)
+                                        source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                        with ui.row().classes('gap-1 items-baseline'):
+                                            if category:
+                                                ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                            else:
+                                                ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
+                                            if source_name and source_name.strip():
+                                                ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                    cat_refs = fjms_data.get('catalog_refs')
+                    if cat_refs:
+                        ui.label(tr('Catalog References')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
+                        with ui.row().classes('gap-2 flex-wrap'):
+                            for ref in cat_refs:
+                                acronym = ref.get('cat_acronym', '')
+                                cat_entry = ref.get('catalog_entry', '')
+                                ref_display = f"{acronym} #{cat_entry}" if cat_entry else acronym
+                                ui.label(ref_display).classes('text-xs').style('color: var(--text-primary);')
+
+    load_result(adv_state.current_result_idx)
+    dialog.open()
+

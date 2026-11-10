@@ -1,0 +1,6585 @@
+# -*- coding: utf-8 -*-
+from version import APP_VERSION
+
+TRANSLATIONS = {
+    # --- General ---
+    f"Dicta Genizah Search Pro V{APP_VERSION}": f"Dicta Genizah Search Pro V{APP_VERSION}",
+    "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
+    "Fatal Error": "שגיאה קריטית",
+    "Failed to initialize:\n{}": "אתחול נכשל:\n{}",
+    "Failed to start initialization:\n{}": "התחלת האתחול נכשלה:\n{}",
+    "Failed to finalize initialization:\n{}": "סיום האתחול נכשל:\n{}",
+    "OK": "אישור",
+    "Actions": "פעולות",
+    "Apply": "החל",
+    "Error": "שגיאה",
+    "Error.": "שגיאה.",
+    "Warning": "אזהרה",
+    "Information": "מידע",
+    "Success": "הצלחה",
+    "Ready.": "מוכן.",
+    "Starting...": "מתחיל...",
+    "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
+    "Stopped": "נעצר",
+    "Stopping...": "עוצר...",
+    "Search stopped": "החיפוש נעצר",
+    "Searches are busy. Please try again shortly.": "החיפושים עמוסים כרגע. נסו שוב בעוד זמן קצר.",
+    "Reset": "אפס",
+    "Unknown Shelfmark": "מספר מדף לא ידוע",
+    "◀": "▶",
+    "▶": "◀",
+    
+    # --- Connectivity / Status ---
+    "Online": "מקוון",
+    "Offline": "לא מקוון",
+    "Degraded": "זמין חלקית",
+    "Checking connectivity...": "בודק קישוריות...",
+    "All external services responding.": "כל השירותים החיצוניים מגיבים.",
+    "All services healthy": "כל השירותים תקינים",
+    "No internet connection": "אין חיבור לאינטרנט",
+    "NLI service unavailable": "שירות הספרייה הלאומית אינו זמין",
+    "AI provider unavailable": "ספק הבינה המלאכותית אינו זמין",
+    "Connectivity Error": "שגיאת קישוריות",
+    "Components loaded. Ready.": "הרכיבים נטענו. המערכת מוכנה.",
+    "Search engine not loaded.": "מנוע החיפוש לא נטען.",
+    "Tantivy library missing. Please install it.": "ספריית Tantivy חסרה. אנא התקן אותה.",
+
+    # --- Tabs ---
+    "Browse Manuscript": "עיון בכתב יד",
+    "Settings & About": "הגדרות ואודות",
+
+    # --- Main Search Tab ---
+    "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
+    "Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\nR = Responsa mode\n\nExample: ?שלום": "קיצורי דרך לחיפוש:\n= = חיפוש מדויק\n? = וריאנטים (השתמש בכפתורים לבחירת רמה)\n~ = חיפוש מקורב (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\nR = מצב פרויקט השו\"ת\n\nדוגמה: ?שלום",
+    "Query:": "שאילתא:",
+    "Mode:": "מצב:",
+    "Gap:": "מרחק:",
+    "Maximum word distance (0 = Exact phrase)": "מרחק מקסימלי בין מילים (0 = ביטוי מדויק)",
+    "Search": "חפש",
+    "🤖 AI Assistant": "🤖 עוזר AI",
+    "Generate Regex with Gemini AI": "צור ביטוי רגולרי באמצעות AI",
+    "Search Help": "עזרה בחיפוש",
+    "Genizah Help": "עזרה בגניזה",
+    "Please enter text to search.": "אנא הזן טקסט לחיפוש.",
+    "No Results": "אין תוצאות",
+    "Found {} results.": "נמצאו {} תוצאות.",
+    "Found {} results. Loading metadata...": "נמצאו {} תוצאות. טוען נתוני מטא...",
+    "System ID:": "מספר מערכת:",
+    "FL:": "מס' קובץ:",
+    "Enter FL ID...": "הכנס מספר קובץ...",
+    "Img": "תמונה",
+    "Src": "מקור",
+    "Export Results": "יצא תוצאות",
+    "Export selected results": "יצא תוצאות נבחרות",
+    "Reload shelfmark/title metadata": "רענן נתוני מספר מדף/כותרת",
+    "Stop metadata loading": "עצור טעינת נתונים",
+    "No results found.": "לא נמצאו תוצאות.",
+    "Loading metadata...": "טוען נתוני מטא...",
+    "Found {}. Loading metadata...": "נמצאו {}. טוען נתונים...",
+    "Fetching metadata...": "טוען נתוני מטא...",
+    "Metadata already loaded for {} items.": "נתונים נטענו עבור {} פריטים.",
+    "Stopping metadata load...": "עוצר טעינת נתונים...",
+    "Metadata loaded: {}/{}": "נתונים נטענו: {}/{}",
+    "Metadata Error": "שגיאת נתונים",
+    "Metadata load cancelled. Loaded {}/{}.": "טעינת נתונים בוטלה. נטענו {}/{}.",
+    "Loaded {} items.": "נטענו {} פריטים.",
+    "Search for parallels": "חפש מקבילות",
+    "Show Extended Info": "הצג מידע מורחב",
+    "Hide Extended Info": "הסתר מידע מורחב",
+    "External Website": "אתר חיצוני",
+    "Cambridge": "קיימברידג'",
+    "Oxford": "אוקספורד",
+    "Cambridge Website": "אתר קיימברידג'",
+    "Oxford Website": "אתר אוקספורד",
+    "External Metadata": "מידע חיצוני",
+    "Ktiv Info": "מידע מכתיב",
+    "Oxford Info": "מידע מאוקספורד",
+    "Cambridge Info": "מידע מקמברידג'",
+    "Codicological Part": "חלק קודיקולוגי",
+    "Folio Range": "טווח דפים",
+    "Oxford Title": "כותרת אוקספורד",
+    "Contents": "תוכן",
+    "No System ID found for this result.": "לא נמצא מספר מערכת עבור תוצאה זו.",
+    "Toggle Image Pane": "הצג/הסתר תמונה",
+    "Select Image": "בחר תמונה",
+    "Show entries:": "הצג פריטים:",
+    "In selected lists": "ברשימות הנבחרות",
+    "Not in selected lists": "שאינם ברשימות הנבחרות",
+    "All Lists": "כל הרשימות",
+    "Filter configuration": "סנן",
+    "Filter by List (Click to enable)": "סנן לפי רשימה (לחץ כדי להפעיל)",
+
+    # --- Search Modes & Tooltips ---
+    "Exact": "מדויק",
+    "Exact (=)": "מדויק (=)",
+    "Variants (?)": "וריאנטים (?)",
+    "Variants": "וריאנטים",
+    "Variants Basic": "וריאנטים בסיסי",
+    "Variants Extended": "וריאנטים מורחב",
+    "Variants Maximum": "וריאנטים מרבי",
+    "Basic": "בסיסי",
+    "Extended (??)": "מורחב (??)",
+    "Extended": "מורחב",
+    "Maximum (???)": "מרבי (???)",
+    "Maximum": "מרבי",
+    "Fuzzy (~)": "מקורב (~)",
+    "Fuzzy": "מקורב",
+    "Regex": "ביטוי רגולרי",
+    "Regex (/)": "ביטוי רגולרי (/)",
+    "Title ($)": "כותרת ($)",
+    "Shelfmark (#)": "מספר מדף (#)",
+    "Exact match": "התאמה מדויקת",
+    "Basic variants": "וריאנטים בסיסיים",
+    "Basic variants (30 pairs)": "וריאנטים בסיסיים (30 זוגות)",
+    "Basic variants: ד/ר, ה/ח, ו/י/ן etc.": "וריאנטים בסיסיים: ד/ר, ה/ח, ו/י/ן וכו'",
+    "Extended variants": "וריאנטים מורחבים",
+    "Extended variants (70 pairs)": "וריאנטים מורחבים (70 זוגות)",
+    "Extended variants: Adds more swaps (א/ע, ק/כ etc.)": "וריאנטים מורחבים: מוסיף עוד חילופים (א/ע, ק/כ וכו')",
+    "Maximum variants": "וריאנטים מרביים",
+    "Maximum variants (150 pairs) - slower": "וריאנטים מרביים (150 זוגות) - איטי יותר",
+    "Maximum variants: Very broad search": "וריאנטים מרביים: חיפוש רחב מאוד",
+    "Level": "דרגה",
+    "Changes": "שינויים",
+    "Num Changes": "מס' שינויים",
+    "Max character changes per word": "שינויי תווים מקסימליים למילה",
+    "Variant Level": "דרגת וריאנטים",
+    "Current level": "דרגה נוכחית",
+    "Max changes:": "שינויים:",
+    "Fuzzy search": "חיפוש מקורב",
+    "Fuzzy search: near spellings, 1 letter different (2 in words of 5+ letters)": "חיפוש מקורב: כתיב קרוב, הבדל של אות אחת (שתיים במילים של 5 אותיות ומעלה)",
+    "Regex: Use AI Assistant for complex patterns": "ביטוי רגולרי: השתמש בעוזר ה-AI לתבניות מורכבות",
+    "Search in Title metadata": "חיפוש בכותרות (Metadata)",
+    "Search in Shelfmark metadata": "חיפוש במספרי מדף (Metadata)",
+
+    # --- Responsa Mode ---
+    "Responsa": "פרויקט השו\"ת",
+    "Responsa (R)": "פרויקט השו\"ת (R)",
+    "Responsa-Project style grammatical expansion for Hebrew search": "הרחבה דקדוקית בסגנון פרויקט השו\"ת לחיפוש עברי",
+    "Judeo-Arabic": "ערבית-יהודית",
+    "Flex Spacing": "ריווח גמיש",
+    "Bidirectional Gap": "פער דו-כיווני",
+    "Bidirectional": "דו-כיווני",
+    "Include spelling variant pairs": "כלול זוגות וריאנטים כתיביים",
+    "Expand with Judeo-Arabic article forms (al-)": "הרחב עם צורות ידיעה ערבית-יהודית (אל-)",
+    "Allow flexible spacing between characters (helps with OCR text)": "אפשר רווח גמיש בין תווים (מסייע לטקסט OCR)",
+    "Search for words in either order": "חפש מילים בכל סדר",
+    "Syntax:": "תחביר:",
+    "prefix": "קידומת",
+    "suffix": "סיומת",
+    "both": "שניהם",
+    "plene": "מלא/חסר",
+    "wildcard": "תו כללי",
+    "OR": "או",
+    "Prefix expansion (e.g., #word adds prefix forms)": "הרחבת קידומות (למשל #מילה מוסיף צורות עם קידומות)",
+    "Suffix expansion": "הרחבת סיומות",
+    "Both prefix and suffix expansion": "הרחבת קידומות וסיומות",
+    "Plene/defective variants": "וריאנטים מלא/חסר",
+    "Wildcard (prefix or suffix)": "תו כללי (קידומת או סיומת)",
+    "OR alternatives": "חלופות או",
+    "Variant search with configurable intensity": "חיפוש וריאנטים עם עוצמה מתכווננת",
+
+    # --- Composition Tab ---
+    "Composition Title": "כותרת החיבור",
+    "Paste source text...": "הדבק טקסט מקור...",
+    "Load Text File": "טען קובץ טקסט",
+    "Exclude Manuscripts": "החרג כתבי יד",
+    "Enter system IDs or shelfmarks to exclude (one per line). Matching values are filled automatically.": "הכנס מספרי מערכת או מספרי מדף להחרגה (אחד בשורה). הערכים המקבילים ימולאו אוטומטית.",
+    "System IDs": "מספרי מערכת",
+    "Shelfmarks": "מספרי מדף",
+    "Filter Text": "סנן טקסט",
+    "Filter {}": "סנן {}",
+    "Filter by List": "סנן לפי רשימה",
+    "Show entries in selected lists": "הצג פריטים ברשימות נבחרות",
+    "Hide entries in selected lists": "הסתר פריטים מרשימות נבחרות",
+    "Select Lists": "בחר רשימות",
+    "Projects": "פרויקטים",
+    "Enter text to filter this column:": "הכנס טקסט לסינון העמודה:",
+    "Filter text...": "טקסט לסינון...",
+    "Exclude matches (must NOT contain the text)": "סנן התאמות (חייב לא להכיל את הטקסט)",
+    "No composition data to export.": "אין נתוני חיבורים לייצוא.",
+    "Excluded: {}": "הוחרגו: {}",
+    "Chunk: ": "מקטע: ",
+    "Words per search block (Rec: 5-7)": "מילים בכל מקטע חיפוש (מומלץ: 5-7)",
+    "Max Freq: ": "תדירות מקס': ",
+    "Ignore phrases appearing > X times (filters common phrases)": "התעלם מביטויים המופיעים מעל X פעמים (מסנן ביטויים נפוצים)",
+    "Filter > ": "סינון > ",
+    "Move titles appearing > X times to Appendix": "העבר כותרות המופיעות מעל X פעמים לנספח",
+    "Sort by System ID/Shelfmark only": "מיין לפי מספר מערכת/מדף בלבד",
+    "Sort by shelfmark only": "מיין לפי מספר מדף בלבד",
+    "Disable Main/Appendix grouping": "בטל חלוקה לראשי/נספח",
+    "Analyze Composition": "נתח חיבור",
+    "Analyze": "נתח",
+    "Full Recursive Search": "חיפוש רקורסיבי מלא",
+    "Recursive Search in Results": "חיפוש רקורסיבי בתוצאות",
+    "Deep Scan": "סריקה עמוקה",
+    "Deep Limit:": "מגבלת עומק:",
+    "Slower but checks deeper. Use for common phrases/quotes": "איטי יותר אך בודק לעומק. השתמש בביטויים/ציטוטים נפוצים.",
+    "Experimental search mode using advanced proximity scoring. WARNING: Can freeze the program. Use with caution.": "מצב חיפוש ניסיוני עם ניקוד קירבה מתקדם. אזהרה: עלול לגרום לקפיאת התוכנה. השתמש בזהירות.",
+    "Lower values prevent the app from freezing. All results are still exported.": "ערכים נמוכים מונעים קפיאה של התוכנה. כל התוצאות עדיין מיוצאות.",
+    "Context": "הקשר",
+    "MS Context": "הקשר כתב יד",
+    "Main Results ({})": "תוצאות ראשיות ({})",
+    "Save Report": "שמור דוח",
+    "Composition Help": "עזרה בחיפוש מקבילות",
+    "Scanning chunks...": "סורק...", 
+    "No composition matches found.": "לא נמצאו התאמות.",
+    "Grouping compositions...": "מקבץ חיבורים...",
+    "Grouping results...": "מקבץ תוצאות...",
+    "Grouping Error": "שגיאה בקיבוץ",
+    "Grouping stopped. Showing ungrouped results.": "הקיבוץ נעצר. מציג תוצאות לא מקובצות.",
+    "Appendix - Grouped ({})": "נספח - מקובץ ({})",
+    "Main ({})": "ראשי ({})",
+    "Appendix ({})": "נספח ({})",
+    "Main Appendix (Groups)": "נספח ראשי (קבוצות)",
+    "Filtered by Text ({})": "סונן לפי טקסט ({})",
+    "Filtered ({})": "מסוננים ({})",
+    "Filtered by Text (Manuscripts)": "סונן לפי טקסט (כתבי יד)",
+    # Phase 110 (EXP-F3 / 5b): LOCAL-only composition export terminology. Selected
+    # only when EVERY exported comp item is a LOCAL "My Library" document — the
+    # Genizah/mixed exports keep the "...Manuscripts" labels above.
+    "Documents Found": "מסמכים שנמצאו",
+    "Main Documents": "מסמכים עיקריים",
+    "Filtered by Text (Documents)": "סוננו לפי טקסט (מסמכים)",
+    "Excluded Documents": "מסמכים שלא נכללו",
+    "EXCLUDED DOCUMENTS": "מסמכים שלא נכללו",
+    "Matched Text": "טקסט תואם",
+    "EXCLUDED MANUSCRIPTS": "כתבי יד מוחרגים",
+    "Excluded ({})": "מוחרגים ({})",
+    "Excluded Manuscripts": "כתבי יד מוחרגים",
+    "MAIN APPENDIX": "נספח ראשי",
+    "Filtered": "מסוננים",
+    "FILTERED": "מסוננים",
+    "FILTERED APPENDIX": "נספח מסונן",
+    "Excluded Manuscripts ({})": "כתבי יד מוחרגים ({})",
+    "Filtered Main": "ראשי מסונן",
+    "Filtered Appendix": "נספח מסונן",
+    "Filtered Main ({})": "ראשי מסונן ({})",
+    "Filtered Appendix ({})": "נספח מסונן ({})",
+    "Filtered Results (found in source texts)": "תוצאות מסוננות (נמצאו בטקסטים מקוריים)",
+    "All Results ({})": "כל התוצאות ({})",
+    "All Results": "כל התוצאות",
+    "ALL RESULTS": "כל התוצאות",
+    "Untitled Composition": "חיבור ללא כותרת",
+    "Metadata Missing": "חסרים נתונים",
+    "Shelfmark/Title/Page info missing for some items.\nContinue using system IDs? Choose No to load metadata first.": "חסרים פרטי מספר מדף/כותרת/עמוד לחלק מהפריטים.\nלהמשיך עם מספרי מערכת? בחר 'לא' כדי לטעון נתונים תחילה.",
+    "Loading shelfmarks and titles...": "טוען מספרי מדף וכותרות...",
+    "Loading metadata was cancelled.": "טעינת הנתונים בוטלה.",
+    "Fetching metadata before export...": "טוען נתונים לפני ייצוא...",
+    "Loading missing metadata...": "טוען נתונים חסרים...",
+    "No items.": "אין פריטים.",
+    "No Selections": "אין בחירה",
+    "Select compositions to run recursive search.": "יש לבחור תוצאות כדי להריץ חיפוש רקורסיבי.",
+    "No Data": "אין נתונים",
+    "Could not load full text for selected results.": "לא ניתן לטעון טקסט מלא עבור התוצאות שנבחרו.",
+
+    # --- Browse Tab ---
+    "Select Manuscript": "בחר כתב יד",
+    "Multiple matches found for": "נמצאו מספר התאמות עבור",
+    "Enter System ID...": "הכנס מספר מערכת...",
+    "Go": "עבור",
+    "Enter ID to browse.": "הכנס מספר לדפדוף.",
+    "Ktiv": "כתיב",
+    "View on Ktiv": "עיין בכתיב",
+    "View image in Ktiv": "צפה בתמונה בכתיב",
+    "Find parallels": "מצא מקבילות",
+    "Open in Ktiv Website": "פתח באתר 'כתיב'",
+    "< Prev": "< הקודם ",
+    "Next >": "הבא >",
+    "View All": "הכל",
+    "Per page": "לדף",
+    "Chunk": "מקטע",
+    "Large file": "קובץ גדול",
+    "This file has {n} pages. Viewing all at once may freeze the window.": "קובץ זה מכיל {n} עמודים. הצגתם יחד עלולה להקפיא את החלון.",
+    "Show first {cap} pages": "הצג {cap} עמודים ראשונים",
+    "Browse by List": "עיין לפי רשימה",
+    "Lists are not available.": "רשימות אינן זמינות.",
+    "Items": "פריטים",
+    "External Viewer": "מציג חיצוני",
+    "Show full text continuously (Infinite Scroll)": "הצג טקסט מלא ברצף (גלילה אינסופית)",
+    "Save Image As...": "שמור תמונה בשם...",
+    "Show/Hide Image": "הצג/הסתר תמונה",
+    "Save full manuscript to file": "שמור כתב יד מלא לקובץ",
+    "No Preview": "אין תצוגה",
+    "Loading Meta...": "טוען מידע...",
+    "No Image": "אין תמונה",
+    "No images available": "אין תמונות זמינות",
+    "Waiting...": "ממתין...",
+    "Page not found.": "דף לא נמצא.",
+    "Not found or end.": "לא נמצא או סוף הקובץ.",
+    "FL not found.": "מספר קובץ לא נמצא.",
+    "Shelfmark not found.": "מספר המדף לא נמצא.",
+    "Multiple shelfmarks found. Select one:": "נמצאו מספר מספרי מדף. בחר אחד:",
+    "Nav": "ניווט",
+    "Previous Manuscript (File Order)": "כתב היד הקודם (סדר קבצים)",
+    "Next Manuscript (File Order)": "כתב היד הבא (סדר קבצים)",
+    "Total Manuscripts Found": "סה\"כ כתבי יד שנמצאו",
+    "Bibliography": "ביבליוגרפיה",
+    "English Title": "כותרת באנגלית",
+    "People": "אנשים",
+    "Physical Description": "תיאור פיזי",
+    "Subjects": "נושאים",
+    "Loading full manuscript...": "טוען כתב יד מלא...",
+    "Could not load full text.": "לא ניתן לטעון טקסט מלא.",
+    "Continuous View": "תצוגה רציפה",
+    "Save Manuscript": "שמור כתב יד",
+    "Saved": "נשמר",
+    "Manuscript saved to:\n{}": "כתב היד נשמר אל:\n{}",
+    "<< Prev": ">> הקודם", 
+    "Next >>": "הבא <<",
+    "<< Prev Page": "<< הדף הקודם",
+    "Next Page >>": "הדף הבא >>",
+    "Page / Image": "עמוד / תמונה",
+    "Reset rotation": "אפס סיבוב",
+    "Rotate image (0-360°)": "סובב תמונה (0-360°)",
+    "Rotate Left 90°": "סובב שמאלה 90°",
+    "Rotate Right 90°": "סובב ימינה 90°",
+
+    # --- Settings Tab ---
+    "Data & Index": "נתונים ואינדקס",
+    "Download Transcriptions (Zenodo)": "הורד תעתיקים (Zenodo)",
+    "Build / Rebuild Index": "בנייה / בנייה מחדש של אינדקס",
+    "Search index: current format.": "אינדקס החיפוש: בפורמט העדכני.",
+    "Search index: built by an earlier version. It works as before; rebuilding it makes a * at the start of a word fast in Responsa search.": "אינדקס החיפוש נבנה בגרסה קודמת. הוא פועל כמו קודם; בנייה מחדש תאיץ בחיפוש השו\"ת כוכבית בתחילת מילה.",
+    "Search index": "אינדקס החיפוש",
+    "The search index on this computer was built by an earlier version. It works as before.": "אינדקס החיפוש במחשב זה נבנה בגרסה קודמת. הוא פועל כמו קודם.",
+    "Rebuilding it makes Responsa search fast for a * at the start of a word, and reads matches that run across a page break from the pages that follow each other in each manuscript. A rebuild takes about 20-25 minutes on a recent laptop.": "בנייה מחדש תאיץ בחיפוש השו\"ת כוכבית בתחילת מילה, ותקרא התאמות שעוברות מעמוד לעמוד מן העמודים הסמוכים זה לזה בכל כתב יד. הבנייה נמשכת כ-20-25 דקות במחשב נייד חדש.",
+    "Rebuild now builds the new index beside the current one: searching keeps working meanwhile, and the new index takes over when the build ends. Rebuild when I exit runs the build after you close the program, in a small window whose Cancel keeps the index you have. Later leaves the index as it is; you can rebuild it at any time from Settings.": "\"לבנות מחדש עכשיו\" בונה את האינדקס החדש לצד הנוכחי: החיפוש ממשיך לפעול בינתיים, והאינדקס החדש נכנס לשימוש כשהבנייה מסתיימת. \"לבנות מחדש ביציאה\" מריץ את הבנייה אחרי סגירת התוכנה, בחלון קטן שכפתור הביטול שבו משאיר את האינדקס שיש לך. \"מאוחר יותר\" משאיר את האינדקס כמות שהוא; אפשר לבנות אותו מחדש בכל עת מההגדרות.",
+    "There is not enough free disk space to build the new index beside the current one (about {} GB needed, {} GB free), so Rebuild now rebuilds it in place: searching waits until the build ends. Later leaves the index as it is; you can rebuild it at any time from Settings.": "אין די מקום פנוי בדיסק לבניית האינדקס החדש לצד הנוכחי (דרושים כ-{} GB, פנויים {} GB), ולכן \"לבנות מחדש עכשיו\" בונה אותו מחדש במקומו: החיפוש ימתין עד סיום הבנייה. \"מאוחר יותר\" משאיר את האינדקס כמות שהוא; אפשר לבנות אותו מחדש בכל עת מההגדרות.",
+    "Rebuild now": "לבנות מחדש עכשיו",
+    "Rebuild when I exit": "לבנות מחדש ביציאה",
+    # The build: its confirmation, the line in the main window (desktop/index_rebuild_bar.py),
+    # the exit window, and what the Search buttons say while an in-place build runs.
+    "The search index is already being rebuilt.": "אינדקס החיפוש כבר נבנה מחדש כעת.",
+    "The new index is built beside the current one, so searching keeps working meanwhile; the new index takes over when the build ends.": "האינדקס החדש נבנה לצד האינדקס הנוכחי, כך שהחיפוש ממשיך לפעול בינתיים; האינדקס החדש נכנס לשימוש כשהבנייה מסתיימת.",
+    "There is not enough free disk space to build the new index beside the current one (about {} GB needed, {} GB free). The index is rebuilt in place: searching is unavailable until the build ends.": "אין די מקום פנוי בדיסק לבניית האינדקס החדש לצד הנוכחי (דרושים כ-{} GB, פנויים {} GB). האינדקס ייבנה מחדש במקומו: החיפוש לא יהיה זמין עד סיום הבנייה.",
+    "Searching is unavailable until the build ends.": "החיפוש אינו זמין עד סיום הבנייה.",
+    "Searching uses the current index meanwhile.": "החיפוש משתמש בינתיים באינדקס הנוכחי.",
+    "Rebuilding the search index: {}%": "בונה מחדש את אינדקס החיפוש: {}%",
+    "Rebuilding the search index: {}%, writing it to disk": "בונה מחדש את אינדקס החיפוש: {}%, כותב אותו לדיסק",
+    "estimating the time left": "מעריך את הזמן שנותר",
+    "less than a minute left": "נותרה פחות מדקה",
+    "about a minute left": "נותרה כדקה",
+    "about {} minutes left": "נותרו כ-{} דקות",
+    "Finishing the index... %p%": "משלים את האינדקס... %p%",
+    "The new search index is ready; it takes over when the current search ends.": "אינדקס החיפוש החדש מוכן; הוא ייכנס לשימוש כשהחיפוש הנוכחי יסתיים.",
+    "The new search index could not be put in place; the index you had is still in use.": "לא ניתן היה להעמיד את אינדקס החיפוש החדש במקומו; האינדקס שהיה לך עדיין בשימוש.",
+    "Indexing cancelled": "האינדוקס בוטל",
+    "Index rebuild cancelled. The index you had is unchanged.": "בניית האינדקס מחדש בוטלה. האינדקס שהיה לך לא השתנה.",
+    "Rebuilding the search index before closing: {}%": "בונה מחדש את אינדקס החיפוש לפני הסגירה: {}%",
+    "Cancel keeps the index you have; the program closes either way.": "ביטול משאיר את האינדקס שיש לך; התוכנה תיסגר בכל מקרה.",
+    "This build runs in place and cannot be cancelled; the program closes when it is done.": "בנייה זו מתבצעת במקום האינדקס הקיים ואי אפשר לבטלה; התוכנה תיסגר כשתסתיים.",
+    "Cancelling... the index you have is kept.": "מבטל... האינדקס שיש לך נשמר.",
+    "AI Configuration": "הגדרות AI",
+    "Provider:": "ספק:",
+    "Model:": "מודל:",
+    "API Key:": "מפתח API:",
+    "Save Settings": "שמור הגדרות",
+    "About": "אודות",
+    "Citation:": "ציטוט:",
+    "Copy": "העתק",
+    "Copy Image": "העתק תמונה",
+    "Copy Citation": "העתק ציטוט",
+    # The citation bar's menu (genizah_app.py::_create_citation_bar). Two
+    # citations, because a reader who worked across many manuscripts wants the
+    # site and a reader on a folio wants the folio -- same split as the web chip.
+    "Citation for this page": "ציטוט לדף זה",
+    # The Browse toolbar's own cite button (owner, 2026-09-05): the page
+    # citation lives on the surface that HAS a page, not on the window-wide bar.
+    "Cite this page": "צטט דף זה",
+    # v9.2.0 What's New (owner-approved wording, 2026-09-06). The desktop bar
+    # and dialog are read in Hebrew by Hebrew users; `tr()` falls back to the
+    # KEY, so a missing entry here is silent English rather than an error.
+    "New: a \"Cite this page\" button, prominent PGP links, and fixes to composition search and Oxford image links":
+        "חדש: כפתור \"צטט דף זה\", קישורים ל-PGP במיקום בולט, ותיקונים בחיפוש חיבורים ובקישורים לתמונות אוקספורד",
+    "Prominent links to the Princeton Geniza Project (PGP) - in the search result window, on the Browse tab, and on the PGP badge in the results table.":
+        "קישורים בולטים לפרויקט הגניזה של פרינסטון (PGP) — בחלונית תוצאות החיפוש ובטאב העיון, וכן בתגית PGP בטבלת התוצאות",
+    "A new \"Cite this page\" button, naming whoever made the transcription - MiDRASH, Princeton, Friedberg, a translator, or a community correction.":
+        "נוסף כפתור \"צטט דף זה\", המזכיר את מי שיצר את התעתוק — מדרש, פרינסטון, פרידברג, מתרגם או תיקון קהילתי",
+    "The citation bar at the foot of the app now also credits the application version.":
+        "באנר הציטוט בתחתית התוכנה מכיל כעת גם קרדיט לגרסת התוכנה",
+    "The Search tab and the Composition Search tab now have separate exclusion lists (until now they shared one).":
+        "לשונית החיפוש ולשונית חיפוש החיבורים קיבלו רשימות החרגה נפרדות (עד כה הן חלקו רשימה אחת)",
+    "Assorted composition-search bug fixes, and Bodleian (Oxford) images now carry a prominent link to their site.":
+        "תיקוני באגים שונים בחיפוש חיבורים, ותמונות ספריות הבודליאנה באוקספורד קיבלו קישור בולט לאתר",
+    "New: a print-view button, and a prominent citation button - for the site as a whole and for each page.":
+        "חדש: לחצן תצוגת הדפסה, וכפתור ציטוט בולט לאתר כולו ולכל דף בנפרד",
+    # The desktop cites SOFTWARE, not a website: a reader here never
+    # visited an address on a date. The product NAME stays Latin in both
+    # languages, as it does in the window title and the export header.
+    "Citation for this application": "ציטוט לתוכנה זו",
+    "Copy a citation for the folio on screen": "העתק ציטוט לדף שעל המסך",
+    "There is no manuscript page to cite. Use Copy Citation at the bottom of the window to cite the site.":
+        "אין דף כתב-יד לצטט. השתמשו בהעתק ציטוט בתחתית החלון כדי לצטט את האתר.",
+    "Citation for the site": "ציטוט לאתר כולו",
+    "Citation copied to clipboard!": "הציטוט הועתק ללוח!",
+    "Missing Key": "מפתח חסר",
+    "Please configure your AI Provider & Key in Settings.": "אנא הגדר ספק AI ומפתח בהגדרות.",
+    "Saved to {}": "נשמר אל {}",
+    "Open File": "פתח קובץ",
+    "Open Folder": "פתח תיקייה",
+
+    # --- Updates ---
+    "Download Update": "הורד עדכון",
+    "Update Now": "עדכן עכשיו",
+    "Dismiss until next version": "הסתר עד לגרסה הבאה",
+    "New version available: {}": "גרסה חדשה זמינה: {}",
+    "Application": "יישום",
+    "Check for Updates": "בדוק עדכונים",
+    "Checking...": "בודק...",
+    "Update Available": "עדכון זמין",
+    "A new version is available: {}": "גרסה חדשה זמינה: {}",
+    "Would you like to update now?": "האם ברצונך לעדכן כעת?",
+    "Open download page?": "לפתוח את דף ההורדה?",
+    "Up to date": "התוכנה מעודכנת",
+    "You are using the latest version.": "הגרסה שברשותך היא העדכנית ביותר.",
+    "Update Error": "שגיאה בבדיקת עדכונים",
+
+    # --- In-App Update Dialog ---
+    "Updating Dicta Genizah Search Pro": "מעדכן את Dicta Genizah Search Pro",
+    "Updating to version {}": "מעדכן לגרסה {}",
+    "Preparing download...": "מכין הורדה...",
+    "Downloading: {:.1f} MB / {:.1f} MB": "מוריד: {:.1f} מ\"ב / {:.1f} מ\"ב",
+    "Downloaded: {:.1f} MB": "הורד: {:.1f} מ\"ב",
+    "Download complete. Installing update...": "ההורדה הושלמה. מתקין עדכון...",
+    "Launching installer...": "מפעיל תוכנת התקנה...",
+    "Download Error": "שגיאת הורדה",
+    "No direct download available. Opening browser instead...": "הורדה ישירה אינה זמינה. פותח דפדפן...",
+    "Download Failed": "ההורדה נכשלה",
+    "Failed to download update: {}": "נכשל בהורדת העדכון: {}",
+    "Would you like to download manually from the website?": "האם ברצונך להוריד ידנית מהאתר?",
+    "Update Ready": "העדכון מוכן",
+    "The update has been downloaded to:": "העדכון הורד אל:",
+    "The installer has been downloaded to:": "תוכנת ההתקנה הורדה אל:",
+    "Please run the installer manually.": "אנא הפעל את תוכנת ההתקנה ידנית.",
+    "Development Mode": "מצב פיתוח",
+    "Auto-update is not available in development mode.": "עדכון אוטומטי אינו זמין במצב פיתוח.",
+    "Could not start installer: {}": "לא ניתן להפעיל את תוכנת ההתקנה: {}",
+    "Cancel Download": "ביטול הורדה",
+    "Are you sure you want to cancel the update?": "האם אתה בטוח שברצונך לבטל את העדכון?",
+    "Download is in progress. Cancel and close?": "הורדה בתהליך. לבטל ולסגור?",
+
+    # --- Indexing ---
+    "Index not found.\nWould you like to build it now?\n(It is built from 'Transcriptions.txt'. If the file is not next to the app, you will be asked where it is.)": "האינדקס לא נמצא.\nהאם ברצונך לבנות אותו כעת?\n(הוא נבנה מהקובץ 'Transcriptions.txt'. אם הקובץ אינו לצד התוכנה, תתבקשו לציין היכן הוא.)",
+    "Index Missing": "אינדקס חסר",
+    "Start indexing?": "להתחיל ביצירת אינדקס?",
+    "Index": "אינדקס",
+    "Index is ready.": "האינדקס מוכן.",
+    "Index missing or outdated.": "האינדקס חסר או לא מעודכן.",
+    "Indexing... %p%": "בונה אינדקס... %p%",
+    "Indexing complete": "הבנייה הושלמה",
+    "Indexing failed": "הבנייה נכשלה",
+    "Indexing Error": "שגיאה בבנייה",
+    "Indexing failed - another program is blocking file access.": "בניית האינדקס נכשלה - תוכנה אחרת חוסמת את הגישה לקבצים.",
+    "Solution:": "פתרון:",
+    "• Close file manager programs (Total Commander, Directory Opus, etc.)": "• סגור תוכנות ניהול קבצים (Total Commander, Directory Opus וכו׳)",
+    "• Close Windows Explorer windows open to the application folder": "• סגור חלונות של סייר Windows שפתוחים על תיקיית התוכנה",
+    "• Try again": "• נסה שוב",
+    "Done": "בוצע",
+    "Done. {} docs.": "בוצע. {} מסמכים.",
+    "Processing docs: {}": "מעבד מסמכים: {}",
+    "End of file list.": "סוף רשימת הקבצים.",
+    "Indexing complete. Documents indexed: {}": "בניית האינדקס הושלמה. מסמכים שמופתחו: {}",
+
+    # --- Lab Settings ---
+    "Lab Mode Settings": "הגדרות מצב מעבדה",
+    "Lab Mode": "מצב מעבדה",
+    "Search Parameters": "פרמטרי חיפוש",
+    "Max number of variants to search per term.": "מספר וריאנטים מקסימלי לחיפוש לכל מילה.",
+    "Size of the window to check for matches.": "גודל החלון לבדיקת התאמות.",
+    "Candidate Limit:": "מגבלת מועמדים:",
+    "Max Stage 1 candidates (default 2000, max 50000).": "מקסימום מועמדי שלב 1 (ברירת מחדל 2000, מקסימום 50000).",
+    "Advanced Scoring...": "ניקוד מתקדם...",
+    "Advanced Scoring": "ניקוד מתקדם",
+    "Search Settings": "הגדרות חיפוש",
+    "Configure variant search behavior for Standard Search modes.": "הגדר את התנהגות חיפוש הווריאנטים עבור מצבי החיפוש הרגיל.",
+    "Variant Search Limits:": "מגבלות חיפוש וריאנטים:",
+    "Variant search settings": "הגדרות חיפוש וריאנטים",
+    "Use slider instead of preset buttons (Basic, Extended, Maximum)": "השתמש בסליידר במקום כפתורי הפריסט (בסיסי, מורחב, מרבי)",
+    "Use slider instead of preset buttons (?, ??, ???)": "השתמש בסליידר במקום כפתורי הפריסט (?, ??, ???)",
+    "When enabled, shows a slider in the search bar instead of preset buttons": "כאשר מופעל, מציג סליידר בשורת החיפוש במקום כפתורי הפריסט",
+    "When enabled, shows a slider in the search bar instead of ?, ??, ??? buttons": "כאשר מופעל, מציג סליידר בשורת החיפוש במקום כפתורי ?, ??, ???",
+    "Custom Variant Pairs:": "זוגות וריאנטים מותאמים אישית:",
+    "Add character pairs that should be treated as interchangeable (e.g. ק=א means ק↔א).": "הוסף זוגות תווים שיטופלו כברי-חילוף (למשל ק=א פירושו ק↔א).",
+    "Enter one pair per line:\nק=א\nכו=מ\nב=פ": "הזן זוג אחד בכל שורה:\nק=א\nכו=מ\nב=פ",
+    "Minimum Match %:": "אחוז התאמה מינימלי:",
+    "Minimum percent of query terms required for Stage 1 candidates.": "אחוז מינימלי של מונחי שאילתה הדרוש למועמדי שלב 1.",
+    "Use Standard Variants": "השתמש בווריאנטים סטנדרטיים",
+    "Standard visual swaps like ד/ר.": "חילופים חזותיים סטנדרטיים כמו ד/ר.",
+    "Use Custom Variants": "השתמש בווריאנטים מותאמים",
+    "Use your custom char=char replacements.": "השתמש בהחלפות מותאמות אישית מסוג תו=תו.",
+    "Use Double Scan (Stage 2)": "סריקה כפולה (שלב 2)",
+    "Run Stage 2 re-ranking (slower but more precise).": "הרץ דירוג מחדש בשלב 2 (איטי יותר אך מדויק).",
+    "Use Slop Window": "השתמש בחלון גמיש (Slop)",
+    "Enable sliding window density check.": "הפעל בדיקת צפיפות בחלון גולש.",
+    "Use Rare Word Filtering": "השתמש בסינון על ידי מילים נדירות",
+    "Boost score for rare words found in document.": "העלה ציון עבור מילים נדירות שנמצאו במסמך.",
+    "Prefix Mode (Begins with...)": "מצב קידומת (מתחיל ב...)",
+    "Search for words starting with the query terms (e.g. 'lam' matches 'lama').": "חפש מילים המתחילות במונחי השאילתא (למשל 'למ' ימצא 'למה').",
+    "Prefix Length:": "אורך קידומת:",
+    "How many letters from the start of each word to match in Prefix Mode.": "כמה אותיות מתחילת כל מילה להתאמה במצב קידומת.",
+    "Order Tolerance": "סדר מילים",
+    "Require N words to appear in the same order within a window of N+M words.": "דרוש הופעה של N מילים באותו סדר בתוך חלון של N+M מילים.",
+    "Find": "מצא",
+    "Find:": "מצא:",
+    "Find in text...": "חיפוש בטקסט...",
+    "words in order out of": "מילים לפי סדר מתוך",
+    "extra words (Window N+M)": "מילים נוספות (חלון N+M)",
+    "Custom Variants (char=char, word=word)": "ווריאנטים מותאמים (תו=תו, מילה=מילה)",
+    "Lab Index": "אינדקס מעבדה",
+    "Rebuild Lab Index": "בנה מחדש אינדקס מעבדה",
+    "Max Candidates per Chunk:": "מקסימום מועמדים למקטע:",
+    "Max Results to Display:": "מקסימום תוצאות להצגה:",
+    "Max Results to Process:": "מקסימום תוצאות לעיבוד:",
+    "Min Chunk Score:": "ציון מקטע מינימלי:",
+    "Max Final Results:": "מקסימום תוצאות סופיות:",
+    "Sequential Order Bonus:": "בונוס רצף מילים:",
+    "Coverage Penalty Power:": "מקדם קנס כיסוי:",
+    "Stop-Word Suppression:": "סינון מילות עצירה:",
+    "Score for Short Words (<3):": "ניקוד למילים קצרות (<3):",
+    "Score for Common 3-Letter:": "ניקוד למילים נפוצות בנות 3 אותיות:",
+    "Standard Weights:": "משקלים רגילים:",
+    "Long Word Bonus:": "בונוס מילה ארוכה:",
+    "Unique Match Base Score:": "ניקוד בסיס להתאמה ייחודית:",
+    "Distance Penalty:": "קנס מרחק:",
+    "Repeated Word Factor:": "קנס על מילים חוזרות:",
+    "Adjust how the algorithm prioritizes results.": "כוונן כיצד האלגוריתם מתעדף תוצאות.",
+    "Points given for very short words (<3 letters). Keep low to reduce noise.": "נקודות הניתנות למילים קצרות מאוד (פחות מ-3 אותיות). השאר נמוך להפחתת רעש.",
+    "Points for common 3-letter words (e.g. 'ליה', 'הכי').": "נקודות למילים נפוצות בנות 3 אותיות (למשל 'ליה', 'הכי').",
+
+    # --- Variant Search Settings ---
+    "Standard Search - Variant Limits:": "חיפוש רגיל - הגבלות וריאנטים:",
+    "(Affects regular search modes: Variants (?), Extended (??), Maximum (???))": "(משפיע על מצבי חיפוש רגילים: וריאנטים (?), מורחב (??), מקסימלי (???))",
+    "Limit Short Words (≤N chars):": "הגבל מילים קצרות (≤N תווים):",
+    "Max Changes per Word:": "מקסימום שינויים למילה:",
+    "Aggressive Mode (ignore word length limits)": "מצב אגרסיבי (התעלם מהגבלות אורך)",
+    "Words with this length or less get only 1 character change. Increase to be more conservative.": "מילים באורך זה או פחות מקבלות רק שינוי תו אחד. הגדל להיות יותר שמרני.",
+    "Maximum character substitutions per word. Higher = more results but slower.": "מספר החלפות תווים מקסימלי למילה. גבוה יותר = יותר תוצאות אך איטי יותר.",
+    "Like old behavior: apply max changes to all words regardless of length. More results, more noise.": "כמו ההתנהגות הישנה: החל שינויים מקסימליים על כל המילים ללא קשר לאורך. יותר תוצאות, יותר רעש.",
+
+    "Save & Close": "שמור וסגור",
+    "Copied": "הועתק",
+    "Configuration JSON copied to clipboard.": "קובץ תצורה JSON הועתק ללוח.",
+    "Lab Engine not initialized.": "מנוע המעבדה לא אותחל.",
+    "Lab Index rebuilt successfully.": "אינדקס המעבדה נבנה מחדש בהצלחה.",
+
+    # --- Lab Tooltips ---
+    "Minimum percentage of query terms required to consider a result relevant.": "אחוז מינימלי של מונחי שאילתה הדרוש כדי להחשיב תוצאה כרלוונטית.",
+    "Maximum number of raw candidates to fetch from the index before detailed scoring.": "מספר מקסימלי של מועמדים גולמיים לשליפה מהאינדקס לפני ניקוד מפורט.",
+    "Maximum number of documents to scan in Deep Scan mode.": "מספר מקסימלי של מסמכים לסריקה במצב סריקה עמוקה.",
+    "Maximum number of index hits to process per text chunk.": "מספר מקסימלי של תוצאות אינדקס לעיבוד עבור כל מקטע טקסט.",
+    "Minimum score required for a chunk to be considered a match.": "ציון מינימלי הדרוש למקטע כדי להיחשב כהתאמה.",
+    "Maximum number of results to display in the tree (prevents freezing). All results are exported.": "מספר מקסימלי של תוצאות להצגה בעץ (מונע קפיאה). כל התוצאות מיוצאות.",
+
+    # --- Result Dialog ---
+    "Manuscript Viewer": "צפייה בכתב יד",
+    "Result {} of {}": "תוצאה {} מתוך {}",
+    "Go to Ktiv": "עיון בכתיב",
+    "Sys": "מס' מערכת",
+    "FL": "מס' קובץ",
+    "Image:": "תמונה:",
+    "Show More": "הצג עוד", 
+
+    "◀ Prev Result": "▶ לתוצאה קודמת",
+    "Next Result ▶": "לתוצאה הבאה ◀",
+    "◀◀ Prev Manuscript": "▶▶ לכתב היד הקודם",
+    "Next Manuscript ▶▶": "לכתב היד הבא ◀◀",
+    "Skip to the previous manuscript in the results": "דלג לכתב היד הקודם ברשימת התוצאות",
+    "Skip to the next manuscript in the results": "דלג לכתב היד הבא ברשימת התוצאות",
+    "View result": "הצג תוצאה",
+    "Showing top {} of {} results. (Export for full list)": "מציג {} הראשונות מתוך {} תוצאות. (לייצוא הרשימה המלאה)",
+
+    "Match Context (Source)": "הקשר (מקור)",
+
+    # --- AI Dialog ---
+    "AI Regex Assistant ({})": "עוזר ביטויים רגולריים - AI ({})",
+    "Describe pattern (e.g. 'Word starting with Aleph')...": "תאר תבנית (למשל 'מילה המתחילה באות א')...",
+    "Send": "שלח",
+    "Generated Regex will appear here.": "הביטוי הרגולרי שיופק יופיע כאן.",
+    "Thinking...": "חושב...",
+    "Use this Regex": "השתמש בביטוי זה",
+    "Hello! I can help you build Regex for Hebrew manuscripts.": "שלום! אני יכול לעזור לך לבנות ביטויים רגולריים לכתבי יד עבריים.",
+    "System": "מערכת",
+    "You": "אתה",
+    "Gemini": "ג'מיני",
+
+    # --- Exclude Dialog ---
+    "Enter system IDs or shelfmarks to exclude (one per line).": "הכנס מספרי מערכת או מספרי מדף להחרגה (אחד בשורה).",
+
+    # --- Filter Text Dialog ---
+    "Enter text to filter results (results found in this text will be moved to a separate list):": "הכנס טקסט לסינון תוצאות (תוצאות שיימצאו בטקסט זה יועברו לרשימה נפרדת):",
+    "Paste text here...": "הדבק טקסט כאן...",
+    "Load Text": "טען טקסט",
+
+    # --- Sefaria Sources ---
+    "Load from Sefaria": "טען מספריא",
+    "Tanakh": "תנ\"ך",
+    "Mishnah": "משנה",
+    "Talmud": "תלמוד בבלי",
+    "Load Bible text from Sefaria": "טען טקסט תנ\"ך מספריא",
+    "Load Mishnah text from Sefaria": "טען טקסט משנה מספריא",
+    "Load Talmud Bavli text from Sefaria": "טען טקסט תלמוד בבלי מספריא",
+    "Select Books": "בחר ספרים",
+    "Category:": "קטגוריה:",
+    "Select All": "בחר הכל",
+    "Selected: {} / {}": "נבחרו: {} / {}",
+    "Load Selected": "טען נבחרים",
+    "Please select at least one book.": "אנא בחר לפחות ספר אחד.",
+    "Loading: {}": "טוען: {}",
+    "Error: {}": "שגיאה: {}",
+    "Clear": "נקה",
+    "Loaded": "נטענו",
+    "texts": "טקסטים",
+    "failed": "נכשלו",
+    "Failed to load": "הטעינה נכשלה",
+    "Starting search...": "מתחיל חיפוש...",
+    "More Sources...": "עוד מקורות...",
+    "More Sources": "עוד מקורות",
+    "Browse all available Sefaria sources": "עיין בכל המקורות הזמינים מספריא",
+    "Source Type:": "סוג מקור:",
+    "Tosefta": "תוספתא",
+    "Jerusalem Talmud": "תלמוד ירושלמי",
+    "Midrash Rabbah": "מדרש רבה",
+    "Midrash Tanchuma": "מדרש תנחומא",
+    "Sifra": "ספרא",
+    "Sifrei": "ספרי",
+    "Mekhilta": "מכילתא",
+    "Select sources to filter results (matches found in checked sources will be moved to a separate list):": "בחר מקורות לסינון תוצאות (התאמות שנמצאות במקורות המסומנים יועברו לרשימה נפרדת):",
+    "Loaded Sources": "מקורות שנטענו",
+    "Deselect All": "בטל בחירה",
+    "Remove Unchecked": "הסר לא מסומנים",
+    "Active: {} / {}": "פעילים: {} / {}",
+    "Info": "מידע",
+    "All selected sources are already loaded.": "כל המקורות שנבחרו כבר נטענו.",
+    "No sources loaded yet": "עדיין לא נטענו מקורות",
+    "Search Sefaria": "חפש בספריא",
+    "Custom source": "מקור מותאם",
+    "Add Custom Text": "הוסף טקסט מותאם",
+    "Enter a name for this source:": "הזן שם למקור זה:",
+    "e.g., My Commentary": "לדוגמה: פירוש שלי",
+    "Paste your text (will be cleaned automatically):": "הדבק את הטקסט (ינוקה אוטומטית):",
+    "Paste Hebrew text here...": "הדבק טקסט עברי כאן...",
+    "Please enter a name for the source": "אנא הזן שם למקור",
+    "Please enter at least 10 characters of text": "אנא הזן לפחות 10 תווים של טקסט",
+    "No valid Hebrew text found": "לא נמצא טקסט עברי תקין",
+    "Added": "נוסף",
+    "Enter a Sefaria reference (e.g., \"Genesis 1\", \"Berakhot 2a\", \"Rashi on Genesis 1\"):": "הזן הפניה לספריא (לדוגמה: \"Genesis 1\", \"Berakhot 2a\", \"Rashi on Genesis 1\"):",
+    "Examples:": "דוגמאות:",
+    "Please enter a Sefaria reference": "אנא הזן הפניה לספריא",
+    "Not found. Try a different reference.": "לא נמצא. נסה הפניה אחרת.",
+    "Text not found": "הטקסט לא נמצא",
+    "Search for any Sefaria text by reference": "חפש כל טקסט בספריא לפי הפניה",
+    "Add your own text as a filter source": "הוסף טקסט משלך כמקור סינון",
+    "Load": "טען",
+    "Sefaria Library": "ספריית ספריא",
+    "Search texts...": "חפש טקסטים...",
+    "Categories": "קטגוריות",
+    "Select All in Category": "בחר הכל בקטגוריה",
+    "Selected: {}": "נבחרו: {}",
+    "Loading library...": "טוען ספרייה...",
+    "Failed to load library. Check internet connection.": "טעינת הספרייה נכשלה. בדוק חיבור לאינטרנט.",
+
+    # --- Export Report Headers ---
+    "Composition Search": "חיפוש חיבורים", 
+    "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש חיבורים", 
+    "Total Results": "סך כל התוצאות",
+    "Main Manuscripts": "כתבי יד ראשיים",
+    "Main Appendix": "נספח ראשי",
+    "MAIN APPENDIX SUMMARY": "סיכום נספח ראשי", 
+    "FILTERED APPENDIX SUMMARY": "סיכום נספח מסונן", 
+    "KNOWN MANUSCRIPTS SUMMARY": "סיכום כתבי יד ידועים", 
+    "No known manuscripts were excluded.": "לא הוחרגו כתבי יד ידועים.", 
+    "MAIN MANUSCRIPTS": "כתבי יד ראשיים", 
+    "Known Manuscripts": "כתבי יד ידועים",
+    "Excluded": "הוחרגו", 
+    "Filtered by Text": "סונן לפי טקסט",
+    "Search_Results": "תוצאות_חיפוש",
+    "Composition_Report": "דוח_חיפוש_חיבורים",
+    "Manuscript": "כתב יד",
+    "MS": "כ\"י",
+    "Browse Help": "עיון בכתב יד - עזרה",
+    "Settings Help": "הגדרות - עזרה",
+    
+    # --- Indexing / File Selection ---
+    "The transcriptions file ('Transcriptions.txt') was not found in the application folder.": "קובץ התעתיקים ('Transcriptions.txt') לא נמצא בתיקיית התוכנה.",
+    "Would you like to locate it manually?": "האם ברצונך לאתר אותו ידנית?",
+    "File Not Found": "קובץ לא נמצא",
+    "Select Transcriptions File": "בחר קובץ תעתיקים",
+    "Input file not found: {}\nPlease place 'Transcriptions.txt' next to the executable.": "קובץ הקלט לא נמצא: {}\nאנא הנח את 'Transcriptions.txt' לצד קובץ ההפעלה.",
+    "Input file not found: {}": "קובץ קלט לא נמצא: {}",
+    "Please place 'Transcriptions.txt' next to the executable.": "אנא הנח את 'Transcriptions.txt' לצד התוכנה.",
+
+    # --- HTML About ---
+    "ABOUT_HTML": f"""
+        <style>
+            h3 {{ margin-bottom: 0px; margin-top: 10px; }}
+            p {{ margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }}
+            a {{ color: #2980b9; text-decoration: none; }}
+        </style>
+        <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
+            <div style='text-align:center;'>
+                <h2 style='margin-bottom:5px;'>Dicta Genizah Search Pro {APP_VERSION}</h2>
+                <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
+                <p>אתר: <a href='https://genizahsearch.com'>GenizahSearch.com</a> &mdash; אתר הגניזה של דיקטה</p>
+            </div>
+            <hr>
+
+            <h3>מוקדש לזכרו של מורנו האהוב, פרופ' מנחם כהנא ז\"ל</h3>
+            <h3>קרדיטים</h3>
+            <p>כלי זה נבנה בסיוע <b>Claude</b> (Anthropic), <b>Gemini</b> (Google) ו-<b>ChatGPT</b> (OpenAI).</p>
+            <p>תודה מיוחדת לפרופ' משה קופל ול<a href='https://dicta.org.il/'>דיקטה</a> על התמיכה הנדיבה וההכוונה.</p>
+            <p>תודה גם לאבי שמידמן, ג'וש גדליה, אלישע רוזנצוייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר על עצותיהם ותמיכתם.</p>
+            <p>חיפוש בקבצים מקומיים (תכונת "הספרייה שלי") קיבל השראה מהאב-טיפוס GenizahLocal של יהודה זייבלד.</p>
+
+            <h3>פרטיות מטמון האינדקס המקומי</h3>
+            <p>הטקסט שחולץ מהמסמכים שלכם נשמר בקובץ <code>local_index.sqlite3</code> בתוך תיקיית האינדקס המקומי שלכם.
+            הטקסט דחוס באמצעות <b>zstd</b> (דחיסה בלבד, לא הצפנה).
+            מידע מטמון זה <b>אינו מועלה</b> לשרתי GenizahSearch.
+            להצפנה בעת מנוחה, השתמשו בהצפנת דיסק ברמת מערכת ההפעלה (BitLocker / FileVault).</p>
+
+            <h3>מקור הנתונים ותודות</h3>
+            <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטוב, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרה זיו וליצחק גילה מהספרייה הלאומית. תודות רבות גם לשאר חברי הצוות: לואיג'י במבאצ'י, שרווה גוגאוולה, דריה וסיוטינסקי שפירא, משה לביא, אלנה לולי, חיים לפין, נורית עזר, בראת קוראר-ברכאת, בנימין קיסלינג וורד רזיאל קרצ'מר.</p>
+            <p>הנגשת מאגר כה מורכב וערך לציבור היא צעד משמעותי למדע הפתוח, ואני מעריך מאוד את נדיבותם.</p>
+
+            <h3>רישיון</h3>
+
+            <p>המאגר הבסיסי מופץ תחת רישיון Creative Commons Attribution 4.0 International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>)</p>
+
+            <h3>ציטוט</h3>
+            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Dicta Genizah Search Pro של הלל גרשוני.</p>
+        </div>
+        """,
+
+    "נדרש אתחול מחדש": "Restart Required",
+    "אנא הפעילו מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף." : "Please restart the application for the language change to take effect.",
+
+    # --- Export Labels ---
+    "Search Results": "תוצאות חיפוש",
+    "Report View": "תצוגת דו\"ח",
+    "Raw Data": "נתונים גולמיים",
+    "Query information": "מידע על השאילתה",
+    "Search Text": "טקסט החיפוש",
+    "Search Query": "שאילתת חיפוש",
+    "Search Mode": "מצב חיפוש",
+    "Gap": "מרווח",
+    "Report Summary": "תקציר דוח",
+    "System ID": "מספר מערכת",
+    "Title": "כותרת",
+    "Image/Page": "תמונה/עמוד",
+    "Snippet": "קטע",
+    "Category": "קטגוריה",
+    "Group": "קבוצה",
+    "Source Context": "הקשר חיפוש",
+    "Manuscript Text": "תוכן כתב יד",
+    "Appendix": "נספח",
+    "See Appendix for query information and excluded manuscripts.": "ראו נספח למידע על השאילתה וכתבי היד המוחרגים.",
+
+    # --- Report Headers ---
+    "REPORT_CREDIT_TXT": """הופק באמצעות Dicta Genizah Search Pro
+מקור הנתונים: תעתיקי MiDRASH (שטוקל בן עזרא ואח', 2025)
+המאגר זמין בכתובת: https://doi.org/10.5281/zenodo.17734473
+================================================================================
+""",
+
+    # --- Personal Lists Tab ---
+    "Personal Lists": "רשימות אישיות",
+    "General": "כללי",
+    "Recently Viewed": "נצפו לאחרונה",
+    "New List...": "רשימה חדשה...",
+    "Create New List": "צור רשימה חדשה",
+    "List Name:": "שם הרשימה:",
+    "Add list...": "הוסף רשימה...",
+    "Add project...": "הוסף פרויקט...",
+    "Create New Project": "צור פרויקט חדש",
+    "Project Name:": "שם הפרויקט:",
+    "Rename Project": "שנה שם פרויקט",
+    "Delete Project (Keep Lists)": "מחק פרויקט (השאר רשימות)",
+    "Delete Project and Lists": "מחק פרויקט ורשימות",
+    "List Color:": "צבע:",
+    "Duplicate List": "שכפל רשימה",
+    "Merge Lists": "מזג רשימות",
+    "Fix Duplicates": "תקן כפילויות",
+    "Merge duplicate lists created by sync issues": "מזג רשימות כפולות שנוצרו מבעיות סנכרון",
+    "No duplicate lists found.": "לא נמצאו רשימות כפולות.",
+    "Cleanup complete:\n": "הניקוי הושלם:\n",
+    "- Removed {} duplicate lists\n": "- הוסרו {} רשימות כפולות\n",
+    "- Merged {} items total\n": "- מוזגו {} פריטים בסך הכל\n",
+    "items merged": "פריטים מוזגו",
+    "- Restored {} lists to their projects\n": "- שוחזרו {} רשימות לפרויקטים שלהן\n",
+    "No changes made.": "לא בוצעו שינויים.",
+    "Resolve Duplicate: {}": "פתור כפילות: {}",
+    "Found {} lists named '{}' with different projects.\nChoose which to keep:": "נמצאו {} רשימות בשם '{}' עם פרויקטים שונים.\nבחר איזו לשמור:",
+    "Under '{}' ({} items)": "תחת '{}' ({} פריטים)",
+    "(no project)": "(ללא פרויקט)",
+    " [System]": " [מערכת]",
+    "Items from other lists will be merged into the selected one.": "פריטים מרשימות אחרות ימוזגו לרשימה שנבחרה.",
+    "Delete List": "מחק רשימה",
+    "Edit List": "ערוך רשימה",
+    "Rename List": "שנה שם רשימה",
+    "Add to List": "הוסף לרשימה",
+    "Previous Folio": "עמוד קודם",
+    "Next Folio": "עמוד הבא",
+    "Cycle Background": "החלף רקע",
+    "Toggle BG": "החלף רקע",
+    "☆ Add to List": "☆ הוסף לרשימה",
+    "List": "רשימה",
+    "Imported List": "רשימה מיובאת",
+    "Remove from List": "הסר מרשימה",
+    "Move to List...": "העבר לרשימה...",
+    "Add Tag...": "הוסף תגית...",
+    "Add Tag": "הוסף תגית",
+    "Enter tag:": "הכנס תגית:",
+    "selected": "נבחרו",
+    "No items in this list.": "אין פריטים ברשימה זו.",
+    "Edit Item": "ערוך פריט",
+    "Copy Info": "העתק מידע",
+    "Copy Info...": "העתק מידע...",
+    "Detailed": "מפורט",
+    "With Link": "עם קישור",
+    "Info copied to clipboard.": "המידע הועתק ללוח.",
+    "Link copied to clipboard": "הקישור הועתק ללוח",
+    "Item Details": "פרטי הפריט",
+    "Preview": "תצוגה מקדימה",
+    "Select an item to preview": "בחר פריט להצגה מקדימה",
+    "No image": "אין תמונה",
+    "Toggle Preview Panel": "הצג/הסתר תצוגה מקדימה",
+    "Could not load text": "לא ניתן לטעון טקסט",
+    "Lists:": "רשימות:",
+    "Tags:": "תגיות:",
+    "Note:": "הערה:",
+    "Link:": "קישור:",
+    "Added:": "נוסף:",
+    "Modified:": "עודכן:",
+    "Save Changes": "שמור שינויים",
+    "Unidentified": "לא מזוהה",
+    "(unidentified)": "(לא מזוהה)",
+    "Edit Shelfmark": "ערוך מספר מדף",
+    "Enter shelfmark manually:": "הכנס מספר מדף ידנית:",
+
+    # --- Sorting ---
+    "Sort by": "מיין לפי",
+    "Sort:": "מיון:",
+    "By count": "לפי כמות",
+    "A–Z": "א–ת",  # A–Z (EN-DASH U+2013) → א–ת; shared key with web tr('A–Z')
+    "Shelfmark": "מספר מדף",
+    "Date Added": "תאריך הוספה",
+    "Filter...": "סנן...",
+    "Filter items...": "סנן פריטים...",
+
+    # --- Export/Import ---
+    "Export List": "ייצוא רשימה",
+    "Export List...": "ייצוא רשימה...",
+    "Import List": "ייבוא רשימה",
+    "Import List...": "ייבוא רשימה...",
+    "Export Options": "אפשרויות ייצוא",
+    "What to include:": "מה לכלול:",
+    "IDs only (for transfer)": "מזהים בלבד (להעברה)",
+    "With metadata (shelfmark, title)": "עם מטאדאטה (מספר מדף, כותרת)",
+    "Full (with snippets)": "מלא (כולל קטעים)",
+    "Save to File": "שמור לקובץ",
+    "Copy to Clipboard": "העתק ללוח",
+    "Send by Email": "שלח בדוא\"ל",
+    "The items have been copied to your clipboard.\n\nYour email client will now open.\nPlease paste (Ctrl+V) the text into the message body.": 
+        "הפריטים הועתקו ללוח.\n\nתוכנת הדוא\"ל תיפתח כעת.\nאנא הדבק (Ctrl+V) את הטקסט בגוף ההודעה.",
+    "List exported successfully.": "הרשימה יוצאה בהצלחה.",
+    "List imported successfully.": "הרשימה יובאה בהצלחה.",
+    "Imported {} items ({} unidentified).": "יובאו {} פריטים ({} לא מזוהים).",
+    "Import Error": "שגיאה בייבוא",
+    "Invalid file format.": "פורמט קובץ לא תקין.",
+    "Select List File": "בחר קובץ רשימה",
+    "JSON Files": "קבצי JSON",
+    "Text (plain)": "טקסט (רגיל)",
+    "Excel (.xlsx)": "אקסל (.xlsx)",
+    "Word (.docx)": "וורד (.docx)",
+    "Excel Files": "קבצי אקסל",
+    "Word Files": "קבצי וורד",
+    "Text Files": "קבצי טקסט",
+    "List is empty.": "הרשימה ריקה.",
+    "Total items": "סה\"כ פריטים",
+    "Export Error": "שגיאה בייצוא",
+    "Copied to clipboard.": "הועתק ללוח.",
+    "View Error": "שגיאה בתצוגה",
+    "Could not load manuscript data.": "לא ניתן לטעון את נתוני כתב היד.",
+
+    # --- Confirmations ---
+    "Delete List?": "למחוק רשימה?",
+    "Are you sure you want to delete '{}'?\nAll items in this list will be deleted.": "האם אתה בטוח שברצונך למחוק את '{}'?\nכל הפריטים ברשימה זו יימחקו.",
+    "Move '{}' to trash?\nYou can restore it later from the Trash.": "להעביר את '{}' לסל האשפה?\nתוכל לשחזר אותה מאוחר יותר מסל האשפה.",
+    "Delete Items?": "למחוק פריטים?",
+    "Remove {} items from this list?": "להסיר {} פריטים מרשימה זו?",
+    "Item already in list": "הפריט כבר ברשימה",
+    "This item is already in '{}'. Would you like to update its note and tags?": "פריט זה כבר נמצא ב-'{}'. האם לעדכן את ההערה והתגיות שלו?",
+    "Update": "עדכן",
+
+    # --- Merge Dialog ---
+    "Select Target List": "בחר רשימת יעד",
+    "Merge '{}' into:": "מזג את '{}' לתוך:",
+    "Delete source list after merge": "מחק רשימת מקור לאחר מיזוג",
+    "Merge": "מזג",
+
+    # --- Recently Viewed ---
+    "This is an automatic list of recently viewed manuscripts.": "זוהי רשימה אוטומטית של כתבי יד שנצפו לאחרונה.",
+    "Cannot modify this list manually.": "לא ניתן לערוך רשימה זו ידנית.",
+
+    # --- Trash ---
+    "Trash": "סל אשפה",
+    "View and restore deleted lists": "צפה ושחזר רשימות שנמחקו",
+    "Trash is empty.": "סל האשפה ריק.",
+    "{} deleted lists": "{} רשימות נמחקו",
+    "Restore": "שחזר",
+    "Delete Permanently": "מחק לצמיתות",
+    "Empty Trash": "רוקן סל אשפה",
+    "Please select a list to restore.": "אנא בחר רשימה לשחזור.",
+    "Please select a list to delete.": "אנא בחר רשימה למחיקה.",
+    "Are you sure you want to permanently delete this list?\nThis cannot be undone.": "האם אתה בטוח שברצונך למחוק רשימה זו לצמיתות?\nלא ניתן לשחזר פעולה זו.",
+    "Are you sure you want to permanently delete all lists in trash?\nThis cannot be undone.": "האם אתה בטוח שברצונך למחוק את כל הרשימות בסל האשפה לצמיתות?\nלא ניתן לשחזר פעולה זו.",
+    "Deleted {} lists permanently.": "נמחקו {} רשימות לצמיתות.",
+
+    # --- Add to project ---
+    "Add to project...": "הוסף לפרויקט...",
+    "No project": "ללא פרויקט",
+    "Add new...": "הוסף חדש...",
+    "Add to New Project": "הוסף לפרויקט חדש",
+    "Create a new project and move this list to it.": "צור פרויקט חדש והעבר אליו את הרשימה.",
+    "Create & Add": "צור והוסף",
+    "List moved to project": "הרשימה הועברה לפרויקט",
+    "List removed from project": "הרשימה הוסרה מהפרויקט",
+    "List added to project": "הרשימה נוספה לפרויקט",
+    "Feature not available": "תכונה לא זמינה",
+    "Select project": "בחר פרויקט",
+    "Or create new project:": "או צור פרויקט חדש:",
+    "New project name": "שם פרויקט חדש",
+    "Move": "העבר",
+
+    # --- Item exists dialog ---
+    "Already in list": "כבר ברשימה",
+
+    # --- Search source ---
+    "from search: {}": "מחיפוש: {}",
+    "from composition search: {}": "מחיפוש חיבורים: {}",
+    "from browse": "מעיון",
+    "Added to list.": "נוסף לרשימה.",
+    "Items are already in this list.": "הפריטים כבר נמצאים ברשימה זו.",
+    "Need at least two lists to merge.": "נדרשות לפחות שתי רשימות למיזוג.",
+    "Select list:": "בחר רשימה:",
+    "Add a note...": "הוסף הערה...",
+
+    # --- Edit Mode ---
+    "Edit": "ערוך",
+    "Edit Mode": "מצב עריכה",
+    "Make corrections directly in the text": "בצע תיקונים ישירות בטקסט",
+    "Exit Edit": "צא מעריכה",
+    "Save Correction": "שמור תיקון",
+    "No changes were made to the text.": "לא בוצעו שינויים בטקסט.",
+    "Correction Notes": "הערות לתיקון",
+
+    # --- Discoveries ---
+    "Share a new discovery": "שתף תגלית חדשה",
+    "Refresh discoveries": "רענן תגליות",
+    "No discoveries yet": "אין תגליות עדיין",
+    "Error loading discoveries": "שגיאה בטעינת תגליות",
+    "Share Discovery...": "שתף תגלית...",
+    "by": "מאת",
+
+    # --- Corrections ---
+    "Corrections": "תיקונים",
+    "Refresh corrections": "רענן תיקונים",
+    "View Corrections": "צפה בתיקונים",
+    "View Corrections...": "צפה בתיקונים...",
+    "Submit Correction...": "הגש תיקון...",
+
+    # --- Comments ---
+    "Comment": "תגובה",
+    "Refresh comments": "רענן תגובות",
+    "View Comments...": "צפה בתגובות...",
+    "Add Comment...": "הוסף תגובה...",
+    "Add a comment on this document": "הוסף תגובה על מסמך זה",
+    "You can view document comments via View Comments button": "ניתן לצפות בתגובות למסמכים דרך כפתור 'צפייה בתגובות'",
+    "Please login to add a comment.": "אנא התחבר כדי להוסיף תגובה.",
+
+    # --- Community General ---
+    "Please login to submit a correction.": "אנא התחבר כדי להגיש תיקון.",
+    "Logged Out": "התנתקת",
+    "You have been logged out.": "התנתקת מהמערכת.",
+    "View community corrections for this document": "צפה בתיקוני הקהילה למסמך זה",
+    "View comments on this document": "צפה בתגובות על מסמך זה",
+    "View Document": "צפה במסמך",
+    "Check for updates": "בדוק עדכונים",
+    "Correction not found": "התיקון לא נמצא",
+    "Failed to load correction": "טעינת התיקון נכשלה",
+    # Discovery types
+    "All Types": "כל הסוגים",
+    "Discovery": "תגלית",
+    "Question": "שאלה",
+    "Note": "הערה",
+    # Edit mode
+    "Save": "שמור",
+    "Submit": "שלח",
+    "Save & Submit": "שמור ושלח",
+    "Save as draft for later editing": "שמור כטיוטה לעריכה מאוחרת",
+    "Submit correction for review": "שלח תיקון לבדיקה",
+    "Draft Saved": "הטיוטה נשמרה",
+    "Your correction has been saved as a draft. You can continue editing later.": "התיקון שלך נשמר כטיוטה. תוכל להמשיך לערוך מאוחר יותר.",
+    # Dialog icons
+    "View in Result Dialog": "צפה בתיבת תוצאות",
+    "Browse Document": "עיין במסמך",
+    # Version selector
+    "Version:": "גרסה:",
+    "Edited": "מתוקן",
+    "User Edit": "עריכת משתמש",
+    # Discovery dialog - document selection
+    "Document Reference (optional)": "הפניה למסמך (אופציונלי)",
+    "Document References (optional)": "הפניות למסמכים (אופציונלי)",
+    "From List:": "מרשימה:",
+    "-- Select from list --": "-- בחר מרשימה --",
+    "Item:": "פריט:",
+    "-- Select item --": "-- בחר פריט --",
+    "Shelfmark:": "מספר מדף:",
+    "Type or select, e.g., T-S 13J1.1": "הקלד או בחר, לדוגמה: T-S 13J1.1",
+    "Add shelfmark to list": "הוסף מספר מדף לרשימה",
+    "View": "צפה",
+    "Browse": "עיין",
+    "Remove selected shelfmark": "הסר מספר מדף שנבחר",
+    # Comments panel
+    "My Comments": "ההערות שלי",
+    "All Comments": "כל ההערות",
+    "Login to see your comments": "התחבר כדי לראות את ההערות שלך",
+    # Discovery manuscripts
+    "Manuscripts": "כתבי יד",
+
+    # ==================== Login/Register ====================
+    "Login to Corrections System": "התחברות למערכת התיקונים",
+    "Login to submit corrections and comments": "התחבר כדי לשלוח תיקונים והערות",
+    "Email:": "אימייל:",
+    "Password:": "סיסמה:",
+    "Register": "הרשמה",
+    "Login": "התחבר",
+    "Please enter email and password": "אנא הזן אימייל וסיסמה",
+    "Logging in...": "מתחבר...",
+    "Login Failed": "ההתחברות נכשלה",
+    "Remember me": "זכור אותי",
+    "Save login credentials for next time": "שמור את פרטי ההתחברות לפעם הבאה",
+    "Forgot password?": "שכחת סיסמה?",
+    "Forgot Password": "שכחתי סיסמה",
+    "Enter your email address:": "הזן את כתובת האימייל שלך:",
+    "Email Sent": "האימייל נשלח",
+    "A password reset link has been sent to your email.\n\nIf you signed up with Google, this will let you set a password for desktop login.": "קישור לאיפוס סיסמה נשלח לאימייל שלך.\n\nאם נרשמת דרך Google, זה יאפשר לך להגדיר סיסמה לכניסה מהתוכנה.",
+    "Failed to send reset email": "שליחת האימייל לאיפוס נכשלה",
+    "Create Account": "יצירת חשבון",
+    "Create a new account to contribute corrections": "צור חשבון חדש כדי לתרום תיקונים",
+    "Email*:": "אימייל*:",
+    "Username*:": "שם משתמש*:",
+    "Choose a username": "בחר שם משתמש",
+    "Password*:": "סיסמה*:",
+    "Confirm Password*:": "אימות סיסמה*:",
+    "Full Name:": "שם מלא:",
+    "Affiliation:": "שיוך מוסדי:",
+    "University, institute, etc.": "אוניברסיטה, מכון וכיוצא בזה'",
+    "Password: 8+ characters, uppercase letter, number": "סיסמה: 8+ תווים, אות גדולה, מספר",
+    "Please fill all required fields": "אנא מלא את כל השדות הנדרשים",
+    "Passwords do not match": "הסיסמאות אינן תואמות",
+    "Registering...": "נרשם...",
+    "Account created! You can now login.": "החשבון נוצר! כעת ניתן להתחבר.",
+    "Registration Failed": "ההרשמה נכשלה",
+    "Logout": "התנתקות",
+    "Logged in as": "מחובר כ",
+    "Not logged in": "לא מחובר",
+    "Login to participate in the community": "התחבר כדי להשתתף בקהילה",
+    "Login with Google": "התחבר עם Google",
+    "Sign up with Google": "הרשם עם Google",
+    "For desktop app login, set a password in your profile after signing up.": "לכניסה מתוכנת המחשב, הגדר סיסמה בפרופיל לאחר ההרשמה.",
+    # Web sign-up with email confirmation (2026-10-21): the Register answer, and the two sign-in errors people hit.
+    'Check your inbox at {email} (and the spam folder). A new account gets a confirmation link: open it, then sign in here. If this address already has an account, sign in, or use "Forgot password?".': 'בדוק את תיבת הדואר של {email} (וגם את תיקיית הספאם). לחשבון חדש נשלח קישור אישור: פתח אותו ואז התחבר כאן. אם כבר יש חשבון בכתובת הזו, התחבר, או השתמש ב"שכחת סיסמה?".',
+    "Your email address is not confirmed yet. Open the confirmation link we sent you (check the spam folder too), then sign in.": "כתובת האימייל שלך עדיין לא אושרה. פתח את קישור האישור ששלחנו אליך (בדוק גם בתיקיית הספאם) ואז התחבר.",
+    'Wrong email or password. If you signed up with Google, use "Login with Google". To set a new password, use "Forgot password?".': 'אימייל או סיסמה שגויים. אם נרשמת דרך Google, השתמש ב"התחבר עם Google". להגדרת סיסמה חדשה, השתמש ב"שכחת סיסמה?".',
+    # Sign-in dead ends (2026-11-03): resend the confirmation mail.
+    "Resend confirmation email": "שלח שוב דוא\"ל אישור",
+    "If that address is registered, a new confirmation email is on its way.": "אם הכתובת הזו רשומה, דוא\"ל אישור חדש בדרך אליה.",
+    "Please wait a minute before sending another.": "נא להמתין דקה לפני שליחה נוספת.",
+
+    # ==================== Password Reset (web recovery-link landing) ====================
+    "Set a new password": "הגדר סיסמה חדשה",
+    "Set Password": "הגדר סיסמה",
+    "This password reset link has expired or was already used.": "קישור איפוס הסיסמה הזה פג תוקף או שכבר נעשה בו שימוש.",
+    "Send reset link": "שלח קישור איפוס",
+    "Please enter your email address": "אנא הזן את כתובת האימייל שלך",
+    "If an account exists for that email, a password reset link has been sent.": "אם קיים חשבון עבור כתובת אימייל זו, נשלח אליו קישור לאיפוס סיסמה.",
+
+    # ==================== Submit Correction ====================
+    "Submit Correction": "שלח תיקון",
+    "Submit a Transcription Correction": "שלח תיקון תמלול",
+    "Original Text:": "טקסט מקורי:",
+    "Corrected Text:": "טקסט מתוקן:",
+    "Text Correction": "תיקון טקסט",
+    "Text Addition": "הוספת טקסט",
+    "Text Deletion": "מחיקת טקסט",
+    "Reading Suggestion": "הצעת קריאה",
+    "Paleographic Note": "הערה פליאוגרפית",
+    "Uncertain Reading": "קריאה לא ודאית",
+    "Confidence:": "רמת ביטחון:",
+    "Source/Reference (optional):": "מקור/הפניה (אופציונלי):",
+    "Academic source, manuscript comparison, etc.": "מקור אקדמי, השוואת כתבי יד וכו'",
+    "Notes (optional):": "הערות (אופציונלי):",
+    "Explain the reasoning for this correction...": "הסבר את הסיבה לתיקון זה...",
+    "Save as Draft": "שמור כטיוטה",
+    "Submit for Review": "שלח לבדיקה",
+    "Your correction has been saved as a draft. You can submit it later.": "התיקון שלך נשמר כטיוטה. תוכל לשלוח אותו מאוחר יותר.",
+    "Submitted": "נשלח",
+    "Your correction has been submitted for review. Thank you!": "התיקון שלך נשלח לבדיקה. תודה!",
+    "Please enter the corrected text": "אנא הזן את הטקסט המתוקן",
+    "The corrected text must be different from the original": "הטקסט המתוקן חייב להיות שונה מהמקור",
+
+    # ==================== Document Corrections ====================
+    "Document Corrections": "תיקוני מסמך",
+    "Corrections for {}": "תיקונים עבור {}",
+    "Status": "סטטוס",
+    "Corrected": "מתוקן",
+    "Score": "ניקוד",
+    "Refresh": "רענן",
+    "Correction Details": "פרטי תיקון",
+    "No correction data": "אין נתוני תיקון",
+    "Correction": "תיקון",
+    "Corrected:": "מתוקן:",
+    "Source:": "מקור:",
+
+    # ==================== Voting ====================
+    "Community Rating": "דירוג קהילה",
+    "Upvote": "הצבע בעד",
+    "Downvote": "הצבע נגד",
+    "Voting": "הצבעה",
+    "Login Required": "נדרשת התחברות",
+    "Please login to vote": "אנא התחבר כדי להצביע",
+
+    # ==================== My Corrections ====================
+    "My Corrections": "התיקונים שלי",
+    "Draft": "טיוטה",
+    "Pending": "ממתין",
+    "Approved": "אושר",
+    "Rejected": "נדחה",
+    "Needs Revision": "דורש תיקון",
+    "Document": "מסמך",
+    "Created": "נוצר",
+    "All Corrections": "כל התיקונים",
+    "Browse All User Corrections": "עיין בכל תיקוני המשתמשים",
+    "Search:": "חיפוש:",
+    "Search corrections...": "חפש תיקונים...",
+    "No corrections submitted yet": "לא נשלחו תיקונים עדיין",
+    "No corrections yet": "אין תיקונים עדיין",
+
+    # ==================== Discoveries ====================
+    "Discoveries Center": "מרכז התגליות",
+    "Share Discovery": "שתף תגלית",
+    "Discoveries": "תגליות",
+    "Period:": "תקופה:",
+    "All Time": "כל הזמנים",
+    "Today": "היום",
+    "This Week": "השבוע",
+    "This Month": "החודש",
+    "No items found": "לא נמצאו פריטים",
+    "Answered": "נענה",
+    "Anonymous": "אנונימי",
+    "No responses yet": "אין תגובות עדיין",
+    "Please login to share a discovery": "אנא התחבר כדי לשתף תגלית",
+    "Please login to share a discovery.": "אנא התחבר כדי לשתף תגלית.",
+    "Discovery Details": "פרטי תגלית",
+    "Discovery not found": "התגלית לא נמצאה",
+    "Mark as Unanswered": "סמן כלא נענה",
+    "Mark as Answered": "סמן כנענה",
+    "Post anonymously": "פרסם באופן אנונימי",
+    "Submit Response": "שלח תגובה",
+    "Login to respond": "התחבר כדי להגיב",
+    "Write a response...": "כתוב תגובה...",
+    "Please enter a response": "אנא הזן תגובה",
+    "Response submitted": "התגובה נשלחה",
+    "Responses": "תגובות",
+    "Share a Discovery": "שתף תגלית",
+    "Share a Discovery or Ask a Question": "שתף תגלית או שאל שאלה",
+    "Discovery - Found something interesting": "תגלית - מצאתי משהו מעניין",
+    "Question - Need help": "שאלה - צריך עזרה",
+    "Identification - Identified a text": "זיהוי - זיהיתי טקסט",
+    "Note - General observation": "הערה - תצפית כללית",
+    "Title:": "כותרת:",
+    "Brief description of your discovery": "תיאור קצר של התגלית שלך",
+    "Description:": "תיאור:",
+    "Describe your discovery in detail...": "תאר את התגלית שלך בפירוט...",
+    "Page:": "עמוד:",
+    "Share": "שתף",
+    "Please fill in title and description": "אנא מלא כותרת ותיאור",
+    "Discovery shared successfully!": "התגלית שותפה בהצלחה!",
+    "View All Discoveries...": "צפה בכל התגליות...",
+
+    # ==================== Comments ====================
+    "Add Comment": "הוסף הערה",
+    "Add a Comment": "הוסף הערה",
+    "General Comment": "הערה כללית",
+    "Scholarly Note": "הערה מדעית",
+    "Suggestion": "הצעה",
+    "Issue Report": "דיווח על בעיה",
+    "Your comment:": "ההערה שלך:",
+    "Write your comment here...": "כתוב את הערתך כאן...",
+    "Public comment": "הערה ציבורית",
+    "Uncheck to make this comment private (only visible to you)": "הסר סימון כדי להפוך את ההערה לפרטית (נראית רק לך)",
+    "Submit Comment": "שלח הערה",
+    "Please enter a comment": "אנא הזן הערה",
+    "Comment submitted successfully": "ההערה נשלחה בהצלחה",
+    "Failed to submit comment": "שליחת ההערה נכשלה",
+    "Document Comments": "הערות למסמך",
+    "No comments yet": "אין הערות עדיין",
+    "Private": "פרטי",
+    "View My Comments": "צפה בהערות שלי",
+    "View All My Comments...": "צפה בכל ההערות שלי...",
+    "Please login to view your comments.": "אנא התחבר כדי לצפות בהערות שלך.",
+
+    # ==================== Edit Transcription ====================
+    "Edit Transcription": "ערוך העתקה",
+    "Original Text": "טקסט מקורי",
+    "Copy to Editor": "העתק לעורך",
+    "Your Correction": "התיקון שלך",
+    "Ready to edit": "מוכן לעריכה",
+    "Notes (explain your correction)": "הערות (הסבר את התיקון שלך)",
+    "Explain what you changed and why...": "הסבר מה שינית ומדוע...",
+    "Reset to Original": "אפס למקור",
+    "Save Draft": "שמור טיוטה",
+    "Unsaved changes": "שינויים לא שמורים",
+    "No changes": "אין שינויים",
+    "Are you sure you want to reset to the original text?": "האם אתה בטוח שברצונך לאפס לטקסט המקורי?",
+    "Your draft has been saved locally": "הטיוטה שלך נשמרה מקומית",
+    "No Changes": "אין שינויים",
+    "No changes to submit": "אין שינויים לשליחה",
+    "View Correction Details": "צפיה בפרטי השינוי",
+
+    # ==================== Community Hub ====================
+    "Community Hub": "מרכז הקהילה",
+    "Open Discoveries Center": "פתח את מרכז התגליות",
+    "View community discoveries, questions, and share your own findings.": "צפה בחידושי הקהילה, שאלות, ושתף את הממצאים שלך.",
+    "Browse All Corrections": "עיין בכל התיקונים",
+    "View corrections from all contributors.": "צפה בתיקונים מכל התורמים.",
+    "View My Corrections": "צפה בתיקונים שלי",
+    "View and manage your submitted corrections.": "צפה ונהל את התיקונים שהגשת.",
+    "View and manage your comments.": "צפה ונהל את ההערות שלך.",
+    "Please login to view your corrections": "אנא התחבר כדי לצפות בתיקונים שלך",
+    "Please login to view your comments": "אנא התחבר כדי לצפות בהערות שלך",
+    "Please login to view your corrections.": "אנא התחבר כדי לצפות בתיקונים שלך.",
+    "Browse Corrections...": "עיין בתיקונים...",
+    "Comments": "הערות",
+    "Reputation": "מוניטין",
+    "View Comments": "צפה בהערות",
+    "✏️ Edit": "✏️ ערוך",
+    "✏️ Editing...": "✏️ עורך...",
+    "✓ Saved": "✓ נשמר",
+    "No Document": "אין מסמך",
+    "Please load a document first.": "אנא טען מסמך קודם.",
+
+    # Additional community UI translations
+    "💬 Comment": "💬 הערה",
+    "Please provide a brief explanation for your correction (optional):": "אנא ספק הסבר קצר לתיקון שלך (אופציונלי):",
+    "Please login to edit.": "אנא התחבר כדי לערוך.",
+    "Please login to make corrections.": "אנא התחבר כדי לבצע תיקונים.",
+    "Enable edit mode to make corrections": "הפעל מצב עריכה כדי לבצע תיקונים",
+    "Failed to save correction": "שמירת התיקון נכשלה",
+    "Failed to submit correction": "שליחת התיקון נכשלה",
+    "Correction Submitted": "התיקון נשלח",
+    "Your correction has been submitted for review. Thank you for your contribution!": "התיקון שלך נשלח לבדיקה. תודה על תרומתך!",
+    "Default": "ברירת מחדל",
+    "Modified": "השתנה",
+    "❌ Exit Edit": "❌ יציאה מעריכה",
+
+    # ==================== Fragment Joins (צירופים) ====================
+    "Fragment Joins": "צירופי קטעים",
+    "Connected Fragments for {}": "קטעים מצורפים ל-{}",
+    "No joins found": "לא נמצאו צירופים",
+    "No joins found (offline)": "לא נמצאו צירופים (לא מקוון)",
+    "{} fragments in cluster, {} joins": "{} קטעים בקבוצה, {} צירופים",
+    "Connected Fragments": "קטעים מצורפים",
+    "Navigate to Selected": "נווט לנבחר",
+    "Join Details": "פרטי צירוף",
+    "Fragment A": "קטע א",
+    "Fragment B": "קטע ב",
+    "Relationship": "קשר",
+    "Source": "מקור",
+    "Created By": "נוצר על ידי",
+    "Create New Join": "צור צירוף חדש",
+    "Fragment A:": "קטע א:",
+    "Fragment B:": "קטע ב:",
+    "Start typing shelfmark...": "התחל להקליד מספר מדף...",
+    "Pick from personal list": "בחר מרשימה אישית",
+    "Relationship:": "קשר:",
+    "Not sure / Related": "לא בטוח / קשור",
+    "Physical join": "צירוף פיזי",
+    "Same composition": "אותו חיבור",
+    "Optional notes about this join": "הערות אופציונליות על צירוף זה",
+    "Create Join": "צור צירוף",
+    "Login to create joins": "התחבר כדי ליצור צירופים",
+    "Delete Selected Join": "מחק צירוף נבחר",
+    "Delete selected join (admin only)": "מחק צירוף נבחר (מנהלים בלבד)",
+    "Confirm Delete": "אישור מחיקה",
+    "Are you sure you want to delete this join?": "האם אתה בטוח שברצונך למחוק צירוף זה?",
+    "Join created successfully": "הצירוף נוצר בהצלחה",
+    "Join deleted": "הצירוף נמחק",
+    "Saved Offline": "נשמר באופן לא מקוון",
+    "Join saved locally. Will sync when connection is restored.": "הצירוף נשמר מקומית. יסתנכרן כשהחיבור יחזור.",
+    "Deleted Locally": "נמחק מקומית",
+    "Join deleted locally. Will sync when connection is restored.": "הצירוף נמחק מקומית. יסתנכרן כשהחיבור יחזור.",
+    "Failed to create join: {}": "יצירת הצירוף נכשלה: {}",
+    "Failed to delete: {}": "המחיקה נכשלה: {}",
+    "Please enter both fragment shelfmarks": "אנא הזן את מספרי המדף של שני הקטעים",
+    "Cannot join a fragment to itself": "לא ניתן לצרף קטע לעצמו",
+    "View joined fragments": "צפה בקטעים מצורפים",
+    "{} connected fragments": "{} קטעים מצורפים",
+    "No joined fragments": "אין קטעים מצורפים",
+    "current": "נוכחי",
+    "Unknown": "לא ידוע",
+    "Pick from List": "בחר מרשימה",
+    "View Fragment Joins": "צפה בצירופי קטעים",
+    "View user-created fragment joins and connections.": "צפה בצירופי קטעים שנוצרו על ידי משתמשים.",
+    "User Joins": "צירופי משתמשים",
+    "Joins": "צירופים",
+    "Join (noun)": "צירוף",
+    "My Joins": "הצירופים שלי",
+    "All Joins": "כל הצירופים",
+    "Search shelfmarks...": "חפש מספרי מדף...",
+    "Login required to view your joins": "נדרשת התחברות כדי לצפות בצירופים שלך",
+    "Server unavailable - showing cached data": "השרת אינו זמין - מציג נתונים מהמטמון",
+    "Failed to load joins": "טעינת הצירופים נכשלה",
+    "Failed to load joins. Server may be unavailable.": "טעינת הצירופים נכשלה. ייתכן שהשרת אינו זמין.",
+    "{} joins total": "{} צירופים סה\"כ",
+    "Open Fragment A: {}": "פתח את קטע א: {}",
+    "Open Fragment B: {}": "פתח את קטע ב: {}",
+    "Copy shelfmarks": "העתק מספרי מדף",
+    "Delete join": "מחק צירוף",
+    "Document ID: {}": "מזהה מסמך: {}",
+    "Author": "מחבר",
+    "Type:": "סוג:",
+    "Open": "פתח את",
+    "Refresh joins": "רענן צירופים",
+    "Login to see your joins": "התחבר כדי לצפות בצירופים שלך",
+    "No joins yet": "אין צירופים עדיין",
+    "Browse Joins...": "עיין בצירופים...",
+    "Offline - no cached data available": "לא מקוון - אין נתונים במטמון",
+    "List:": "רשימה:",
+    "-- Select list --": "-- בחר רשימה --",
+    "Select": "בחר",
+    "Cancel": "ביטול",
+    "Navigate": "נווט",
+    "To view {}, search for it in the Browse tab": "כדי לצפות ב-{}, חפש אותו בלשונית עיון",
+    "Server unavailable": "השרת אינו זמין",
+
+    # --- Web Specific Translations ---
+    "Search...": "חיפוש...",
+    "Results": "תוצאות",
+    "No results found": "לא נמצאו תוצאות",
+    "Back": "חזרה",
+    "Page": "דף",
+    "Settings": "הגדרות",
+    "Options": "אפשרויות",
+    "Hebrew": "עברית",
+    "English": "אנגלית",
+    "Create": "צור",
+    "Show": "הצג",
+    "recommended": "מומלץ",
+    "results": "תוצאות",
+    "NAVIGATION": "ניווט",
+    "Community": "קהילה",
+    "TOOLS": "כלים",
+    "Dashboard": "לוח בקרה",
+    "Home": "בית",
+    "About the Genizah": "על הגניזה",
+    "Help": "עזרה",
+    "Quick search...": "חיפוש מהיר...",
+    "Lab Settings": "הגדרות מעבדה",
+    "Help Center": "מרכז עזרה",
+    "Genizah Search": "חיפוש גניזה",
+    "Cairo Genizah Search Engine": "מנוע חיפוש לגניזת קהיר",
+    "Welcome to Genizah Search Pro": "ברוכים הבאים ל-Genizah Search Pro",
+    "Welcome to Dicta Genizah Search": "ברוכים הבאים לאתר הגניזה של דיקטה",
+    "Dicta Genizah Search: Full-Text Manuscript Search": "אתר הגניזה של דיקטה: חיפוש בגניזה הקהירית",
+    "Advanced research tools for Cairo Genizah manuscripts": "כלי מחקר מתקדמים לכתבי יד מגניזת קהיר",
+    "Search MiDRASH transcriptions across 255,000+ manuscripts: text, variants, parallels, joins, and images": "חיפוש בתעתוקי MiDRASH של למעלה מ-255,000 כתבי יד: טקסט, וריאנטים, מקבילות, צירופים ותמונות",
+    "What is the Cairo Genizah?": "מהי גניזת קהיר?",
+    "Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic, now searchable for the first time": "מאות אלפי כתבי יד מימי הביניים מעליית גג של בית כנסת בקהיר, זמינים לחיפוש לראשונה",
+    "What can I do here?": "מה אפשר לעשות כאן?",
+    "Search MiDRASH transcriptions of ~255,000 Genizah manuscripts with variants, find textual parallels, locate joins, browse images alongside text, and share discoveries with the research community.": "חיפוש בתעתוקי MiDRASH של כ-255,000 קטעי גניזה עם וריאנטים, מציאת מקבילות טקסטואליות, איתור צירופים, עיון בתמונות לצד טקסט ושיתוף תגליות עם קהילת המחקר.",
+    "Free Text Search": "חיפוש טקסט חופשי",
+    "Spelling Variants": "וריאנטים",
+    "Parallel Detection": "מקבילות",
+    "Join Search": "צירופים",
+    "Advanced Search": "חיפוש מתקדם",
+    "Images + Text": "תמונות וטקסט",
+    "Downloadable App": "תוכנה להורדה",
+    "Community Discoveries": "תגליות הקהילה",
+    "Transcriptions: MiDRASH. Manuscript images: NLI, Cambridge, Oxford, and others. Scholarly descriptions, bibliography, and catalog data: NLI, FGP, PGP, Oxford, Cambridge, and others.": "תעתוקים: MiDRASH. תמונות כתבי יד: הספרייה הלאומית, קיימברידג', אוקספורד ועוד. תיאורים מדעיים, ביבליוגרפיה ונתוני קטלוג: הספרייה הלאומית, פרויקט פרידברג, PGP, אוקספורד, קיימברידג' ועוד.",
+    "A downloadable Windows application for power users: fast local search, offline access, and advanced workflows.": "תוכנה להורדה לחוקרים מתקדמים: חיפוש מקומי מהיר, גישה ללא אינטרנט וכלים מתקדמים.",
+    "Researchers are already finding new joins and parallels. Share your own discoveries, suggest corrections, and contribute to the research community.": "חוקרים כבר מוצאים צירופים ומקבילות חדשות. שתפו את התגליות שלכם, הציעו תיקונים ותרמו לקהילת המחקר.",
+    "Research Tools": "כלי מחקר",
+    "Pages": "עמודים",
+    "Volume": "כרך",
+    "This manuscript has multiple volumes (IEs)": "לכתב יד זה מספר כרכים (IEs)",
+    "Lists": "רשימות",
+    "Latest Data": "נתונים עדכניים",
+    "Chunk Analysis": "ניתוח קטעים",
+    "Scoring": "ניקוד",
+    "Transcriptions": "תעתיקים",
+    "Start Search": "התחל חיפוש",
+    "Recent Activity": "פעילות אחרונה",
+    "No recent activity": "אין פעילות אחרונה",
+    "System Status": "סטטוס מערכת",
+    "Indexed Pages": "עמודים באינדקס",
+    "Cached Metadata": "מטא-דאטא במטמון",
+    "Rebuild Needed": "נדרשת בנייה מחדש",
+    "Line/position search requires a rebuilt index. Please rebuild the index from Settings to use this feature.": "חיפוש לפי מיקום בשורה/טקסט דורש בניית אינדקס מחדש. אנא בנו מחדש את האינדקס מההגדרות כדי להשתמש בתכונה זו.",
+    "Configure advanced search parameters": "הגדר פרמטרים מתקדמים לחיפוש",
+    "Learn how to use the Genizah site": "למד כיצד להשתמש באתר הגניזה",
+
+    # --- Transcription Disclaimer ---
+    "The texts in this database were generated by automatic transcription and contain errors. Use the variant search modes to help find results despite mistakes.": "הטקסטים במאגר זה נוצרו באמצעות תמלול אוטומטי ומכילים שגיאות. השתמשו בחיפוש וריאנטים כדי למצוא תוצאות למרות השגיאות.",
+    "Computer-read manuscripts; expect some reading errors!": "כתבי יד שנקראו על ידי מחשב; צפו לשגיאות קריאה!",
+    "The texts were transcribed automatically by AI. Our smart search tools help find results despite mistakes.": "הטקסטים תועתקו אוטומטית על ידי בינה מלאכותית. כלי החיפוש החכמים שלנו עוזרים למצוא תוצאות למרות השגיאות.",
+    "Learn more →": "← למידע נוסף",
+    "Got it": "הבנתי",
+
+    "Display Settings": "הגדרות תצוגה",
+    "Enable Lab Mode by default": "הפעל מצב מעבדה כברירת מחדל",
+    "Lab Mode Parameters": "פרמטרים של מצב מעבדה",
+    "Lab Mode uses the Shmidman-Koppel-Porat algorithm for detecting parallel texts\n            based on rare-letter fingerprinting.": "מצב מעבדה משתמש באלגוריתם שמידמן-קופל-פורת לזיהוי טקסטים מקבילים\n            בהתבסס על טביעת אצבע של אותיות נדירות.",
+    "Candidate Limit": "מגבלת מועמדים",
+    "Maximum candidates to scan per query": "מספר מועמדים מקסימלי לסריקה בחיפוש",
+    "Display Limit": "מגבלת תצוגה",
+    "Maximum results to display": "מספר תוצאות מקסימלי להצגה",
+    "Default Chunk Size": "גודל קטע ברירת מחדל",
+    "Words per search chunk in composition search": "מילים לכל קטע חיפוש בחיפוש חיבורים",
+    "Min Score": "ציון מינימלי",
+    "Minimum score for results": "ציון מינימלי לתוצאות",
+    "Settings saved": "ההגדרות נשמרו",
+    "Variant Search Configuration": "הגדרות חיפוש וריאנטים",
+    "Custom Variant Pairs": "זוגות וריאנטים מותאמים אישית",
+    "Add character pairs that should be treated as interchangeable (one per line: ק=א)": "הוסף זוגות תווים שיטופלו כמתחלפים (אחד בשורה: ק=א)",
+    "Custom Variants": "וריאנטים מותאמים אישית",
+    "Variant Search Limits": "מגבלות חיפוש וריאנטים",
+    "Limit Short Words (≤N chars)": "הגבל מילים קצרות (≤N תווים)",
+    "Words this length or shorter get only 1 character change": "מילים באורך זה או קצר יותר מקבלות שינוי תו אחד בלבד",
+    "Max Changes per Word": "שינויים מקסימליים למילה",
+    "Maximum character substitutions per word": "החלפות תווים מקסימליות למילה",
+    "Apply max changes to all words regardless of length": "החל שינויים מקסימליים על כל המילים ללא תלות באורך",
+    "Save Variant Settings": "שמור הגדרות וריאנטים",
+    "Variant settings saved": "הגדרות וריאנטים נשמרו",
+    "Variant Pairs Level": "רמת זוגות וריאנטים",
+    "Controls how many character substitution pairs to use. Higher values find more variants but are slower.": "קובע כמה זוגות החלפת תווים לשימוש. ערכים גבוהים יותר מוצאים יותר וריאנטים אך איטיים יותר.",
+    "Based on frequency analysis of HTR confusions. Top pairs are most common substitutions.": "מבוסס על ניתוח תדירות של טעויות HTR. הזוגות העליונים הם ההחלפות הנפוצות ביותר.",
+    "Top Variant Pairs (by frequency)": "זוגות וריאנטים מובילים (לפי תדירות)",
+    "Pairs are sorted by frequency from HTR analysis. The slider above controls how many to use.": "הזוגות ממוינים לפי תדירות מניתוח HTR. הסליידר למעלה קובע כמה מהם לשימוש.",
+    "Most common": "הנפוצים ביותר",
+    "Similar tops": "חלקים עליונים דומים",
+    "2↔1 merge": "מיזוג 2↔1",
+    "Common Built-in Variant Pairs": "זוגות וריאנטים מובנים נפוצים",
+    "Search Index": "אינדקס חיפוש",
+    "Active": "פעיל",
+    "Not loaded": "לא נטען",
+    "Documents": "מסמכים",
+    "Genizah Search Pro v5.0": "Genizah Search Pro v5.0",
+    "Data Source: MiDRASH Project (Friedberg Genizah Project)": "מקור נתונים: פרויקט MiDRASH (פרויקט הגניזה של פרידברג)",
+    "Text Search": "חיפוש טקסט",
+    "Search in manuscripts": "חיפוש בכתבי יד",
+    "Search for words and phrases in the Genizah corpus": "חפש מילים וביטויים בגניזה",
+    "Enter search terms and find matching manuscripts": "הזן מילות חיפוש ומצא כתבי יד תואמים",
+    "Find Parallels": "מציאת מקבילות",
+    "Find similar texts": "מצא טקסטים דומים",
+    "Enter a long text and find parallel texts in the Genizah": "הזן טקסט ארוך ומצא טקסטים מקבילים בגניזה",
+    "Paste your text to discover parallels": "הדבק טקסט כדי לגלות מקבילות",
+    "Browse Manuscripts": "דפדוף בכתבי יד",
+    "Browse by shelfmark": "דפדוף לפי מספר מדף",
+    "Enter a shelfmark to browse the manuscript": "הזן מספר מדף כדי לדפדף בכתב היד",
+    "Navigate through manuscript pages": "נווט בין דפי כתב היד",
+    "Enter search terms": "הזן מילות חיפוש",
+    "Enter Hebrew text to search": "הזן טקסט עברי לחיפוש",
+    "Search manuscripts...": "חיפוש בכתבי יד...",
+    # Replaces "Search manuscripts..." on the homepage hero box (owner,
+    # 2026-09-04). Both the English and the Hebrew read as "search FOR a
+    # manuscript", so readers typed shelfmarks into a full-text box. The old key
+    # stays registered because tests/e2e/conftest.py still builds a stub page
+    # with that placeholder. Since 2026-10-19 the box also opens a shelfmark or
+    # sys_id (routing in web/home_query.py), so the placeholder names all three
+    # inputs -- in few enough words to fit the box on a 360px phone (measured).
+    "Text, shelfmark or system ID": "טקסט, מספר מדף או מספר מערכת",
+    # The header's go-to box (web/main.py::render_header_center), on every page.
+    # Hebrew: the owner's words; English approved by the owner (both 2026-11-04).
+    "Search text or go to a shelfmark...": "חפשו טקסט או עברו למספר מדף...",
+    "Search mode": "מצב חיפוש",
+    "results found": "תוצאות נמצאו",
+    "Advanced options": "אפשרויות מתקדמות",
+    "Advanced Options": "אפשרויות מתקדמות",
+    "Word gap": "מרווח מילים",
+    "Gap description": "מספר המילים המותר בין מילות החיפוש (0 = רק מילים צמודות)",
+    "Start search": "התחל חיפוש",
+    "Results per page": "תוצאות בעמוד",
+    "Search tips": "טיפים לחיפוש",
+    "Try different search mode": "נסה מצב חיפוש אחר",
+    "Check spelling": "בדוק את האיות",
+    "Use fewer words": "השתמש בפחות מילים",
+    "Text copied": "הטקסט הועתק",
+    "Copy text": "העתק טקסט",
+    "Search functionality is currently unavailable": "פונקציית החיפוש אינה זמינה כרגע",
+    "Mode": "מצב",
+    "Enable Lab Mode algorithms": "הפעל אלגוריתמים של מצב מעבדה",
+    "Searches more candidates for comprehensive results": "מחפש יותר מועמדים לתוצאות מקיפות",
+    "Export Word": "יצא Word",
+    "Print / Save as PDF": "הדפסה / שמירה כ-PDF",
+    "Print this page": "הדפסת הדף הנוכחי",
+    # The "How to cite" chip that replaced the citation footer (2026-09-04).
+    # The citations themselves are assembled bilingually in
+    # shared/transcription_credits.py, which shared/ code cannot get from tr().
+    "How to cite": "כיצד לצטט",
+    "Print all manuscript pages": "הדפסת כל דפי כתב היד",
+    "Export Excel": "יצא Excel",
+    "Export JSON": "יצוא ל-JSON",
+    "Download JSON": "הורד JSON",
+    "Advanced Filters": "סינונים מתקדמים",
+    "Search only in...": "חפש רק ב...",
+    # /search box input (2026-11-03): a shelfmark typed into the box runs in Shelfmark
+    # mode and says so; a Latin query that spells Hebrew on the Hebrew keyboard layout
+    # is offered under "0 Results" (shared/search_box_input.py, shared/keyboard_layout.py).
+    "Searched as a shelfmark.": "החיפוש נערך כמספר מדף.",
+    "Search as text instead": "חפשו כטקסט במקום זאת",
+    "Did you mean {query}?": "האם התכוונתם ל{query}?",
+    "Include": "כלול",
+    "Search only in selected": "חפש רק בנבחרים",
+    "Exclude selected": "החרג נבחרים",
+    "All words": "כל המילים",
+    "Any word": "כל מילה",
+    "Not these words": "ללא מילים אלה",
+    "Add term": "הוסף מונח",
+    "Boolean Operators": "אופרטורים בוליאניים",
+    "Shortcuts": "קיצורי דרך",
+    "Engine not ready.": "המנוע אינו מוכן.",
+    "Ready to search.": "מוכן לחיפוש.",
+    "Select a result to view": "בחר תוצאה לצפייה",
+    "Showing first 200 results. Refine search.": "מציג 200 תוצאות ראשונות. דייק את החיפוש.",
+    "Browse Full Manuscript": "עיין בכתב יד מלא",
+    "Done. Found {} results.": "סיים. נמצאו {} תוצאות.",
+
+    # Collapsible Search Panel
+    "Expand search options": "הרחב אפשרויות חיפוש",
+    "Collapse search panel": "כווץ את חלונית החיפוש",
+    "Enter search query": "הזן שאילתת חיפוש",
+    "New": "חדש",
+    "New Search": "חיפוש חדש",
+    "Clear and start a new search": "נקה והתחל חיפוש חדש",
+    "Search reset": "החיפוש אופס",
+    "Enter a search query": "הזן שאילתת חיפוש",
+    "New Composition Search": "חיפוש הרכב חדש",
+    "Clear and start a new composition search": "נקה והתחל חיפוש הרכב חדש",
+    "Composition reset": "חיפוש ההרכב אופס",
+    "Filter by lists": "סינון לפי רשימות",
+    "All results": "כל התוצאות",
+    "Favorites only": "מועדפים בלבד",
+    "Full text not available": "טקסט מלא לא זמין",
+    "Advanced View": "תצוגה מתקדמת",
+    "Quick View": "מבט מהיר",
+    "Match Context": "הקשר התאמה",
+    "View in Browse": "עיין בכתב יד",
+    "Copy Text": "העתק טקסט",
+    "Text copied to clipboard": "הטקסט הועתק ללוח",
+    "No text to copy": "אין טקסט להעתקה",
+    "Copy failed. Select the text and copy it manually.": "ההעתקה נכשלה. סמן את הטקסט והעתק אותו ידנית.",
+    "Could not confirm the copy.": "לא ניתן היה לאשר את ההעתקה.",
+    "Add Selected to List": "הוסף נבחרים לרשימה",
+    "Copy Selected Text": "העתק טקסט נבחר",
+    "No results selected": "לא נבחרו תוצאות",
+    "No valid selections": "אין בחירות תקפות",
+    "items selected": "פריטים נבחרו",
+    "items added to list": "פריטים נוספו לרשימה",
+    "results copied to clipboard": "תוצאות הועתקו ללוח",
+    "Enter text to search for parallels": "הזן טקסט לחיפוש מקבילות",
+    "Source text": "טקסט מקור",
+    "Filter text": "טקסט סינון",
+    "Optional: exclude matches from this text": "אופציונלי: סנן התאמות מטקסט זה",
+    "Chunk size": "גודל קטע",
+    "Match": "התאמה",
+    "Manuscript text": "טקסט כתב היד",
+    "Your text": "הטקסט שלך",
+    "Discover parallel texts in the Genizah corpus": "גלה טקסטים מקבילים בגניזה",
+    "Words": "מילים",
+    "Characters": "תווים",
+    "Paste your Hebrew text here (minimum 10 words)...": "הדבק טקסט עברי כאן (מינימום 10 מילים)...",
+    "Filter text (exclude known sources)": "טקסט סינון (הסרת מקורות ידועים)",
+    "Matches containing text from this field will be filtered out": "התאמות המכילות טקסט משדה זה יסוננו",
+    "Paste text to exclude from results...": "הדבק טקסט להסרה מהתוצאות...",
+    "Words per search chunk": "מילים לכל קטע חיפוש",
+    "Words per search chunk (recommended: 4-7)": "מילים לכל קטע חיפוש (מומלץ: 4-7)",
+    "Skip common phrases": "דלג על ביטויים נפוצים",
+    "Overlap": "חפיפה",
+    "Maximum (step=1)": "מקסימלית (צעד=1)",
+    "Medium (step=2)": "בינונית (צעד=2)",
+    "Minimal (step=4)": "מינימלית (צעד=4)",
+    "Searching for parallels...": "מחפש מקבילות...",
+    "Cancelling...": "מבטל...",
+    "Stop": "עצור",
+    "and show partial results": "והצג תוצאות חלקיות",
+    "This may take a while...": "פעולה זו עשויה לקחת זמן...",
+    "This may take a while for long texts...": "פעולה זו עשויה לקחת זמן לטקסטים ארוכים...",
+    "Choose known sources to exclude from results (e.g., Bible verses, Mishnah). Matches found in these sources will be moved to a separate list.": "בחר מקורות ידועים לסנן מהתוצאות (כגון תנ״ך, משנה, תלמוד). התאמות שנמצאו במקורות אלה יועברו לרשימה נפרדת.",
+    "Initializing search...": "מאתחל חיפוש...",
+    "Search cancelled": "החיפוש בוטל",
+    "No parallels found": "לא נמצאו מקבילות",
+    "Try adjusting your search parameters": "נסה לשנות את הגדרות החיפוש",
+    "parallels found": "מקבילות נמצאו",
+    "in": "ב",
+    "All results filtered": "כל התוצאות סוננו",
+    "in filtered sources": "במקורות המסוננים",
+    "of": "מתוך",
+    "filtered manuscripts": "כתבי יד מסוננים",
+    "Load more": "טען עוד",
+    "partial results": "תוצאות חלקיות",
+    "partial": "חלקי",
+    "Partial results (search cancelled)": "תוצאות חלקיות (החיפוש בוטל)",
+    "Partial results (search stopped)": "תוצאות חלקיות (החיפוש נעצר)",
+    "Showing partial results": "מציג תוצאות חלקיות",
+    "Stops the search and shows partial results": "עוצר את החיפוש ומציג תוצאות חלקיות",
+    "Search cancelled - no results yet": "החיפוש בוטל - אין תוצאות עדיין",
+    "Top score": "ציון גבוה ביותר",
+    "Sort by score": "מיון לפי ציון",
+    "Sort by shelfmark": "מיון לפי מספר מדף",
+    "Sort by matches": "מיון לפי מספר התאמות",
+    "Min score": "ציון מינימלי",
+    "matches": "התאמות",
+    "and": "ו",
+    "more matches": "התאמות נוספות",
+    "View manuscript": "צפה בכתב היד",
+    "No context available": "אין הקשר זמין",
+    "Please ensure the search index is loaded": "אנא ודא שאינדקס החיפוש נטען",
+    "Showing first 100 of": "מציג 100 ראשונות מתוך",
+    "Export coming soon": "ייצוא בקרוב",
+    "Enter shelfmark": "הזן מספר מדף",
+    "Enter shelfmark or NLI system ID": "הזן מספר מדף או מספר מערכת של הספרייה הלאומית",
+    "e.g. T-S 8J6.1": "לדוגמה: T-S 8J6.1",
+    "First page": "עמוד ראשון",
+    "Last page": "עמוד אחרון",
+    "Jump to page": "קפוץ לעמוד",
+    "Show image": "הצג תמונה",
+    "Hide image": "הסתר תמונה",
+    "Open in Ktiv": "פתח בכתיב",
+    "Open in NLI KTIV": "פתח בכתיב NLI",
+    "Open in Cambridge Digital Library": "פתח בספריה הדיגיטלית של קיימברידג'",
+    "Open in Bodleian Libraries": "פתח בספריות הבודליאנה",
+    "Oxford image unavailable — showing the NLI image instead": "תמונת אוקספורד אינה זמינה — מוצגת במקומה התמונה מהספרייה הלאומית",
+    "Oxford image unavailable — the Bodleian site shows it only in a web browser": "תמונת אוקספורד אינה זמינה — אתר הבודליאנה מציג אותה רק בדפדפן",
+    "Oxford image unavailable, and the National Library copy could not be loaded": "תמונת אוקספורד אינה זמינה, וגם העותק שבספרייה הלאומית לא נטען",
+    "External link": "קישור חיצוני",
+    "Material Type": "סוג חומר",
+    "Parchment": "קלף",
+    "Folios": "דפים",
+    "Bifolios": "ביפוליו",
+    "Size": "גודל",
+    "View in Library Catalog": "צפה בקטלוג הספרייה",
+    "pages": "עמודים",
+    "Examples": "דוגמאות",
+    "Folio": "דף",
+    "Previous manuscript": "כתב היד הקודם",
+    "Next manuscript": "כתב היד הבא",
+    "Show Full Manuscript": "הצג כתב יד מלא",
+    "Hide Full Manuscript": "הסתר כתב יד מלא",
+    "Search for Parallels": "חפש מקבילות",
+    "Full Manuscript View": "תצוגת כתב יד מלא",
+    "Back to Page View": "חזרה לתצוגת עמוד",
+    "No more manuscripts": "אין עוד כתבי יד",
+    "At first manuscript": "בכתב היד הראשון",
+    "Could not load full manuscript": "לא ניתן לטעון את כתב היד המלא",
+    "Manuscript Image": "תמונת כתב היד",
+    "Toggle Image": "הצג/הסתר תמונה",
+    "Show Metadata": "הצג מטא-דאטא",
+    "Hide Metadata": "הסתר מטא-דאטא",
+    "Zoom": "זום",
+    "Zoom in": "הגדל",
+    "Zoom out": "הקטן",
+    "Zoom level": "רמת זום",
+    "Reset zoom": "אפס זום",
+    "Fit to width": "התאם לרוחב",
+    "Fit to height": "התאם לגובה",
+    "Fullscreen": "מסך מלא",
+    "Exit fullscreen": "צא ממסך מלא",
+    "Image not available": "תמונה לא זמינה",
+    "Full Text": "טקסט מלא",
+    "Metadata": "מטא-דאטא",
+    "Library": "ספרייה",
+    "Library:": "ספרייה:",
+    "Cross-page match": "התאמה חוצת עמודים",
+    "Showing match context only": "מציג הקשר התאמה בלבד",
+    "Click \"Browse Full Manuscript\" to view the complete page with navigation": "לחץ על \"עיין בכתב יד מלא\" לצפייה בעמוד המלא עם ניווט",
+    "View Complete Page": "צפה בעמוד המלא",
+    "Manuscript Match": "התאמה בכתב יד",
+    "View Result": "צפה בתוצאה",
+    "Add to Favorites": "הוסף למועדפים",
+    "How does it work?": "איך זה עובד?",
+    "found": "נמצאו",
+    "Data Source": "מקור נתונים",
+    "Transcriptions provided by the MiDRASH Project": "MiDRASH התעתיקים מסופקים על ידי פרויקט",
+    "View Dataset on Zenodo": "צפה במאגר הנתונים ב-Zenodo",
+    "Licensed under CC BY 4.0": "ברישיון CC BY 4.0",
+    "When publishing material from this site, please cite:": "בכל פרסום של החומר המוצג כאן, אנא צטטו את:",
+    "Citation copied!": "הציטוט הועתק!",
+    "Copy citation": "העתק ציטוט",
+    "Dismiss": "סגור",
+    "Toggle Filters": "הצג/הסתר מסננים",
+    "Filter Results": "סנן תוצאות",
+    "Filter by shelfmark": "סנן לפי מספר מדף",
+    "Filter by title": "סנן לפי כותרת",
+    "Filter by text": "סנן לפי טקסט",
+    "Apply Filters": "החל מסננים",
+    "Clear Filters": "נקה מסננים",
+    "results match filters": "תוצאות תואמות למסננים",
+    "Filters cleared": "מסננים נוקו",
+    "matches in": "התאמות ב",
+    "Max": "מקס'",
+    "Avg": "ממוצע",
+    "Reconnecting...": "מתחבר מחדש...",
+    "Connecting...": "מתחבר...",
+    "Initializing...": "מאתחל...",
+    "Service not available": "השירות אינו זמין",
+    "Index not found": "האינדקס לא נמצא",
+    "Composition search not available": "חיפוש חיבורים אינו זמין",
+    "No manuscript found": "לא נמצא כתב יד",
+    "Enter at least 10 words": "הזן לפחות 10 מילים",
+    "Enter at least 3 words": "הזן לפחות 3 מילים",
+    # Composition search notices (shared/composition_windows.py)
+    "The text has {words} words, fewer than the chunk size ({chunk_size}), so it was searched as one chunk of {words} words.":
+        "בטקסט {words} מילים, פחות מגודל המקטע ({chunk_size}), ולכן הוא נבדק כמקטע אחד בן {words} מילים.",
+    "The text is too short to search: enter at least {minimum} words.":
+        "הטקסט קצר מכדי לחפש: הזן לפחות {minimum} מילים.",
+    "This search uses at least {effective_chunk_size} words per chunk, so the chunk size was raised from {chunk_size} to {effective_chunk_size}.":
+        "חיפוש זה בודק לפחות {effective_chunk_size} מילים בכל מקטע, ולכן גודל המקטע הוגדל מ-{chunk_size} ל-{effective_chunk_size}.",
+    "The text has {windows} chunk(s) in all, so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
+        "בטקסט יש {windows} מקטעים שונים בסך הכול, ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
+    "Every chunk of the text is made of very common words, so Lab Mode did not search it. Try a longer or more distinctive text.":
+        "כל מקטעי הטקסט מורכבים ממילים נפוצות מאוד, ולכן מצב מעבדה לא חיפש בו. נסה טקסט ארוך או ייחודי יותר.",
+    "Lab Mode searched only {windows} of the text's chunks (the others are made of very common words), so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
+        "מצב מעבדה חיפש רק {windows} ממקטעי הטקסט (האחרים מורכבים ממילים נפוצות מאוד), ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
+    "Lab Engine not initialized": "מנוע המעבדה לא אותחל",
+    "Paste your Hebrew text here...": "הדבק טקסט עברי כאן...",
+    "Final forms": "צורות סופיות",
+    "Theme changed": "ערכת הנושא שונתה",
+    "Configure search and display preferences": "הגדר העדפות חיפוש ותצוגה",
+    "Default word gap": "מרווח מילים ברירת מחדל",
+    "Extended Variants": "וריאנטים מורחבים",
+    "Number of words per search chunk in composition search": "מספר מילים לכל קטע חיפוש בחיפוש חיבורים",
+    "Exclude Words": "מילים להחרגה",
+    "Exclude:": "החרג:",
+    "Words to exclude (space separated)": "מילים להחרגה (מופרדות ברווח)",
+    "Results containing these words will be filtered out": "תוצאות המכילות מילים אלה יסוננו",
+    "Display settings": "הגדרות תצוגה",
+    "Search settings": "הגדרות חיפוש",
+    "Default search mode": "מצב חיפוש ברירת מחדל",
+    "Theme": "ערכת נושא",
+    "Light": "בהיר",
+    "Dark": "כהה",
+    "Configure advanced search parameters and algorithms": "הגדר פרמטרים ואלגוריתמים מתקדמים לחיפוש",
+    "Min Should Match (%)": "אחוז התאמה מינימלי (%)",
+    "Percentage of query terms that must match": "אחוז מילות החיפוש שחייבות להתאים",
+    "Gap Penalty": "עונש מרווח",
+    "Penalty applied for gaps between matched terms": "עונש על פערים בין מילים שנמצאו",
+    "Variant Search": "חיפוש וריאנטים",
+    "Common Variant Pairs": "זוגות וריאנטים נפוצים",
+    "Common HTR confusion": "טעות HTR נפוצה",
+    "Similar shapes": "צורות דומות",
+    "Vertical strokes": "קווים אנכיים",
+    "Gutturals": "גרוניות",
+    "Index Management": "ניהול אינדקס",
+    "Index Status": "סטטוס אינדקס",
+    "Not available": "לא זמין",
+    "Rebuilding Lab Index...": "בונה מחדש אינדקס מעבדה...",
+    "Lab Index rebuilt": "אינדקס המעבדה נבנה מחדש",
+    "Learn how to use Genizah Search effectively": "למד כיצד להשתמש ב-Genizah Search ביעילות",
+    "Quick Start": "התחלה מהירה",
+    "Getting Started": "להתחיל",
+    "Search Modes": "מצבי חיפוש",
+    "Keyboard Shortcuts": "קיצורי מקלדת",
+    "Focus search": "מיקוד חיפוש",
+    "Execute search": "הפעל חיפוש",
+    "Close dialogs": "סגור דיאלוגים",
+    "Navigate results": "נווט בתוצאות",
+    "Open selected result": "פתח תוצאה נבחרת",
+    "Parallels Search": "חיפוש מקבילות",
+    "Data Sources": "מקורות נתונים",
+    "Feedback": "משוב",
+    "My Lists": "הרשימות שלי",
+    "Remove Selected": "הסר נבחרים",
+    "Fit All": "התאם הכל",
+    "Show Original": "הצג מקור",
+    "Scale": "קנה מידה",
+    "Rotation": "סיבוב",
+    "Threshold": "סף",
+    "No images found": "לא נמצאו תמונות",
+    "Loading fragment...": "טוען קטע...",
+    "Manage lists": "ניהול רשימות",
+    "Select a document": "בחר מסמך",
+    "Select a document:": "בחר מסמך:",
+    "Create new list": "צור רשימה חדשה",
+    "Create List": "צור רשימה",
+    "Create and Add": "צור והוסף",
+    "Failed to create list": "יצירת הרשימה נכשלה",
+    "Failed to add item": "הוספת הפריט נכשלה",
+    "List Name": "שם הרשימה",
+    "Please enter a list name": "אנא הזן שם לרשימה",
+    "List created": "הרשימה נוצרה",
+    "Are you sure you want to delete": "האם אתה בטוח שברצונך למחוק",
+    "All items in this list will be removed.": "כל הפריטים ברשימה זו יוסרו.",
+    "List deleted": "הרשימה נמחקה",
+    "Delete list": "מחק רשימה",
+    "Delete": "מחק",
+    "Lists manager not available": "מנהל הרשימות אינו זמין",
+    "No lists yet. Create your first list!": "אין רשימות עדיין. צור את הרשימה הראשונה שלך!",
+    "Select a list to view its contents": "בחר רשימה כדי לצפות בתוכן שלה",
+    "List not found": "הרשימה לא נמצאה",
+    "System List": "רשימת מערכת",
+    "This list is empty": "הרשימה הזו ריקה",
+    "Add items from search results": "הוסף פריטים מתוצאות החיפוש",
+    "Organize and save manuscripts for easy access": "ארגן ושמור כתבי יד לגישה נוחה",
+    "Color": "צבע",
+    "Export": "יצא",
+    "Export functionality coming soon": "פונקציית הייצוא תגיע בקרוב",
+    "Add to list": "הוסף לרשימה",
+    "Item": "פריט",
+    "Select List": "בחר רשימה",
+    "Note (optional)": "הערה (אופציונלי)",
+    "Add": "הוסף",
+    "Added to list": "נוסף לרשימה",
+    "Cannot add: missing system ID": "לא ניתן להוסיף: חסר מזהה מערכת",
+    "No lists available. Create a list first.": "אין רשימות זמינות. צור רשימה תחילה.",
+    "Go to Lists": "עבור לרשימות",
+    "Tags (comma-separated)": "תגיות (מופרדות בפסיקים)",
+    "Item updated": "הפריט עודכן",
+    "Remove": "הסר",
+    "Item removed from list": "הפריט הוסר מהרשימה",
+
+    # --- Lists Sync ---
+    "Sync Your Lists": "סנכרן את הרשימות שלך",
+    "Local Lists Available": "רשימות מקומיות זמינות",
+    "You have local lists that can be synced to your account.": "יש לך רשימות מקומיות שניתן לסנכרן לחשבון שלך.",
+    "This will make them available on all your devices.": "זה יהפוך אותן לזמינות בכל המכשירים שלך.",
+    "You have lists stored on this device. Sync them to your account?": "יש לך רשימות שמורות במכשיר זה. לסנכרן לחשבון שלך?",
+    "Sync Now": "סנכרן עכשיו",
+    "Move browser lists to your account": "העברת רשימות מהדפדפן לחשבון שלך",
+    "Your browser has saved lists that haven't been moved to your account yet.": "יש בדפדפן הזה רשימות שעדיין לא הועברו לחשבון שלך.",
+    "Moving them will make them available on all your devices and apps.": "אחרי ההעברה הן יהיו זמינות בכל המכשירים והיישומים שלך.",
+    "Move to account": "העבר לחשבון",
+    "Browser lists found": "נמצאו רשימות בדפדפן",
+    "This browser has lists that haven't been moved to your account. Move them now?": "בדפדפן הזה יש רשימות שעדיין לא הועברו לחשבון שלך. להעביר עכשיו?",
+    "Lists auto-sync between this site and the desktop app": "הרשימות מסונכרנות אוטומטית בין האתר לאפליקציה",
+    "Refresh lists from cloud": "טען רשימות מהענן",
+    "Later": "מאוחר יותר",
+    "Migration complete": "הסנכרון הושלם",
+    "Migration failed": "הסנכרון נכשל",
+    "Migration not available": "סנכרון לא זמין",
+    "Synced to your account": "מסונכרן לחשבון שלך",
+    "Local storage only - log in to sync": "אחסון מקומי בלבד - התחבר לסנכרון",
+    "Your lists are synced across all your devices": "הרשימות שלך מסונכרנות בכל המכשירים שלך",
+    "Lists are stored locally.": "הרשימות מאוחסנות מקומית.",
+    "Log in to sync across devices": "התחבר לסנכרון בין מכשירים",
+    "lists": "רשימות",
+    "Please load a manuscript first": "אנא טען כתב יד תחילה",
+
+    "My Edits & Comments": "העריכות וההערות שלי",
+    "Manage your edits and comments": "נהל את העריכות וההערות שלך",
+    "My Edits": "העריכות שלי",
+    "Submit and review transcription corrections": "שלח ובדוק תיקוני תעתיק",
+    "Edit your version": "ערוך את הגרסה שלך",
+    "You already have a version for this page": "כבר יש לך גרסה לעמוד זה",
+    "No edits yet": "אין עריכות עדיין",
+    "Edit transcriptions to help improve the corpus": "ערוך תעתיקים כדי לעזור לשפר את המאגר",
+    "Share your insights and questions": "שתף את התובנות והשאלות שלך",
+    "Edit Comment": "ערוך הערה",
+    "Delete Comment": "מחק הערה",
+    "Delete Comment?": "למחוק את ההערה?",
+    "Comment deleted": "ההערה נמחקה",
+    "Comment updated": "ההערה עודכנה",
+    "Nothing was changed. You may not have permission.": "לא בוצע שינוי. ייתכן שאין לך הרשאה לכך.",
+    "The change could not be saved. Check your connection and try again.": "לא ניתן היה לשמור את השינוי. בדקו את החיבור ונסו שוב.",
+    "Private comment (only visible to me)": "הערה פרטית (גלויה רק לי)",
+    "Please login to view your edits": "התחבר כדי לצפות בעריכות שלך",
+    "Email": "אימייל",
+    "Password": "סיסמה",
+    "Username": "שם משתמש",
+    "Full Name": "שם מלא",
+    "Affiliation (optional)": "שיוך (אופציונלי)",
+    "Confirm Password": "אישור סיסמה",
+    "Login successful": "התחברת בהצלחה",
+    "Registration successful": "נרשמת בהצלחה",
+    "Logged out": "התנתקת",
+    "Role": "תפקיד",
+    "Review": "סקירה",
+    "Leaderboard": "טבלת מובילים",
+    "Submit your first correction to help improve transcriptions": "שלח את התיקון הראשון שלך כדי לשפר תעתיקים",
+    "Error loading corrections": "שגיאה בטעינת התיקונים",
+    "Submit New Correction": "שלח תיקון חדש",
+    "Document ID (System ID)": "מזהה מסמך (מזהה מערכת)",
+    "Page Number (optional)": "מספר עמוד (אופציונלי)",
+    "Line Number (optional)": "מספר שורה (אופציונלי)",
+    "Corrected Text": "טקסט מתוקן",
+    "Correction Type": "סוג תיקון",
+    "Metadata Correction": "תיקון מטא-דאטא",
+    "Translate": "תרגם",
+    "Show original": "הצג מקור",
+    "Translation failed": "התרגום נכשל",
+    "Please fill in Document ID and Corrected Text": "אנא מלא מזהה מסמך וטקסט מתוקן",
+    "Correction submitted successfully": "התיקון נשלח בהצלחה",
+    "Error loading pending corrections": "שגיאה בטעינת תיקונים ממתינים",
+    "No pending corrections": "אין תיקונים ממתינים",
+    "corrections pending review": "תיקונים ממתינים לסקירה",
+    "Review notes": "הערות סקירה",
+    "Approve": "אשר",
+    "Reject": "דחה",
+    "Correction approved": "התיקון אושר",
+    "Correction rejected": "התיקון נדחה",
+    "Top Contributors": "תורמים מובילים",
+    "No contributors yet": "אין תורמים עדיין",
+    "Error loading leaderboard": "שגיאה בטעינת טבלת המובילים",
+    "corrections": "תיקונים",
+    "pts": "נקודות",
+    "Loading corrections...": "טוען תיקונים...",
+    "Loading pending corrections...": "טוען תיקונים ממתינים...",
+    "Loading leaderboard...": "טוען טבלת מובילים...",
+    "Admin Panel": "פאנל ניהול",
+    "Please fill in all fields": "אנא מלא את כל השדות",
+    "Please fill in required fields": "אנא מלא את השדות הנדרשים",
+    "Session expired. Please login again.": "פג תוקף החיבור. אנא התחבר מחדש.",
+    "Edit Text": "ערוך טקסט",
+    "Send Comment": "שלח הערה",
+    "Save Locally": "שמור אצלך",
+    "Comment Scope": "היקף ההערה",
+    "This page only": "דף זה בלבד",
+    "Entire manuscript": "כל כתב היד",
+    "Public": "ציבורי",
+    "Comment visibility": "נראות ההערה",
+    "Your changes have been saved locally": "השינויים שלך נשמרו מקומית",
+    "Your changes have been submitted for review": "השינויים שלך נשלחו לבדיקה",
+    "Version": "גרסה",
+    "Current version": "גרסה נוכחית",
+    "Pending approval": "ממתין לאישור",
+    "Local draft": "טיוטה מקומית",
+    "Discard local changes": "בטל שינויים מקומיים",
+    "Apply local changes": "החל שינויים מקומיים",
+    "Changes apply immediately": "השינויים יושמו מיד",
+    "Your corrections will be reviewed before publishing": "התיקונים שלך יבדקו לפני פרסום",
+    "Correction published successfully": "התיקון פורסם בהצלחה",
+    "Access Denied": "הגישה נדחתה",
+    "You need admin privileges to access this page": "נדרשות הרשאות מנהל כדי לגשת לדף זה",
+    "Go Home": "חזור לדף הבית",
+    "User management and system administration": "ניהול משתמשים ומערכת",
+    "Users": "משתמשים",
+    "Pending Approval": "ממתינים לאישור",
+    "Statistics": "סטטיסטיקות",
+    "No pending users": "אין משתמשים ממתינים",
+    "All registration requests have been processed": "כל בקשות ההרשמה טופלו",
+    "users pending approval": "משתמשים ממתינים לאישור",
+    "User approved": "המשתמש אושר",
+    "User rejected": "המשתמש נדחה",
+    "No users found": "לא נמצאו משתמשים",
+    "Search users...": "חפש משתמשים...",
+    "No name set": "לא הוגדר שם",
+    "Emails could not be loaded: the server has no signed-in session for this page. Sign out and sign in again.": "לא ניתן היה לטעון את כתובות הדוא\"ל: השרת לא מזהה חיבור לחשבון בדף הזה. יש להתנתק ולהתחבר מחדש.",
+    "Emails could not be loaded: the database does not list this account as an admin.": "לא ניתן היה לטעון את כתובות הדוא\"ל: במסד הנתונים החשבון הזה אינו רשום כמנהל.",
+    "Emails could not be loaded: migrations/admin_list_user_emails.sql has not been run.": "לא ניתן היה לטעון את כתובות הדוא\"ל: הקובץ migrations/admin_list_user_emails.sql עוד לא הורץ.",
+    "Emails could not be loaded. The server log has the reason (\"Account emails unavailable\").": "לא ניתן היה לטעון את כתובות הדוא\"ל. הסיבה מופיעה ביומן השרת (\"Account emails unavailable\").",
+    "How should your name appear?": "באיזה שם להציג אותך?",
+    "Your corrections, comments and joins are credited to the name you choose: your own name, or an alias the site gave you.": "התיקונים, ההערות והצירופים שלך יופיעו בשם שתבחר/י: השם שלך, או כינוי שהאתר נתן לך.",
+    "Your name": "השם שלך",
+    "Your alias:": "הכינוי שלך:",
+    "You can change it later in My Profile.": "אפשר לשנות אותו בהמשך בדף \"הפרופיל שלי\".",
+    "Use the alias": "להשתמש בכינוי",
+    "Use my name": "להשתמש בשם שלי",
+    "Name saved": "השם נשמר",
+    "A public name cannot contain @.": "השם לא יכול לכלול את התו @.",
+    "Please enter your name, or use the alias.": "נא להזין את שמך, או להשתמש בכינוי.",
+    "The account is deleted: they can no longer sign in, and their lists and votes go with it. Their corrections, comments and joins stay, without a name.": "החשבון יימחק: לא ניתן יהיה להתחבר אליו, והרשימות וההצבעות שלו יימחקו איתו. התיקונים, ההערות והצירופים שלו יישארו, ללא שם.",
+    "No such account: it may already have been deleted.": "החשבון לא נמצא: ייתכן שכבר נמחק.",
+    "The name this account signed in with. Not public unless they choose it.": "השם שאיתו החשבון נכנס לאתר. אינו מוצג לציבור אלא אם בעל/ת החשבון בוחר/ת בו.",
+    "Your name could not be saved. You can set it in My Profile.": "לא ניתן היה לשמור את השם. אפשר להגדיר אותו בדף \"הפרופיל שלי\".",
+    "All Roles": "כל התפקידים",
+    "User": "משתמש",
+    "Editor": "עורך",
+    "Filter by role": "סנן לפי תפקיד",
+    "Set as User": "הגדר כמשתמש",
+    "Set as Editor": "הגדר כעורך",
+    "Set as Admin": "הגדר כמנהל",
+    "Role updated": "התפקיד עודכן",
+    "Total Users": "סך המשתמשים",
+    "Editors & Admins": "עורכים ומנהלים",
+    "Total Corrections": "סך התיקונים",
+    "Version History": "היסטוריית גרסאות",
+    "User Corrections": "תיקוני משתמשים",
+    "No other versions": "אין גרסאות אחרות",
+    "User correction": "תיקון משתמש",
+
+    # --- PGP Metadata ---
+    "Princeton Geniza Project": "פרויקט הגניזה של פרינסטון",
+    "PGP Details": "פרטי PGP",
+    "FJMS Details": "פרטי FJMS",
+    "Document Type": "סוג מסמך",
+    "Tags": "תגיות",
+    "Description": "תיאור",
+    "Tag": "תגית",
+    "No results for tag": "אין תוצאות לתגית",
+    "Searching by tag...": "מחפש לפי תגית...",
+    "PGP Tags": "תגיות PGP",
+    "Select a tag...": "בחר תגית...",
+    "Search by topic tags from the Princeton Geniza Project": "חיפוש לפי תגיות נושא מפרויקט הגניזה של פרינסטון",
+    "Tag:": "תגית:",
+    "Princeton Geniza Project (PGP) tags:": "תגיות פרויקט הגניזה של פרינסטון (PGP):",
+    "Scholarly transcriptions/data available from the Princeton Geniza Project": "קיים מידע/תעתיקים מפרויקט הגניזה של פרינסטון",
+    "Search Tag": "חפש תגית",
+    "Search by tag...": "חפש לפי תגית...",
+    "Searching tag: {}...": "מחפש תגית: {}...",
+    "No results for tag: {}": "אין תוצאות לתגית: {}",
+    "No local results for tag: {}": "אין תוצאות מקומיות לתגית: {}",
+    "Tag: {} - {} results": "תגית: {} - {} תוצאות",
+
+    # --- PGP Transcription ---
+    "Has PGP info": "יש מידע PGP",
+    # SEED-022: source-agnostic "has manual transcription" indicator tooltip.
+    "scholarly transcription/translation available": "תעתיק/תרגום מדעי זמין",
+    # SEED-022: desktop results-table column header for the above (concise).
+    "Edition": "מהדורה",
+    # SEED-023: homepage corpus-stats band labels ("Manuscripts"/"Images" already exist).
+    "Catalog entries": "רשומות קטלוג",
+    "Scholarly transcriptions": "תעתוקים מדעיים",
+    "Automatic transcriptions": "תעתוקים אוטומטיים",
+    "PGP Transcription": "תעתוק PGP",
+    "PGP Transcriptions": "תעתוקי PGP",
+    # --- FGP (Friedberg Genizah Project) Transcription ---
+    "FGP Transcription": "תעתוק FGP",
+    "FGP Transcriptions": "תעתוקי FGP",
+    "Transcription by": "תעתוק מאת",
+    "View on PGP": "צפה ב-PGP",
+    "Translations": "תרגומים",
+    "Hebrew Translation": "תרגום עברי",
+    "English Translation": "תרגום אנגלי",
+    "Translation by": "תרגום מאת",
+    "Notes & Comments": "הערות ותגובות",
+    "Draft saved": "טיוטה נשמרה",
+    "You have unsaved changes. Are you sure you want to close?": "יש לך שינויים שלא נשמרו. האם אתה בטוח שברצונך לסגור?",
+    "Close without saving": "סגור בלי לשמור",
+    "characters": "תווים",
+    "words": "מילים",
+    "words changed": "מילים שונו",
+    "Reset to original": "אפס למקור",
+    "Keyboard shortcuts": "קיצורי מקלדת",
+    "read-only": "קריאה בלבד",
+    "unsaved": "לא נשמר",
+    "Add notes about your correction": "הוסף הערות על התיקון שלך",
+    "Explain what you changed and why (optional)": "הסבר מה שינית ולמה (אופציונלי)",
+    "Login to submit corrections to the system": "התחבר כדי לשלוח תיקונים למערכת",
+    "Your account is pending approval": "החשבון שלך ממתין לאישור",
+    "Ready to submit": "מוכן לשליחה",
+    "Discard draft": "מחק טיוטה",
+    "Draft saved locally": "הטיוטה נשמרה מקומית",
+    "No changes to save": "אין שינויים לשמירה",
+    "Correction submitted for review": "התיקון נשלח לבדיקה",
+    "Original text copied": "הטקסט המקורי הועתק",
+    "Auto-saved": "נשמר אוטומטית",
+    "Save draft locally": "שמור טיוטה מקומית",
+    "Submit correction": "שלח תיקון",
+    "Undo": "בטל",
+    "Redo": "בצע שנית",
+    "Close editor": "סגור עורך",
+    "draft": "טיוטה",
+    "Local draft deleted": "הטיוטה המקומית נמחקה",
+    "Community discoveries, questions, and contributions": "חידושים, שאלות ותרומות הקהילה",
+    "All Items": "הכל",
+    "Questions": "שאלות",
+    "Please login to create a discovery": "אנא התחבר כדי ליצור חידוש",
+    "Words Corrected": "מילים שתוקנו",
+    "Documents Edited": "מסמכים שנערכו",
+    "Discoveries Shared": "חידושים ששותפו",
+    "Open Questions": "שאלות פתוחות",
+    "Active Contributors": "תורמים פעילים",
+    "Could not load statistics": "לא ניתן לטעון סטטיסטיקות",
+    "Error loading feed": "שגיאה בטעינת הפיד",
+    "Be the first to share a discovery or ask a question!": "היה הראשון לשתף חידוש או לשאול שאלה!",
+    "Showing": "מציג",
+    "Edit Discovery": "ערוך חידוש",
+    "Delete Discovery?": "למחוק את החידוש?",
+    "Discovery updated": "החידוש עודכן",
+    "Discovery deleted": "החידוש נמחק",
+    "Write a reply...": "כתוב תגובה...",
+    "Reply anonymously": "ענה באנונימיות",
+    "Reply": "תגובה",
+    "Reply posted": "התגובה נשלחה",
+    "Please enter a reply": "אנא הכנס תגובה",
+    "Login to reply": "התחבר כדי להגיב",
+    "Pinned": "מוצמד",
+    "Pin": "הצמד",
+    "Unpin": "בטל הצמדה",
+    "Pin toggled": "ההצמדה שונתה",
+    "Hide": "הסתר",
+    "Unhide": "הצג מחדש",
+    "Hidden": "מוסתר",
+    "Item hidden": "הפריט הוסתר",
+    "Item unhidden": "הפריט הוצג מחדש",
+    "Items in": "פריטים ב",
+    "Select a list": "בחר רשימה",
+    "Add shelfmark reference": "הוסף הפניה למספר מדף",
+    "No items in this list": "אין פריטים ברשימה זו",
+    "Delete this comment?": "למחוק הערה זו?",
+    "Delete this correction?": "למחוק תיקון זה?",
+    "Delete comment": "מחק הערה",
+    "Delete correction": "מחק תיקון",
+    "Correction deleted": "התיקון נמחק",
+    "Document reference": "הפניה למסמך",
+    "Document link": "קישור למסמך",
+    "No document linked": "אין מסמך מקושר",
+    "Mark as answered": "סמן כנענה",
+    "Mark as unanswered": "סמן כלא נענה",
+    "Status updated": "הסטטוס עודכן",
+    "Vote recorded": "ההצבעה נרשמה",
+    "Login to vote": "התחבר כדי להצביע",
+    "No matching document found": "לא נמצא מסמך מתאים",
+    "Question - Need help reading/understanding": "שאלה - צריך עזרה בקריאה/הבנה",
+    "Period": "תקופה",
+    "Link to document (optional)": "קישור למסמך (אופציונלי)",
+    "Your name will not be shown publicly": "השם שלך לא יוצג בפומבי",
+    "Error submitting": "שגיאה בשליחה",
+    "View document": "צפה במסמך",
+    "Showing version by": "מציג גרסה מאת",
+    "Additional shelfmarks (optional)": "מספרי מדף נוספים (אופציונלי)",
+    "Add shelfmark": "הוסף מספר מדף",
+    "Related manuscripts (optional)": "כתבי יד קשורים (אופציונלי)",
+    "Add related manuscript": "הוסף כתב יד קשור",
+    "Parallel text": "טקסט מקביל",
+    "Continuation": "המשך",
+    "Fragment of": "קטע מ",
+    "Related": "קשור",
+    "Citation": "ציטוט",
+    "Optional notes about the relationship": "הערות אופציונליות על הקשר",
+    "Related Manuscripts": "כתבי יד קשורים",
+    "Change highlighted": "השינוי מודגש",
+    "more": "עוד",
+    "Correction in": "תיקון ב-",
+    "Contributors": "תורמים",
+    "View and manage your submitted corrections": "צפה ונהל את התיקונים שהגשת",
+    "View community discoveries, questions, and share your own findings": "צפה בחידושים של הקהילה, שאלות, ושתף את התגליות שלך",
+    "View corrections from all contributors": "צפה בתיקונים מכל התורמים",
+    "Shelfmark, e.g., T-S 13J1.1": "מספר מדף, למשל T-S 13J1.1",
+    "Joined Fragments": "קטעים מצורפים",
+    "This fragment is part of a group of": "קטע זה חלק מקבוצה של",
+    "Current": "נוכחי",
+    "Join Another Fragment": "צרף קטע נוסף",
+    "Join Fragment": "צרף קטע",
+    "Join": "צרף",
+    "to another fragment": "לקטע אחר",
+    "Relationship (optional)": "קשר (אופציונלי)",
+    "Not sure / just related": "לא בטוח / קשור",
+    "Physical join - fragments of same original document": "צירוף פיזי - קטעים מאותו מסמך מקורי",
+    "Same composition - different copies of same text": "אותו חיבור - עותקים שונים של אותו טקסט",
+    "Add notes about this join...": "הוסף הערות על צירוף זה...",
+    "Please enter a shelfmark": "אנא הזן מספר מדף",
+    "Join created": "הצירוף נוצר",
+    "joined fragments": "קטעים מצורפים",
+    "No joins": "אין צירופים",
+    "View cluster": "הצג אשכול",
+    "Delete this join?": "למחוק צירוף זה?",
+    "joins": "צירופים",
+    "fragments": "קטעים",
+    "Fragments in cluster": "קטעים באשכול",
+    "View in browser": "הצג בדפדפן",
+    "By": "על ידי",
+    "My Profile": "הפרופיל שלי",
+    "Edit your details and password": "ערוך את הפרטים והסיסמה שלך",
+    "Profile Details": "פרטי פרופיל",
+    "Please login to view your profile": "אנא התחבר כדי לצפות בפרופיל שלך",
+    "Profile updated": "הפרופיל עודכן",
+    "Bio": "אודות",
+    "Change Password": "שנה סיסמה",
+    "Current Password": "סיסמה נוכחית",
+    "New Password": "סיסמה חדשה",
+    "Confirm New Password": "אשר סיסמה חדשה",
+    "Please enter current password": "אנא הזן סיסמה נוכחית",
+    "Please enter new password": "אנא הזן סיסמה חדשה",
+    "Password must be at least 8 characters": "הסיסמה חייבת להכיל לפחות 8 תווים",
+    "Password changed successfully": "הסיסמה שונתה בהצלחה",
+    "Account Information": "מידע על החשבון",
+    "Member Since": "חבר מאז",
+    "Delete User?": "למחוק משתמש?",
+    "User deleted": "המשתמש נמחק",
+    "Delete User": "מחק משתמש",
+    "Pending Corrections": "תיקונים ממתינים",
+    "All corrections have been reviewed": "כל התיקונים נבדקו",
+    "Accessibility Statement": "הצהרת נגישות",
+    "Created by Hillel Gershuni": "נוצר על ידי הלל גרשוני",
+    "Conformance Status": "סטטוס תאימות",
+    "Measures to Support Accessibility": "אמצעים לתמיכה בנגישות",
+    "Known Limitations": "מגבלות ידועות",
+    "Feedback and Contact": "משוב ויצירת קשר",
+    "Last Updated": "עודכן לאחרונה",
+    "The Web Content Accessibility Guidelines (WCAG) defines requirements for designers and developers to improve accessibility for people with disabilities. It defines three levels of conformance: Level A, Level AA, and Level AAA.": "הנחיות נגישות תכנים באינטרנט (WCAG) מגדירות דרישות למעצבים ומפתחים לשיפור הנגישות לאנשים עם מוגבלות. הן מגדירות שלוש רמות תאימות: רמה A, רמה AA ורמה AAA.",
+    "Dicta Genizah Search is committed to ensuring digital accessibility for people with disabilities.": "אתר הגניזה של דיקטה מחויב להבטיח נגישות דיגיטלית לאנשים עם מוגבלות.",
+    "We are continually improving the user experience for everyone, and applying the relevant accessibility standards.": "אנו משפרים ללא הרף את חווית המשתמש לכולם, ומיישמים את תקני הנגישות הרלוונטיים.",
+    "Dicta Genizah Search is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.": "אתר הגניזה של דיקטה תואם חלקית לתקן WCAG 2.0 רמה AA ולתקן הישראלי 5568.",
+    "\"Partially conformant\" means that some parts of the content do not fully conform to the accessibility standard, primarily due to the nature of historical manuscript images.": "\"תואמת חלקית\" משמעו שחלקים מהתוכן אינם תואמים באופן מלא לתקן הנגישות, בעיקר בשל אופיים של תמונות כתבי היד ההיסטוריים.",
+    "We have taken the following measures to ensure accessibility:": "נקטנו באמצעים הבאים להבטחת נגישות:",
+    "Keyboard Navigation": "ניווט מקלדת",
+    "Most of the site can be navigated using a keyboard, and we continue to expand keyboard support.": "ניתן לנווט ברוב חלקי האתר באמצעות מקלדת, ואנו ממשיכים להרחיב את התמיכה במקלדת.",
+    "Focus Visibility": "נראות פוקוס",
+    "Focus indicators are visible on interactive elements.": "מחווני פוקוס נראים ברכיבים האינטראקטיביים.",
+    "Text Alternatives": "חלופות טקסט",
+    "Controls and images are given alternative text or labels where applicable.": "פקדים ותמונות מקבלים טקסט חלופי או תוויות במקומות הרלוונטיים.",
+    "Colors have been chosen to meet contrast requirements.": "הצבעים נבחרו כדי לעמוד בדרישות הניגודיות.",
+    "Zoom Support": "תמיכה בזום",
+    "The site supports standard browser zoom up to 200% without loss of functionality.": "האתר תומך בזום דפדפן סטנדרטי עד 200% ללא אובדן פונקציונליות.",
+    "Semantic Structure": "מבנה סמנטי",
+    "We use semantic HTML headings and landmarks to aid screen reader navigation.": "אנו משתמשים בכותרות וציוני דרך סמנטיים ב-HTML כדי לסייע בניווט קוראי מסך.",
+    "Despite our best efforts, there may be some limitations:": "למרות מאמצינו הטובים ביותר, ייתכנו מספר מגבלות:",
+    "Manuscript Images": "תמונות כתבי יד",
+    "Scanned historical manuscripts are images of text and cannot be read directly by screen readers. We provide machine-generated transcriptions where available to assist with access.": "כתבי יד היסטוריים סרוקים הם תמונות של טקסט ואינם ניתנים לקריאה ישירה על ידי קוראי מסך. אנו מספקים תעתיקים שנוצרו על ידי מכונה היכן שזמין כדי לסייע בגישה.",
+    "Generated Transcriptions": "תעתיקים שנוצרו",
+    "The OCR (Optical Character Recognition) text may contain errors and might not perfectly reflect the manuscript content.": "טקסט ה-OCR (זיהוי תווים אופטי) עשוי להכיל שגיאות וייתכן שלא ישקף באופן מושלם את תוכן כתב היד.",
+    "We welcome your feedback on the accessibility of Dicta Genizah Search. Please let us know if you encounter accessibility barriers:": "אנו מברכים על המשוב שלך לגבי הנגישות של אתר הגניזה של דיקטה. אנא הודע לנו אם נתקלת בחסמי נגישות:",
+    "We try to respond to feedback within 5 business days.": "אנו משתדלים להגיב למשוב תוך 5 ימי עסקים.",
+
+    # --- Download Page ---
+    "Visit Website": "בקר באתר",
+    "Visit our website": "בקר באתר שלנו",
+    "Download App": "הורד אפליקציה",
+    "Get Dicta Genizah Search Pro": "הורדת Dicta Genizah Search Pro",
+    "Desktop Application": "אפליקציית שולחן עבודה",
+    "Download for Windows": "הורד לחלונות",
+    "Download for offline research": "הורד למחקר ללא אינטרנט",
+    "Fast, powerful, works offline": "מהיר, רב עוצמה, עובד ללא אינטרנט",
+    "More search options and filters": "אפשרויות חיפוש ומסננים נוספים",
+    "Community updates synced regularly": "עדכוני קהילה מסונכרנים באופן קבוע",
+    "System Requirements": "דרישות מערכת",
+    "Works offline": "עובד ללא אינטרנט",
+    "Full search capabilities": "יכולות חיפוש מלאות",
+    "Why use the desktop app?": "למה להשתמש באפליקציה?",
+    "Installation Steps": "שלבי התקנה",
+    "Step": "שלב",
+    "Download the installer": "הורד את קובץ ההתקנה",
+    "Run the setup wizard": "הפעל את אשף ההתקנה",
+    "Download transcriptions from Zenodo": "הורד תעתיקים מ-Zenodo",
+    "Desktop App": "אפליקציה",
+    "Access your research offline with full functionality": "גישה למחקר שלך ללא אינטרנט עם פונקציונליות מלאה",
+    "No internet required after setup": "לא נדרש אינטרנט לאחר ההתקנה",
+    "Fast local search": "חיפוש מקומי מהיר",
+    "Private - data stays on your computer": "פרטי - המידע נשאר במחשב שלך",
+    "Regular updates via built-in updater": "עדכונים שוטפים דרך מעדכן מובנה",
+    "Windows 10 or Windows 11": "ווינדוס 10 או ווינדוס 11",
+    "8 GB RAM minimum": "מינימום 8 גיגה זיכרון",
+    "2 GB free disk space": "2 גיגה מקום פנוי בדיסק",
+    "Download from GitHub Releases": "הורד מ-GitHub Releases",
+    "Follow the installation prompts": "עקוב אחר הנחיות ההתקנה",
+    "On first launch, download the transcription data from Zenodo": "בהפעלה הראשונה, הורד את נתוני התעתיק מ-Zenodo",
+
+    # --- Search Mode ---
+    "Searching...": "מחפש...",
+    "Searching": "מחפש",
+    # Web search page, rows shown while the search still runs (2026-10-05).
+    "Still searching. The first results:": "החיפוש עדיין נמשך. התוצאות הראשונות:",
+    "Max frequency": "תדירות מקסימלית",
+    "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
+    # Replaced 2026-08-25: the old wording said "manuscripts", but the engine
+    # counts PAGE HITS inside a top-50 retrieval, and 50 or above never fires.
+    # Kept as a key so an already-open page still renders Hebrew.
+    "Skip phrases matching more than this many pages (lower = stricter; 50 or above turns it off)":
+        "\u05d3\u05dc\u05d2 \u05e2\u05dc \u05e6\u05d9\u05e8\u05d5\u05e4\u05d9\u05dd "
+        "\u05d4\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd \u05dc\u05d9\u05d5\u05ea\u05e8 "
+        "\u05de\u05db\u05de\u05d5\u05ea \u05d6\u05d5 \u05e9\u05dc \u05e2\u05de\u05d5\u05d3\u05d9\u05dd "
+        "(\u05e0\u05de\u05d5\u05da \u05d9\u05d5\u05ea\u05e8 = \u05de\u05d7\u05de\u05d9\u05e8 "
+        "\u05d9\u05d5\u05ea\u05e8; 50 \u05d5\u05de\u05e2\u05dc\u05d4 \u05de\u05db\u05d1\u05d4 "
+        "\u05d0\u05ea \u05d4\u05e1\u05d9\u05e0\u05d5\u05df)",
+    "Skip phrases found in more than this many manuscripts (lower = stricter)":
+        "דלג על ביטויים המופיעים ביותר כתבי יד ממספר זה (נמוך = מחמיר יותר)",
+    "Lab Mode (experimental)": "מצב מעבדה (ניסיוני)",
+    "Advanced search using fingerprint algorithm. Slower but more features.": "חיפוש מתקדם באמצעות אלגוריתם טביעת אצבע. איטי יותר אך עם יותר תכונות.",
+    "Exhaustive search - slower but finds more results": "חיפוש ממצה - איטי יותר אך מוצא יותר תוצאות",
+
+    # --- Boundary Search ---
+    "More options": "אפשרויות נוספות",
+    "Paragraph search": "חיפוש פסקאות",
+    "Full search": "חיפוש מלא",
+    "Cross-paragraph only": "חוצה-פסקאות בלבד",
+    "Full + Cross-paragraph boost": "מלא + העדפת חוצה-פסקאות",
+    "Show only matches where the matching text spans a paragraph break in your source": "הצג רק התאמות בהן הטקסט התואם חוצה מעבר פסקה במקור שלך",
+    "Search everything, but rank cross-paragraph matches higher": "חפש הכל, אך דרג התאמות חוצות-פסקאות גבוה יותר",
+    "Paragraph separator": "מפריד פסקאות",
+    "Blank line (paragraph)": "שורה ריקה (פסקה)",
+    "Line break": "מעבר שורה",
+    "Period (.)": "נקודה (.)",
+    "Colon (:)": "נקודתיים (:)",
+    "Advanced settings": "הגדרות מתקדמות",
+    "Cross-paragraph boost": "תוספת חוצה-פסקאות",
+    "Score multiplier for cross-paragraph matches": "מכפיל ניקוד להתאמות חוצות-פסקאות",
+    "Min. cross-paragraph matches": "מינימום התאמות חוצות-פסקאות",
+    "Min. words between separators": "מינימום מילים בין מפרידים",
+    "{} boundaries detected, {} chunks will cross them": "זוהו {} גבולות, {} מקטעים חוצי-גבול",
+    "No paragraph breaks detected in text!": "לא זוהו מעברי פסקה בטקסט!",
+    "Cross-paragraph": "חוצה-פסקה",
+    "cross-paragraph matches": "התאמות חוצות-פסקאות",
+    "Advanced cross-paragraph settings": "הגדרות חוצה-פסקאות מתקדמות",
+    "Minimum number of cross-paragraph matches required": "מספר מינימלי של התאמות חוצות-פסקאות נדרש",
+    "Ignore separators that are too close together": "התעלם ממפרידים קרובים מדי",
+    "Character or pattern that separates paragraphs in your text": "תו או דפוס שמפריד בין פסקאות בטקסט שלך",
+    "Search all text chunks regardless of paragraph breaks": "חפש בכל חלקי הטקסט ללא קשר למעברי פסקה",
+
+    # --- Fragment Joins UI ---
+    "Related Fragments": "קטעים קשורים",
+    "View whole document": "צפה במסמך המלא",
+    "Full Transcription": "תמלול מלא",
+    "Recto": "רקטו",
+    "Verso": "ורסו",
+    "This action cannot be undone.": "פעולה זו אינה ניתנת לביטול.",
+    "Failed to delete join": "מחיקת הצירוף נכשלה",
+    "Select fragment to join:": "בחר קטע לצירוף:",
+    "Selected fragment:": "קטע נבחר:",
+    "Notes (optional)": "הערות (אופציונלי)",
+    "direct": "ישיר",
+    "Delete join (admin)": "מחק צירוף (מנהל)",
+    "Change selection": "שנה בחירה",
+    "View All Fragments": "הצג את כל הקטעים",
+    "All Fragments": "כל הקטעים",
+    "Full PGP Transcription": "תמלול PGP מלא",
+
+    # --- Tabular Query Builder ---
+    "Query Builder": "בונה שאילתות",
+    "Tabular Search": "חיפוש טבלאי",
+    "Search Options": "אפשרויות חיפוש",
+    "Word Range": "טווח מילים",
+    "Within Document": "בתוך מסמך",
+    "Component": "רכיב",
+    "Distance": "מרחק",
+    "Prefixes": "קידומות",
+    "Suffixes": "סיומות",
+    "Wildcard Start": "תחילית *",
+    "Wildcard End": "סיומת *",
+    "Plene/Defective": "מלא/חסר",
+    "Exclude": "שלילה",
+    "Clear All": "ניקוי הכל",
+    "Add Word": "הוסף מילה",
+    "Add Component": "הוסף רכיב",
+    "Scope": "טווח",
+    "Modifiers": "שינויים",
+    "No words entered": "לא הוזנו מילים",
+
+    # --- Query Builder (Desktop) ---
+    "Word": "מילה",
+    "Open the tabular query builder": "פתח את בונה השאילתות הטבלאי",
+
+    # --- Modifier checkbox labels (builder dialog) ---
+    "Prefixes #_": "קידומות #_",
+    "Suffixes _#": "סיומות _#",
+    "Wildcard *_": "*_ תחילית",
+    "Wildcard _*": "_* סופית",
+    "Plene/Defective %": "מלא/חסר %",
+    "Negation −": "שלילה −",
+    "Start of line |_": "תחילת שורה |_",
+    "End of line _|": "סוף שורה _|",
+    "Word must appear at start of line": "המילה חייבת להופיע בתחילת השורה",
+    "Word must appear at end of line": "המילה חייבת להופיע בסוף השורה",
+    "Lines": "שורות",
+    "lines": "שורות",
+    "Text Position": "מיקום בטקסט",
+    "Anywhere": "בכל מקום",
+    "Start of text": "תחילת טקסט",
+    "End of text": "סוף טקסט",
+    "Line starts": "תחילת שורה",
+    "Line ends": "סוף שורה",
+    # --- Phase 118 Joins Lab builder collapsed-summary bar (WR-04) ---
+    "{n} line": "שורה אחת",
+    "{n} lines": "{n} שורות",
+    "Text Position: {pos}": "מיקום בטקסט: {pos}",
+    "Constrain matches to text boundaries (for join detection)": "הגבל התאמות לגבולות טקסט (לזיהוי צירופים)",
+    "Position:": "מיקום:",
+    "Processing": "מעבד תוצאות",
+    "Grammatical prefixes tooltip": "קידומות דקדוקיות (ו/ה/ב/כ/ל/מ/ש)",
+    "Grammatical suffixes tooltip": "סיומות דקדוקיות",
+    "Words ending with...": "מילים שמסתיימות ב...",
+    "Words starting with...": "מילים שמתחילות ב...",
+    "Plene/defective spelling tooltip": "כתיב מלא/חסר (ו/י)",
+    "Negation tooltip": "שלילה — הוצא מילה זו",
+
+    # --- Phase 118-06 word-box builder — symbol table + UI labels (BLD-03) ---
+    # Modifier labels (shown in per-word modifier menus)
+    "Prefix": "קידומת",
+    "Suffix": "סיומת",
+    "Plene / defective": "מלא/חסר",
+    "Wildcard before": "תו כללי לפני",
+    "Wildcard after": "תו כללי אחרי",
+    "Negation": "שלילה",
+    # Modifier symbol tooltips (shown on hover over symbol indicators beneath word boxes)
+    "May carry a prefix": "יכול לשאת קידומת",
+    "May carry a suffix": "יכול לשאת סיומת",
+    "Plene / defective spelling variants": "וריאנטים מלא/חסר",
+    "Must NOT appear": "חייב להיות נעדר",
+    # Line-level anchor labels + tooltips
+    "Line start (⊢)": "תחילת שורה (⊢)",
+    "Line end (⊣)": "סוף שורה (⊣)",
+    "Line starts here": "השורה מתחילה כאן",
+    "Line ends here": "השורה מסתיימת כאן",
+    # Word-box UI action labels
+    "+ Add word": "+ הוסף מילה",
+    "+ Add line": "+ הוסף שורה",
+    "Remove word": "הסר מילה",
+    "Remove line": "הסר שורה",
+    "Word options": "אפשרויות מילה",
+    # Misc builder labels
+    "Words on this line (space = sequence, a/b = alternatives)":
+        "מילים בשורה זו (רווח = רצף, א/ב = חלופות)",
+    "Words on this side (space = sequence, a/b = alternatives)":
+        "מילים בצד זה (רווח = רצף, א/ב = חלופות)",
+    "Fuzzy search is slower and uses more server resources.":
+        "חיפוש מקורב איטי יותר ועמוס יותר על השרת.",
+    "↕ gap": "↕ מרווח",
+    # New Search (reset) button + mode/syntax info popup (Phase 118 UAT)
+    "New Search — clear the query and results (keeps the anchor)":
+        "חיפוש חדש — ניקוי השאילתה והתוצאות (העוגן נשמר)",
+    "About search modes & syntax": "אודות מצבי החיפוש והתחביר",
+    "Search modes & syntax": "מצבי חיפוש ותחביר",
+    "Your query always runs as Responsa syntax (shown in the collapsed search bar). "
+    "The mode controls how each word is matched:":
+        "השאילתה תמיד מורצת בתחביר בסגנון פרויקט השו״ת (המוצג בשורת החיפוש המכווצת). "
+        "המצב קובע כיצד כל מילה מותאמת:",
+    "Exact — match each word as written, no expansion. This is the raw Responsa query.":
+        "מדויק — התאמה לכל מילה כפי שנכתבה, ללא הרחבה. זוהי שאילתת החיפוש הגולמית.",
+    "Variants — also match known spelling variants of each word.":
+        "וריאנטים — התאמה גם לווריאנטי כתיב ידועים של כל מילה.",
+    "Fuzzy — approximate matching: finds words within 1–2 letter changes "
+    "(typos, missing or swapped letters), independent of the variant tables. Slowest.":
+        "מקורב — מאתר מילים במרחק עריכה של 1–2 אותיות "
+        "(שגיאות כתיב, אותיות חסרות או מוחלפות), ללא תלות בטבלאות הווריאנטים. האיטי ביותר.",
+    "You can type Responsa operators directly in a word box (space = sequence, "
+    "a/b = alternatives); the gear menu adds the #, %, *, − modifiers.":
+        "ניתן להקליד אופרטורים של חיפוש בסגנון פרויקט השו״ת ישירות בתיבת מילה (רווח = רצף, א/ב = חלופות); "
+        "תפריט גלגל השיניים מוסיף את הסימנים #, %, *, −.",
+
+    # --- Joins Lab page + search-type selector — full HE i18n sweep (Phase 118) ---
+    "Responsa-style": "בסגנון השו״ת",
+    "Search type": "סוג חיפוש",
+    "Search types": "סוגי חיפוש",
+    "About search types": "אודות סוגי החיפוש",
+    "Responsa-style — the structured builder: build the line word-by-word with gaps, "
+    "line anchors and per-word modifiers. Turn on Variants to also match spelling variants.":
+        "בסגנון השו״ת — הבנאי המובנה: בניית השורה מילה-אחר-מילה עם מרווחים, עוגני שורה "
+        "ומשַני-מילה. הפעילו \"וריאנטים\" כדי להתאים גם לווריאנטי כתיב.",
+    "Exact / Variants / Fuzzy / Regex — a single free-text line that searches like the "
+    "main search bar (Fuzzy = approximate, within 1–2 letter changes; Regex = a regular expression).":
+        "מדויק / וריאנטים / מקורב / ביטוי רגולרי — שורת טקסט חופשי אחת שמחפשת כמו שורת החיפוש "
+        "הראשית (מקורב = במרחק 1–2 אותיות; ביטוי רגולרי = regex).",
+    "Search in Responsa syntax": "חיפוש בתחביר השו״ת",
+    "Responsa syntax": "תחביר השו״ת",
+    "Space separates words; click the gear icon for the same options per word.":
+        "רווח מפריד בין מילים; לחצו על סמל גלגל השיניים לאותן אפשרויות לכל מילה.",
+    "with variants": "עם וריאנטים",
+    "exact": "מדויק",
+    # Run / Stop / reset / anchor controls
+    "Run Search": "הרצת חיפוש",
+    "Stop search and show partial results": "עצור חיפוש והצג תוצאות חלקיות",
+    "Stopping…": "עוצר…",
+    "Load Anchor": "טעינת עוגן",
+    "Change anchor": "החלפת עוגן",
+    "Edit search": "עריכת החיפוש",
+    "Pin an Anchor Fragment": "קביעת קטע עוגן",
+    "Enter a shelfmark or fragment ID to begin hunting for physical joins.":
+        "הזינו סימן או מזהה קטע כדי להתחיל באיתור צירופים פיזיים.",
+    "Shelfmark or fragment ID (e.g. T-S 12.123)": "סימן או מזהה קטע (לדוגמה T-S 12.123)",
+    "Restored your last anchor": "העוגן האחרון שלך שוחזר",
+    # Advanced options + other side
+    "Flexible spacing": "ריווח גמיש",
+    "Search the other side of the leaf": "חיפוש בצד השני של הדף",
+    "Other side": "הצד השני",
+    "Combine mode": "אופן השילוב",
+    "Narrow (AND)": "צמצום (AND)",
+    "Widen (OR)": "הרחבה (OR)",
+    # Lists / sign-in (D-06 / D-17 / D-19 — Phase 120)
+    "Choose from my lists": "בחירה מהרשימות שלי",
+    "Sign in to access your saved research lists": "התחברו כדי לגשת לרשימות המחקר השמורות שלכם",
+    "Sign in to access your saved research lists.": "התחברו כדי לגשת לרשימות המחקר השמורות שלכם.",
+    "Sign in required": "נדרשת התחברות",
+    "Sign in": "התחברות",
+    "Full list picker is available in the next phase. Go to /lists to pick a fragment, "
+    "then return here.":
+        "בורר הרשימות המלא יהיה זמין בשלב הבא. עברו אל /lists כדי לבחור קטע, ואז חזרו לכאן.",
+    # D-17: choose-from-lists picker (Phase 120)
+    "Choose a List": "בחרו רשימה",
+    "Filter lists…": "סינון רשימות…",
+    "Back to lists": "חזרה לרשימות",
+    "Filter fragments…": "סינון קטעים…",
+    "No lists found.": "לא נמצאו רשימות.",
+    "No fragments in this list.": "אין קטעים ברשימה זו.",
+    "No matches.": "אין התאמות.",
+    # D-19: Open in Joins Lab button on /lists (Phase 120)
+    "Open in Joins Lab": "פתח במעבדת הצירופים",
+    # Validation / status / error toasts
+    "Enter at least one search line to run": "יש להזין לפחות שורת חיפוש אחת",
+    "Enter a search query to run": "יש להזין שאילתת חיפוש",
+    "Text Position requires content on that line. Add a word to the first/last line "
+    "or set Text Position to Anywhere.":
+        "מיקום בטקסט מחייב תוכן באותה שורה. הוסיפו מילה לשורה הראשונה/אחרונה "
+        "או הגדירו את מיקום הטקסט ל\"בכל מקום\".",
+    "Search timed out. Try fewer or shorter lines.":
+        "החיפוש חרג מהזמן המוקצב. נסו פחות שורות או שורות קצרות יותר.",
+    "Search failed. Check your connection and try again.":
+        "החיפוש נכשל. בדקו את החיבור ונסו שוב.",
+    "Other-side search timed out — showing this-side results only.":
+        "חיפוש הצד השני חרג מהזמן — מוצגות תוצאות הצד הזה בלבד.",
+    "Could not resolve the other side of this leaf. Try navigating to a specific folio first.":
+        "לא ניתן לזהות את הצד השני של הדף. נסו לנווט תחילה לדף מסוים.",
+    "No candidates found. Try different lines.": "לא נמצאו מועמדים. נסו שורות אחרות.",
+    "Fragment not found. Check the shelfmark and try again.":
+        "הקטע לא נמצא. בדקו את הסימן ונסו שוב.",
+    "Could not load joins. Check your connection.":
+        "לא ניתן לטעון צירופים. בדקו את החיבור.",
+    # Anchor viewer
+    "No more folios in this direction": "אין דפים נוספים בכיוון זה",
+    "Fragment not found": "הקטע לא נמצא",
+    # Candidate grid
+    "Candidates": "מועמדים",
+    "No candidates found. Try different lines or broader terms.":
+        "לא נמצאו מועמדים. נסו שורות אחרות או מונחים רחבים יותר.",
+    "Showing the first {n} results — refine your search to narrow them down.":
+        "מוצגות {n} התוצאות הראשונות — דייקו את החיפוש כדי לצמצם אותן.",
+    # Known-joins group
+    "Re-anchor to this fragment": "קביעת קטע זה כעוגן",
+    "No known joins": "אין צירופים ידועים",
+    "Only confirmed public joins are shown": "מוצגים רק צירופים ציבוריים מאומתים",
+    # Joins panel (cross-links into the Lab)
+    "Find Joins in the Joins Lab": "איתור צירופים במעבדת הצירופים",
+    "Go to Joins Lab to find more joins": "עברו למעבדת הצירופים לאיתור צירופים נוספים",
+    "Find more joins": "איתור צירופים נוספים",
+
+    # --- Refused star shapes and short star words (shared/responsa_match.py, Responsa Phase 3) ---
+    "Showing {} of {} results (searching {} expanded terms + {} patterns)":
+        "מציג {} מתוך {} תוצאות (מחפש {} ביטויים מורחבים + {} תבניות)",
+    "patterns": "תבניות",
+    # --- Matches across pages not searched (shared/search_engine.py, Responsa Phase 3) ---
+    "Matches across a page break with more than {k} words on one side of it "
+    "were not searched (a query with *).":
+        "התאמות שעוברות מעמוד לעמוד ובהן יותר מ-{k} מילים בצד אחד של המעבר "
+        "לא נחפשו (שאילתא עם *).",
+    "Matches that run across pages were not searched: a query with * reached "
+    "{n:,} manuscripts, more than the {limit:,} that can be read in time.":
+        "התאמות שעוברות בין עמודים לא נחפשו: שאילתא עם * הגיעה ל-{n:,} כתבי יד, "
+        "יותר מ-{limit:,} שאפשר לקרוא בזמן סביר.",
+    "Matches across a page break could not be searched; the list may be incomplete.":
+        "לא ניתן היה לחפש התאמות שעוברות מעמוד לעמוד; ייתכן שהרשימה חסרה.",
+    "A * alone, or a word made only of *s, matches every word. "
+    "For any one word, use a gap such as [1].":
+        "כוכבית לבדה, או מילה שכולה כוכביות, מתאימה לכל מילה. "
+        "למילה אחת כלשהי השתמשו במרווח, למשל [1].",
+    "A word with * holds letters only: a * never reaches past a space or punctuation. "
+    "Write the punctuation as a separate word, or leave it out.":
+        "מילה עם כוכבית מכילה אותיות בלבד: כוכבית אינה עוברת רווח או סימן פיסוק. "
+        "כתבו את סימן הפיסוק כמילה נפרדת, או השמיטו אותו.",
+    "A * word with only one or two letters of its own matches very many words: "
+    "the list may be cut short (N+).":
+        "מילה עם כוכבית ובה רק אות אחת או שתיים משלה מתאימה למילים רבות מאוד: "
+        "הרשימה עשויה להיקטע (N+).",
+    "This query is too long for Responsa search. Use fewer or shorter words "
+    "(Composition Search takes a longer passage).":
+        "השאילתא ארוכה מדי לחיפוש שו\"ת. השתמשו במילים מעטות או קצרות יותר "
+        "(חיפוש חיבורים מקבל קטע ארוך יותר).",
+
+    # --- Explosion guard warnings ---
+    "Variant mode downgraded to basic (30 pairs)": "מצב וריאנטים הורד לרמה בסיסית (30 זוגות)",
+    "Spelling variants disabled": "וריאנטים כתיביים בוטלו",
+    "Judeo-Arabic expansion disabled": "הרחבת ערבית-יהודית בוטלה",
+    "Plene/defective expansion disabled": "הרחבת מלא/חסר בוטלה",
+    "Grammatical suffix expansion disabled": "הרחבת סיומות דקדוקיות בוטלה",
+    "Grammatical prefix expansion disabled": "הרחבת קידומות דקדוקיות בוטלה",
+    "Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
+    "Please simplify your query by using fewer OR-group alternatives or "
+    "removing the # (grammatical prefixes) modifier from some terms.":
+        "השאילתא חורגת ממגבלת {limit} מונחים מורחבים (כ-{count} מונחים). "
+        "אנא פשט את השאילתא על ידי הפחתת חלופות בקבוצות OR או "
+        "הסרת הסימן # (קידומות דקדוקיות) ממונחים מסוימים.",
+
+    # --- What's New notifications ---
+    "New Features!": "תכונות חדשות!",
+    # v8.0.0 — Joins Lab & enhanced Local Library
+    "v8.0: Joins Lab — hunt physical joins, plus an expanded Local Library: more file types and Composition Search (desktop app)": "v8.0: מעבדת צירופים — איתור צירופים פיזיים, והרחבת החיפוש בקבצים מקומיים לסוגי קבצים נוספים וגם לחיפוש חיבורים (אפליקציית שולחן העבודה)",
+    "New: Joins Lab for hunting physical joins, plus an expanded Local Library — more file types and Composition Search": "חדש: מעבדת צירופים לאיתור צירופים פיזיים, והרחבת החיפוש בקבצים מקומיים לסוגי קבצים נוספים וגם לחיפוש חיבורים",
+    "Joins Lab — a dedicated workspace for hunting physical joins: pin a fragment as the anchor, build a line-by-line query for the joining fragment, and triage candidates Yes / Maybe / No.": "מעבדת צירופים — מרחב עבודה ייעודי לאיתור צירופים פיזיים: קביעת קטע כעוגן, בניית שאילתה שורה-אחר-שורה לטקסט הצפוי בקטע המצורף, ומיון המועמדים (כן / אולי / לא).",
+    "Visual Similarity is built into the Lab — surface fragments that look alike, alone or combined with a text query.": "דמיון חזותי משולב במעבדה — הצגת קטעים הדומים חזותית, לבד או בשילוב עם שאילתת טקסט.",
+    "Composition Search now runs over your Local Library too, and My Library searches more file types: xlsx, CSV, HTML.": "ניתן לבצע גם חיפוש חיבורים בספרייה המקומית, וכן לחפש בסוגי קבצים נוספים: xlsx, csv, html",
+    # v8.1.0 — Telemetry & API enhancements
+    "New: Experiment with GenizahSearch using AI tools and the public API.": "חדש: התנסו ב‑GenizahSearch בעזרת כלי בינה מלאכותית וה‑API הציבורי.",
+    "Use the Claude skill to intelligently search for phrases or parallels and surface images and information — you can also point other AI engines, including local ones, at the same skill. See Help → Public API & AI Tools.": "השתמשו בסקיל של קלוד כדי לחפש באופן חכם ביטויים או מקבילות ולהציג תמונות ומידע; תוכלו להפנות גם מנועי בינה מלאכותית מקומיים אחרים לסקיל זה. ראו עזרה ← ממשק API וכלי בינה מלאכותית.",
+    "A public HTTP/JSON API (POST /api/search, POST /api/parallels, GET /api/browse) gives programmatic access to the corpus, documented by an OpenAPI schema.": "ממשק HTTP/JSON ציבורי (POST /api/search, POST /api/parallels, GET /api/browse) מספק גישה תכנותית לקורפוס, עם סכמת OpenAPI.",
+    "Data collection — with your consent, the app can collect general usage data and crash reports, without compromising the privacy of your searches or your personal data, to help improve the app.": "איסוף נתונים — בהסכמתכם, ניתן לאפשר לתוכנה לאסוף נתונים כלליים על דרך השימוש שלכם ועל נתוני קריסה, בלי לפגוע בפרטיות החיפושים שלכם או המידע האישי שלכם, לצורך שיפור התוכנה.",
+    # v8.2.0 — Web Joins Lab, FGP transcriptions & Hebrew/Judeo-Arabic search
+    "New features: Friedberg (FGP) transcriptions are now available; search now finds Judeo-Arabic letters with an upper dot, without typing the dot; and the Joins Lab is now on the web too — give it a try!": "תכונות חדשות: תעתיקי פרידברג (FGP) זמינים כעת; החיפוש שופר ומאפשר מציאה של אותיות בערבית-יהודית עם נקודה עליונה, בלי להקליד אותה; ומעבדת צירופים זמינה גם באתר - מוזמנים לנסות אותה!",
+    "New features: Friedberg (FGP) transcriptions are now available in the app; and search is improved — it now finds Judeo-Arabic letters with an upper dot (without typing it) and words attached to punctuation, including searches in My Library.": "תכונות חדשות: תעתיקי פרידברג (FGP) זמינים כעת באפליקציה; והחיפוש שופר - מוצא כעת אותיות בערבית-יהודית עם נקודה עליונה (בלי להקליד אותה) ומילים הצמודות לסימני פיסוק, גם בחיפוש בספרייה שלי.",
+    "Friedberg Genizah Project (FGP) transcriptions are now available as a selectable source in the version chooser, shown on the matching manuscript image.": "תעתיקי פרויקט הגניזה של פרידברג (FGP) זמינים כעת כמקור נבחר בבורר הגרסאות, ומוצגים על גבי תמונת כתב היד המתאימה.",
+    "Search is improved: it now finds words attached to punctuation (searching \"בסגן\" also finds \"בסגן,\") and Judeo-Arabic letters written with an upper dot (without typing the dot). In My Library this works automatically — the index rebuilds itself.": "החיפוש שופר: מאתר כעת מילים הצמודות לסימני פיסוק (חיפוש \"בסגן\" מאתר גם \"בסגן,\") ואותיות בערבית-יהודית עם נקודה עליונה (בלי להקליד אותה). בספרייה שלי השיפור פועל אוטומטית — האינדקס נבנה מחדש מעצמו.",
+    "Recommended: to enjoy the improved search on the Genizah corpus too — especially for Judeo-Arabic texts — rebuild your Genizah index from Settings, via \"Build / Rebuild Index\". It's a one-time action, and highly recommended.": "מומלץ: כדי ליהנות מהחיפוש המשופר גם בקורפוס הגניזה — ובמיוחד בטקסטים בערבית-יהודית — בנו מחדש את אינדקס הגניזה דרך ההגדרות, בכפתור \"בנה / בנייה מחדש של אינדקס\". זוהי פעולה חד-פעמית, ומומלצת בחום.",
+    "Responsa search operators — # (prefixes/suffixes), * (wildcard), % (plene/defective) and (א/ב) alternation — now work when searching My Library.": "אופרטורים של חיפוש שו״ת — # (תחיליות/סופיות), * (תו כללי), % (כתיב מלא/חסר) וחלופות (א/ב) — פועלים כעת גם בחיפוש בספרייה שלי.",
+    # v8.4.0 — Dual-mode library filter (Show-only / Hide)
+    "New: choose Show only or Hide for the library filter — on Search, Browse, and now Parallels — with live per-library counts, sorting, and type-to-find. Give it a try!": "חדש: בסינון לפי ספרייה אפשר עכשיו לבחור בין 'הצג רק' ל'הסתר' — בחיפוש, בקטלוג, ועכשיו גם במקבילות — עם מונה כתבי יד לכל ספרייה (מתעדכן בזמן אמת), מיון וחיפוש מהיר בהקלדה. מוזמנים לנסות!",
+    # v8.4.0 — Desktop What's New (bar + dialog bullets)
+    "New: the library filter now has two modes — Show only or Hide — with live per-library counts, sort, and type-to-find in Browse by Identification.": "חדש: לסינון לפי ספרייה נוספו שני מצבים — 'הצג רק' או 'הסתר' — עם מונה כתבי יד לכל ספרייה, מיון וחיפוש מהיר בהקלדה, ב'עיון לפי זיהוי'.",
+    "Show only or Hide: the 'Browse by Identification' library filter now has two modes — show only the libraries you pick, or hide them. In Hide mode a newly-appearing library stays visible unless you've hidden it, and your choice is remembered.": "'הצג רק' או 'הסתר': לסינון הספריות ב'עיון לפי זיהוי' נוספו שני מצבים — הצגת רק הספריות שבחרת, או הסתרתן. במצב 'הסתר' ספרייה שמופיעה מחדש נשארת גלויה אלא אם הסתרת אותה, והבחירה נשמרת.",
+    "Per-library counts: each library shows how many manuscripts it holds, updating live as you toggle the PGP and scholarly-edition filters.": "מונה כתבי יד לכל ספרייה: לצד כל ספרייה מוצג מספר כתבי היד שברשותה, והוא מתעדכן בזמן אמת כשמפעילים את סינוני ה-PGP והמהדורות המדעיות.",
+    "Sort and type-to-find: sort the library list by count or A–Z, and type to filter it. Each row shows its English code (e.g. CUL) in both the Hebrew and English interface.": "מיון וחיפוש מהיר בהקלדה: אפשר למיין את רשימת הספריות לפי מספר או לפי א-ב, ולסנן אותה בהקלדה. לצד כל ספרייה מוצג הקוד האנגלי שלה (למשל CUL) גם בממשק העברי וגם באנגלי.",
+    # v8.3.0 — Library filter, Space-scroll, Joins Lab viewers
+    "New features: filter your search results and the catalog by holding library; press Space to page through results; and the Joins Lab viewers gained rotate and fullscreen. Give it a try!": "תכונות חדשות: אפשר לסנן את תוצאות החיפוש ואת הקטלוג לפי ספרייה; ללחוץ על מקש הרווח כדי לדפדף בתוצאות; ומציגי התמונות במעבדת הצירופים קיבלו סיבוב ותצוגת מסך מלא. מוזמנים לנסות!",
+    "New features: filter the catalog by library, press Space to page through search results, and rotate / view images fullscreen in the Joins Lab.": "תכונות חדשות: סינון הקטלוג לפי ספרייה, דפדוף בתוצאות החיפוש בעזרת מקש הרווח, וסיבוב ותצוגת מסך מלא של תמונות במעבדת הצירופים.",
+    "Filter by library: the 'Browse by Identification' catalog now has a library filter — narrow results to Cambridge, JTS, Oxford, and other holding libraries.": "סינון לפי ספרייה: בקטלוג 'עיון לפי זיהוי' נוסף סינון לפי ספרייה — אפשר לצמצם את התוצאות לקיימברידג', JTS, אוקספורד וספריות נוספות.",
+    "Press Space to page down through search results (Shift+Space to page up), unless a result control is focused.": "לחיצה על מקש הרווח מדפדפת מטה בתוצאות החיפוש (Shift+רווח מדפדף מעלה), אלא אם הפוקוס נמצא על אחת הפעולות שבתוצאה.",
+    "Joins Lab improvements: rotate and fullscreen in the anchor and Compare viewers, the web's full set of search modes (Exact, Variants, Fuzzy, Regex, Responsa), inline search options, a Stop button, and candidate export to Excel.": "שיפורים במעבדת הצירופים: סיבוב ותצוגת מסך מלא במציגי העוגן וההשוואה, כל מצבי החיפוש של גרסת האתר (מדויק, וריאנטים, מקורב, ביטוי רגולרי, שו״ת), אפשרויות חיפוש מוטמעות, כפתור עצירה, וייצוא מועמדים לאקסל.",
+    "More resilient image loading: an outage of the National Library's image servers no longer stalls loading of images from other libraries.": "טעינת תמונות עמידה יותר: תקלה בשרתי התמונות של הספרייה הלאומית כבר לא תתקע טעינת תמונות מספריות אחרות.",
+    "v7.15: PDF page images and Hebrew text fixes in My Library (desktop)": "גרסה 7.15: תמונות עמודי PDF ותיקוני טקסט עברית ב\"הספרייה שלי\" (אפליקציית שולחן עבודה)",
+    "v7.15: PDF page images in My Library, Hebrew text fixes, and a new Re-index All button": "גרסה 7.15: תמונות עמודי PDF ב\"הספרייה שלי\", תיקוני טקסט עברית, וכפתור 'אנדקס מחדש הכל'",
+    "PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically.": "תמונות עמודי PDF ב\"הספרייה שלי\" — תוצאת חיפוש בקובץ PDF מקומי מציגה כעת את עמוד ה-PDF המקורי לצד הטקסט שחולץ. הניווט בין תוצאות ובין עמודים מסנכרן את התמונה אוטומטית.",
+    "Hebrew text extraction quality: two bugs that hurt search in Hebrew books are fixed — left-to-right word order is now correct, and fragmented text (single word or punctuation per line) joins back into continuous paragraphs.": "שיפור איכות חילוץ טקסט עברי — תוקנו שני באגים שפגעו בחיפוש בספרים עבריים: סדר מילים שמאל-לימין הפך לעברית, וקטעי טקסט מקוטעים (מילה או סימן פיסוק לשורה) מתאחדים שוב לפסקאות רציפות.",
+    "To apply the fixes to an existing library, click \"Re-index All\" in the My Library tab.": "כדי להחיל את התיקונים על ספרייה קיימת, לחצו על \"אנדקס מחדש הכל\" בלשונית \"הספרייה שלי\".",
+    # v7.16 What's New — bar + dialog (Hebrew PDF Text Quality)
+    "Improved text processing in My Library — click Re-index All to enjoy the improvement": "שיפור בעיבוד טקסטים מ'הספרייה שלי' - לחצו על אנדקס מחדש הכול כדי ליהנות מן השיפור",
+    "Hebrew text from PDF files in My Library is now processed so that letter-spacing used for emphasis no longer splits words into separate pieces.": "טקסטים עבריים מקובצי פדף מעובדים כך שריווח בין אותיות לשם הדגשה אינו מפריד אותן למילים נפרדות",
+    "Improved handling of maqaf hyphens and numbers.": "תיקון בעיבוד של מקפים ומספרים",
+    "To apply the improvement to your existing library, click \"Re-index All\" in the My Library tab.": "כדי להחיל את השיפור על הספרייה הקיימת, לחצו על \"אנדקס מחדש הכל\" בלשונית \"הספרייה שלי\"",
+    "Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search":
+        "עיון לפי זיהוי: עיון בכתבי יד לפי היררכיית תחומים, מחבר או כותרת יצירה עם סינון משולב וחיפוש טקסט חופשי",
+    "Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value":
+        "קישורים צולבים: תוויות תחום ומחבר בעמודי עיון מקשרות ישירות לעיון בקטלוג המסונן לפי אותו ערך",
+    "New: Catalog browse by domain, author, and work with free text filter and cross-links":
+        "חדש: עיון בקטלוג לפי תחום, מחבר ויצירה עם סינון טקסט חופשי וקישורים צולבים",
+    "Composition Search UX: elapsed timer, cancel with partial results, printed badge and filter":
+        "חיפוש מקבילות: טיימר, ביטול עם תוצאות חלקיות, תגית וסינון דפוס",
+    "Session Persistence: search state saved and restored across restarts, search history dropdown in search bar":
+        "שמירת מצב: מצב חיפוש נשמר ומשוחזר בין הפעלות, תפריט היסטוריית חיפושים בשורת החיפוש",
+    "Desktop Notifications: taskbar flash on search completion, sleep prevention, copy context menu":
+        "התראות שולחן עבודה: הבהוב בשורת המשימות בסיום חיפוש, מניעת שינה, תפריט העתקה",
+    "Hebrew Library Names: full Hebrew names for all library codes":
+        "שמות ספריות בעברית: שמות עבריים מלאים לכל קודי הספריות",
+    "New: Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names":
+        "חדש: שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
+    "Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names":
+        "שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
+    "Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English)":
+        "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית)",
+    "Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English), line-boundary search for join detection":
+        "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית), חיפוש לפי גבולות שורה לזיהוי צירופים",
+    "New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection":
+        "חדש: חיפוש ממוקד לפי מאפייני כתב יד, תרגומי קטלוג ומטא-נתונים, חיפוש לפי גבולות שורה לזיהוי צירופים",
+    "Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.":
+        "פאזל קטעים — צרו תמונת תצרף של כמה קטעי כתבי יד המהווים מסמך אחד. ערכו, שתפו ויצאו.",
+    "38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries.":
+        "נוספו 38,673 כתבי יד חדשים מהגניזה — תמונות ומטא-נתונים לקטעים ללא תעתיקים. 255K+ רשומות מ-52 ספריות.",
+    "38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255,615 records across 52 libraries.":
+        "נוספו 38,673 כתבי יד חדשים מהגניזה — תמונות ומטא-נתונים לקטעים ללא תעתיקים. 255,615 רשומות מ-52 ספריות.",
+    "7 new library collections: Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman.":
+        "7 אוספי ספריות חדשים: שלמה הלברשטם, ריינך, הוותיקן, הארכיון המרכזי, קהילת מיינץ, קורווין, מהלמן.",
+    "Search by shelfmark or title now finds manuscripts even without transcription text — with images and scholarly catalog data.":
+        "חיפוש לפי מספר מדף או כותרת מוצא כעת כתבי יד גם ללא תעתיקים — עם תמונות ונתוני קטלוג.",
+    "Shelfmark normalization: Yevr/Halper aliases for cross-collection search compatibility.":
+        "נרמול סימני מדף: כינויי Yevr/Halper לתאימות חיפוש בין אוספים.",
+    "New: Manuscript measurements — dimensions, margins, line counts & material via Measurements button in browse. 400K bibliography duplicates removed.":
+        'חדש: מידות פיזיות של כתבי יד — מידות, שוליים, שורות וחומר בלחצן ייעודי בעיון. 400 אלף כפילויות ביבליוגרפיות הוסרו.',
+    "Manuscript measurements — new Measurements button in browse shows physical dimensions, margins, writing area, line counts, text density and material for 231K manuscripts.":
+        'מידות כתבי יד — לחצן "מידות" חדש בעיון מציג מידות פיזיות, שוליים, שטח כתיבה, מספר שורות, צפיפות טקסט וחומר עבור 231 אלף כתבי יד.',
+    "Bibliography cleanup — removed over 400,000 duplicate entries (48% reduction) for cleaner scholarly references.":
+        "ניקוי ביבליוגרפיה — הוסרו למעלה מ-400 אלף רשומות כפולות (הפחתה של 48%), להצגה נקייה יותר של מקורות מדעיים.",
+    "55,000 new Hebrew translations — English catalog free descriptions now available in Hebrew via Dicta Translation.":
+        "55 אלף תרגומים חדשים לעברית — תיאורים חופשיים מהקטלוג זמינים כעת בעברית באמצעות דיקטה תרגום.",
+    "Desktop stability — fixed crash when rapidly navigating between manuscripts in the browse tab.":
+        "יציבות שולחן העבודה — תוקנה קריסה בניווט מהיר בין כתבי יד בלשונית העיון.",
+    "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":
+        "חיפוש ממוקד: סינון כתבי יד לפי תחום, מחבר, יצירה, תאריך וחומר לפני החיפוש",
+    "Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation":
+        "תרגומי קטלוג ומטא-נתונים: תרגומים עברית/אנגלית לכותרות, תיאורים ונתוני קטלוג באמצעות תרגום דיקטה",
+    "Line-Boundary Search: find words at start/end of lines or text for join detection. Requires index rebuild.":
+        "חיפוש לפי גבולות שורה: מציאת מילים בתחילת/סוף שורות או טקסט לזיהוי צירופים. דורש בניית אינדקס מחדש.",
+    "Got it!": "הבנתי!",
+    "Learn More": "למידע נוסף",
+
+    # --- Feature discovery hints ---
+    "Try the Responsa-project style search mode!": "נסו את מצב חיפוש בסגנון פרויקט השו\"ת!",
+    "Try the Tabular Search!": "נסו את החיפוש הטבלאי!",
+
+    # --- Domain Filter ---
+    "Filter by domains": "סנן לפי תחומים",
+    "Filter by Domain": "סנן לפי תחום",
+    "Domains": "תחומים",
+    "domains excluded": "תחומים הוחרגו",
+    "Search domains:": "חפש תחומים:",
+    "Type to filter...": "הקלד לסינון...",
+    "Uncheck All": "בטל הכל",
+    "Select None": "בטל בחירה",
+    "Showing all domains": "מציג את כל התחומים",
+    "Excluding": "מחריג",
+    "domains": "תחומים",
+    "Uncategorized": "ללא סיווג",
+    "Subject Domains": "תחומי נושא",
+    "Filter results by subject domain": "סנן תוצאות לפי תחום נושא",
+    "excluded": "מוחרגים",
+    "Filter results by subject domain (post-search)": "סנן תוצאות לפי תחום (לאחר חיפוש)",
+    "Filter by Subject Domain": "סנן לפי תחום נושא",
+    "Run a search first to see domain options.": "בצע חיפוש תחילה כדי לראות אפשרויות תחום.",
+
+    # --- Bibliography Split ---
+    "Article": "מאמר",
+    "Article/Title": "מאמר/כותרת",
+    "Vol.": "כרך",
+    "Reference": "הפניה",
+    "Filter references...": "סנן הפניות...",
+    "Has Transcription": "יש העתקה",
+    "Has Translation": "יש תרגום",
+    "Has Image": "יש תמונה",
+    "Transcription": "העתקה",
+    "Year": "שנה",
+    "Filter by author, title...": "סנן לפי מחבר, כותרת...",
+    "Bibliography FJMS": "ביבליוגרפיה פרידברג",
+    "Bibliography Ktiv": "ביבליוגרפיה כתיב",
+    "Bib. FJMS": "ביבל' פרידברג",
+    "Bib. Ktiv": "ביבל' כתיב",
+    # /browse, under the image, when the NLI record and image list came from the
+    # copies kept on disk because NLI could not answer (shared/nli_metadata_store.py)
+    "Catalogue details from {date}": "פרטי הקטלוג מתאריך {date}",
+    "Catalog rec.": "קטלוגים",
+    "Catalog": "קטלוג",
+    "Discussion": "דיון",
+    "Mentioned": "איזכור",
+    "Open in KTIV": "פתח בכתיב",
+    "Image": "תמונה",
+    "Partial": "חלקית",
+    "Full": "מלאה",
+    "Records per page": "רשומות לעמוד",
+    "col_D": "ד",
+    "col_T": "ע",
+    "col_S": "ר",
+    "col_I": "מ",
+
+    # --- Phase 54: Measurements Dialog ---
+    "Measurements": "מידות",
+    "No measurement data available": "אין נתוני מידות זמינים",
+    "Catalog Dimensions": "מידות קטלוג",
+    "Computed Dimensions": "מידות מחושבות",
+    "Physical Measurements": "מידות פיזיות",
+    "Page Size": "גודל עמוד",
+    "Written Area": "שטח כתיבה",
+    "Margins": "שוליים",
+    "Text Density": "צפיפות טקסט",
+    "Size Category": "קטגוריית גודל",
+    "per 10cm": 'ל-10 ס"מ',
+    "Width": "רוחב",
+    "Height": "גובה",
+    "Inner": "פנימי",
+    "DPI Quality": "איכות DPI",
+    "Grid calibrated": "מכויל רשת",
+    "Ruler only": "סרגל בלבד",
+    "Fragment Dimensions (no text block)": "מידות הקטע (ללא גוש טקסט)",
+    "Incomplete fragment": "קטע חלקי",
+    "Line Height": "גובה שורה",
+    "Fragment": "קטע",
+    "Images": "תמונות",
+    "avg": "ממוצע",
+    "total": "סה״כ",
+    "with text": "עם טקסט",
+    "blank": "ריק",
+    # Phase 54: Measurement filter labels
+    "Material (measured)": "חומר",
+    "Density": "צפיפות",
+    "Min": "מינ'",
+    "cm": 'ס"מ',
+    "mm": 'מ"מ',
+    "Paper": "נייר",
+    "Vellum": "קלף",
+    "Papyrus": "פפירוס",
+    "Mix": "מעורב",
+    "Wood": "עץ",
+    "Width (cm)": 'רוחב (ס"מ)',
+    "Height (cm)": 'גובה (ס"מ)',
+    "Line Height (mm)": 'גובה שורה (מ"מ)',
+
+    # --- Phase 33: Metadata Enrichment ---
+    "Bibliography References": "הפניות ביבליוגרפיות",
+    "Catalog References": "הפניות קטלוגיות",
+    "Scholarly Sources": "מקורות מדעיים",
+    "Collection & Storage": "אוסף ואחסון",
+
+    # --- FJMS Catalog ---
+    "FJMS Catalog": "קטלוג FJMS",
+    "Content Identification": "זיהוי תוכן",
+    "Copy Date": "תאריך העתקה",
+    "Place": "מקום",
+    "identifications": "זיהויים",
+    "Catalog Records": "מידע קטלוגי",
+    "Running Title": "כותרת רצה",
+    "Free Description": "תיאור חופשי",
+    "Script Type": "סוג כתב",
+    "Script Style": "סגנון כתב",
+    "Vocalization": "ניקוד",
+    "Physical Status": "מצב פיזי",
+    "Number of Folios": "מספר דפים",
+    "Number of Bifolios": "מספר ביפוליו",
+    "Number of Columns": "מספר טורים",
+    "Number of Lines": "מספר שורות",
+    "Script Place": "מקום כתב",
+    "From the catalogue records: manuscripts whose records do not describe the script are not included.":
+        "לפי המידע הקטלוגי; כתבי יד שהכתב שלהם לא תואר בו אינם נכללים.",
+    "Script and size": "כתב ומידות",
+    "Only manuscripts with a recorded value are included.": "נכללים רק כתבי יד שיש להם ערך רשום.",
+    "Size filters are not applied to parallel search": "סינון לפי מידות אינו חל על חיפוש מקבילות",
+
+    # --- Catalog Dialog Sections ---
+    "Shelfmark Description": "תיאור מספר מדף",
+    "Content Description": "תיאור תוכן",
+    "Script Description": "תיאור כתב",
+    "Format Description": "תיאור פורמט",
+    "Miscellaneous": "שונות",
+    "Inner Size": "גודל פנימי",
+    "No catalog data available": "אין נתוני קטלוג זמינים",
+    "Scholarly Description": "תיאור מדעי",
+    "Detailed Content": "תוכן מפורט",
+    "Mentions": "אזכורים",
+    "Personalities": "אישים",
+    "Places": "מקומות",
+    "Creations": "יצירות",
+    "Dates": "תאריכים",
+    "Groups": "קבוצות",
+
+    # --- Compact Mode ---
+    "Compact": "צמצם",
+    "Expand": "הרחב",
+
+    # --- Catalog Browse (Desktop & Web) ---
+    "Browse by Shelfmark": "עיון לפי מספר מדף",
+    "Browse by Identification": "עיון לפי זיהוי",
+    "Domains, authors & works": "תחומים, מחברים וחיבורים",
+    "Authors": "מחברים",
+    "Work / Title": "חיבור / כותרת",
+    "Search authors...": "חיפוש מחברים...",
+    "Search works...": "חיפוש חיבורים...",
+    "Showing {start}-{end} of {total} manuscripts": "מציג {start}-{end} מתוך {total} כתבי יד",
+    "Page {current} of {total}": "עמוד {current} מתוך {total}",
+    "Previous": "הקודם",
+    "Next": "הבא",
+    "Domain": "תחום",
+    "Identification": "זיהוי",
+    "Date": "תאריך",
+    "No results": "אין תוצאות",
+    "Unclassified": "לא מסווג",
+    "Browse the manuscript corpus by scholarly domain classifications, author attributions, and work identifications.": "עיון בקורפוס כתבי היד לפי סיווגי תחום מדעיים, שיוכי מחבר וזיהויי חיבורים.",
+    "Text Preview": "תצוגה מקדימה",
+    "From year": "משנה",
+    "To year": "עד שנה",
+    "Include undated": "כלול לא מתוארכים",
+    "10th": "10",
+    "11th": "11",
+    "12th": "12",
+    "13th": "13",
+    "14th": "14",
+    "15th": "15",
+    "16th": "16",
+    "16-19": "16-19",
+    "Text Filter": "סינון טקסט",
+    "Type term, press Enter": "הקלד מונח, לחץ Enter",
+    "containing": "מכיל",
+    "at least one of": "לפחות אחד מ",
+    "excluding": "ללא",
+    "or": "או",
+    "ALL": "כל",
+    "ANY": "אחד מ-",
+    "NOT": "ללא",
+    "Must contain ALL terms": "חייב להכיל את כל המונחים",
+    "Must contain at least ONE term": "חייב להכיל לפחות מונח אחד",
+    "Must NOT contain the term": "לא יכיל את המונח",
+
+    # --- Phase 42: Search UX & Composition Polish ---
+    # Timer / progress
+    "Search completed in": "החיפוש הושלם בתוך",
+    "chunks": "מקטעים",
+    "chunks searched": "מקטעים נסרקו",
+    "searching": "מחפש",
+    "expanded terms": "ביטויים מורחבים",
+    # Cancel / partial results
+    "Partial results": "תוצאות חלקיות",
+    "no results yet": "אין תוצאות עדיין",
+    # Excluded section
+    "Excluded Results": "תוצאות שהוחרגו",
+    # Printed filter
+    "Printed": "דפוס",
+    "Filter Printed": "סנן דפוסים",
+    "Showing all": "מציג הכל",
+    "Hiding printed": "מסתיר דפוסים",
+    "Only printed": "דפוסים בלבד",
+    # Library filter (SEED-026 / Phase 130-02 DMF dual-mode)
+    # Single consistent base label in neutral state; active states use Showing/Hiding.
+    "Filter by library": "סינון לפי ספרייה",
+    "Filter results by library": "סינון התוצאות לפי ספרייה",
+    # Phase 130-02 DMF: dual-mode dialog labels and button states.
+    # Added 2026-06-30 — EN key + HE value so Hebrew UI does not fall back to English.
+    "Hiding": "מסתיר",
+    # Phase 130 UAT: pluralized library/libraries noun on filter button (EN+HE).
+    # Format templates — call .format(shown=N, total=M) or .format(n=N) after tr().
+    # Keys ARE the English template text (tr() in 'en' mode returns the key itself).
+    # HE word-order for hide: singular is noun-then-number (ספרייה {n}), plural is number-then-noun.
+    "Showing {shown}/{total} library": "מציג {shown}/{total} ספרייה",
+    "Showing {shown}/{total} libraries": "מציג {shown}/{total} ספריות",
+    "Hiding {n} library": "מסתיר ספרייה {n}",
+    "Hiding {n} libraries": "מסתיר {n} ספריות",
+    "Show only selected": "הצג רק נבחרות",
+    "Hide selected": "הסתר נבחרות",
+    "Search libraries...": "חיפוש ספריות...",
+    # Codex MEDIUM (2026-06-29): catalog→parallels handoff drops library (parallels can't scope by it)
+    "Library filter is not applied to parallel search": "מסנן הספרייה אינו חל על חיפוש מקבילות",
+    "Library filter": "מסנן ספרייה",
+    # Both capitalisations, deliberately. The dialog's "show the rest of the
+    # libraries" expander calls tr('All libraries') (sentence case) in
+    # web/pages/{parallels,search,catalog_browse}.py, but only the title-case
+    # key existed -- so the summary line rendered in English on an otherwise
+    # Hebrew page, in all three. Nothing calls tr('All Libraries') today;
+    # it is kept because a lookup miss is silent (tr falls back to the key),
+    # so dropping it would risk re-opening the same class of bug for the
+    # cost of one line.
+    "All libraries": "כל הספריות",
+    "All Libraries": "כל הספריות",
+    "Libraries": "ספריות",
+    # SEED-026 GAP-C dialog (title-case dialog header + FINDING-1 hint)
+    "Filter by Library": "סינון לפי ספרייה",
+    "Select at least one library, or check all to clear the filter": "יש לבחור לפחות ספרייה אחת, או לסמן הכל כדי לבטל את הסינון",
+    # PGP filter (Phase 93)
+    "Filter PGP": "סנן PGP",
+    "Has PGP": "PGP בלבד",
+    "No PGP": "ללא PGP",
+    "Only PGP": "PGP בלבד",
+    "Hiding PGP": "ללא PGP",
+    "Filter by PGP coverage": "סנן לפי כיסוי PGP",
+    # Catalog browse availability filters (SEED-023)
+    "Filter by availability": "סינון לפי זמינות",
+    "Filter Scholarly Transcriptions": "סנן לפי תעתיק מדעי",
+    "Has Scholarly Transcription": "יש תעתיק מדעי",
+    "No Scholarly Transcription": "אין תעתיק מדעי",
+    "Filter by PGP information": "סנן כתבי יד לפי מידע PGP",
+    "Filter by scholarly transcription (PGP or FGP edition)":
+        "סנן לפי תעתיק מדעי (מהדורת PGP או FGP)",
+    # Composition / parallels min-chunks
+    "Min. chunk matches": "מינ' התאמות מקטע",
+    "Minimum matching chunks per manuscript": "מספר מינימלי של מקטעים תואמים לכתב יד",
+    # Desktop search status strings
+    "Showing {} of {} results": "מציג {} מתוך {} תוצאות",
+    "Showing {} of {} results (searching {} expanded terms)": "מציג {} מתוך {} תוצאות (מחפש {} ביטויים מורחבים)",
+    "Showing {} of {} results (filtering {} domains)": "מציג {} מתוך {} תוצאות (מסנן {} תחומים)",
+    "Nothing to export: every result in the table is hidden by a filter or an exclusion.":
+        "אין מה לייצא: כל התוצאות בטבלה מוסתרות בסינון או בהחרגה.",
+    "Load more results ({} not loaded)": "טען תוצאות נוספות ({} לא נטענו)",
+    # Desktop-specific Phase 42 strings
+    "Min chunks: ": "מינ' מקטעים: ",
+    "Minimum chunk matches per manuscript": "מינימום התאמות מקטע לכתב יד",
+    "Printed material (not handwritten manuscript)": "חומר דפוס (לא כתב יד)",
+    # Excluded section reason sub-headers (Phase 42 R3)
+    "Found in source text": "נמצא בטקסט המקור",
+    "High frequency": "תדירות גבוהה",
+    # Session persistence (Phase 43)
+    "Session Persistence": "שמירת מצב",
+    "Control how search state is saved between sessions": "שליטה באופן שמירת מצב החיפוש בין מפגשים",
+    "Save search state between sessions": "שמור מצב חיפוש בין מפגשים",
+    "When enabled, your search results, exclusions, and filters are preserved when you return": "כאשר מופעל, תוצאות החיפוש, ההחרגות והמסננים נשמרים כשאתה חוזר",
+    "Search history entries": "רשומות היסטוריית חיפוש",
+    "Maximum number of past searches to remember per search type": "מספר מרבי של חיפושים קודמים לזכור לכל סוג חיפוש",
+    "Session restored": "המצב שוחזר",
+    "Restoring previous session...": "משחזר מצב קודם...",
+    "Save and restore search state across restarts": "שמור ושחזר מצב חיפוש בין הפעלות",
+    "Search History": "היסטוריית חיפוש",
+    "No search history": "אין היסטוריית חיפוש",
+    "Search restored from history": "חיפוש שוחזר מהיסטוריה",
+    "Clear all": "נקה הכל",
+    "Composition History": "היסטוריית חיפוש מקבילות",
+    "No composition history": "אין היסטוריית חיפוש מקבילות",
+    "Composition restored from history": "חיפוש מקבילות שוחזר מהיסטוריה",
+    "Recent searches — click to restore": "חיפושים אחרונים — לחץ לשחזור",
+    "Recent composition searches — click to restore": "חיפושי מקבילות אחרונים — לחץ לשחזור",
+    "Clear search history": "נקה היסטוריית חיפוש",
+    "Clear composition history": "נקה היסטוריית חיפוש מקבילות",
+    "Delete this entry": "מחק רשומה זו",
+    "Clear all history": "נקה את כל ההיסטוריה",
+    "Clear History": "ניקוי היסטוריה",
+    "Clear all search history?": "לנקות את כל היסטוריית החיפוש?",
+    "Resume Search": "חידוש חיפוש",
+    "A composition search was interrupted last time. Resume from where it stopped?": "חיפוש חיבורים הופסק בפעם הקודמת. לחדש מהמקום שבו הופסק?",
+    "History Limit:": "מגבלת היסטוריה:",
+    "Maximum search history entries per type": "מספר מרבי של רשומות היסטוריה לכל סוג חיפוש",
+    "Last Searches": "חיפושים אחרונים",
+    "Recent searches": "חיפושים אחרונים",
+    "Recent composition searches": "חיפושי מקבילות אחרונים",
+    "{count} results": "{count} תוצאות",
+    "Restore State:": "שחזור מצב:",
+    "Ask": "שאל",
+    "Always": "תמיד",
+    "Never": "אף פעם",
+    "Whether to restore previous search state on startup": "האם לשחזר מצב חיפוש קודם בהפעלה",
+    "Restore State": "שחזור מצב",
+    "Restore previous search state?": "לשחזר מצב חיפוש קודם?",
+    "Don't ask me again": "אל תשאל אותי שוב",
+    "Yes": "כן",
+    "No": "לא",
+
+    # Phase 44 - Notification & Copy
+    "Desktop Notifications": "התראות שולחן עבודה",
+    "Flash taskbar when search completes while app is in background": "הבהב בשורת המשימות כשחיפוש מסתיים בזמן שהאפליקציה ברקע",
+    "Copy Shelfmark": "העתק מספר מדף",
+    "Copy Title": "העתק כותרת",
+    "Copy Result": "העתק תוצאה",
+    "Copy Library": "העתק ספרייה",
+
+    # Phase 45 - Filtered Search Context
+    # Filter panel strings
+    "Date from": "מתאריך",
+    "Date to": "עד תאריך",
+    "Exclude Printed": "הסתר מודפסים",
+    "Material": "חומר",
+    "manuscripts match": "כתבי יד תואמים",
+    "No manuscripts match the current filters.": "אין כתבי יד התואמים לסינון הנוכחי.",
+    "No manuscripts match the current filters": "אין כתבי יד התואמים לסינון הנוכחי",
+    # Chip bar strings
+    "Clear all filters": "נקה את כל הסינונים",
+    # Per-manuscript exclusion strings
+    "Exclude this manuscript": "הסתר כתב יד זה",
+    "Source manuscript": "כתב היד המקורי",
+    "Import exclusions": "ייבא רשימת הסתרה",
+    "Import from word search": "ייבא מחיפוש מילים",
+    "Import from parallels": "ייבא ממקבילות",
+    "exclusions from word search": "הסתרות מחיפוש מילים",
+    # Path B (browse-to-search) strings
+    "Search in these results": "חפש בתוצאות אלה",
+    "Parallel search in these results": "חפש מקבילות בתוצאות אלה",
+    # Filter history strings
+    "filtered": "מסונן",
+    "with filters": "עם סינון",
+    # Pre-search filter dialog (desktop)
+    "Set pre-search filters (domain, author, date, material)": "הגדר סינון מקדים (תחום, מחבר, תאריך, חומר)",
+    "Filters": "סינון",
+    "Focus Search": "מקד חיפוש",
+    "Narrow search scope by domain, author, date, material": "צמצם טווח חיפוש לפי תחום, מחבר, תאריך, חומר",
+    "Type to select author...": "הקלד לבחירת מחבר...",
+    "Type to select work...": "הקלד לבחירת חיבור...",
+    "Catalog Data Text": "טקסט נתוני קטלוג",
+    "Type": "סוג",
+    "Show all": "הצג הכל",
+    "Exclude printed": "ללא דפוסים",
+    "No printed": "ללא דפוסים",
+    "Printed only": "דפוסים בלבד",
+    "include": "כולל",
+    "exclude": "ללא",
+    "Work": "חיבור",
+
+    # Phase 46 - Dicta Translation Integration
+    "Show translations": "הצג תרגומים",
+    "Hide translations": "הסתר תרגומים",
+    "Don't show translations": "אל תציג תרגומים",
+    "Translated": "מתורגם",
+    "Original": "מקור",
+    "Translated match": "התאמה בתרגום",
+    "Original text": "טקסט מקורי",
+    "Machine translated via Dicta": "תורגם אוטומטית באמצעות דיקטה",
+    "Translation": "תרגום",
+    "Translations ON": "תרגומים מופעלים",
+    "Translations OFF": "תרגומים כבויים",
+
+    # Phase 999.4 - Line-number gutter
+    "Toggle line numbers": "הצג/הסתר מספרי שורות",
+    "# Lines": "# שורות",
+    "Show translated descriptions when available": "הצג תיאורים מתורגמים כאשר זמינים",
+
+    # Phase 46-06 - Extended field translations
+    "Abstract": "תקציר",
+    "Condition": "מצב",
+    "Provenance": "מקור",
+    "Language": "שפה",
+    "Script": "כתב",
+    "Decoration": "עיטור",
+    "Translating...": "מתרגם...",
+
+    # Phase 46 - Translation QA & User Safety
+    "Machine-generated translation": "תרגום ממוחשב",
+    "Translations are machine-generated scholarly aids and may contain errors. Always verify against the original text.": "התרגומים הם כלי עזר ממוחשבים ועלולים להכיל שגיאות. יש לאמת תמיד מול הטקסט המקורי.",
+    "Report translation issue": "דווח על בעיה בתרגום",
+    "Report an issue with this translation": "דווח על בעיה בתרגום זה",
+    "Translation issue reported. Thank you!": "הבעיה בתרגום דווחה. תודה!",
+    "Please describe the issue": "אנא תאר/י את הבעיה",
+    "The translation is incorrect or misleading": "התרגום שגוי או מטעה",
+    "The translation contains hallucinated content": "התרגום מכיל תוכן שאינו במקור",
+    "The translation is a copy of the source text": "התרגום הוא העתק של טקסט המקור",
+    "Other issue": "בעיה אחרת",
+    "Issue type": "סוג הבעיה",
+    "Submit report": "שלח דיווח",
+    "Translation reports help us improve quality": "דיווחי תרגום מסייעים לנו לשפר את האיכות",
+
+    # --- Quick-21: Short button labels for icon+text compact ---
+    "Parallels": "מקבילות",
+    "Trans ON": "תרגום פעיל",
+    "Trans OFF": "תרגום כבוי",
+    "Hide Info": "הסתר מידע",
+    "External": "חיצוני",
+    "Bib FJMS": "ביבל׳ פרידברג",
+    "Bib Ktiv": "ביבל׳ כתיב",
+    "Toggle translations": "הפעל/כבה תרגומים",
+    # Puzzle canvas (Phase 48)
+    "Fragment Puzzle": "פאזל קטעים",
+    "Enter shelfmark...": "הכנס מספר מדף...",
+    "Fragments on canvas": "קטעים על הקנבס",
+    "No selection": "אין בחירה",
+    "{} selected": "{} נבחרו",
+    "Threshold:": "סף:",
+    "Scale:": "גודל:",
+    "Background": "רקע",
+    "Flip": "הפוך",
+    "Flip selected fragment (recto/verso)": "הפוך קטע נבחר (רקטו/ורסו)",
+    "Flip Puzzle": "הפוך פאזל",
+    "Flip all fragments — show other side of joined page": "הפוך את כל הקטעים — הצג את הצד השני של הדף המחובר",
+    "Rotate left 90°": "סובב שמאלה 90°",
+    "Rotate right 90°": "סובב ימינה 90°",
+    "Add to Puzzle": "הוסף לפאזל",
+    "Add current manuscript to Fragment Puzzle": "הוסף כתב יד נוכחי לפאזל קטעים",
+    "Resolving images...": "מאתר תמונות...",
+    "Shelfmark not found": "מספר מדף לא נמצא",
+    "No images found for this manuscript": "לא נמצאו תמונות לכתב יד זה",
+    "No folio list available": "אין רשימת דפים זמינה",
+    "No more folios": "אין עוד דפים",
+    "Loading...": "טוען...",
+    "Ready": "מוכן",
+    "Puzzle": "פאזל",
+    "Add to Fragment Puzzle": "הוסף לפאזל קטעים",
+    "Flip Horizontal": "הפוך אופקית",
+    "Flip Vertical": "הפוך אנכית",
+    "Delete Fragment": "מחק קטע",
+    "Toggle checkerboard background": "החלף רקע משבצות",
+    "Puzzle requires NLI images": "הפאזל דורש תמונות NLI",
+    "Crop": "חתוך",
+    "Trim borders from selected fragment": "חתוך שוליים מקטע נבחר",
+    "Border crop amount (pixels)": "כמות חיתוך שוליים (פיקסלים)",
+    "Cropped {} px from borders": "נחתכו {} פיקסלים מהשוליים",
+    "Crop:": "חיתוך:",
+    "Crop {} edge": "חתוך צד {}",
+    "Crop all edges": "חתוך את כל הצדדים",
+    "All": "הכל",
+    "Revert": "שחזר",
+    "Revert to original image": "שחזר לתמונה המקורית",
+    "Crop reverted": "החיתוך שוחזר",
+    "Rotate left 1°": "סובב שמאלה 1°",
+    "Rotate right 1°": "סובב ימינה 1°",
+    "Add from personal list": "הוסף מרשימה אישית",
+    "Add connected fragments (joins)": "הוסף קטעים מחוברים (צירופים)",
+    "No personal lists found": "לא נמצאו רשימות אישיות",
+    "Add from Personal List": "הוסף מרשימה אישית",
+    "Add Selected": "הוסף נבחרים",
+    "Add All": "הוסף הכל",
+    "Close": "סגור",
+    "Select a fragment first to find its joins": "בחר קטע קודם כדי למצוא צירופים",
+    "Joins data not available": "נתוני צירופים לא זמינים",
+    "No joins found for {}": "לא נמצאו צירופים עבור {}",
+    "Add Joined Fragments": "הוסף קטעים מצורפים",
+    "Joins for: {}": "צירופים עבור: {}",
+    "Could not resolve: {}": "לא ניתן לזהות: {}",
+    "Dark Gray": "אפור כהה",
+    "Black": "שחור",
+    "White": "לבן",
+    "Checkerboard": "משבצות",
+    "Light Table": "שולחן אור",
+    "Grid": "רשת",
+    "Cycle background: dark gray → black → white → checkerboard → light table → grid": "החלף רקע: אפור כהה → שחור → לבן → משבצות → שולחן אור → רשת",
+    "Enter crop mode — drag edges to trim": "מצב חיתוך — גרור שוליים לחיתוך",
+    "Crop mode: drag edges with arrow keys (↑↓←→), Enter=OK, Esc=revert": "מצב חיתוך: גרור שוליים עם חצים (↑↓←→), Enter=אישור, Esc=ביטול",
+    "All joined fragments are already on canvas": "כל הקטעים המצורפים כבר על הקנבס",
+
+    # --- Puzzle Document Management ---
+    "Saved Joins": "צירופים שמורים",
+    "Save Puzzle": "שמור פאזל",
+    "Save Puzzle Document": "שמור מסמך פאזל",
+    "Rename": "שנה שם",
+    "No saved joins": "אין צירופים שמורים",
+    "No fragments": "אין קטעים",
+    "Fragments:": "קטעים:",
+    "Export PNG": "ייצוא PNG",
+    "New Puzzle": "פאזל חדש",
+    "Details": "פרטים",
+    "Notes": "הערות",
+    'Delete "{}"?': 'למחוק "{}"?',
+    "Deleted": "נמחק",
+    "Loaded: {}": "נטען: {}",
+    "Saved: {}": "נשמר: {}",
+    "Add fragments before saving": "הוסף קטעים לפני שמירה",
+    "Add fragments before exporting": "הוסף קטעים לפני ייצוא",
+    "Could not load document": "לא ניתן לטעון מסמך",
+    "Saved joins are unavailable right now. Please reload the page.": "הצירופים השמורים אינם זמינים כרגע. נא לטעון את הדף מחדש.",
+    "Only you can see your saved joins until you publish them.": "רק אתה רואה את הצירופים השמורים שלך, עד שתפרסם אותם.",
+    "Saved in this browser only. Only you can see them. Sign in to keep them in your account.": "נשמרים בדפדפן זה בלבד. רק אתה רואה אותם. התחבר כדי לשמור אותם בחשבון שלך.",
+    "Drafts saved in this browser were added to your account ({}).": "טיוטות שנשמרו בדפדפן זה נוספו לחשבון שלך ({}).",
+    "Could not save this join": "לא ניתן לשמור את הצירוף",
+    "Opened the published version: {}. Save to keep your own copy.": "נפתחה הגרסה שפורסמה: {}. שמור כדי לשמור עותק משלך.",
+    "You signed in or out since this page opened. Reload the page to continue.": "התחברת או התנתקת מאז שהדף נפתח. נא לטעון את הדף מחדש כדי להמשיך.",
+    "Export failed": "הייצוא נכשל",
+    "Add fragment": "הוסף קטע",
+    "Delete selected fragment": "מחק קטע נבחר",
+    "Crop — drag edges to trim": "חיתוך — גרור קצוות לחיתוך",
+    "Cycle background: dark gray / black / white / checkerboard / light table / grid": "החלף רקע: אפור כהה / שחור / לבן / משבצות / שולחן אור / רשת",
+    "Previous page": "עמוד קודם",
+    "Next page": "עמוד הבא",
+    "Save current puzzle as a join document": "שמור פאזל נוכחי כמסמך צירוף",
+    "Clear canvas and start a new puzzle": "נקה קנבס והתחל פאזל חדש",
+    "Export composite image at full resolution": "ייצוא תמונה מורכבת ברזולוציה מלאה",
+    "Notes:": "הערות:",
+    "Optional notes about this join...": "הערות אופציונליות על צירוף זה...",
+    "Bring Forward": "הבא קדימה",
+    "Send Backward": "העבר אחורה",
+    "Select resolution:": "בחר רזולוציה:",
+    "Draft (1000 px)": "טיוטה (1000 פיקסלים)",
+    "Standard (2000 px)": "רגיל (2000 פיקסלים)",
+    "Full (3000 px)": "מלא (3000 פיקסלים)",
+    # Phase 52: Community Publishing
+    "Publish to Community": "פרסם לקהילה",
+    "This will make your puzzle join visible to all users.": "פעולה זו תהפוך את צירוף הפאזל שלך לנראה לכל המשתמשים.",
+    "Publish": "פרסם",
+    "Publishing...": "מפרסם...",
+    "Published successfully! Share link: {}": "פורסם בהצלחה! קישור לשיתוף: {}",
+    "Published successfully!": "פורסם בהצלחה!",
+    "Share this link:": "שתף קישור זה:",
+    "Copy Link": "העתק קישור",
+    "Link copied!": "הקישור הועתק!",
+    "Publish failed: {}": "הפרסום נכשל: {}",
+    "Published -- click to unpublish": "פורסם — לחץ לביטול פרסום",
+    "Unpublished": "בוטל פרסום",
+    "Unpublish failed: {}": "ביטול הפרסום נכשל: {}",
+    "Please log in to publish": "יש להתחבר כדי לפרסם",
+    "Add fragments before publishing": "הוסף קטעים לפני פרסום",
+    "Save the puzzle first": "שמור את הפאזל תחילה",
+    "Published Puzzles": "פאזלים שפורסמו",
+    "Puzzle Joins": "צירופי פאזל",
+    "Open in Puzzle": "פתח בפאזל",
+    "View Details": "הצג פרטים",
+    "Download Full Resolution": "הורד ברזולוציה מלאה",
+    "Could not fork join": "לא ניתן להעתיק צירוף",
+    "Fork failed: {}": "ההעתקה נכשלה: {}",
+    "Community Puzzle Joins": "צירופי פאזל קהילתיים",
+    "All Puzzles": "כל הפאזלים",
+    "My Puzzles": "הפאזלים שלי",
+    "Untitled": "ללא כותרת",
+    "{} puzzles": "{} פאזלים",
+    "Login required to view your puzzles": "יש להתחבר כדי לצפות בפאזלים שלך",
+    "Failed to load puzzles": "נכשל בטעינת פאזלים",
+    "Forked": "הועתק",
+    "Puzzle forked as document {}. Open Fragment Puzzle to view.": "הפאזל הועתק כמסמך {}. פתח פאזל קטעים לצפייה.",
+    "New: Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.":
+        "חדש: פאזל קטעים — צרו תמונת תצרף של כמה קטעי כתבי יד המהווים מסמך אחד. ערכו, שתפו ויצאו.",
+    "New: 38,673 Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries.":
+        "חדש: נוספו 38,673 כתבי יד מהגניזה — תמונות ומטא-נתונים לקטעים ללא תעתיקים. 255K+ רשומות מ-52 ספריות.",
+    "Fragment Puzzle: visual canvas for arranging manuscript fragments. Background removal, zoom, rotate, crop, folio navigation. Save as join documents with auto-save. Export composite PNG.":
+        "פאזל קטעים: קנבס חזותי לסידור קטעי כתבי יד. הסרת רקע, זום, סיבוב, חיתוך, ניווט דפים. שמירה כמסמכי צירוף עם שמירה אוטומטית. ייצוא תמונה מורכבת.",
+    "Community Publishing: share puzzle joins with the research community. Published joins appear in Discoveries with thumbnails. Fork and open any published join.":
+        "פרסום לקהילה: שתפו צירופי פאזל עם קהילת המחקר. צירופים שהתפרסמו מופיעים במרכז החידושים עם תמונות ממוזערות. העתקה ופתיחה של כל צירוף שהתפרסם.",
+    "Recto/Verso: automatic verso view from recto arrangement with correct verso images.":
+        "רקטו/ורסו: תצוגת ורסו אוטומטית מסידור הרקטו עם תמונות ורסו נכונות.",
+    "Fragment Selector: combobox with all canvas fragments and Browse button to open in browse view.":
+        "בורר קטעים: תיבת בחירה עם כל קטעי הקנבס וכפתור עיון לפתיחה בתצוגת הגלישה.",
+    "Select fragment": "בחר קטע",
+    "Select a fragment first": "בחר קטע תחילה",
+    "Browse this fragment": "עיין בקטע זה",
+    "No puzzles yet": "אין פאזלים עדיין",
+    "Login to see your puzzles": "יש להתחבר כדי לצפות בפאזלים שלך",
+    "Puzzle join hidden": "צירוף הפאזל הוסתר",
+    "Failed to hide: {}": "ההסתרה נכשלה: {}",
+    "Hide (admin)": "הסתר (מנהל)",
+    # Phase 52 — missing puzzle/community translations
+    "Save current work?": "לשמור עבודה נוכחית?",
+    "Save current puzzle before loading?": "לשמור פאזל נוכחי לפני טעינה?",
+    "Save current puzzle before starting new?": "לשמור פאזל נוכחי לפני התחלת חדש?",
+    "Save current puzzle before quitting?": "לשמור פאזל נוכחי לפני היציאה?",
+    "Discard": "אל תשמור",
+    "The last changes to this join could not be saved.": "השינויים האחרונים בצירוף זה לא נשמרו.",
+    "The puzzle could not be saved. It is still on the canvas.": "לא ניתן היה לשמור את הפאזל. הוא עדיין על הקנבס.",
+    "Auto-save failed: the latest changes to this join are not saved.":
+        "השמירה האוטומטית נכשלה: השינויים האחרונים בצירוף זה לא נשמרו.",
+    "Auto-save failed": "השמירה האוטומטית נכשלה",
+    "The latest changes to this join could not be saved. They are still on the canvas. Saving is tried again after your next change, and you will be asked before you leave this join.":
+        "השינויים האחרונים בצירוף זה לא נשמרו. הם עדיין על הקנבס. השמירה תנוסה שוב אחרי השינוי הבא, ולפני שתעזבו את הצירוף תישאלו מה לעשות בהם.",
+    "The join could not be renamed.": "לא ניתן היה לשנות את שם הצירוף.",
+    "Fragments whose images could not be loaded: {}. They stay in the join.":
+        "קטעים שתמונותיהם לא נטענו: {}. הם נשארים בצירוף.",
+    "image not loaded": "התמונה לא נטענה",
+    "The canvas is empty, so the saved join keeps its fragments. Title and notes were saved.":
+        "הקנבס ריק, ולכן הצירוף השמור שומר על הקטעים שלו. הכותרת וההערות נשמרו.",
+    "The canvas is empty. Save only the title and notes? The saved join keeps its fragments.":
+        "הקנבס ריק. לשמור רק את הכותרת וההערות? הצירוף השמור ישמור על הקטעים שלו.",
+    "Folio {} of this manuscript is already in the puzzle.": "הדף {} של כתב יד זה כבר נמצא בפאזל.",
+    "Delete fragments?": "למחוק קטעים?",
+    "Remove {} fragments from the puzzle?": "להסיר {} קטעים מהפאזל?",
+    "Fragment deleted. Press Ctrl+Z to undo.": "הקטע נמחק. לחצו Ctrl+Z כדי לבטל.",
+    "{} fragments deleted. Press Ctrl+Z to undo.": "נמחקו {} קטעים. לחצו Ctrl+Z כדי לבטל.",
+    "Nothing to undo": "אין מה לבטל",
+    "Save the puzzle before publishing": "שמרו את הפאזל לפני פרסום",
+    "Save First": "שמירה תחילה",
+    "No Fragments": "אין קטעים",
+    "Empty": "ריק",
+    "Are you sure you want to delete this join document?": "האם למחוק מסמך צירוף זה?",
+    "Delete join?": "למחוק צירוף?",
+    "New title:": "כותרת חדשה:",
+    "Join title": "כותרת צירוף",
+    "Notes and observations...": "הערות ותצפיות...",
+    "An export is already in progress": "ייצוא כבר מתבצע",
+    "Export Composite Image": "ייצוא תמונה מורכבת",
+    "Preparing export...": "מכין ייצוא...",
+    "Cancelling export...": "מבטל ייצוא...",
+    "Exported to": "יוצא אל",
+    "Export cancelled": "הייצוא בוטל",
+    "Unpublish": "ביטול פרסום",
+    "Remove this join from community view?": "להסיר צירוף זה מתצוגת הקהילה?",
+    "Published": "פורסם",
+    "Your puzzle join is now visible to the community": "צירוף הפאזל שלך נראה כעת לקהילה",
+    "Your puzzle join is no longer visible to the community": "צירוף הפאזל שלך אינו נראה עוד לקהילה",
+    "Added {} ({} folios)": "נוסף {} ({} דפים)",
+    "Failed to resolve images: {}": "נכשל בפענוח תמונות: {}",
+    "Failed to load image: {}": "נכשל בטעינת תמונה: {}",
+    "All joined fragments already on canvas": "כל הקטעים המצורפים כבר על הקנבס",
+    "Generating export...": "מייצר ייצוא...",
+    "Export ready": "הייצוא מוכן",
+    "Apply crop": "החל חיתוך",
+    "Revert crop": "בטל חיתוך",
+    "Crop edges of selected fragment": "חתוך קצוות של קטע נבחר",
+    "Show other side (recto/verso)": "הצג צד שני (רקטו/ורסו)",
+    "Flip all + mirror positions": "הפוך הכל + שיקוף מיקומים",
+    "Cycle background": "החלף רקע",
+    "Add from Known Joins": "הוסף מצירופים ידועים",
+    "Add from List": "הוסף מרשימה",
+    "Select list": "בחר רשימה",
+    "Empty list": "רשימה ריקה",
+    "Please log in to access lists": "יש להתחבר כדי לגשת לרשימות",
+    "Fragments": "קטעים",
+    "Puzzle Join": "צירוף פאזל",
+    "Could not load join details": "לא ניתן לטעון פרטי צירוף",
+    "OFF": "כבוי",
+    "by {}": "מאת {}",
+    "Could not fork puzzle join": "לא ניתן להעתיק צירוף פאזל",
+    "Join forked to local workspace. Open Fragment Puzzle to view it.": "הצירוף הועתק לסביבת העבודה המקומית. פתחו פאזל קטעים לצפייה.",
+    "Loading feed...": "טוען פיד...",
+    "Unpublishing...": "מבטל פרסום...",
+    "Original (V0.8)": "מקור (V0.8)",
+    "This will make your puzzle join visible to all users.\n\nPublish now?":
+        "פעולה זו תהפוך את צירוף הפאזל שלך לנראה לכל המשתמשים.\n\nלפרסם עכשיו?",
+    "(no original text)": "(אין טקסט מקורי)",
+    "View all joins...": "הצג את כל הצירופים...",
+    "No joined fragments found.": "לא נמצאו קטעים מצורפים.",
+    "Could not resolve fragment identifiers.": "לא ניתן לפענח מזהי קטעים.",
+
+    # --- Image Adjustment Controls ---
+    "Brightness": "בהירות",
+    "Contrast": "ניגודיות",
+    "Gamma": "גמא",
+    "Invert Colors": "הפוך צבעים",
+    "Reset Image": "איפוס תמונה",
+    "Image adjustment controls — brightness, contrast, gamma & invert on all image viewers. Better reading of difficult manuscripts.": "בקרות התאמת תמונה — בהירות, ניגודיות, גמא והיפוך צבעים בכל מציגי התמונות. קריאה טובה יותר של כתבי יד קשים.",
+    "Manuscript measurements — physical dimensions, margins, line counts & material now visible via Measurements button in browse. Plus 400K bibliography duplicates removed.": "מידות כתבי יד — מידות פיזיות, שוליים, מספר שורות וחומר זמינים כעת בלחצן מידות בעיון. בנוסף הוסרו 400 אלף כפילויות ביבליוגרפיות.",
+    "Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.": "חיפוש בתוך תוצאות — צמצום הדרגתי של תוצאות חיפוש על ידי הגבלת שאילתות המשך לכתבי היד שנמצאו.",
+    # Phase 55: Search within results
+    "Search within": "חפש בתוך",
+    "Searching within": "מחפש בתוך",
+    "manuscripts": "כתבי יד",
+    "Re-evaluating refinement...": "מעריך מחדש צמצום...",
+    "Restoring refinement chain...": "משחזר שרשרת צמצום...",
+    "Completing the cut-off results": "משלים את התוצאות שנקטעו",
+    "The search stopped after {minutes} minutes; showing the results found so far.": "החיפוש נעצר אחרי {minutes} דקות; מוצגות התוצאות שנמצאו עד כה.",
+    "Could not complete the cut-off results; searching within the shown ones.": "לא ניתן היה להשלים את התוצאות שנקטעו; החיפוש יתבצע בתוך התוצאות המוצגות.",
+    "Could not complete the cut-off results; the \"Only results with all terms\" filter was not applied.": "לא ניתן היה להשלים את התוצאות שנקטעו; המסנן \"רק תוצאות עם כל המונחים\" לא הוחל.",
+    "A search with a line break, or one that leaves matches across pages out, cannot be "
+    "completed; searching within the shown results.":
+        "לא ניתן להשלים חיפוש עם מעבר שורה, או חיפוש שמשאיר בחוץ התאמות החוצות עמודים; "
+        "החיפוש יתבצע בתוך התוצאות המוצגות.",
+    "Back to previous step": "חזרה לשלב הקודם",
+    "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
+    "0 results within current scope": "0 תוצאות בטווח הנוכחי",
+    "Only results with all terms": "רק תוצאות עם כל המונחים",
+    "0 results \u2014 no manuscripts match all terms": "0 תוצאות \u2014 אין כתבי יד התואמים לכל המונחים",
+    "New: Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.": "חדש: חיפוש בתוך תוצאות — צמצום הדרגתי של תוצאות חיפוש על ידי הגבלת שאילתות המשך לכתבי היד שנמצאו.",
+    'Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.': 'חיפוש בתוך תוצאות — לחצו "חפש בתוך N כתבי יד" כדי לצמצם חיפוש לכתבי היד שנמצאו. תומך בכל מצבי החיפוש.',
+    'Refinement chain — a tag strip shows all refinement steps. Click × to remove a step, or "Clear all" to reset.': 'שרשרת צמצום — פס תגיות מציג את כל שלבי הצמצום. לחצו × להסרת שלב, או "נקה הכל" לאיפוס.',
+    '"Only results with all terms" filter — a checkbox that shows only pages from manuscripts that appeared in all search steps.': 'מסנן "רק תוצאות עם כל המונחים" — תיבת סימון המציגה רק דפים מכתבי יד שהופיעו בכל שלבי החיפוש.',
+    'All chain terms highlighted — text snippets highlight terms from all refinement steps, not just the last one.': 'הדגשת כל מונחי השרשרת — קטעי טקסט מדגישים מונחים מכל שלבי הצמצום, לא רק מהאחרון.',
+
+    # --- Phase 56: Exclude Known Manuscripts ---
+    'Exclude manuscripts': 'החרג כתבי יד',
+    'Exclude known manuscripts': 'החרג כתבי יד מוכרים',
+    'From List': 'מרשימה',
+    'From File': 'מקובץ',
+    'From File / Manual': 'מקובץ / ידני',
+    'Paste Shelfmarks': 'הדבק מספרי מדף',
+    'Paste shelfmarks, one per line. Lines starting with # are ignored.': 'הדבק מספרי מדף, אחד בכל שורה. שורות המתחילות ב-# יתעלמו.',
+    'Pasted shelfmarks': 'מספרי מדף שהודבקו',
+    'Excluded manuscripts': 'כתבי יד שהוחרגו',
+    'manuscripts excluded': 'כתבי יד הוחרגו',
+    'excluded by': 'הוחרג על ידי',
+    'Select a list first': 'בחר רשימה תחילה',
+    'Upload a file first': 'העלה קובץ תחילה',
+    'No shelfmarks entered': 'לא הוזנו מספרי מדף',
+    'No shelfmarks found in file': 'לא נמצאו מספרי מדף בקובץ',
+    'no matches found': 'לא נמצאו התאמות',
+    'not found': 'לא נמצא',
+    'duplicates': 'כפולים',
+    'Resolved': 'אותרו',
+    'resolved': 'אותרו',
+    'Resolve Shelfmarks': 'אתר מספרי מדף',
+    'Log in to use saved lists': 'התחבר כדי להשתמש ברשימות שמורות',
+    'Lists not available': 'רשימות לא זמינות',
+    'Lists not available (not logged in)': 'רשימות לא זמינות (לא מחובר)',
+    'No lists found': 'לא נמצאו רשימות',
+    'Load from File': 'טען מקובץ',
+    'Load to Editor': 'טען לעורך',
+    'Load selected list items into the editor tab so you can review and modify them': 'טען את פריטי הרשימה שנבחרו לעורך כדי שתוכל לעיין ולערוך אותם',
+    'Select lists to exclude their manuscripts:': 'בחר רשימות להחרגת כתבי היד שלהן:',
+    "Select a list and click 'Load to Editor' to add its manuscripts to the exclusion list.": "בחר רשימה ולחץ 'טען לעורך' כדי להוסיף את כתבי היד שלה לרשימת ההחרגה.",
+    'Previous session': 'שיחה קודמת',
+    'Manual entry': 'הזנה ידנית',
+    'Resolve entered shelfmarks and show per-row status report': 'אתר מספרי מדף שהוזנו והצג דו"ח סטטוס לכל שורה',
+    'Shelf map not available': 'מפת מספרי מדף לא זמינה',
+    'No shelfmarks to resolve': 'אין מספרי מדף לאיתור',
+    'Exclude specific manuscripts by shelfmark or system ID': 'החרג כתבי יד ספציפיים לפי מספר מדף או מספר מערכת',
+    'Remove all exclusions': 'הסר את כל ההחרגות',
+    'Select all': 'בחר הכל',
+    'New: Search within results to narrow your search. Exclude known manuscripts from results via lists, files, or pasted shelfmarks.': 'חדש: חיפוש בתוך תוצאות לצמצום החיפוש. החרגת כתבי יד מוכרים מתוצאות באמצעות רשימות, קבצים או מספרי מדף.',
+    'New: Visual Similarity — discover related manuscripts by image analysis. Search within results to narrow your search. Exclude known manuscripts from results.': 'חדש: חיפוש בתוך תוצאות, החרגת כתבי יד מוכרים מהחיפוש, ודמיון חזותי - עיון וחיפוש בכתבי יד דומים לפי האלגוריתם החזותי של פרויקט פרידברג',
+    'New: Search within results, exclude known manuscripts from search, and Visual Similarity — browse and search similar manuscripts using FJMS visual analysis.': 'חדש: חיפוש בתוך תוצאות, החרגת כתבי יד מוכרים מהחיפוש, ודמיון חזותי - עיון וחיפוש בכתבי יד דומים לפי האלגוריתם החזותי של פרויקט פרידברג',
+    'New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts.': 'חדש: עיון בכרכים שונים בכתבי יד מרובי סריקות — תיקון התאמת תמונות לתעתוק, והצעות דמיון חזותי לגילוי כתבי יד קשורים.',
+    'New: Public Search API — programmatic access to search, browse, and parallels for researchers and AI tools. See the API section in the README.': 'חדש: ממשק API ציבורי — גישה פרוגרמטית לחיפוש, עיון, והקבלות לחוקרים ולכלי AI. ראו את חלק ה-API בקובץ README.',
+    # v7.14.0 What's New (My Library — Local Document Search) — web banner
+    'New feature in desktop app: My Library — index your own .docx / .pdf / .txt files and search them alongside the Genizah corpus': 'חדש בגרסת שולחן העבודה: הספרייה שלי — סרקו קבצי .docx / .pdf / .txt משלכם וחפשו בהם לצד תעתיקי הגניזה',
+    # v7.14.0 What's New — desktop bar + dialog
+    'New: My Library — index your own documents and search them alongside the Genizah corpus.': 'חדש: הספרייה שלי — סרקו את המסמכים שלכם וחפשו בהם לצד תעתיקי הגניזה.',
+    "My Library: new desktop tab that indexes your own .docx, .pdf, and .txt files into a private side-index. Your documents never leave your machine.": 'הספרייה שלי: לשונית חדשה הסורקת קבצי .docx, .pdf ו־.txt משלכם לאינדקס פרטי. המסמכים נשארים אצלכם במחשב.',
+    "Scope your search two ways: pre-search dropdown (Genizah / Local / All) next to the Search button, and post-search filter (Filter Local / Only Local / No Local) on Search, Composition Search, and Parallels.": 'שתי דרכים להגדיר היכן לחפש: תפריט נפתח לצד כפתור החיפוש (גניזה / מקומי / הכול) וכפתור סינון אחרי החיפוש (סנן מקומי / רק מקומי / ללא מקומי) בכרטיסיות החיפוש, הצירופים והמקבילות.',
+    "LOCAL hits show inline with a blue badge. Double-click opens the text with an Open File button. Inspired by Yehuda Seewald's GenizahLocal prototype.": 'תוצאות מקומיות מופיעות עם תג כחול. לחיצה כפולה פותחת את הטקסט עם כפתור "פתח קובץ". בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.',
+    # v7.13.0 What's New (Research-Grade Export & Polish)
+    'New: improved Excel downloads, transcription line numbers, PGP filter': 'חדש: הורדות אקסל משופרות, מספור שורות בתעתיקים, סינון לפי PGP',
+    # v7.9.2 What's New (PGP data refresh)
+    'Updated PGP data, catalog sources for 30,000 manuscripts, and Cambridge image alignment.': 'עדכון נתוני PGP, מקורות קטלוג ל-30,000 כתבי יד, ויישור תמונות קיימברידג\'.',
+    'Updated Princeton Geniza Project (PGP) data — hundreds of new documents, transcriptions, and scholarly footnotes.': 'עדכון נתוני פרויקט הגניזה של פרינסטון \u200E(PGP)\u200E — מאות מסמכים, תעתיקים והפניות מדעיות חדשים.',
+    'Catalog dialog — about 30,000 manuscripts that previously showed empty dialogs now display proper sources (GRU Cambridge, Schocken-Zulay, Fleischer Piyut Project, and more).': 'דיאלוג קטלוג — כ-30,000 כתבי יד שהציגו דיאלוג ריק מציגים כעת מקורות: GRU קיימברידג\', שוקן-זולאי, פרויקט פיוטי פליישר ועוד.',
+    'Bug fixes for navigation and image display on Cambridge and JTS manuscripts.': 'תיקון באגים הנוגעים לניווט והצגה של תמונות מקמברידג\' וJTS.',
+    # v7.11.1 What's New (CUDL synthetic manuscripts on desktop)
+    'Additional Cambridge CUDL manuscripts are now available with images and information.': 'כתבי יד נוספים מקטלוג קיימברידג\' זמינים כעת עם תמונות ומידע',
+    '108 manuscripts from the Cambridge CUDL catalog that did not previously appear in the app — because they have no record in the National Library of Israel catalog — are now available for viewing. You can see images, catalog, and bibliographic information (including T-S NS 329.96 and about 100 others).': '108 כתבי-יד מקטלוג ‎CUDL‎ של ספריית קיימברידג\', שלא הופיעו עד כה באפליקציה כיוון שאין להם רשומה בקטלוג הספרייה הלאומית, זמינים כעת לעיון. ניתן לראות תמונות, קטלוג ומידע ביבליוגרפי (כולל ‎T-S NS 329.96‎ וכמאה נוספים).',
+    'Automatic recognition of alternative shelfmark forms for manuscripts from the Mosseri collection and other collections. Shelfmark search now finds thousands of manuscripts that previously could not be found due to differences in writing convention.': 'זיהוי אוטומטי של שמות חלופיים לכתבי יד מאוסף מוצרי ומאוספים אחרים. חיפוש מספר מדף מאתר כעת אלפי כתבי יד שקודם לא נמצאו בגלל הבדלים בקונוונציית הכתיבה.',
+    'Bug fix in submitting user comments on manuscripts.': 'תיקון באג בשליחת הערות משתמש על כתבי יד.',
+    # v7.13.0 What's New (Research-Grade Export & Polish) — desktop bar + dialog
+    'New: improved Excel downloads and transcription line numbers.': 'חדש: הורדות אקסל משופרות ומספור שורות בתעתיקים.',
+    "Excel downloads are now a 4-sheet research workbook: Search Results, Manuscripts, Bibliography, and Credits and Info. Includes full text plus links to library viewers and images.": 'הורדות אקסל הופכות לחוברת מחקרית בת 4 גיליונות: תוצאות חיפוש, כתבי יד, ביבליוגרפיה וקרדיטים ומידע. כולל טקסט מלא וקישורים לצפייה בספרייה ולתמונות.',
+    "Line numbering in transcriptions: when viewing a manuscript, line numbers appear beside the text. Toggle via the '# Lines' button.": "מספור שורות בתעתיקים: בעיון בכתב יד מופיעים מספרי שורות לצד הטקסט. ניתן להפעיל ולכבות בכפתור '# שורות'.",
+    "Bug fix: when merging lists between the website and the desktop app, items no longer duplicate in the desktop app. Pre-existing duplicates from past syncs clean up automatically on the next sync.": "תוקן באג: בעת מיזוג רשימות בין האתר לתוכנה, פריטים אינם משוכפלים עוד בתוכנה. כפילויות קיימות מסנכרונים קודמים יתאחדו אוטומטית בסנכרון הבא.",
+    'Volume-Aware Browse — manuscripts with multiple microfilm scans now show a volume selector. This fixes a bug where images did not match the transcription text. Each volume displays its own images and text, with navigation that stays within the active volume.': 'עיון מודע כרכים — כתבי יד עם מספר סריקות מיקרופילם מציגים כעת בורר כרכים. תיקון באג שבו התמונות לא התאימו לטקסט התעתוק. כל כרך מציג את התמונות והטקסט שלו, עם ניווט שנשאר בתוך הכרך הפעיל.',
+    'Visual Similarity — a new button in Browse shows similar manuscripts based on the FJMS (Friedberg Genizah Project) visual analysis algorithm, with similarity score, domain, and library. You can search within the suggestions or add to puzzle.': 'דמיון חזותי — כפתור חדש בעיון מציג כתבי יד דומים על בסיס אלגוריתם הניתוח החזותי של פרויקט פרידברג (FJMS), עם ציון דמיון, תחום וספרייה. ניתן לחפש בתוך ההצעות או להוסיף לפאזל.',
+    'Visual Similarity — a new button in Browse shows similar manuscripts from the Friedberg Project visual algorithm, with similarity score, domain, and library. You can search within the suggestions or add to puzzle.': 'דמיון חזותי — כפתור חדש בדפדוף מציג כתבי יד דומים לפי האלגוריתם החזותי של פרויקט פרידברג, עם ציון דמיון, תחום וספרייה. ניתן לחפש בתוך ההצעות או להוסיף לפאזל.',
+    'Auto-default to available images — when NLI images are unavailable, the system automatically loads from Manchester, Cambridge, or JTS sources.': 'מעבר אוטומטי לתמונות זמינות — כאשר תמונות הספרייה הלאומית אינן זמינות, המערכת טוענת אוטומטית ממנצ\'סטר, קיימברידג\' או JTS.',
+    'Volume-aware community data — corrections and comments are now tagged per volume, so notes on Volume 2 only appear when browsing Volume 2.': 'נתוני קהילה מודעי כרכים — תיקונים והערות מתויגים כעת לפי כרך, כך שהערות על כרך 2 מופיעות רק בעיון בכרך 2.',
+    'Exclude known manuscripts — hide manuscripts you already reviewed from results. Choose from saved lists, upload a file, or paste shelfmarks.': 'החרגת כתבי יד — הסתירו כתבי יד שכבר סקרתם מתוצאות החיפוש. בחרו מרשימות שמורות, העלו קובץ או הדביקו מספרי מדף.',
+    'Exclude known manuscripts — hide known manuscripts from search results. Choose from saved lists, upload a file, or paste shelfmarks.': 'החרגת כתבי יד מוכרים — הסתירו כתבי יד ידועים מתוצאות החיפוש. בחרו מרשימות שמורות, העלו קובץ, או הדביקו סימני מדף.',
+    'Resolution report — before applying exclusions, see per-row status: found, not found, or duplicate.': 'דו"ח איתור — לפני ההחרגה, צפו בסטטוס לכל שורה: נמצא, לא נמצא, כפול.',
+    'WYSIWYG export — Excel, CSV, and Word exports include only visible (non-excluded) manuscripts.': 'ייצוא WYSIWYG — ייצוא לאקסל, CSV או Word כולל רק כתבי יד גלויים.',
+    'items': 'פריטים',
+    # Phase 57: Visual Similarity translations
+    'Visual Similarity': 'דמיון חזותי',
+    'No visual similarity suggestions': 'אין הצעות דמיון חזותי',
+    'No visual similarity suggestions are available for this manuscript.': 'אין הצעות דמיון חזותי זמינות עבור כתב יד זה.',
+    'Could not load visual similarity data. Try again later.': 'לא ניתן לטעון נתוני דמיון חזותי. נסה שוב מאוחר יותר.',
+    'Loading visual similarity suggestions...': 'טוען הצעות דמיון חזותי...',
+    'Visual similarity suggestions from FJMS image analysis': 'הצעות דמיון חזותי מניתוח תמונות של פרידברג',
+    'Search in visual suggestions': 'חפש בהצעות דמיון חזותי',
+    'Browse suggestions': 'עיין בהצעות',
+    'Search within suggestions': 'חפש בתוך ההצעות',
+    'Union (any manuscript)': 'איחוד (כל כתב יד)',
+    'Intersection (all manuscripts)': 'חיתוך (כל כתבי היד)',
+    'Download full visual similarity database': 'הורד מסד נתוני דמיון חזותי מלא',
+    'Browse manuscript': 'עיין בכתב יד',
+    'Add to puzzle': 'הוסף לפאזל',
+    'Visual Similarity results for': 'תוצאות דמיון חזותי עבור',
+    'Has visual suggestions': 'יש הצעות דמיון חזותי',
+    'Visual similarity partners': 'שותפים לדמיון חזותי',
+    'Rank': 'דירוג',
+    'Sort': 'מיון',
+    'Could not load data': 'לא ניתן לטעון נתונים',
+    'suggestions': 'הצעות',
+    'Sort by:': 'מיון לפי:',
+    'Search restricted to visual suggestions for': 'חיפוש מוגבל להצעות חזותיות עבור',
+    'Clear VS restriction': 'נקה הגבלת דמיון חזותי',
+    'Downloading...': 'מוריד...',
+    'Download complete': 'ההורדה הושלמה',
+    'Download failed': 'ההורדה נכשלה',
+    'Insufficient disk space': 'אין מספיק מקום בדיסק',
+    'Checksum mismatch': 'אי-התאמה בסכום ביקורת',
+    'Visual suggestions for': 'הצעות חזותיות עבור',
+    'Visual similarity data is not available locally. Please download the database from Settings.': 'נתוני דמיון חזותי אינם זמינים מקומית. אנא הורד את מסד הנתונים מההגדרות.',
+    'No visual suggestions found for this manuscript.': 'לא נמצאו הצעות דמיון חזותי לכתב יד זה.',
+    'Add as Join': 'הוסף כצירוף',
+    'Pick from visual suggestions': 'בחר מהצעות דמיון חזותי',
+    # Phase 57: Visual Similarity dialog enrichment (web)
+    'Original manuscript': 'כתב יד מקורי',
+    'Show details': 'הצג פרטים',
+    'No image available': 'אין תמונה זמינה',
+    'No text available': 'אין טקסט זמין',
+    'Show more': 'הצג עוד',
+    'remaining': 'נותרו',
+    'from visual similarity': 'מדמיון חזותי',
+    # Phase 999.1 (FOLIO-01): tooltip for the per-card image-number chip after the shelfmark
+    'Image number': 'מספר תמונה',
+
+    # Phase 95 — MyLibraryTab UI strings (Bug 2 fix)
+    "My Library": "הספרייה שלי",
+    "Indexed folders:": "תיקיות באינדקס:",
+    "File status:": "סטטוס קבצים:",
+    "Add Folder…": "הוסף תיקייה…",
+    "Select folder to index": "בחר תיקייה לאינדקס",
+    "Folder already covered": "תיקייה כבר מכוסה",
+    "Already registered": "כבר רשום",
+    "This folder is already registered.": "תיקייה זו כבר רשומה.",
+    "My Library Error": "שגיאה בספרייה המקומית",
+    "Remove folder": "הסר תיקייה",
+    "Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.": "להסיר את '{}' מהספרייה המקומית?\n\nכל הקבצים שאינדוקסו בתיקייה זו יוסרו מתוצאות החיפוש.",
+    "Remove failed": "ההסרה נכשלה",
+    "Add folder — pre-scan": "הוסף תיקייה — סריקה מוקדמת",
+    "Refresh — pre-scan": "רענן — סריקה מוקדמת",
+    "Too large (>100 MB)": "גדול מדי (>100 מ\"ב)",
+    "Suspicious archive": "ארכיון חשוד",
+    "Index size: — / — free": "גודל אינדקס: — / — פנוי",
+    "⚠ low merge headroom": "⚠ מעט מקום למיזוג",
+    "Scanning folder — please wait…": "סורק תיקייה — נא להמתין…",
+    "Filename": "שם קובץ",
+    "Files: {:,}": "קבצים: {:,}",
+    "Total size: {}": "גודל כולל: {}",
+    "Performance may degrade. Do you want to continue?": "הביצועים עלולים להיפגע. האם להמשיך?",
+    "Adding folder '{}' will index {:,} files ({}).": "הוספת תיקייה '{}' תאנדקס {:,} קבצים ({}).",
+    "Refreshing {:d} folder(s) will index {:,} files total ({}).": "רענון {:d} תיקיות יאנדקס {:,} קבצים בסך הכול ({}).",
+    "Folder not found at {} — files remain indexed from last scan.": "תיקייה לא נמצאה ב-{} — הקבצים ממשיכים להיות מאונדקסים מהסריקה האחרונה.",
+    "Cancelled": "בוטל",
+    "Encoding error": "שגיאת קידוד",
+    "Corrupt encoding": "קידוד פגום",
+    "No text layer": "אין שכבת טקסט",
+    "Unsupported": "לא נתמך",
+    "Indexed LOCAL file — no extracted text available. Use 'Open file' to view the original.": "קובץ מאונדקס — אין טקסט מחולץ זמין. השתמש ב'פתח קובץ' לצפייה במקור.",
+    "Local file": "קובץ מקומי",
+    "Open file": "פתח קובץ",
+    "Open this file with the default application (LOCAL documents only)": "פתח קובץ זה עם היישום ברירת המחדל (מסמכים מקומיים בלבד)",
+    # v7.16 — "Open file location" / "Copy file location" (LOCAL file actions)
+    "Open file location": "פתח את מיקום הקובץ",
+    "Copy file location": "העתק את מיקום הקובץ",
+    "Copy filename": "העתק שם קובץ",
+    "Open the containing folder and select this file": "פתח את התיקייה המכילה ובחר את הקובץ",
+    "Open the containing folder and select this file (LOCAL documents only)": "פתח את התיקייה המכילה ובחר את הקובץ (מסמכים מקומיים בלבד)",
+    "Last scan: {} new files indexed, {} up to date": "סריקה אחרונה: {} קבצים חדשים אונדקסו, {} מעודכנים",
+    # Phase 96 D-F1 — opt-out tree widget UI strings
+    "File status & opt-outs:": "סטטוס קבצים ואפשרויות ביטול:",
+    "Folder contents": "תכולת תיקייה",
+    # v7.16 BUG-5 — per-folder opt-out checkbox in the My Library folders list
+    "Uncheck to exclude this whole folder from search": "בטלו את הסימון כדי להחריג את כל התיקייה מהחיפוש",
+    # Phase 97.2 R97.2-E — Reset My Library bilingual strings (registered
+    # for tr() callers; the confirm dialog body uses inline EN/HE branching
+    # per CURRENT_LANG since the QLineEdit accepts both literal tokens).
+    "Reset My Library": "אפס את הספרייה המקומית",
+    "Stop or resolve the active scan first": "עצור או פתור את הסריקה הפעילה תחילה",
+    "Delete all LOCAL index data and start fresh": "מחק את כל המידע של הספרייה המקומית והתחל מחדש",
+    # 2026-05-28 — "Re-index All" forces re-extraction of every committed file
+    # to pick up extractor improvements (e.g. RTL word-order + intra-block
+    # newline collapse fixes shipped in Phase 101). Goes through the normal
+    # background worker so it stays cancellable and progress-tracked.
+    "Re-index All": "אנדקס מחדש הכל",
+    "Re-extract all indexed files? This may take a while on large libraries.": "לאנדקס מחדש את כל הקבצים? פעולה זו עלולה לקחת זמן רב בספריות גדולות.",
+    "Confirm re-index": "אישור אינדוקס מחדש",
+    "Nothing to re-index": "אין מה לאנדקס מחדש",
+    "Force re-extraction of every indexed file": "כפה אינדוקס מחדש של כל הקבצים",
+}
+
+# === Tier-3 i18n coverage (added 2026-06-01, pre-release i18n audit) ===
+# Strings previously absent from TRANSLATIONS so Hebrew users saw English (and a
+# few where English users saw Hebrew). Added via .update() to avoid editing the
+# 2,700-key literal above. See docs/OPEN_ISSUES.md "Pre-existing i18n coverage gaps".
+TRANSLATIONS.update({
+    # --- Lists / Projects (web project_tree, add_to_list_dialog) ---
+    "(No project - standalone)": "(ללא פרויקט - עצמאי)",
+    "Add to project (optional)": "הוסף לפרויקט (אופציונלי)",
+    "Color is inherited from project, or gold for standalone lists.": "הצבע נורש מהפרויקט, או זהב לרשימות עצמאיות.",
+    "Color will be inherited from the project, or gold for standalone lists.": "הצבע יירש מהפרויקט, או זהב לרשימות עצמאיות.",
+    "In List": "ברשימה",
+    "Create project": "צור פרויקט",
+    "Create Project": "צור פרויקט",
+    "Standalone Lists": "רשימות עצמאיות",
+    "No lists yet": "אין רשימות עדיין",
+    "Create a project or list to get started": "צור פרויקט או רשימה כדי להתחיל",
+    "No lists in this project": "אין רשימות בפרויקט זה",
+    "Projects group related lists together. Color is assigned automatically.": "פרויקטים מקבצים יחד רשימות קשורות. הצבע מוקצה אוטומטית.",
+    "Please enter a project name": "אנא הזן שם פרויקט",
+    "Project created": "הפרויקט נוצר",
+    "Failed to create project": "יצירת הפרויקט נכשלה",
+    "Project renamed to": "שם הפרויקט שונה ל-",
+    "Failed to rename project": "שינוי שם הפרויקט נכשל",
+    "List renamed to": "שם הרשימה שונה ל-",
+    "Failed to rename list": "שינוי שם הרשימה נכשל",
+    "Delete Project?": "למחוק פרויקט?",
+    "This project has": "לפרויקט זה יש",
+    "Also delete all lists in this project": "מחק גם את כל הרשימות בפרויקט זה",
+    "If unchecked, lists will become standalone.": "אם לא מסומן, הרשימות יהפכו לעצמאיות.",
+    "Project deleted": "הפרויקט נמחק",
+    "Failed to delete project": "מחיקת הפרויקט נכשלה",
+    "Failed to delete list": "מחיקת הרשימה נכשלה",
+    "Failed to update list": "עדכון הרשימה נכשל",
+    "Project": "פרויקט",
+
+    # --- Corrections / Discoveries / Comments ---
+    "Error submitting report": "שגיאה בשליחת הדיווח",
+    "My Pending Corrections": "התיקונים הממתינים שלי",
+    "Correction published": "התיקון פורסם",
+    "Correction updated": "התיקון עודכן",
+    "Could not load correction details": "לא ניתן לטעון את פרטי התיקון",
+    "Please login to submit corrections": "אנא התחבר כדי לשלוח תיקונים",
+    "Notes about your correction": "הערות על התיקון שלך",
+    "Rejected by reviewer": "נדחה על ידי הבודק",
+    "Voting feature coming soon": "תכונת ההצבעה בקרוב",
+    "Delete Correction?": "למחוק תיקון?",
+    "Loading your edits...": "טוען את העריכות שלך...",
+    "Loading your comments...": "טוען את ההערות שלך...",
+    "Login / Register": "התחברות / הרשמה",
+    "Login to submit comments": "התחבר כדי לשלוח הערות",
+    "Please login first": "אנא התחבר תחילה",
+    "User not found": "המשתמש לא נמצא",
+    "Delete Discovery": "מחק תגלית",
+    "Are you sure you want to delete this discovery?": "האם אתה בטוח שברצונך למחוק תגלית זו?",
+    "Are you sure you want to delete this discovery? This cannot be undone.": "האם אתה בטוח שברצונך למחוק תגלית זו? לא ניתן לבטל פעולה זו.",
+    "Discovery pinned": "התגלית ננעצה",
+    "Discovery hidden": "התגלית הוסתרה",
+    "Discovery unhidden": "הסתרת התגלית בוטלה",
+    "Discovery unpinned": "נעיצת התגלית בוטלה",
+    "Comments for": "הערות עבור",
+    "replies": "תגובות",
+    "Title and description are required": "יש להזין כותרת ותיאור",
+    "Your correction has been submitted for review": "התיקון שלך נשלח לבדיקה",
+    "Issue": "בעיה",
+    "(no corrected text)": "(אין טקסט מתוקן)",
+
+    # --- Reading Desk ---
+    "Add current manuscript to Reading Desk": "הוסף את כתב היד הנוכחי לשולחן העיון",
+    "Add to Desk": "הוסף לשולחן",
+    "Add to Reading Desk": "הוסף לשולחן העיון",
+    "Add to View": "הוסף לתצוגה",
+    "Already in Reading Desk": "כבר בשולחן העיון",
+    "All items already in Reading Desk": "כל הפריטים כבר בשולחן העיון",
+    "Exit Reading Desk": "צא משולחן העיון",
+    "Open in Reading Desk": "פתח בשולחן העיון",
+    "Reading Desk": "שולחן עיון",
+    "added to Reading Desk": "נוסף לשולחן העיון",
+
+    # --- Browse / image controls ---
+    "Add Notes": "הוסף הערות",
+    "Add by shelfmark...": "הוסף לפי מספר מדף...",
+    "Fullscreen Edit": "עריכה במסך מלא",
+    "Fullscreen Image": "תמונה במסך מלא",
+    "Close fullscreen (Esc)": "סגור מסך מלא (Esc)",
+    "Reset View": "אפס תצוגה",
+    "Reset view": "אפס תצוגה",
+    "Reset adjustments": "אפס התאמות",
+    "Rotate Left": "סובב שמאלה",
+    "Rotate Right": "סובב ימינה",
+    "Rotate left": "סובב שמאלה",
+    "Rotate right": "סובב ימינה",
+    "Rotate Left 90": "סובב שמאלה 90°",
+    "Rotate Right 90": "סובב ימינה 90°",
+    "Next image": "התמונה הבאה",
+    "Previous image": "התמונה הקודמת",
+    "Show original title": "הצג כותרת מקורית",
+    "Part Title": "כותרת החלק",
+    "No text for this page": "אין טקסט לעמוד זה",
+    "View Cambridge images": "צפה בתמונות קיימברידג׳",
+    "View JTS images": "צפה בתמונות JTS",
+    "View Manchester images": "צפה בתמונות מנצ׳סטר",
+    "View NLI images": "צפה בתמונות הספרייה הלאומית",
+    "View Oxford images": "צפה בתמונות אוקספורד",
+    "Viewing Cambridge images": "מציג תמונות קיימברידג׳",
+    "Viewing JTS images": "מציג תמונות JTS",
+    "Viewing Manchester images": "מציג תמונות מנצ׳סטר",
+    "Viewing NLI images": "מציג תמונות הספרייה הלאומית",
+    "Viewing Oxford images": "מציג תמונות אוקספורד",
+    "Open in Manchester LUNA": "פתח ב-Manchester LUNA",
+    "Open in Princeton Digital Library": "פתח בספריית פרינסטון הדיגיטלית",
+    "Open in external library website": "פתח באתר הספרייה החיצוני",
+
+    # --- Search / variant / filter controls ---
+    "Select which corpus to search": "בחר באיזה מאגר לחפש",
+    "Regex: Advanced pattern matching": "Regex: התאמת תבניות מתקדמת",
+    "Variant intensity: more pairs = more results but slower": "עוצמת וריאנטים: יותר זוגות = יותר תוצאות אך איטי יותר",
+    "Total estimated variants for all words in query": "סך הווריאנטים המשוערים לכל המילים בשאילתה",
+    "Max character changes per word (1-3)": "מקסימום שינויי תווים למילה (1-3)",
+    "Letter changes per word at this level (1-3)": "שינויי אותיות למילה ברמה זו (1-3)",
+    "Filter results by physical measurements (post-search)": "סנן תוצאות לפי מידות פיזיות (לאחר החיפוש)",
+    "Variant search (uses slider level)": "חיפוש וריאנטים (משתמש ברמת המחוון)",
+    "Variant intensity": "עוצמת וריאנטים",
+    "Number of variant pairs to use. Higher = more substitutions but slower search.\nBased on frequency: top pairs are most common HTR confusions.": "מספר זוגות הווריאנטים לשימוש. גבוה יותר = יותר תחליפים אך חיפוש איטי יותר.\nמבוסס על תדירות: הזוגות המובילים הם בלבולי ה-HTR הנפוצים ביותר.",
+    "Use Dynamic Corpus Stats (HTR-Aware)": "השתמש בסטטיסטיקת מאגר דינמית (מודעת HTR)",
+    "Analyzes the corpus to detect and penalize HTR errors (e.g., if 'Tet' appears 4x more than expected, it is treated as noise). Saves a report to Reports folder.": "מנתח את המאגר כדי לזהות ולקנוס שגיאות HTR (לדוגמה, אם 'טית' מופיעה פי 4 מהצפוי, היא נחשבת לרעש). שומר דוח בתיקיית הדוחות.",
+    "Subject Domain": "תחום נושא",
+    "Filter domains...": "סנן תחומים...",
+    "Date Range": "טווח תאריכים",
+    "Counting...": "סופר...",
+    "No manuscripts match": "אין כתבי יד תואמים",
+    "All manuscripts (no filters)": "כל כתבי היד (ללא סינון)",
+    "From": "מ-",
+    "To": "עד",
+    "Normalized": "מנורמל",
+    "Click to remove this filter": "לחץ כדי להסיר סינון זה",
+    "Active exclusions": "החרגות פעילות",
+    "Removed": "הוסר",
+    "All exclusions cleared": "כל ההחרגות נוקו",
+    "Excluded {} manuscripts from results": "הוחרגו {} כתבי יד מהתוצאות",
+    "No word search exclusions to import": "אין החרגות מחיפוש מילים לייבוא",
+    "Imported": "יובא",
+    "Selected: 0": "נבחרו: 0",
+    "Clear All Exclusions": "נקה את כל ההחרגות",
+    "Re-running search from history": "מריץ מחדש חיפוש מההיסטוריה",
+    "Re-running composition from history": "מריץ מחדש חיבור מההיסטוריה",
+    "sources": "מקורות",
+
+    # --- List cloud-sync dialog (desktop) ---
+    "Could not load cloud lists. You can still upload your local lists.": "לא ניתן לטעון רשימות מהענן. עדיין ניתן להעלות את הרשימות המקומיות שלך.",
+    "Your account has lists in the cloud. How would you like to sync?": "בחשבונך יש רשימות בענן. כיצד תרצה לסנכרן?",
+    "Upload your local lists to the cloud?": "להעלות את הרשימות המקומיות שלך לענן?",
+    "Local Lists (this device)": "רשימות מקומיות (מכשיר זה)",
+    "No local lists": "אין רשימות מקומיות",
+    "Cloud Lists (your account)": "רשימות בענן (החשבון שלך)",
+    "No cloud lists": "אין רשימות בענן",
+    "Download from Cloud": "הורד מהענן",
+    "Add cloud lists to this device (keeps both)": "הוסף רשימות מהענן למכשיר זה (שומר את שתיהן)",
+    "Upload to Cloud": "העלה לענן",
+    "Push local lists to your account": "דחוף רשימות מקומיות לחשבונך",
+    "Merge Both": "מזג את שתיהן",
+    "Download cloud AND upload local (combine everything)": "הורד מהענן וגם העלה מקומי (שלב הכול)",
+    "Skip": "דלג",
+    "Don't download from your account now. Uploads continue: until you log out or close the program, your lists are uploaded to your account after each change.":
+        "לא להוריד מהחשבון כעת. ההעלאות נמשכות: עד שתתנתק או תסגור את התוכנה, הרשימות יועלו לחשבונך אחרי כל שינוי.",
+    "Syncing lists...": "מסנכרן רשימות...",
+    "Sync": "סנכרן",
+    "Sync Complete": "הסנכרון הושלם",
+    "Sync Error": "שגיאת סנכרון",
+    "Downloaded {lists} lists and {items} items from cloud.": "הורדו {lists} רשימות ו-{items} פריטים מהענן.",
+    "Uploaded {lists} lists and {items} items to cloud.": "הועלו {lists} רשימות ו-{items} פריטים לענן.",
+    "Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.": "הרשימות מוזגו בהצלחה! הורדו {dl} רשימות, הועלו {ul} רשימות.",
+    "Your lists on this computer could not be backed up, so nothing was downloaded. Check that the data folder can be written to, then try again.":
+        "לא ניתן היה לגבות את הרשימות שבמחשב הזה, ולכן לא הורד דבר. יש לוודא שאפשר לכתוב לתיקיית הנתונים, ולנסות שוב.",
+    "The cloud lists were downloaded, but the upload failed: {}": "הרשימות מהענן הורדו, אבל ההעלאה נכשלה: {}",
+    # Result lines about notes, each with its count, under the dialog's message (success or failure)
+    "Notes that differ between this computer and your account: {}. They were left as they are; Merge Both keeps both versions.":
+        "הערות שונות בין המחשב הזה לחשבונך: {}. הן נשארו כפי שהן; 'מזג את שתיהן' ישמור את שתי הגרסאות.",
+    "Notes that differed between this computer and your account: {}. Both versions were kept; the account's text is under the line \"--- {} ---\".":
+        "הערות שהיו שונות בין המחשב הזה לחשבונך: {}. שתי הגרסאות נשמרו; הנוסח מהחשבון מופיע מתחת לשורה \"--- {} ---\".",
+    "Tags that differed between this computer and your account: {}. The tags from both were kept.":
+        "תגיות שהיו שונות בין המחשב הזה לחשבונך: {}. התגיות משניהם נשמרו.",
+    "Notes too long to update safely in your account: {}. They were not changed there and are kept on this computer.":
+        "הערות ארוכות מכדי לעדכן אותן בבטחה בחשבונך: {}. הן לא שונו שם ונשמרות במחשב הזה.",
+    # ...the same while lists.pkl cannot be saved, when nothing is kept on this computer
+    "Notes too long to update safely in your account: {}. They were not changed there.":
+        "הערות ארוכות מכדי לעדכן אותן בבטחה בחשבונך: {}. הן לא שונו שם.",
+    # List sync off the UI thread: the preview, progress and cancel lines
+    "Checking the lists in your account...": "בודק את הרשימות בחשבונך...",
+    "Waiting for the list sync that is already running...": "ממתין לסיום סנכרון הרשימות שכבר פועל...",
+    "Downloading list {} of {}...": "מוריד רשימה {} מתוך {}...",
+    "Uploading list {} of {}...": "מעלה רשימה {} מתוך {}...",
+    "Removing entries from your account...": "מסיר פריטים מחשבונך...",
+    "List sync cancelled. Nothing was changed on this computer.": "סנכרון הרשימות בוטל. דבר לא שונה במחשב הזה.",
+    "Upload stopped. The rest of your changes are saved on this computer but have not reached your account yet.":
+        "ההעלאה נעצרה. שאר השינויים שמורים במחשב הזה, אבל עדיין לא הגיעו לחשבונך.",
+    "The cloud lists were downloaded, but the upload was stopped. The rest of your changes are saved on this computer but have not reached your account yet.":
+        "הרשימות מהענן הורדו, אבל ההעלאה נעצרה. שאר השינויים שמורים במחשב הזה, אבל עדיין לא הגיעו לחשבונך.",
+    "Some notes differ from your account and were not uploaded. To keep both versions, use Sync lists now, then Merge Both.":
+        "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. כדי לשמור את שתי הגרסאות, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן'.",
+    # The Lists tab's button, its tooltip, and its tooltip while logged out
+    "Sync lists now": "סנכרן רשימות עכשיו",
+    "Download, upload or merge your lists with your account on genizahsearch.com":
+        "הורדה, העלאה או מיזוג של הרשימות עם החשבון שלך באתר genizahsearch.com",
+    "Log in to sync your lists with your account": "יש להתחבר כדי לסנכרן את הרשימות עם החשבון שלך",
+    # The website-removal prompt (desktop/lists_web_removals_dialog.py) and the line after it
+    "Entries removed on the website": "פריטים שהוסרו באתר",
+    "These entries were removed from your lists on genizahsearch.com. They are still on this computer, and until you choose they stay here and are not uploaded again.":
+        "הפריטים האלה הוסרו מהרשימות שלך באתר genizahsearch.com. הם עדיין במחשב הזה, ועד שתבחר הם יישארו כאן ולא יועלו שוב.",
+    "Decide later": "להחליט אחר כך",
+    "Remove from this computer too": "להסיר גם מהמחשב הזה",
+    "Keep it (and add it back on the website)": "להשאיר (ולהוסיף שוב לאתר)",
+    "Remove all from this computer too": "להסיר את כולם גם מהמחשב הזה",
+    "Keep all (and add them back on the website)": "להשאיר את כולם (ולהוסיף שוב לאתר)",
+    "Choice": "בחירה",
+    "Removed from their lists on this computer: {}. To be added back on the website: {}.":
+        "הוסרו מהרשימות במחשב הזה: {}. יתווספו שוב לאתר: {}.",
+    # A restored log-in at startup whose preview failed (offline): status bar
+    "Could not reach your account to check the lists. List sync stays on; Sync lists now tries again.":
+        "לא ניתן היה להתחבר לחשבונך כדי לבדוק את הרשימות. סנכרון הרשימות נשאר פעיל; 'סנכרן רשימות עכשיו' ינסה שוב.",
+    # Log-out: the corner button while it runs, and the notice's paragraphs
+    "Logging out...": "מתנתק...",
+    "These lists were not uploaded before you logged out: {}. Your changes to them are saved on this computer and are uploaded after you next log in.":
+        "הרשימות האלה לא הועלו לפני שהתנתקת: {}. השינויים בהן שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "Your latest list changes were not uploaded before you logged out. They are saved on this computer and are uploaded after you next log in.":
+        "השינויים האחרונים ברשימות לא הועלו לפני שהתנתקת. הם שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "List sync was not on in this session, so your list changes were not uploaded. They are saved on this computer and are uploaded after you next log in.":
+        "סנכרון הרשימות לא פעל בהפעלה הזו, ולכן השינויים ברשימות לא הועלו. הם שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "Some notes differ from your account and were not uploaded. They are kept on this computer; after you next log in, use Sync lists now, then Merge Both, to keep both versions.":
+        "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. הן נשמרות במחשב הזה; אחרי שתתחבר שוב, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן' כדי לשמור את שתי הגרסאות.",
+    "Your lists cannot be saved on this computer at the moment ({} cannot be written). List changes that did not reach your account before you logged out are lost if you close the program before the file can be saved again.":
+        "לא ניתן לשמור כרגע את הרשימות במחשב הזה (לא ניתן לכתוב את {}). שינויים ברשימות שלא הגיעו לחשבונך לפני שהתנתקת יאבדו אם תסגור את התוכנה לפני שיהיה אפשר לשמור את הקובץ שוב.",
+    # The sync choice dialog's list rows: "• <name> (<n> items)", and "... and <k> more"
+    "{} ({} items)": "{} ({} פריטים)",
+    "... and {} more": "ועוד {}...",
+    # The label between a note's two versions after a Download or Merge: "--- from the cloud ---"
+    "from the cloud": "מהענן",
+    # The sync layer's own messages (shared/lists_sync.py, shared/lists_manager.py)
+    "Sync already in progress": "סנכרון כבר מתבצע",
+    "Sync not available": "הסנכרון אינו זמין",
+    "No Supabase client": "אין חיבור לשרת הענן",
+    "Cloud sync not available": "הסנכרון לענן אינו זמין",
+    "Unknown error": "שגיאה לא ידועה",
+    "Sync stopped": "הסנכרון נעצר",
+    "Uploaded {} item(s), but {} failed to upload to the cloud.": "הועלו {} פריטים, אבל {} לא הועלו לענן.",
+    # lists.pkl could not be read at startup (desktop notice)
+    "Lists restored from a backup": "הרשימות שוחזרו מגיבוי",
+    "Your saved lists could not be read, so they were restored from a backup saved on {}. Changes made after that may be missing. The unreadable file is kept as {} in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. ייתכן ששינויים שנעשו אחרי מועד זה חסרים. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
+    "Lists could not be loaded": "לא ניתן היה לטעון את הרשימות",
+    "Your saved lists could not be read and no readable backup was found, so your lists are empty. The unreadable file is kept as {} in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
+    # ...and lists.pkl could not even be copied aside, so no save can replace it
+    "Lists cannot be saved": "לא ניתן לשמור את הרשימות",
+    "Your saved lists could not be read, so they were restored from a backup saved on {}. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
+    "Your saved lists could not be read and no readable backup was found, so your lists are empty. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
+    # ...and a save during the session did not reach lists.pkl
+    "Your lists could not be saved to {} in:\n{}\n\nChanges you make now may be lost until the file can be written. Another program may be using it or one of its backup files (.bak). Each later change tries again and saves everything once it succeeds.\n\nDetails: {}":
+        "לא ניתן היה לשמור את הרשימות בקובץ {} בתיקייה:\n{}\n\nשינויים שייעשו עכשיו עלולים ללכת לאיבוד עד שניתן יהיה לכתוב את הקובץ. ייתכן שתוכנה אחרת משתמשת בו או באחד מקובצי הגיבוי שלו (.bak). כל שינוי נוסף ינסה לשמור שוב, וכשהשמירה תצליח יישמר הכול.\n\nפרטים: {}",
+    "Your lists are not being saved: changes may be lost until {} can be written.":
+        "הרשימות אינן נשמרות: שינויים עלולים ללכת לאיבוד עד שניתן יהיה לכתוב את {}.",
+
+    # --- Data-update notification (desktop) ---
+    "New research data available:": "נתוני מחקר חדשים זמינים:",
+    "Total download:": "סך ההורדה:",
+    "Download now?": "להוריד עכשיו?",
+    "Data Update Available": "עדכון נתונים זמין",
+    "Update Complete": "העדכון הושלם",
+    "Research data has been updated. New data will be used immediately.": "נתוני המחקר עודכנו. הנתונים החדשים ישמשו באופן מיידי.",
+
+    # --- Export ---
+    "Excel export requires the 'openpyxl' package. Install it with: pip install openpyxl": "ייצוא ל-Excel דורש את החבילה 'openpyxl'. התקן אותה באמצעות: pip install openpyxl",
+    "Word export requires the 'python-docx' package. Install it with: pip install python-docx": "ייצוא ל-Word דורש את החבילה 'python-docx'. התקן אותה באמצעות: pip install python-docx",
+    "Domain enrichment is still running. Exporting now will produce empty Domains cells. Continue?": "העשרת התחומים עדיין פועלת. ייצוא כעת יפיק תאי תחומים ריקים. להמשיך?",
+    "Domain enrichment pending": "העשרת תחומים ממתינה",
+    "Main Results": "תוצאות עיקריות",
+    "Appendix - Grouped": "נספח - מקובץ",
+    "None": "ללא",
+    "Completed in": "הושלם תוך",
+    "{} cross-paragraph matches": "{} התאמות חוצות-פסקה",
+    "{} fragments in cluster, {} joins (PGP)": "{} קטעים באשכול, {} צירופים (PGP)",
+
+    # --- Misc desktop / web ---
+    "Admin": "ניהול",
+    "Copy full citation": "העתק ציטוט מלא",
+    "Dark theme": "ערכת נושא כהה",
+    "Light theme": "ערכת נושא בהירה",
+    "Parchment theme": "ערכת נושא קלף",
+    "Switch language": "החלף שפה",
+    "Open navigation menu": "פתח תפריט ניווט",
+    "Toggle sidebar": "הצג/הסתר סרגל צד",
+    "February 2025": "פברואר 2025",
+    "Document not found": "המסמך לא נמצא",
+    "Document not found: {}": "המסמך לא נמצא: {}",
+    "No Shelfmark": "אין מספר מדף",
+    "Could not determine shelfmark for this document.": "לא ניתן לקבוע מספר מדף למסמך זה.",
+    "No PGP sources available for this fragment.": "אין מקורות PGP זמינים לקטע זה.",
+    "Version Selector": "בורר גרסה",
+    "Select Version": "בחר גרסה",
+    "Choose a text version for {}:": "בחר גרסת טקסט עבור {}:",
+    "No folios found for this Part.": "לא נמצאו דפים עבור חלק זה.",
+    "End of Parts in this volume.": "סוף החלקים בכרך זה.",
+    "Loading catalog data...": "טוען נתוני קטלוג...",
+    "Corrections not available": "תיקונים אינם זמינים",
+    "Corrections cannot be added to synthetic-row manuscripts (FJMS-only inventories without NLI Alma records). This restriction is tracked for a future release.": "לא ניתן להוסיף תיקונים לכתבי יד מסוג שורה סינתטית (רשומות FJMS בלבד ללא רשומות Alma של הספרייה הלאומית). הגבלה זו מתועדת לקראת גרסה עתידית.",
+    "Img {}": "תמונה {}",
+    "My Library filter inactive — no LOCAL hits in this query": "מסנן הספרייה שלי אינו פעיל — אין תוצאות מקומיות בשאילתה זו",
+    "Index size: {} / {} free": "גודל אינדקס: {} / {} פנוי",
+    "Meas.": "מידות",
+    "Open the source file in the default OS application": "פתח את קובץ המקור ביישום ברירת המחדל של מערכת ההפעלה",
+    "No document ID": "אין מזהה מסמך",
+    "No shelfmark available": "אין מספר מדף זמין",
+    "Shelfmark not found: {}": "מספר מדף לא נמצא: {}",
+    "Failed to change password": "שינוי הסיסמה נכשל",
+    "Bib": "ביבל׳",
+    "Cat": "קטלוג",
+    "Result": "תוצאה",
+    "Recent": "אחרונים",
+    "Recent items not available": "פריטים אחרונים אינם זמינים",
+    "Please select a fragment": "אנא בחר קטע",
+    "No text preview available": "אין תצוגה מקדימה של טקסט זמינה",
+    "Show less": "הצג פחות",
+    "Show text preview": "הצג תצוגה מקדימה של טקסט",
+    "Trash not available": "סל המחזור אינו זמין",
+    "List deleted permanently": "הרשימה נמחקה לצמיתות",
+    "List restored": "הרשימה שוחזרה",
+    "No items selected": "לא נבחרו פריטים",
+    "manuscripts added": "כתבי יד נוספו",
+    "Session expired. Please log out and log back in, then try again.": "פג תוקף ההתחברות. אנא התנתק והתחבר מחדש, ואז נסה שוב.",
+    "Please login to save drafts": "אנא התחבר כדי לשמור טיוטות",
+    "Please login to save": "אנא התחבר כדי לשמור",
+    "Please login to submit": "אנא התחבר כדי לשלוח",
+    "Refresh page to see changes": "רענן את הדף כדי לראות שינויים",
+    "Parameters for composition/parallel search using the Shmidman-Koppel-Porat algorithm.": "פרמטרים לחיפוש חיבור/מקבילות באמצעות אלגוריתם שמידמן-קופל-פורת.",
+    "Visual Similarity Database": "מסד נתוני דמיון חזותי",
+    "Unnamed": "ללא שם",
+
+    # --- Near-miss reuses (case/punctuation variants of existing keys) ---
+    "Add list": "הוסף רשימה",
+    "Add shelfmark...": "הוסף מספר מדף...",
+    "Affiliation": "שיוך מוסדי",
+    "Any": "הכול",
+    "Author:": "מחבר:",
+    "Create list": "צור רשימה",
+    "Exit Fullscreen": "צא ממסך מלא",
+    "From Year": "משנה",
+    "To Year": "עד שנה",
+    "Hide Image": "הסתר תמונה",
+    "Show Image": "הצג תמונה",
+    "Next Page": "עמוד הבא",
+    "Previous Page": "עמוד קודם",
+    "No items": "אין פריטים",
+    "Not Found": "לא נמצא",
+    "Please login to add a comment": "אנא התחבר כדי להוסיף תגובה",
+    "Please login to edit": "אנא התחבר כדי לערוך",
+    "Project Name": "שם הפרויקט",
+    "Status:": "סטטוס:",
+    "Unsaved": "לא נשמר",
+    "Variant Pairs Level:": "רמת זוגות וריאנטים:",
+    "Zoom In": "הגדל",
+    "Zoom Out": "הקטן",
+    "users": "משתמשים",
+})
+
+# Hebrew library display names (keyed by library_code)
+LIBRARY_CODES_HE = {
+    'CUL': 'ספריית אוניברסיטת קיימברידג׳',
+    'JTS': 'בית המדרש לרבנים של אמריקה',
+    'RNL': 'הספרייה הלאומית של רוסיה',
+    'Oxford': 'ספריות הבודליאנה, אוניברסיטת אוקספורד',
+    'Manchester': 'ספריית אוניברסיטת מנצ׳סטר',
+    'BL': 'הספרייה הבריטית',
+    'AIU': 'כל ישראל חברים',
+    'Westminster': 'מכללת ווסטמינסטר',
+    'Freer': 'גלריית פריר לאמנות',
+    'Mosseri': 'אוסף מוצרי',
+    'Gaster': 'אוסף גסטר',
+    'Katz': 'מרכז כ״ץ',
+    'Halper': 'קטלוג הלפר',
+    'HUC': 'ספריית המכון העברי',
+    'HAS': 'ספריית האקדמיה ההונגרית למדעים',
+    'Vienna': 'הספרייה הלאומית של אוסטריה',
+    'Strasbourg': 'הספרייה הלאומית והאוניברסיטאית של שטרסבורג',
+    'InstFrance': 'ספריית מכון צרפת',
+    'Warsaw': 'הקהילה היהודית של ורשה',
+    'ASL': 'האקדמיה למדעים ולספרות',
+    'Schoeyen': 'אוסף שויין',
+    'Harkavy': 'אוסף הרכבי',
+    'Combs': 'אוסף קומבס',
+    'Lehnardt': 'אוסף להנרדט',
+    'Allony': 'אוסף אלוני',
+    'Boesky': 'אוסף בוסקי',
+    'Bisno': 'אוסף ביסנו',
+    'UPenn': 'אוניברסיטת פנסילבניה',
+    'BnF': 'הספרייה הלאומית של צרפת',
+    'Toronto': 'ספריית אוניברסיטת טורונטו',
+    'Dropsie': 'מכללת דרופסי',
+    'Princeton': 'ספריית אוניברסיטת פרינסטון',
+    'Columbia': 'ספריית אוניברסיטת קולומביה',
+    'Harvard': 'ספריית אוניברסיטת הרווארד',
+    'Yale': 'ספריית אוניברסיטת ייל',
+    'Rylands': 'ספריית ג׳ון ריילנדס',
+    'Senckenberg': 'ספריית אוניברסיטת יוהאן כריסטיאן זנקנברג (פרנקפורט)',
+    'Geneva': 'ספריית ז׳נבה',
+    'Munich': 'ספריית המדינה הבוורית (מינכן)',
+    'BNF': 'הספרייה הלאומית של צרפת',
+    'RSL': 'ספריית המדינה הרוסית',
+    'SBB': 'ספריית המדינה של ברלין',
+    'Birmingham': 'ספריית אוניברסיטת בירמינגהם',
+    'Heidelberg': 'ספריית אוניברסיטת היידלברג',
+    'Turin': 'ספריית המחקר המזרחני, טורינו',
+    'Basel': 'ספריית אוניברסיטת באזל',
+    'IOM': 'המכון לכתבי יד מזרחיים (סנט פטרבורג)',
+    'Leeds': 'ספריית אוניברסיטת לידס',
+    'Chetham': 'ספריית צ׳תהם (מנצ׳סטר)',
+    'Wellcome': 'ספריית וולקאם',
+    'TCD': 'טריניטי קולג׳ דבלין',
+    'TAU': 'ספריית אוניברסיטת תל אביב',
+    'Haifa': 'ספריית אוניברסיטת חיפה',
+    'BenZvi': 'מכון בן צבי',
+    'Schocken': 'מכון שוקן למחקר יהדות',
+    'BarIlan': 'ספריית אוניברסיטת בר אילן',
+    'NLI': 'הספרייה הלאומית של ישראל',
+    'UChicago': 'ספריית אוניברסיטת שיקגו',
+    'McGill': 'ספריית אוניברסיטת מקגיל',
+    'Duke': 'ספריות אוניברסיטת דיוק',
+    'YU': 'ספריית אוניברסיטת ישיבה',
+    'UMich': 'ספריית אוניברסיטת מישיגן',
+    'Sassoon': 'אוסף ששון',
+    'Wallach': 'אוסף וולך',
+    'Lutzki': 'אוסף לוצקי',
+    'Adler': 'אוסף אדלר',
+    'Lehmann': 'קרן מנפרד ואן להמן',
+    'JCBerlin': 'הקהילה היהודית של ברלין',
+    'JCErfurt': 'הקהילה היהודית של ארפורט',
+    'AllonyLoew': 'קטלוג אלוני-לוינגר',
+    'AllonyKupf': 'קטלוג אלוני-קופר',
+    'Benayahu': 'אוסף בניהו',
+    'Nahum': 'אוסף יהודה נחום',
+    'Salmon': 'אוסף חוה סלמון',
+    'Sofer': 'אוסף דוד סופר',
+    'Shapira': 'אוסף ברנרד שפירא',
+    'Weiss': 'אוסף סטיב וייס',
+    'Karp': 'אוסף אברהם קרפ',
+    'Goldsmith': 'מוזיאון גולדסמית',
+    'SOS': 'החברה האורתודוקסית הנפרדת',
+    'MotB': 'מוזיאון התנ״ך',
+    # Phase 53: New codes for FIST gap records
+    'Solomon': 'אוסף שלמה הלברשטם',
+    'Reinach': 'אוסף ריינך',
+    'Vatican': 'ספריית הוותיקן',
+    'Mehlman': 'אוסף מהלמן',
+    'CentralArch': 'הארכיון המרכזי לתולדות העם היהודי',
+    'JCMainz': 'הקהילה היהודית של מיינץ',
+    'Corwin': 'אוסף קורווין',
+    # Phase 95 D-13 — My Library namespace (LOCAL sys_ids start with 97).
+    'LOCAL': 'הספרייה שלי',
+}
+
+# === Phase 107 — Join Workbench i18n (CLOSED set for Plans 01/02/03) ===
+# 11 NEW keys. "Add as Join" is REUSED (already at genizah_translations.py:3226) — NOT in this block.
+TRANSLATIONS.update({
+    # --- UI labels (Plan 01 helpers + Plan 02 window + Plan 03 entry points) ---
+    "Find joins":       "מצא צירופים",
+    "Joins Lab":        "מעבדת צירופים",
+    "ANCHOR":           "עוגן",
+    "Known Joins":      "צירופים ידועים",
+    "Make anchor":      "הגדר כעוגן",
+    "Known join":       "צירוף ידוע",
+    "Open fragment":    "פתח קטע",
+    "Enter shelfmark…": "הזן מספר מדף…",
+    # --- helper / panel strings introduced by Plan 02 (bootstrapped HERE, used there) ---
+    "img":              "תמונה",                       # meta_brief image-count unit (Plan 02 Task 1)
+    "Could not load joins. Click to retry.": "לא ניתן לטעון צירופים. לחץ לניסיון חוזר.",  # known-joins retry affordance (Plan 02 Task 3, REC-2)
+    "No manuscript found for '{}'": "לא נמצא כתב יד עבור '{}'",  # cold-start no-match (Plan 02 Task 3)
+    # --- Phase 107 UAT follow-up (left-pane joins panel + puzzle multi-add) ---
+    "Add selected to puzzle": "הוסף נבחרים לפאזל",
+    "Joins context":          "הקשר הצירופים",
+    "No lists available":     "אין רשימות זמינות",
+})
+
+# === Phase 108-02 — JoinQueryBuilder i18n (Plan 02 builder widget) ===
+# All new tr() keys introduced by JoinQueryBuilder in desktop/join_workbench.py.
+TRANSLATIONS.update({
+    # --- Row controls ---
+    "+ or":                  "+ או",
+    "+ Add Line":            "+ הוסף שורה",
+    "Add another single word that may appear INSTEAD (OR) on this same line":
+        "הוסף מילה נוספת שיכולה להופיע במקום (OR) על אותה שורה",
+    "Add an OR alternative to this line":
+        "הוסף חלופת OR לשורה זו",
+    "Add another manuscript line to the query":
+        "הוסף שורת כתב יד נוספת לשאילתה",
+    "Remove row":            "הסר שורה",
+    "Remove this OR alternative": "הסר חלופת OR זו",
+    "ends line ⊣":           "מסיים שורה ⊣",
+    "The LAST word must be at the END of the line (left edge in Hebrew) — a torn line ending":
+        "המילה האחרונה חייבת להיות בסוף השורה (קצה שמאל בעברית) — שורה קרועה בסופה",
+    "⊢ starts line":         "⊢ מתחיל שורה",
+    "The FIRST word must be at the START of the line (right edge in Hebrew) — a torn line beginning":
+        "המילה הראשונה חייבת להיות בתחילת השורה (קצה ימין בעברית) — שורה קרועה בתחילתה",
+    "Lines to skip before the next line (0 = the very next line)":
+        "שורות לדלג לפני השורה הבאה (0 = השורה הבאה ממש)",
+    "↓ ":                    "↓ ",
+    " ln":                   " שורות",
+
+    # --- Variants / global options ---
+    "variants":              "וריאנטים",
+    "Expand spelling variants (responsa variant expansion)":
+        "הרחב וריאנטים כתיביים (הרחבת וריאנטים של פרויקט השו\"ת)",
+
+    # --- New global Search options button + dialog (Phase 108 redesign) ---
+    "Search options ▾":     "אפשרויות חיפוש ▾",
+    "Global search options (variants, Judeo-Arabic, flex spacing, bidirectional)":
+        "אפשרויות חיפוש גלובליות (וריאנטים, ערבית-יהודית, רווח גמיש, דו-כיווני)",
+    "Search options":        "אפשרויות חיפוש",
+    "Expand spelling variants": "הרחב וריאנטים כתיביים",
+
+    # --- Per-row ⚙ line options dialog (Phase 108 redesign) ---
+    "Line options":          "אפשרויות שורה",
+    "Line options (modifiers, starts/ends line)":
+        "אפשרויות שורה (מאפיינים, התחלת/סיום שורה)",
+    "Wildcard-prefix disabled for multi-box OR lines":
+        "תחילית ג'וקר מושבתת לשורות OR עם תיבות מרובות",
+    "⊣ ends line":           "⊣ מסיים שורה",
+    "The FIRST word must be at the START of the line (right edge in Hebrew)":
+        "המילה הראשונה חייבת להיות בתחילת השורה (קצה ימין בעברית)",
+    "The LAST word must be at the END of the line (left edge in Hebrew)":
+        "המילה האחרונה חייבת להיות בסוף השורה (קצה שמאל בעברית)",
+
+    # --- ⓘ typed-sign legend tooltip (real multi-line legend; replaced placeholder) ---
+    "Type signs directly in a word box:\n  #word — grammatical prefixes\n  word# — grammatical suffixes\n  %word — plene/defective spelling\n  *word / word* — wildcard\n  −word — exclude\n(the same options are available via the line's ⚙)":
+        "הקלד סימנים ישירות בתיבת המילה:\n  #מילה — קידומות דקדוקיות\n  מילה# — סיומות דקדוקיות\n  %מילה — כתיב מלא/חסר\n  *מילה / מילה* — ג'וקר\n  −מילה — שלילה\n(אותן אפשרויות זמינות דרך ⚙ בשורה)",
+
+    # --- Modifier row (PER-ROW — legacy, kept for backward compat) ---
+    "(modifiers apply to the focused line)":
+        "(המאפיינים חלים על השורה הממוקדת)",
+    "Wildcard-prefix can't apply to an OR group — use it on a single-word line":
+        "ג'וקר-תחילי לא חל על קבוצת OR — השתמש בו על שורה עם מילה אחת",
+
+    # --- Page-position control (anchor side, RR-5) ---
+    "page: anywhere":        "עמוד: בכל מקום",
+    "page: start of text":   "עמוד: תחילת הטקסט",
+    "page: end of text":     "עמוד: סוף הטקסט",
+    "Match must fall at the START or END of the page text (like the main search). Realizes the page-anchored first/last line.":
+        "ההתאמה חייבת להיות בתחילת או סוף הטקסט בעמוד (כמו בחיפוש הרגיל). מממשת שורה ראשונה/אחרונה מעוגנת לעמוד.",
+
+    # --- Preview ---
+    "Preview:":              "תצוגה מקדימה:",
+    "(query preview — fill in at least one word box)":
+        "(תצוגה מקדימה של השאילתה — מלא לפחות תיבת מילה אחת)",
+    "(page anchor needs a non-empty anchored line)":
+        "(עיגון עמוד דורש שורה מעוגנת עם תוכן)",
+
+    # --- Placeholder ---
+    "word(s) on this line…":           "מילה/ות בשורה זו…",
+    "word(s) required on the OTHER side…": "מילה/ות נדרשת בצד השני…",
+    "or…":                   "או…",
+    "word…":                 "מילה…",
+})
+
+# === Phase 108-03 — JoinCandidatePane / CandidateCard i18n (Plan 03 candidate surface) ===
+# All new tr() keys introduced by workers, pane, and cards in desktop/join_workbench.py.
+TRANSLATIONS.update({
+    # --- Image/thumb states ---
+    "loading…":         "טוען…",     # loading…
+    "(no image)":            "(אין תמונה)",  # (אין תמונה)
+
+    # --- CandidateCard triage + action buttons ---
+    "Mark yes":              "סמן כן",     # סמן כן
+    "Mark maybe":            "סמן אולי",   # סמן אולי
+    "Mark no":               "סמן לא",     # סמן לא
+    "Compare":               "השווה",      # השווה
+    "Re-anchor":             "עגן מחדש",   # עגן מחדש
+    "Compare side-by-side with anchor":
+        "השווה זה לצד עם העוגן",
+    "Set this candidate as the new anchor":
+        "הגדר מועמד זה כעוגן חדש",
+
+    # --- CandidateCard provenance badges ---
+    "  ⚓ self":         "  ⚓ עצמו",    # ⚓ עצמו
+    "  ⇄ other side":   "  ⇄ צד שני",   # ⇄ צד שני
+
+    # --- CandidateCard dimension/material labels ---
+    "⚠ size mismatch":  "⚠ אי-התאמת גודל",  # same words as the website (owner, 2026-10-18)
+    "Size may not match anchor":
+        "ייתכן שהגודל אינו תואם לעוגן",
+
+    # --- CandidateCard action row ---
+    "Browse":                "עיין",             # עיין
+    "Puzzle":                "פאזל",             # פאזל
+    "List":                  "רשימה",       # רשימה
+    "Add as Join":           "הוסף כצירוף",  # הוסף כצירוף
+    # Icon-only button tooltips (Phase 108 redesign)
+    "Add to Puzzle (with anchor)":  "הוסף לפאזל (עם עוגן)",
+    "Add to list":                  "הוסף לרשימה",
+    "Select this candidate":        "בחר מועמד זה",
+
+    # --- JoinCandidatePane section tag ---
+    "THIS SIDE — find candidate pages matching, line by line (hunt the MISSING continuation):":
+        "צד זה — מצא עמודים מתאימים, שורה אחר שורה (חפש את ההמשך חסר):",
+
+    # --- Other-side collapsible ---
+    "Also constrain the OTHER side of the leaf (adjacent image p+/-1):":
+        "הגבל גם את הצד השני (תמונה סמוכה p±1):",
+    # Relabeled in Phase 108 redesign (adapted_decision 11)
+    "search also on the other side of the leaf (p ±1)":
+        "חפש גם בצד השני של הדף (p ±1)",
+    "AND narrows: only candidates whose adjacent page ALSO matches. OR widens: include adjacent pages as extra candidates.":
+        "AND מצמצם: רק מועמדים שהעמוד הסמוך שלהם גם תואם. OR מרחיב: כלול עמודים סמוכים כמועמדים נוספים.",
+    # Feature 6 (Polish 3): Latin-free combo items + tooltip
+    "Narrow: keep only candidates whose adjacent page also matches. Widen: include adjacent pages as extra candidates.":
+        "צמצום: שמור רק מועמדים שהעמוד הסמוך שלהם גם תואם. הרחבה: כלול עמודים סמוכים כמועמדים נוספים.",
+    "Narrow":                "צמצום",
+    "Widen":                 "הרחבה",
+    "word(s) on this line…":   "מילה/ות בשורה זו…",
+
+    # --- Source selector ---
+    "Include anchor itself": "כלל את העוגן עצמו",
+    "Find Candidates":       "מצא מועמדים",
+    "Visual similarities":   "דמיון חזותי",
+    "Search + visual":       "חיפוש + חזותי",
+    "Visual similarity candidates — arrives in Phase 109":
+        "מועמדים בדמיון חזותי — יגיע בשלב 109",
+    "Visual source (coming soon)":
+        "מקור חזותי (בקרוב)",
+    "Combined source (coming soon)":
+        "מקור משולב (בקרוב)",
+    "Text source (active)":  "מקור טקסט (פעיל)",
+
+    # --- Refine bar ---
+    "Filter by shelfmark, text, or title…":
+        "סנן לפי מספר מדף, טקסט או כותר…",
+    "any material":          "כל חומר",
+    "any library":           "כל ספרייה",
+    "any domain":            "כל תחום",
+    # Joins Lab Domain filter: show only the chosen domains, or hide them
+    "Show only":             "הצג רק",
+    "Has dimensions":        "יש מידות",
+    "all triage":            "כל סיווג",
+    "Y — kept":         "Y — נשמר",
+    "? — maybe":        "? — אולי",
+    "N — dismissed":    "N — נדחה",
+    "untriaged":             "ללא סיווג",
+    "Size filter":           "סנן גודל",
+    "min width (cm)":        "רוחב מינימאלי (ס\"מ)",
+    "max width (cm)":        "רוחב מקסימאלי (ס\"מ)",
+
+    # --- Status / view toggle / pagination ---
+    "Build a line-by-line query, then Find Candidates.":
+        "בנה שאילתה שורה-אחר-שורה, אחר מצא מועמדים.",
+    "Table view":            "תצוגת טבלה",
+    "Grid view":             "תצוגת רשת",
+    "working…":         "עובד…",
+    "shown":                 "מוצגים",
+    # Feature 7 (Polish 3): RTL-correct glyphs — Prev points right, Next points left
+    "Prev →":           "→ קודם",
+    "← Next":           "הבא ←",
+
+    # --- Self-match readout (D-15 — kept for backward compat) ---
+    "⚓ anchor matches this query ✓  ·  ":
+        "⚓ העוגן תואם שאילתה זו ✓  ·  ",
+    "⚓ anchor does NOT match this query ✗  ·  ":
+        "⚓ העוגן אינו תואם שאילתה זו ✗  ·  ",
+
+    # --- Table headers ---
+    "Shelfmark":             "מספר מדף",
+    "Score":                 "ציון",
+    "Snippet":               "קטע",
+    "Material":              "חומר",
+    "Dimensions":            "מידות",
+    "Source":                "מקור",
+    "Page":                  "עמוד",
+
+    # --- Phase 108 redesign: anchor pane icon-only tooltips (adapted_decision 14) ---
+    "Browse this fragment":  "עיין בקטע זה",
+    "Add anchor to a Puzzle": "הוסף עוגן לפאזל",
+    "Add anchor to a list":  "הוסף עוגן לרשימה",
+    "Start a join from this anchor": "התחל צירוף מעוגן זה",
+
+    # --- Phase 108 redesign: results toolbar + Filter dialog + bulk bar ---
+    "Browse results ▶":      "◀ עיין בתוצאות",
+    "Open Browse results compare window":
+        "פתח חלון השוואה לעיון בתוצאות",
+    "Filter ▾":              "סנן ▾",
+    # The Filter button with how many filters are on (.format(n=N))
+    "Filter ({n}) ▾":        "סנן ({n}) ▾",
+    "Open filter dialog":    "פתח תיבת סינון",
+    "Filter candidates":     "סנן מועמדים",
+    "Current fragment":      "קטע נוכחי",
+    "match material":        "התאם חומר",
+    "width ±2 cm of anchor": "רוחב ±2 ס\"מ מהעוגן",
+    "Filter by width (cm)":  "סנן לפי רוחב (ס\"מ)",
+    "min":                   "מינ",
+    "max":                   "מקס",
+    # The note under "Filter by width (cm)": the filter also hides every fragment with
+    # no width, even at the full 0-200 range (wording chosen by the owner, 2026-10-27)
+    "With this on, fragments with no recorded width are hidden too.":
+        "כשהסינון פעיל, מוסתרים גם קטעים שאין להם רוחב רשום.",
+    "Reset":                 "איפוס",
+    "Triage":                "סיווג",  # already exists but safe duplicate
+
+    # --- Bulk bar ---
+    "selected":              "נבחרו",
+    "Browse — select exactly one":
+        "עיין — בחר בדיוק אחד",
+    "Add all to Puzzle (with anchor)":
+        "הוסף הכל לפאזל (עם עוגן)",
+    "Add all to list":       "הוסף הכל לרשימה",
+    "Add as join — select exactly one":
+        "הוסף כצירוף — בחר בדיוק אחד",
+    "✕ clear":               "✕ נקה",
+
+    # --- Open-compare stub ---
+    "TODO: open_compare stub (Plan 04 will implement CompareDialog)":
+        "TODO: פעולת השוואה (תוכנן בשלב 104)",
+})
+
+# === Phase 108-04 — CompareDialog i18n (Plan 04 two-pane compare) ===
+# All new tr() keys introduced by CompareDialog in desktop/join_workbench.py.
+TRANSLATIONS.update({
+    # --- Navigation buttons (Feature 7: RTL-correct glyphs) ---
+    # Round-4 UAT: buttons are forced LTR so the stored string renders verbatim. Per Hillel:
+    # prev (right) = "<הקודם" (arrow before word); next (left) = "הבא>" (arrow after the word).
+    "prev >":                     "<הקודם",
+    "Previous candidate":         "מועמד קודם",
+    "< next":                     "הבא>",
+    "Next candidate":             "מועמד הבא",
+
+    # --- Triage buttons (emoji + label) ---
+    "Y yes":                      "Y כן",
+    "? maybe":                    "? אולי",
+    "N no":                       "N לא",
+
+    # --- Action row ---
+    "📖 Browse":                  "📖 עיין",
+    "🧩 Puzzle":                  "🧩 פאזל",
+    "📋 Add to List":             "📋 הוסף לרשימה",
+    "🔗 Add as Join":             "🔗 הוסף כצירוף",
+    "⚓ Re-anchor":               "⚓ עגן מחדש",
+
+    # --- Pane placeholders ---
+    "…":                          "…",
+
+    # --- Candidate pane meta ---
+    "other side matched":         "הצד השני תאם",
+
+    # --- Position label prefix ---
+    "candidate":                  "מועמד",
+})
+
+# === Phase 108 Polish Round 2 — new tr() keys ===
+TRANSLATIONS.update({
+    # --- Feature 3: per-card folio browse ---
+    "Previous folio":             "עמוד קודם",
+    "Next folio":                 "עמוד הבא",
+
+    # --- Feature 4: CompareDialog per-pane folio browse ---
+    "◄ anchor folio":             "עמוד עוגן קודם ◄",
+    "anchor folio ►":             "עמוד עוגן הבא ►",
+    "◄ candidate folio":          "עמוד מועמד קודם ◄",
+    "candidate folio ►":          "עמוד מועמד הבא ►",
+
+    # --- Feature 5: Clear button ---
+    "Clear":                      "נקה הכל",
+    "Clear anchor, builders, candidates, triage and session state":
+        "נקה עוגן, בוני שאילתות, מועמדים, סיווג ומצב הפעלה",
+
+    # --- Feature 6: corner Joins icon ---
+    "Joins Lab":                  "מעבדת צירופים",  # already exists, safe duplicate
+})
+
+# === Phase 108 Polish Round 3 — new tr() keys ===
+TRANSLATIONS.update({
+    # --- Feature 6: Latin-free combine combo + tooltip (already inserted above inline) ---
+    # (keys added inline into the round-2 block to avoid duplication)
+
+    # --- Feature 3: compare pane zoom + dims label (new keys) ---
+    # "Zoom in" and "Zoom out" already exist in TRANSLATIONS (line ~1761)
+
+    # --- Feature 7: RTL nav glyphs (already inserted above inline) ---
+    # (pagination + compare nav keys updated inline)
+
+    # --- Feature 9: material display (pure Python helper, no new tr() keys) ---
+
+    # --- Feature 1: card text worker feedback ---
+    # "loading…" already exists
+
+    # --- Anchor pane zoom buttons (now tr()-wrapped) ---
+    # "Zoom in" / "Zoom out" already in TRANSLATIONS
+
+    # Placeholder — keep block non-empty for future additions
+})
+
+# === Phase 109 — Visual-Similarity source wiring ===
+TRANSLATIONS.update({
+    # Provenance badges appended to CandidateCard shelf text (note leading 2 spaces).
+    # Review #6: NO "  ✎ text" badge — text-only candidates render UNBADGED (CONTEXT ✎text RESOLVED).
+    "  ★ both": "  ★ שניהם",
+    "  ⊙ VS": "  ⊙ דמיון",
+    # Source selector labels (radio buttons)
+    "Text": "טקסט",
+    # Source state / status messages
+    "Visual look-alikes loaded": "דמיון חזותי נטען",
+    "No visual similarity data for this manuscript": "אין נתוני דמיון חזותי עבור כתב יד זה",
+    # Compact rank/score label on VS cards (Claude's discretion C — shown as plain text, formatted at call site)
+    "VS rank": "דירוג דמיון",
+})
+
+# === Phase 109 gap-closure (G-04 toggle + G-05 pick) ===
+TRANSLATIONS.update({
+    # G-04: the single "Visual Similarity" toggle tooltip (the LABEL key "Visual Similarity"
+    # already exists at line 3194 -> "דמיון חזותי"; do NOT re-add it).
+    "Show only visual look-alikes; with a search term, only look-alikes that also match":
+        "הצג רק דומים חזותית; עם מונח חיפוש, רק דומים חזותית שגם מתאימים",
+    # G-03/G-04: empty-intersection state (toggle ON + term with no look-alike match)
+    "No look-alikes match this search": "אין דומים חזותית התואמים לחיפוש זה",
+    # G-05: pick-mode affordance + JoinsDialog tooltip
+    "Select as partner": "בחר כשותף",
+    "Pick a partner in the Join Lab": "בחר שותף במעבדת הצירופים",
+})
+
+# === Phase 109 gap-closure round 3 (G-06 eye badge / G-13 hint+empty / G-08 link tooltip) ===
+TRANSLATIONS.update({
+    # G-06.2: tooltip on the single eye 👁 badge (replaces ★both / ⊙VS badges) AND on the
+    # eye-prefixed toggle. Reuse חזותי (NOT חיצוני).
+    "visual similarity": "דמיון חזותי",
+    # G-13.1: the distinct, subtly-styled hint line shown near the grid whenever the toggle is ON
+    # and results are shown (pure-VS OR intersection). Eye-prefixed at the call site.
+    "Turn off Visual Similarity to see more results":
+        "כבו את הדמיון החזותי כדי לראות יותר תוצאות",
+    # G-13.3: combined empty-intersection message (toggle ON + term yields zero look-alikes).
+    # Takes precedence over the bare "No look-alikes match this search" key.
+    "No look-alikes match this search — turn off Visual Similarity to see all results":
+        "אין דומים חזותית התואמים לחיפוש זה — כבו את הדמיון החזותי כדי לראות הכל",
+    # G-08.1: the JoinsDialog VS button's new tooltip (icon 🔍→🔗; the button now leaves the dialog
+    # and opens the anchor PLAIN in the Join Lab).
+    "find joins in joins lab": "מצא צירופים במעבדת הצירופים",
+})
+
+# === Phase 119-07: A2 Grid/Table toggle + F-VSavail VS-unavailable affordance ===
+TRANSLATIONS.update({
+    # A2: view mode toggle button labels (current state shows the OTHER mode as the action)
+    "Table": "טבלה",
+    "Grid": "רשת",
+    "Switch between Grid and Table view": "החלף בין תצוגת רשת לתצוגת טבלה",
+    # F-VSavail: VS service unavailable (distinct from 'no data for this fragment')
+    "Visual similarity unavailable": "דמיון חזותי אינו זמין",
+    # A1/A3/A4 strings (Compare anchor + VS metadata)
+    "No visual similarity data for this fragment": "אין נתוני דמיון חזותי עבור קטע זה",
+})
+
+# === Phase 119-09: R2-1 — missing Hebrew translations for Compare modal ===
+# Closes the live-UAT defect: under the Hebrew UI these strings leaked in English.
+# "Yes"→כן / "No"→לא / "Compare"→השווה / "Mark yes/maybe/no" / "View in Browse" /
+# "Filter candidates" are already present — DO NOT re-add.
+TRANSLATIONS.update({
+    # --- Compare pane labels (compare_modal.py:482, 502) ---
+    "Anchor":           "עוגן",
+    "Candidate":        "מועמד",
+    # --- Verdict bar label (compare_modal.py:534; candidate_grid.py:700) ---
+    "Maybe":            "אולי",
+    # --- Navigation buttons (compare_modal.py:524/550; candidate_grid.py:1060/1064)
+    # RTL-correct: "Next ›" advances leftward in RTL → leading ‹ chevron;
+    # "‹ Prev" moves rightward → trailing › chevron.
+    "Next ›":           "‹ הבא",
+    "‹ Prev":           "הקודם ›",
+    # --- Card actions + pagination (candidate_grid.py:764/1063) ---
+    "Compare fragment": "השווה קטע",
+    # N and M are placeholder literals replaced by the caller via .replace("N",...).replace("M",...)
+    "Page N of M":      "עמוד N מתוך M",
+})
+
+# === Phase 120-03: PST-01/02/03 — restore indicator + Clear/Reset control ===
+TRANSLATIONS.update({
+    # --- Restore indicator (joins_lab.py _bootstrap_anchor restore path) ---
+    "Restoring your search…":    "משחזר את החיפוש שלך…",
+    "(from last session)":             "(מהפעם הקודמת)",
+    # --- Image sizes in Visual Similarity and the Joins Lab (2026-10-19, PR 3) ---
+    "Small":                           "קטן",
+    "Medium":                          "בינוני",
+    "Large":                           "גדול",
+    "Thumbnail size":                  "גודל התמונות הממוזערות",
+    "Larger or smaller original":      "הגדלה או הקטנה של המקור",
+    "Card size":                       "גודל הכרטיסים",
+    # --- Joins Lab toolbar: Library and Domain out of the Filter dialog (2026-10-19) ---
+    "More filters…":                   "סינונים נוספים…",
+    "No candidates match these filters.": "אין מועמדים שמתאימים לסינון הזה.",
+    # --- Joins Lab shared link (2026-10-19, PR 2 of JOINS_LAB_VS_IMPROVEMENTS_PLAN) ---
+    "(from a shared link)":            "(מקישור ששותף)",
+    "Copy a link that opens this screen": "העתקת קישור שפותח את המסך הזה",
+    "Include my marks":                "כולל הסימונים שלי",
+    "Load an anchor first":            "יש לטעון קודם קטע עוגן",
+    "Showing {n} marks from the shared link (not saved)":
+        "מוצגים {n} סימונים מהקישור ששותף (לא נשמרים)",
+    "The Compare candidate from the link is not in these results":
+        "המועמד להשוואה שבקישור אינו בתוצאות האלה",
+    "The link could not be read in full: opening its fragment only":
+        "לא ניתן היה לקרוא את הקישור במלואו: נפתח רק הקטע שלו",
+    "Too many marks for a link: the link leaves them out":
+        "יותר מדי סימונים לקישור: הקישור אינו כולל אותם",
+    "This search is too long for a link: the link opens the fragment only":
+        "החיפוש ארוך מדי לקישור: הקישור פותח רק את הקטע",
+    # --- Clear/Reset control (joins_lab.py summary bar) ---
+    "Reset":                           "איפוס",
+    "Clear all Joins Lab state: anchor, builder, triage, filters":
+                                       "נקה את כל מצב מעבדת הצירופים: עוגן, בונה, מיון וסננים",
+    "Clear Joins Lab":                 "נקה את מעבדת הצירופים",
+    "This clears your anchor, builder lines, triage verdicts, and filters. You will start fresh. This cannot be undone.":
+                                       "הפעולה הזאת מאפסת את העוגן, שורות הבונה, חוות המיון והסננים. החיפוש יתחיל מחדש. אין אפשרות לבטל.",
+    "Clear everything":                "נקה הכל",
+})
+
+# === Phase 120-04: ACT-01/D-02/D-03 — Add-as-Join, remove-join, selection substrate ===
+TRANSLATIONS.update({
+    # --- Known-joins empty state (D-02: proposed joins shown in Lab) ---
+    "Community-proposed joins are shown":
+                                       "מוצגים חיבורים שהוצעו על ידי הקהילה",
+    # --- Add-as-Join (ACT-01) ---
+    "Add as Join":                     "הוסף כצירוף",
+    "Sign in to add this join to the community record":
+                                       "התחבר להוספת החיבור לרשומת הקהילה",
+    "Could not add join. Check your connection.":
+                                       "לא ניתן להוסיף את החיבור. בדוק את החיבור לאינטרנט.",
+    "This records a scholarly claim that {a} and {b} physically join. It will be immediately visible to all users.":
+                                       "האם אתה מעוניין לפרסם לכלל המשתמשים כי {a} ו-{b} מצטרפים?",
+    # --- Remove-join (D-03) ---
+    "Remove this join (only your own joins can be removed)":
+                                       "הסר חיבור זה (ניתן להסיר רק חיבורים שלך)",
+    "Remove Join":                     "הסר חיבור",
+    "Remove":                          "הסר",
+    "Could not remove join. Check your connection.":
+                                       "לא ניתן להסיר את החיבור. בדוק את החיבור לאינטרנט.",
+    "Remove the join between {a} and {b}? This cannot be undone.":
+                                       "להסיר את החיבור בין {a} ל-{b}? לא ניתן לבטל פעולה זו.",
+})
+
+# === Phase 120-05: ACT-02 — Bulk Add-to-Puzzle (anchor + selected candidates) ===
+TRANSLATIONS.update({
+    # --- Bulk Add-to-Puzzle button (bulk action bar) ---
+    "Add to Puzzle":                    "הוסף לפאזל",
+    "Add anchor + selected candidates to the Fragment Puzzle":
+                                        "הוסף עוגן ומועמדים נבחרים לפאזל הקטעים",
+    "Only the first 20 selected candidates will be added to the Puzzle.":
+                                        "רק 20 המועמדים הנבחרים הראשונים יתווספו לפאזל.",
+})
+
+# === Phase 120-06: ACT-03 — Add-to-List (login-gated) + Export (CSV/XLSX) ===
+TRANSLATIONS.update({
+    # --- Add-to-List bulk bar button (TABLE view only — selection-scoped) ---
+    "Add to List":                          "הוסף לרשימה",
+    "Sign in to add candidates to a list":  "התחבר להוספת מועמדים לרשימה",
+    "Add N candidates to list:":            "הוסף N מועמדים לרשימה:",
+    "{N} candidates added to \"{list_name}\"":
+                                            "N מועמדים נוספו לרשימה \"{list_name}\"",
+    "Could not add to list. Check your connection.":
+                                            "לא ניתן להוסיף לרשימה. בדוק את החיבור לאינטרנט.",
+    "No lists found. Create a list first.":
+                                            "לא נמצאו רשימות. צור רשימה תחילה.",
+    # --- Export (persistent toolbar — full filtered set, NOT selection) ---
+    "Export":                               "ייצוא",
+    "Export candidates to CSV or Excel":    "ייצא מועמדים ל-CSV או Excel",
+    "CSV":                                  "CSV",
+    "Excel (XLSX)":                         "Excel (XLSX)",
+    "Exporting the first 500 candidates.":  "מייצא את 500 המועמדים הראשונים.",
+    "Preparing export…":                    "מכין ייצוא…",
+    "fragments fetched":                    "קטעים נשלפו",
+    "Export failed. Check your connection and try again.":
+                                            "הייצוא נכשל. בדוק את החיבור לאינטרנט ונסה שוב.",
+    "Retry":                                "נסה שוב",
+    # --- Saving over a file open in Word / Excel (desktop/export_save.py) ---
+    "File in use":                          "הקובץ בשימוש",
+    'Could not save "{name}". It may be open in another program, such as Word or Excel.':
+        'לא ניתן לשמור את "{name}". ייתכן שהקובץ פתוח בתוכנה אחרת, כגון Word או Excel.',
+    "Close it and choose Retry, or save it under another name.":
+        'סגור אותו ובחר "נסה שוב", או שמור אותו בשם אחר.',
+    "Save under another name":              "שמור בשם אחר",
+    "Collapse":                             "כווץ",
+    "No candidates to export":              "אין מועמדים לייצוא",
+    # --- Export column headers ---
+    "Shelfmark":                            "מספר מדף",
+    "Library":                              "ספרייה",
+    "Title":                                "כותרת",
+    "Triage":                               "מיון",
+    "Score":                                "ציון",
+    "Material":                             "חומר",
+    "Dimensions":                           "מידות",
+    "Page":                                 "עמוד",
+    "Transcription (page)":                 "תמלול (עמוד)",
+    "Image URL":                            "כתובת תמונה",
+})
+
+# === Round-5 (PST): selection bulk-action toolbar (next to Export) ===
+TRANSLATIONS.update({
+    # Count label — "N" is replaced with the live selected count at runtime.
+    "N selected":                           "נבחרו N",
+    "Clear selection":                      "נקה בחירה",
+})
+
+# === Phase 120-07: D-07 Set-as-Anchor + D-08 Browse-in-Compare + D-09 Info buttons ===
+TRANSLATIONS.update({
+    # --- D-07: Set-as-Anchor button on candidate cards ---
+    "Set as Anchor":
+        "הגדר כעוגן",
+    "Pivot the workbench: make this fragment the new anchor":
+        "הפוך קטע זה לעוגן החדש",
+    # --- D-08: Browse-in-Compare per-pane open buttons ---
+    "Open anchor in Browse (new tab)":
+        "פתח עוגן בדפדפן (לשונית חדשה)",
+    "Open candidate in Browse (new tab)":
+        "פתח מועמד בדפדפן (לשונית חדשה)",
+    # --- Phone (2026-10-23): the Compare "Show text" toggle, the Lab's anchor strip ---
+    "Show text":
+        "הצג טקסט",
+    "Back to the anchor":
+        "חזרה לעוגן",
+    # --- D-09: Compare pane info buttons ---
+    "FJMS Catalog":
+        "קטלוג FJMS",
+    "View FJMS catalog data for this fragment":
+        "הצג נתוני קטלוג FJMS עבור קטע זה",
+    "No FJMS catalog data for this fragment":
+        "אין נתוני קטלוג FJMS עבור קטע זה",
+    "PGP / Bibliography":
+        "PGP / ביבליוגרפיה",
+    "View PGP and bibliography data for this fragment":
+        "הצג נתוני PGP וביבליוגרפיה עבור קטע זה",
+    "No PGP data for this fragment":
+        "אין נתוני PGP עבור קטע זה",
+})
+
+# === Phase 121: Joins Lab i18n gap closure (FND-07) ===
+TRANSLATIONS.update({
+    # --- ACT-02 anchor guard (joins_lab.py:1853, 1887) ---
+    "No anchor loaded":
+        "לא נטען עוגן",
+    # --- Bulk action guard (joins_lab.py:1936) ---
+    "No candidates selected":
+        "לא נבחרו מועמדים",
+    # --- VS spinner label (joins_lab.py:2568, 3360) — U+2026 ellipsis ---
+    "Loading visual similarity…":
+        "טוען דמיון חזותי…",
+    # --- VS empty-state (joins_lab.py:2581, 2740) ---
+    "No candidates match both text and visual similarity. Try clearing the builder for VS-only browse.":
+        "אין מועמדים התואמים גם לטקסט וגם לדמיון החזותי. נסו לנקות את הבונה לעיון בדמיון חזותי בלבד.",
+    # --- Add-to-List error (joins_lab.py:3142) ---
+    "Could not load your lists. Please try again.":
+        "לא ניתן לטעון את הרשימות שלכם. נסו שוב.",
+    # --- Filter checkboxes (candidate_grid.py:991, 994) ---
+    "Has dimensions data":
+        "קיימים נתוני מידות",
+    "Exclude size mismatch":
+        "הסתר אי-התאמת גודל",
+    # --- Table checkbox tooltip (candidate_grid.py:712) ---
+    "Select for bulk actions":
+        "בחר לפעולות קבוצתיות",
+    # --- Filter dropdown label (candidate_grid.py:1003) ---
+    "Triage state":
+        "מצב מיון",
+    # --- Filter input placeholder (candidate_grid.py:1009) — U+2026 ellipsis ---
+    "Filter by shelfmark…":
+        "סנן לפי מספר מדף…",
+    # --- Bulk triage label (candidate_grid.py:1116, 1208) — N is replaced at runtime ---
+    "Mark N selected as:":
+        "סמן N שנבחרו כ:",
+    # --- Add-as-Join guard (candidate_grid.py:1176, 1219) ---
+    "Select exactly one candidate to add as a join":
+        "בחרו מועמד אחד בלבד כדי להוסיף כצירוף",
+    # --- Per-card puzzle button tooltip (candidate_grid.py:949, compare_modal.py:648) ---
+    "Add anchor + this candidate to the Fragment Puzzle":
+        "הוסף את העוגן ואת המועמד הזה לפאזל הקטעים",
+    # --- Compare pane badge label (compare_modal.py:479) ---
+    "Size mismatch":
+        "אי-התאמת גודל",
+    # --- Badge strings from shared/joins_lab.py::badge_and_tooltip() ---
+    # Wrapped via tr(tooltip_text) at candidate_grid.py:760 — variable arg, not AST-catchable.
+    "Anchor fragment":
+        "קטע עוגן",
+    "Found via other side":
+        "נמצא דרך הצד השני",
+    "Visually similar":
+        "דומה חזותית",
+})
+
+# --- SEED-014 a11y/RTL audit (PR #300): web search-results + filter-panel
+#     strings that were leaking English to Hebrew users (Codex REQUEST-CHANGES #3) ---
+TRANSLATIONS.update({
+    # web/components/visual_similarity_dialog.py — restriction-clear control
+    "Clear visual similarity restriction":
+        "נקה הגבלת דמיון חזותי",
+    # web/pages/search_results.py — joins-presence hint failure tooltip
+    "Could not check for joins — open the Joins Lab to search":
+        "לא ניתן לבדוק צירופים — פתחו את מעבדת הצירופים כדי לחפש",
+    # web/pages/search_results.py — lazy full-text load failure
+    "Could not load full text. Try again later.":
+        "לא ניתן לטעון את הטקסט המלא. נסו שוב מאוחר יותר.",
+    # web/components/filter_panel.py — filter-count recompute failure (#11)
+    "Could not update filter count":
+        "לא ניתן לעדכן את מניין הסינון",
+    # #17 — web /search and /parallels, desktop Search and Composition: the
+    # filter lookup failed, so the search was not started
+    "The filters could not be applied, so the search was not run. Try again, or remove the filters.":
+        "לא ניתן היה להחיל את הסינון, ולכן החיפוש לא הורץ. נסו שוב, או הסירו את הסינון.",
+    # #17 — web: the catalog data a filter needs is missing, search not started
+    "The catalog data these filters need is not available, so the search was not run. Remove the filters to search.":
+        "נתוני הקטלוג שהסינון זקוק להם אינם זמינים, ולכן החיפוש לא הורץ. הסירו את הסינון כדי לחפש.",
+    # #17 — desktop: same, pointing to the Focus Search button ("מקד חיפוש")
+    "The catalog data these filters need is not available, so the search was not run. Remove the filters with Focus Search to search.":
+        "נתוני הקטלוג שהסינון זקוק להם אינם זמינים, ולכן החיפוש לא הורץ. הסירו את הסינון דרך \"מקד חיפוש\" כדי לחפש.",
+    # #17 — web notice and desktop status bar: saved measurement filters
+    # dropped because the open catalog is known to lack that data
+    "Some saved filters were removed: this catalog data is not available.":
+        "חלק מהסינונים השמורים הוסרו: נתוני קטלוג אלה אינם זמינים.",
+    # #17 (K-14) — desktop status bar: Search/Composition pressed while the
+    # pre-search filters are still being computed; it runs when they are ready
+    "The filters are still being applied; the search will start as soon as they are ready.":
+        "תנאי הסינון עדיין נבדקים; החיפוש יתחיל מיד עם סיום הבדיקה.",
+    # web/pages/search.py — search-history entry delete control
+    "Delete history entry":
+        "מחק רשומת היסטוריה",
+    # web/pages/search_results.py — expanded result region label
+    "Full text and image":
+        "טקסט מלא ותמונה",
+    # web/pages/search_results.py — lazy full-text loading spinner label
+    "Loading full text…":
+        "טוען טקסט מלא…",
+    # web/pages/search.py — refinement-chain component remove control
+    "Remove component":
+        "הסר רכיב",
+    # web/pages/search_results.py — expansion toggle accessible name
+    "Toggle full text and image":
+        "הצג/הסתר טקסט מלא ותמונה",
+    # web/components/filter_panel.py — filter-count recompute pending (#11)
+    "Updating filter count…":
+        "מעדכן את מניין הסינון…",
+})
+
+
+# SEED-024 — desktop Joins-Lab search-mode parity + candidate xlsx export.
+TRANSLATIONS.update({
+    "Search terms for the joining fragment…":
+        "מילות חיפוש עבור הקטע המצורף…",
+    "Type a query for the joining fragment, then Find Candidates.":
+        "הקלידו שאילתה עבור הקטע המצורף, ואז מִצאו מועמדים.",
+    "Responsa-style: structured line-by-line builder. Exact / Variants / Fuzzy / Regex: a single free-text query (like the main search).":
+        "פרויקט השו״ת: בונה שאילתה מובְנה שורה־אחר־שורה. מדויק / צורות / מקורב / Regex: שאילתת טקסט חופשי אחת (כמו החיפוש הראשי).",
+    "Export XLSX":
+        "ייצוא XLSX",
+    "Export candidates to an Excel workbook — checked rows, or all shown if none checked":
+        "ייצוא מועמדים לחוברת Excel — שורות מסומנות, או כל המוצגות אם אין סימון",
+    "Export candidates to XLSX":
+        "ייצוא מועמדים ל־XLSX",
+    "No candidates to export.":
+        "אין מועמדים לייצוא.",
+    "Saved:":
+        "נשמר:",
+    "candidates":
+        "מועמדים",
+    # SEED-024 follow-up — Stop-search (parity with the main desktop search).
+    "Stopping…":
+        "עוצר…",
+    "Search stopped.":
+        "החיפוש הופסק.",
+})
+
+# === SEED-030: FGP default demotion via coverage ratio ===
+TRANSLATIONS.update({
+    # Version-menu hint on an FGP edition demoted below V0.8 for low folio
+    # coverage (a partial/selected excerpt). Phrased against the V0.8 baseline,
+    # not "partial", since the HTR baseline is imperfect.
+    "shorter than V0.8":
+        "קצר מ-V0.8",
+})
+
+# === Generic NLI image credit (2026-09-02) ===
+TRANSLATIONS.update({
+    "From the collections of the National Library of Israel":
+        "מאוספי הספרייה הלאומית",
+})
+
+# === Oxford Genizah Fragments licence credit (2026-09-02) ===
+TRANSLATIONS.update({
+    "Image provided by the Bodleian Libraries, University of Oxford":
+        "התמונה באדיבות ספריות הבודליאנה, אוניברסיטת אוקספורד",
+})
+
+# === SEED-033 Option A: search-scoped source selection ===
+TRANSLATIONS.update({
+    # Shown (web: as a tooltip on the version indicator; desktop: as a tooltip
+    # on the version combo) when the reading-view default was chosen because
+    # it is the source that actually contains the phrase the user searched
+    # for -- not the usual PGP-first / FGP-coverage order.
+    "showing the version containing your search":
+        "מוצגת הגרסה שמכילה את החיפוש שלך",
+})
+
+# === v8.5.0 What's New — Smarter Default Transcription (SEED-030) ===
+TRANSLATIONS.update({
+    # Web What's New banner
+    "New: when an FGP transcription covers only a small part of the folio, the reading view now shows the fuller MiDRASH transcription by default — the FGP text is still available in the version menu.":
+        "חדש: כאשר תעתוק ה־FGP מכסה רק חלק קטן מהדף, תצוגת הקריאה מציגה כעת את תעתוק ה־MiDRASH המלא כברירת מחדל — תעתוק ה־FGP עדיין זמין בתפריט הגרסאות.",
+    # Desktop What's New bar
+    "New: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription now shows by default. FGP stays available in the version chooser.":
+        "חדש: כאשר תעתוק ה־FGP מכסה רק חלק קטן מהדף, מוצג כעת תעתוק ה־MiDRASH (V0.8) המלא כברירת מחדל. ה־FGP נשאר זמין בבורר הגרסאות.",
+    # Desktop What's New dialog bullets
+    "Smarter default transcription: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription is shown by default instead.":
+        "ברירת מחדל חכמה לתעתוק: כאשר תעתוק FGP מכסה רק חלק קטן מהדף, מוצג במקומו תעתוק ה־MiDRASH (V0.8) המלא.",
+    "The FGP transcription stays available in the version chooser, tagged “shorter than V0.8”.":
+        "תעתוק ה־FGP נשאר זמין בבורר הגרסאות, מסומן \"קצר מ־V0.8\".",
+    "Manuscripts where FGP is a full transcription are unchanged — FGP still shows by default there.":
+        "כתבי יד שבהם ה־FGP הוא תעתוק מלא — ללא שינוי; ה־FGP נשאר ברירת המחדל שם.",
+    "Applies across search, browse, and the reading views.":
+        "חל בחיפוש, בעיון ובתצוגות הקריאה.",
+})
+
+# === SEED-031 — Telemetry re-ask consent bar (quick-260714-k56) ===
+TRANSLATIONS.update({
+    # Non-modal re-invite bar (desktop/update_ui.py::TelemetryConsentBar)
+    "Help improve Dicta Genizah Search Pro? You can share anonymous usage data — never your searches or your library.":
+        "לעזור לשפר את Dicta Genizah Search Pro? אפשר לשתף נתוני שימוש אנונימיים — לעולם לא את החיפושים או הספרייה שלכם.",
+    "Enable":
+        "הפעל",
+    "Learn more":
+        "מידע נוסף",
+    "Don't ask again":
+        "אל תשאל שוב",
+})
+
+# === Discovery Review deck (SEED-029 / Road 2 — same-work discovery review) ===
+# English is the source/key; Hebrew pulled from here by the deck builder and by
+# the future in-app R2-2 component via tr(). Reuses existing keys where present
+# (Author, Score, Bibliography, All, Sort, Discovery, Mishnah, Loading..., Next,
+# Suggestion, Continuation, Citation, Tosefta, Judeo-Arabic).
+TRANSLATIONS.update({
+    # bar
+    "Discovery Register": "מאגר תגליות",
+    "Card": "כרטיס",
+    "Prev": "הקודם",
+    "Next ungraded": "הבא ללא דירוג",
+    "Browse server:": "שרת עיון:",
+    "Graded": "דורגו",
+    "Ungraded": "לא דורגו",
+    "current:": "נוכחי:",
+    "of {total} · {removed} removed (edition source)":
+        "מתוך {total} · {removed} הוסרו (מקור מהדורה)",
+    # rail facet headers / controls
+    "Relation": "סוג יחס",
+    "Corpus type": "סוג קורפוס",
+    "Genre / work": "סוגה / חיבור",
+    "Search genre/work…": "חיפוש סוגה/חיבור…",
+    "Search author…": "חיפוש מחבר…",
+    "Grade state": "מצב דירוג",
+    "Score (desc)": "ציון (יורד)",
+    "Work, then score": "חיבור, ואז ציון",
+    "Clear filters": "נקה סינון",
+    # suggestion / grade vocab
+    "Witness": "עד נוסח",
+    "Other": "אחר",
+    "Known": "ידוע",
+    "Other (citation/shared source)": "אחר (ציטוט/מקור משותף)",
+    "Needs review": 'צ"ע',
+    "Print / late": "דפוס/מאוחר",
+    # relation (flank) facet values
+    "Mixed": "משולב",
+    "Undetermined": "לא הוכרע",
+    # corpus-type facet values
+    "Bible": "מקרא",
+    "Targum": "תרגום",
+    "Bavli": "בבלי",
+    "Yerushalmi": "ירושלמי",
+    "Liturgy": "ליטורגיה",
+    "Sefaria": "ספריא",
+    # bibliography facet values
+    "Has bibliography": "יש ביבליוגרפיה",
+    "No bibliography": "ללא ביבליוגרפיה",
+    # card body
+    "letters": "אותיות",
+    "witnesses": "עדים",
+    "⚠ possibly already catalogued:": "⚠ ייתכן שכבר בקטלוג:",
+    "(→ usually 'Known')": "(→ לרוב ״ידוע״)",
+    "NLI catalog:": "קטלוג NLI:",
+    "Open full browse ↗": "פתח בעיון מלא ↗",
+    "Parallel in the edition": "המקבילה במהדורה",
+    "Open in Sefaria ↗": "פתח בספריא ↗",
+    "Open source ↗": "פתח מקור ↗",
+    "(not located for display)": "(לא אותרה לתצוגה)",
+    "Genizah excerpt (index text — may differ from the live transcription at right):":
+        "קטע הגניזה (טקסט האינדוקס — עשוי להיות שונה מהתמלול החי מימין):",
+    # flank verdict labels (card)
+    "Strong witness (continuation)": "עד־נוסח חזק (רצף)",
+    "Continuation to work": "רצף לחיבור",
+    "Mixed text": "טקסט משולב",
+    "Undetermined (short run)": "לא הוכרע (רצף קצר)",
+    "Possibly citation": "אולי ציטוט",
+    "Citation (rejected)": "ציטוט (דחוי)",
+    # suggestion reasons (suggest_bucket)
+    "Witness (title predicts content)": "עד נוסח (הכותרת צופה את התוכן)",
+    "Witness (likely catalogued)": "עד נוסח (כנראה בקטלוג)",
+    "Other (mixed text)": "אחר (טקסט משולב)",
+    "Other (citation — catalogued as {w})": "אחר (ציטוט — הקטלוג מזהה כ״{w}״)",
+    # grade state / misc
+    "(prior)": "(דירוג קודם)",
+    "Select a card…": "בחר/י כרטיס…",
+    "Loading browse…": "טוען עיון…",
+    "Load error": "שגיאת טעינה",
+    "(no cards in current filter)": "(אין כרטיסים בסינון הנוכחי)",
+    "Free note (autosaved)": "הערה חופשית (נשמר אוטומטית)",
+})
+
+# === Connections Atlas / Visual Atlas Preview (Phase 133, ATLAS-01) ===
+# English is the source/key; every NEW string this phase introduces gets a real
+# Hebrew value here so web/pages/atlas.py chrome (133-03), the renderer
+# interactions (133-04), and the homepage teaser (133-05) can tr() them without
+# English leaking under HE. Reuses existing keys where present (Title,
+# Shelfmark, Domain, Library, Home). No claim-bearing source strings — this is our own
+# claim-free UI copy.
+TRANSLATIONS.update({
+    # chrome (133-03)
+    "Connections Atlas": "אטלס החיבורים",
+    "Beta": "בטא",
+    "A preview map of textual connections across the connected Cairo Genizah corpus.":
+        "מפת תצוגה מקדימה של חיבורים טקסטואליים ברחבי קורפוס גניזת קהיר המקושר.",
+    "Positions and clusters are algorithmically derived from textual "
+    "connections — proximity reflects textual similarity, not physical provenance.":
+        "המיקומים והאשכולות מחושבים אלגוריתמית מתוך חיבורים טקסטואליים — "
+        "הקִרבה משקפת דמיון טקסטואלי, לא מקור פיזי משותף.",
+    "Loading the atlas…": "טוען את האטלס…",
+    # interactions (133-04, D-08)
+    "Search by title or shelfmark…": "חיפוש לפי כותרת או סימן מדף…",
+    "Color by domain": "צביעה לפי תחום",
+    "Color by library": "צביעה לפי ספרייה",
+    "Hide library": "הסתר ספרייה",
+    "Show only this library": "הצג רק ספרייה זו",
+    "Focus constellation": "מיקוד קבוצה",
+    "Connections": "חיבורים",
+    "Continuation (same-work evidence)": "המשך (עדות לאותו חיבור)",
+    "Citation / quotation": "ציטוט / מובאה",
+    "Skip intro": "דלג על ההקדמה",
+    "Reduced motion": "תנועה מופחתת",
+    # homepage teaser (133-05)
+    "Explore the Connections Atlas": "חקרו את אטלס החיבורים",
+    "A preview map of textual connections across the Cairo Genizah — "
+    "a claim-free, algorithmically laid-out overview.":
+        "מפת תצוגה מקדימה של חיבורים טקסטואליים בגניזת קהיר — "
+        "סקירה אלגוריתמית, ללא טענות זיהוי.",
+    # === Post-launch corrections (2026-07-21 owner feedback) ===
+    # Rename: sidebar uses the short name, the page title/announcement the full.
+    "The Genizah Atlas": "אטלס הגניזה",
+    "The Visual Genizah Atlas": "אטלס הגניזה החזותי",
+    "Explore the Genizah Atlas": "סיור באטלס הגניזה",
+    # === Computed Identifications announcement (Phase 136) — homepage banner ===
+    # MATCH-framing, never assertion-framing: "may be the same work as", not
+    # "is". No precision figure, no interval, no count — the surface shows
+    # candidates for a reader to judge, and the wording must not promise more.
+    "Explore Computed Identifications": "עיון בזיהויים המחושבים",
+    # The point of the surface, in the owner's words: many computed
+    # identifications OF KNOWN WORKS, so a reader can go looking for NEW
+    # TEXTUAL WITNESSES ("עדי נוסח") of a work they study. Still match-framed
+    # ("matched", "judge each match").
+    #
+    # NOW CARRIES A COUNT (owner, 2026-08-07). `{count}` is the number of
+    # DISTINCT WORKS -- `meta.work_total`, the same figure the findings page
+    # headline shows, computed at request time and a literal NOWHERE (ruling U:
+    # a committed launch figure fails the repo-wide scan).
+    #
+    # A count of works is a SIZE, not a rate: it says how much was matched, never
+    # how often the matching is right. Checked against the honesty gate's
+    # accuracy detector, which passes it in both languages.
+    #
+    # "אלגוריתם ממוחשב" over the owner's dictated "ממחושב" -- the standard form
+    # of the word; the owner's is a typo for the same term, not a variant.
+    "Software has matched Genizah fragments to {count} works we already know. Use "
+    "it to look for new witnesses to a text you study — and judge each match "
+    "yourself.":
+        "אלגוריתם ממוחשב התאים קטעי גניזה ל-{count} חיבורים מוכרים. השתמשו בו כדי "
+        "לחפש עדי נוסח חדשים לחיבור שאתם חוקרים — ושפטו כל התאמה בעצמכם.",
+    # The count-free form, kept as the DEGRADED variant: the homepage renders
+    # before any discovery read, so if the launch figure is unavailable the card
+    # must still say something true rather than print a zero or "None".
+    "Software has matched Genizah fragments to works we already know. Use it to "
+    "look for new witnesses to a text you study — and judge each match yourself.":
+        "אלגוריתם ממוחשב התאים קטעי גניזה לחיבורים מוכרים. השתמשו בו כדי לחפש עדי "
+        "נוסח חדשים לחיבור שאתם חוקרים — ושפטו כל התאמה בעצמכם.",
+    # elaborated intro / how-to (2026-07-21) — two paragraphs; replaces the old one-liner.
+    "A graphical view of textual connections between manuscripts across the Genizah. Manuscripts containing similar text are grouped together into clusters, and connections between manuscripts are marked with a thin line. Alongside the clusters and manuscripts, catalogue information from the National Library and the Friedberg Genizah Project is shown. You can zoom in and out, focus on a particular cluster, and open a preview of a specific manuscript to read it. For the best experience on a phone, tap Full screen — there you can pan and zoom the map freely; a larger screen simply shows more of it at once.": "תצוגה גרפית של קשרים טקסטואליים בין כתבי יד ברחבי הגניזה. כתבי יד המכילים טקסט דומה מקובצים יחד לאשכולות. קשרים בין כתבי יד מסומנים בקו דק. לצד הקבוצות וכתבי היד מובא המידע הקטלוגי מהספרייה הלאומית ומפרויקט הגניזה של פרידברג. ניתן להתמקד או להתרחק, לעיין בקבוצה מסוימת, לפתוח בתצוגה מקדימה כתב יד מסוים ולעיין בו. לחוויה הטובה ביותר בטלפון, לחצו על 'מסך מלא' — שם ניתן להזיז את המפה ולהתמקד בה בחופשיות; מסך גדול יותר פשוט מציג יותר ממנה בבת אחת.",
+    "Use the atlas to get an overall sense of the structure of the Genizah corpus and the connections within it, and to discover new, previously unknown connections. For example, if within a cluster of linguistics manuscripts you find a manuscript identified as 'Biblical fragments,' this manuscript too may be a work of linguistics.": 'השתמשו באטלס כדי להתרשם כללית ממבנה קורפוס הגניזה ומן הקשרים בתוכו, וכן למציאת קשרים חדשים ולא ידועים. לדוגמה, אם מצאתם בקבוצה המכילה כתבי יד של בלשנות כתב יד המזוהה כ"קטעי מקרא", ייתכן שגם כתב יד זה הוא חיבור בבלשנות.',
+    # new renderer controls (#3 fullscreen, #4 domain-label toggle)
+    "Full screen": "מסך מלא",
+    "Exit full screen": "יציאה ממסך מלא",
+    "Hide domain labels": "הסתר שמות תחומים",
+    "Show domain labels": "הצג שמות תחומים",
+    # in-atlas browse pane (#6) — click a dot to open the manuscript in a drawer
+    # (an ?embed=1 iframe) instead of leaving the atlas.
+    "Manuscript viewer": "מציג כתב היד",
+    "Open full browse ↗": "פתח בעיון מלא ↗",
+    # mobile/narrow focus controls (2026-07-21) — Back exits the cluster; Titles
+    # toggles the member-list sheet (auto-hidden on narrow so it never blocks).
+    "Back to map": "חזרה למפה",
+    "Titles": "כותרות",
+    "Hide titles": "הסתר כותרות",
+    # homepage launch announcement (#7)
+    "New": "חדש",
+    "A new interactive map of textual connections across the Cairo Genizah.":
+        "מפה אינטראקטיבית חדשה של חיבורים טקסטואליים ברחבי גניזת קהיר.",
+    "The Genizah Atlas is temporarily unavailable": "אטלס הגניזה אינו זמין כרגע",
+    # error / unavailable copy
+    "The Connections Atlas is temporarily unavailable": "אטלס החיבורים אינו זמין כרגע",
+    "The preview will appear here as soon as it is ready.":
+        "התצוגה המקדימה תופיע כאן ברגע שהיא תהיה מוכנה.",
+    "The atlas could not be loaded.": "לא ניתן היה לטעון את האטלס.",
+})
+
+# === Desktop What's New — v8.5.1 (2026-07-21 bug-fix patch) ===
+TRANSLATIONS.update({
+    "Fixed: some manuscripts showed each folio twice in Browse. This is now corrected.":
+        "תוקן: בחלק מכתבי היד הופיע כל דף פעמיים בתצוגת העיון. התקלה תוקנה.",
+    "Browse no longer shows doubled folios: manuscripts with a single image set could display each page twice. This is now fixed.":
+        "תצוגת העיון אינה מציגה עוד דפים כפולים: בכתבי יד עם סדרת תמונות אחת הופיע לעתים כל דף פעמיים. התקלה תוקנה.",
+    "No changes to search or transcriptions — this release is a targeted fix.":
+        "אין שינוי בחיפוש או בתמלולים — מהדורה זו היא תיקון ממוקד.",
+})
+
+# === Web deferred-render failure notice (v8.5.2 hotfix) ===
+TRANSLATIONS.update({
+    "Could not load this section. Please refresh the page.":
+        "לא ניתן היה לטעון את החלק הזה. נסו לרענן את הדף.",
+})
+
+# === Desktop What's New — v8.5.2 (2026-07-31 bug-fix patch) ===
+TRANSLATIONS.update({
+    "Fixed: the Printed filter in Composition Search had no effect — it now filters correctly.":
+        "תוקן: סינון הדפוסים בחיפוש חיבורים לא פעל — כעת הסינון עובד כראוי.",
+    "Composition Search: the Printed filter had no effect — “Only printed” hid everything and “Exclude printed” hid nothing. Filtering by Library, Shelfmark and Title now works too, including on the fragment rows under a manuscript.":
+        "חיפוש חיבורים: מסנן הדפוסים לא פעל — ״דפוסים בלבד״ הסתיר הכול ו״ללא דפוסים״ לא הסתיר דבר. גם הסינון לפי ספרייה, מספר מדף וכותרת פועל כעת, לרבות בשורות הקטעים שתחת כתב היד.",
+    "Focus Search: you can no longer confirm before the manuscript count finishes — that could quietly run a search over the whole corpus instead of the scope you chose.":
+        "מקד חיפוש: לא ניתן עוד לאשר לפני שחישוב מספר כתבי היד הסתיים — הדבר עלול היה להריץ חיפוש על כל הקורפוס במקום על התחום שבחרתם.",
+})
+
+# ===========================================================================
+# Discovery surfaces — PAGE CHROME ONLY (Phase 136, plan 136-10)
+#
+# THE SPLIT, stated once so it is not re-litigated per plan:
+#
+#   * `tr()` (this file) owns PAGE CHROME — the nav label, the page title and
+#     meta description, the panel's entry-control label, the mode-strip
+#     labels and their phase tags, the "Show as" control and its row-unit
+#     options, the sort options, the result-bar count phrasing, and the
+#     page-level availability card.
+#   * `shared/discovery_display_strings.py` owns the CLAIM VOCABULARY — the
+#     relation chips and their tooltips, the row headlines, coverage labels,
+#     section headers, disclosure toggles, the novelty candidacy wording and
+#     the panel's own service-state copy.
+#
+# A string lives in EXACTLY ONE of the two.
+# `tests/test_discovery_display_strings.py::test_no_translation_key_duplicates_a_display_string`
+# fails if one is ever defined in both.
+#
+# Naming note (findings-page.md § "Design Decisions"): the nav label survived
+# a three-way constraint. "Discoveries" is already taken by the pre-existing
+# Community page at `/discoveries`; a bare "Identifications" collides with the
+# existing "Browse by Identification" entry; and D-23b bars "new", so
+# "New Findings" is out. Do NOT add a "Discoveries" entry and do NOT reuse
+# the existing one.
+# ===========================================================================
+TRANSLATIONS.update({
+    # === v9.0.0 "What's New" toast (web/main.py) — the three new surfaces ===
+    # Hebrew is the DEFAULT language here, so an unregistered string does not fall
+    # back gracefully — it shows English to most of the site's readers.
+    #
+    # The toast reads: New Features! <intro> * <atlas> * <computed identifications>.
+    # The atlas and identification NAMES are already registered further down and in
+    # the atlas block, so only the introduction needs an entry. The Hebrew is the
+    # owner's own wording (2026-08-16) and is deliberately DESCRIPTIVE rather than
+    # the nav label "Start Here" / "התחילו כאן": a What's New line has to say what
+    # the new thing IS to a reader who has never seen it, and "Start Here" does not.
+    "An introduction to the Genizah and this site": "דף היכרות עם הגניזה ואתר הגניזה",
+    # --- Nav entry + page title (the nav tag reuses the existing "Beta") ---
+    "Computed Identifications": "זיהויים מחושבים",
+    # --- Page meta description ---
+    "Computed identifications across the Cairo Genizah corpus, produced by text matching. "
+    "Every row is an algorithmic match, not a reviewed identification.":
+        "זיהויים מחושבים ברחבי קורפוס גניזת קהיר, שהופקו בהתאמת טקסט. "
+        "כל שורה היא התאמה אלגוריתמית, לא זיהוי שנבדק.",
+    # --- The browse-panel entry control (sentence case — the panel title
+    #     stays "Computed identifications" per D-21) ---
+    "Computed identifications": "זיהויים מחושבים",
+    # The SAME control on a folio whose own total is a true zero while the
+    # manuscript-level read came back non-empty. It carries no number: the only
+    # count available there is this page's zero, and a bare "(0)" on a
+    # manuscript with identifications on hundreds of its pages is the false
+    # impression the state exists to prevent. The scope is in the words instead.
+    "Computed identifications elsewhere in this manuscript":
+        "זיהויים מחושבים במקומות אחרים בכתב־היד",
+    # --- Mode strip: "All findings" is live; the other two ship visible,
+    #     inert and phase-tagged, so 137/138 add a tab rather than a page ---
+    "All findings": "כל הממצאים",
+    "Screening leads": "כיווני סינון",
+    "My saved": "השמורים שלי",
+    # The inert mode tabs are badged "Coming soon", never with a plan number:
+    # "Phase 137"/"Phase 138" was internal planning vocabulary on a reader-facing
+    # surface. Those two keys are deliberately gone rather than left orphaned.
+    "Coming soon": "בקרוב",
+    # --- "Show as": the row unit is a reader choice, not a design pick ---
+    "Show as": "הצג כ",
+    "One row per identification": "שורה לכל זיהוי",
+    "One row per manuscript": "שורה לכל כתב יד",
+    "One row per work": "שורה לכל חיבור",
+    # --- Sort options. Novelty is deliberately NOT one of them (D-15a/D-24:
+    #     absence from a finding aid is not evidence a match is correct) ---
+    "Strongest first": "החזקים תחילה",
+    "Pages matched": "דפים שהותאמו",
+    "Matched text": "טקסט שהותאם",
+    # --- Result bar. The default view is narrowed, and the bar SAYS SO
+    #     rather than silently narrowing; {bucket} is filled from
+    #     shared.discovery_display_strings.bucket_name so the bucket name has
+    #     exactly one definition ---
+    "Showing {shown} of {total} findings": "מוצגים {shown} מתוך {total} ממצאים",
+    "Showing the {bucket} by default.": "מוצג {bucket} כברירת מחדל.",
+    # --- Availability card. Distinct from the panel's own service-state copy
+    #     in shared/discovery_display_strings.py: this is the PAGE-level card
+    #     shown when the availability predicate is False ---
+    "Computed Identifications is not available right now":
+        "הזיהויים המחושבים אינם זמינים כעת",
+    "This page will return as soon as the data is ready.":
+        "הדף יחזור ברגע שהנתונים יהיו מוכנים.",
+})
+
+# --- Guided welcome launchpad (2026-08-12) ---
+TRANSLATIONS.update({
+    "Start Here": "התחילו כאן",
+    "Not sure what to search? Start here": "לא יודעים מה לחפש? התחילו כאן",
+    "What's on this website? Start here to explore the Cairo Genizah":
+        "מה יש באתר? התחילו כאן כדי להכיר את גניזת קהיר",
+    "Start Here | Dicta Genizah Search": "התחילו כאן | אתר הגניזה של דיקטה",
+    "A guided introduction to the Cairo Genizah, prepared searches, selected manuscripts, and research tools.":
+        "מבוא מודרך לגניזת קהיר, חיפושים מוכנים, כתבי יד נבחרים וכלי מחקר.",
+    "Find and compare joining fragments": "מצאו והשוו קטעים מצטרפים",
+    "Pin an anchor fragment, build a line-by-line query, and compare possible physical joins.":
+        "קבעו קטע עוגן, בנו שאילתה שורה־אחר־שורה והשוו בין צירופים פיזיים אפשריים.",
+    "Review algorithmic text matches": "בחנו התאמות טקסטואליות אלגוריתמיות",
+    "Text matching": "התאמת טקסט",
+    "Requires review": "טעון בדיקה",
+})
+
+# --- Pause/Resume for desktop searches -------------------------------------
+# "Resume" is deliberately a NEW key and NOT the existing "Resume Search", which
+# titles the session-restore "a composition search was interrupted last time"
+# dialog and means something else entirely.
+# ASCII "..." (not U+2026) to match the dominant "Stopping..." / "Cancelling..."
+# forms already in this file.
+# Forms follow the existing Stop family: imperative for the buttons (like "עצור"),
+# present participle while it is happening (like "עוצר..."), passive participle
+# for the settled state (like "נעצר").
+TRANSLATIONS.update({
+    "Pause": "השהה",
+    "Resume": "המשך",
+    "Pausing...": "משהה...",
+    "Paused": "מושהה",
+    "Searching My Library...": "מחפש בספרייה המקומית...",
+    "Pause — the search stops at the next checkpoint and keeps what it found":
+        "השהיית החיפוש — הוא ייעצר בנקודת הביקורת הבאה והתוצאות שנמצאו יישמרו",
+    "Resume the search from where it paused":
+        "המשך את החיפוש מהנקודה שבה הושהה",
+    "Waiting for the search to reach a checkpoint...":
+        "ממתין שהחיפוש יגיע לנקודת ביקורת...",
+    "Still stopping the previous search — try again in a moment.":
+        "עדיין עוצר את החיפוש הקודם — נסו שוב בעוד רגע.",
+})
+
+
+# === Desktop What's New — v8.6.0 (2026-08-20 Pause/Resume) ===
+TRANSLATIONS.update({
+    "New: pause and resume long searches":
+        "חדש: אפשר להשהות ולהמשיך חיפושים ארוכים",
+    "Pause and Resume: a long search can be paused at any point and continues from exactly where it stopped — nothing is re-scanned. The clock stops while paused, and a paused search lets the computer sleep. A paused search lives in memory only: closing the program ends it.":
+        "השהיה והמשך: אפשר להשהות חיפוש ארוך בכל שלב, והוא ממשיך בדיוק מהנקודה שבה נעצר — שום דבר לא נסרק מחדש. השעון עוצר בזמן ההשהיה, וחיפוש מושהה מאפשר למחשב להיכנס לשינה. חיפוש מושהה קיים בזיכרון בלבד: סגירת התוכנה מסיימת אותו.",
+    "Stop now works in Lab Mode. It previously did nothing at all, and could show an error message instead of stopping.":
+        "“עצור” עובד עכשיו במצב מעבדה. עד כה הוא לא עשה דבר, ולעתים הציג הודעת שגיאה במקום לעצור.",
+    "Stopping a search keeps what it already found. Title, Shelfmark and My Library searches used to discard every result when stopped, even though the results header said “Partial results”.":
+        "עצירת חיפוש שומרת על מה שנמצא עד כה. חיפושי כותר, סימן מדף ו“הספרייה שלי” השמיטו את כל התוצאות בעצירה, גם כשכותרת התוצאות הכריזה “תוצאות חלקיות”.",
+})
+
+
+# === Web parallels — Phase 145 passage matching (PR #324 round 4) ===
+# The Phase-145 strings were never translated (an i18n leak found while
+# wiring the GUI truncation notice); Hebrew users saw English notifies.
+TRANSLATIONS.update({
+})
+
+
+# === Web parallels — letter-level search rename + controls (owner, 2026-08-23) ===
+TRANSLATIONS.update({
+    "Letter-level parallels search — faster and more precise":
+        "חיפוש מקבילות ברמת האות - חיפוש מהיר ומדויק יותר",
+    "Get the most from the parallels search by entering several textual witnesses":
+        "מצו את חיפוש המקבילות בעזרת הזנת כמה עדי נוסח לחיפוש",
+    # v9.1.0 desktop What's New bar (2026-08-28). My draft ended
+    # "-- and letter-level search is now the default"; the owner cut that
+    # clause. The release changes the default without advertising it.
+    "New in Composition Search! Search using several witnesses of the same work":
+        "חדש בחיפוש חיבורים! חיפוש באמצעות כמה עדי נוסח של אותו טקסט",
+    "New! Letter-level search":
+        "חדש! חיפוש ברמת האות",
+    "Chunk search (slower)":
+        "חיפוש מקטעים (איטי יותר)",
+    # This tooltip has been trimmed twice, both times because it named as
+    # a DIFFERENCE between the two engines something both of them do.
+    # First nikkud and line breaks (2026-08-25: the chunk engine strips
+    # nikkud per token at tokenization, and both treat a newline as an
+    # ordinary separator). Then tolerance of spelling and transcription
+    # differences (2026-08-26, owner review: chunk search's Variants and
+    # Fuzzy modes do that job). What is left is what actually differs --
+    # speed, and how much of the result list is worth reading. Both older
+    # keys were deleted rather than kept for open pages: nothing
+    # referenced them, and a rejected claim left in the table is one a
+    # future surface can copy back out of it.
+    # v9.1.0 desktop What's New dialog (2026-08-28). ONE bullet: the owner
+    # cut the measurement, the new-default and the Stop bullets from my
+    # draft. The two v9.0.0 bullets this replaces are deleted rather than
+    # kept -- one of them asserted "Chunk search stays the default", which
+    # this release makes false, and a false claim left in the table is one a
+    # future surface can copy back out of it.
+    "Several witnesses of one work: letter-level search can now be given more than one copy of the text you are looking for. Paste them one at a time, load a whole file split on blank lines, or promote manuscripts straight from your own results. Each is searched on its own and the results are merged into one list.":
+        "כמה עדי נוסח של יצירה אחת: אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים. הדביקו אותם אחד אחד, טענו קובץ שלם המחולק בשורות ריקות, או קדמו כתבי יד ישירות מתוך התוצאות שלכם. כל אחד נבדק בנפרד והתוצאות מתמזגות לרשימה אחת.",
+    # Second bullet added 2026-08-28 (owner "yes"): the viewer fixes folded
+    # into 9.1.0 before its tag -- letter-level highlighting, and the
+    # manuscript-level nav. The button names inside it match the tr() entries
+    # the buttons themselves use.
+    "The manuscript viewer now highlights letter-level matches in the page text — they used to open unmarked — and new Prev / Next Manuscript buttons skip the remaining pages of a manuscript you have already read.":
+        "צפיין כתב היד מסמן כעת התאמות של חיפוש ברמת האות בטקסט העמוד — עד כה הן נפתחו ללא סימון — ולחצנים חדשים, לכתב היד הבא ולכתב היד הקודם, מדלגים על שאר עמודי כתב היד שכבר קראתם.",
+    "Faster, with fewer irrelevant results.":
+        "מהיר יותר, עם פחות תוצאות לא רלוונטיות.",
+    "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
+        "השיטה הוותיקה. איטית יותר, אך מציעה מצבי מדויק / וריאנטים / מקורב, וסינון חוצה-פסקאות.",
+    "Match width":
+        "רוחב התאמה",
+    "Narrow (near-exact)":
+        "צר (כמעט מדויק)",
+    "Medium width":
+        "בינוני",
+    "Wide width":
+        "רחב",
+    "Maximal (may add noise)":
+        "מרבי (עלול להוסיף רעש)",
+    "Very wide (default)":
+        "רחב מאוד (ברירת מחדל)",
+    "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":
+        "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות.",
+    "Passage length":
+        "אורך הקטע",
+    "Normal passages (default)":
+        "קטעים רגילים (ברירת מחדל)",
+    "Also short passages":
+        "גם קטעים קצרים",
+    "Whether a short shared passage counts as a match. \"Also short\" finds piyyutim, quotations and badly damaged copies that share only a phrase — measured at roughly double the results for a third fewer correct ones, so expect to skim more.":
+        "האם קטע משותף קצר נחשב התאמה. \"גם קטעים קצרים\" מוצא פיוטים, ציטוטים ועותקים פגומים מאוד שחולקים רק צירוף אחד — נמדד כמכפיל את מספר התוצאות תמורת שליש פחות תוצאות נכונות, כך שיש לצפות לסינון ידני רב יותר.",
+    "Search depth":
+        "עומק החיפוש",
+    "Normal (fast, default)":
+        "רגיל (מהיר, ברירת מחדל)",
+    "Deep (slower, more witnesses)":
+        "עמוק (איטי יותר, יותר עדים)",
+    "Deepest (slowest, most)":
+        "עמוק ביותר (הכי איטי, הכי הרבה)",
+    "How much of the corpus the search may examine. Deeper searches take seconds longer and return more manuscripts — including badly damaged and reworked copies a fast pass misses. Long texts benefit the most.":
+        "כמה מן הקורפוס מותר לחיפוש לבדוק. חיפוש עמוק יותר אורך שניות נוספות ומחזיר יותר כתבי יד — כולל עותקים פגומים ומעובדים שסריקה מהירה מפספסת. טקסטים ארוכים מרוויחים הכי הרבה.",
+    "Letter-level search is busy right now — please try again in a moment.":
+        "החיפוש ברמת האות עמוס כרגע — נסו שוב בעוד רגע.",
+    "Letter-level search timed out — try a shorter text.":
+        "החיפוש ברמת האות חרג מהזמן המוקצב — נסו טקסט קצר יותר.",
+    "Letter-level search failed.":
+        "החיפוש ברמת האות נכשל.",
+    "Letter-level search checked the {n} best-evidenced candidates of {m}.":
+        "החיפוש ברמת האות בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
+    # Round 7 (Codex P2): the promise is conditional on the ORIGINAL
+    # settings -- after a reload the controls are at defaults, and an
+    # unconditional "run it again" would run a different search.
+    "Restored {shown} of {total} results from the last search — to see the full list, run the search again with its original settings.":
+        "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — לרשימה המלאה יש להריץ את החיפוש שוב עם ההגדרות המקוריות.",
+    "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
+        "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
+    # --- Multi-witness letter-level search ---------------------------------
+    # One work survives in many manuscripts and no single witness of it
+    # retrieves every other. "עדים" is the standard textual-criticism
+    # term the owner uses for manuscript witnesses of a work.
+    "Witnesses": "עדים",
+    "Add other copies of this work to search with. Each is searched on its own and the results are merged.":
+        "הוסף עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
+    "Add witness text": "הוספת עד נוסח",
+    "This paste contains several witnesses separated by blank lines":
+        "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
+    "Preview split": "תצוגה מקדימה של הפיצול",
+    "{n} witnesses detected": "זוהו {n} עדים",
+    "({n} skipped: already added)": "({n} דולגו: כבר נוספו)",
+    "({n} skipped: too short)": "({n} דולגו: קצרים מדי)",
+    "Pasted text": "טקסט שהודבק",
+    "Pending": "ממתין",
+    "Failed": "נכשל",
+    "{n} matches found": "נמצאו {n} התאמות",
+    "Search now ({n} pending)": "חפש עכשיו ({n} ממתינים)",
+    "Search with these too": "חפש גם עם אלו",
+    "Search with this manuscript too": "חפש גם עם כתב יד זה",
+    "Clear selection": "נקה את הבחירה",
+    "{n} manuscripts selected": "נבחרו {n} כתבי יד",
+    "Added {n} witnesses — found {m} new matches.":
+        "נוספו {n} עדים — נמצאו {m} התאמות חדשות.",
+    "Could not load text for this manuscript.":
+        "לא ניתן לטעון את הטקסט של כתב יד זה.",
+    "Could not load text for {n} manuscripts: {names}":
+        "לא ניתן לטעון את הטקסט של {n} כתבי יד: {names}",
+    "Auto-expand (optional)": "הרחבה אוטומטית (לא חובה)",
+    "Repeatedly search with the best results as new witnesses. Reach goes up and top-of-list precision goes down.":
+        "חיפוש חוזר ונשנה עם התוצאות הטובות ביותר כעדים חדשים. ההיקף גדל והדיוק בראש הרשימה יורד.",
+    "Rounds": "סבבים",
+    "Top-K per round": "כמה לקחת בכל סבב",
+    "Run auto-expand now": "הפעל הרחבה אוטומטית",
+    # The metadata-prefetch dialog shown before an export: its title
+    # was already translated while its body was a bare f-string, so
+    # the window showed two languages at once.
+    "Loaded {curr}/{total} (ID: {sid})": "נטענו {curr}/{total} (מזהה: {sid})",
+    "Round {r}/{n}": "סבב {r}/{n}",
+    "Witness {i}/{k}: {label}": "עד {i}/{k}: {label}",
+    "Auto-expand stopped: witness cap reached.":
+        "ההרחבה האוטומטית נעצרה: הושג המקסימום של עדים.",
+    "{n} witnesses could not be searched — use Retry.":
+        "לא ניתן היה לחפש ב־{n} עדים — נסה שוב.",
+    "Run a letter-level search first.": "יש להריץ תחילה חיפוש ברמת האות.",
+    "Sort by combined score": "מיון לפי ציון משולב",
+    "Sort by number of witnesses": "מיון לפי מספר העדים",
+    "{n} of {m} witnesses": "{n} מתוך {m} עדים",
+    "{n} witnesses are waiting, but only {cap} can be searched at this depth — remove some, or choose a shallower depth.":
+        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסר חלק מהם או בחר עומק רדוד יותר.",
+    "Witness removed. The results on screen were found with the previous witness list — run the search again to update them.":
+        "העד הוסר. התוצאות המוצגות נמצאו עם רשימת העדים הקודמת — הרץ את החיפוש שוב כדי לעדכן אותן.",
+    "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
+    "Search now": "חפש עכשיו",
+    "Other source text": "טקסט מקור אחר",
+    "{n} witnesses": "{n} עדים",
+    "{n} from another text": "{n} מטקסט אחר",
+    "{n} pending": "{n} ממתינים",
+    "{n} failed": "{n} נכשלו",
+    "This witness was added for a different source text, so it was not searched.":
+        "עד זה נוסף עבור טקסט מקור אחר, ולכן לא נבדק.",
+    "{n} witnesses were added for a different source text.":
+        "{n} עדים נוספו עבור טקסט מקור אחר.",
+    "Use them anyway": "השתמש בהם בכל זאת",
+    "Remove them": "הסר אותם",
+    "Label (optional)": "תוית (לא חובה)",
+})
+
+
+# --- Phase 146: desktop letter-level (passage) search ---------------
+# Hebrew approved by the owner 2026-08-26. Strings the WEB already has
+# are deliberately absent: both surfaces call tr() against this one
+# table, so the desktop reuses the web's exact English and inherits
+# its Hebrew (see tests/test_desktop_passage_gate.py, which fails if
+# either surface reworders a shared string on its own).
+TRANSLATIONS.update({
+    'Build / Rebuild Letter-Level Index':
+        'בנייה / בנייה מחדש של אינדקס לחיפוש ברמת האות',
+    'Builds the index used by letter-level search, from the transcriptions already on this computer. Needs about 11 GB free while it runs; the finished index is about 3.5 GB.':
+        'בונה את האינדקס המשמש לחיפוש ברמת האות, מתוך התעתיקים שכבר נמצאים במחשב הזה. דורש כ‑11 גיגהבייט פנויים בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט.',
+    'Build letter-level index':
+        'בניית אינדקס לחיפוש ברמת האות',
+    'This builds the index used by letter-level search.\n\n• About 11 GB of free disk space is needed while it runs\n• The finished index is about 3.5 GB\n• It took about 10 minutes on a fast machine, and may take longer here\n\nYou can keep using the program, and you can cancel at any time. Your existing index is not touched until the new one is complete.':
+        'פעולה זו בונה את האינדקס המשמש לחיפוש ברמת האות.\n\n• דרושים כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה\n• האינדקס המוגמר תופס כ‑3.5 גיגהבייט\n• הבנייה ארכה כ‑10 דקות במחשב מהיר, וייתכן שתארך כאן יותר\n\nאפשר להמשיך להשתמש בתוכנה, ואפשר לבטל בכל שלב. האינדקס הקיים יישאר כפי שהוא עד שהחדש יושלם.',
+    'Letter-level index':
+        'אינדקס לחיפוש ברמת האות',
+    'Building the letter-level index...':
+        'בונה את האינדקס לחיפוש ברמת האות...',
+    'Reading transcriptions: {}% ({} records so far)':
+        'קורא תעתיקים: {}% ({} רשומות עד כה)',
+    'Building index: part {} of {}':
+        'בונה אינדקס: חלק {} מתוך {}',
+    'The letter-level index is ready.':
+        'האינדקס לחיפוש ברמת האות מוכן.',
+    'Letter-level index build cancelled. Your existing index was not changed.':
+        'בניית האינדקס לחיפוש ברמת האות בוטלה. האינדקס הקיים לא השתנה.',
+    'The letter-level index could not be replaced. The previous index is still in use.':
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות. האינדקס הקודם עדיין בשימוש.',
+    'Letter-level search covers the Genizah corpus only. My Library and All-corpora searches use chunk search; letter-level search for My Library is planned for a later version.':
+        'חיפוש ברמת האות מכסה את קורפוס הגניזה בלבד. חיפושים בספרייה שלי ובכל הקורפוסים משתמשים בחיפוש מקטעים; חיפוש ברמת האות עבור הספרייה שלי מתוכנן לגרסה עתידית.',
+    'The letter-level index has not been built on this computer yet. You can build it from Settings.':
+        'האינדקס לחיפוש ברמת האות עדיין לא נבנה במחשב הזה. אפשר לבנות אותו מההגדרות.',
+    'Lab Mode is on. Turn Lab Mode off to use letter-level search.':
+        'מצב מעבדה פעיל. יש לכבות את מצב המעבדה כדי להשתמש בחיפוש ברמת האות.',
+    'The letter-level index is being built right now. It will be available when the build finishes.':
+        'האינדקס לחיפוש ברמת האות נבנה כעת. הוא יהיה זמין בסיום הבנייה.',
+    'The main index is not ready yet. Letter-level search needs it to load the text of its results.':
+        'האינדקס הראשי עדיין אינו מוכן. חיפוש ברמת האות זקוק לו כדי לטעון את הטקסט של התוצאות.',
+    'Please wait':
+        'נא להמתין',
+    'The application is still starting up. Try again in a moment.':
+        'התוכנה עדיין עולה. נסה שוב בעוד רגע.',
+    'Already running':
+        'כבר פועל',
+    # A second copy of the desktop app refuses to start (it would overwrite
+    # the first one's lists and settings). Hebrew-first so it lays out RTL.
+    "Dicta Genizah Search Pro is already open. Only one copy can run at a time, because two copies would overwrite each other's lists and settings. Switch to the open window. If none is visible, it is still starting or closing; try again in a moment.":
+        'התוכנה Dicta Genizah Search Pro כבר פתוחה. רק עותק אחד יכול לפעול בכל פעם, כי כל עותק שומר את הרשימות וההגדרות שלו על גבי אלה של העותק האחר. עברו לחלון הפתוח. אם אין חלון גלוי, התוכנה עדיין נפתחת או נסגרת; נסו שוב בעוד רגע.',
+    # The language-change restart cannot start the new copy: checked before
+    # the window closes (it stays open), or failed after it closed.
+    'Could not restart':
+        'לא ניתן להפעיל מחדש',
+    'The application cannot restart itself right now. The language will change to {} the next time you start it.':
+        'התוכנה אינה יכולה להפעיל את עצמה מחדש כעת. השפה תשתנה ל-{} בהפעלה הבאה.',
+    'The application could not restart itself. Start it again to use the new language.':
+        'התוכנה לא הצליחה להפעיל את עצמה מחדש. יש להפעיל אותה שוב כדי לעבור לשפה החדשה.',
+    'The letter-level index is already being built.':
+        'האינדקס לחיפוש ברמת האות כבר נבנה כעת.',
+    'Transcriptions needed':
+        'דרושים תעתיקים',
+    'The letter-level index is built from the transcriptions file on this computer, and it was not found. Download or locate it first.':
+        'האינדקס לחיפוש ברמת האות נבנה מתוך קובץ התעתיקים שבמחשב הזה, והוא לא נמצא. יש להוריד או לאתר אותו תחילה.',
+    'Build failed':
+        'הבנייה נכשלה',
+    'The letter-level index could not be built. Details have been written to the log. Your existing index was not changed.':
+        'לא ניתן היה לבנות את האינדקס לחיפוש ברמת האות. הפרטים נכתבו ליומן. האינדקס הקיים לא השתנה.',
+    'The letter-level search could not be completed. Details have been written to the log.':
+        'לא ניתן היה להשלים את החיפוש ברמת האות. הפרטים נכתבו ליומן.',
+    '{} results could not load their text and were left out. Re-index from Settings if this persists.':
+        '{} תוצאות לא הצליחו לטעון את הטקסט שלהן והושמטו. אם התופעה נמשכת, יש לבנות מחדש את האינדקס מההגדרות.',
+    'A deep search cannot be interrupted once it has started.':
+        'לא ניתן להפסיק חיפוש עמוק לאחר שהתחיל.',
+    'This letter-level search cannot be stopped once it has started. It is nearly done — please wait a moment.':
+        'לא ניתן להפסיק חיפוש ברמת האות לאחר שהתחיל. הוא כמעט הסתיים — נא להמתין רגע.',
+    'Closing once the current work finishes — {}. A letter-level search cannot be interrupted once it has started, and is usually done within a few seconds.':
+        'ייסגר עם סיום הפעולה הנוכחית — {}. לא ניתן להפסיק חיפוש ברמת האות לאחר שהתחיל, והוא מסתיים בדרך כלל תוך שניות ספורות.',
+    'the letter-level index is being built':
+        'האינדקס לחיפוש ברמת האות נבנה כעת',
+    # Multi-witness batches. A batch CAN be stopped -- its loop
+    # checkpoints between witnesses -- but the witness already running
+    # finishes first, up to ~19s at Deepest. Both messages say so rather
+    # than promising an instant stop and then taking twenty seconds.
+    'Stopping after the current witness finishes. Results found so far are kept.':
+        'העצירה תתבצע בסיום חיפוש העד הנוכחי. התוצאות שנמצאו עד כה נשמרות.',
+    'Clearing once the current witness finishes.':
+        'הניקוי יתבצע בסיום חיפוש העד הנוכחי.',
+    # Loading witnesses from disk: the owner's witness sets are files,
+    # not clipboard contents -- seventeen rites in one file, or a
+    # transcription per file.
+    'Load from files...':
+        'טען מקבצים...',
+    'Load witness files':
+        'טען קובצי עדים',
+    'Split each file on blank lines':
+        'פצל כל קובץ לפי שורות ריקות',
+    'Remove selected':
+        'הסר את הנבחרים',
+    'Remove all':
+        'הסר את כולם',
+    'Remove all {n} witnesses?':
+        'להסיר את כל {n} העדים?',
+    'Choose one or more files. Each file becomes a witness.':
+        'בחר קובץ אחד או יותר. כל קובץ הופך לעד.',
+    'Text files (*.txt);;All files (*)':
+        'קובצי טקסט (*.txt);;כל הקבצים (*)',
+    'Could not read {n} files: {names}':
+        'לא ניתן היה לקרוא {n} קבצים: {names}',
+    # Used by the WEB page too (three call sites in
+    # web/pages/parallels.py), which had no entry for it -- so Hebrew
+    # readers there saw English until this was approved.
+    'Witness text is too long (max {cap} characters)':
+        'טקסט העד ארוך מדי (עד {cap} תווים)',
+    'a letter-level search is running':
+        'חיפוש ברמת האות פועל כעת',
+    'Build letter-level index?':
+        'לבנות אינדקס לחיפוש ברמת האות?',
+    'Letter-level search is a new way to find parallels in the Composition Search tab. It is much faster than chunk search and returns far fewer unrelated results.\n\nIt needs an index that has not been built on this computer yet. Building it takes about 10 minutes and needs about 11 GB of free disk space while it runs; the finished index is about 3.5 GB. You can always build it later from Settings.':
+        'חיפוש ברמת האות הוא דרך חדשה למצוא מקבילות בלשונית חיפוש חיבורים. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות.\n\nהוא זקוק לאינדקס שעדיין לא נבנה במחשב הזה. הבנייה אורכת כ‑10 דקות ודורשת כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
+    'Build now':
+        'בנה עכשיו',
+    'Ask me later':
+        'שאל אותי מאוחר יותר',
+    "Don't ask again":
+        'אל תשאל שוב',
+    'the letter-level index is being opened':
+        'האינדקס לחיפוש ברמת האות נפתח כעת',
+    'Letter-level search':
+        'חיפוש ברמת האות',
+    'Chunk search':
+        'חיפוש מקטעים',
+    'The letter-level index could not be replaced. Reloading the existing index.':
+        'לא היה ניתן להחליף את האינדקס לחיפוש ברמת האות. האינדקס הקיים נטען מחדש.',
+    'Search method':
+        'שיטת חיפוש',
+    'Letter-level options':
+        'אפשרויות חיפוש ברמת האות',
+    'Not enough disk space':
+        'אין מספיק מקום בדיסק',
+    'Building the letter-level index needs about {} GB free on this drive, and there is about {} GB. Free some space and try again.':
+        'בניית האינדקס לחיפוש ברמת האות דורשת כ‑{} גיגהבייט פנויים בכונן הזה, וישנם כ‑{} גיגהבייט. פנו מקום ונסו שוב.',
+})
+
+
+# Desktop PGP link buttons (ResultDialog + Browse) and the clickable PGP
+# badge in the search results table. Reuses the existing 'View on PGP'
+# label; only the shared tooltip is new.
+TRANSLATIONS.update({
+    'Open on the Princeton Geniza Project website':
+        'פתיחה באתר של פרויקט הגניזה של פרינסטון',
+})
+
+
+# Desktop Search tab: a zero-result search while the corpus scope is "Local"
+# shows a strip above the (empty) results table offering the same query
+# against the Genizah corpus in one click.
+TRANSLATIONS.update({
+    'No results in My Library. This search looked only at your local files.':
+        'אין תוצאות בספרייה המקומית. החיפוש הזה בדק רק את הקבצים המקומיים שלך.',
+    'Search the Genizah corpus instead':
+        'לחפש במאגר הגניזה במקום',
+})
+
+
+# v9.4.0 desktop What's New bar and dialog (2026-09-28). Hebrew: the owner's
+# own for the bar; the dialog bullets drafted for the release and approved.
+TRANSLATIONS.update({
+    "New: improvements to personal list sync, and more":
+        "חדש: שיפורים בסנכרון רשימות אישיות ועוד.",
+    "List sync keeps everything: an entry in two lists, and two pages of one manuscript, each keep their own copy in your account, and a note that differs is never overwritten; both versions are kept.":
+        "סנכרון הרשימות שומר על הכול: פריט שנמצא בשתי רשימות, ושני עמודים של אותו כתב יד, נשמרים כל אחד בנפרד בחשבונך, והערה שונה לעולם אינה נדרסת – שתי הגרסאות נשמרות.",
+    "List sync runs in the background: every change uploads by itself, \"Sync lists now\" is on the Lists tab, and entries you remove here are removed from your account too. Entries removed on the website are shown to you and never removed silently.":
+        "הסנכרון פועל ברקע: כל שינוי עולה לחשבון מעצמו, „סנכרן רשימות עכשיו\" נמצא בלשונית הרשימות, ופריטים שהסרת כאן מוסרים גם מחשבונך. פריטים שהוסרו באתר מוצגים לך לבחירה, ולעולם אינם מוסרים בשקט.",
+    "Your work stays saved: lists, settings and language are saved safely and restored from a backup if a file is damaged; New keeps your Joins Lab work; excluded manuscripts stay hidden until New; only one copy of the program runs at a time.":
+        "העבודה שלך נשמרת: הרשימות, ההגדרות והשפה נשמרות בבטחה ומשוחזרות מגיבוי אם קובץ נפגע; „חדש\" שומר את העבודה במעבדת צירופים; כתבי יד שהוחרגו נשארים מוסתרים עד „חדש\"; ורק עותק אחד של התוכנה פועל בכל פעם.",
+})
+
+# v9.5.0 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-04). Hebrew: the owner's own for the desktop bar; the rest drafted for
+# the release and approved.
+TRANSLATIONS.update({
+    "New: much faster search, and more comprehensive results, also in searches with many results":
+        "חדש: חיפוש מהיר בהרבה, ותוצאות מקיפות יותר גם בחיפושים מרובי תוצאות",
+    "Faster search: the first results appear while the search is still running, and Exact and Variants searches take a fraction of the time (Exact שלום: from 10 seconds to under 2).":
+        "חיפוש מהיר יותר: התוצאות הראשונות מופיעות כבר בזמן החיפוש, וחיפושים מדויקים ובווריאנטים נמשכים זמן קצר בהרבה (שלום בחיפוש מדויק: מ־10 שניות לפחות מ־2).",
+    "Whole words: Exact, Variants and Fuzzy match whole words (שלום, not בשלום), and Fuzzy finds near spellings: one letter different, two in words of five letters or more.":
+        "מילים שלמות: מדויק, וריאנטים ומקורב מוצאים מילים שלמות (שלום, ולא בשלום), והחיפוש המקורב מוצא כתיב קרוב: הבדל של אות אחת, או שתיים במילים של חמש אותיות ומעלה.",
+    "More comprehensive results, also in searches with many results: \"Search within\", \"Only results with all terms\" and Composition Search with filters work on the whole set, at any size, and a long list shows \"N+\".":
+        "תוצאות מקיפות יותר, גם בחיפושים מרובי תוצאות: „חפש בתוך\", „רק תוצאות עם כל המונחים\" וחיפוש חיבורים עם מסננים פועלים על הקבוצה כולה, בכל גודל, ורשימה ארוכה מסומנת „N+\".",
+    "New: faster search, more comprehensive results in searches with many results, and whole-word matching in Variants and Fuzzy":
+        "חדש: חיפוש מהיר יותר, תוצאות מקיפות יותר בחיפושים מרובי תוצאות, והתאמה למילים שלמות בווריאנטים ובמקורב",
+    "New: first results while the search runs, and further improvements to search quality":
+        "חדש: תוצאות ראשונות כבר בזמן החיפוש, ושיפורים נוספים באיכות החיפוש",
+})
+
+# v9.6.1 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-11). Drafted for the release and approved.
+TRANSLATIONS.update({
+    "New: Extended and Maximum variant searches are much faster":
+        "חדש: חיפוש בווריאנטים מורחבים ומרביים מהיר בהרבה",
+    "Extended and Maximum, much faster: each word's thousands of spellings are now searched as one compact pattern, with the same results. A four-word Maximum search is ready in about 4 seconds instead of about 22, and each page is checked tens of times faster.":
+        "וריאנטים מורחבים ומרביים – מהר בהרבה: אלפי הכתיבים של כל מילה נבדקים עכשיו כתבנית אחת קומפקטית, עם אותן תוצאות. חיפוש מרבי בן ארבע מילים מוכן בתוך כ־4 שניות במקום כ־22, וכל עמוד נבדק מהר פי עשרות מונים.",
+    "Composition Search with Extended or Maximum variants is faster too.":
+        "גם חיפוש חיבורים בווריאנטים מורחבים או מרביים מהיר יותר.",
+    "Stop answers sooner during a slow search.":
+        "„עצור\" מגיב מהר יותר בחיפוש איטי.",
+})
+
+# Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.
+TRANSLATIONS.update({
+    "New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research skill for other AI assistants, and the public API, from the AI tools page.":
+        "חדש: שאלו את הגניזה ב־ ChatGPT – ה־GPT של GenizahSearch, סקיל מחקר לעוזרי AI אחרים וה־API הציבורי, הכול מעמוד כלי ה־AI.",
+})
+
+# Web What's New banner: the AI listings launch (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md,
+# web/main.py AI_LAUNCH_WHATS_NEW), one entry per combination of live listings.
+TRANSLATIONS.update({
+    "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.":
+        "חדש: GenizahSearch ב־ChatGPT וב־Claude – שאלו על כתבי היד במילים שלכם, מעמוד כלי ה־AI.",
+    "New: GenizahSearch in ChatGPT - ask about the manuscripts in your own words, from the AI tools page.":
+        "חדש: GenizahSearch ב־ChatGPT – שאלו על כתבי היד במילים שלכם, מעמוד כלי ה־AI.",
+    "New: GenizahSearch in Claude - ask about the manuscripts in your own words, from the AI tools page.":
+        "חדש: GenizahSearch ב־Claude – שאלו על כתבי היד במילים שלכם, מעמוד כלי ה־AI.",
+})
+
+# Composition Manuscript Viewer: result category, the frozen result-list filter strip,
+# and the way back to the list (user letter, Tishrei 5787 -- A4/A5).
+TRANSLATIONS.update({
+    "Main results group": "תוצאות ראשיות",
+    "Appendix group": "נספח",
+    "Filtered group": "מסוננים",
+    "Excluded group": "מוחרגים",
+    "All results group": "כל התוצאות",
+    "Back to results": "חזרה לתוצאות",
+    "Show the results list, where the filters can be changed": "הצגת רשימת התוצאות, שבה אפשר לשנות את הסינונים",
+    "This result is hidden by the current filters": "תוצאה זו מוסתרת על ידי הסינונים הנוכחיים",
+    "Filters from the results list: {}": "סינונים מרשימת התוצאות: {}",
+    '{} contains "{}"': '{} מכיל "{}"',
+    '{} does not contain "{}"': '{} אינו מכיל "{}"',
+    "My Library only": "הספרייה שלי בלבד",
+    "My Library hidden": "הספרייה שלי מוסתרת",
+    "{} domains excluded": "{} תחומים הוחרגו",
+})
+
+# Composition flat view ("Sort by shelfmark only"): the per-row marker that replaces
+# the Filtered/Excluded groups the flat list does not have (2026-09-24).
+TRANSLATIONS.update({
+    "{} filtered": "{} מסוננות",
+    "{} excluded": "{} מוחרגות",
+    "Filtered result": "תוצאה מסוננת",
+    "Filtered result: {}": "תוצאה מסוננת: {}",
+    "Excluded from the results by you": "הוחרגה על ידך מן התוצאות",
+})
+
+# Desktop layout for low-resolution / high-zoom screens (2026-09-24): overflow
+# menus, the Manuscript Viewer's reading views and image controls.
+TRANSLATIONS.update({
+    "More": "עוד",
+    "Sources": "מקורות",
+    "Show the image": "הצגת התמונה",
+    "Show the text": "הצגת הטקסט",
+    "Image adjustments": "כוונון תמונה",
+    "{} matching pages": "{} עמודים תואמים",
+    "All sections": "כל הלשוניות",
+    # The menu layouts (desktop/widgets/side_nav.py, 2026-10-24): ☰, the
+    # Settings choice between them, and the account menu.
+    "Menu": "תפריט",
+    "Collapse menu": "כיווץ התפריט",
+    "Expand menu": "הרחבת התפריט",
+    "Menu:": "תפריט:",
+    "Tabs at the top": "לשוניות למעלה",
+    "Side menu": "תפריט צד",
+    "Move the menu to the side": "העברת התפריט לצד",
+    "Move the menu to tabs": "העברת התפריט לתצורת לשוניות",
+    "Account": "חשבון",
+    # The Go to box (Ctrl+G).
+    "Go to": "מעבר אל",
+    "Go to...": "מעבר אל...",
+    "A shelfmark or system number opens the manuscript. "
+    "Hebrew or Arabic words are searched.":
+        "מספר מדף או מספר מערכת פותחים את כתב היד. "
+        "מילים בעברית או בערבית נשלחות לחיפוש.",
+    "For example T-S 12.123": "למשל T-S 12.123",
+    "Recent manuscripts": "כתבי יד אחרונים",
+    # The keyboard shortcuts card (Ctrl+/, 2026-10-30; desktop/shortcuts_dialog.py).
+    "Open a section, with the cursor in its results (Search, Composition Search) or its search box":
+        "פתיחת לשונית, עם הסמן בתוצאות שלה (חפש, חיפוש חיבורים) או בתיבת החיפוש שלה",
+    "In a text box, such as Find, Ctrl with the arrows moves the cursor word by word, as usual.":
+        "בתיבת טקסט, כמו מצא, Ctrl עם החצים מזיז את הסמן מילה אחר מילה, כרגיל.",
+    "Put the cursor in the results list of the section in front":
+        "העברת הסמן לרשימת התוצאות של הלשונית הפתוחה",
+    "Put the cursor in the search box of the section in front":
+        "העברת הסמן לתיבת החיפוש של הלשונית הפתוחה",
+    "In the search box: the search history (Enter runs a search, Delete removes it)":
+        "בתיבת החיפוש: היסטוריית החיפושים (Enter מריץ חיפוש, Delete מוחק אותו)",
+    "Stop a running search (Search, Composition Search)": "עצירת חיפוש שרץ (חפש, חיפוש חיבורים)",
+    "Go to: open a manuscript by its shelfmark or system number":
+        "מעבר אל: פתיחת כתב יד לפי מספר מדף או מספר מערכת",
+    "Larger, smaller or normal text": "טקסט גדול יותר, קטן יותר או בגודל הרגיל",
+    "Help, at the section in front": "עזרה, בפרק של הלשונית הפתוחה",
+    "This list": "הרשימה הזו",
+    # Its sections, and the keys of the result lists, Browse and the Manuscript
+    # Viewer (owner, 2026-10-30).
+    "In the whole window": "בכל החלון",
+    "In a list of results": "ברשימת תוצאות",
+    "Tick or untick the result (Search)": "סימון התוצאה או ביטול הסימון (חפש)",
+    "Tick every result, or untick them all (Search)": "סימון כל התוצאות, או ביטול כל הסימונים (חפש)",
+    "Open the result (Search, Composition Search, Personal Lists)":
+        "פתיחת התוצאה (חפש, חיפוש חיבורים, רשימות אישיות)",
+    "Open it in Browse by Shelfmark": "פתיחה בעיון לפי מספר מדף",
+    "In the source text: run the search": "בטקסט המקור: הרצת החיפוש",
+    "Next / previous image": "התמונה הבאה / הקודמת",
+    "Next / previous manuscript": "כתב היד הבא / הקודם",
+    "Next / previous result": "התוצאה הבאה / הקודמת",
+    "Find in the text": "חיפוש בטקסט",
+    "Close the window": "סגירת החלון",
+    "Next result": "התוצאה הבאה",
+    "Previous result": "התוצאה הקודמת",
+    # Saved searches: the star in the search history menus (2026-10-25).
+    "Saved searches": "חיפושים שמורים",
+    "Clear history (saved searches stay)": "ניקוי ההיסטוריה (החיפושים השמורים נשארים)",
+    "Remove from saved searches": "הסרה מהחיפושים השמורים",
+    "Save this search: it stays at the top of this list and is never dropped from it":
+        "שמירת החיפוש: הוא יישאר בראש הרשימה ולא יימחק ממנה",
+    "Clear the search history? Your saved searches stay.":
+        "לנקות את היסטוריית החיפוש? החיפושים השמורים יישארו.",
+    "How many recent searches each history list keeps. Saved (starred) searches are not counted.":
+        "כמה חיפושים אחרונים שומרת כל רשימת היסטוריה. חיפושים שמורים (בכוכב) אינם נספרים.",
+    # Text size of the result lists (Settings, Ctrl+= / Ctrl+- / Ctrl+0).
+    "Text size in result lists:": "גודל הטקסט ברשימות התוצאות:",
+    "Normal": "רגיל",
+    "Larger": "גדול יותר",
+    "Largest": "הגדול ביותר",
+    "The text in the search, composition, identification and list results. "
+    "Also Ctrl+= and Ctrl+-, and Ctrl+0 for normal. The transcription has "
+    "its own A- / A+ buttons.":
+        "הטקסט בתוצאות החיפוש, חיפוש החיבורים, העיון לפי זיהוי והרשימות. "
+        "אפשר גם Ctrl+= ו-Ctrl+-, ו-Ctrl+0 לגודל הרגיל. לתעתיק יש כפתורי A- / A+ משלו.",
+    "Columns": "עמודות",
+    "Show all columns": "הצגת כל העמודות",
+    "Fit columns to window": "התאמת העמודות לחלון",
+    "Open on the website": "פתיחה באתר",
+    "Copy link": "העתקת קישור",
+    "Link copied": "הקישור הועתק",
+    "Open this page on genizahsearch.com": "פתיחת עמוד זה באתר genizahsearch.com",
+    "Copy a link to this page on genizahsearch.com": "העתקת קישור לעמוד זה באתר genizahsearch.com",
+    "This page is not on genizahsearch.com.": "עמוד זה אינו נמצא באתר genizahsearch.com.",
+    "Smaller text": "הקטנת הטקסט",
+    "Larger text": "הגדלת הטקסט",
+})
+
+# Composition Search tooltips in plain words (owner, 2026-10-25).
+TRANSLATIONS.update({
+    "Your text is searched in runs of this many words. Fewer words find more, "
+    "including chance matches; more words find fewer, surer ones. "
+    "5 to 7 suits most texts.":
+        "הטקסט שלך נחפש ברצפים של מספר מילים זה. פחות מילים מוצאות יותר, "
+        "כולל התאמות מקריות; יותר מילים מוצאות פחות, אבל בוודאות רבה יותר. "
+        "5 עד 7 מתאים לרוב הטקסטים.",
+    "A run of words found on more than this many pages is treated as a common "
+    "phrase, such as a verse or a formula, and the pages where it is found go to "
+    "the Filtered group. Raise it if too much ends up there. At 50 or more, "
+    "nothing is filtered this way.":
+        "רצף מילים שנמצא ביותר עמודים ממספר זה נחשב לביטוי נפוץ, כגון פסוק או נוסחה, "
+        "והעמודים שבהם הוא נמצא עוברים לקבוצת המסוננים. הגדילו את המספר אם יותר מדי "
+        "עובר לשם. ב-50 ומעלה שום דבר אינו מסונן כך.",
+    "How closely the manuscripts must match your words:":
+        "עד כמה כתבי היד צריכים להתאים למילים שלך:",
+    "Exact: your words as written, as whole words.":
+        "מדויק: המילים שלך כפי שנכתבו, כמילים שלמות.",
+    "Variants: also common spelling variants. The slider beside it sets "
+    "how many kinds of letter swap are tried.":
+        "וריאנטים: גם חילופי כתיב נפוצים. המחוון שלידו קובע כמה סוגים של "
+        "חילופי אותיות ינוסו.",
+    "Fuzzy: also near spellings, with a letter added, dropped, changed or "
+    "swapped (two in words of five letters or more).":
+        "מקורב: גם כתיב קרוב, עם אות שנוספה, נשמטה, הוחלפה או החליפה מקום "
+        "(שתיים במילים של חמש אותיות ומעלה).",
+    "How many kinds of letter swap to try, the most common first. Higher finds "
+    "more spellings, more slowly and with more noise. The slider in the Search "
+    "tab moves with it.":
+        "כמה סוגים של חילופי אותיות לנסות, הנפוצים קודם. ערך גבוה מוצא יותר צורות "
+        "כתיב, לאט יותר ועם יותר רעש. המחוון בלשונית החיפוש זז יחד איתו.",
+    "When more than this many results share one catalog title (many copies of "
+    "one prayer book, for example), they are gathered under that title in the "
+    "Appendix, so they do not crowd the main results.":
+        "כאשר ליותר תוצאות ממספר זה יש אותה כותרת בקטלוג (למשל עותקים רבים של "
+        "סידור אחד), הן מקובצות תחת הכותרת הזאת בנספח, כדי שלא יציפו את התוצאות הראשיות.",
+    "A page is listed only when at least this many different chunks of your "
+    "text are found on it. Raise it to drop pages that share only one phrase "
+    "with your text. With cross-paragraph search, the \u2699 setting is used "
+    "instead.":
+        "עמוד מוצג רק אם נמצאו בו לפחות מספר זה של מקטעים שונים מהטקסט שלך. "
+        "הגדילו את המספר כדי להשמיט עמודים שחולקים עם הטקסט שלך ביטוי אחד בלבד. "
+        "בחיפוש חוצה פסקאות משמשת במקומו ההגדרה שבכפתור \u2699.",
+    "Show every result in one list, without the Main Results, Appendix and "
+    "Filtered groups. Filtered and excluded results are marked in the list "
+    "instead.":
+        "הצגת כל התוצאות ברשימה אחת, בלי הקבוצות תוצאות ראשיות, נספח ומסוננים. "
+        "תוצאות מסוננות ומוחרגות מסומנות ברשימה עצמה.",
+    "Search the corpus for parallels to the text in the box.":
+        "חיפוש מקבילות לטקסט שבתיבה.",
+    "Which texts to search:": "באילו טקסטים לחפש:",
+    "Genizah: the Genizah transcriptions.": "גניזה: התעתיקים של הגניזה.",
+    "Local: your My Library documents.": "מקומי: המסמכים שלך בספרייה שלי.",
+    "ALL: both, in one list.": "הכול: שניהם, ברשימה אחת.",
+    "Put the text of a file in the box, instead of pasting it.":
+        "הכנסת הטקסט של קובץ לתיבה, במקום להדביק אותו.",
+    "Manuscripts you already know: they are kept out of the results and listed "
+    "under Excluded.":
+        "כתבי יד שכבר ידועים לך: הם מוצאים מהתוצאות ומופיעים תחת מוחרגים.",
+    "Keep other texts out of your results: texts your composition quotes, works "
+    "that quote it, or a text that must appear. Hover over an item for an example.":
+        "הרחקת טקסטים אחרים מהתוצאות: טקסטים שהחיבור שלך מצטט, חיבורים שמצטטים אותו, "
+        "או טקסט שחייב להופיע. העבירו את העכבר מעל פריט כדי לראות דוגמה.",
+    "Search, then search again with the full text of the pages found "
+    "added to yours, to reach copies your text alone does not find. "
+    "Tick results first to use only those.":
+        "חיפוש, ואחריו חיפוש נוסף שבו הטקסט המלא של העמודים שנמצאו מתווסף לטקסט שלך, "
+        "כדי להגיע לעותקים שהטקסט שלך לבדו אינו מוצא. סמנו תוצאות קודם כדי להשתמש רק בהן.",
+    "Search again with the full text of the ticked results added to "
+    "yours.":
+        "חיפוש נוסף שבו הטקסט המלא של התוצאות המסומנות מתווסף לטקסט שלך.",
+    "Search again with the best results as more witnesses, merged into "
+    "one list.":
+        "חיפוש נוסף שבו התוצאות הטובות ביותר משמשות עדים נוספים, ממוזגות לרשימה אחת.",
+})
+
+# Startup tips (desktop/startup_tips.py, 2026-10-25). The Hebrew of each tip is
+# the owner's own, from the review sheet (startup_tips_review, round 4); **bold**
+# marks a name on screen, as Hebrew has no capitals to mark one.
+TRANSLATIONS.update({
+    "Show me": "הראה לי",
+    "Next tip": "הטיפ הבא",
+    "Don't show tips": "לא להציג טיפים",
+    "Build the index": "בניית האינדקס",
+    "Tips are off. You can turn them on again in Settings.":
+        "הטיפים כבויים. אפשר להפעיל אותם שוב בהגדרות.",
+    "Show a tip when the program starts": "הצגת טיפ בפתיחת התוכנה",
+    "Show all tips again": "הצגת כל הטיפים מחדש",
+    "The tips are reset and all of them are shown again.": "תצוגת הטיפים תתאפס וכל הטיפים יוצגו מחדש",
+    "Ctrl+G opens any manuscript from anywhere: type a shelfmark or system number, or pick one of the last ten you opened.":
+        "Ctrl+G פותח כל כתב יד מכל מקום: הקלידו מספר מדף או מספר מערכת, או בחרו אחד מעשרת כתבי היד האחרונים שפתחתם.",
+    "The arrow at the end of the query box reruns a recent search; ☆ keeps it at the top of the list for good.":
+        "החץ בקצה תיבת החיפוש מריץ שוב אחד מהחיפושים האחרונים; ☆ מצמיד אותו לראש הרשימה לצמיתות.",
+    "**Letter-level search** finds parallels much faster than chunk search, with fewer unrelated results. Its index is built once, from **Settings**.":
+        "**חיפוש ברמת האות** מוצא מקבילות מהר בהרבה מחיפוש מקטעים, ועם פחות תוצאות לא רלוונטיות. את האינדקס שלו בונים פעם אחת, בחלון **הגדרות**.",
+    "Have several textual witnesses of the work you are looking for? Add each one in the **Witnesses** window: each copy is searched separately and the results are merged, which finds more than any single copy.":
+        "יש לכם כמה עדי נוסח של החיבור שאתם מחפשים? הוסיפו כל אחד מהם בחלון **עדים**: החיפוש נעשה בכל עותק בנפרד והתוצאות ממוזגות, וכך מוצאים יותר מאשר בכל עותק לבדו.",
+    "In **Responsa** style, * stands for any letters inside a word: כהנ* גדו* finds both כהן גדול and כהנים גדולים.":
+        "בחיפוש בסגנון **פרויקט השו\"ת**, הסימן * מייצג אותיות כלשהן בתוך מילה: כהנ* גדו* מוצא גם כהן גדול וגם כהנים גדולים.",
+    "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for catalog titles, # for shelfmarks, and R and a space for **Responsa** style.":
+        "הקלידו סימן ואחריו רווח כדי לבחור את סוג החיפוש: ? שלום לחיפוש **וריאנטים**, ~ לחיפוש **מקורב**, $ לכותרות בקטלוג, # למספרי מדף, ו-R ורווח לחיפוש בסגנון **פרויקט השו\"ת**.",
+    "#שלום# finds the word with every prefix and suffix (600 forms), and %שלום finds it with and without ו and י.":
+        "#שלום# מוצא את המילה עם כל התחיליות והסיומות (600 צורות), ו-%שלום מוצא אותה בכתיב מלא ובכתיב חסר (עם ו' ו-י' ובלעדיהן).",
+    "Not sure of the **Responsa** syntax? **Tabular Search** builds the query from boxes, with a live preview.":
+        "לא בטוחים בתחביר של **פרויקט השו\"ת**? הכפתור **חיפוש טבלאי** בונה את השאילתה בעזרת תיבות, עם תצוגה מקדימה בזמן אמת.",
+    "The position list beside the query box (**Anywhere**, **Start of text**, **End of text**, **Line starts**, **Line ends**) limits the search to the start or end of a text or of a line, which helps when hunting joins.":
+        "רשימת המיקום שליד תיבת החיפוש (**בכל מקום**, **תחילת טקסט**, **סוף טקסט**, **תחילת שורה**, **סוף שורה**) מגבילה את החיפוש לתחילת טקסט או שורה, או לסופם – שימושי באיתור צירופים.",
+    "**Focus Search** narrows a search before it runs: by subject, author, work, date, or printed versus handwritten.":
+        "הכפתור **מקד חיפוש** מצמצם את החיפוש מראש: לפי תחום, מחבר, חיבור, תאריך, ודפוס או כתב יד.",
+    "After a search, **Search within N manuscripts** searches again only in the manuscripts it found.":
+        "אחרי חיפוש, הכפתור **חפש בתוך N כתבי יד** מחפש שוב רק בכתבי היד שנמצאו.",
+    "Click the filter mark in a column heading to filter the results by text; tick **Exclude matches** to hide the matching results instead.":
+        "לחצו על סמן הסינון בראש העמודה כדי לסנן את התוצאות לפי טקסט; סמנו **סנן התאמות** כדי להסתיר דווקא את התוצאות התואמות.",
+    "Right-click a result to hide that manuscript, copy its shelfmark, or send a correction or a comment.":
+        "לחצו לחיצה ימנית על תוצאה כדי להסתיר את כתב היד, להעתיק את מספר המדף שלו, או לשלוח תיקון או תגובה.",
+    "Tick results and press **Search with these too**: the pages that matched become more witnesses for the next round.":
+        "סמנו תוצאות ולחצו על **חפש גם עם אלו**: העמודים התואמים יהפכו לעדים נוספים בסבב הבא.",
+    "If your text contains verses or other quoted sources, you can filter them out with **Filter texts** > **Quoted texts**.":
+        "אם הטקסט שלכם מכיל פסוקים או מקורות מצוטטים אחרים, תוכלו לסנן אותם בעזרת **סנן טקסטים** > **מקורות מצוטטים**.",
+    "**Filter texts** > **Quoting texts** > **Load from Sefaria**: choose the passage of a work that quotes yours (the Rif on Berakhot, say), and that work's pages move out of the results.":
+        "**סנן טקסטים** > **חיבורים מצטטים** > **טען מספריא**: בחרו את הקטע בחיבור שמצטט את הטקסט שלכם (למשל הרי\"ף לברכות), ועמודי החיבור הזה יוצאו מהתוצאות.",
+    "**Filter texts** > **Add condition** shows only pages where another known text also appears: on the same image, on an adjacent one, or anywhere in the manuscript.":
+        "**סנן טקסטים** > **הוסף תנאי** מציג רק עמודים שבהם מופיע גם טקסט ידוע נוסף: באותה תמונה, בתמונה סמוכה או בכל מקום בכתב היד.",
+    "Already know some witnesses? List them in **Exclude Manuscripts**: they move to the **Excluded** group and the new finds stand out.":
+        "כבר מכירים חלק מהעדים? רשמו אותם בחלון **החרג כתבי יד**: הם יעברו לקבוצת **מוחרגים**, והממצאים החדשים יבלטו.",
+    "Shelfmarks needn't be exact: TS NS 13 15 finds T-S NS 13.15.":
+        "אין צורך להקליד מספר מדף מדויק: TS NS 13 15 מוצא את T-S NS 13.15.",
+    "**Find** on the Browse tab marks a word as you type it; **View All** puts every page of the manuscript in one scroll.":
+        "השדה **מצא** בלשונית **עיון לפי מספר מדף** מדגיש מילה תוך כדי הקלדה; הכפתור **הכל** מציג את כל עמודי כתב היד בגלילה רציפה אחת.",
+    "🔍 **Parallels**, on the Browse tab and in the viewer, sends the page you are reading to Composition Search to find other copies of it.":
+        "הכפתור 🔍 **מקבילות**, בלשונית **עיון לפי מספר מדף** ובחלון הצפייה, שולח את העמוד שאתם קוראים ללשונית **חיפוש חיבורים** כדי למצוא עותקים נוספים שלו.",
+    "The **Reading Desk** shows several manuscripts side by side with their images: 👁️ **Add to View** adds the one on screen, and the 🔗 joins menu opens all joined fragments at once.":
+        "**שולחן עיון** מציג כמה כתבי יד זה לצד זה, עם התמונות שלהם: 👁️ **הוסף לתצוגה** מוסיף את כתב היד שעל המסך, ותפריט הצירופים 🔗 פותח בבת אחת את כל הקטעים שבצירוף.",
+    "**Cite this page** copies a ready citation for the manuscript on screen.":
+        "הכפתור **צטט דף זה** מעתיק הפניה ביבליוגרפית מוכנה לכתב היד המוצג.",
+    "**Open on the website** and **Copy link** lead to the same page on genizahsearch.com, handy for sharing with others.":
+        "הכפתורים **פתיחה באתר** ו-**העתקת קישור** מקשרים לאותו עמוד באתר genizahsearch.com, שימושי לשיתוף עם אחרים.",
+    "Click a PGP tag on the Browse tab (a letter, a contract) to list every manuscript with that topic, or choose **PGP Tags** as the search mode.":
+        "לחצו על תגית PGP בלשונית **עיון לפי מספר מדף** (למשל מכתב או חוזה) כדי להציג את כל כתבי היד בנושא הזה, או בחרו בסוג החיפוש **תגיות PGP**.",
+    "**Browse by Identification** lists manuscripts by subject, author, work and date; **Search in these results** then searches only them.":
+        "הלשונית **עיון לפי זיהוי** מציגה כתבי יד לפי תחום, מחבר, חיבור ותאריך; אחר כך הכפתור **חפש בתוצאות אלה** מחפש רק בהם.",
+    "The ☆ on each search result adds it to a personal list; signed in, your lists sync with genizahsearch.com.":
+        "הכוכב ☆ שליד כל תוצאת חיפוש מוסיף אותה לרשימה אישית; כשאתם מחוברים לחשבון, הרשימות שלכם מסתנכרנות עם genizahsearch.com.",
+    "Group your lists into projects, give items tags and notes, and save a list to Excel or Word with **Export List**.":
+        "קבצו את הרשימות לפרויקטים, הוסיפו לפריטים תגיות והערות, ושמרו רשימה כקובץ Excel או Word בעזרת **ייצוא רשימה**.",
+    "📋 **Copy Info** on a list item copies its details (short, detailed or with a link), ready to paste into an article.":
+        "הכפתור 📋 **העתק מידע** שבפריט ברשימה מעתיק את פרטיו (בקצרה, בפירוט או עם קישור), מוכנים להדבקה במאמר.",
+    "The **Joins Lab** helps you find joins for a given manuscript. Anchor it, and see beside it the results of a search for text you expect on the joining fragment, fragments that look like it, or both together.":
+        "**מעבדת צירופים** נועדה לסייע לכם למצוא צירופים לכתב יד מסוים. תוכלו לעגן את כתב היד ולצפות מולו בתוצאות חיפוש טקסט שאתם מצפים שיהיה בקטע המצורף, או בהתאמות חזותיות לקטע, וכן בשילוב של שניהם.",
+    "In the **Joins Lab**, **Visual Similarity** finds fragments that look alike. Note: it is a computer algorithm that covers only about half of the Genizah fragments, so its suggestions add matches but never rule one out.":
+        "בחלון **מעבדת צירופים**, הכפתור **דמיון חזותי** מוצא קטעים שנראים דומים זה לזה. תשומת לב: זה אלגוריתם ממוחשב הכולל רק כמחצית מקטעי הגניזה, כך שהצעותיו מוסיפות אך לא פוסלות התאמות.",
+    "Want to join fragments to each other physically? 🧩 **Puzzle** on the Browse tab puts the fragment on a canvas: remove the background, rotate and fit the pieces together, then export the result as one image.":
+        "רוצים לצרף קטעים פיזית אחד לשני? הכפתור 🧩 **פאזל** בלשונית **עיון לפי מספר מדף** מניח את הקטע על משטח עבודה: הסירו את הרקע, סובבו והתאימו את החלקים זה לזה, ואז ייצאו את התוצאה כתמונה אחת.",
+    "Ask the community: in the **Community** tab, + shares a discovery or a question about a manuscript, and other researchers can reply.":
+        "שאלו את הקהילה: בלשונית **קהילה**, לחצו על + כדי לשתף תגלית או שאלה על כתב יד, וחוקרים אחרים יוכלו להגיב.",
+    "You can search your own files! **My Library** indexes your Word, PDF, text and Excel files, so **Search** and **Composition Search** search them too when you choose **Local** or **ALL**.":
+        "תוכלו לחפש בקבצים שלכם! הלשונית **הספרייה שלי** מוסיפה לאינדקס את קובצי ה-Word, ה-PDF, הטקסט וה-Excel שלכם, כך שהלשוניות **חפש** ו-**חיפוש חיבורים** יחפשו גם בהם, אם בוחרים **מקומי** או **הכול**.",
+    "F1 opens Help at the section you are in; the orange **?** buttons do the same.":
+        "F1 פותח את העזרה בפרק של הלשונית שבה אתם נמצאים; גם הכפתורים הכתומים **?** עושים זאת.",
+    "Ctrl+1 to Ctrl+7 jump between the sections, and Ctrl+F puts the cursor in the section's own search box.":
+        "הקישו Ctrl+1 עד Ctrl+7 כדי לעבור בין הלשוניות, ו-Ctrl+F כדי להעביר את הסמן לתיבת החיפוש של הלשונית.",
+    "Ctrl+= and Ctrl+- make the text in the result lists larger or smaller, and Ctrl+0 returns to normal; **A−** and **A+** size the transcription.":
+        "Ctrl+= ו-Ctrl+- מגדילים ומקטינים את הכתב ברשימות התוצאות, ו-Ctrl+0 מחזיר לגודל הרגיל; **A−** ו-**A+** משנים את גודל התעתיק.",
+    "Prefer a menu down the side of the window? ☰ > **Move the menu to the side**.":
+        "מעדיפים תפריט לאורך צד החלון? ☰ > **העברת התפריט לצד**.",
+    "In the search results, Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in **Browse by Shelfmark**.":
+        "ברשימת תוצאות החיפוש, מקש הרווח מסמן תוצאה, Enter פותח אותה, ו-Ctrl+Enter או Ctrl+B פותחים אותה ב**עיון לפי מספר מדף**.",
+    "The **XLSX** button exports a research workbook: the results, the manuscripts, a bibliography and credits, with a link to each image. Tick rows first to export only those.":
+        "הכפתור **XLSX** מייצא חוברת עבודה למחקר: התוצאות, כתבי היד, ביבליוגרפיה וקרדיטים, עם קישור לכל תמונה. סמנו שורות מראש כדי לייצא רק אותן.",
+    "Is a search taking a long time? ⏸ pauses it and ▶ resumes it from the same point; **Stop** keeps everything found so far.":
+        "החיפוש נמשך זמן רב? ⏸ משהה אותו ו-▶ ממשיך אותו מאותה נקודה; הכפתור **עצור** שומר את כל מה שנמצא עד כה.",
+    "You can add your own variant pairs, such as מ=נו, in the ⚙ **Search Settings** window.":
+        "תוכלו להוסיף זוגות וריאנטים מותאמים אישית, למשל מ=נו, בחלון ⚙ **הגדרות חיפוש**.",
+    "The automatic transcription sometimes splits or joins words. To get past this, choose **Responsa** style and tick **Flex Spacing**.":
+        "התעתיק האוטומטי מפצל ומאחד לפעמים מילים. כדי להתגבר על כך, בחרו בחיפוש בסגנון **פרויקט השו\"ת** וסמנו **ריווח גמיש**.",
+    "Searching Judeo-Arabic? In **Responsa** style, tick **Judeo-Arabic** to add the article אל- to every word.":
+        "מחפשים בערבית-יהודית? בחיפוש בסגנון **פרויקט השו\"ת**, סמנו **ערבית-יהודית** כדי להוסיף לכל מילה את תווית היידוע אל-.",
+    "In **Responsa** style, (שלום/שלומות) finds either word, and שלום [3] עולם allows up to three words between the two.":
+        "בחיפוש בסגנון **פרויקט השו\"ת**, (שלום/שלומות) מוצא כל אחת משתי המילים, והחיפוש שלום [3] עולם מתיר עד שלוש מילים ביניהן.",
+    "Not sure which word comes first? In **Responsa** style, tick **Bidirectional** to find the words in either order.":
+        "לא בטוחים איזו מילה באה קודם? בחיפוש בסגנון **פרויקט השו\"ת**, סמנו **דו-כיווני** כדי למצוא את המילים בכל סדר.",
+    "If you are looking for a work in several paragraphs, such as the Amidah or a piyyut, try **Cross-paragraph only**: the program looks only for phrases that link the paragraphs, which filters out quotations of a single paragraph.":
+        "אם אתם מחפשים חיבור בן כמה פסקאות, כמו תפילת שמונה עשרה או פיוט, נסו את האפשרות **חוצה-פסקאות בלבד**: התוכנה תחפש רק ביטויים שמחברים בין הפסקאות וכך תסנן ציטוטים של פסקה בפני עצמה.",
+    "Many textual witnesses in one file? In the **Witnesses** window, tick **Split each file on blank lines** and press **Load from files** to add them all at once.":
+        "יש לכם עדי נוסח רבים בקובץ אחד? בחלון **עדים**, סמנו **פצל כל קובץ לפי שורות ריקות** ולחצו על **טען מקבצים** כדי להוסיף את כולם בבת אחת.",
+    "In the viewer opened from Composition Search, **Next Manuscript ▶▶** skips the remaining pages of the fragment you are reading.":
+        "בחלון הצפייה שנפתח מהלשונית **חיפוש חיבורים**, הכפתור **לכתב היד הבא ◀◀** מדלג על שאר העמודים של הקטע שאתם קוראים.",
+    "🌐 **View on Ktiv** opens the manuscript in the National Library of Israel's catalogue.":
+        "הכפתור 🌐 **עיין בכתיב** פותח את כתב היד בקטלוג של הספרייה הלאומית.",
+    "Can't find a manuscript you saw yesterday? **Personal Lists** keeps a **Recently Viewed** list with the last 50 you opened.":
+        "לא מוצאים כתב יד שראיתם אתמול? בלשונית **רשימות אישיות** שמורה הרשימה **נצפו לאחרונה**, ובה 50 כתבי היד האחרונים שפתחתם.",
+    "You can edit the transcription or post comments with the matching buttons on the Browse tab or in the results viewer.":
+        "תוכלו לערוך את התעתיק או לפרסם הערות, בכפתורים המתאימים בלשונית העיון או בחלונית תצוגת התוצאות.",
+    "In the **Joins Lab** window, press **Browse results ▶** to show the results one after another beside the anchor fragment.":
+        "בחלון **מעבדת צירופים** תוכלו ללחוץ על הכפתור **◀ עיין בתוצאות** כדי להציג אותן בזה אחר זה לצד קטע העוגן.",
+    "If you have a fragment and a guess at what the fragment joining it says on both sides, try a tailored search: in the **Joins Lab**, tick **search also on the other side of the leaf (p ±1)**.":
+        "אם יש לכם קרע והשערה מה כתוב בקרע המצורף לו משני הצדדים, נסו לערוך חיפוש מותאם: בחלון **מעבדת צירופים**, סמנו **חפש גם בצד השני של הדף (p ±1)**.",
+    "📖 on a search result opens the whole manuscript on the Browse tab; a double-click opens the viewer at that page.":
+        "הכפתור 📖 שבשורת התוצאה פותח את כל כתב היד בלשונית **עיון לפי מספר מדף**; לחיצה כפולה על התוצאה פותחת את חלון הצפייה באותו עמוד.",
+})
+
+# The word gap limit (owner, 2026-10-12): at most 10 in Exact, Variants and Fuzzy;
+# Responsa and Regex have none. The Search press, and a saved step that is not run again.
+TRANSLATIONS.update({
+    "In Exact, Variants and Fuzzy searches the word gap is at most {limit}; "
+    "this search asks for {gap}.\n\nLower the gap, or search in Responsa or "
+    "Regex mode, which have no limit.":
+        "בחיפוש מדויק, וריאנטים ומקורב המרווח בין המילים הוא לכל היותר {limit}; "
+        "בחיפוש הזה הוא {gap}.\n\nהקטינו את המרווח, או חפשו במצב פרויקט השו\"ת "
+        "או ביטוי רגולרי, שאין בהם הגבלה.",
+    "The saved search \"{query}\" uses a word gap of {gap}. In Exact, Variants "
+    "and Fuzzy searches the gap is at most {limit}, so this step was not run "
+    "again. Its gap was not changed.":
+        "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים. בחיפוש מדויק, "
+        "וריאנטים ומקורב המרווח הוא לכל היותר {limit}, ולכן השלב הזה לא הורץ שוב. "
+        "המרווח שלו לא שונה.",
+    # v9.6.2 What's New (desktop bar and dialog; owner-approved 2026-10-12).
+    "New: Extended and Maximum searches run many times faster":
+        "חדש: חיפושי וריאנטים מורחב ומרבי רצים מהר פי כמה",
+    "Extended and Maximum searches are many times faster: for the patterns the app builds itself, each page is now checked with Python's own fast matcher, with the same results. Stop answers at once.":
+        "חיפושי וריאנטים מורחב ומרבי מהירים פי כמה: בתבניות שהתוכנה בונה בעצמה, כל עמוד נבדק עכשיו במנוע המהיר של פייתון, עם אותן תוצאות. עצירה נענית מיד.",
+    "The word gap (words allowed between the search words) is at most 10 in Exact, Variants and Fuzzy searches; Responsa-style and Regex searches have no limit.":
+        "המרווח בין המילים (כמה מילים מותרות בין מילות החיפוש) הוא לכל היותר 10 בחיפוש מדויק, וריאנטים ומקורב; בחיפוש בסגנון פרויקט השו\"ת ובביטוי רגולרי אין מגבלה.",
+    # re's own repeat ceiling, in every mode (Codex review of PR #395).
+    "The word gap {gap} is too large; the most a search can take is {limit}.":
+        "המרווח {gap} גדול מדי; המרב שחיפוש יכול לקבל הוא {limit}.",
+    "The saved search \"{query}\" uses a word gap of {gap}, which is too "
+    "large (the most is {limit}), so this step was not run again. Its gap "
+    "was not changed.":
+        "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים, שהוא גדול מדי "
+        "(המרב הוא {limit}), ולכן השלב הזה לא הורץ שוב. המרווח שלו לא שונה.",
+})
+
+# Composition Search conditions (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
+# Wording approved by the owner (2026-10-18).
+TRANSLATIONS.update({
+    "Conditions": "תנאים",
+    "Conditions work only with letter-level search. Switch the method to "
+    "letter-level, or remove the conditions.":
+        "תנאים פועלים רק בחיפוש ברמת האות. החלף את שיטת החיפוש לחיפוש ברמת "
+        "האות, או הסר את התנאים.",
+    "At most {} conditions.": "לכל היותר {} תנאים.",
+    "Condition {}: at most {} versions.": "תנאי {}: לכל היותר {} נוסחים.",
+    "This would run {} searches; the limit is {}. Remove a witness, a "
+    "condition or a version.":
+        'החיפוש יריץ {} חיפושים, והמגבלה היא {}. הסר אחד מהעדים, תנאי או נוסח.',
+    "Condition {}, version {}: {} letters is too short for letter-level "
+    "search.":
+        "תנאי {}, נוסח {}: {} אותיות הן מעט מדי לחיפוש ברמת האות.",
+    "Condition {}, version {}: {} letters is too long (the limit is {}).":
+        "תנאי {}, נוסח {}: {} אותיות הן יותר מדי (המגבלה היא {}).",
+    "Condition {} has no text.": "בתנאי {} אין טקסט.",
+    "Condition {} is not valid.": "תנאי {} אינו תקין.",
+    "Searching the main text ({}/{})": "מחפש את הטקסט הראשי ({}/{})",
+    "Searching condition {} ({}/{})": "מחפש את תנאי {} ({}/{})",
+    "Stopping. Results found so far are kept; conditions not yet searched "
+    "are marked as not fully checked.":
+        "עוצר. התוצאות שנמצאו עד כה נשמרות; תנאים שעדיין לא נבדקו יסומנו "
+        "כ\"לא נבדקו עד הסוף\".",
+})
+
+# Composition Search conditions, step 4 (strip, dialog, result groups).
+# Wording approved by the owner (2026-10-18).
+TRANSLATIONS.update({
+    'More conditions': 'תנאים נוספים',
+    '+ Add condition': '+ הוסף תנאי',
+    'Search condition': 'תנאי חיפוש',
+    'Must appear': 'חייב להופיע',
+    'Must not appear': 'אסור שיופיע',
+    'On the same image': 'באותה תמונה',
+    'On an adjacent image': 'בתמונה סמוכה',
+    'Anywhere in the manuscript': 'באותו כתב יד',
+    '({} versions)': '({} נוסחים)',
+    'Name (optional), e.g. Halakhot Gedolot': 'שם (לא חובה), למשל הלכות גדולות',
+    'Paste the text. To give several versions, separate them with a blank line; any one of them counts.': 'הדבק את הטקסט. כדי לתת כמה נוסחים, הפרד ביניהם בשורה ריקה; די שאחד מהם יימצא.',
+    'For "must not appear", give the passages of the quoting work that are not quotations of your main text; otherwise the main text\'s own manuscripts are removed too.': 'ב"אסור שיופיע" תן את הקטעים של החיבור המצטט שאינם ציטוט של הטקסט הראשי; אחרת יוסרו גם כתבי היד של הטקסט הראשי עצמו.',
+    'Version {} is too short ({} letters; at least {}).': 'נוסח {} קצר מדי ({} אותיות; נדרשות לפחות {}).',
+    'Version {} is too long ({} letters; at most {}).': 'נוסח {} ארוך מדי ({} אותיות; לכל היותר {}).',
+    'At most {} versions.': 'לכל היותר {} נוסחים.',
+    '{} versions: {} letters': '{} נוסחים: {} אותיות',
+    'Text files (*.txt);;All files (*)': 'קובצי טקסט (*.txt);;כל הקבצים (*)',
+    '{} searches (limit {})': '{} חיפושים (מגבלה {})',
+    'Conditions work only with letter-level search.': 'תנאים פועלים רק בחיפוש ברמת האות.',
+    'Removed by a condition ({})': 'הוסרו בגלל תנאי ({})',
+    'Not fully checked ({})': 'לא נבדקו עד הסוף ({})',
+    '{} removed by a condition': '{} הוסרו בגלל תנאי',
+    '{} not fully checked': '{} לא נבדקו עד הסוף',
+    'Removed by a condition: {}': 'הוסר בגלל תנאי: {}',
+    'Not fully checked: {}': 'לא נבדק עד הסוף: {}',
+    'Condition {}': 'תנאי {}',
+    'search limit reached': 'הגיע למגבלת החיפוש',
+    'text too short': 'הטקסט קצר מדי',
+    'stopped': 'נעצר',
+    'search failed': 'החיפוש נכשל',
+    'not searched': 'לא נבדק',
+    'page not identified': 'העמוד לא זוהה',
+    'Removed by a condition group': 'הוסרו בגלל תנאי',
+    'Not fully checked group': 'לא נבדקו עד הסוף',
+    '{} pages without {}': '{} עמודים בלי {}',
+    '{} pages removed': '{} עמודים הוסרו',
+    '{} pages not fully checked': '{} עמודים לא נבדקו עד הסוף',
+})
+
+# Composition Search conditions, step 6 (persistence and bypass paths).
+TRANSLATIONS.update({
+    'Auto-expand is not available while conditions are set.': 'הרחבה אוטומטית אינה זמינה כשמוגדרים תנאים.',
+    'The saved conditions could not be read and were cleared.': 'לא ניתן היה לקרוא את התנאים השמורים, והם נוקו.',
+    'Results of a search with conditions are not kept between sessions. Search again to see them.': 'תוצאות של חיפוש עם תנאים אינן נשמרות בין הפעלות. חפש שוב כדי לראות אותן.',
+})
+
+# Composition Search conditions, step 5 (Manuscript Viewer evidence strip).
+TRANSLATIONS.update({
+    'This image is not part of the result with conditions.': 'תמונה זו אינה חלק מהתוצאה עם התנאים.',
+    '{} matched on this image.': '{} נמצא בתמונה זו.',
+    'Main text: image {}': 'הטקסט הראשי: תמונה {}',
+    '{}: found on image {}': '{}: נמצא בתמונה {}',
+    '{}: not found in the searchable pages': '{}: לא נמצא בעמודים הניתנים לחיפוש',
+    '({} pages of this manuscript could not be searched)': '(לא ניתן היה לחפש ב־{} עמודים של כתב היד הזה)',
+    '{}: found on image {} (removed)': '{}: נמצא בתמונה {} (הוסר)',
+    '{}: not fully checked': '{}: לא נבדק עד הסוף',
+})
+
+# Composition Search conditions, step 5 (export category names).
+TRANSLATIONS.update({
+    'Removed by a condition': 'הוסרו בגלל תנאי',
+    'Not fully checked': 'לא נבדקו עד הסוף',
+})
+
+# Composition Search conditions, code review round 1.
+TRANSLATIONS.update({
+    'Version {}': 'נוסח {}',
+    'Conditions changed. Search again to apply them.': 'התנאים השתנו. חפש שוב כדי להחיל אותם.',
+    '(image {} could not be searched)': '(לא ניתן היה לחפש בתמונה {})',
+})
+
+# Composition Search conditions: the "Filter texts" menu (owner decision
+# 2026-10-14), replacing the old "Filter Text" button and the conditions
+# strip's own "+ Add condition" with three fixed-requirement entry points.
+# Wording approved by the owner (2026-10-18).
+TRANSLATIONS.update({
+    'Filter texts': 'סנן טקסטים',
+    'Quoted texts...': 'מקורות מצוטטים...',
+    'Quoted texts': 'מקורות מצוטטים',
+    'Quoted texts... ({})': 'מקורות מצוטטים... ({})',
+    'Quoting texts...': 'חיבורים מצטטים...',
+    'Quoting text': 'חיבור מצטט',
+    'Add condition...': 'הוסף תנאי...',
+    'For example, Bible verses quoted in the Talmud': 'למשל: פסוקי תנ"ך המצוטטים בתלמוד',
+    'For example, the Rif quoting the Talmud': 'למשל: הרי"ף המצטט את התלמוד',
+    'For example, show only results where an adjacent image (before or after) includes a certain text':
+        'למשל: הצג רק תוצאות שבתמונה סמוכה (לפניה או אחריה) מופיע טקסט מסוים',
+})
+
+# "Own text" (owner, 2026-10-14): the must_not help line restates the new
+# rule, and the OLD key above ('For "must not appear", give the passages...')
+# is left in place, unreferenced, rather than removed or changed.
+# Wording approved by the owner (2026-10-18).
+TRANSLATIONS.update({
+    "Paste the quoting work's passage as it is. A page is removed only "
+    "where the quoting work has on it one unbroken stretch of at least "
+    "40 letters that are not also in your main text.":
+        'הדבק את קטע החיבור המצטט כמות שהוא. עמוד יוסר רק אם יש בו רצף אחד של 40 אותיות לפחות מהחיבור המצטט שאינן גם בטקסט הראשי שלך.',
+    'Checking your own text ({}/{})': 'בודק את הטקסט שלך ({}/{})',
+})
+
+# Quoting texts dialog (owner decision 2026-10-15): looks like the
+# Quoted texts dialog and reuses its Sefaria library browser under
+# "Load from Sefaria...". Reuses the existing "Add Custom Text",
+# "Load from files...", "Remove", "OK" and "Cancel" keys.
+# Wording approved by the owner (2026-10-18).
+TRANSLATIONS.update({
+    "Quoting texts": "חיבורים מצטטים",
+    "Load from Sefaria...": "טען מספריא...",
+    "Which passage of {}?": "איזה קטע מתוך {}?",
+    "For example: 1a-2b": "למשל: 1a-2b",
+    "Choose a passage, not the whole book.": "בחר קטע, לא את כל הספר.",
+    "{} is too long ({} letters; at most {}). Choose a shorter passage.":
+        "{} ארוך מדי ({} אותיות; לכל היותר {}). בחר קטע קצר יותר.",
+    "Not found on Sefaria: {}": "לא נמצא בספריא: {}",
+    "Text {}": "טקסט {}",
+    "{} · {} letters": "{} · {} אותיות",
+    "Load or paste the passage of the quoting work that discusses your "
+    "main text (for example Rif Berakhot 1a-2b), not the whole book. A "
+    "page is removed only where the quoting work has on it one unbroken "
+    "stretch of at least 40 letters that are not also in your main "
+    "text.":
+        'טען או הדבק את הקטע מהחיבור המצטט שעוסק בטקסט הראשי שלך (למשל רי"ף ברכות 1a-2b), ולא את כל הספר. עמוד יוסר רק אם יש בו רצף אחד של 40 אותיות לפחות מהחיבור המצטט שאינן גם בטקסט הראשי שלך.',
+})
+
+# Letter-level search for My Library (desktop/passage_local.py). Wording approved by the owner (2026-10-18).
+TRANSLATIONS.update({
+    'Build / Rebuild Letter-Level Index for My Library':
+        'בנייה / בנייה מחדש של אינדקס לחיפוש ברמת האות בספרייה המקומית',
+    'Builds the index used by letter-level search in My Library, from the '
+    'texts My Library has already extracted. It does not update by itself: '
+    'rebuild it when My Library changes.':
+        'בונה את האינדקס שמשמש לחיפוש ברמת האות בספרייה המקומית, מתוך הטקסטים '
+        'שכבר חולצו מהספרייה המקומית. הוא אינו מתעדכן מעצמו: יש לבנות אותו מחדש '
+        'כשהספרייה המקומית משתנה.',
+    'Build letter-level index for My Library':
+        'בניית אינדקס לחיפוש ברמת האות בספרייה המקומית',
+    'Build letter-level index for My Library?':
+        'לבנות אינדקס לחיפוש ברמת האות בספרייה המקומית?',
+    'Build the letter-level index for My Library from {} indexed pages?\n\n'
+    'This needs up to about {} of free disk space while it runs (the '
+    'finished index is smaller) and can take an hour or more on a large '
+    'library. The application stays usable meanwhile.\n\nThe index does not '
+    'update by itself: when My Library changes, you will be told to rebuild '
+    'it.':
+        'לבנות את האינדקס לחיפוש ברמת האות בספרייה המקומית מתוך {} עמודים באינדקס?\n\n'
+        'הבנייה דורשת עד כ-{} פנויים בדיסק בזמן הריצה (האינדקס הסופי קטן יותר), '
+        'ובספרייה גדולה היא עשויה להימשך שעה ויותר. התוכנה נשארת זמינה לעבודה בינתיים.\n\n'
+        'האינדקס אינו מתעדכן מעצמו: כשהספרייה המקומית משתנה, תוצג הודעה לבנות אותו מחדש.',
+    'Build the letter-level index for My Library from {} indexed pages?\n\n'
+    'This can take an hour or more on a large library and needs free disk '
+    'space while it runs. The application stays usable meanwhile.\n\nThe '
+    'index does not update by itself: when My Library changes, you will be '
+    'told to rebuild it.':
+        'לבנות את האינדקס לחיפוש ברמת האות בספרייה המקומית מתוך {} עמודים באינדקס?\n\n'
+        'בספרייה גדולה הבנייה עשויה להימשך שעה ויותר, והיא דורשת מקום פנוי בדיסק '
+        'בזמן הריצה. התוכנה נשארת זמינה לעבודה בינתיים.\n\n'
+        'האינדקס אינו מתעדכן מעצמו: כשהספרייה המקומית משתנה, תוצג הודעה לבנות אותו מחדש.',
+    'Building the letter-level index for My Library needs about {} free on '
+    'this drive, and there is about {}. Free some space and try again.':
+        'בניית האינדקס לחיפוש ברמת האות בספרייה המקומית דורשת כ‑{} פנויים בכונן הזה, '
+        'וישנם כ‑{}. פנה מקום ונסה שוב.',
+    'Building the My Library letter-level index...':
+        'בונה את האינדקס לחיפוש ברמת האות בספרייה המקומית...',
+    'Letter-level search in My Library needs its own index, built from the '
+    'texts My Library has already extracted. The index does not update by '
+    'itself: when My Library changes, you will be told to rebuild it.\n\nFor '
+    'a large library this takes up to an hour or more and needs a lot of free '
+    'disk space while it runs; you will see the figures before it starts. You '
+    'can always build it later from Settings.':
+        'חיפוש ברמת האות בספרייה המקומית צריך אינדקס משלו, שנבנה מהטקסטים שכבר חולצו '
+        'מהספרייה המקומית. האינדקס אינו מתעדכן מעצמו: כשהספרייה המקומית משתנה, תוצג הודעה '
+        'לבנות אותו מחדש.\n\n'
+        'בספרייה גדולה הבנייה עשויה להימשך שעה ויותר ודורשת נפח דיסק פנוי רב בזמן '
+        'הריצה; הנתונים יוצגו לפני תחילתה. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
+    'My Library has changed since its letter-level index was built. Rebuild '
+    'it from Settings to include the changes.':
+        'הספרייה המקומית השתנתה מאז שנבנה האינדקס לחיפוש ברמת האות. בנה אותו מחדש '
+        'מההגדרות כדי לכלול את השינויים.',
+    'My Library is empty':
+        'הספרייה המקומית ריקה',
+    'My Library is not loaded. Letter-level search for My Library needs it '
+    'to load the text of its results.':
+        'הספרייה המקומית לא נטענה. חיפוש ברמת האות בספרייה המקומית צריך אותה כדי לטעון '
+        'את הטקסט של התוצאות.',
+    'My Library letter-level index':
+        'אינדקס חיפוש ברמת האות - הספרייה המקומית',
+    'My Library letter-level index build cancelled. Your existing index was '
+    'not changed.':
+        'בניית האינדקס לחיפוש ברמת האות בספרייה המקומית בוטלה. האינדקס הקיים לא השתנה.',
+    'Reading My Library pages: {}% ({} pages so far)':
+        'קורא את עמודי הספרייה המקומית: {}% ({} עמודים עד כה)',
+    'All pages have been read. Arranging the index; this stage shows no '
+    'percentage and can take a while on a large library.':
+        'כל העמודים נקראו. כעת מתבצע סידור האינדקס; בשלב זה אין אחוזי התקדמות, '
+        'ובספרייה גדולה הוא עשוי להימשך זמן מה.',
+    'Reading the My Library catalogue...':
+        'קורא את רשימת הקבצים של הספרייה המקומית...',
+    'The My Library letter-level index could not be replaced. Reloading the '
+    'existing index.':
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה המקומית. טוען מחדש '
+        'את האינדקס הקיים.',
+    'The My Library letter-level index could not be replaced. The previous '
+    'index is still in use.':
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה המקומית. האינדקס '
+        'הקודם עדיין בשימוש.',
+    'The My Library letter-level index is already being built.':
+        'בניית האינדקס לחיפוש ברמת האות בספרייה המקומית כבר מתבצעת.',
+    'The My Library letter-level index is ready.':
+        'האינדקס לחיפוש ברמת האות בספרייה המקומית מוכן.',
+    'The letter-level index for My Library has not been built yet. You can '
+    'build it from Settings.':
+        'האינדקס לחיפוש ברמת האות בספרייה המקומית עדיין לא נבנה. אפשר לבנות אותו '
+        'מההגדרות.',
+    'There are no indexed My Library pages to build a letter-level index '
+    'from. Add folders to My Library and index them first.':
+        'אין בספרייה המקומית עמודים באינדקס שמהם אפשר לבנות אינדקס לחיפוש ברמת האות. '
+        'הוסף תיקיות לספרייה המקומית ובנה להן אינדקס תחילה.',
+    'the My Library letter-level index is busy':
+        'האינדקס לחיפוש ברמת האות בספרייה המקומית עסוק',
+    # Conditions are Genizah-only (2026-10-16). Wording approved by the
+    # owner (2026-10-18).
+    'Conditions work only when the corpus is Genizah. Switch the corpus to '
+    'Genizah, or remove the conditions.':
+        'תנאים פועלים רק כשהקורפוס הוא גניזה. החלף את הקורפוס לגניזה, '
+        'או הסר את התנאים.',
+    'Conditions work only when the corpus is Genizah.':
+        'תנאים פועלים רק כשהקורפוס הוא גניזה.',
+    'Measuring My Library for its letter-level index...':
+        'מודד את הספרייה המקומית לקראת בניית האינדקס לחיפוש ברמת האות...',
+})
+
+# Help consistency pass (owner, 2026-10-18): the desktop Composition
+# history menu names the tab, and the notice HelpDialog shows when Help.html
+# cannot be loaded (the old built-in help texts were removed).
+TRANSLATIONS.update({
+    'No Composition Search history':
+        'אין היסטוריית חיפוש חיבורים',
+    'The Help file could not be loaded.':
+        'לא ניתן היה לטעון את קובץ העזרה.',
+    "Reinstall the application, or read the Help at <a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>.":
+        "התקן מחדש את התוכנה, או קרא את העזרה באתר <a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>.",
+})
+
+# Web Joins Lab: the Triage state filter choice that had no Hebrew (2026-10-18).
+TRANSLATIONS.update({
+    'Not triaged': 'לא מוין',
+})
+
+# Web visual-similarity window: the List / Thumbnails view switch (2026-10-18).
+TRANSLATIONS.update({
+    'Thumbnails': 'תמונות ממוזערות',
+})
+
+# v9.7.0 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-18). Drafted for the release and approved; the bar, the second
+# bullet and the web entry are the owner's own Hebrew.
+TRANSLATIONS.update({
+    "New: more text filter options in Composition Search, and letter-level search in My Library":
+        'חדש: אפשרויות סינון טקסטים חדשות בחיפוש חיבורים, וחיפוש ברמת האות בספרייה המקומית',
+    'Conditions in Composition Search: from the new "Filter texts" menu, add up to four texts that must appear, or must not appear, on the same image, on an adjacent image or in the same manuscript — for example, set aside the works that quote your text, such as the Rif when you search the Talmud, or search only manuscripts that carry parallels to one text on one page and to another text on the other.':
+        'תנאים בחיפוש חיבורים: מהתפריט החדש "סנן טקסטים" אפשר להוסיף עד ארבעה טקסטים שחייבים להופיע, או שאסור שיופיעו, באותה תמונה, בתמונה סמוכה או באותו כתב יד — למשל, להוציא מהתוצאות חיבורים המצטטים את הטקסט שלך, כמו הרי"ף כשמחפשים בתלמוד, או לחפש רק כתבי יד שמכילים מקבילות לטקסט מסוים בעמוד אחד ולטקסט אחר בעמוד השני.',
+    "Fast letter-level search in My Library too: build the index once, and then you can search for compositions quickly in My Library as well (based on a prototype by Yehudah Seewald).":
+        'חיפוש מהיר ברמת האות גם בספרייה המקומית. בונים את האינדקס פעם אחת, ואז ניתן לחפש חיבורים במהירות גם בספרייה המקומית (נוצר על פי אב-טיפוס שיצר יהודה זייבלד).',
+    "Shelfmarks as the NLI catalogue writes them, such as \"Cambridge University Library, Ms. T-S K 08.026\", are found wherever you type or paste a shelfmark; when one fits several records, you choose from a list. A library name at the start, such as \"Halper 77\", leads to that library's record.":
+        'מספרי מדף כפי שהם כתובים בקטלוג הספרייה הלאומית, כמו "Cambridge University Library, Ms. T-S K 08.026", נמצאים בכל מקום שבו מקלידים או מדביקים מספר מדף; כשמספר מדף מתאים לכמה רשומות, בוחרים מתוך רשימה. שם ספרייה בתחילתו, כמו "Halper 77", מוביל לרשומה של אותה ספרייה.',
+    "New: support for shelfmarks in the NLI catalogue's style, and thumbnails in the visual join suggestions":
+        'חדש: תמיכה במספרי מדף בסגנון קטלוג הספרייה הלאומית, והצגת תמונות ממוזערות בהצעות צירופים חזותיים',
+})
+
+# v9.8.0 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-19). Drafted for the release and approved; the web entry opens with
+# the owner's own Hebrew.
+TRANSLATIONS.update({
+    "New in the Joins Lab: sort and filter by library and domain, card sizes, and a fuller Compare window":
+        'חדש במעבדת הצירופים: מיון וסינון לפי ספרייה ותחום, גודל כרטיסים וחלון השוואה מלא יותר',
+    'Sort and filter the Joins Lab by library and domain: next to "Table view", keep the search\'s order or group the candidates by library or by domain; the Filter dialog adds Library and Domain, and each card shows its library and domain.':
+        'מיון וסינון במעבדת הצירופים לפי ספרייה ותחום: ליד "תצוגת טבלה" אפשר לשמור על סדר החיפוש או לקבץ את המועמדים לפי ספרייה או לפי תחום; בחלון הסינון נוספו ספרייה ותחום, וכל כרטיס מציג את הספרייה והתחום שלו.',
+    "Three card sizes in the grid view: five, four or three cards in a row, with larger thumbnails in the largest size. The app remembers your choice.":
+        'שלושה גדלים של כרטיסים בתצוגת הרשת: חמישה, ארבעה או שלושה כרטיסים בשורה, ובגודל הגדול התמונות גדולות יותר. התוכנה זוכרת את הבחירה.',
+    "A fuller Compare window: each side has a copy button by the shelfmark, one line with library, domain, date, size and material, and links to Ktiv, the holding library's viewer, the Princeton Geniza Project and genizahsearch.com.":
+        'חלון השוואה מלא יותר: בכל צד יש כפתור העתקה ליד מספר המדף, שורה אחת עם ספרייה, תחום, תאריך, גודל וחומר, וקישורים לכתיב, למציג של הספרייה שמחזיקה בקטע, לפרויקט הגניזה של פרינסטון ול-genizahsearch.com.',
+    "New in the Joins Lab and the Visual Similarity window: sort and filter by library and domain, image and card sizes, a link to share the screen, and a fuller Compare window":
+        'חדש במעבדת הצירופים ובחלונית הדמיון החזותי: מיון וסינון לפי ספרייה ותחום, בחירת גודל לתמונות ולכרטיסים, קישור לשיתוף המסך וחלון השוואה מלא יותר',
+})
+
+# v9.9.0 desktop What's New bar and dialog, and the two web What's New entries
+# (2026-10-23). The Hebrew is the owner's own (the web Responsa line, the three
+# dialog bullets); the English keys follow it.
+TRANSLATIONS.update({
+    'Better wildcard search in Responsa style (the * operator): the site now finds fuller results':
+        'שיפור בחיפוש רצף תווים בסגנון פרויקט השו"ת (שימוש באופרטור *) - האתר מוצא כעת תוצאות מלאות יותר',
+    'Better wildcard search in Responsa style (the * operator): the app now finds fuller results':
+        'שיפור בחיפוש רצף תווים בסגנון פרויקט השו"ת (שימוש באופרטור *) - התוכנה מוצאת כעת תוצאות מלאות יותר',
+    'The Joins Lab and Personal Lists now fit a phone: Compare shows the anchor and the candidate together, and the anchor stays in view while you scroll':
+        'מעבדת צירופים ורשימות אישיות מותאמות כעת לטלפון: חלון "השווה" מציג את העוגן והמועמד יחד, והעוגן נשאר בטווח ראייה בזמן הגלילה',
+    'Better wildcard search in Responsa style (the * operator): the app now finds fuller results. A star (*) stands for any sequence of letters, anywhere in a word, final letters included: search כהנ* גדו* and you get both כהן גדול and כהנים גדולים, and *א*תי קורי* also finds מאמתי קורין. Variants, grammatical prefixes and suffixes (#) and plene/defective spelling (%) work together with the star. The search also works across a page break in the same manuscript. Rebuilding the index speeds up searches with a star at the start of a word and completes the matches across page breaks.':
+        'שיפור בחיפוש רצף תווים בסגנון פרויקט השו"ת (שימוש באופרטור *) - התוכנה מוצאת כעת תוצאות מלאות יותר. כוכבית (*) מייצגת כל רצף אותיות, בכל מקום במילה, כולל חלופות אותיות סופיות. נסו לחפש כהנ* גדו* ותקבלו גם כהן גדול וגם כהנים גדולים. חיפוש *א*תי קורי* ימצא גם מאמתי קורין. אופציות וריאנטים, קידומות וסיומות דקדוקיות (#) וכתיב מלא/חסר (%) פועלות יחד עם הכוכבית. החיפוש פועל גם במעבר בין עמודים באותו כתב יד. בנייה מחדש של האינדקס מאיצה את החיפוש עם כוכבית בתחילת מילה ומשלימה את ההתאמות במעבר בין עמודים.',
+    'Every word in a Responsa-style search is a whole word, #word# searches every combination of prefixes and suffixes, and the search also finds a word with brackets inside it, such as של[ו]ם. An excluded word hides a result only when it is on the same page.':
+        'כל מילה בחיפוש בסגנון פרויקט השו"ת היא מילה שלמה, #מילה# מחפש כל צירוף של תחיליות וסיומות, החיפוש מוצא גם מילה שיש בתוכה סוגריים, כגון של[ו]ם. מילה מוחרגת מסתירה תוצאה רק כשהיא באותו עמוד.',
+    'Better search display: the highlighted words in the results are now centred in the Snippet column.':
+        'שיפור בממשק החיפוש: המילים המודגשות בתוצאות החיפוש ממורכזות כעת בעמודת הקטע.',
+})
+
+# v9.10.0 desktop What's New bar and dialog (2026-10-25). The Hebrew of the
+# dialog bullets is the owner's own; the English keys follow it.
+TRANSLATIONS.update({
+    'New: a side menu as an option, Go to (Ctrl+G), saved searches, and larger text in the result lists':
+        'חדש: אפשרות לתפריט צד, מעבר מהיר לכתב יד (Ctrl+G), חיפושים שמורים והגדלת הטקסט ברשימות התוצאות',
+    'The menu can move to the side of the window: Settings > Menu: Side menu, or ☰ > Move the menu to the side. Ctrl+1 to Ctrl+7 open the sections, Ctrl+8 the Fragment Puzzle and Ctrl+9 the Joins Lab.':
+        'אפשר להעביר את התפריט לצד החלון: הגדרות > תפריט: תפריט צד, או ☰ > העברת התפריט לצד. Ctrl+1 עד Ctrl+7 פותחים את הלשוניות, Ctrl+8 את פאזל קטעים ו-Ctrl+9 את מעבדת צירופים.',
+    'Go to (Ctrl+G): type a shelfmark or system number, and the manuscript opens in Browse by Shelfmark from anywhere in the program; type Hebrew or Arabic words in the same box to search the corpus for them. The last ten manuscripts you opened are listed under the box, for quick access.':
+        'מעבר אל (Ctrl+G): הקלידו מספר מדף או מספר מערכת, וכתב היד ייפתח בלשונית "עיון לפי מספר מדף" מכל מקום בתוכנה; הקלידו מילים בעברית או בערבית באותה תיבה לשם חיפוש מונחים בקורפוס. מתחת לתיבה מופיעים עשרת כתבי היד האחרונים שפתחתם, לגישה מהירה.',
+    'Saved searches: click ☆ beside a search in the history menu of Search or Composition Search, and it stays at the top of the list; clearing the history leaves it.':
+        'חיפושים שמורים: לחצו על ☆ ליד חיפוש בתפריט ההיסטוריה של "חפש" או של "חיפוש חיבורים", והוא יישאר בראש הרשימה; ניקוי ההיסטוריה אינו מוחק אותו.',
+    'Text size: Settings > Text size in result lists, Ctrl+= / Ctrl+- (Ctrl+0 for normal), or A- / A+ beside the tabs. To enlarge or shrink the transcriptions, click the A- / A+ buttons beside them.':
+        'גודל הטקסט: הגדרות > גודל הטקסט ברשימות התוצאות, Ctrl+= / Ctrl+- (Ctrl+0 לגודל הרגיל), או A- / A+ ליד הלשוניות. להגדלה או הקטנה של התעתיקים, לחצו על כפתורי A- / A+ לידם.',
+    'More features: a short tip at each start (turn it off or on in Settings > Show a tip when the program starts), the window opens where and as large as it was closed, F1 opens Help at the section in front, clicking your name on the Login button opens an account menu so you no longer log out by accident, and clear explanations in the Composition Search tooltips.':
+        'תכונות נוספות: טיפ קצר בכל פתיחה (ניתן לבטל או להפעיל בהגדרות > הצגת טיפ בפתיחת התוכנה), החלון נפתח במקום ובגודל שבו נסגר, F1 פותח את העזרה בנושא הלשונית הפתוחה, לחיצה על שמכם בכפתור הכניסה פותחת תפריט חשבון כדי למנוע התנתקות אקראית, ונוספו הסברים ברורים בחלוניות העזר של חיפוש חיבורים.',
+})
+
+# v9.11.0 desktop What's New bar and dialog, and the web What's New entry (2026-10-28).
+# The Hebrew is the owner's own; the English keys follow it.
+TRANSLATIONS.update({
+    'New: about 14,600 more Friedberg Genizah Project transcriptions, and cleaner text in about 27,800 more':
+        'חדש: כ-14,600 העתקות נוספות של פרויקט פרידברג, וטקסט נקי יותר בכ-27,800 העתקות',
+    'About 14,600 more transcriptions of the Friedberg Genizah Project (FGP), read from the project\'s own Word files and line data.':
+        'כ-14,600 העתקות נוספות של פרויקט פרידברג לחקר הגניזה (FGP), שנקראו מקובצי הוורד ומנתוני השורות של הפרויקט עצמו.',
+    'Cleaner text in about 27,800 FGP transcriptions that were already in the program: final and vocalised letters, the order of the lines, lines that mix Hebrew and Arabic, and Arabic script now appear as the transcriber wrote them; in about 1,900 more, letters that showed as boxes or wrong symbols are restored.':
+        'טקסט נקי יותר בכ-27,800 העתקות FGP שכבר היו בתוכנה: אותיות סופיות ומנוקדות, סדר השורות, שורות המשלבות עברית וערבית, והכתב הערבי מופיעים עתה כפי שכתב אותם המתעתק; ובכ-1,900 העתקות נוספות שוחזרו אותיות שהופיעו כריבועים או כסימנים שגויים.',
+    'Transcriptions of the Jerusalem Talmud now distinguish completions (in square brackets), doubtful letters (with a small circle above them) and additions between the lines. Please note: these transcriptions are not the final text, which is found in "Ginze Yerushalmi", edited by Y. Sussmann.':
+        'בהעתקות התלמוד הירושלמי נערכת עתה הבחנה: השלמות בסוגריים מרובעים, אותיות מסופקות בעיגול קטן מעליהן, ותוספות בין השיטין. תשומת לב: העתקות אלה אינן הנוסח הסופי, שאותו ניתן למצוא ב"גנזי הירושלמי" בעריכת י\' זוסמן.',
+    'A new "?" button beside transcriptions by FGP\'s Genuzot team explains the transcribers\' sigla.':
+        'נוסף כפתור "?" ליד העתקות של צוות גנוזות של פרויקט פרידברג, המסביר את סימולי המתעתקים.',
+    'In the Joins Lab and Visual Similarity, you can choose several libraries or domains, and show or hide them, to find matches faster.':
+        'במעבדת הצירופים ובדמיון החזותי, תוכלו לבחור כמה ספריות או תחומים, ולבחור הצגה או הסתרה שלהם, לשם מציאת התאמות מהירה יותר.',
+    'New: about 14,600 more Friedberg Genizah Project transcriptions, and cleaner text in about 27,800 more.':
+        'חדש: כ-14,600 העתקות נוספות של פרויקט פרידברג, וטקסט נקי יותר בכ-27,800 העתקות.',
+})
+
+# v9.11.1 web What's New entry and desktop What's New bullet (2026-10-30), the owner's own Hebrew.
+TRANSLATIONS.update({
+    'New: corrected and added links to the Cambridge Digital Library (CUDL)':
+        "חדש: תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג' (CUDL)",
+    'Corrected and added links to the Cambridge Digital Library (CUDL).':
+        "תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג' (CUDL).",
+})
+
+# v9.12.0 desktop What's New bar and dialog (2026-10-30), approved with the release texts.
+# The left-to-right marks after "Ctrl+/" and "A−" keep the "/" and "−" beside their keys.
+TRANSLATIONS.update({
+    'New: keyboard shortcuts, and the cursor waits in the search box from the moment the program opens':
+        'חדש: קיצורי מקלדת, והסמן מחכה בתיבת החיפוש כבר בפתיחת התוכנה',
+    'The cursor is in the search box as soon as the program opens, so you can type a search right away.':
+        'הסמן נמצא בתיבת החיפוש מרגע פתיחת התוכנה, כך שאפשר להקליד חיפוש מיד.',
+    'When a search finds results, the cursor moves to the results: Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+F or Ctrl+E brings you back to the search box.':
+        'כשחיפוש מוצא תוצאות, הסמן עובר לרשימת התוצאות: מקש הרווח מסמן תוצאה, Enter פותח אותה, ו-Ctrl+Enter או Ctrl+B פותחים אותה בעיון לפי מספר מדף; Ctrl+F או Ctrl+E מחזירים לתיבת החיפוש.',
+    # Mirrored in Hebrew (owner, 2026-10-30): there Ctrl+Left goes to the next result.
+    'In the Manuscript Viewer, Ctrl+Right and Ctrl+Left move to the next and previous result, Ctrl+PgDown and Ctrl+PgUp to the next and previous image, and Ctrl+B opens it in Browse.':
+        'בחלון "צפייה בכתב יד", Ctrl+חץ שמאלה ו-Ctrl+חץ ימינה עוברים לתוצאה הבאה ולקודמת, Ctrl+PgDown ו-Ctrl+PgUp לתמונה הבאה ולקודמת, ו-Ctrl+B פותח אותה בעיון לפי מספר מדף.',
+    'Ctrl+1 to Ctrl+7 open the tabs: in Search and Composition Search the cursor goes to the results when there are any, otherwise to the search box; Ctrl+R goes to the results list; Ctrl+O opens Go to, like Ctrl+G.':
+        'Ctrl+1 עד Ctrl+7 פותחים את הלשוניות: בחפש ובחיפוש חיבורים הסמן עובר לתוצאות כשיש כאלה, ואחרת לתיבת החיפוש; Ctrl+R מעביר לרשימת התוצאות; Ctrl+O פותח את "מעבר אל", כמו Ctrl+G.',
+    'All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.':
+        'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
+})
+
+# Catalogue criteria, PR 1c (2026-11-01): the desktop's own strings for the
+# Manuscript features window (desktop/dialogs_filter.py::CriteriaDialog). The
+# strings it shares with the web panel are PR 1b's block, after the PR 1a one.
+TRANSLATIONS.update({
+    "This catalogue data file is too old for this criterion: it needs version 5.1.0 or later.":
+        "קובץ נתוני הקטלוג ישן מדי למאפיין זה: נדרשת גרסה 5.1.0 ומעלה.",
+    "{n} of the {total} manuscripts in the results match": "{n} מתוך {total} כתבי היד שבתוצאות מתאימים",
+    "The catalog data these features need is not available.":
+        "נתוני הקטלוג הדרושים למאפיינים אלה אינם זמינים.",
+    "The measurement filters could not be applied: every result is shown.":
+        "לא ניתן היה להחיל את סינון המידות: כל התוצאות מוצגות.",
+    "The saved results were found with filters that have changed. Search again to see them.":
+        "התוצאות השמורות נמצאו לפי מסננים שהשתנו. חפשו שוב כדי לראות אותן.",
+    "Manuscripts of the corpus with no FJMS catalogue record: they are listed after the catalogued ones.":
+        "כתבי יד שאין להם רשומה בקטלוג FJMS: הם מוצגים אחרי כתבי היד המקוטלגים.",
+})
+
+# Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
+# and a failed browse query is an error, not "no manuscripts match".
+TRANSLATIONS.update({
+    "No catalogue record": "אין רשומה בקטלוג",
+    "The catalog could not be listed. Try again in a moment.":
+        "לא ניתן היה להציג את רשימת כתבי היד. נסו שוב בעוד רגע.",
+})
+
+# Catalogue criteria, PR 1b (web, 2026-11-01): the "Manuscript features"
+# button, its chips and panel (web/components/criteria_panel.py), on Catalog
+# Browse, /search and /parallels.
+TRANSLATIONS.update({
+    "Manuscript features": "מאפייני כתב היד",
+    "Clear section": "ניקוי הסעיף",
+    "Catalogue or measured": "קטלוג או מדידה",
+    "Catalogue only": "קטלוג בלבד",
+    "Measured only": "מדידה בלבד",
+    "Only these": "רק אלה",
+    "All except these": "הכול חוץ מאלה",
+    "A manuscript matches when any of its catalogue records gives a ticked value.":
+        "כתב יד נכלל אם אחת מרשומות הקטלוג שלו נותנת ערך מסומן.",
+    "Measured values: every range set here holds on one measured page.":
+        "ערכים נמדדים: כל הטווחים שנבחרו כאן מתקיימים באותו עמוד נמדד.",
+    "Any of the ticked attributes.": "אחת לפחות מהתכונות המסומנות.",
+    "This catalogue data is not available on this site yet.":
+        "נתוני קטלוג אלה עדיין אינם זמינים באתר.",
+    "recorded for {n} of {total}": "רשום ל־{n} מתוך {total}",
+    "The list of all manuscripts is still loading. Try again in a moment.":
+        "רשימת כל כתבי היד עדיין נטענת. נסו שוב בעוד רגע.",
+    "These values could not be read.": "לא ניתן היה לקרוא את הערכים.",
+    "Filter values": "סינון ערכים",
+    "or: not recorded": "או: ללא רישום",
+    "per 10 cm": "ל־10 ס\"מ",
+    "dpi": "dpi",
+    "No features chosen.": "לא נבחרו מאפיינים.",
+    "The count could not be computed.": "לא ניתן היה לחשב את המספר.",
+    "{n} manuscripts have these features": "ל־{n} כתבי יד יש מאפיינים אלה",
+    ", of which {m} have no {label} recorded": ", מהם {m} ללא רישום של {label}",
+    "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
+    "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
+    "catalogue size).":
+        "המאפיינים חלים על כל {corpus} כתבי היד. ל־{uncatalogued} אין רשומה בקטלוג FJMS: "
+        "הם נכללים ב'ללא רישום', ב'הכול חוץ מ' ובנתונים הנמדדים (ל־{sized} מהם יש גם מידה "
+        "בקטלוג).",
+    "Some criteria were removed: this catalogue data is not available on this site yet.":
+        "חלק מהמאפיינים הוסרו: נתוני קטלוג אלה עדיין אינם זמינים באתר.",
+    "Some parts of the address were not understood and were ignored: {names}":
+        "חלקים מהכתובת לא הובנו והושמטו: {names}",
+    "No catalogue record ({n})": "אין רשומה בקטלוג ({n})",
+    "The manuscript features could not be applied to these results.":
+        "לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.",
+})
+
+# Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
+# panel's slider toggle, and the catalog-browse sidebar toggle.
+TRANSLATIONS.update({
+    "More actions": "פעולות נוספות",
+    "Compact rows": "שורות צפופות",
+    "Comfortable rows": "שורות מרווחות",
+})
+
+# v9.14.0 web What's New entry (2026-11-05), approved with the release texts.
+TRANSLATIONS.update({
+    "New: Judeo-Arabic dictionaries! On the manuscript page, press the dictionaries button (עع) at the bottom of the text pane; clicking a word then shows its entry in Blau's dictionary and in Lane's Lexicon":
+        'חדש: מילונים לערבית־יהודית! בעיון בכתבי יד תוכלו ללחוץ על כפתור המילונים (עع) בתחתית חלונית הטקסט. לחיצה על מילה תציג את ערכה במילון בלאו ובלקסיקון ליין',
+    "New: Friedman's Judeo-Arabic dictionary, beside Blau's, and expression search: select several words on the manuscript page to find them together in both dictionaries":
+        'חדש: מילון פרידמן לערבית־יהודית לצד מילון בלאו, וחיפוש ביטויים: בחרו כמה מילים בעיון בכתב היד כדי למצוא אותן יחד בשני המילונים',
+})
+# v9.13.0 web What's New entry and desktop What's New bar and dialog (2026-11-01),
+# approved with the release texts.
+TRANSLATIONS.update({
+    'New: find manuscripts by their features — script, region, period, vocalization, lines, size, material and more — with the Manuscript features button, on Browse by Identification and in Search only in...':
+        'חדש: איתור כתבי יד לפי המאפיינים שלהם – כתב, אזור, תקופה, ניקוד, שורות, מידות, חומר ועוד – בכפתור "מאפייני כתב היד", בעיון לפי זיהוי וב"חפש רק ב..."',
+    'New: find manuscripts by their features — script, region, period, vocalization, lines, size, material and more':
+        'חדש: איתור כתבי יד לפי המאפיינים שלהם – כתב, אזור, תקופה, ניקוד, שורות, מידות, חומר ועוד',
+    'The new Manuscript features button opens one window with what the catalogue records about each manuscript: period of copy, language and alphabet, script and region, vocalization, number of columns and lines, physical status, material, attributes, and measurements computed from the photographs.':
+        'הכפתור החדש "מאפייני כתב היד" פותח חלון אחד ובו מה שהקטלוג מתעד על כל כתב יד: תקופת העתקה, שפה ואות, כתב ואזור, ניקוד, מספר טורים ושורות, מצב פיזי, חומר, תכונות ונתונים שחושבו מן הצילומים.',
+    'Tick values, or choose "All except these"; "Not recorded" finds the manuscripts the catalogue says nothing about. Each value shows how many manuscripts have it, and the window counts the matches before you apply it.':
+        'סמנו ערכים, או בחרו "הכול חוץ מאלה"; "ללא רישום" מוצא את כתבי היד שהקטלוג אינו מתעד בהם דבר. ליד כל ערך מופיע מספר כתבי היד שיש להם אותו, והחלון סופר את ההתאמות לפני שמחילים אותו.',
+    'On the Browse by Identification tab the window lists the manuscripts; in Focus Search it limits a search to them. Browse by Identification now lists all 255,723 manuscripts, including the 29,169 without a catalogue record.':
+        'בלשונית "עיון לפי זיהוי" החלון מציג את כתבי היד; ב"מקד חיפוש" הוא מגביל אליהם את החיפוש. "עיון לפי זיהוי" מציג עכשיו את כל 255,723 כתבי היד, ובהם 29,169 שאין להם רשומה בקטלוג.',
+    'Lines, width, height and material come from the catalogue, from the measurements, or from either; when you set several measured values, they must all hold on the same page.':
+        'שורות, רוחב, גובה וחומר נלקחים מהקטלוג, מהמדידה או מאחד מהם; כשקובעים כמה ערכים נמדדים, כולם צריכים להתקיים באותו עמוד.',
+    "The period of copy now uses each catalogue record's full range of dates, shown in the results (for example 944–1100), and the catalogue records of about 30,600 more manuscripts show their source.":
+        'תקופת ההעתקה מתחשבת עכשיו בטווח התאריכים המלא של כל רשומת קטלוג, והתוצאות מציגות אותו (למשל 944–1100); ורשומות הקטלוג של עוד כ־30,600 כתבי יד מציגות את מקורן.',
+    # v9.13.1 (2026-11-03): the sixth bullet, approved with the release texts.
+    'The Joins Lab can filter its candidates by Manuscript features too: Filter ▾ > Manuscript features, where material and size are now chosen.':
+        'גם במעבדת הצירופים אפשר לסנן את המועמדים לפי מאפייני כתב היד: סנן ▾ > מאפייני כתב היד, ושם נבחרים עכשיו גם החומר והמידות.',
+})
+
+# v9.13.0 startup tips for the Manuscript features (desktop/startup_tips.py),
+# approved 2026-11-02.
+TRANSLATIONS.update({
+    '**Focus Search** > **Manuscript features** searches only manuscripts of the kind you choose: script, region, period of copy, number of lines, size, material and more.':
+        '**מקד חיפוש** > **מאפייני כתב היד** מחפש רק בכתבי יד מהסוג שתבחרו: כתב, אזור, תקופת העתקה, מספר שורות, מידות, חומר ועוד.',
+    '**Manuscript features** on the **Browse by Identification** tab lists the manuscripts that have the features you choose, with how many manuscripts have each value; **Not recorded** finds those the catalogue says nothing about.':
+        '**מאפייני כתב היד** בלשונית **עיון לפי זיהוי** מציג את כתבי היד שיש להם המאפיינים שבחרתם, וליד כל ערך כמה כתבי יד יש לו; **ללא רישום** מוצא את אלה שהקטלוג אינו מתעד בהם דבר.',
+    'Hunting joins? **Focus Search** > **Manuscript features** can keep only manuscripts in the same script, with about the same number of lines and line height as your fragment.':
+        'מחפשים צירופים? **מקד חיפוש** > **מאפייני כתב היד** יכול להשאיר רק כתבי יד באותו כתב ובמספר שורות ובגובה שורה קרובים לאלה של הקטע שלכם.',
+})
+
+# Manuscript features in the Joins Lab's filter dialogs, both apps (2026-11-02):
+# web/components/candidate_grid.py, web/pages/joins_lab.py, desktop/join_workbench.py.
+TRANSLATIONS.update({
+    "Features are checked per manuscript: every candidate page of a matching manuscript stays.":
+        "המאפיינים נבדקים לפי כתב היד: כל הדפים המועמדים של כתב יד מתאים נשארים ברשימה.",
+    "Checking manuscript features…": "בודק את מאפייני כתב היד…",
+    "The catalogue data could not be read: the filters that need it are not applied.":
+        "לא ניתן היה לקרוא את נתוני הקטלוג: המסננים שתלויים בהם לא הוחלו.",
+})
+
+# The Blau dictionary companion on /browse (web/components/blau_panel.py,
+# docs/plans/BLAU_DICTIONARY_PLAN.md §6.2, 2026-11-04). "Blau's dictionary" is
+# the panel's title when Blau is the only dictionary served; the credit line
+# itself comes from the sidecar's meta.
+TRANSLATIONS.update({
+    "Blau's dictionary": "מילון בלאו",
+    "Open on the dictionary site": "פתיחה באתר המילון",
+    "more senses on the site": "משמעויות נוספות באתר",
+    "more entries": "ערכים נוספים",
+    "Also in the examples under": "מופיע גם בדוגמאות שבערכים",
+    "Looked for": "חיפשנו",
+    "matched": "התאמה",
+    "via": "דרך",
+    "see": "ראו",
+    "binyan": "בניין",
+    "classical": "קלאסי",
+    "reconstructed": "משוחזר",
+    "erroneous": "שגוי",
+    "p.": "עמ׳",
+})
+
+# The reader's switch and the box (owner, 2026-11-04: the page does not guess
+# the text's language; the reader turns the lookup on and can type a word).
+TRANSLATIONS.update({
+    "Type a word to look up": "הקלדת מילה לחיפוש במילון",
+    "A word in Hebrew or Arabic letters (ד' for ד̇)": "מילה באותיות עבריות או ערביות (ד' במקום ד̇)",
+    "spelled without the dot": "נכתב בלי הנקודה",
+    "Look up": "חיפוש",
+    "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.":
+        "אפשר להקליד מילה ערבית־יהודית באותיות עבריות, או מילה ערבית.",
+    # The disclaimer on every panel: the Hebrew is the owner's own wording (2026-11-04).
+    "Blau's dictionary records mainly meanings particular to Judeo-Arabic. "
+    "To look up verbs and inflected forms, type the root or the base form.":
+        "מילון בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית. "
+        "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
+    "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
+    # The digital edition's credit under the print credit (owner, 2026-11-04).
+    "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
+        "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
+})
+
+# The dictionary panel holds every dictionary, one tab each (owner, 2026-11-04; plan
+# docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12): its title, the tabs, the hint and the
+# switch name no one dictionary. Approved by the owner, 2026-11-04 ("Wording is fine").
+TRANSLATIONS.update({
+    "Dictionaries": "מילונים",
+    "Blau": "בלאו",
+    "Lane": "ליין",
+    "Click a word to look it up in the dictionaries": "לחיצה על מילה מחפשת אותה במילונים",
+    "Turn on the dictionaries (Judeo-Arabic)": "הפעלת המילונים (ערבית־יהודית)",
+    "Turn off the dictionaries": "כיבוי המילונים",
+})
+# The switch's label, from 640px: the owner's wording (2026-11-04), with the maqaf. "New!" until
+# the visitor first turns the dictionaries on (web/components/blau_panel.py::NEW_LABEL).
+TRANSLATIONS.update({
+    "New! Judeo-Arabic dictionaries!": "חדש! מילונים לערבית־יהודית!",
+    "Judeo-Arabic dictionaries": "מילונים לערבית־יהודית",
+})
+# Lane's Lexicon in its tab (web/components/lane_panel.py, phase B, 2026-11-04). Approved by the
+# owner as drafted, both source lines included, 2026-11-05 ("Approve as is"). The Perseus credit
+# line itself is not translated: it is shown verbatim (D3).
+TRANSLATIONS.update({
+    "Lane's Arabic-English Lexicon": "הלקסיקון הערבי-אנגלי של ליין",  # the owner's wording, 2026-11-04
+    "Arabic readings, commonest first": "קריאות בערבית, הנפוצה תחילה",
+    "Look up this reading": "חיפוש קריאה זו",
+    "root": "שורש",
+    "All entries of this root": "כל הערכים של השורש",
+    "more entries under this root": "ערכים נוספים תחת השורש",
+    "full entry": "הערך המלא",
+    "No root of this reading was found in Lane.": "לא נמצא במילון של ליין שורש לקריאה זו.",
+    "Lane's entries from semitic.lang.emeiri.org (Ephraim Meiri).":
+        "ערכי ליין מתוך semitic.lang.emeiri.org (אפרים מאירי).",
+    "Readings ranked by a word count of the OpenITI corpus.":
+        "הקריאות מדורגות לפי ספירת מילים בקורפוס OpenITI.",
+})
+# Friedman's dictionary in its tab (web/components/friedman_panel.py; the private Friedman plan
+# step 3, 2026-11-07). The status line and "base form" are the owner's wording (2026-11-07); the rest
+# are drafts the owner has seen. The author's credit line is shown verbatim.
+TRANSLATIONS.update({
+    "Friedman's dictionary": "מילון פרידמן",
+    "Friedman": "פרידמן",
+    "Read by machine from the dictionary's PDF files and not checked; it may contain errors. "
+    "Open the linked page to verify.":
+        "פוענח אוטומטית מתוך קובצי ה-PDF ולא נבדק. פתחו את הקישור כדי לוודא",
+    "entry": "ערך",
+    "sub-entry": "ערך משנה",
+    "verb stem": "בניין",
+    "found by the word itself": "נמצא לפי המילה עצמה",
+    "found by its base form": "נמצא לפי צורת הבסיס",
+    "found through the book's index of forms": "נמצא דרך מפתח הערכים ושורשיהם שבספר",
+    "Open the original page": "פתיחת העמוד המקורי",
+    "under": "תחת",
+    "more sub-entries and verb stems on the page": "ערכי משנה ובניינים נוספים בעמוד",
+    "more quotations on the page": "מובאות נוספות בעמוד",
+    "more units reached; narrow the word": "נמצאו ערכים נוספים; דייקו את המילה",
+    # The expression search (plan step 4, 2026-11-07). Approved by the owner as drafted, 2026-11-08.
+    "The words were not found together in the dictionary.": "המילים לא נמצאו יחד במילון.",
+    "words allowed between": "מילים מותרות בין מילה למילה",
+    "Matched words": "המילים שנמצאו",
+    "in the headword": "בראש הערך",
+    "more places in this unit": "מקומות נוספים בערך זה",
+})
+# What's New in every version (shared/whats_new_history.py; web /whats-new, the desktop dialog and
+# update notice, 2026-11-05). Approved by the owner as drafted, 2026-11-05 (reviewed in the wordings docx).
+TRANSLATIONS.update({
+    "What's New in every version": "מה חדש בכל גרסה",
+    "Every version since 9.0.0, newest first.": "כל הגרסאות מאז 9.0.0, מהחדשה לישנה.",
+    "New features": "תכונות חדשות",
+    "Improvements": "שיפורים",
+    "Fixes": "תיקונים",
+    "Website": "אתר",
+    "Desktop app": "אפליקציית שולחן עבודה",
+    "Version {version}": "גרסה {version}",
+    "All versions": "כל הגרסאות",
+    "What's new?": "מה חדש?",
+    "What's new since your version ({version})": "מה חדש מאז הגרסה שלכם ({version})",
+    "Loading the list of changes...": "טוען את רשימת השינויים...",
+    "The list of changes could not be loaded.": "לא ניתן היה לטעון את רשימת השינויים.",
+    "Release notes on GitHub": "פרטי הגרסה ב-GitHub",
+})
+# Before 9.14.0 (owner, 2026-11-05): the dictionaries' M key, the one sign-in button, and the
+# card of keyboard shortcuts (web/keyboard_shortcuts.py). Approved by the owner, 2026-11-05.
+# After the owner's touchpad test (2026-11-05: D or M tapped, Alt + a click, Esc): the key hint,
+# approved word for word in the Help text; the phone chip's "Look up in the dictionary"; "or",
+# "then", "Close the dictionary". All approved by the owner, 2026-11-05.
+TRANSLATIONS.update({
+    "Look up in the dictionary": "חיפוש במילון",
+    "Press D or M, then click a word (or click it with Alt held); or select words and press D or M":
+        "לחצו על D או M (או מ) ואז על מילה (או לחצו עליה כש-Alt לחוץ), או בחרו מילים ולחצו על D או M",
+    "or": "או",
+    "then": "ואז",
+    "Close the dictionary": "סגירת המילון",
+    "Sign in or register": "התחברות או הרשמה",
+    "On every page": "בכל עמוד",
+    "Show this list": "הצגת הרשימה הזאת",
+    "Jump to the search box": "מעבר לתיבת החיפוש",
+    "Look up a word in the dictionaries": "חיפוש מילה במילונים",
+    "Look up the selected words": "חיפוש המילים המסומנות במילונים",
+    "Run the search": "הפעלת החיפוש",
+    "Scroll the results down": "גלילת התוצאות למטה",
+    "Scroll the results up": "גלילת התוצאות למעלה",
+    "click": "לחיצה",
+    "Select words": "סימון מילים",
+})

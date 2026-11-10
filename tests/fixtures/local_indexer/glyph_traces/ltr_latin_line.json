@@ -1,0 +1,387 @@
+{
+  "description": "LTR Latin no-regression pin (spike: 'NW Semitic Dictionary' was BETTER in the current extractor). rtl_ratio <= 0.4 so every RTL helper passes through. expected_despaced == expected_reordered == byte-identical input join.",
+  "expected_despaced": "Northwest Semitic Dictionary",
+  "expected_reordered": "Northwest Semitic Dictionary",
+  "lines": [
+    {
+      "bbox": [
+        97.0,
+        40.0,
+        286.0,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "N",
+              "bbox": [
+                97.0,
+                40.0,
+                103.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "o",
+              "bbox": [
+                104.0,
+                40.0,
+                110.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "r",
+              "bbox": [
+                111.0,
+                40.0,
+                117.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "t",
+              "bbox": [
+                118.0,
+                40.0,
+                124.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": "h",
+              "bbox": [
+                125.0,
+                40.0,
+                131.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 4
+            },
+            {
+              "c": "w",
+              "bbox": [
+                132.0,
+                40.0,
+                138.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 5
+            },
+            {
+              "c": "e",
+              "bbox": [
+                139.0,
+                40.0,
+                145.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 6
+            },
+            {
+              "c": "s",
+              "bbox": [
+                146.0,
+                40.0,
+                152.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 7
+            },
+            {
+              "c": "t",
+              "bbox": [
+                153.0,
+                40.0,
+                159.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 8
+            },
+            {
+              "c": " ",
+              "bbox": [
+                161.0,
+                40.0,
+                165.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 9
+            },
+            {
+              "c": "S",
+              "bbox": [
+                164.0,
+                40.0,
+                170.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 10
+            },
+            {
+              "c": "e",
+              "bbox": [
+                171.0,
+                40.0,
+                177.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 11
+            },
+            {
+              "c": "m",
+              "bbox": [
+                178.0,
+                40.0,
+                184.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 12
+            },
+            {
+              "c": "i",
+              "bbox": [
+                185.0,
+                40.0,
+                191.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 13
+            },
+            {
+              "c": "t",
+              "bbox": [
+                192.0,
+                40.0,
+                198.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 14
+            },
+            {
+              "c": "i",
+              "bbox": [
+                199.0,
+                40.0,
+                205.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 15
+            },
+            {
+              "c": "c",
+              "bbox": [
+                206.0,
+                40.0,
+                212.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 16
+            },
+            {
+              "c": " ",
+              "bbox": [
+                214.0,
+                40.0,
+                218.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 17
+            },
+            {
+              "c": "D",
+              "bbox": [
+                217.0,
+                40.0,
+                223.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 18
+            },
+            {
+              "c": "i",
+              "bbox": [
+                224.0,
+                40.0,
+                230.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 19
+            },
+            {
+              "c": "c",
+              "bbox": [
+                231.0,
+                40.0,
+                237.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 20
+            },
+            {
+              "c": "t",
+              "bbox": [
+                238.0,
+                40.0,
+                244.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 21
+            },
+            {
+              "c": "i",
+              "bbox": [
+                245.0,
+                40.0,
+                251.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 22
+            },
+            {
+              "c": "o",
+              "bbox": [
+                252.0,
+                40.0,
+                258.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 23
+            },
+            {
+              "c": "n",
+              "bbox": [
+                259.0,
+                40.0,
+                265.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 24
+            },
+            {
+              "c": "a",
+              "bbox": [
+                266.0,
+                40.0,
+                272.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 25
+            },
+            {
+              "c": "r",
+              "bbox": [
+                273.0,
+                40.0,
+                279.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 26
+            },
+            {
+              "c": "y",
+              "bbox": [
+                280.0,
+                40.0,
+                286.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 27
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

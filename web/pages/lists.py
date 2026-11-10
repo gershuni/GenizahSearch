@@ -1,0 +1,1031 @@
+# -*- coding: utf-8 -*-
+"""
+Personal Lists Management Page for GenizahSearch web application.
+
+Features:
+- View all personal lists
+- Create/delete/rename lists
+- Add/remove items from lists
+- View list contents with metadata
+- Edit notes and tags for items
+- Export lists
+- Per-user storage (syncs across devices when logged in)
+- Anonymous visitors see a sign-in prompt and no lists (sweep C2)
+"""
+
+import logging
+import re
+
+from nicegui import ui
+from web.state import state
+from web.translations import tr, get_language
+from web.feature_flags import WEB_PUZZLE_ENABLED
+from web.components.typography import h1, h3
+from web.components.project_tree import create_project_tree
+# Every write callback on this page goes through this runner (sign-in re-checked, awaited,
+# failure toasted); tests/test_lists_page_write_callbacks.py pins it.
+from web.components.lists_write import run_lists_write as _run_lists_write
+from web.auth_state import GlobalAuthState, create_login_dialog
+from genizah_core import get_library_display
+from typing import Optional, Dict
+import asyncio
+
+logger = logging.getLogger(__name__)
+
+# Phase 92.2 D-FANOUT-01 + Reviews MUST-FIX 1: sentinel distinguishes
+# 'caller did not pass counts' from 'counts intentionally None (legacy fallback)'.
+_COUNTS_UNSET = object()
+
+
+def _page_text(page) -> str:
+    """A list item's page as text: '' when it has none (rows from before the page column
+    have no 'page' key; entries for a folio or the whole manuscript hold NULL)."""
+    return '' if page is None else str(page).strip()
+
+
+def list_item_page_label(shelfmark, page):
+    """The shelfmark shown for a list item, with "Page N" when the item is one page.
+
+    The desktop records the page in its own column. The web's "Add page to list" writes
+    "<shelfmark> - Page N" into the shelfmark itself, in the interface language, and a
+    desktop may later fill the page column on that row too -- so a shelfmark that already
+    ends with that page is left as it is.
+    """
+    page = _page_text(page)
+    if not page:
+        return shelfmark
+    base = (shelfmark or '').rstrip()
+    if re.search(rf'(?:^|\W)(?:Page|עמוד|דף)\s+{re.escape(page)}$', base):
+        return shelfmark
+    label = f"{tr('Page')} {page}"
+    return f"{base} - {label}" if base else label
+
+
+def list_item_browse_url(sys_id, page) -> str:
+    """/browse link for a list item, opened at its page when the page is a number."""
+    url = f'/browse?sys_id={sys_id}'
+    page = _page_text(page)
+    if re.fullmatch(r'[0-9]+', page):
+        # /browse takes `page: int`; a page such as 'Unknown' opens the first page.
+        url += f'&page={page}'
+    return url
+
+
+def list_item_preview_page(page) -> int:
+    """The page a list item's text preview shows: its page when that is a number, else the
+    first page (the same rule as its Browse link)."""
+    page = _page_text(page)
+    return int(page) if re.fullmatch(r'[0-9]+', page) and int(page) > 0 else 1
+
+
+def _load_list_item_counts() -> Optional[Dict[int, int]]:
+    """Return batched item counts for logged-in users; None means legacy fallback.
+
+    Reviews MUST-FIX 1: None vs {} semantics are CRITICAL. None signals
+    'RPC failed or anonymous — caller MUST trigger per-list legacy fetch'.
+    An empty dict means 'RPC succeeded with zero rows — a valid batched
+    result for a user with no items'. Never return {} on failure.
+    """
+    counts: Optional[Dict[int, int]] = None
+    try:
+        if GlobalAuthState.is_logged_in() and GlobalAuthState.get_user_id():
+            from web.supabase_client import get_list_item_counts
+            counts = get_list_item_counts()
+    except Exception as _e:
+        logger.warning("get_list_item_counts failed; falling back to per-list counts: %s", _e)
+        counts = None
+    return counts
+
+
+def _lists_task_probe(label: str, **fields) -> None:
+    """Record asyncio task identity at lifecycle points.
+
+    Phase 92.2 / Reviews Codex-MEDIUM-1: emits lists_task_probe=<json> with
+    id(asyncio.current_task()) at 4 lifecycle points so Plan 92.2-02's
+    task-scope memo assumption is empirically verified by reading the JSON
+    log BEFORE the memo lands. Zero production cost when env var is off
+    (short-circuits on first line).
+    """
+    import json as _json
+    import os as _os
+
+    if _os.getenv('GS_LISTS_PERF_INSTRUMENTATION') != '1':
+        return
+
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+
+    record = {
+        'phase': '92.2',
+        'event': 'lists_task_probe',
+        'label': label,
+        'current_task_id': id(task) if task is not None else None,
+        'current_task_name': task.get_name() if task is not None else None,
+        **fields,
+    }
+    print('lists_task_probe=' + _json.dumps(record, sort_keys=True), flush=True)
+
+
+def create_inline_edit_label(
+    current_name: str,
+    list_id: str,
+    is_system: bool,
+    lists_mgr,
+    tr_func,
+    classes: str = 'font-semibold',
+    on_save_callback=None,
+    is_default: bool = False,
+):
+    """
+    Create an inline-editable label for list names.
+    Click to edit, Enter/blur to save, Escape to cancel.
+    """
+    if is_system:
+        # System lists cannot be renamed, just show a label. The name is stored
+        # verbatim in the DB (e.g. "Recently Viewed") and must be localized at
+        # render time so it doesn't leak English under a Hebrew UI (W1).
+        ui.label(tr_func(current_name)).classes(classes)
+        return
+
+    # The default "General" list is renameable, but until renamed its name is the
+    # canonical English "General" stored verbatim in the DB — localize the DISPLAY
+    # so it doesn't leak English under a Hebrew UI (W4). The edit value uses the
+    # localized text too; if the user saves it unchanged that's a harmless no-op,
+    # and any real rename overwrites it. User-created lists (is_default=False) are
+    # never translated.
+    display_name = tr_func(current_name) if is_default else current_name
+
+    # Container to hold either the label or the input
+    container = ui.element('div').classes('inline-edit-container')
+
+    with container:
+        # State for editing mode
+        editing_state = {'active': False}
+
+        # The display label (shown when not editing)
+        label_el = ui.label(display_name).classes(classes + ' cursor-pointer hover:underline')
+
+        # The input field (hidden initially)
+        input_el = ui.input(value=display_name).classes('inline-edit-input').props('dense outlined')
+        input_el.set_visibility(False)
+
+        def start_editing():
+            """Switch to edit mode."""
+            if editing_state['active']:
+                return
+            editing_state['active'] = True
+            input_el.value = label_el.text
+            label_el.set_visibility(False)
+            input_el.set_visibility(True)
+            # Focus the input
+            ui.run_javascript(f'document.querySelector("[id=\\"{input_el.id}\\"] input")?.focus(); document.querySelector("[id=\\"{input_el.id}\\"] input")?.select();')
+
+        async def save_edit():
+            """Save the new name and exit edit mode.
+
+            Enter and blur both call this; leaving edit mode BEFORE the await
+            makes the second call a no-op instead of a second write.
+            """
+            if not editing_state['active']:
+                return
+            new_name = input_el.value.strip()
+            old_name = label_el.text
+            cancel_edit()
+            if new_name and new_name != old_name and lists_mgr:
+                renamed = await _run_lists_write(lambda: lists_mgr.update_list(list_id, name=new_name))
+                if not renamed:
+                    return
+                label_el.text = new_name
+                ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
+                if on_save_callback:
+                    on_save_callback()
+
+        def cancel_edit():
+            """Cancel editing and restore the label."""
+            editing_state['active'] = False
+            input_el.set_visibility(False)
+            label_el.set_visibility(True)
+
+        async def handle_keydown(e):
+            """Handle keyboard events in the input."""
+            if e.args.get('key') == 'Enter':
+                await save_edit()
+            elif e.args.get('key') == 'Escape':
+                cancel_edit()
+
+        # Attach event handlers
+        label_el.on('click', start_editing, [])
+        input_el.on('keydown', handle_keydown)
+        input_el.on('blur', save_edit)
+
+
+def _render_anonymous_lists_page():
+    """Sign-in empty state for anonymous visitors. Reads no lists at all."""
+    with ui.column().classes('w-full items-center gap-4'):
+        h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
+        with ui.card().classes('p-6 items-center gap-3').mark('lists-anonymous-gate'):
+            ui.icon('lock', size='lg').style('color: var(--text-muted);')
+            ui.label(tr('Sign in to access your saved research lists.')).style(
+                'color: var(--text-secondary);'
+            )
+            ui.button(
+                tr('Sign in'),
+                icon='login',
+                on_click=lambda: create_login_dialog().open(),
+            ).classes('bg-primary text-white')
+
+
+def create_lists_page():
+    """Create the personal lists management page."""
+
+    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 1
+    _lists_task_probe('initial_page_render')
+
+    # State
+    class ListsPageState:
+        def __init__(self):
+            self.selected_list_id: Optional[str] = None
+            self.refresh_trigger: int = 0
+
+    page_state = ListsPageState()
+
+    # Sweep C2: anonymous visitors have no lists. Return BEFORE any
+    # state.lists_mgr access: the old anonymous store was one server-wide
+    # store shared by every visitor. Login reloads the page, so the full
+    # page appears after sign-in.
+    if not GlobalAuthState.is_logged_in():
+        _render_anonymous_lists_page()
+        return
+
+    # Main container references
+    lists_sidebar_container = None
+    list_content_container = None
+
+    def refresh_ui(lists_mgr=None, data=None, counts=_COUNTS_UNSET):
+        """Trigger a full UI refresh, threading lists_mgr + data + counts through.
+
+        Phase 92.2 Reviews Codex-HIGH 1: accepts and threads the capture triple so
+        callers that already hold data/counts avoid re-fetching.
+        """
+        page_state.refresh_trigger += 1
+        if lists_mgr is None:
+            lists_mgr = state.lists_mgr
+        if lists_mgr is not None and data is None:
+            data = lists_mgr.data
+        if counts is _COUNTS_UNSET:
+            counts = _load_list_item_counts()
+        render_lists_sidebar(lists_mgr=lists_mgr, data=data, counts=counts)
+        render_list_content(lists_mgr=lists_mgr, data=data, counts=counts)
+
+    async def async_refresh_ui():
+        """Async refresh — consumes the data returned by refresh_data() and threads
+        it forward (Reviews Codex-HIGH 2: avoids double-fetch on the warm path).
+        """
+        lists_mgr = state.lists_mgr
+        data = None
+
+        if lists_mgr is not None:
+            try:
+                if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'refresh_data'):
+                    data = await lists_mgr.refresh_data()  # Task 6.5 returns Dict
+                else:
+                    data = lists_mgr.data
+            except Exception as e:
+                logger.error("Error refreshing lists data: %s", e)
+                data = None
+
+        counts = _load_list_item_counts() if lists_mgr is not None else None
+        refresh_ui(lists_mgr=lists_mgr, data=data, counts=counts)
+
+    def _schedule_async_refresh(reason: str):
+        """Schedule an async_refresh_ui() task, emitting task-probe log at lifecycle
+        points 2 and 3 (Reviews Codex-MEDIUM-1: verify NiceGUI task-per-callback)."""
+        _lists_task_probe('asyncio.create_task(async_refresh_ui())', reason=reason)
+        task = asyncio.create_task(async_refresh_ui())
+        _lists_task_probe('async_refresh_task_created', reason=reason, created_task_id=id(task))
+        return task
+
+    # --- Create New List Dialog ---
+    def show_create_list_dialog():
+        """Show dialog to create a new list."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[400px]'):
+            # Changed to H3
+            h3(tr('Create New List'), classes='text-xl font-bold mb-4')
+
+            list_name = ui.input(label=tr('List Name')).classes('w-full mb-4')
+
+            # Color picker
+            ui.label(tr('Color')).classes('text-sm font-semibold mb-2')
+            selected_color = {'value': '#FFD700'}
+
+            with ui.row().classes('gap-2 mb-4 flex-wrap'):
+                colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
+                          '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
+                for color in colors:
+                    btn = ui.button().props('flat round dense').style(
+                        f'background-color: {color}; width: 32px; height: 32px; min-width: 32px;'
+                    )
+                    btn.on('click', lambda c=color: selected_color.update({'value': c}))
+
+            async def create_list():
+                name = list_name.value.strip()
+                if not name:
+                    ui.notify(tr('Please enter a list name'), type='warning')
+                    return
+
+                if state.lists_mgr:
+                    list_id = await _run_lists_write(
+                        lambda: state.lists_mgr.create_list(name, color=selected_color['value'])
+                    )
+                    if not list_id:
+                        return
+                    ui.notify(f"{tr('List created')}: {name}", type='positive')
+                    dialog.close()
+                    await async_refresh_ui()
+                else:
+                    ui.notify(tr('Lists manager not available'), type='negative')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Create'), on_click=create_list).classes('bg-primary text-white')
+
+        dialog.open()
+
+    # --- Delete List Dialog ---
+    def show_delete_list_dialog(list_id: str, list_name: str):
+        """Show confirmation dialog to delete a list."""
+        with ui.dialog() as dialog, ui.card().classes('p-6'):
+            # Changed to H3
+            h3(tr('Delete List?'), classes='text-xl font-bold mb-2')
+            ui.label(f"{tr('Are you sure you want to delete')}: {list_name}?").classes('mb-4').style('color: var(--text-secondary);')
+            ui.label(tr('All items in this list will be removed.')).classes('text-sm text-red-500 mb-4')
+
+            async def delete_list():
+                if state.lists_mgr:
+                    deleted = await _run_lists_write(lambda: state.lists_mgr.delete_list(list_id))
+                    if not deleted:
+                        # 0 rows usually means another tab already deleted it: close the
+                        # now-stale dialog and refresh (the runner toasted the failure).
+                        dialog.close()
+                        await async_refresh_ui()
+                        return
+                    ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
+                    dialog.close()
+                    page_state.selected_list_id = None
+                    await async_refresh_ui()
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Delete'), on_click=delete_list).classes('bg-red-500 text-white')
+
+        dialog.open()
+
+    # --- Trash Dialog ---
+    def show_trash_dialog():
+        """Show dialog with deleted lists (trash)."""
+        if not state.lists_mgr:
+            return
+
+        # Get deleted lists
+        if hasattr(state.lists_mgr, 'get_deleted_lists'):
+            deleted_lists = state.lists_mgr.get_deleted_lists()
+        else:
+            ui.notify(tr('Trash not available'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
+            h3(tr('Trash'), classes='text-xl font-bold mb-4')
+
+            if not deleted_lists:
+                ui.label(tr('Trash is empty.')).classes('text-gray-500 mb-4')
+                ui.button(tr('Close'), on_click=dialog.close).props('flat')
+            else:
+                ui.label(tr('{} deleted lists').format(len(deleted_lists))).classes('mb-4').style('color: var(--text-secondary);')
+
+                # List of deleted lists
+                trash_list = ui.column().classes('w-full max-h-60 overflow-auto border rounded p-2 mb-4')
+                selected_list_id = {'value': None}
+
+                def select_item(list_id, btn):
+                    selected_list_id['value'] = list_id
+                    # Update selection visuals
+                    for child in trash_list:
+                        if hasattr(child, 'classes'):
+                            child.classes(remove='bg-blue-100')
+                    btn.classes(add='bg-blue-100')
+
+                with trash_list:
+                    for lst in deleted_lists:
+                        from datetime import datetime
+                        deleted_at = lst.get('deleted_at')
+                        if deleted_at:
+                            if isinstance(deleted_at, (int, float)):
+                                deleted_str = datetime.fromtimestamp(deleted_at).strftime('%Y-%m-%d %H:%M')
+                            else:
+                                deleted_str = str(deleted_at)[:16]
+                        else:
+                            deleted_str = tr('Unknown')
+
+                        count = lst.get('count', 0)
+                        with ui.row().classes('w-full items-center justify-between p-2 hover:bg-gray-100 rounded cursor-pointer') as row:
+                            row.on('click', lambda e, lid=lst['id'], r=row: select_item(lid, r))
+                            ui.label(f"{lst['name']} ({count} {tr('items')})")
+                            ui.label(f"{tr('Deleted')}: {deleted_str}").classes('text-sm text-gray-500')
+
+                # Action buttons
+                with ui.row().classes('w-full justify-end gap-2'):
+                    async def restore_selected():
+                        if not selected_list_id['value']:
+                            ui.notify(tr('Please select a list to restore.'), type='warning')
+                            return
+                        if hasattr(state.lists_mgr, 'restore_list'):
+                            restored = await _run_lists_write(
+                                lambda: state.lists_mgr.restore_list(selected_list_id['value'])
+                            )
+                            if not restored:
+                                # 0 rows usually means another tab already did it: close the
+                                # now-stale dialog and refresh (the runner toasted the failure).
+                                dialog.close()
+                                await async_refresh_ui()
+                                return
+                            ui.notify(tr('List restored'), type='positive')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    async def delete_permanently():
+                        if not selected_list_id['value']:
+                            ui.notify(tr('Please select a list to delete.'), type='warning')
+                            return
+                        if hasattr(state.lists_mgr, 'permanently_delete_list'):
+                            purged = await _run_lists_write(
+                                lambda: state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            )
+                            if not purged:
+                                # 0 rows usually means another tab already did it: close the
+                                # now-stale dialog and refresh (the runner toasted the failure).
+                                dialog.close()
+                                await async_refresh_ui()
+                                return
+                            ui.notify(tr('List deleted permanently'), type='info')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    async def empty_trash():
+                        if hasattr(state.lists_mgr, 'empty_trash'):
+                            # 0 deleted is a legitimate answer, so only None is a failure.
+                            count = await _run_lists_write(
+                                lambda: state.lists_mgr.empty_trash(), falsy_is_failure=False
+                            )
+                            if count is None:
+                                # The runner already toasted the failure. A partial Empty Trash
+                                # may have deleted some rows, so close this now-stale dialog
+                                # (its rows and ids may be gone) and refresh the page.
+                                dialog.close()
+                                await async_refresh_ui()
+                                return
+                            ui.notify(tr('Deleted {} lists permanently.').format(count), type='info')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                    ui.button(tr('Restore'), on_click=restore_selected).classes('bg-green-500 text-white')
+                    ui.button(tr('Delete Permanently'), on_click=delete_permanently).classes('bg-red-500 text-white')
+                    ui.button(tr('Empty Trash'), on_click=empty_trash).classes('bg-red-700 text-white')
+
+        dialog.open()
+
+    # --- Edit Item Dialog ---
+    def show_edit_item_dialog(item_id: str, item_data: dict, display_shelfmark: str):
+        """Show dialog to edit item notes and tags.
+
+        display_shelfmark is the heading of the item's card (library, the catalogue's
+        shelfmark when the row has none, and the page), so both name the item alike.
+        """
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
+            # Changed to H3
+            h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
+
+            ui.label(f"{tr('Item')}: {display_shelfmark}").classes('text-sm mb-4').style('color: var(--text-secondary);')
+
+            note_input = ui.textarea(
+                label=tr('Notes'),
+                value=item_data.get('note', '')
+            ).classes('w-full mb-4').props('outlined rows=3')
+
+            tags_text = ', '.join(item_data.get('tags', []))
+            tags_input = ui.input(
+                label=tr('Tags (comma-separated)'),
+                value=tags_text
+            ).classes('w-full mb-4').props('outlined')
+
+            async def save_changes():
+                if state.lists_mgr:
+                    # Update note (the manager methods are async: a bare call never ran)
+                    new_note = note_input.value
+                    if new_note != item_data.get('note', ''):
+                        noted = await _run_lists_write(
+                            lambda: state.lists_mgr.update_item_note(item_id, new_note)
+                        )
+                        if not noted:
+                            return
+
+                    # Update tags -- only when the field was changed: it splits on ',', so
+                    # re-reading an untouched field would split a tag holding a comma
+                    new_tags = [t.strip() for t in tags_input.value.split(',') if t.strip()]
+                    if tags_input.value != tags_text and new_tags != item_data.get('tags', []):
+                        tagged = await _run_lists_write(
+                            lambda: state.lists_mgr.update_item_tags(item_id, new_tags)
+                        )
+                        if not tagged:
+                            return
+
+                    ui.notify(tr('Item updated'), type='positive')
+                    dialog.close()
+                    refresh_ui()
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Save'), on_click=save_changes).classes('bg-primary text-white')
+
+        dialog.open()
+
+    # --- Render Lists Sidebar ---
+    def render_lists_sidebar(lists_mgr=None, data=None, counts=_COUNTS_UNSET):
+        """Render the left sidebar with project tree.
+
+        Phase 92.2 D-FANOUT-01 + Reviews Codex-HIGH 1: capture lists_mgr +
+        data + counts ONCE; thread through create_project_tree. Reviews
+        MUST-FIX 1: counts may be None (legacy fallback) or a (possibly empty)
+        dict; _COUNTS_UNSET means 'caller did not provide — default-fetch'.
+
+        Reviews Round-2 HIGH-1 pre-merge: this version PRESERVES Plan 01 Task 2b's
+        _t_render_start / try / finally instrumentation harness AND Plan 01
+        Task 2c's _schedule_async_refresh task-probe wiring.
+        Reviews Round-2 MEDIUM-3: emits request_id in the decomposition log line.
+        """
+        # Capture lists_mgr ONCE — factory property per Phase 89 D-03/D-04.
+        lists_mgr = state.lists_mgr if lists_mgr is None else lists_mgr
+
+        from web.supabase_client import _INSTRUMENTATION_ENABLED, _inst_snapshot, _inst_request_id
+        import json as _json
+        import time as _time
+
+        _t_render_start = _time.perf_counter() if _INSTRUMENTATION_ENABLED else None
+
+        try:
+            # Capture `data` and `counts` INSIDE the timed try: block so the
+            # .data + RPC access costs ARE measured by sidebar_render_ms AND
+            # inherited by the ASGI middleware's total_wall_clock_ms.
+            if lists_mgr is not None and data is None:
+                data = lists_mgr.data
+            if counts is _COUNTS_UNSET:
+                counts = _load_list_item_counts()
+
+            def _select_from_sidebar(list_id, mgr=lists_mgr, threaded_data=data, threaded_counts=counts):
+                select_list(list_id, lists_mgr=mgr, data=threaded_data, counts=threaded_counts)
+
+            create_project_tree(
+                lists_mgr=lists_mgr,
+                container=lists_sidebar_container,
+                on_select=_select_from_sidebar,
+                selected_list_id=page_state.selected_list_id,
+                on_refresh=lambda: _schedule_async_refresh('project_tree_refresh'),
+                data=data,
+                counts=counts,
+            )
+        finally:
+            if _INSTRUMENTATION_ENABLED:
+                sidebar_ms = (_time.perf_counter() - _t_render_start) * 1000.0
+                snap = _inst_snapshot()
+                L = S = Cp = 0
+                # Reuse the captured `data` local from the timed try: block.
+                # Do NOT re-access lists_mgr.data here — the timed window already
+                # paid that cost; a second fetch in finally: would contaminate
+                # the baseline numbers AND escape the ASGI middleware's wall-clock span.
+                for _lid, _ldata in (data or {}).get('lists', {}).items():
+                    L += 1
+                    if _ldata.get('project_id'):
+                        Cp += 1
+                    else:
+                        S += 1
+
+                predicted_queries = 4 + L + 2 * S
+                logger.info(
+                    'lists_sidebar_decomposition=%s',
+                    _json.dumps({
+                        'phase': '92.2',
+                        'event': 'lists_sidebar_decomposition',
+                        'request_id': _inst_request_id.get(),  # Reviews Round-2 MEDIUM-3
+                        'sidebar_render_ms': sidebar_ms,
+                        'decomposition': {
+                            'L': L,
+                            'S': S,
+                            'Cp': Cp,
+                            'Cs': S,
+                            'predicted_queries_from_codex_formula': '4 + L + 2*S',
+                            'predicted_query_count': predicted_queries,
+                        },
+                        'delta_vs_codex_formula': {
+                            'observed_minus_predicted': snap['query_count'] - predicted_queries,
+                            'ratio': (snap['query_count'] / predicted_queries) if predicted_queries > 0 else None,
+                        },
+                    }, sort_keys=True),
+                )
+
+    # --- Select List ---
+    def select_list(list_id: str, lists_mgr=None, data=None, counts=None):
+        """Select a list to view its contents.
+
+        Reviews Codex-HIGH 1: accepts and threads lists_mgr + data + counts so
+        list-click latency drops alongside sidebar latency (Hillel reported BOTH slow).
+        """
+        # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 4
+        _lists_task_probe('list_select_callback', list_id=list_id)
+        page_state.selected_list_id = list_id
+        render_list_content(lists_mgr=lists_mgr, data=data, counts=counts)
+        # Under 769px the list renders below the stacked tree (common.css,
+        # "Lists"), out of sight of the tap that chose it: bring it up.
+        ui.run_javascript(
+            'if (window.innerWidth <= 768) {'
+            f" const el = document.getElementById('c{list_content_container.id}');"
+            " if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); }"
+        )
+
+    # --- Render List Content ---
+    def render_list_content(lists_mgr=None, data=None, counts=None):
+        """Render the selected list's content.
+
+        Reviews Codex-HIGH 1: accepts and threads lists_mgr + data + counts.
+        Hillel reported BOTH /lists load AND list-click slow; this function
+        is the list-click hot path. Capture lists_mgr ONCE at entry; use
+        threaded data for color/items; use threaded counts for expected_count.
+        """
+        list_content_container.clear()
+
+        with list_content_container:
+            if not page_state.selected_list_id:
+                # No list selected
+                with ui.column().classes('w-full h-full items-center justify-center'):
+                    ui.icon('playlist_add', size='6rem').style('color: var(--text-muted);')
+                    ui.label(tr('Select a list to view its contents')).classes('text-xl mt-4').style('color: var(--text-muted);')
+                return
+
+            # Capture lists_mgr ONCE — factory property per Phase 89 D-03/D-04
+            lists_mgr = state.lists_mgr if lists_mgr is None else lists_mgr
+            if not lists_mgr:
+                ui.label(tr('Lists manager not available')).classes('text-red-500')
+                return
+
+            if data is None:
+                data = lists_mgr.data
+
+            list_id = page_state.selected_list_id
+            lists = data.get('lists', {})
+            list_data = lists.get(list_id)
+
+            if not list_data:
+                ui.label(tr('List not found')).classes('text-red-500')
+                return
+
+            # List Header
+            is_system = list_data.get('is_system', False)
+            # Use project-inherited color — pass data= to avoid a second .data fetch
+            display_color = (
+                lists_mgr.get_list_display_color(list_id, data=data)
+                if hasattr(lists_mgr, 'get_list_display_color')
+                else list_data.get('color', '#FFD700')
+            )
+            with ui.row().classes('w-full justify-between items-start mb-6 pb-4 border-b-2').style(
+                f'border-color: {display_color};'
+            ):
+                with ui.column().classes('gap-1'):
+                    with ui.row().classes('items-center gap-3'):
+                        ui.icon('circle').style(f'color: {display_color}; font-size: 2rem;')
+                        # Inline-editable list name (click to rename)
+                        create_inline_edit_label(
+                            current_name=list_data.get('name', 'Unnamed'),
+                            list_id=list_id,
+                            is_system=is_system,
+                            lists_mgr=lists_mgr,
+                            tr_func=tr,
+                            classes='text-3xl font-bold',
+                            on_save_callback=refresh_ui,
+                            is_default=list_data.get('is_default', False),
+                        )
+                    if is_system:
+                        ui.label(tr('System List')).classes('text-xs').style('color: var(--text-tertiary);')
+
+                # Export button
+                with ui.row().classes('gap-2'):
+                    ui.button(
+                        tr('Export'),
+                        icon='download',
+                        on_click=lambda: export_list(list_id)
+                    ).props('flat').classes('text-primary')
+
+            # Get items — use captured lists_mgr (not state.lists_mgr factory)
+            items_list = lists_mgr.get_items_in_list_sync(list_id)
+            is_recent = (
+                lists_mgr._is_recent_list(list_id)
+                if hasattr(lists_mgr, '_is_recent_list') else False
+            )
+            # The id the note/tag edit and Remove act on. An ordinary list's items are raw
+            # list_items rows, whose row id is 'id' (they have no 'item_id'); the edit and
+            # remove calls do int(item_id) and address that row. Only the recent list's
+            # formatted items carry 'item_id'.
+            items_data = [
+                (item.get('item_id') if is_recent else str(item.get('id')), item)
+                for item in items_list
+            ]
+
+            # expected_count: prefer threaded counts dict over len(items_data) when available.
+            # W3: the recent system list is never in the batched counts dict (its items live in
+            # recent_items, not list_items), so trust the actually-loaded items_data for it rather
+            # than the stale batched value.
+            expected_count = len(items_data)
+            if counts is not None and not is_recent:
+                try:
+                    expected_count = counts.get(int(list_id), len(items_data))
+                except (TypeError, ValueError):
+                    expected_count = len(items_data)
+
+            if not items_data:
+                with ui.column().classes('w-full items-center justify-center py-16'):
+                    ui.icon('inbox', size='4rem').style('color: var(--text-muted);')
+                    ui.label(tr('This list is empty')).classes('text-lg mt-2').style('color: var(--text-muted);')
+                    if not list_data.get('is_system'):
+                        ui.label(tr('Add items from search results')).classes('text-sm').style('color: var(--text-muted);')
+                return
+
+            # Items Grid/List
+            ui.label(f"{expected_count} {tr('items')}").classes('text-sm mb-4').style('color: var(--text-tertiary);')
+
+            # Track expanded items
+            expanded_items = {}
+
+            with ui.column().classes('w-full gap-3'):
+                for item_id, item_data in items_data:
+                    sys_id = item_data.get('sys_id', item_id)
+                    shelfmark = item_data.get('shelfmark', 'Unknown')
+                    title = item_data.get('title', '')
+                    note = item_data.get('note', '')
+                    tags = item_data.get('tags', [])
+                    fl_id = item_data.get('fl_id')
+                    page = item_data.get('page')
+
+                    # Enrich metadata if needed
+                    if not shelfmark or shelfmark == 'Unknown':
+                        if state.meta_mgr:
+                            shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                            shelfmark = shelf_temp or shelfmark
+                            title = title or title_temp
+                    shelfmark = list_item_page_label(shelfmark, page)
+
+                    # Get library name for display
+                    library_name = ''
+                    if state.meta_mgr:
+                        library_code = state.meta_mgr.get_library_for_id(sys_id)
+                        if library_code:
+                            library_name = get_library_display(library_code, short=False, lang=get_language())
+
+                    # Build display shelfmark with library name
+                    display_shelfmark = shelfmark
+                    if library_name:
+                        display_shelfmark = f"{library_name}, {shelfmark}"
+
+                    # lists-item-card / lists-item-actions: on a phone the action
+                    # icons are a row under the text, not a column beside it
+                    # (common.css, "Lists").
+                    with ui.card().classes('w-full p-4 hover:shadow-lg transition-shadow lists-item-card'):
+                        with ui.row().classes('w-full justify-between items-start'):
+                            # Main content
+                            with ui.column().classes('flex-grow gap-2'):
+                                # Shelfmark with library name
+                                h3(display_shelfmark, classes='text-lg font-bold text-primary')
+
+                                # Title
+                                if title:
+                                    ui.label(title).classes('text-sm').style('direction: rtl; color: var(--text-secondary);')
+
+                                # Note
+                                if note:
+                                    with ui.row().classes('items-start gap-2 p-2 mt-2 rounded').style('background: var(--bg-tertiary);'):
+                                        ui.icon('note', size='xs').style('color: var(--text-muted);')
+                                        ui.label(note).classes('text-xs').style('color: var(--text-secondary);')
+
+                                # Tags
+                                if tags:
+                                    with ui.row().classes('gap-2 mt-2 flex-wrap'):
+                                        for tag in tags:
+                                            ui.badge(tag).classes('bg-blue-100 text-blue-700')
+
+                            # Actions
+                            with ui.column().classes('gap-1 lists-item-actions'):
+                                # Browse button (at the item's page, when it is one page)
+                                ui.button(
+                                    icon='menu_book',
+                                    on_click=lambda url=list_item_browse_url(sys_id, page): ui.navigate.to(url)
+                                ).props('flat round dense').tooltip(tr('Browse'))
+
+                                # Open in Joins Lab button (Phase 120 D-19)
+                                # Inserted BETWEEN Browse and Add-to-Puzzle (UI-SPEC §11).
+                                # icon=link reads as "open the joins/link workbench".
+                                # Always enabled — Joins Lab requires no login for anonymous browsing.
+                                ui.button(
+                                    icon='link',
+                                    on_click=lambda sid=sys_id: ui.navigate.to(
+                                        f'/joins-lab?sys_id={sid}', new_tab=True
+                                    ),
+                                ).props(
+                                    'flat round dense aria-label="Open in Joins Lab"'
+                                ).tooltip(tr('Open in Joins Lab'))
+
+                                if WEB_PUZZLE_ENABLED:
+                                    # Add to Puzzle button (Phase 49)
+                                    ui.button(
+                                        icon='extension',
+                                        on_click=lambda sid=sys_id: ui.navigate.to(f'/puzzle?add={sid}')
+                                    ).props('flat round dense').tooltip(tr('Add to Puzzle'))
+
+                                # Edit button
+                                ui.button(
+                                    icon='edit',
+                                    on_click=lambda iid=item_id, idata=item_data, shown=display_shelfmark: (
+                                        show_edit_item_dialog(iid, idata, shown)
+                                    )
+                                ).props('flat round dense').tooltip(tr('Edit'))
+
+                                # Remove button
+                                if not list_data.get('is_system'):
+                                    ui.button(
+                                        icon='delete',
+                                        on_click=lambda iid=item_id, lid=list_id: remove_item_from_list(iid, lid)
+                                    ).props('flat round dense').classes('text-red-400').tooltip(tr('Remove'))
+
+                        # Text snippet section (expandable)
+                        with ui.column().classes('w-full mt-3'):
+                            snippet_container = ui.column().classes('w-full')
+                            is_expanded = {'value': False}
+
+                            def create_snippet_ui(container, sid, fid, expanded_state, pnum=1):
+                                """Create the snippet UI with lazy loading (pnum: the item's page)."""
+                                container.clear()
+                                with container:
+                                    # Try to get text snippet
+                                    text_snippet = ''
+                                    try:
+                                        from web.services import get_service
+                                        service = get_service()
+                                        if service.is_ready:
+                                            page_data = service.get_browse_page(sid, p_num=pnum)
+                                            if page_data and page_data.text:
+                                                text_snippet = page_data.text
+                                    except Exception as e:
+                                        logger.error(f"Error fetching snippet: {e}")
+
+                                    if text_snippet:
+                                        # Show snippet or full text
+                                        max_chars = 200
+                                        with ui.element('div').classes(
+                                            'p-3 rounded-lg'
+                                        ).style('direction: rtl; text-align: right; background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
+                                            if expanded_state['value'] or len(text_snippet) <= max_chars:
+                                                ui.label(text_snippet).classes(
+                                                    'text-sm whitespace-pre-wrap'
+                                                ).style('line-height: 1.8; color: var(--text-primary);')
+                                            else:
+                                                ui.label(text_snippet[:max_chars] + '...').classes(
+                                                    'text-sm'
+                                                ).style('line-height: 1.8; color: var(--text-primary);')
+
+                                            # Expand/collapse button
+                                            if len(text_snippet) > max_chars:
+                                                def toggle_expand():
+                                                    expanded_state['value'] = not expanded_state['value']
+                                                    create_snippet_ui(container, sid, fid, expanded_state, pnum)
+
+                                                with ui.row().classes('w-full justify-center mt-2'):
+                                                    btn_text = tr('Show less') if expanded_state['value'] else tr('Show more')
+                                                    btn_icon = 'expand_less' if expanded_state['value'] else 'expand_more'
+                                                    ui.button(
+                                                        btn_text,
+                                                        icon=btn_icon,
+                                                        on_click=toggle_expand
+                                                    ).props('flat dense size=sm').classes('text-green-700')
+                                    else:
+                                        ui.label(tr('No text preview available')).classes(
+                                            'text-xs italic'
+                                        ).style('color: var(--text-muted);')
+
+                            # Load snippet button (lazy load to avoid slow page)
+                            load_btn_container = ui.row().classes('w-full')
+                            with load_btn_container:
+                                def make_load_handler(container, sid, fid, expanded, btn_container, pnum):
+                                    def handler():
+                                        btn_container.clear()
+                                        with container:
+                                            ui.spinner(size='sm').classes('mx-auto')
+                                        async def _deferred_snippet(c=container, s=sid, f=fid, e=expanded, p=pnum):
+                                            await asyncio.sleep(0.1)
+                                            try:
+                                                create_snippet_ui(c, s, f, e, p)
+                                            except Exception:
+                                                pass  # UI element update optional; continue rendering
+                                        asyncio.ensure_future(_deferred_snippet())
+                                    return handler
+
+                                ui.button(
+                                    tr('Show text preview'),
+                                    icon='text_snippet',
+                                    on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container,
+                                                               list_item_preview_page(page))
+                                ).props('flat dense size=sm').style('color: var(--text-tertiary);')
+
+    async def remove_item_from_list(item_id: str, list_id: str):
+        """Remove an item from the current list."""
+        if state.lists_mgr:
+            result = await _run_lists_write(
+                lambda: state.lists_mgr.remove_item_from_list(item_id, list_id)
+            )
+            if not result:
+                # Already removed elsewhere, or a failed write: refresh so the view is current.
+                await async_refresh_ui()
+                return
+            ui.notify(tr('Item removed from list'), type='info')
+            await async_refresh_ui()
+
+    def export_list(list_id: str):
+        """Export list to Excel."""
+        if state.lists_mgr:
+            try:
+                list_data = state.lists_mgr.data.get('lists', {}).get(list_id)
+                if not list_data:
+                    ui.notify(tr('List not found'), type='warning')
+                    return
+
+                # Use get_items_in_list to correctly fetch items
+                # Items are stored in data['items'] with list membership in each item's 'lists' field
+                items = state.lists_mgr.get_items_in_list_sync(list_id)
+                if not items:
+                    ui.notify(tr('This list is empty'), type='warning')
+                    return
+
+                # Trigger download
+                ui.download(f'/api/export/list/{list_id}/excel')
+            except Exception as e:
+                ui.notify(f"{tr('Export failed')}: {str(e)}", type='negative')
+
+    # --- Main Layout ---
+    # Signed-in only: anonymous visitors returned early above (sweep C2).
+    # The "Move to account" card and dialog are gone: they copied the whole
+    # server-wide anonymous store into one account and then wiped it.
+    # lists-shell / lists-splitter / lists-sidebar / lists-content: under 769px
+    # the stylesheet stacks the splitter, the My Lists tree above the list,
+    # and lets the page scroll (common.css, "Lists").
+    with ui.column().classes('w-full h-[calc(100vh-120px)] lists-shell'):
+        # Page Title
+        with ui.row().classes('w-full items-center justify-between mb-4'):
+            # Changed to H1
+            h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
+            with ui.row().classes('items-center gap-2'):
+                # Show sync status
+                ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
+
+                # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
+                async def _refresh_button_click():
+                    _lists_task_probe('refresh_button_click')
+                    await async_refresh_ui()
+
+                ui.button(
+                    icon='refresh',
+                    on_click=_refresh_button_click,
+                ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
+                ui.button(
+                    tr('Create List'),
+                    icon='add',
+                    on_click=show_create_list_dialog
+                ).classes('bg-primary text-white')
+                ui.button(
+                    tr('Trash'),
+                    icon='delete',
+                    on_click=show_trash_dialog
+                ).props('flat').classes('text-gray-600')
+
+        # Description with sync status
+        ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
+
+        # Main Content: Sidebar + Content
+        with ui.splitter(value=25).classes('w-full flex-grow lists-splitter') as splitter:
+            # Left: Lists Sidebar
+            with splitter.before:
+                lists_sidebar_container = ui.column().classes('w-full h-full p-2 lists-sidebar')
+
+            # Right: List Content
+            with splitter.after:
+                list_content_container = ui.column().classes('w-full h-full p-4 lists-content')
+
+    # Initial render
+    render_lists_sidebar()
+    render_list_content()

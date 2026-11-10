@@ -1,0 +1,133 @@
+{
+  "description": "Two RTL words (ספר / תורה) in separate spans with a realistic word gap (~10pt edge, ~0.9*em) and an embedded space glyph that is now IGNORED for boundary detection. Splits purely by the edge-gap rule (2026-05-31).",
+  "expected_despaced": "ספר תורה",
+  "expected_reordered": "ספר תורה",
+  "lines": [
+    {
+      "bbox": [
+        317.5,
+        40.0,
+        371.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ס",
+              "bbox": [
+                364.5,
+                40.0,
+                371.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                358.5,
+                40.0,
+                365.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                352.5,
+                40.0,
+                359.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": " ",
+              "bbox": [
+                349.0,
+                40.0,
+                353.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            }
+          ]
+        },
+        {
+          "font": "FrankRuehl",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ת",
+              "bbox": [
+                335.5,
+                40.0,
+                342.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 4
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                329.5,
+                40.0,
+                336.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 5
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                323.5,
+                40.0,
+                330.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 6
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                317.5,
+                40.0,
+                324.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 7
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

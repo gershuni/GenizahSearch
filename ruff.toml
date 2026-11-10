@@ -1,0 +1,30 @@
+# GenizahSearch ruff configuration
+# Phase 63: syntax errors + import hygiene only
+# Expand ruleset in future milestones
+
+line-length = 120  # Future-friendly default (not enforced yet)
+# The version floor the docs state and CI proves (.github/workflows/ci.yml runs 3.11 only).
+# Recorded here rather than in a pyproject [project] table: the repo has no build backend, so
+# `dynamic = ["version"]` would be invalid and a static version would drift from version.py.
+target-version = "py311"
+
+extend-exclude = [
+    ".claude",
+    "extension",
+    "dist",
+    "build",
+    # Non-app research / spike / one-off addon trees (not imported by web/ or the
+    # desktop app). Kept out of the app's import-hygiene lint so their throwaway
+    # scripts don't gate CI on the shipped codebase.
+    "same_work_spike",
+    "seewald_addition",
+    "ephraim_meiri_pdf_converter",
+]
+
+[lint]
+select = [
+    "E9",    # Syntax errors (runtime-breaking)
+    "F401",  # Unused imports
+    "F811",  # Redefined while unused
+    "F821",  # Undefined name
+]

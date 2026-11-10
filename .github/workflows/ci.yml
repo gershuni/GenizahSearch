@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  push:
+    branches: [master-main]
+  pull_request:
+
+# Every job only reads the repository. The token gets no write scope, so a
+# compromised step or dependency cannot push, tag or comment with it.
+permissions:
+  contents: read
+
+# A new push to a pull request cancels that PR's run still in progress: only
+# the newest commit's result decides anything, and PR #402 had seven full runs
+# in ~3 hours, an older one still running next to its replacement. A branch
+# push starts ONE run here (`push:` is limited to master-main), so the PR
+# number covers it. Every master-main push gets a group of its own (run_id),
+# not a shared one: a shared group with cancel-in-progress false still holds a
+# second push PENDING behind the first and cancels that pending run when a
+# third arrives. master-main runs are never queued or cancelled. A re-run
+# (run_attempt > 1) keeps its old commit's PR number, so it waits behind the
+# PR's current run instead of cancelling it: re-running a stale run must not
+# take away the newest commit's result.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
+
+jobs:
+  lint-and-docs:
+    # Bounded so a hung runner fails in minutes instead of burning GitHub's
+    # 6-hour default. Added 2026-08-18 after a random ubuntu job stalled ~6h on
+    # `apt-get` while the identical step succeeded in two sibling jobs of the
+    # same run -- infrastructure, not this repo, but with no bound it made a
+    # green build indistinguishable from a hung one for a whole working day.
+    # Values are ~3x the observed p100 (slowest measured: tests/windows 21 min).
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is REQUIRED by check_docs.py's contract-header gate,
+      # which asks git for the last commit date of a specific file. The
+      # default depth-1 clone answers "no such commit" for every file HEAD
+      # did not touch, so the gate would silently pass instead of running.
+      # Only this job needs history; the test jobs stay shallow and fast.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install ruff==0.15.10  # Pinned -- update version intentionally
+      - run: ruff check .
+      - run: python scripts/check_docs.py
+
+  tests:
+    # Three shards per OS (2026-10-19). As ONE process the Windows lane took
+    # 41-52 min for 15,300 tests (it needed a 90-min timeout after being
+    # cancelled at 60 twice at 97-99%) and Ubuntu ~25 -- the wall time of every
+    # PR, paid again on each push. Each shard runs its share of
+    # scripts/run_local_tests.py's balanced chunks (`--shard K/N`), each chunk a
+    # fresh process: the same selection, the same chunks the owner's local runs
+    # use. 45 = ~3x a shard's expected time, with the old Windows variance.
+    timeout-minutes: 45
+    name: tests (${{ matrix.os }}, ${{ matrix.python-version }}, shard ${{ matrix.shard }}/3)
+    needs: lint-and-docs
+    env:
+      # PyQt6 tests (e.g. desktop-telemetry consent dialogs) construct a real
+      # QApplication and dispatch widget events. Without a platform plugin the
+      # headless Linux runner falls back to xcb (no display) and segfaults
+      # (exit 139). 'offscreen' is the documented headless mode — see the
+      # test docstrings and CLAUDE.md (GITHUB_ACTIONS is auto-set by the runner).
+      QT_QPA_PLATFORM: offscreen
+    strategy:
+      # fail-fast canceled the sibling OS the moment one failed, so a
+      # cross-platform failure reported HALF its data (PR #324: the gui
+      # Windows log ended at "The operation was canceled" and the real
+      # Windows behaviour stayed unknown). Report each OS independently.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11']
+        # tests/test_run_local_tests_gate.py checks this list is 1..N for the
+        # N in `--shard ${{ matrix.shard }}/N` below.
+        shard: [1, 2, 3]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      # Schema validation is exercised by the ChatGPT contract tests.
+      - run: pip install pytest jsonschema==4.26.0
+      # `-m "not gui"` deselects PyQt6 event-dispatching dialog tests (auto-marked
+      # `gui` in tests/conftest.py). Run together in this one process they tip the
+      # accumulated Qt state into SIGSEGV (exit 139) after ~3000 tests. They run
+      # in their own fresh process in the `gui-tests` job below.
+      # `not render_smoke` deselects the NiceGUI render-smoke tests (auto-marked in
+      # tests/conftest.py): they enter+tear down the app lifespan via asyncio.run,
+      # closing the event loop + deleting the auto-index client, which poisons any
+      # later NiceGUI test in the same process. They run in the `render-smoke-tests`
+      # job below (fresh process).
+      # `not atlas_bake` deselects the Phase 133 atlas-bake invariant tests
+      # (auto-marked in tests/conftest.py): they require the pinned bake-time deps
+      # in requirements-atlas-bake.txt (networkx/python-louvain/Brotli), which are
+      # NOT installed in this job (the test module also self-skips via
+      # pytest.importorskip as defense in depth). They run for real in the
+      # dedicated `atlas-bake-tests` job below.
+      # -j 2: two chunk processes at a time on the 4-vCPU runner (a chunk peaked
+      # at 5.6 GB locally; runners have 16 GB).
+      - run: python scripts/run_local_tests.py -m "not gui and not render_smoke and not atlas_bake" --shard ${{ matrix.shard }}/3 -j 2
+
+  # One result for the sharded job above, for anything that wants a single
+  # "tests" check (a required status, a glance at the PR). Fails if any shard
+  # failed or timed out. `!cancelled()`, not `always()`: a newer push cancels
+  # this run, and `always()` then reported the cancellation as a red "tests"
+  # on the superseded commit (seen on this PR's first push).
+  tests-all:
+    name: tests
+    if: ${{ !cancelled() }}
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: test "${{ needs.tests.result }}" = "success"
+
+  render-smoke-tests:
+    timeout-minutes: 40
+    needs: lint-and-docs
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+          - os: windows-latest
+            python-version: '3.11'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      # Fresh process, only the render-smoke tests. They drive a NiceGUI User through
+      # the app lifespan and are safe to run together (each restores slot_stack for
+      # its siblings) but must NOT share a process with the broader suite.
+      - run: pytest tests/ -m render_smoke
+
+  gui-tests:
+    timeout-minutes: 20
+    needs: lint-and-docs
+    env:
+      # Same headless-Qt requirement as the `tests` job: these tests construct a
+      # real QApplication and dispatch widget events; offscreen is the documented
+      # headless mode. Running them in a SEPARATE job = a fresh process with clean
+      # process-global Qt state, which avoids the full-suite accumulation segfault.
+      QT_QPA_PLATFORM: offscreen
+    strategy:
+      # fail-fast canceled the sibling OS the moment one failed, so a
+      # cross-platform failure reported HALF its data (PR #324: the gui
+      # Windows log ended at "The operation was canceled" and the real
+      # Windows behaviour stayed unknown). Report each OS independently.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+          - os: windows-latest
+            python-version: '3.11'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      # ONE PROCESS PER FILE. Qt state is process-global and these desktop
+      # tests leak it across test boundaries (a widget closed with
+      # deleteLater() is only QUEUED for destruction; a worker QThread or
+      # QTimer can post a queued call into a widget an earlier test already
+      # closed). Nothing fires until something runs an event loop, and then it
+      # all fires at once on objects whose Python wrappers are still live --
+      # SIGSEGV, at a position that moves with the run. Per-file processes
+      # bound a leak to its own file. This is the same isolation the `tests`,
+      # `gui-tests`, `render-smoke-tests` and `atlas-bake-tests` split already
+      # buys at coarser grain, one level finer; the underlying widget/worker
+      # lifetime bug is desktop work tracked separately.
+      - run: python scripts/run_gui_tests.py
+
+  slow-tests:
+    timeout-minutes: 30
+    needs: lint-and-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Qt runtime deps
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      # R2-#5 (78-REVIEWS.md): dedicated slow-tests gate. Runs Phase 78 soak tests
+      # plus any other @pytest.mark.slow tests. Concern #7 preserved: the default
+      # `tests` job above continues to run `pytest tests/` (no addopts filter), so
+      # the existing tests/e2e/test_performance.py also runs there. This job is
+      # ADDITIONAL coverage, NOT a replacement.
+      - run: pytest -m slow tests/
+
+  atlas-bake-tests:
+    timeout-minutes: 20
+    needs: lint-and-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      # Node is provisioned here (not needed by the Python bake tests
+      # themselves) so the companion 133-04 golden JS-decode + DOM-XSS tests
+      # -- also tagged `atlas_bake` under tests/atlas_bake/ -- can run in this
+      # same dedicated job once that plan lands.
+      - run: pip install -r requirements-lock.txt
+      # Bake-time-only deps (Phase 133 ATLAS-01, scripts/build_atlas_asset.py)
+      # -- deliberately NOT in requirements.txt/requirements-lock.txt; this
+      # tooling never runs inside the web process.
+      - run: pip install -r requirements-atlas-bake.txt
+      - run: pip install pytest
+      - run: pytest tests/atlas_bake -m atlas_bake

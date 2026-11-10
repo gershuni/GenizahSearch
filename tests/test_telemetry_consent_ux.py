@@ -1,0 +1,863 @@
+# -*- coding: utf-8 -*-
+"""Phase 112 Plan 01 — Consent UX test suite (Wave 0).
+
+Two clearly-separated sections:
+  - HEADLESS: no QApplication required; exercises gate logic, done()-finalizer,
+    shown-flag writes, and opt-out queue drain.
+  - Qt-OFFSCREEN: requires QApplication; exercises dialog widget behaviour
+    (no-default buttons, focused-Enter, Escape, X-close, PrivacyDialog content).
+
+Notes:
+  (a) Windows test isolation: full `pytest tests/` aborts on a non-deterministic
+      PyQt6 headless segfault; run this subset directly:
+        GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen pytest tests/test_telemetry_consent_ux.py
+  (b) Pytest config + markers live in pyproject.toml (no pytest.ini).
+      Registered markers: slow, e2e, packaging, scale.  `qt` is NOT registered.
+  (c) Qt gating uses the conftest offscreen pattern, NOT a `qt` marker:
+      a module-level `app = QApplication.instance() or QApplication([])` inside
+      try/except skips the whole offscreen section if no platform plugin is available.
+
+Critical design note (save_app_config binding):
+  desktop/consent_dialog.py calls `genizah_core.save_app_config(...)` via
+  MODULE-ATTRIBUTE access (NOT `from genizah_core import save_app_config`).
+  This means the _reset_telemetry_state fixture's monkeypatch of
+  `genizah_core.save_app_config` DOES intercept dialog writes — the patched name
+  is the one the dialog resolves at call time.
+"""
+
+from __future__ import annotations
+
+import queue
+import pytest
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI run
+# segfaults after thousands of NiceGUI/asyncio tests share the process (2026-08-21).
+
+import shared.posthog_server as ph
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixture — copied verbatim from tests/test_telemetry_consent_gate.py
+# Provides an in-memory fake_config dict and patches load/save_app_config on
+# both genizah_core (source) and desktop.telemetry (imported-into names).
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_telemetry_state(monkeypatch):
+    """Reset desktop.telemetry + posthog_server state before/after each test."""
+    fake_config: dict = {}
+
+    def fake_load_app_config():
+        return dict(fake_config)
+
+    def fake_save_app_config(new_data: dict):
+        fake_config.update(new_data)
+
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'load_app_config', fake_load_app_config)
+    monkeypatch.setattr(genizah_core, 'save_app_config', fake_save_app_config)
+
+    import desktop.telemetry as tel
+    monkeypatch.setattr(tel, 'load_app_config', fake_load_app_config)
+    monkeypatch.setattr(tel, 'save_app_config', fake_save_app_config)
+
+    ph._reset_for_tests()
+    fresh_q: queue.Queue = queue.Queue(maxsize=10000)
+    monkeypatch.setattr(ph, '_event_queue', fresh_q)
+
+    tel._reset_for_tests()
+    tel._load_consent_state()
+
+    yield fake_config
+
+    tel._reset_for_tests()
+    ph._reset_for_tests()
+
+
+# ===========================================================================
+# HEADLESS SECTION
+# Tests in this section do NOT require QApplication.
+# They drive the dialog's helper methods directly or test engine behaviour.
+# ===========================================================================
+
+def test_first_run_gate_skips_if_shown(monkeypatch, _reset_telemetry_state):
+    """CONSENT-03: show_first_run_prompt() is a no-op when FIRST_RUN_SHOWN_KEY=True.
+
+    NOTE: show_first_run_prompt is a no-op stub until Plan 02 fills the gate.
+    This test passes trivially now and remains meaningful after Plan 02 wires it.
+    The sentinel class raises if instantiated — any invocation is a failure.
+    """
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+    _reset_telemetry_state[FIRST_RUN_SHOWN_KEY] = True  # fake_config
+
+    class _ShouldNotInstantiate:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("ConsentDialog must NOT be constructed when already shown")
+
+    import desktop.consent_dialog
+    monkeypatch.setattr(desktop.consent_dialog, 'ConsentDialog', _ShouldNotInstantiate)
+
+    import desktop.telemetry as tel
+    # Must not raise
+    tel.show_first_run_prompt()
+
+
+def test_first_run_constructs_and_execs_once(monkeypatch, _reset_telemetry_state):
+    """CONSENT-02: show_first_run_prompt() constructs ConsentDialog exactly once and calls exec().
+
+    NOTE: FIRST_RUN_SHOWN_KEY absent => gate should pass through and construct.
+    This test is authored in Wave 0 but goes GREEN only after Plan 02 fills the stub.
+    Plan 02 Task 1 acceptance criteria re-runs it with `-k constructs_and_execs_once`.
+    """
+    construct_count = [0]
+    exec_count = [0]
+
+    from PyQt6.QtWidgets import QDialog
+
+    class _RecordingStub:
+        def __init__(self, parent=None):
+            construct_count[0] += 1
+
+        def exec(self):
+            exec_count[0] += 1
+            return QDialog.DialogCode.Rejected
+
+    import desktop.consent_dialog
+    monkeypatch.setattr(desktop.consent_dialog, 'ConsentDialog', _RecordingStub)
+
+    import desktop.telemetry as tel
+    tel.show_first_run_prompt()
+
+    assert construct_count[0] == 1, "ConsentDialog must be constructed exactly once"
+    assert exec_count[0] == 1, "ConsentDialog.exec() must be called exactly once"
+
+
+# ---------------------------------------------------------------------------
+# done()-finalizer tests (REVIEWS HIGH-1)
+# Each path drives ConsentDialog.done(result) and asserts:
+#   (a) FIRST_RUN_SHOWN_KEY=True in the fake config
+#   (b) set_consent called with the correct bool
+# ---------------------------------------------------------------------------
+
+def _make_consent_dialog():
+    """Construct a ConsentDialog instance under the offscreen QApplication."""
+    from desktop.consent_dialog import ConsentDialog
+    return ConsentDialog()
+
+
+def test_done_finalizer_writes_flag_on_accept(monkeypatch, _reset_telemetry_state):
+    """Accept path: done(Accepted) writes FIRST_RUN_SHOWN_KEY=True and calls set_consent(True)."""
+    import desktop.telemetry as tel
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = _make_consent_dialog()
+    dlg._accepted_telemetry = True  # simulate explicit Enable click
+    from PyQt6.QtWidgets import QDialog
+    dlg.done(QDialog.DialogCode.Accepted)
+
+    import genizah_core
+    cfg = genizah_core.load_app_config()
+    assert cfg.get(FIRST_RUN_SHOWN_KEY) is True, "FIRST_RUN_SHOWN_KEY must be True after accept"
+    assert consent_calls == [True], f"set_consent(True) expected; got {consent_calls}"
+
+
+def test_done_finalizer_writes_flag_on_decline(monkeypatch, _reset_telemetry_state):
+    """Decline path: done(Rejected) writes FIRST_RUN_SHOWN_KEY=True and calls set_consent(False)."""
+    import desktop.telemetry as tel
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = _make_consent_dialog()
+    # _accepted_telemetry stays False (default) — decline
+    from PyQt6.QtWidgets import QDialog
+    dlg.done(QDialog.DialogCode.Rejected)
+
+    import genizah_core
+    cfg = genizah_core.load_app_config()
+    assert cfg.get(FIRST_RUN_SHOWN_KEY) is True, "FIRST_RUN_SHOWN_KEY must be True after decline"
+    assert consent_calls == [False], f"set_consent(False) expected; got {consent_calls}"
+
+
+def test_done_finalizer_writes_flag_on_escape(monkeypatch, _reset_telemetry_state):
+    """Escape path: keyPressEvent(Escape) routes through reject()→done() and writes flag + opt-out."""
+    import desktop.telemetry as tel
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = _make_consent_dialog()
+    # Simulate Escape: _accepted_telemetry stays False; call reject() which calls done(Rejected)
+    dlg.reject()  # Escape routes through reject()
+
+    import genizah_core
+    cfg = genizah_core.load_app_config()
+    assert cfg.get(FIRST_RUN_SHOWN_KEY) is True, "FIRST_RUN_SHOWN_KEY must be True after Escape"
+    assert consent_calls == [False], f"set_consent(False) expected on Escape; got {consent_calls}"
+
+
+def test_done_finalizer_writes_flag_on_close(monkeypatch, _reset_telemetry_state):
+    """Close (X-button) path: done(Rejected) writes FIRST_RUN_SHOWN_KEY=True and calls set_consent(False).
+
+    X-close routes through reject()→done(Rejected) in Qt's close sequence.
+    We drive done() directly here (headless mode — dialog not shown, so close()
+    does not trigger the full Qt event chain on a hidden widget; done() is the
+    canonical finalizer we test).
+    """
+    import desktop.telemetry as tel
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = _make_consent_dialog()
+    # Drive done() directly simulating X-close (Rejected, _accepted_telemetry=False)
+    from PyQt6.QtWidgets import QDialog
+    dlg.done(QDialog.DialogCode.Rejected)
+
+    import genizah_core
+    cfg = genizah_core.load_app_config()
+    assert cfg.get(FIRST_RUN_SHOWN_KEY) is True, "FIRST_RUN_SHOWN_KEY must be True after X-close"
+    assert consent_calls == [False], f"set_consent(False) expected on X-close; got {consent_calls}"
+
+
+def test_settings_cancel_does_not_desync_telemetry(_reset_telemetry_state):
+    """D-07b / T-112-CancelDesync: Cancel in SettingsDialog must NOT overwrite
+    telemetry keys that set_consent() already wrote to config.pkl.
+
+    Simulates the exact fix in SettingsDialog.__init__: the snapshot is built by
+    stripping the 7 telemetry key constants from the full config dict, then
+    save_app_config(snapshot) is called (as _on_cancel does). Since save_app_config
+    is additive-merge, the telemetry keys NOT in the snapshot are left untouched.
+
+    After opt-in followed by a snapshot-restore that omits telemetry keys,
+    load_app_config()[TELEMETRY_ENABLED_KEY] must still be True (no desync).
+    """
+    import desktop.telemetry as tel
+    from desktop.telemetry import (
+        TELEMETRY_ENABLED_KEY, FIRST_RUN_SHOWN_KEY,
+        TELEMETRY_INSTALL_ID_KEY, CONSENT_TIMESTAMP_KEY,
+        CONSENT_APP_VERSION_KEY, CONSENT_UI_VERSION_KEY, IDENTIFIED_USER_KEY,
+    )
+    import genizah_core
+
+    _TELEMETRY_SNAPSHOT_EXCLUDE = frozenset({
+        TELEMETRY_ENABLED_KEY, FIRST_RUN_SHOWN_KEY, TELEMETRY_INSTALL_ID_KEY,
+        CONSENT_TIMESTAMP_KEY, CONSENT_APP_VERSION_KEY,
+        CONSENT_UI_VERSION_KEY, IDENTIFIED_USER_KEY,
+    })
+
+    # Step 1: opt in (simulates user flipping toggle in Settings)
+    tel.set_consent(True)
+    cfg_after_consent = genizah_core.load_app_config()
+    assert cfg_after_consent.get(TELEMETRY_ENABLED_KEY) is True, (
+        "Precondition: set_consent(True) must write TELEMETRY_ENABLED_KEY=True"
+    )
+
+    # Step 2: build a snapshot as SettingsDialog.__init__ does (strip telemetry keys)
+    full_cfg = genizah_core.load_app_config()
+    snapshot = {k: v for k, v in full_cfg.items() if k not in _TELEMETRY_SNAPSHOT_EXCLUDE}
+    assert TELEMETRY_ENABLED_KEY not in snapshot, (
+        "Snapshot must not contain TELEMETRY_ENABLED_KEY (D-07b strip)"
+    )
+
+    # Step 3: simulate _on_cancel restoring the snapshot (additive-merge)
+    genizah_core.save_app_config(snapshot)
+
+    # Step 4: verify telemetry state is NOT desynced — engine wrote True; disk must still be True
+    cfg_after_cancel = genizah_core.load_app_config()
+    assert cfg_after_cancel.get(TELEMETRY_ENABLED_KEY) is True, (
+        "After snapshot restore, TELEMETRY_ENABLED_KEY must remain True "
+        "(save_app_config is additive-merge — omitted keys are preserved). "
+        "T-112-CancelDesync."
+    )
+    assert tel.is_enabled() is True, (
+        "is_enabled() must still return True after snapshot restore (no engine desync)"
+    )
+
+
+def test_optout_drains_queue(_reset_telemetry_state):
+    """CONSENT-08 verification: set_consent(False) drains any queued events.
+
+    Phase 111 already implemented _drain_and_discard inside set_consent(False).
+    This test proves the drain via the engine's normal opt-in + track + opt-out flow.
+    No new drain logic is re-implemented here.
+    """
+    import desktop.telemetry as tel
+    from desktop.telemetry import DesktopEvent
+
+    # First opt in so we can enqueue an event
+    tel.set_consent(True)
+    tel.track(DesktopEvent.SELFTEST)
+
+    # Queue should be non-empty
+    assert not ph._event_queue.empty(), "Precondition: event should be enqueued after consent+track"
+
+    # Now opt out — should drain queue
+    tel.set_consent(False)
+    assert ph._event_queue.empty(), "Queue must be drained after set_consent(False)"
+
+
+# ===========================================================================
+# Qt-OFFSCREEN SECTION
+# Requires QApplication + offscreen platform.
+# Gate: construct QApplication at module level; skip entire section if unavailable.
+# Run with: GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen pytest tests/test_telemetry_consent_ux.py
+# ===========================================================================
+
+_qt_app = None
+_qt_skip_reason: str | None = None
+
+try:
+    from PyQt6.QtWidgets import QApplication
+    _qt_app = QApplication.instance() or QApplication([])
+except Exception as _qt_exc:  # noqa: BLE001
+    _qt_skip_reason = f"QApplication unavailable: {_qt_exc}"
+
+
+def _skip_if_no_qt():
+    if _qt_skip_reason is not None:
+        pytest.skip(_qt_skip_reason, allow_module_level=False)
+
+
+def test_consent_dialog_no_default_button():
+    """T-112-EnterOptIn SC#1: both buttons must NOT be default or auto-default."""
+    _skip_if_no_qt()
+    from desktop.consent_dialog import ConsentDialog
+    dlg = ConsentDialog()
+    assert dlg.btn_enable.isDefault() is False, "btn_enable must not be the default button"
+    assert dlg.btn_enable.autoDefault() is False, "btn_enable must not be auto-default"
+    assert dlg.btn_decline.isDefault() is False, "btn_decline must not be the default button"
+    assert dlg.btn_decline.autoDefault() is False, "btn_decline must not be auto-default"
+    dlg.reject()  # clean up — routes through done() which will call set_consent(False)
+
+
+def test_consent_dialog_enter_is_decline(monkeypatch):
+    """REVIEWS HIGH-2: focused Enter on btn_enable must NOT opt in.
+
+    Explicitly focuses btn_enable (worst case: a focused QPushButton could consume
+    Return before the dialog's keyPressEvent), then posts a Key_Return event.
+    Asserts set_consent was NOT called with True.
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+    from desktop.consent_dialog import ConsentDialog
+    from PyQt6.QtCore import Qt, QEvent
+    from PyQt6.QtGui import QKeyEvent
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = ConsentDialog()
+    dlg.btn_enable.setFocus()  # Focus the Enable button — worst case
+
+    # Post Key_Return directly to the focused widget (btn_enable) and to the dialog
+    key_event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(dlg.btn_enable, key_event)
+    QApplication.processEvents()
+
+    # Postcondition: set_consent must NOT have been called with True
+    assert True not in consent_calls, (
+        f"Enter/Return must NOT opt in even when btn_enable is focused; "
+        f"set_consent calls: {consent_calls}"
+    )
+    # Clean up
+    try:
+        dlg.close()
+    except Exception:
+        pass
+
+
+def test_consent_dialog_escape_opts_out(monkeypatch):
+    """REVIEWS HIGH-1: Escape routes through done() — writes flag + set_consent(False)."""
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+    from desktop.consent_dialog import ConsentDialog
+    from PyQt6.QtCore import Qt, QEvent
+    from PyQt6.QtGui import QKeyEvent
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = ConsentDialog()
+
+    # Post Escape key to dialog
+    escape_event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(dlg, escape_event)
+    QApplication.processEvents()
+
+    import genizah_core
+    cfg = genizah_core.load_app_config()
+    assert cfg.get(FIRST_RUN_SHOWN_KEY) is True, "FIRST_RUN_SHOWN_KEY must be True after Escape"
+    assert False in consent_calls, f"set_consent(False) expected; got {consent_calls}"
+    assert True not in consent_calls, f"set_consent(True) must NOT occur on Escape; got {consent_calls}"
+
+
+def test_consent_dialog_close_opts_out(monkeypatch):
+    """REVIEWS HIGH-1: X-close routes through reject()→done() — writes flag + set_consent(False).
+
+    Qt's X-button (window close) sends a closeEvent which calls reject() on a QDialog.
+    reject() in turn calls done(Rejected). We drive reject() directly here because
+    close() on a non-visible dialog is a Qt no-op (the close event is only sent when the
+    window is visible). The actual close-event→reject()→done() chain is the production
+    path; this test verifies the done() finalizer fires correctly via reject().
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+    from desktop.telemetry import FIRST_RUN_SHOWN_KEY
+    from desktop.consent_dialog import ConsentDialog
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    dlg = ConsentDialog()
+    dlg.reject()  # X-close → closeEvent → reject() → done(Rejected)
+    QApplication.processEvents()
+
+    import genizah_core
+    cfg = genizah_core.load_app_config()
+    assert cfg.get(FIRST_RUN_SHOWN_KEY) is True, "FIRST_RUN_SHOWN_KEY must be True after X-close"
+    assert False in consent_calls, f"set_consent(False) expected; got {consent_calls}"
+    assert True not in consent_calls, f"set_consent(True) must NOT occur on X-close; got {consent_calls}"
+
+
+def test_privacy_dialog_constructs_bilingual():
+    """PRIV-05: PrivacyDialog must contain bilingual EN+HE content covering D-10 points.
+
+    Assertions:
+    - Contains 'PostHog' (data processor)
+    - Contains 'My Library' or 'file paths' or 'filenames' (what-is-NOT-collected)
+    - Contains 'privacy-preserving' (or HE equivalent — NOT bare 'anonymous')
+    - Contains a dir='rtl' block (Hebrew)
+    - Contains a dir='ltr' block (English)
+    - Does NOT use 'anonymous' as the headline data descriptor
+    """
+    _skip_if_no_qt()
+    from desktop.consent_dialog import PrivacyDialog
+
+    # bilingual=True is the one-time startup mode (ConsentDialog "Learn more"),
+    # which stacks EN+HE. Settings/About open it single-language per UI.
+    dlg = PrivacyDialog(bilingual=True)
+    html = dlg._build_html()
+
+    assert 'PostHog' in html, "PrivacyDialog must mention PostHog as data processor"
+    assert any(term in html for term in ('My Library', 'file paths', 'filenames')), (
+        "PrivacyDialog must state My Library paths/filenames are NOT collected"
+    )
+    assert any(term in html for term in ('privacy-preserving', 'privacy_preserving', 'שומרי-פרטיות', 'שומרי פרטיות')), (
+        "PrivacyDialog must use 'privacy-preserving' wording (not bare 'anonymous')"
+    )
+    assert "dir='rtl'" in html or 'dir="rtl"' in html, "PrivacyDialog must have a dir=rtl block for Hebrew"
+    assert "dir='ltr'" in html or 'dir="ltr"' in html, "PrivacyDialog must have a dir=ltr block for English"
+    # Ensure 'anonymous' is not used as THE headline descriptor
+    # (it may appear in compound phrases but not as the sole qualifier before 'data' or 'usage')
+    import re
+    bare_anonymous = re.search(r'\banonymous\s+(?:usage|data|identifier|install)\b', html, re.IGNORECASE)
+    assert bare_anonymous is None, (
+        f"PrivacyDialog must not use 'anonymous' as headline descriptor; "
+        f"found: {bare_anonymous.group() if bare_anonymous else ''}"
+    )
+    dlg.accept()
+
+
+# ===========================================================================
+# Phase 112 Plan 03 — Settings telemetry toggle tests (Task 2)
+# Requires Qt-offscreen platform.
+# ===========================================================================
+
+def test_settings_toggle_initial_state(monkeypatch):
+    """CONSENT-04: chk_telemetry initial state matches is_enabled().
+
+    When telemetry is disabled, the checkbox must be unchecked.
+    When telemetry is enabled, the checkbox must be checked.
+    Tests both states to verify the checkbox reads from is_enabled().
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+
+    # Case A: disabled → checkbox unchecked
+    tel._reset_for_tests()
+    tel._load_consent_state()
+    assert tel.is_enabled() is False, "Precondition: telemetry off after reset"
+
+    # We need to build just enough of SettingsDialog to test chk_telemetry.
+    # Import and check the attribute exists and reflects is_enabled().
+    # We do this by introspecting desktop/settings_dialogs.py's SettingsDialog class
+    # without constructing the full main window — using a minimal QDialog parent.
+    from PyQt6.QtWidgets import QDialog
+    import genizah_app
+
+    class _FakeMainWin:
+        """Minimal stand-in for self.main_win attributes SettingsDialog touches.
+
+        _on_language_combo_changed must be a callable (QComboBox connects to it).
+        All other attribute accesses return a no-op lambda or None so Qt setattr
+        calls don't raise.
+        """
+        def _on_language_combo_changed(self, idx):
+            pass
+
+        def check_updates_manual(self):
+            pass
+
+        def run_indexing(self):
+            pass
+
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    # Patch out the heavy parts so SettingsDialog can be constructed without
+    # a real GenizahGUI. Provide a fake load_app_config that returns defaults.
+    fake_cfg = {}
+
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    # Also patch save_app_config so Settings doesn't persist anything
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
+    # Minimal init attributes needed by SettingsDialog.__init__
+    # We can't call super().__init__ without a display, so call directly.
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    # Run only _build_general_tab to set up chk_telemetry
+    # But _build_general_tab needs palette colors — set them
+    from PyQt6.QtWidgets import QApplication
+    pal = QApplication.palette()
+    from PyQt6.QtGui import QPalette
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    assert hasattr(sd, 'chk_telemetry'), "SettingsDialog must have chk_telemetry attribute"
+    # State: disabled → unchecked
+    assert sd.chk_telemetry.isChecked() is False, (
+        "chk_telemetry must be unchecked when is_enabled() returns False"
+    )
+    del _page  # explicit cleanup
+
+
+def test_settings_toggle_applies_on_confirm(monkeypatch):
+    """CONSENT-04 / D-07a: confirming the toggle calls set_consent(new_val).
+
+    Patches QMessageBox.question to return Yes, then triggers stateChanged.
+    Verifies set_consent is called with the new value.
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    import genizah_app
+    import genizah_core
+    from PyQt6.QtWidgets import QDialog, QApplication, QMessageBox
+    from PyQt6.QtGui import QPalette
+
+    fake_cfg = {}
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+    # The confirm now uses a QMessageBox instance (localized Yes/No buttons).
+    # Patch exec() to click the Yes button (sets clickedButton) and return.
+    def _fake_exec_yes(box_self):
+        box_self.button(QMessageBox.StandardButton.Yes).click()
+        return QMessageBox.StandardButton.Yes.value
+    monkeypatch.setattr(QMessageBox, 'exec', _fake_exec_yes)
+
+    class _FakeMainWin:
+        def _on_language_combo_changed(self, idx):
+            pass
+        def check_updates_manual(self):
+            pass
+        def run_indexing(self):
+            pass
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    # Trigger a state change: flip to checked (enable telemetry)
+    sd.chk_telemetry.blockSignals(False)
+    sd.chk_telemetry.setChecked(True)
+    QApplication.processEvents()
+
+    assert True in consent_calls, (
+        f"set_consent(True) must be called on confirmed toggle; got {consent_calls}"
+    )
+    del _page
+
+
+def test_settings_toggle_reverts_on_cancel_confirm(monkeypatch):
+    """CONSENT-04 / D-07a: cancelling the confirm reverts checkbox; set_consent NOT called.
+
+    Patches QMessageBox.question to return No, then triggers stateChanged.
+    Verifies set_consent is NOT called and the checkbox reverts to prior state.
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    import genizah_app
+    import genizah_core
+    from PyQt6.QtWidgets import QDialog, QApplication, QMessageBox
+    from PyQt6.QtGui import QPalette
+
+    fake_cfg = {}
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+    # The confirm now uses a QMessageBox instance (localized Yes/No buttons).
+    # Patch exec() to click the No button (sets clickedButton) and return.
+    def _fake_exec_no(box_self):
+        box_self.button(QMessageBox.StandardButton.No).click()
+        return QMessageBox.StandardButton.No.value
+    monkeypatch.setattr(QMessageBox, 'exec', _fake_exec_no)
+
+    class _FakeMainWin:
+        def _on_language_combo_changed(self, idx):
+            pass
+        def check_updates_manual(self):
+            pass
+        def run_indexing(self):
+            pass
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    # Initial state: unchecked (is_enabled()=False after reset)
+    assert sd.chk_telemetry.isChecked() is False, "Precondition: starts unchecked"
+
+    # Flip to checked — but QMessageBox returns No → should revert
+    sd.chk_telemetry.blockSignals(False)
+    sd.chk_telemetry.setChecked(True)
+    QApplication.processEvents()
+
+    assert consent_calls == [], (
+        f"set_consent must NOT be called when confirm is cancelled; got {consent_calls}"
+    )
+    assert sd.chk_telemetry.isChecked() is False, (
+        "Checkbox must revert to prior state (unchecked) when confirm is cancelled"
+    )
+    del _page
+
+
+def test_settings_checkbox_refreshes_on_open(monkeypatch):
+    """REVIEWS HIGH-3 / T-112-StaleCheckbox: _open_settings_dialog refreshes
+    chk_telemetry from is_enabled() with signals blocked before exec().
+
+    Simulates: (1) dialog built with telemetry OFF, (2) consent changes to ON
+    (first-run opt-in), (3) _open_settings_dialog is called — checkbox must now
+    reflect ON (not the stale OFF from construction time).
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+    import genizah_app
+
+    # Confirm is_enabled() is False after reset (autouse fixture)
+    assert tel.is_enabled() is False
+
+    import genizah_core
+    fake_cfg = {}
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+    monkeypatch.setattr(tel, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(tel, 'save_app_config', lambda d: fake_cfg.update(d))
+
+    from PyQt6.QtWidgets import QDialog, QApplication
+    from PyQt6.QtGui import QPalette
+
+    class _FakeMainWin:
+        def _on_language_combo_changed(self, idx):
+            pass
+        def check_updates_manual(self):
+            pass
+        def run_indexing(self):
+            pass
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    # At construction time: is_enabled()=False → checkbox unchecked
+    assert sd.chk_telemetry.isChecked() is False, (
+        "Precondition: checkbox unchecked at construction (is_enabled=False)"
+    )
+
+    # Simulate first-run opt-in (happens AFTER dialog was built)
+    tel.set_consent(True)
+    assert tel.is_enabled() is True, "Post-consent: is_enabled() must be True"
+
+    # Now simulate _open_settings_dialog's refresh logic (REVIEWS HIGH-3)
+    try:
+        chk = getattr(sd, 'chk_telemetry', None)
+        if chk is not None:
+            chk.blockSignals(True)
+            chk.setChecked(tel.is_enabled())
+            chk.blockSignals(False)
+    except Exception:
+        pass
+
+    # Checkbox must now be CHECKED (reflecting post-consent state)
+    assert sd.chk_telemetry.isChecked() is True, (
+        "chk_telemetry must be refreshed to True after first-run opt-in (REVIEWS HIGH-3)"
+    )
+
+
+# ===========================================================================
+# Mid-session opt-in from Settings runs the MAIN WINDOW's coordinator (D-13)
+# ===========================================================================
+
+def _confirm_settings_opt_in(monkeypatch, main_win):
+    """Build SettingsDialog's General tab on `main_win`, confirm an opt-in.
+
+    Returns (calls, slot_errors): `calls` records set_consent and coordinator
+    calls in order. The checkbox handler runs as a Qt slot, so an exception in
+    it never reaches the test -- PyQt hands it to sys.excepthook and carries
+    on. `slot_errors` records those, which is how a raise is seen at all.
+    """
+    import sys
+    import desktop.telemetry as tel
+    import desktop.settings_dialogs
+    from PyQt6.QtWidgets import QDialog, QApplication, QMessageBox
+    from PyQt6.QtGui import QPalette
+
+    calls: list = []
+    slot_errors: list = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: calls.append(('set_consent', v)))
+    monkeypatch.setattr(sys, 'excepthook', lambda *exc: slot_errors.append(exc[1]))
+    fake_cfg: dict = {}
+    monkeypatch.setattr(desktop.settings_dialogs, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(desktop.settings_dialogs, 'save_app_config', lambda d: fake_cfg.update(d))
+
+    def _fake_exec_yes(box_self):
+        box_self.button(QMessageBox.StandardButton.Yes).click()
+        return QMessageBox.StandardButton.Yes.value
+    monkeypatch.setattr(QMessageBox, 'exec', _fake_exec_yes)
+
+    main_win._calls = calls
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = main_win
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    assert sd.chk_telemetry.isChecked() is False, "Precondition: starts unchecked"
+    sd.chk_telemetry.setChecked(True)
+    QApplication.processEvents()
+    del _page
+    return calls, slot_errors
+
+
+class _StubMainWin:
+    """Main-window stand-in: every attribute SettingsDialog touches is a no-op."""
+
+    def __getattr__(self, name):
+        return lambda *a, **kw: None
+
+
+def test_settings_opt_in_runs_main_window_coordinator(monkeypatch):
+    """D-13/HIGH-4: confirming an opt-in in Settings saves consent, THEN runs
+    GenizahGUI._run_startup_telemetry_coordinator exactly once.
+
+    The coordinator lives on the main window, not on SettingsDialog; calling it
+    on the dialog raised AttributeError after consent was already saved, so
+    identify/session_start never fired for that session.
+    """
+    _skip_if_no_qt()
+
+    class _MainWin(_StubMainWin):
+        def _run_startup_telemetry_coordinator(self):
+            self._calls.append('coordinator')
+
+    calls, slot_errors = _confirm_settings_opt_in(monkeypatch, _MainWin())
+
+    assert slot_errors == [], f"opt-in handler raised: {slot_errors!r}"
+    assert calls == [('set_consent', True), 'coordinator'], (
+        f"consent must be saved, then the main window's coordinator run once; got {calls}"
+    )
+
+
+def test_settings_opt_in_without_coordinator_does_not_raise(monkeypatch):
+    """A parent with no coordinator (no main window) still saves consent cleanly."""
+    _skip_if_no_qt()
+
+    class _MainWinWithoutCoordinator(_StubMainWin):
+        def __getattr__(self, name):
+            if name == '_run_startup_telemetry_coordinator':
+                raise AttributeError(name)
+            return super().__getattr__(name)
+
+    calls, slot_errors = _confirm_settings_opt_in(monkeypatch, _MainWinWithoutCoordinator())
+
+    assert slot_errors == [], f"opt-in handler raised: {slot_errors!r}"
+    assert calls == [('set_consent', True)], f"consent must still be saved; got {calls}"

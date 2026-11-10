@@ -1,0 +1,269 @@
+"""POST /api/parallels transport. Emits JSON envelope to stdout.
+
+Usage:
+    python parallels.py --method passage --text-file passage.txt
+    python parallels.py --method passage --witnesses-file witnesses.json --sort fused
+    python parallels.py --text "ויאמר אליו" [--chunk-size 5] [--mode exact]
+                        [--max-freq N] [--boundary-mode full]
+                        [--library CUL,JTS] [--library-mode include|exclude]
+                        [--filters-json '{"library":["CUL"],"library_filter_mode":"exclude"}']
+                        [--base-url URL]
+
+Or read text from a file:
+    python parallels.py --text-file path/to/text.txt
+
+Per SKILL-01 / D-09: GENIZAH_API_BASE env var overrides --base-url.
+This INVERTS the typical CLI convention — env wins.
+
+NOTE: /api/parallels uses the `mode` field (NOT `search_mode`). This is
+intentional per Phase 81A D-07 — the parallels endpoint keeps its original
+field name distinct from search_mode used by /api/search.
+"""
+from __future__ import annotations
+import argparse
+import json
+import sys
+
+import requests
+
+# Support both package import and direct script invocation.
+try:
+    from . import _config, throttle
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _config, throttle  # type: ignore
+
+# Parallels endpoint uses `mode` (not `search_mode` — Phase 81A D-07)
+PARALLELS_MODES = {"exact", "variants", "fuzzy"}
+
+
+def call_parallels(
+    *,
+    text: str = "",
+    method: str = "chunk",
+    witnesses: list[dict] | None = None,
+    sort: str | None = None,
+    chunk_size: int = 5,
+    mode: str = "exact",
+    max_freq: int | None = None,
+    boundary_mode: str | None = None,
+    filters: dict | None = None,
+    base_url: str | None = None,
+    timeout: float = 130.0,
+) -> dict:
+    """POST /api/parallels and return the parsed JSON response dict.
+
+    timeout default (130s) is an INVARIANT, not a bare number: it must stay
+    strictly ABOVE the server's heaviest documented ceiling — currently 110s
+    for the parallels endpoint (SEARCH_API_PARALLELS_TIMEOUT, dropped from
+    300s so the ceiling sits below the edge proxy's origin-response budget)
+    — so the server's JSON 504 core_timeout envelope wins the race instead of
+    a client-side socket timeout or an opaque proxy error page. The margin
+    here is 20s. If the server ceiling moves again, this value must move with
+    it. Composition searches are inherently slow.
+    Always returns a dict — never raises.
+    GENIZAH_API_BASE env var overrides base_url per D-09.
+
+    Note: uses `mode` field (not `search_mode`) per Phase 81A D-07.
+    """
+    if method not in {"chunk", "passage"}:
+        return {"error": {"code": "invalid_request", "message": "method must be chunk or passage"}}
+    if method == "passage" and (
+        chunk_size != 5 or mode != "exact" or max_freq is not None
+        or boundary_mode not in (None, "full")
+    ):
+        return {"error": {"code": "passage_option_unsupported", "message": "Letter-level search does not accept chunk tuning options"}}
+    if witnesses is not None and (method != "passage" or text):
+        return {"error": {"code": "invalid_request", "message": "witnesses require passage and no text"}}
+    if sort is not None and (witnesses is None or sort not in {"fused", "best_match", "witness_count"}):
+        return {"error": {"code": "invalid_request", "message": "sort requires witnesses and a supported ordering"}}
+    if mode not in PARALLELS_MODES:
+        return {
+            "error": {
+                "code": "invalid_request",
+                "message": f"unknown mode '{mode}'; valid: {sorted(PARALLELS_MODES)}",
+            }
+        }
+
+    url = _config.resolve_base_url(base_url) + "/api/parallels"
+    # NOTE: parallels uses `mode` (not `search_mode`) per 81A D-07
+    body: dict = {
+        "text": text,
+        "chunk_size": chunk_size,
+        "mode": mode,
+    }
+    if method == "passage":
+        body = {"method": "passage", "text": text}
+    if witnesses is not None:
+        body.pop("text", None)
+        body["witnesses"] = witnesses
+    if sort is not None:
+        body["sort"] = sort
+    if max_freq is not None:
+        body["max_freq"] = max_freq
+    if boundary_mode is not None:
+        body["boundary_mode"] = boundary_mode
+    if filters:
+        body["filters"] = filters
+
+    throttle.acquire("parallels")
+
+    try:
+        resp = requests.post(url, json=body, timeout=timeout)
+    except requests.exceptions.Timeout:
+        return {
+            "error": {
+                "code": "core_timeout",
+                "message": f"parallels request timed out after {timeout}s",
+            }
+        }
+    except requests.exceptions.ConnectionError as e:
+        return {"error": {"code": "connection_error", "message": str(e)}}
+
+    try:
+        data = resp.json()
+    except (json.JSONDecodeError, ValueError):
+        return {
+            "error": {
+                "code": "invalid_response",
+                "message": f"non-JSON response (HTTP {resp.status_code})",
+            }
+        }
+
+    # Surface Retry-After when present so callers can honor the server's
+    # backoff hint — applies to BOTH 429 rate_limited AND 503 heavy_search_busy.
+    if "Retry-After" in resp.headers and isinstance(data, dict) and "error" in data:
+        data["error"]["retry_after"] = resp.headers["Retry-After"]
+
+    return data
+
+
+def _main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(
+        description="POST /api/parallels — emit JSON envelope to stdout"
+    )
+    text_src = p.add_mutually_exclusive_group(required=True)
+    text_src.add_argument("--text", default=None, help="Composition text (inline)")
+    text_src.add_argument(
+        "--witnesses-file", help="UTF-8 JSON array of witnesses (passage only; replaces text)",
+    )
+    p.add_argument("--method", choices=["chunk", "passage"], default="chunk",
+                   help="passage = letter-level search; chunk = legacy word chunks")
+    p.add_argument("--sort", choices=["fused", "best_match", "witness_count"])
+    text_src.add_argument(
+        "--text-file",
+        default=None,
+        dest="text_file",
+        help="Path to file containing composition text (use '-' for stdin)",
+    )
+    p.add_argument(
+        "--chunk-size",
+        type=int,
+        default=5,
+        dest="chunk_size",
+        help="Chunk size in words (default: 5)",
+    )
+    p.add_argument(
+        "--mode",
+        default="exact",
+        choices=sorted(PARALLELS_MODES),
+        help="Match mode: exact | variants | fuzzy (default: exact)",
+    )
+    p.add_argument(
+        "--max-freq",
+        type=int,
+        default=None,
+        dest="max_freq",
+        help="Max chunk frequency filter",
+    )
+    p.add_argument(
+        "--boundary-mode",
+        default=None,
+        dest="boundary_mode",
+        choices=["full", "boundary", "combined"],
+        help="Boundary mode for combined search",
+    )
+    p.add_argument(
+        "--filters-json",
+        default=None,
+        dest="filters_json",
+        help='JSON filters dict e.g. \'{"library":["CUL"]}\'',
+    )
+    p.add_argument(
+        "--library",
+        default=None,
+        help=(
+            "Comma-separated library codes, e.g. CUL,JTS,Oxford (convenience for "
+            "filters.library; merged into --filters-json). Scopes parallels results "
+            "server-side via restrict_sys_ids."
+        ),
+    )
+    p.add_argument(
+        "--library-mode",
+        default=None,
+        choices=["include", "exclude"],
+        dest="library_mode",
+        help=(
+            "How --library / filters.library is applied: 'include' (the effective "
+            "default when omitted) restricts to those libraries; 'exclude' restricts "
+            "to the complement (manuscripts whose library_code is NOT in the set). "
+            "Merged into filters.library_filter_mode. Omitting it is byte-for-byte "
+            "the current include behavior."
+        ),
+    )
+    p.add_argument(
+        "--base-url",
+        default=None,
+        dest="base_url",
+        help=f"Base URL (default: {_config.DEFAULT_BASE_URL}; overridden by GENIZAH_API_BASE env)",
+    )
+    args = p.parse_args(argv)
+
+    # Resolve text source
+    witnesses = None
+    if args.witnesses_file:
+        with open(args.witnesses_file, encoding="utf-8-sig") as fh:
+            witnesses = json.load(fh)
+        if not isinstance(witnesses, list) or not witnesses:
+            p.error("--witnesses-file must contain a nonempty JSON array")
+        text = ""
+    elif args.text is not None:
+        text = args.text
+    elif args.text_file == "-":
+        text = sys.stdin.read()
+    else:
+        with open(args.text_file, encoding="utf-8") as fh:
+            text = fh.read()
+
+    filters = json.loads(args.filters_json) if args.filters_json else None
+    # --library / --library-mode convenience (explicit filters-json values win).
+    # Omitting --library-mode keeps the request byte-for-byte the current include behavior.
+    if args.library:
+        _codes = [c.strip() for c in args.library.split(",") if c.strip()]
+        if _codes:
+            filters = dict(filters or {})
+            filters.setdefault("library", _codes)
+    if args.library_mode:
+        filters = dict(filters or {})
+        filters.setdefault("library_filter_mode", args.library_mode)
+
+    result = call_parallels(
+        text=text,
+        method=args.method,
+        witnesses=witnesses,
+        sort=args.sort,
+        chunk_size=args.chunk_size,
+        mode=args.mode,
+        max_freq=args.max_freq,
+        boundary_mode=args.boundary_mode,
+        filters=filters,
+        base_url=args.base_url,
+    )
+    json.dump(result, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main())

@@ -1,0 +1,205 @@
+{
+  "description": "F-E: letter-spaced AND order-reversed RTL. PDF emitted word units in reversed reading order (original_order ascending = הגדול, בראשית, ספר) while their x-positions are correct (ספר rightmost). De-space (BEFORE reorder, D-05) yields the reversed string; reorder segments by original_order + x-jumps and sorts right-to-left by center-x to recover reading order.",
+  "expected_despaced": "הגדול בראשית ספר",
+  "expected_reordered": "ספר בראשית הגדול",
+  "lines": [
+    {
+      "bbox": [
+        276.5,
+        40.0,
+        403.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ה",
+              "bbox": [
+                308.5,
+                40.0,
+                315.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ג",
+              "bbox": [
+                300.5,
+                40.0,
+                307.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ד",
+              "bbox": [
+                292.5,
+                40.0,
+                299.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                284.5,
+                40.0,
+                291.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                276.5,
+                40.0,
+                283.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 4
+            },
+            {
+              "c": "ב",
+              "bbox": [
+                364.5,
+                40.0,
+                371.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 5
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                356.5,
+                40.0,
+                363.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 6
+            },
+            {
+              "c": "א",
+              "bbox": [
+                348.5,
+                40.0,
+                355.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 7
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                340.5,
+                40.0,
+                347.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 8
+            },
+            {
+              "c": "י",
+              "bbox": [
+                332.5,
+                40.0,
+                339.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 9
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                324.5,
+                40.0,
+                331.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 10
+            },
+            {
+              "c": "ס",
+              "bbox": [
+                396.5,
+                40.0,
+                403.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 11
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                388.5,
+                40.0,
+                395.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 12
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                380.5,
+                40.0,
+                387.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 13
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

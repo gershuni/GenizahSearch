@@ -1,0 +1,5304 @@
+# -*- coding: utf-8 -*-
+"""The single async, read-only ``DiscoveryService`` chokepoint (Phase 134,
+DATA-06) through which all web access to the ``discovery.db`` sidecar flows.
+
+Modeled on the established ``shared/*_service.py`` sidecar-service shape
+(``shared/fjms_service.py``: module-level sidecar open + graceful-absent
+reads + a ``meta`` version accessor) composed with the off-event-loop async
+pattern already proven in ``web/search_api.py`` (``run_in_executor`` +
+``asyncio.wait`` -- NEVER ``asyncio.wait_for`` over ``run_in_executor``,
+since executor threads are not cancellable -- plus non-blocking bounded
+concurrency semaphores: one budget for heavy corpus-wide queries and a
+separate, larger one for the per-page browse path. EVERY executor crossing
+takes one of the two; there is no unbounded dispatch.
+
+Key invariants (134-06 must_haves):
+  - ``__init__`` takes INJECTED LAZY providers (``path_provider``,
+    ``availability_callable``, ``sidecar_version_provider``) and stores them
+    WITHOUT touching the DB (F15) -- importing a module that constructs a
+    ``DiscoveryService`` at import time (``web/discovery.py``) before the
+    sidecar loader has run must never bind a stale/empty path.
+  - The ``ThreadLocalConnection`` is built LAZILY on the first AVAILABLE
+    call, and RECREATED whenever the resolved path or sidecar version
+    changes -- the PRIOR ``ThreadLocalConnection`` pool is ``.close()``d
+    first so no per-thread handle is ever leaked (R8).
+  - Every sync read method follows the fjms_service graceful-absent shape:
+    unavailable or any exception -> return ``[]``/``None``, NEVER raise.
+  - Every async wrapper dispatches its sync method via
+    ``loop.run_in_executor(...)`` wrapped in ``asyncio.wait({fut},
+    timeout=...)`` (never ``wait_for``); a timeout raises
+    ``DiscoveryUnavailable`` WITHOUT awaiting the abandoned future.
+  - EVERY read acquires a non-blocking bounded semaphore before its executor
+    crossing -- the HEAVY budget for corpus-wide reads
+    (``get_work_witnesses``, findings, facets, launch stats, the per-work
+    expansion), the BROWSE budget for everything else. The slot is released
+    from the future's ``add_done_callback`` (never a bare ``finally``) so a
+    timed-out thread cannot re-admit new work until it truly finishes (DC6).
+    A cache HIT takes no slot, because it runs no query.
+  - Each budget class dispatches into its OWN ``ThreadPoolExecutor`` whose
+    ``max_workers`` EQUALS that class's capacity, never the shared default
+    ``run_in_executor`` pool. Over one shared pool the two budgets are two
+    names for one budget: browse work can occupy or queue ahead of every
+    worker in a pool this repository does not configure, and a heavy read
+    then times out while its own semaphore still has capacity. The executors
+    are built lazily (a flag-OFF process pays nothing) and shut down by a
+    ``weakref.finalize`` that closes over the dict, never over ``self``.
+  - The browse-enrichment reads (``get_claims_for_page`` /
+    ``get_pages_related_to_page``) are wrapped in a small bounded LRU keyed
+    INCLUDING the sidecar version, so a version swap never serves stale
+    cached rows (F15).
+  - ``get_work_witnesses`` implements the DATA-10 unit x work projection: a
+    physical-MS witness_unit is shown ONCE at its highest member band; the
+    enabled-band filter acts on that DISPLAYED band BEFORE pagination; the
+    anchor's own unit is excluded; same-unit members are suppressed from the
+    list (the grouping/filtering/sorting/pagination logic itself is a pure,
+    DB-free helper -- ``_project_work_witnesses`` -- directly unit-testable).
+
+All timeout/concurrency/LRU/page-size defaults are read from
+``docs/specs/discovery-budgets.md``'s ``DISCOVERY_*`` env-var convention,
+re-read PER CALL (never baked in at import time) so they can be tuned in
+production without a restart.
+
+THE LAUNCH STATISTICS (owner ruling U, plan 136-22) -- EVERY BASIS, IN SQL
+------------------------------------------------------------------------
+``get_launch_stats_enveloped`` returns the release's headline contribution
+figure and its three shades. "Fragments" and "pages" are ambiguous across at
+least four plausible populations in this schema, and that ambiguity is exactly
+how an earlier draft produced a total by adding a main-pool count to two
+unfiltered ones. So every key is named after its basis, and every basis is
+stated here in SQL terms, so a later reader can VERIFY a number rather than
+trust it. ``<shades>`` is ``LAUNCH_CONTRIBUTION_SHADES``.
+
+===============================  =========================================
+envelope key                     the query it is
+===============================  =========================================
+``total``                        the SUM of the three ``items`` rows below
+                                 (never a separately-counted number)
+``items[i].identification_count``  ``SELECT COUNT(*) FROM
+                                 discovery_identification WHERE main_pool = 1
+                                 AND novelty_status = <shade>``
+``items[i].manuscript_count``    ``SELECT COUNT(DISTINCT sys_id)`` over the
+                                 same rows
+``meta.main_pool_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id) FROM
+                                 discovery_identification WHERE main_pool = 1
+                                 AND novelty_status IN <shades>``. NOT the sum
+                                 of the per-shade manuscript counts: a
+                                 manuscript contributing under two shades is
+                                 counted once here and twice there.
+``meta.main_pool_total``         ``SELECT COUNT(*) FROM
+                                 discovery_identification WHERE main_pool = 1``
+                                 -- **NO ``novelty_status`` predicate at all.**
+``meta.main_pool_total_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id)``
+                                 over the same rows, again with no shade
+                                 predicate.
+``meta.identification_total``    ``SELECT COUNT(*) FROM
+                                 discovery_identification`` -- **no
+                                 ``main_pool`` predicate and no
+                                 ``novelty_status`` predicate.** The all-in-all
+                                 figure the headline ledes with (owner ruling,
+                                 2026-08-05). It is NOT ``all_bucket_total``,
+                                 which is shade filtered and a different
+                                 population; substituting one for the other is
+                                 the mixed-basis defect ruling U was issued
+                                 over. It is its own ``COUNT(*)`` rather than a
+                                 sum of the two pool keys below: the identity
+                                 holds today because ``main_pool`` partitions
+                                 the table, and a UI that added two separately
+                                 derived figures would go wrong the first time
+                                 either one's basis moved, silently.
+``meta.work_total``              ``SELECT COUNT(DISTINCT display_work_id)
+                                 FROM discovery_identification`` -- how many
+                                 distinct WORKS the identifications name, again
+                                 with no predicate of any kind.
+                                 ``display_work_id`` is not a choice: it is the
+                                 column ``_FINDINGS_UNIT_GROUP_BY`` groups the
+                                 per-work row unit by, so this figure and the
+                                 row count that unit returns are one population
+                                 by construction. NOTE that it is the UNION
+                                 over both buckets and is therefore larger than
+                                 either bucket's own work count; no surface may
+                                 present it as reachable through the bucket
+                                 control, which offers the two buckets and no
+                                 union between them.
+``meta.more_pool_total``         ``SELECT COUNT(*) FROM
+                                 discovery_identification WHERE main_pool = 0``
+                                 -- the SECOND pool's SIZE, again with no
+                                 ``novelty_status`` predicate. It is the exact
+                                 complement of ``main_pool_total`` on one
+                                 stated basis, and the two are never summed:
+                                 their sum is ``COUNT(*)`` over the table,
+                                 which is a third population nothing here
+                                 reports.
+``meta.all_bucket_total``        the same as ``total`` with the ``main_pool``
+                                 predicate DROPPED. Ruling U constraint 1
+                                 permits a page to show this only if it says
+                                 so in words -- so it lives under its own
+                                 named key and is NEVER merged into ``total``.
+``meta.all_bucket_manuscript_count``  ditto for the manuscript count
+``meta.corpus_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id) FROM
+                                 discovery_identification`` -- every bucket,
+                                 every shade. **It counts the fragments THIS
+                                 RELEASE IDENTIFIED SOMETHING ON, not the
+                                 corpus**: the project's corpus is ~255,615
+                                 manuscript records (``libraries.csv``), and a
+                                 surface that labelled this figure "the whole
+                                 corpus" would present the denominator of what
+                                 we already matched as the denominator of
+                                 everything -- a coverage overclaim of roughly
+                                 6.6x. The key keeps its NAME (renaming a
+                                 shipped key is a separate, breaking change)
+                                 and every reader-facing string that uses it
+                                 now says what it counts.
+``meta.corpus_page_count``       ``SELECT COUNT(DISTINCT page_id) FROM
+                                 discovery_claim`` -- every page carrying at
+                                 least one claim. Again NOT the corpus's page
+                                 count, and the rendered wording says so.
+===============================  =========================================
+
+**``main_pool_total`` AND ``total`` ARE TWO DIFFERENT POPULATIONS.** ``total``
+is and stays the SHADE-FILTERED contribution figure -- what the release adds to
+the finding aids -- while ``main_pool_total`` counts every main-pool
+identification whatever its novelty shade, including the shades that are not a
+contribution at all. Substituting one for the other, or summing them, or
+pairing ``main_pool_total`` with ``main_pool_manuscript_count`` (which IS shade
+filtered), reproduces exactly the mixed-basis defect ruling U was issued over:
+a figure built by adding counts taken on different bases. The same applies to
+the pair ``main_pool_total`` / ``main_pool_total_manuscript_count``, which is
+internally consistent and must be used together.
+
+``meta.more_pool_total`` exists because the OWNER RULED (2026-08-05) that the
+second pool's size may be shown. It was deliberately withheld until then: a
+number advertising that pool is an owner ruling rather than a reader's
+convenience. What the ruling does NOT touch is the prohibition it sits beside
+-- the owner's QUALITY assessment of that pool must never become a percentage,
+a score, an interval or any number at all, on this surface or any other. A
+count of what is IN a pool is a different kind of fact from a judgement about
+it, and this key is only ever the first. Ruling T is likewise untouched: the
+BUCKET CONTROL still carries no count, and a test asserts no digit appears in
+its subtree.
+
+``meta.basis`` states the single basis (``main_pool``) explicitly, so no
+consumer has to infer it and no consumer can mix bases silently.
+``meta.sidecar_version`` and ``meta.audience`` come from the ARTIFACT's own
+``meta`` table, not from an injected provider: the same query against the
+public projection and the private rebuild returns two different, both-correct
+answers, so a number without the provenance of the artifact that produced it
+is not interpretable.
+
+NOTHING this reader emits is a precision, an accuracy rate, a confidence
+interval, a review badge or a percentage. "The finding aids did not already
+have it" is a claim about the AIDS, not about the match, and that distinction
+is the whole basis on which these numbers may be published at all.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import sqlite3
+import threading
+import weakref
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
+from typing import (
+    Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple,
+)
+
+from shared.discovery_band_labels import serialize_banded_claim
+from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
+from shared.discovery_novelty import (
+    CANDIDATE_STATUS,
+    NOVELTY_STATUS_ORDER,
+    NOVELTY_STATUSES,
+    is_hidden_by_default,
+)
+from shared.discovery_relation_matrix import (
+    cap_member_relation,
+    relation_from_rank,
+    relation_rank_sql,
+)
+from shared.discovery_surface_projection import (
+    STATUS_OK,
+    busy_envelope,
+    make_envelope,
+    surface_safe_claim,
+    surface_safe_excerpt,
+    surface_safe_expansion,
+    surface_safe_facet,
+    surface_safe_finding,
+    surface_safe_launch_shade,
+    surface_safe_locus_unit,
+    surface_safe_related_page,
+    surface_safe_work_summary,
+    timeout_envelope,
+    unavailable_envelope,
+)
+from shared.thread_local_db import ThreadLocalConnection
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Env-var defaults (docs/specs/discovery-budgets.md SS2/SS3) -- re-read per
+# call, never cached at import time.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_QUERY_TIMEOUT_BROWSE = 2.0
+_DEFAULT_QUERY_TIMEOUT_WORK = 5.0
+_DEFAULT_MAX_CONCURRENT_QUERIES = 4
+#: The BROWSE-path bound, separate from the heavy one and deliberately larger.
+#:
+#: Both are the same non-blocking fast-fail shape; only the number differs, and
+#: the number has to differ. The heavy cap of 4 is sized for corpus-wide
+#: queries that a caller issues ONE of. A cold connections-panel load issues
+#: THREE reads concurrently and then a fourth, so a cap of 4 would put the
+#: SECOND simultaneous browse visitor into `busy` -- a self-inflicted outage on
+#: an already-shipped page, which is not what "bounded" is for. 24 admits eight
+#: concurrent cold panel loads. Warm loads cost NO slot at all: the
+#: version-keyed LRU returns before any dispatch.
+#:
+#: The two budgets are only really separate because each has its OWN executor
+#: (see `_executor_for`). Sized against the shared default `run_in_executor`
+#: pool the split was nominal: 24 browse jobs could occupy or queue ahead of
+#: every worker in a pool this repository never configures and whose width is
+#: not guaranteed, so a heavy read could time out while its own semaphore still
+#: had capacity -- reproducible with a two-worker default executor. A budget is
+#: only a budget when a slot guarantees a worker, so each class's semaphore
+#: capacity IS its executor's `max_workers` (code review round 13, finding 2).
+_DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES = 24
+#: The EXPORT-path bound (EXPORT-03, phase 136.2), the third and smallest
+#: budget. An export is uncapped in ROWS by owner decision, so it is bounded in
+#: CONCURRENCY instead: one request walks the whole filtered set, and two of
+#: them at once must not be able to occupy the workers the browse path needs.
+#: Deliberately NOT folded into the heavy budget -- an export holds its slot for
+#: the length of a whole workbook build, and sharing the heavy cap of 4 would
+#: let two exports halve the budget every corpus-wide query draws on.
+_DEFAULT_MAX_CONCURRENT_EXPORT_QUERIES = 2
+#: Seconds. A whole-set export legitimately takes far longer than any
+#: interactive read, and its honest failure is a timeout, never a short file.
+_DEFAULT_EXPORT_TIMEOUT = 300.0
+#: Identifiers per `IN (...)` batch in the export's excerpt read. SQLite's
+#: default host-parameter ceiling is 999; 500 keeps a wide margin and still
+#: turns tens of thousands of per-row reads into tens of queries.
+#: CLAMPED at `_EXPORT_EXCERPT_CHUNK_MAX`, because the knob is an env var and a
+#: configured 1,000 would build a statement with 1,000 bind variables against a
+#: 999 limit -- a misconfiguration that turns the whole export into an error
+#: rather than a slower query (Codex review, finding C).
+_DEFAULT_EXPORT_EXCERPT_CHUNK = 500
+_EXPORT_EXCERPT_CHUNK_MAX = 900
+_DEFAULT_BROWSE_LRU_MAX_ENTRIES = 5000
+_DEFAULT_PAGE_SIZE_DEFAULT = 50
+_DEFAULT_PAGE_SIZE_MAX = 200
+
+# M3: the frozen ABSOLUTE row-per-page ceiling (docs/specs/discovery-budgets.md
+# SS3: "hard ceiling; never overridable above this"). DISCOVERY_PAGE_SIZE_MAX
+# may only ever TIGHTEN this value, never raise it -- see _clamp_page_size.
+_ABSOLUTE_PAGE_SIZE_CEILING = 200
+
+# H1: there is NO pre-grouping raw-claim cap here (a previous
+# _MAX_RAW_CLAIMS_PER_WORK=5000 / _MAX_UNIT_MEMBER_ROWS=200_000 pair silently
+# dropped units on any work with more claims than that -- get_work_witnesses
+# now performs the whole DATA-10 unit x work projection IN SQL, so
+# LIMIT/OFFSET paginates over UNITS post-grouping, never over a truncated
+# pre-grouping raw-claim scan; see get_work_witnesses below).
+
+
+def _get_float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _get_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _get_positive_int_env(name: str, default: int) -> int:
+    """Like ``_get_int_env``, but coerces to >= 1 (M3) -- a non-positive or
+    unparsable env value falls back to ``default`` rather than propagating
+    into ``asyncio.Semaphore(n)`` (which raises ValueError for n < 0 and
+    means "always locked" for n == 0, either of which would silently break
+    or permanently overload the service from a single bad env var)."""
+    value = _get_int_env(name, default)
+    return value if value >= 1 else default
+
+
+def _get_positive_float_env(name: str, default: float) -> float:
+    """Like ``_get_float_env``, but coerces to > 0 (M3) -- a non-positive
+    timeout would make ``asyncio.wait(..., timeout=X)`` return immediately
+    on every call, permanently overloading the service from a single bad
+    env var; falls back to ``default`` instead."""
+    value = _get_float_env(name, default)
+    return value if value > 0 else default
+
+
+def _shutdown_executors(executors: Dict[str, "ThreadPoolExecutor"]) -> None:
+    """Retire a collected service's per-budget threadpools.
+
+    Registered through ``weakref.finalize`` over the DICT and never over the
+    service, because a finalizer holding ``self`` would keep the very object it
+    is meant to clean up alive. ``wait=False``: an in-flight query is left to
+    finish on its own thread, exactly as a timed-out read already is.
+    """
+    for executor in list(executors.values()):
+        try:
+            executor.shutdown(wait=False)
+        except Exception:                                    # pragma: no cover
+            pass
+    executors.clear()
+
+
+def _parse_json_field(value: Optional[str]) -> Any:
+    """Best-effort JSON parse for the seed_spans/seed_ms_ids TEXT columns.
+    Returns None for a NULL cell, the parsed object on success, or the raw
+    string unchanged if it somehow isn't valid JSON (defensive; never
+    raises)."""
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return value
+
+
+# ---------------------------------------------------------------------------
+# Frozen global band-rank (docs/specs/discovery-sidecar-schema-v1.md SS6 item
+# 2), strongest first. Inlined here (rather than importing
+# scripts/discovery_ids.py) to keep this runtime module decoupled from the
+# offline-build script tree -- mirrors the same decision already made in
+# web/discovery_assets.py (see its own enum-vocab spot-check comment).
+# ---------------------------------------------------------------------------
+
+# v1-read-compat window (Codex #8): the strongest track1_direct band is listed
+# under BOTH the v2 key `high_confidence_algorithmic` AND the v1 key
+# `expert_verified` at the same (top) rank position, so the band-rank lattice
+# ranks whichever key the currently-loaded asset carries. A built v2 asset
+# uses only the v2 key (the offline verifier's no-mixed-enum-state check
+# enforces that); do NOT drop `expert_verified` until the v2 manifest is live
+# (135-08) -- the v1 asset + the v1 fixture tests still read it.
+_BAND_RANK_ORDER: List[Tuple[str, str]] = [
+    ("track1_direct", "high_confidence_algorithmic"),
+    ("track1_direct", "expert_verified"),
+    ("track1_direct", "tier_a"),
+    ("propagated", "corroborated"),
+    ("track1_direct", "screening_rb"),
+    ("track1_direct", "screening_canon"),
+    ("propagated", "weak"),
+    ("propagated", "not_evaluated"),
+]
+_BAND_RANK_INDEX: Dict[Tuple[str, str], int] = {
+    pair: i for i, pair in enumerate(_BAND_RANK_ORDER)
+}
+_UNRANKED_BAND = len(_BAND_RANK_ORDER)
+
+
+def _band_rank(evidence_source: Optional[str], confidence_band: Optional[str]) -> int:
+    """Lower is "stronger" (rank 0 = expert_verified, the strongest band)."""
+    return _BAND_RANK_INDEX.get((evidence_source, confidence_band), _UNRANKED_BAND)
+
+
+#: The page component of a corpus page id, `{sys_id}_{ie_id}_P{n:06d}_{fl_id}`.
+_PAGE_ID_PAGE_NUMBER_RE = re.compile(r"_P(\d+)_")
+
+
+def _page_number_from_page_id(page_id: Any) -> Optional[int]:
+    """The folio number carried INSIDE a page id, or None.
+
+    Parsed in the SERVICE so no surface has to know the id's shape to show a
+    page number -- and so that no surface has a reason to hold the composite id
+    at all. Returns None rather than raising on any id that does not carry one:
+    a missing page number is a row that says less, while an exception here
+    would take down a section that has already been fetched.
+    """
+    if not isinstance(page_id, str):
+        return None
+    match = _PAGE_ID_PAGE_NUMBER_RE.search(page_id)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:                                       # pragma: no cover
+        return None
+
+
+#: The VOLUME component of a corpus page id, `{sys_id}_{ie_id}_P{n:06d}_{fl_id}`.
+#: Anchored on the `_P` that follows it so a sys_id containing `IE` (none do, but
+#: the id's shape is not this module's to guarantee) cannot be read as a volume.
+_PAGE_ID_VOLUME_IE_RE = re.compile(r"_(IE\d+)_P\d+_")
+
+
+def _volume_ie_from_page_id(page_id: Any) -> Optional[str]:
+    """The inventory-entry (volume) id carried INSIDE a page id, or None.
+
+    The sibling of `_page_number_from_page_id`, and needed for the same reason
+    the folio number is: a MULTI-VOLUME manuscript numbers its folios PER
+    VOLUME, so a folio number without its volume addresses more than one page
+    and `/browse` resolves it against whichever volume it happens to be showing.
+    988 of the served artifact's 53,581 identifications span more than one
+    volume, so this is a real population and not a theoretical one.
+
+    Returns None rather than raising, exactly as its sibling does: a page id
+    that carries no volume is a link that says less, while an exception here
+    would take down a result set that has already been fetched.
+    """
+    if not isinstance(page_id, str):
+        return None
+    match = _PAGE_ID_VOLUME_IE_RE.search(page_id)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _browse_address_from_page_id(page_id: Any) -> Tuple[Optional[int], Optional[str]]:
+    """`(folio, volume)` for a page id -- BOTH or NEITHER, never one of the two.
+
+    ATOMICITY IS ENFORCED HERE, IN THE SERVICE, and not left to each consumer to
+    re-derive (Codex review, 2026-08-08). The two parsers accept different
+    things: `_page_number_from_page_id` matches a bare `_P<n>_` anywhere, while
+    `_volume_ie_from_page_id` requires the full `_IE<n>_P<n>_` run. So an id
+    carrying a folio and no volume -- `9900_P000007_FL1` -- parses to
+    `(7, None)`, and a consumer that asked only "is there a folio?" would then
+    tell a reader it was opening the matched folio while the link it built,
+    lacking the volume, opened the manuscript instead.
+
+    That is the ONE failure this whole change exists to prevent, arrived at from
+    the other side: the note must never claim more than the link delivers. One
+    predicate, applied once, at the point the pair is produced.
+    """
+    folio = _page_number_from_page_id(page_id)
+    volume = _volume_ie_from_page_id(page_id)
+    if folio is None or folio <= 0 or not volume:
+        return None, None
+    return folio, volume
+
+
+def _representative_browse_address(page_id: Any) -> Dict[str, Any]:
+    """The expansion row's two `/browse` address keys, as a dict to splat.
+
+    A DICT rather than two assignments because the expansion row is built in TWO
+    places -- the SQL projection (`_present_expansion_row`) and the pure-Python
+    reference (`_project_work_witnesses`) -- which deliberately mirror each other
+    and are compared key-for-key by a test kept in the private repository.
+    One call each is one thing to keep in step instead of four.
+    """
+    page, volume = _browse_address_from_page_id(page_id)
+    return {"representative_page": page, "representative_volume_ie": volume}
+
+
+#: The character immediately after `_` (0x5F) in ASCII, and therefore the
+#: exclusive upper bound of the half-open range that selects exactly the page
+#: ids beginning `{sys_id}_`. A RANGE and not a `LIKE`/`GLOB` prefix because
+#: `_` is a LIKE wildcard and because the range is what lets SQLite drive the
+#: join from `ix_discovery_evidence_a_page_id` -- see `_FIRST_MATCH_PAGE_SQL`.
+_PAGE_ID_PREFIX_SENTINEL = "`"
+
+#: The FIRST matched folio of every identification carried by a set of
+#: manuscripts, in ONE query (plan: owner report, 2026-08-08).
+#:
+#: WHY THIS EXISTS. The findings row's preview opened `/browse` at the
+#: manuscript's FIRST page rather than at a page the match was found on, and a
+#: reader who lands on folio 1r of a 40-folio manuscript and sees nothing
+#: resembling the identification reasonably concludes the identification is
+#: wrong. The row copy named that limit rather than hiding it, on the stated
+#: basis that "a findings row carries `page_count` and NO folio identifier" and
+#: that targeting the folio needed "a future bake carrying a representative page
+#: per identification". THE SECOND HALF OF THAT WAS NOT TRUE: every contributing
+#: page id is already in the served asset on `discovery_evidence.a_page_id`; it
+#: is only the IDENTIFICATION GRAIN that aggregates them away. So this resolves
+#: them at read time and no re-bake is owed.
+#:
+#: THE PREDICATE IS THE BUILDER'S, VERBATIM. `populate_discovery_identification`
+#: groups `WHERE de.routing_status = 'shipped' OR de.adjudication_status =
+#: 'human_confirmed'` and stores `page_count = len({a_page_id})` over that group.
+#: Reproducing it here is what makes the resolved folio one of the pages the row
+#: is counting; any other predicate would point a reader at a page the row's own
+#: number does not include. `test_the_first_match_resolver_reproduces_the_stored_
+#: page_count` pins the two against each other over the whole artifact.
+#:
+#: `MIN(a_page_id)` PICKS ONE VOLUME AND THEN ITS EARLIEST MATCHED FOLIO --
+#: lexicographic order over a shared `{sys_id}_` prefix sorts by inventory-entry
+#: id first, then by the zero-padded `P{n:06d}` (which orders numerically as
+#: text), then by folio id.
+#:
+#: WHAT THAT IS AND IS NOT (Codex review, 2026-08-08). Within one volume it is
+#: exactly "the earliest matched folio", and 52,593 of the artifact's 53,581
+#: identifications live in one volume. ACROSS volumes it is NOT an authoritative
+#: order and must not be described as one: inventory-entry ids run 7, 8 and 9
+#: digits here, so their lexicographic order is not even their numeric order --
+#: on 163 of the 988 multi-volume identifications a numeric reading names a
+#: different volume, and neither reading is the volumes' shelf order, which the
+#: sidecar does not carry at all. The reader-facing copy therefore says "a folio
+#: the match was found on" and claims no ordinal.
+#:
+#: What the rule DOES guarantee everywhere is that it never crosses a volume
+#: boundary to find a lower folio number -- folio 2 of one volume is not earlier
+#: than folio 5 of another, and an ordering by bare folio number would send this
+#: population into the wrong volume, which a reader cannot see.
+#:
+#: The range predicate depends on BINARY-collated TEXT comparison, which is the
+#: schema's default and what `ix_discovery_evidence_a_page_id` is built with. A
+#: custom collation on `a_page_id` would change which rows the half-open range
+#: selects; nothing in the build sets one, and the plan-shape test below would
+#: notice the index dropping out.
+#:
+#: `CROSS JOIN` IS SQLite's join-ORDER HINT, not a cartesian product -- it forces
+#: the query to be driven from the asked-for manuscripts into
+#: `ix_discovery_evidence_a_page_id`.
+#:
+#: IT CHANGES NOTHING TODAY, and saying otherwise would be the more useful lie:
+#: measured on the served artifact, this query plans and runs IDENTICALLY with a
+#: plain `JOIN` (0.4ms / 35.5ms / 101.2ms vs 0.3ms / 36.0ms / 102.0ms across a
+#: default first page, a mid-corpus page, and the 50 manuscripts with the
+#: heaviest evidence fan-out). With no selective predicate on `works` the planner
+#: reaches the right order unaided.
+#:
+#: It is kept as INSURANCE against one specific edit, because that edit has
+#: already been written once: an exploratory version of this query also filtered
+#: `w.canonical_work_id IN (...)`, and that single added predicate pulled the
+#: planner onto `ix_works_canonical` -- 230ms for a 50-row page, and unbounded in
+#: the corpus's worst case, since the heaviest works carry tens of thousands of
+#: claims. `test_the_folio_query_stays_INDEX_DRIVEN_on_the_served_artifact` fails
+#: on exactly that combination.
+_FIRST_MATCH_PAGE_SQL = """
+    WITH asked(sys_id) AS (VALUES {values})
+    SELECT de.sys_id           AS sys_id,
+           w.canonical_work_id AS canonical_work_id,
+           MIN(de.a_page_id)   AS page_id
+    FROM asked
+    CROSS JOIN discovery_evidence de
+        ON de.a_page_id >= asked.sys_id || '_'
+       AND de.a_page_id <  asked.sys_id || ?
+    JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+    JOIN works w            ON w.work_id   = dc.work_id
+    WHERE (de.routing_status = 'shipped'
+           OR de.adjudication_status = 'human_confirmed')
+    GROUP BY de.sys_id, w.canonical_work_id
+"""
+
+
+def _build_band_rank_case_sql() -> str:
+    """Build the frozen band-rank lattice as a SQL CASE expression (H1) --
+    ``_BAND_RANK_ORDER`` is a frozen module-level constant (never user
+    input), so building SQL via string formatting here is safe. Used to
+    perform the DATA-10 unit x work projection's "highest member band"
+    selection IN SQL (a ``ROW_NUMBER() OVER (PARTITION BY unit_key ...)``
+    window-function query) instead of in Python, so ``LIMIT``/``OFFSET``
+    can paginate over UNITS post-grouping rather than a pre-grouping
+    raw-claim cap."""
+    lines = ["CASE"]
+    for i, (source, band) in enumerate(_BAND_RANK_ORDER):
+        lines.append(
+            f"    WHEN de.evidence_source = '{source}' AND de.confidence_band = '{band}' THEN {i}"
+        )
+    lines.append(f"    ELSE {_UNRANKED_BAND}")
+    lines.append("  END")
+    return "\n".join(lines)
+
+
+_BAND_RANK_CASE_SQL = _build_band_rank_case_sql()
+
+
+# ---------------------------------------------------------------------------
+# D-13g: the default-surface routing predicate.
+#
+# The bug this replaces: the page query filtered `routing_status = 'shipped'`
+# in SQL, while `shared/discovery_band_labels.py::is_default_eligible` returns
+# True for `human_confirmed` UNCONDITIONALLY, before it inspects routing --
+# and `discovery-band-labels-v1.md` SS4 says the same. So a human-confirmed row
+# that routing had demoted was dropped by the query BEFORE the predicate meant
+# to protect it ever ran: 19 of the 121 human-confirmed rows across all
+# human-confirmed evidence, and 14 of 116 on the DISPLAY evidence this query
+# actually reads. Live symptom: on one manuscript, one page's human-confirmed
+# row was hidden while another page's human-confirmed row showed -- two rows a
+# human confirmed, treated differently.
+#
+# The fix is in SQL, not in a display-layer patch, and it MIRRORS the
+# eligibility rule the build already materializes into
+# `discovery_identification` (`populate_discovery_identification`, in the
+# sidecar build script kept in the private repository) -- so the restore cannot be undone one
+# layer down by the identification join.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# ONE eligibility clause builder (Codex pre-flight finding 3).
+#
+# Four read paths decided eligibility independently and disagreed three ways:
+# the claims query applied D-13g above; the three shared_text (related-pages)
+# queries hardcoded `routing_status = 'shipped'`, which is the pre-D-13g
+# predicate; and the work-expansion CTE applied NO routing predicate at all.
+# Three spellings of "which rows may a reader see" is how one of them ends up
+# wrong without anybody editing it.
+#
+# MEASURED on the served asset (`discovery-v3-PUBLIC`, 2026-08-12) before any
+# behaviour changed, because the two disagreements are not the same size:
+#
+#   * shared_text: 28,684 rows, 28,673 shipped, and ZERO human_confirmed. So
+#     moving those three sites onto the D-13g rule restores nothing today --
+#     it is a consistency fix whose visible effect is nil, which is exactly
+#     why it is safe to make now.
+#   * expansion CTE: 222,972 rows admitted today, 142,254 eligible under
+#     D-13g -- 80,718 rows (36%) are review_only DISPLAY evidence
+#     (65,719 gen2_parallel_surface / 14,213 gen2_router_not_shipped /
+#     786 later_shared_text). At the pane's real grain that is 88,337 ->
+#     48,701 (work, unit) pairs, 589 of 613 works changing and 58 panes
+#     emptying, with 39,636 pairs reachable ONLY through a review_only row.
+#     That is an owner decision about what the pane CLAIMS, not a cleanup, so
+#     the CTE takes an explicit mode that DEFAULTS to today's behaviour and
+#     changes nothing until ruled.
+# ---------------------------------------------------------------------------
+
+#: D-13g: shipped OR human-confirmed. The rule the build materializes into
+#: `discovery_identification.eligibility_basis`, so a read path using it agrees
+#: with the table it joins against.
+ELIGIBILITY_DEFAULT = "default"
+#: The pre-D-13g predicate. Kept nameable because a caller may legitimately
+#: want it, never because it is the default.
+ELIGIBILITY_SHIPPED_ONLY = "shipped_only"
+#: No routing predicate -- admits review_only. What `include_review=True` means,
+#: and (for now) what the expansion CTE does unconditionally.
+ELIGIBILITY_ALL = "all"
+
+ELIGIBILITY_MODES = frozenset({
+    ELIGIBILITY_DEFAULT, ELIGIBILITY_SHIPPED_ONLY, ELIGIBILITY_ALL,
+})
+
+
+def eligibility_clause(mode: str, prefix: str = "") -> str:
+    """The `AND`-prefixed routing predicate for `mode`, or `''` for `all`.
+
+    `prefix` is the table alias plus dot (`'de.'`) where the query needs one;
+    the shared_text queries select straight from `discovery_evidence` and pass
+    nothing. An unknown mode raises rather than defaulting: silently falling
+    back to a weaker predicate is how review_only rows reach a reader.
+    """
+    if mode not in ELIGIBILITY_MODES:
+        raise ValueError(
+            f"eligibility_clause: unknown mode {mode!r} "
+            f"(expected one of {sorted(ELIGIBILITY_MODES)})"
+        )
+    if mode == ELIGIBILITY_ALL:
+        return ""
+    if mode == ELIGIBILITY_SHIPPED_ONLY:
+        return f"AND {prefix}routing_status = 'shipped'"
+    return (
+        f"AND ({prefix}routing_status = 'shipped' "
+        f"OR {prefix}adjudication_status = 'human_confirmed')"
+    )
+
+
+def _review_toggle_mode(include_review: bool) -> str:
+    """`include_review` as an eligibility mode -- the one place the toggle's
+    meaning is written down."""
+    return ELIGIBILITY_ALL if include_review else ELIGIBILITY_DEFAULT
+
+
+_CLAIMS_DEFAULT_ROUTING_CLAUSE = eligibility_clause(ELIGIBILITY_DEFAULT, "de.")
+
+# The manuscript scope is served by `page_id IN (...)` over the browse page's
+# own page list, NOT by `discovery_evidence.sys_id` -- that column has no
+# index, while `ix_discovery_claim_page_id` exists and is confirmed in use by
+# EXPLAIN QUERY PLAN (asserted by a test, not assumed). Bounded so an
+# unbounded caller cannot build a giant IN list: the largest manuscript in the
+# corpus carries 427 claims, and 429 manuscripts carry over 50.
+_MAX_MANUSCRIPT_PAGE_IDS = 500
+
+
+# ---------------------------------------------------------------------------
+# 136-14 Task 3: the corpus-wide findings query ("Computed Identifications").
+#
+# THREE row units, ONE implementation. Serving them from one parameterised
+# builder is not tidiness -- it is the only way filter, sort and count
+# semantics cannot diverge between the unit a reader selects and the unit the
+# counts were computed over.
+#
+# The base grain is `discovery_identification`, NEVER a claim-row scan: that
+# shape measured 3.41-3.55 s against a 1.5 s cap, and the deduped count alone
+# measured 16 s. Over the materialized grain the same shapes measure 124 ms p95
+# in production, with the visible count at 0.46 ms against its own 500 ms cap.
+#
+# The domain axis is the IDENTIFIED WORK's (`works.genre`, reached through
+# `display_work_id`), never the manuscript's catalogue domain -- see the
+# wrong-axis guard in a test kept in the private repository.
+# ---------------------------------------------------------------------------
+
+FINDINGS_UNIT_IDENTIFICATION = "identification"
+FINDINGS_UNIT_MANUSCRIPT = "manuscript"
+FINDINGS_UNIT_WORK = "work"
+
+#: The three OFFERED units. `claim` is deliberately absent: the same
+#: identification repeats once per folio, which inflates same-work matches
+#: ~2.3x relative to citations (a fragment that copies a work matches on every
+#: folio; a citation matches once).
+FINDINGS_UNITS: frozenset = frozenset({
+    FINDINGS_UNIT_IDENTIFICATION, FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK,
+})
+
+FINDINGS_SORT_BAND_RANK = "band_rank"
+FINDINGS_SORT_PAGE_COUNT = "page_count"
+FINDINGS_SORT_MATCHED_TEXT = "matched_text"
+
+#: The three offered sorts. `novelty` is deliberately absent: absence from a
+#: finding aid is not evidence a match is correct, and ordering by it would
+#: imply otherwise (D-15a / D-24). Novelty filters and may group; it never
+#: orders.
+FINDINGS_SORTS: frozenset = frozenset({
+    FINDINGS_SORT_BAND_RANK, FINDINGS_SORT_PAGE_COUNT, FINDINGS_SORT_MATCHED_TEXT,
+})
+
+
+def findings_novelty_offered(unit: str) -> bool:
+    """Whether a row of `unit` can DISPLAY a single novelty verdict.
+
+    Novelty is a verdict about ONE work on ONE fragment: no finding aid we
+    checked records this work there. The per-work row unit collapses many
+    manuscripts into a single line, and `novelty_status` is NULL whenever the
+    aggregated identifications do not agree -- so such a row has no verdict to
+    show. This predicate gates the DISPLAYED value (`novelty_status` on the
+    projection, the row's badge, and `meta['novelty_offered']`).
+
+    IT NO LONGER GATES THE FILTER (owner ruling, 2026-08-06). Those were two
+    different questions under one name: "what is this row's verdict" is
+    undefined on a grouped row, while "does this row have at least one such
+    identification under it" is well defined on every unit and is what a reader
+    filtering a list is asking. `_build_findings_filter` answers the second by
+    placing the predicate BEFORE the `GROUP BY`, exactly as the bucket filter
+    already does, so it no longer refuses any unit. See that function for the
+    measurement.
+
+    The `ValueError` this predicate used to guard was real -- a live switch over
+    a refusing builder was an unhandled failure on a live page (round 15,
+    finding 1). It is gone because the refusal is gone, not because the guard was
+    relaxed: there is no longer an unanswerable combination to protect against.
+    """
+    return unit != FINDINGS_UNIT_WORK
+
+#: Ruling F's hidden-by-default shades, as a DETERMINISTICALLY ORDERED tuple.
+#:
+#: DERIVED, never restated. `shared.discovery_novelty.is_hidden_by_default` is
+#: the policy; this filters the canonical shade ORDER through it, so the SQL
+#: predicate below and the predicate the rest of the project tests against
+#: cannot come to disagree -- a shade joining or leaving the policy moves this
+#: tuple with it, and a second literal list here would not move at all. The
+#: ordering comes from `NOVELTY_STATUS_ORDER` rather than from iterating the
+#: frozenset, because a set's iteration order is not stable across processes
+#: and a query's bound parameters must be reproducible.
+#:
+#: Ruling F's own rationale (`136-GATE1-DECISIONS.md` section F): these rows
+#: are neither auto-hidden by policy nor silently trusted. The SYSTEM never
+#: treats the catalogue's disagreement as a verdict; it surfaces the
+#: disagreement behind an explicit, warned opt-in and lets the reader decide.
+DIVERGENCE_SHADE_ORDER: Tuple[str, ...] = tuple(
+    shade for shade in NOVELTY_STATUS_ORDER if is_hidden_by_default(shade)
+)
+
+# ---------------------------------------------------------------------------
+# The divergence axis is THREE-STATE, not a boolean (owner, 2026-08-05).
+#
+# It shipped as `include_divergent: bool` and the owner read the control as
+# broken: the ON state is purely ADDITIVE (24,480 main-pool rows become 27,709),
+# so every non-divergent row stays and the top of a list sorted by pages matched
+# is byte-identical before and after. A reader who asks to see the
+# disagreements is shown a mixed set in which they are 12% of the rows.
+#
+# A boolean cannot express the state that answers the owner's actual question --
+# "show me the 3,229" -- so the axis takes the shape this project already ships
+# for exactly this problem: the three-state PGP filter (Phase 93, mirroring
+# `printed_filter`), whose three states are exclude / no-filter / only.
+#
+# `HIDDEN` is the default, and that is ruling F: divergent rows are ABSENT from
+# the default render. `SHOWN` is the no-filter state -- it exists because ruling
+# F says the SYSTEM never adjudicates and the READER decides, and a reader who
+# cannot see the complete pool has had the exclusion enforced on them rather
+# than offered. `ONLY` is the access path the owner asked for.
+# ---------------------------------------------------------------------------
+
+DIVERGENCE_HIDDEN = "hidden"
+DIVERGENCE_SHOWN = "shown"
+DIVERGENCE_ONLY = "only"
+
+#: The closed vocabulary, in cycle order: the default first, then widening, then
+#: narrowing to the divergent rows alone.
+DIVERGENCE_MODES: Tuple[str, ...] = (
+    DIVERGENCE_HIDDEN, DIVERGENCE_SHOWN, DIVERGENCE_ONLY,
+)
+
+
+# ---------------------------------------------------------------------------
+# THE FOUR-STATE NOVELTY SELECTOR (owner ruling, 2026-08-06).
+#
+# ONE control where the page previously had two, and the reason is the column:
+# `novelty_status` holds ONE value per identification, and `fills_gap` (a
+# candidate) and the two divergence shades are three mutually exclusive values of
+# it. Two independent controls over one column could therefore be driven into
+# states where one silently did nothing -- which is what `findings_divergence_offered`
+# and `normalise_state` existed to paper over. A single-select cannot express an
+# incoherent combination at all, so the coupling is designed out rather than
+# guarded.
+#
+# The fourth state is a UNION, not an intersection. "Divergent AND novel" is
+# EMPTY by construction at the leaf grain (measured: 0 of 53,581 rows) because one
+# column cannot hold two values; "divergent OR novel" is 7,381 main-pool rows and
+# is what a reader chasing anything the finding aids did not already have right
+# actually wants.
+#
+# EVERY MEMBER SET IS DERIVED from the policy constants, never restated: a shade
+# joining or leaving `HIDDEN_BY_DEFAULT_SHADES`, or the candidate shade moving,
+# carries these with it. A literal list here would silently stop matching.
+# ---------------------------------------------------------------------------
+
+NOVELTY_VIEW_ALL = "all"
+NOVELTY_VIEW_CANDIDATES = "candidates"
+NOVELTY_VIEW_DIVERGENT = "divergent"
+NOVELTY_VIEW_EITHER = "either"
+
+#: The closed vocabulary, in the order the selector offers them: the default
+#: (unfiltered) first, then the two single-axis narrowings, then their union.
+NOVELTY_VIEWS: Tuple[str, ...] = (
+    NOVELTY_VIEW_ALL, NOVELTY_VIEW_CANDIDATES,
+    NOVELTY_VIEW_DIVERGENT, NOVELTY_VIEW_EITHER,
+)
+
+#: VIEW -> the `novelty` argument it becomes. `None` means "no predicate", the
+#: phase-wide convention that an empty filter is not a filter.
+_NOVELTY_VIEW_SHADES: Dict[str, Optional[Tuple[str, ...]]] = {
+    NOVELTY_VIEW_ALL: None,
+    NOVELTY_VIEW_CANDIDATES: (CANDIDATE_STATUS,),
+    NOVELTY_VIEW_DIVERGENT: DIVERGENCE_SHADE_ORDER,
+    NOVELTY_VIEW_EITHER: (CANDIDATE_STATUS,) + tuple(DIVERGENCE_SHADE_ORDER),
+}
+
+
+def novelty_view_shades(view: Optional[str]) -> Optional[Tuple[str, ...]]:
+    """The `novelty` argument for a selector view. THE authority on that mapping.
+
+    An unrecognised view resolves to the UNFILTERED state rather than raising:
+    the value can arrive from a reader's persisted storage or a hand-edited
+    cookie, and a vocabulary that moved between releases must degrade to showing
+    everything -- never to showing a narrower set the reader did not choose and
+    cannot see the basis of.
+    """
+    if view not in _NOVELTY_VIEW_SHADES:
+        return None
+    return _NOVELTY_VIEW_SHADES[view]
+
+
+def findings_divergence_offered(novelty: Optional[Iterable[str]] = None) -> bool:
+    """Whether the divergence axis can change ANYTHING, given the candidacy
+    selection. THE authority on that rule, mirroring `findings_novelty_offered`.
+
+    Both controls select on ONE column. `fills_gap` (the candidacy shade) and
+    the two divergence shades are mutually exclusive values of it, so with the
+    candidacy filter active the divergence axis is inert: `SHOWN` adds rows that
+    the candidacy predicate has already excluded, and `ONLY` intersects two
+    disjoint sets and returns nothing. A control that silently stops doing
+    anything is the same defect as the novelty/per-work-unit pair, in a new
+    place -- so the rule is a function here, where the SURFACE can ask it BEFORE
+    it renders, rather than a comparison spelled out at each site.
+
+    DERIVED from `HIDDEN_BY_DEFAULT_SHADES` through `DIVERGENCE_SHADE_ORDER`,
+    never a restated literal: a shade joining or leaving the hidden-by-default
+    policy moves this predicate with it.
+    """
+    selected = set(novelty or ())
+    if not selected:
+        return True
+    return bool(selected & set(DIVERGENCE_SHADE_ORDER))
+
+BUCKET_MAIN = "main"
+BUCKET_MORE = "more"
+BUCKET_ALL = "all"
+FINDINGS_BUCKETS: frozenset = frozenset({BUCKET_MAIN, BUCKET_MORE, BUCKET_ALL})
+
+#: The visible bucket for a work the domain vocabulary cannot place. It is a
+#: SELECTABLE value with a real count, never a silent disappearance.
+DOMAIN_UNASSIGNED = "Unassigned"
+
+FACET_LEVELS: frozenset = frozenset({"domain", "author", "work"})
+
+_DEFAULT_QUERY_TIMEOUT_FINDINGS = 5.0
+_DEFAULT_FINDINGS_PAGE_SIZE_DEFAULT = 50
+
+# The per-unit SELECT lists. Every unit exposes the SAME output aliases
+# (`main_pool`, `best_band_rank`, `page_count`, `max_coverage_ppm`), so ONE
+# ORDER BY serves all three and a sort cannot mean different things on
+# different units.
+#
+# `{divergent}` is the ONE substitution, filled by `_divergence_flag_sql` --
+# a per-row CASE on the ungrouped unit and a MAX over the group on the two
+# grouped ones. It is written as a template rather than three hand-written
+# expressions for the same reason the rest of this table is data: the grouped
+# units would otherwise be one careless edit away from reporting a mixed group
+# as undivergent.
+_FINDINGS_UNIT_SELECT: Dict[str, str] = {
+    FINDINGS_UNIT_IDENTIFICATION: """
+        di.identification_id           AS identification_id,
+        di.sys_id                      AS sys_id,
+        di.canonical_work_id           AS canonical_work_id,
+        di.display_work_id             AS display_work_id,
+        w.neutral_title                AS neutral_title,
+        w.author                       AS author,
+        w.genre                        AS genre,
+        di.main_pool                   AS main_pool,
+        di.main_pool_reason            AS main_pool_reason,
+        di.best_band_rank              AS best_band_rank,
+        di.page_count                  AS page_count,
+        di.max_coverage_ppm            AS max_coverage_ppm,
+        di.rendered_relation           AS rendered_relation,
+        {locus}                        AS locus_label,
+        di.novelty_status              AS novelty_status,
+        {divergent}                    AS divergent,
+        1                              AS work_count,
+        1                              AS manuscript_count,
+        md.library_code                AS library_code,
+        md.shelfmark_display           AS shelfmark_display
+    """,
+    FINDINGS_UNIT_MANUSCRIPT: """
+        NULL                           AS identification_id,
+        di.sys_id                      AS sys_id,
+        NULL                           AS canonical_work_id,
+        NULL                           AS display_work_id,
+        NULL                           AS neutral_title,
+        NULL                           AS author,
+        NULL                           AS genre,
+        MAX(di.main_pool)              AS main_pool,
+        NULL                           AS main_pool_reason,
+        MIN(di.best_band_rank)         AS best_band_rank,
+        SUM(di.page_count)             AS page_count,
+        MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
+        NULL                           AS rendered_relation,
+        {locus}                        AS locus_label,
+        CASE WHEN COUNT(DISTINCT di.novelty_status) = 1
+             THEN MIN(di.novelty_status) ELSE NULL END AS novelty_status,
+        {divergent}                    AS divergent,
+        COUNT(DISTINCT di.display_work_id) AS work_count,
+        1                              AS manuscript_count,
+        MIN(md.library_code)           AS library_code,
+        MIN(md.shelfmark_display)      AS shelfmark_display
+    """,
+    FINDINGS_UNIT_WORK: """
+        NULL                           AS identification_id,
+        NULL                           AS sys_id,
+        MIN(di.canonical_work_id)      AS canonical_work_id,
+        di.display_work_id             AS display_work_id,
+        MIN(w.neutral_title)           AS neutral_title,
+        MIN(w.author)                  AS author,
+        MIN(w.genre)                   AS genre,
+        MAX(di.main_pool)              AS main_pool,
+        NULL                           AS main_pool_reason,
+        MIN(di.best_band_rank)         AS best_band_rank,
+        SUM(di.page_count)             AS page_count,
+        MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
+        NULL                           AS rendered_relation,
+        {locus}                        AS locus_label,
+        NULL                           AS novelty_status,
+        {divergent}                    AS divergent,
+        1                              AS work_count,
+        COUNT(DISTINCT di.sys_id)      AS manuscript_count,
+        NULL                           AS library_code,
+        NULL                           AS shelfmark_display
+    """,
+}
+
+#: unit -> (the LEAF column that carries this group's key, the FILTER AXIS an
+#: expansion pins it on). `None` for the leaf grain, which groups nothing.
+#:
+#: DEFINED HERE, not in `web/components/findings_rows.py`, which is where it
+#: used to live and which now imports it. Two consumers need the same table and
+#: they are on opposite sides of the layering guard: the page opens a grouped
+#: row onto its children with it, and the EXPORT flattens the same grouping
+#: with it (owner report, 2026-08-21). A copy in `shared/` beside a copy in
+#: `web/` is the shape that drifts, and the drift would be silent -- an export
+#: grouping on a column the page no longer expands on still produces a
+#: plausible file.
+#:
+#: `findings_rows` keeps its own import-time check that every axis named here
+#: exists in `_build_findings_filter`'s signature; that check is about the
+#: PREDICATE, and it belongs next to the caller that passes the keyword.
+EXPANSION_KEY_BY_UNIT: Dict[str, Optional[Tuple[str, str]]] = {
+    FINDINGS_UNIT_IDENTIFICATION: None,
+    FINDINGS_UNIT_MANUSCRIPT: ("sys_id", "sys_id"),
+    FINDINGS_UNIT_WORK: ("display_work_id", "work_id"),
+}
+
+#: The units whose rows are a GROUP rather than a finding. Derived, never
+#: listed: a unit that gains an expansion gains a flattened export with it.
+EXPORT_GROUPED_UNITS: frozenset = frozenset(
+    unit for unit, pair in EXPANSION_KEY_BY_UNIT.items() if pair is not None)
+
+
+_FINDINGS_UNIT_GROUP_BY: Dict[str, Optional[str]] = {
+    FINDINGS_UNIT_IDENTIFICATION: None,
+    FINDINGS_UNIT_MANUSCRIPT: "di.sys_id",
+    FINDINGS_UNIT_WORK: "di.display_work_id",
+}
+
+# The deterministic final tie-break per unit -- a page boundary must never
+# depend on unspecified scan order.
+_FINDINGS_UNIT_TIEBREAK: Dict[str, str] = {
+    FINDINGS_UNIT_IDENTIFICATION: "di.identification_id ASC",
+    FINDINGS_UNIT_MANUSCRIPT: "di.sys_id ASC",
+    FINDINGS_UNIT_WORK: "di.display_work_id ASC",
+}
+
+# Sorts as FIXED SQL fragments over the shared output aliases -- a closed enum
+# mapped to a constant, never user text interpolated into SQL (T-136-14-04).
+# `max_coverage_ppm IS NULL` first puts unmeasurable rows LAST rather than
+# treating a missing measurement as a zero.
+_FINDINGS_QUALITY_ORDER = (
+    "main_pool DESC, best_band_rank ASC, "
+    "max_coverage_ppm IS NULL, max_coverage_ppm DESC"
+)
+_FINDINGS_SORT_SQL: Dict[str, str] = {
+    FINDINGS_SORT_BAND_RANK: _FINDINGS_QUALITY_ORDER,
+    FINDINGS_SORT_PAGE_COUNT: f"page_count DESC, {_FINDINGS_QUALITY_ORDER}",
+    # The identification grain materializes COVERAGE, not matched letters
+    # (matched_letters lives per evidence row, and all shipped propagated rows
+    # have none at all). Coverage is therefore the grain's own measure of "how
+    # much text matched"; the envelope's `sort_basis` names it, so the surface
+    # never implies a letter count it does not have.
+    FINDINGS_SORT_MATCHED_TEXT: (
+        f"max_coverage_ppm IS NULL, max_coverage_ppm DESC, {_FINDINGS_QUALITY_ORDER}"
+    ),
+}
+_FINDINGS_SORT_BASIS: Dict[str, str] = {
+    FINDINGS_SORT_BAND_RANK: "best_band_rank",
+    FINDINGS_SORT_PAGE_COUNT: "page_count",
+    FINDINGS_SORT_MATCHED_TEXT: "max_coverage_ppm",
+}
+
+_FINDINGS_FROM = """
+    FROM discovery_identification di
+    JOIN works w ON w.work_id = di.display_work_id
+    LEFT JOIN manuscript_display md ON md.sys_id = di.sys_id
+"""
+
+# ---------------------------------------------------------------------------
+# The facet cascade's COUNT, per row unit (§3.6).
+#
+# Each expression counts the same thing the row query's GROUP BY produces, so
+# the number beside an option is the number of ROWS selecting that option
+# returns -- which is the only promise a count beside a filter can honestly
+# make. Written as data beside `_FINDINGS_UNIT_GROUP_BY` rather than derived
+# from it, because `COUNT(*)` on the ungrouped unit has no GROUP BY column to
+# derive from; a test pins the two tables against each other.
+# ---------------------------------------------------------------------------
+
+_FINDINGS_FACET_COUNT_SQL: Dict[str, str] = {
+    FINDINGS_UNIT_IDENTIFICATION: "COUNT(*)",
+    FINDINGS_UNIT_MANUSCRIPT: "COUNT(DISTINCT di.sys_id)",
+    FINDINGS_UNIT_WORK: "COUNT(DISTINCT di.display_work_id)",
+}
+
+#: The domain facet's LEAF key -- the stored genre, with the unplaceable ones
+#: collapsed into their own selectable bucket rather than disappearing.
+_DOMAIN_KEY_SQL = f"COALESCE(NULLIF(w.genre, ''), '{DOMAIN_UNASSIGNED}')"
+
+#: The domain facet's PARENT key. The stored genre is a `Parent / Leaf` string;
+#: this is the part before the separator, or NULL for a genre that has none
+#: (such a genre is its own leaf and gets no parent node).
+_DOMAIN_PARENT_SQL = (
+    "CASE WHEN instr({key}, ' / ') > 0 "
+    "THEN substr({key}, 1, instr({key}, ' / ') - 1) "
+    "ELSE NULL END"
+).format(key=_DOMAIN_KEY_SQL)
+
+# ---------------------------------------------------------------------------
+# Ruling U (plan 136-22): the launch statistics.
+# ---------------------------------------------------------------------------
+
+#: The THREE contribution shades, in the frozen order ruling U lists them.
+#:
+#: Defined ONCE, here, and never retyped at a call site: a shade added to the
+#: novelty vocabulary later must not silently join the contribution total, and a
+#: shade retired from it must not silently leave a smaller one behind.
+LAUNCH_CONTRIBUTION_SHADES: Tuple[str, ...] = (
+    "fills_gap",
+    "refines_granularity",
+    "container_predicts",
+)
+
+#: The single basis every launch figure is computed on (ruling U constraint 1).
+LAUNCH_BASIS: str = "main_pool"
+
+
+def _validate_contribution_shades(shades: Tuple[str, ...]) -> None:
+    """Raise unless every contribution shade is in the novelty vocabulary.
+
+    Called at IMPORT time below. A typo or a retired shade must fail loudly at
+    import rather than producing a quietly smaller headline at request time --
+    the shade simply matches no row, the total shrinks, and nothing raises.
+    """
+    unknown = sorted(set(shades) - NOVELTY_STATUSES)
+    if unknown:
+        raise RuntimeError(
+            f"LAUNCH_CONTRIBUTION_SHADES names {unknown}, which is not in "
+            "shared.discovery_novelty.NOVELTY_STATUSES -- a contribution shade "
+            "outside the vocabulary matches no row and silently shrinks the "
+            "launch total (ruling U constraint 2)"
+        )
+    if len(set(shades)) != len(shades):
+        raise RuntimeError(
+            "LAUNCH_CONTRIBUTION_SHADES repeats a shade -- a repeated shade "
+            "would be double-counted into the total"
+        )
+
+
+_validate_contribution_shades(LAUNCH_CONTRIBUTION_SHADES)
+
+
+def _build_launch_contribution_sql(*, main_pool_only: bool) -> Tuple[str, List[Any]]:
+    """The ONE grouped statement both contribution figures are computed with.
+
+    `main_pool_only=False` is the SAME statement with the `main_pool` predicate
+    dropped -- one shape, not two separately-written queries, so the main-pool
+    and all-bucket figures cannot drift apart through an edit to one of them.
+
+    Returns per shade the identification count AND the distinct-manuscript
+    count; the TOTAL is then the sum of the returned rows in Python, which is
+    what makes the decomposition identity structural rather than asserted.
+    """
+    placeholders = ",".join("?" * len(LAUNCH_CONTRIBUTION_SHADES))
+    where = [f"novelty_status IN ({placeholders})"]
+    if main_pool_only:
+        where.insert(0, "main_pool = 1")
+    return (
+        "SELECT novelty_status, COUNT(*) AS identification_count, "
+        "COUNT(DISTINCT sys_id) AS manuscript_count "
+        "FROM discovery_identification "
+        "WHERE " + " AND ".join(where) + " "
+        "GROUP BY novelty_status",
+        list(LAUNCH_CONTRIBUTION_SHADES),
+    )
+
+
+def _build_launch_manuscript_sql(*, main_pool_only: bool) -> Tuple[str, List[Any]]:
+    """Distinct CONTRIBUTING manuscripts, on the same basis as the total above.
+
+    Not derivable by summing the per-shade manuscript counts: one manuscript can
+    contribute under two shades, so the sum over-counts. Ruling U's "over 6,755
+    manuscripts" is this number, never that sum.
+    """
+    placeholders = ",".join("?" * len(LAUNCH_CONTRIBUTION_SHADES))
+    where = [f"novelty_status IN ({placeholders})"]
+    if main_pool_only:
+        where.insert(0, "main_pool = 1")
+    return (
+        "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification "
+        "WHERE " + " AND ".join(where),
+        list(LAUNCH_CONTRIBUTION_SHADES),
+    )
+
+
+_LIKE_ESCAPE_RE = re.compile(r"([\\%_])")
+
+
+def _like_prefix(value: str) -> str:
+    r"""`value` as a LIKE pattern matching its own children (`value / ...`),
+    with `\`, `%` and `_` escaped so a domain containing one cannot behave as a
+    wildcard. Bound as a PARAMETER; never interpolated."""
+    return _LIKE_ESCAPE_RE.sub(r"\\\1", value) + " / %"
+
+
+#: How many identifications one request may suppress.
+#:
+#: A HARD CAP, not a tuning knob. Each suppressed id becomes one `?` in a `NOT IN`
+#: clause, and SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` is 999 -- shared with
+#: every other bound parameter in the same statement. A list that grew past this
+#: would start failing as an opaque SQLite error deep inside a query, so the
+#: builder RAISES here instead, naming the cap.
+#:
+#: 200 is deliberately far below 999 and far above any plausible use. This exists
+#: to hide the handful of rows an owner finds embarrassing before a beta; a
+#: suppression list approaching 200 is evidence that the BAKE is wrong, and the
+#: fix then is the main-pool rule or the evidence, never a longer denylist. The
+#: raise is the signal that the tool is being used as a substitute for the fix.
+FINDINGS_SUPPRESSION_MAX = 200
+
+
+def _build_findings_filter(
+    *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    divergence: str = DIVERGENCE_HIDDEN,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+    work_id: Optional[str] = None,
+    locus_from: Optional[int] = None,
+    locus_to: Optional[int] = None,
+    locus_enabled: bool = False,
+    suppressed: Optional[Iterable[str]] = None,
+    sys_id: Optional[str] = None,
+) -> Tuple[str, List[Any]]:
+    """The ONE findings predicate, shared by the row query and the facet
+    counts.
+
+    Building the predicate twice is exactly how a facet count and the result
+    set it sits beside drift apart, so both callers come through here.
+
+    Filters compose as AND; an empty filter set returns the whole current
+    bucket. Every VALUE is bound -- the only interpolation is placeholder
+    punctuation (T-136-14-04).
+
+    `divergence` is ruling F's axis, and it is applied HERE -- in SQL,
+    on the same predicate the count and the facet cascade are built from --
+    rather than by dropping rows out of a fetched page. Post-filtering a page
+    would leave `total`, the pager and every facet count describing a
+    population the reader is not being shown, which is a lie the reader cannot
+    see. The DEFAULT is `False`: divergent rows are ABSENT from the default
+    render (ruling F's "hidden by default", stronger than decision E's earlier
+    "excluded from the candidate toggle but shown normally").
+    """
+    if bucket not in FINDINGS_BUCKETS:
+        raise ValueError(
+            f"unknown findings bucket {bucket!r} -- offered buckets are "
+            f"{sorted(FINDINGS_BUCKETS)}"
+        )
+    where: List[str] = []
+    params: List[Any] = []
+
+    if bucket == BUCKET_MAIN:
+        where.append("di.main_pool = 1")
+    elif bucket == BUCKET_MORE:
+        where.append("di.main_pool = 0")
+
+    if divergence not in DIVERGENCE_MODES:
+        raise ValueError(
+            f"unknown divergence mode {divergence!r} -- offered modes are "
+            f"{list(DIVERGENCE_MODES)}"
+        )
+    if divergence != DIVERGENCE_SHOWN and DIVERGENCE_SHADE_ORDER:
+        # `IN` selects the divergent rows and `NOT IN` excludes them; `SHOWN`
+        # adds no predicate at all, which is what makes it the no-filter state
+        # rather than a third query shape.
+        #
+        # A bare `NOT IN` is sound HERE and nowhere else in this file's reach:
+        # SQL's three-valued logic makes `NULL NOT IN (...)` evaluate to NULL
+        # (i.e. false in a WHERE clause), so on a nullable column this shape
+        # would silently drop every row whose novelty was never recorded --
+        # rows the absence of a verdict must never be conflated with a
+        # disagreement. `discovery_identification.novelty_status` is declared
+        # NOT NULL with the fail-closed `not_checked` default carrying the
+        # "never checked" case as a REAL value, which is what makes the null
+        # branch unreachable rather than merely unlikely. That schema
+        # invariant is pinned by a test kept in the private repository, so a
+        # future migration relaxing it fails a named test instead of quietly
+        # shrinking this page.
+        operator = "IN" if divergence == DIVERGENCE_ONLY else "NOT IN"
+        where.append(
+            "di.novelty_status %s (%s)"
+            % (operator, ",".join("?" for _ in DIVERGENCE_SHADE_ORDER))
+        )
+        params.extend(DIVERGENCE_SHADE_ORDER)
+
+    novelty_list = list(novelty) if novelty else []
+    if novelty_list:
+        # OFFERED ON EVERY UNIT (owner ruling, 2026-08-06), and the change is a
+        # SEPARATION of two questions this predicate used to conflate:
+        #
+        #   1. "What is this row's novelty verdict?" -- undefined on a grouped
+        #      row. `novelty_status` is NULL when the aggregated identifications
+        #      do not agree, so a work row cannot DISPLAY one. That is what
+        #      `findings_novelty_offered` still answers, and it still gates the
+        #      DISPLAYED value and the row's badge.
+        #   2. "Does this row have at least one such identification under it?"
+        #      -- perfectly well defined on every unit, and the question a
+        #      reader filtering a list is actually asking.
+        #
+        # This clause is question 2, and it needs no aggregate at all: the
+        # predicate sits in the WHERE, BEFORE the `GROUP BY`, so a grouped row
+        # survives exactly when one of its identifications matches -- and its
+        # counts then describe the matching subset. That is not a new semantic
+        # invented here; `di.main_pool = 1` two blocks above has behaved this way
+        # since the bucket shipped. Measured on the heaviest main-pool work:
+        # 2,981 manuscripts unfiltered, 559 with the divergence shades selected.
+        #
+        # The raise it replaces was a real guard against a real failure -- a page
+        # that let a reader hold candidacy AND the per-work unit drove this
+        # builder into an unhandled `ValueError` (round 15, finding 1). What made
+        # that a failure was the CONTRADICTION between a live control and a
+        # refusing builder, not the combination itself. With the combination
+        # answerable, there is nothing left to refuse, and the coupling the page
+        # needed `normalise_state` for disappears with it.
+        where.append("di.novelty_status IN (%s)" % ",".join("?" for _ in novelty_list))
+        params.extend(novelty_list)
+
+    if domain:
+        if domain == DOMAIN_UNASSIGNED:
+            where.append("(w.genre IS NULL OR w.genre = '' OR w.genre = ?)")
+            params.append(DOMAIN_UNASSIGNED)
+        else:
+            # Matches the domain itself OR any leaf beneath it, so a parent
+            # selection is a strict superset of each of its leaves.
+            where.append(r"(w.genre = ? OR w.genre LIKE ? ESCAPE '\')")
+            params.extend([domain, _like_prefix(domain)])
+
+    if author:
+        if author == DOMAIN_UNASSIGNED:
+            where.append("(w.author IS NULL OR w.author = '')")
+        else:
+            where.append("w.author = ?")
+            params.append(author)
+
+    if work_id:
+        where.append("di.display_work_id = ?")
+        params.append(work_id)
+
+    if locus_enabled and work_id and (locus_from is not None or locus_to is not None):
+        bounds = []
+        for name, value in (("locus_from", locus_from), ("locus_to", locus_to)):
+            if value is None:
+                bounds.append(None)
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a non-negative unit ordinal")
+            try:
+                ordinal = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{name} must be a non-negative unit ordinal"
+                ) from exc
+            if ordinal < 0:
+                raise ValueError(f"{name} must be a non-negative unit ordinal")
+            bounds.append(ordinal)
+        from_ord, to_ord = bounds
+        if from_ord is not None and to_ord is not None and from_ord > to_ord:
+            raise ValueError("locus_from cannot follow locus_to")
+        # THE SUBQUERY MUST STAY UNCORRELATED. It was written as a correlated
+        # `EXISTS (... WHERE p.identification_id = di.identification_id ...)`,
+        # which re-runs the interval search ONCE PER CANDIDATE ROW: an
+        # identification carries 1.6 pieces on average, so the inner loop cost
+        # O(all pieces for that work) per outer row. Measured on the served
+        # artifact (`w000112`, citation range 1..75, median of 3 warm runs):
+        # 10,478 ms correlated vs 59.9 ms driven from `locus_unit` -- against a
+        # 5.0 s findings timeout, i.e. the range filter returned NOTHING for
+        # every heavy work, deterministically. `EXPLAIN QUERY PLAN` is the
+        # difference: `CORRELATED SCALAR SUBQUERY` became `LIST SUBQUERY`,
+        # evaluated once.
+        #
+        # Re-introducing `p.identification_id = di.identification_id` inside
+        # this subquery restores that outage. `IN` is set membership, so
+        # duplicate subquery rows cannot duplicate an outer row and no DISTINCT
+        # is needed. Driving from `locus_unit` (equality on `work_id`) is what
+        # lets `ix_discovery_locus_piece_range` satisfy the interval join once
+        # instead of per row.
+        #
+        # A `WITH ... AS MATERIALIZED` CTE measured the same (62.6 ms) and was
+        # REJECTED: statement-level, so it could not live in this filter, and
+        # its placeholders would precede `_divergence_flag_sql`'s SELECT-list
+        # params -- an un-spliced params list returned WRONG result sets on 6 of
+        # 15 probed (work x bound-shape) cases and silently correct ones on the
+        # other 9, because those were empty. Keeping the predicate in the WHERE
+        # clause keeps the parameter order below identical to the correlated
+        # form's, so no call site changes.
+        overlap = ["lu.work_id=?"]
+        range_params: List[Any] = [work_id]
+        if from_ord is not None:
+            overlap.append("lu.citation_pos >= ?")
+            range_params.append(from_ord)
+        if to_ord is not None:
+            overlap.append("lu.citation_pos <= ?")
+            range_params.append(to_ord)
+        where.append(
+            "di.identification_id IN (SELECT p.identification_id "
+            "FROM locus_unit lu JOIN discovery_locus_piece p "
+            "ON p.locus_work_id=lu.work_id "
+            "AND p.start_unit_ord<=lu.unit_ord AND p.end_unit_ord>=lu.unit_ord "
+            "WHERE " + " AND ".join(overlap) + ")"
+        )
+        params.extend(range_params)
+
+    # THE MANUSCRIPT AXIS (owner report, 2026-08-07: "In One Row Per Manuscript I
+    # don't see the computed identifications at all").
+    #
+    # This axis was DELIBERATELY absent, and its absence was load-bearing at the
+    # time: `web/components/findings_rows.py::EXPANSION_KEY_BY_UNIT` maps a unit to
+    # the filter axis its expansion pins, and offering a manuscript expansion
+    # against a predicate with no `sys_id` would pass a keyword the read SILENTLY
+    # IGNORES -- opening the row onto every identification matching the reader's
+    # filters instead of the ones in that manuscript. Measured then, not feared.
+    # Withholding the affordance was the safe half of that trade.
+    #
+    # The cost of the safe half was that the per-manuscript unit had no way to show
+    # its own identifications, which is what the owner hit: a reader who groups by
+    # manuscript sees a shelfmark and a work count and can go no further. So the
+    # axis is added HERE, in the one shared predicate, which is what makes the
+    # expansion honest -- the children come from the same read at the leaf grain
+    # with this key pinned, so every active filter still applies and a parent's
+    # count cannot contradict the rows underneath it.
+    #
+    # `di.sys_id` is the SAME column `_FINDINGS_UNIT_GROUP_BY` groups the manuscript
+    # unit by, so the expansion pins exactly the key the parent row was built from.
+    if sys_id:
+        where.append("di.sys_id = ?")
+        params.append(str(sys_id))
+
+    # ADMIN SUPPRESSION (owner ruling, 2026-08-06): a list of identification ids
+    # the owner has hidden, so a clearly-wrong row can come off the live beta
+    # without a re-bake. The artifact is content-hash verified and refuses to
+    # serve if a single byte changes, so suppression CANNOT live in it; the ids
+    # come from Supabase and are passed IN by `web/discovery.py`. This module
+    # must not import `web/` (`tests/test_seed016_layering_executor.py`), and
+    # does not.
+    #
+    # IN THE PREDICATE, not applied to a fetched page, and that is the whole
+    # reason this is here rather than in the renderer. The owner ruled that the
+    # counts follow the suppression, which this gets for free: `total`, the pager
+    # and every facet count are built from THIS predicate, so they all drop by
+    # exactly what was hidden. Post-filtering a page would leave all three
+    # describing a population the reader is not being shown -- the same defect
+    # the divergence filter's own comment above was written about, and the same
+    # one CLAUDE.md names for a capped total ("a capped total reported as exact is
+    # a correctness defect").
+    #
+    # The LAUNCH HEADLINE figures deliberately do NOT move: they are corpus
+    # figures on ruling U's fixed basis, read by a separate query, and a corpus
+    # figure that tracked an admin's hide list would stop being a corpus figure.
+    # Owner confirmed. The result bar is what reports what the reader is seeing.
+    #
+    # `NOT IN` IS SOUND HERE, and it needs saying because the sibling divergence
+    # clause above carries a long warning about exactly this shape:
+    # `NULL NOT IN (...)` evaluates to NULL and would silently drop every row
+    # with a null in the tested column. `di.identification_id` is the table's
+    # PRIMARY KEY and therefore NOT NULL, so the null branch is unreachable by
+    # construction rather than merely unlikely.
+    suppressed_list = [str(value) for value in (suppressed or ()) if value]
+    if suppressed_list:
+        # DEDUPLICATED and ORDER-STABLE: two copies of one id would burn two
+        # parameters against the cap for no effect, and a set would make the
+        # generated SQL vary between identical requests -- which would defeat any
+        # future statement cache and makes a test assertion on the SQL flaky.
+        seen: Dict[str, None] = {}
+        for value in suppressed_list:
+            seen.setdefault(value, None)
+        suppressed_list = list(seen)
+        if len(suppressed_list) > FINDINGS_SUPPRESSION_MAX:
+            raise ValueError(
+                f"{len(suppressed_list)} suppressed identifications exceeds the "
+                f"cap of {FINDINGS_SUPPRESSION_MAX}. This tool hides the few rows "
+                "that must come off a live surface immediately; a list this long "
+                "means the bake is wrong, and the fix is the main-pool rule or "
+                "the evidence, not a longer denylist."
+            )
+        where.append(
+            "di.identification_id NOT IN (%s)"
+            % ",".join("?" for _ in suppressed_list)
+        )
+        params.extend(suppressed_list)
+
+    return ("WHERE " + " AND ".join(where)) if where else "", params
+
+
+def _divergence_flag_sql(*, aggregate: bool) -> Tuple[str, List[Any]]:
+    """`(expression, params)` for a findings row's own divergence flag.
+
+    `aggregate=True` wraps the per-identification CASE in `MAX(...)`, which is
+    what the two GROUPED units need: a manuscript or work row is divergent when
+    ANY identification under it is, and `novelty_status` cannot answer that (it
+    is NULL on a mixed group by construction).
+
+    Returns the constant `0` when the hidden-by-default policy selects no shade
+    at all, so the flag stays a real boolean rather than becoming invalid SQL.
+    """
+    if not DIVERGENCE_SHADE_ORDER:
+        return "0", []
+    case = (
+        "CASE WHEN di.novelty_status IN (%s) THEN 1 ELSE 0 END"
+        % ",".join("?" for _ in DIVERGENCE_SHADE_ORDER)
+    )
+    return (f"MAX({case})" if aggregate else case), list(DIVERGENCE_SHADE_ORDER)
+
+
+def _build_findings_query(
+    *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    sort: str = FINDINGS_SORT_BAND_RANK,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    divergence: str = DIVERGENCE_HIDDEN,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+    work_id: Optional[str] = None,
+    locus_from: Optional[int] = None,
+    locus_to: Optional[int] = None,
+    suppressed: Optional[Iterable[str]] = None,
+    sys_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    count_only: bool = False,
+    count_cap: Optional[int] = None,
+    locus_enabled: bool = False,
+    locus_filter_enabled: bool = False,
+) -> Tuple[str, List[Any]]:
+    """Build the findings query for ONE unit. The single query builder -- all
+    three offered units come through here.
+
+    Returns `(sql, params)`. Every user-supplied VALUE is bound; the only
+    interpolated fragments come from closed enums mapped to fixed constants
+    above, so the large filter/sort/unit combination space cannot reach SQL as
+    text (T-136-14-04).
+
+    `count_only` builds the bounded-count form used when an exact count is
+    capped; otherwise the row query carries `COUNT(*) OVER ()`, which SQLite
+    evaluates over the whole (post-GROUP BY) result set BEFORE `LIMIT`, so the
+    real total costs no second query.
+    """
+    if unit not in FINDINGS_UNITS:
+        raise ValueError(
+            f"unknown findings unit {unit!r} -- offered units are "
+            f"{sorted(FINDINGS_UNITS)} (the per-claim unit is deliberately not offered)"
+        )
+    if sort not in FINDINGS_SORTS:
+        raise ValueError(
+            f"unknown findings sort {sort!r} -- offered sorts are "
+            f"{sorted(FINDINGS_SORTS)} (novelty is deliberately not a sort key)"
+        )
+
+    where_sql, params = _build_findings_filter(
+        unit=unit, bucket=bucket, novelty=novelty,
+        divergence=divergence, domain=domain,
+        author=author, work_id=work_id, locus_from=locus_from,
+        locus_to=locus_to, locus_enabled=locus_filter_enabled,
+        suppressed=suppressed, sys_id=sys_id)
+    group_by = _FINDINGS_UNIT_GROUP_BY[unit]
+    group_sql = f"GROUP BY {group_by}" if group_by else ""
+
+    if count_only:
+        inner = f"SELECT 1 {_FINDINGS_FROM} {where_sql} {group_sql}"
+        if count_cap:
+            inner += f" LIMIT {int(count_cap) + 1}"
+        return f"SELECT COUNT(*) AS n FROM ({inner})", params
+
+    order_sql = f"{_FINDINGS_SORT_SQL[sort]}, {_FINDINGS_UNIT_TIEBREAK[unit]}"
+    # The flag's placeholders sit in the SELECT list, so its parameters bind
+    # BEFORE the WHERE clause's. Ordering is the whole contract of a positional
+    # parameter list; getting it wrong here would silently filter on a shade
+    # name and flag on a domain.
+    flag_sql, flag_params = _divergence_flag_sql(aggregate=bool(group_by))
+    sql = f"""
+        SELECT {_FINDINGS_UNIT_SELECT[unit].format(
+                   divergent=flag_sql,
+                   locus=("di.locus_label" if locus_enabled
+                          and unit == FINDINGS_UNIT_IDENTIFICATION else "NULL"))},
+               COUNT(*) OVER () AS _total_rows
+        {_FINDINGS_FROM}
+        {where_sql}
+        {group_sql}
+        ORDER BY {order_sql}
+        LIMIT ? OFFSET ?
+    """
+    return sql, [*flag_params, *params, page_size, max(0, (page - 1) * page_size)]
+
+
+def _build_manuscript_works_sql(n_page_ids: int) -> str:
+    """The D-13h manuscript-scope query, as SQL, for `n_page_ids` bound
+    parameters.
+
+    A module-level builder rather than an inline f-string so a test can run
+    `EXPLAIN QUERY PLAN` over the EXACT statement the service executes -- an
+    index assertion against a hand-retyped near-copy proves nothing.
+
+    Only the placeholder COUNT is interpolated; every value is bound.
+
+    ⟨CHANGED 2026-08-12 -- C-track step 3c⟩ The relation this pane reports is the
+    strongest MATRIX OUTPUT over the works's identifications here, not the
+    strongest raw `claim_type` over its claims. Two consequences worth naming:
+
+    * the SQL keeps ONE comparator (a rank) instead of the two it carried, and
+      that rank is generated by `relation_rank_sql` from the matrix module's own
+      order -- the mapping back is `relation_from_rank`. A query module holding
+      half an ordering is a query module that will eventually disagree with the
+      module holding the other half.
+    * `di` is LEFT-joined, so a claim with no published identification ranks
+      last and the row reads `uncertain` -- matrix spec §3.2a, and the same
+      answer the claim rows give.
+
+    Strongest-member is CORRECT at this grain and only at this grain (§3.1): the
+    row is one canonical work in ONE manuscript, which is the identification
+    grain, and a manuscript that witnesses the work on any page IS a witness.
+    """
+    placeholders = ",".join("?" for _ in range(n_page_ids))
+    relation_rank = relation_rank_sql("di.rendered_relation")
+    return f"""
+        SELECT w.canonical_work_id AS canonical_work_id,
+               MIN(di.display_work_id) AS display_work_id,
+               MIN(dw.neutral_title) AS display_neutral_title,
+               MIN(w.neutral_title) AS neutral_title,
+               MIN(COALESCE(dw.author, w.author)) AS author,
+               MIN(COALESCE(dw.genre, w.genre)) AS genre,
+               COUNT(DISTINCT dc.page_id) AS page_count,
+               MIN(COALESCE(de.band_rank, {_UNRANKED_BAND})) AS best_band_rank,
+               MAX(COALESCE(di.main_pool, 0)) AS any_main_pool,
+               MIN({relation_rank}) AS _relation_rank,
+               COUNT(*) OVER () AS _total_rows
+        FROM discovery_claim dc
+        JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
+        JOIN works w ON w.work_id = dc.work_id
+        LEFT JOIN discovery_identification di
+               ON di.sys_id = de.sys_id
+              AND di.canonical_work_id = w.canonical_work_id
+        LEFT JOIN works dw ON dw.work_id = di.display_work_id
+        WHERE dc.page_id IN ({placeholders})
+        GROUP BY w.canonical_work_id
+        ORDER BY best_band_rank ASC, canonical_work_id ASC
+        LIMIT ? OFFSET ?
+    """
+
+# The per-work "ranked" CTE body (H1): every witness claim's display
+# evidence for `work_id`, its physical-MS unit_key (a real unit_id, or a
+# `sys:<sys_id>` singleton discriminator -- unit_id values are always
+# 64-hex-char sha256 digests so they can never collide with the "sys:"
+# prefix form), and its frozen band_rank. Reused (with the SAME `work_id`
+# bind parameter) by both the paginated projection query and the
+# member-sys_ids follow-up query below, so the two queries can never drift
+# out of sync with each other.
+#
+# 136-21: `manuscript_display` is LEFT-joined here (mirroring `_FINDINGS_FROM`)
+# so every expansion row can NAME the manuscript it points at. LEFT, not inner:
+# a carrier absent from `manuscript_display` must still appear -- flagged --
+# rather than vanishing from a list whose whole purpose is completeness. Joining
+# it once inside the SHARED CTE is what keeps the row query, the member query
+# and the count query consistent. `adjudication_status` comes through for the
+# same reason `_present_claim_row` needs it: `serialize_banded_claim` REFUSES to
+# emit a bandless presentation without it (SC#1), and the expansion's
+# `band_label` is produced by that serializer rather than formatted locally.
+def _build_work_witnesses_ranked_cte_sql(
+    *, restrict_work_id: bool = True, eligibility: str = ELIGIBILITY_ALL,
+) -> str:
+    """The ranked CTE body. `restrict_work_id=False` builds the CORPUS-WIDE
+    form (no `dc.work_id = ?` bind), used ONLY by the cardinality probe that
+    has to rank every work at this exact grain through this exact fragment --
+    the service itself always builds the per-work form.
+
+    `eligibility` DEFAULTS to `ELIGIBILITY_ALL`, which is what this CTE has
+    always done: it applies no routing predicate, so a claim whose DISPLAY
+    evidence is `review_only` appears on the expansion pane. That is the
+    default here rather than the D-13g rule for one reason -- switching it is a
+    decision about what the pane claims, and the decision has not been made.
+    The parameter exists so the divergence is explicit, tested, and one argument
+    away from resolved, instead of an absent predicate nobody can see.
+
+    ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ The CTE now carries each claim's
+    IDENTIFICATION-grain matrix output (`identification_rendered_relation`), so
+    both presenters can cap the pane's rendered relation per matrix-spec §3.2.
+    Two joins, and the shape is deliberate: `works` by primary key, then
+    `discovery_identification` on the pair its `UNIQUE (sys_id,
+    canonical_work_id)` constraint already indexes.
+
+    The cheaper-looking alternative -- resolve this work's `canonical_work_id`
+    once outside the CTE and bind it -- is WRONG here and was rejected in
+    pre-flight: this same fragment builds the CORPUS-WIDE form
+    (`restrict_work_id=False`) for the cardinality probe, where there is no
+    single work, and a bound constant would apply one work's identification
+    verdict to every work in the corpus. It also measured no faster.
+
+    Measured cost, on the served asset's three heaviest works (count query, the
+    latency-critical path a cold panel blocks on): 320 -> 440 ms, 225 -> 306 ms,
+    228 -> 303 ms, i.e. +33-37%, against `DISCOVERY_QUERY_TIMEOUT_BROWSE` of
+    2.0 s. EXPLAIN confirms the identification join is an index SEARCH, not a
+    scan. Re-measure if that budget ever tightens.
+
+    Measured cost of the eligibility change, so the ruling has numbers (served
+    asset, 2026-08-12): 80,718 of 222,972 CTE rows are review_only display evidence;
+    at the pane's real (work, unit) grain that is 88,337 -> 48,701, with 589 of
+    613 works changing, 58 panes emptying, and 39,636 pairs reachable ONLY
+    through a review_only row. Both curated Yalkut works lose ~84% of their
+    pane presence (w001384 1,752 -> 273; w001383 1,126 -> 184).
+    """
+    work_clause = "dc.work_id = ?\n    AND " if restrict_work_id else ""
+    routing_clause = eligibility_clause(eligibility, "de.")
+    return f"""
+  SELECT
+    COALESCE(wum.unit_id, 'sys:' || de.sys_id) AS unit_key,
+    wum.unit_id AS unit_id,
+    dc.page_id AS page_id,
+    dc.work_id AS work_id,
+    dc.claim_id AS claim_id,
+    dc.claim_type AS claim_type,
+    de.sys_id AS sys_id,
+    de.evidence_source AS evidence_source,
+    de.confidence_band AS confidence_band,
+    de.adjudication_status AS adjudication_status,
+    md.library_code AS library_code,
+    md.shelfmark_display AS shelfmark_display,
+    di.rendered_relation AS identification_rendered_relation,
+    {_BAND_RANK_CASE_SQL} AS band_rank
+  FROM discovery_claim dc
+  JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
+  LEFT JOIN witness_unit_members wum ON wum.sys_id = de.sys_id
+  LEFT JOIN manuscript_display md ON md.sys_id = de.sys_id
+  JOIN works w ON w.work_id = dc.work_id
+  LEFT JOIN discovery_identification di ON di.sys_id = de.sys_id
+         AND di.canonical_work_id = w.canonical_work_id
+  WHERE {work_clause}dc.claim_type IN ('direct_witness', 'quotes_this_work')
+    {routing_clause}
+"""
+
+
+_WORK_WITNESSES_RANKED_CTE_SQL = _build_work_witnesses_ranked_cte_sql()
+
+
+# ---------------------------------------------------------------------------
+# 136-21 / PANEL-02: the anchor side of the expansion.
+#
+# The anchor's identity is ALL THREE OR NONE. With three independent optionals,
+# "anchor arguments were supplied" is ambiguous for the six partial
+# combinations, and a partial call could rank against a defaulted side or emit
+# `relations_differ` computed from a missing relation -- both silently wrong
+# rather than loudly broken. Ranking needs BOTH `(evidence_source,
+# confidence_band)` because that is what `_band_rank` takes; a band alone cannot
+# produce a rank.
+# ---------------------------------------------------------------------------
+
+#: ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ The anchor's STORED claim type is REPLACED by
+#: `anchor_rendered_relation`, not joined by it: the tuple stays three wide.
+#: After this step nothing on this surface needs the anchor's STORED claim type
+#: -- the chip renders the anchor's capped matrix relation and
+#: `relations_differ` compares the two RENDERED values -- and an anchor field
+#: with no consumer is a field a renderer eventually prints, which is the exact
+#: defect step 3d exists to remove.
+#:
+#: The anchor arrives ALREADY capped. Its origin is the panel model's own claim
+#: row, whose `rendered_relation` step 3b capped against its identification, so
+#: capping it again here would be a second implementation of §3.2.
+_ANCHOR_IDENTITY_FIELDS: Tuple[str, ...] = (
+    "anchor_rendered_relation", "anchor_evidence_source", "anchor_confidence_band",
+)
+
+
+def _validate_anchor_identity(
+    anchor_rendered_relation: Optional[str],
+    anchor_evidence_source: Optional[str],
+    anchor_confidence_band: Optional[str],
+) -> bool:
+    """Enforce the all-or-none invariant; return True when the anchor is
+    supplied. Raises ValueError naming which fields were PRESENT and which were
+    MISSING on any of the six partial combinations."""
+    supplied = {
+        "anchor_rendered_relation": anchor_rendered_relation,
+        "anchor_evidence_source": anchor_evidence_source,
+        "anchor_confidence_band": anchor_confidence_band,
+    }
+    present = [f for f in _ANCHOR_IDENTITY_FIELDS if supplied[f] is not None]
+    missing = [f for f in _ANCHOR_IDENTITY_FIELDS if supplied[f] is None]
+    if present and missing:
+        raise ValueError(
+            "the anchor identity is all-three-or-none: present "
+            f"{present}, missing {missing} -- ranking the anchor side needs BOTH "
+            "its evidence_source and its confidence_band, and `relations_differ` "
+            "needs its rendered relation (PANEL-02 / DATA-01)"
+        )
+    return bool(present)
+
+
+def _resolve_displayed_band(
+    evidence_source: Optional[str],
+    confidence_band: Optional[str],
+    anchor_evidence_source: Optional[str],
+    anchor_confidence_band: Optional[str],
+) -> Tuple[Optional[str], Optional[str], int]:
+    """DATA-01: the WEAKER of the two claims' bands -- `(evidence_source,
+    confidence_band, band_rank)` of whichever side ranks weaker.
+
+    `_band_rank` is the ONLY comparator (lower is stronger, so the weaker side
+    is the higher rank); a second local ordering over band strings would drift
+    from the frozen lattice. On a tie the carrier's own pair wins, which mirrors
+    the SQL's strict `anchor_rank > band_rank` test exactly.
+    """
+    carrier_rank = _band_rank(evidence_source, confidence_band)
+    if anchor_evidence_source is None or anchor_confidence_band is None:
+        return evidence_source, confidence_band, carrier_rank
+    anchor_rank = _band_rank(anchor_evidence_source, anchor_confidence_band)
+    if anchor_rank > carrier_rank:
+        return anchor_evidence_source, anchor_confidence_band, anchor_rank
+    return evidence_source, confidence_band, carrier_rank
+
+
+# ---------------------------------------------------------------------------
+# 136-21: the ONE `ranked -> unit_best -> filtered` pipeline. BOTH the row
+# query and the count query are built from this single fragment.
+#
+# Sharing only the raw CTE would not be enough: unit-best selection and band
+# filtering are separate SQL BELOW it, and under this plan the FILTERING stage
+# itself changes shape depending on whether an anchor was supplied. A
+# separately-written count is exactly how a total drifts from the list it
+# labels, and that drift is invisible until someone counts by hand.
+# ---------------------------------------------------------------------------
+
+#: The deterministic ordering, unchanged from the pre-136-21 query: band_rank
+#: (the CARRIER's own, never the resolved one -- ordering is not part of this
+#: plan's change) plus stable secondary tie-breakers.
+_WORK_EXPANSION_ORDER_BY = "band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC"
+
+#: Every column the row query returns. Named explicitly so a new CTE column
+#: cannot silently reach a caller.
+_WORK_EXPANSION_ROW_COLUMNS = """unit_key, unit_id, page_id, work_id, claim_id, claim_type,
+               identification_rendered_relation,
+               sys_id, evidence_source, confidence_band, adjudication_status,
+               library_code, shelfmark_display,
+               displayed_evidence_source, displayed_confidence_band, displayed_band_rank"""
+
+
+def _build_work_expansion_pipeline(
+    *,
+    work_id: Optional[str],
+    anchor_unit_key: Optional[str] = None,
+    anchor_evidence_source: Optional[str] = None,
+    anchor_confidence_band: Optional[str] = None,
+    enabled_bands: Optional[Iterable[str]] = None,
+) -> Tuple[str, List[Any]]:
+    """Build the shared `WITH ranked ... unit_best ... filtered` prefix and its
+    bind parameters. Callers append their own terminal SELECT.
+
+    THE FILTER CONTRACT (deliberately split, and stated because the two obvious
+    readings contradict each other):
+
+      * anchor supplied -> the enabled-band filter acts on the RESOLVED,
+        DISPLAYED band, because that is the band the reader actually sees.
+        Filtering on the other carrier's band while displaying the weaker one
+        would put a screening-band row above the disclosure line whenever the
+        anchor happened to be the weak side.
+      * anchor absent -> the pre-136-21 behaviour, unchanged: the filter acts
+        on the other carrier's own band.
+
+    The `PARTITION BY work_id, unit_key` is behaviour-identical to the
+    pre-136-21 `PARTITION BY unit_key` on the per-work form (work_id is a
+    constant there); naming it makes the SAME fragment correct for the
+    corpus-wide probe form, where a unit_key can legitimately recur across
+    works.
+    """
+    params: List[Any] = []
+    if work_id is not None:
+        params.append(work_id)
+
+    anchored = anchor_evidence_source is not None and anchor_confidence_band is not None
+    if anchored:
+        anchor_rank = _band_rank(anchor_evidence_source, anchor_confidence_band)
+        displayed_sql = (
+            "CASE WHEN ? > band_rank THEN ? ELSE evidence_source END "
+            "AS displayed_evidence_source,\n"
+            "                   CASE WHEN ? > band_rank THEN ? ELSE confidence_band END "
+            "AS displayed_confidence_band,\n"
+            "                   CASE WHEN ? > band_rank THEN ? ELSE band_rank END "
+            "AS displayed_band_rank,"
+        )
+        params.extend([
+            anchor_rank, anchor_evidence_source,
+            anchor_rank, anchor_confidence_band,
+            anchor_rank, anchor_rank,
+        ])
+        band_filter_column = "displayed_confidence_band"
+    else:
+        displayed_sql = (
+            "evidence_source AS displayed_evidence_source,\n"
+            "                   confidence_band AS displayed_confidence_band,\n"
+            "                   band_rank AS displayed_band_rank,"
+        )
+        band_filter_column = "confidence_band"
+
+    extra_clauses: List[str] = []
+    if anchor_unit_key is not None:
+        extra_clauses.append("unit_key != ?")
+        params.append(anchor_unit_key)
+    bands = list(enabled_bands) if enabled_bands else []
+    if bands:
+        placeholders = ",".join("?" for _ in bands)
+        extra_clauses.append(f"{band_filter_column} IN ({placeholders})")
+        params.extend(bands)
+    where_extra = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
+
+    cte = _build_work_witnesses_ranked_cte_sql(restrict_work_id=work_id is not None)
+    pipeline = f"""
+                WITH ranked AS ({cte}),
+                unit_best AS (
+                    SELECT *,
+                           {displayed_sql}
+                           ROW_NUMBER() OVER (
+                               PARTITION BY work_id, unit_key
+                               ORDER BY {_WORK_EXPANSION_ORDER_BY}
+                           ) AS rn
+                    FROM ranked
+                ),
+                filtered AS (
+                    SELECT * FROM unit_best WHERE rn = 1{where_extra}
+                )
+    """
+    return pipeline, params
+
+
+def build_work_expansion_rows_sql(
+    *, page_size: int, offset: int, **pipeline_kwargs: Any
+) -> Tuple[str, List[Any]]:
+    """The paginated expansion row query. Built from the shared pipeline, so it
+    cannot diverge from the count below."""
+    pipeline, params = _build_work_expansion_pipeline(**pipeline_kwargs)
+    sql = f"""{pipeline}
+                SELECT {_WORK_EXPANSION_ROW_COLUMNS}
+                FROM filtered
+                ORDER BY {_WORK_EXPANSION_ORDER_BY}
+                LIMIT ? OFFSET ?
+    """
+    return sql, [*params, page_size, offset]
+
+
+def build_work_expansion_count_sql(**pipeline_kwargs: Any) -> Tuple[str, List[Any]]:
+    """The EXACT count of distinct witness UNITS the row query would return
+    across all pages -- the same `ranked -> unit-best -> filtered` fragment,
+    counted instead of paginated. Never a claim-row count, never bounded by a
+    LIMIT, never approximated."""
+    pipeline, params = _build_work_expansion_pipeline(**pipeline_kwargs)
+    return f"{pipeline}\n                SELECT COUNT(*) AS n FROM filtered\n", params
+
+
+# ---------------------------------------------------------------------------
+# Pure, DB-free DATA-10 unit x work projection helper. Kept as the reference
+# implementation of the SAME grouping/highest-band/anchor-exclusion/
+# same-unit-suppression/pagination rules the SQL projection in
+# get_work_witnesses() below implements directly in the database -- used
+# for member-claim expansion callers that already hold an in-memory row set
+# with no DB handle, and directly unit-tested with fabricated data (no
+# fixture DB required) so the rules stay pinned independent of the SQL.
+# ---------------------------------------------------------------------------
+
+def _project_work_witnesses(
+    claim_rows: Iterable[Dict[str, Any]],
+    unit_by_sys: Dict[str, str],
+    *,
+    enabled_bands: Optional[Iterable[str]] = None,
+    anchor_sys_id: Optional[str] = None,
+    anchor_rendered_relation: Optional[str] = None,
+    anchor_evidence_source: Optional[str] = None,
+    anchor_confidence_band: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> List[Dict[str, Any]]:
+    """Group ``claim_rows`` (one row per real (page_id, work_id) witness
+    claim, each carrying the claim's OWN display-evidence band) into
+    physical-MS ``witness_units`` and project ONE row per unit at its
+    HIGHEST member band, filtering on that displayed band BEFORE
+    pagination, excluding the anchor's own unit, and suppressing same-unit
+    members from the returned list.
+
+    Args:
+        claim_rows: dicts with keys ``page_id``, ``work_id``, ``claim_id``,
+            ``claim_type``, ``sys_id``, ``evidence_source``,
+            ``confidence_band`` -- one row per witness claim for a single
+            work_id (already restricted to claim_type IN
+            ('direct_witness', 'quotes_this_work') by the caller).
+        unit_by_sys: sys_id -> unit_id for every sys_id that belongs to a
+            merged witness_unit; a sys_id absent from this dict is its own
+            singleton (unmerged) unit.
+        enabled_bands: optional iterable of confidence_band strings; when
+            given (non-empty), only units whose DISPLAYED band is in this
+            set are kept. None/empty = no filtering (every band shown).
+        anchor_sys_id: when given, the unit containing this sys_id
+            (merged or singleton) is excluded entirely from the result.
+        anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band:
+            the ANCHOR side's own identity (136-21) -- ALL THREE OR NONE
+            (see ``_validate_anchor_identity``). When supplied, the displayed
+            band becomes the WEAKER of the pair (DATA-01) and the
+            ``enabled_bands`` filter acts on THAT resolved band rather than
+            on the other carrier's; when absent, the pre-136-21 behaviour is
+            unchanged.
+        page, page_size: 1-indexed pagination applied AFTER filtering.
+
+    Returns:
+        A list of dicts, one per surviving unit, each carrying:
+        ``work_id``, ``unit_id`` (None for an unmerged singleton),
+        ``representative_sys_id``, ``representative_page_id``,
+        ``representative_claim_id``, ``claim_type``, ``evidence_source``,
+        ``confidence_band`` (the unit's displayed/highest band), and
+        ``member_sys_ids`` (sorted list of every claim-bearing sys_id in
+        the unit -- the surface a caller uses to retrieve suppressed
+        member claims on expansion, via ``get_claims_for_page`` +
+        ``witness_unit_members``; there is no ``supporting_page_ids``
+        column, G4/R5), plus the 136-21 fields: both sides' RENDERED relations
+        (``rendered_relation`` / ``anchor_rendered_relation``, each capped per
+        matrix-spec §3.2) with ``relations_differ`` over that pair, the stored
+        ``claim_type`` for the carrier (internal only -- the surface allowlist
+        drops it), the resolved displayed
+        pair (``displayed_evidence_source`` / ``displayed_confidence_band`` /
+        ``band_rank``) and the carrier's name (``library_code`` /
+        ``shelfmark_display`` / ``display_missing``, READ OFF the input rows --
+        this helper has no DB to join them from and never invents them).
+
+        ``band_label`` is the ONE field the SQL path produces that this helper
+        does not: it needs the sidecar's cached band-measurement read and a UI
+        language, neither of which exists here. Every other field is computed
+        identically, and a test asserts the two agree over all of them.
+    """
+    _validate_anchor_identity(
+        anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
+    rows = list(claim_rows)
+    if not rows:
+        return []
+
+    enabled_bands_set = set(enabled_bands) if enabled_bands else None
+
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for row in rows:
+        sys_id = row["sys_id"]
+        unit_id = unit_by_sys.get(sys_id)
+        unit_key = ("unit", unit_id) if unit_id is not None else ("sys", sys_id)
+        groups.setdefault(unit_key, []).append(row)
+
+    anchor_unit_key = None
+    if anchor_sys_id:
+        anchor_unit_id = unit_by_sys.get(anchor_sys_id)
+        anchor_unit_key = (
+            ("unit", anchor_unit_id) if anchor_unit_id is not None else ("sys", anchor_sys_id)
+        )
+
+    items: List[Dict[str, Any]] = []
+    for unit_key, members in groups.items():
+        if anchor_unit_key is not None and unit_key == anchor_unit_key:
+            continue  # exclude the anchor's own unit entirely
+
+        # MED (Codex R2): band_rank + sys_id alone is NOT a total order --
+        # a unit/sys_id can carry >=2 same-band page claims (2,829 tied
+        # units observed in the cited real-corpus large work), leaving the
+        # representative dependent on unspecified scan/insertion order.
+        # page_id/claim_id are stable, deterministic secondary tie-breakers
+        # -- MIRRORED exactly (same key order) in the SQL projection below
+        # (_WORK_WITNESSES_RANKED_CTE_SQL's ROW_NUMBER() ORDER BY) so the
+        # pure-Python reference implementation and the SQL projection can
+        # never disagree on which row wins a tie.
+        best_row = min(
+            members,
+            key=lambda r: (
+                _band_rank(r["evidence_source"], r["confidence_band"]),
+                r["sys_id"],
+                r["page_id"],
+                r["claim_id"],
+            ),
+        )
+        displayed_band = best_row["confidence_band"]
+        resolved_source, resolved_band, resolved_rank = _resolve_displayed_band(
+            best_row["evidence_source"], displayed_band,
+            anchor_evidence_source, anchor_confidence_band)
+        # The band the FILTER acts on is the band the reader SEES -- the
+        # resolved one when an anchor was supplied, the carrier's own when it
+        # was not (see _build_work_expansion_pipeline's filter contract).
+        if enabled_bands_set is not None and resolved_band not in enabled_bands_set:
+            continue
+
+        member_sys_ids = sorted({m["sys_id"] for m in members})
+        library_code = best_row.get("library_code") or None
+        shelfmark_display = best_row.get("shelfmark_display") or None
+        claim_type = best_row["claim_type"]
+        # C-track step 3d: what this row may SAY about the representative --
+        # its own stored claim type capped by its identification's matrix output
+        # (§3.2), and `uncertain` when there is no identification to cap against
+        # (§3.2a). Computed here as well as in the SQL presenter because this is
+        # the REFERENCE implementation the mirror test compares against; both
+        # call the one matrix function rather than restating the rule.
+        rendered_relation = cap_member_relation(
+            claim_type, best_row.get("identification_rendered_relation"))
+        items.append({
+            "work_id": best_row["work_id"],
+            "unit_id": unit_key[1] if unit_key[0] == "unit" else None,
+            "representative_sys_id": best_row["sys_id"],
+            "representative_page_id": best_row["page_id"],
+            "representative_claim_id": best_row["claim_id"],
+            # The representative claim's folio, as a `/browse` address. See the
+            # note on the SQL projection's identical pair in
+            # `_present_expansion_row`; the two producers MIRROR each other and
+            # `test_sql_projection_matches_the_pure_reference` compares every key.
+            **_representative_browse_address(best_row["page_id"]),
+            "claim_type": claim_type,
+            "rendered_relation": rendered_relation,
+            "evidence_source": best_row["evidence_source"],
+            "confidence_band": displayed_band,
+            "member_sys_ids": member_sys_ids,
+            "anchor_rendered_relation": anchor_rendered_relation,
+            "anchor_evidence_source": anchor_evidence_source,
+            "anchor_confidence_band": anchor_confidence_band,
+            # C-track step 3d: computed over the two RENDERED relations, not the
+            # two stored claim types. The marker exists to tell the renderer
+            # whether to draw the anchor's chip beside the carrier's, so it has
+            # to compare the values those chips SHOW. On stored values it would
+            # both claim a difference where the two chips are identical (two
+            # stored types capping to one state) and hide a real one.
+            "relations_differ": bool(
+                anchor_rendered_relation is not None
+                and rendered_relation != anchor_rendered_relation),
+            "displayed_evidence_source": resolved_source,
+            "displayed_confidence_band": resolved_band,
+            "band_rank": resolved_rank,
+            "library_code": library_code,
+            "shelfmark_display": shelfmark_display,
+            "display_missing": library_code is None or shelfmark_display is None,
+        })
+
+    items.sort(
+        key=lambda it: (
+            _band_rank(it["evidence_source"], it["confidence_band"]),
+            it["representative_sys_id"],
+            it["representative_page_id"],
+            it["representative_claim_id"],
+        )
+    )
+
+    page = page if isinstance(page, int) and page >= 1 else 1
+    page_size = page_size if isinstance(page_size, int) and page_size > 0 else 1
+    offset = (page - 1) * page_size
+    return items[offset: offset + page_size]
+
+
+def _present_expansion_row(
+    row: Mapping[str, Any],
+    members_by_key: Mapping[str, Any],
+    measurements: Mapping[Tuple[str, str], Tuple[Optional[str], Optional[float]]],
+    lang: str,
+    *,
+    anchor_rendered_relation: Optional[str],
+    anchor_evidence_source: Optional[str],
+    anchor_confidence_band: Optional[str],
+) -> Dict[str, Any]:
+    """One raw expansion query row -> the INTERNAL expansion row.
+
+    `band_label` is produced exactly the way the page query produces its own:
+    `_band_measurements()` supplies `measurement_status`/`ci_low`,
+    `serialize_banded_claim` composes the presentation over the RESOLVED
+    displayed pair, and only `band_label` is taken off the result --
+    `review_overlay` and the measurement inputs are dropped here and dropped
+    again by `surface_safe_expansion`. `band_precision` is deliberately NOT
+    joined into the query: its `precision`/`ci_low`/`ci_high` columns would then
+    sit on every returned row, one careless caller away from a D-06 violation.
+
+    `adjudication_status` is the CARRIER's own, and is passed only because the
+    serializer REFUSES to emit a bandless presentation without it (SC#1) -- that
+    refusal is the property this call is here for. Nothing derived from it
+    (`review_overlay`, `default_eligible`) leaves this function.
+    """
+    displayed_source = row["displayed_evidence_source"]
+    displayed_band = row["displayed_confidence_band"]
+    measurement_status, ci_low = measurements.get(
+        (displayed_source, displayed_band), (None, None))
+    banded = serialize_banded_claim({
+        "evidence_source": displayed_source,
+        "confidence_band": displayed_band,
+        "adjudication_status": row["adjudication_status"],
+        "measurement_status": measurement_status,
+        "ci_low": ci_low,
+    }, lang)
+
+    # An absent `manuscript_display` row surfaces as explicit NULLs plus a
+    # marker -- never an empty string, and never a silently dropped row.
+    library_code = row["library_code"] or None
+    shelfmark_display = row["shelfmark_display"] or None
+    claim_type = row["claim_type"]
+    # C-track step 3d: see the identical call in `_project_work_witnesses` --
+    # the two producers MIRROR each other and a test compares every key, so the
+    # cap is computed the same way in both, through the one matrix function.
+    rendered_relation = cap_member_relation(
+        claim_type, row["identification_rendered_relation"])
+    return {
+        "work_id": row["work_id"],
+        "unit_id": row["unit_id"],
+        "representative_sys_id": row["sys_id"],
+        "representative_page_id": row["page_id"],
+        "representative_claim_id": row["claim_id"],
+        # WHERE THIS CARRIER'S MATCH IS (owner request, 2026-08-08). The row
+        # already ranked its representative claim; `page_id` is that claim's
+        # folio, so the shelfmark link can land on the page the row is about
+        # instead of on the manuscript's first page.
+        #
+        # The panel's link comment used to say "the representative page is not
+        # necessarily where the match sits", which was wrong: `best_row` IS the
+        # carrier's best-ranked claim FOR THIS WORK, so its page is a page this
+        # work was matched on. What it is not is the ONLY such page -- hence
+        # "representative" in the name, and no ordinal claimed anywhere.
+        **_representative_browse_address(row["page_id"]),
+        "claim_type": claim_type,
+        "rendered_relation": rendered_relation,
+        "evidence_source": row["evidence_source"],
+        "confidence_band": row["confidence_band"],
+        "member_sys_ids": sorted(members_by_key.get(row["unit_key"], {row["sys_id"]})),
+        "anchor_rendered_relation": anchor_rendered_relation,
+        "anchor_evidence_source": anchor_evidence_source,
+        "anchor_confidence_band": anchor_confidence_band,
+        # Over the two RENDERED relations -- see the note on the mirror producer.
+        "relations_differ": bool(
+            anchor_rendered_relation is not None
+            and rendered_relation != anchor_rendered_relation),
+        "displayed_evidence_source": displayed_source,
+        "displayed_confidence_band": displayed_band,
+        "band_rank": row["displayed_band_rank"],
+        "band_label": banded["band_label"],
+        "library_code": library_code,
+        "shelfmark_display": shelfmark_display,
+        "display_missing": library_code is None or shelfmark_display is None,
+    }
+
+
+def _export_page_guard(total: Optional[int], page_size: int) -> int:
+    """How many pages an export walk may fetch before it is treated as runaway.
+
+    Generous by construction: the reported total's own page count plus slack,
+    or a flat ceiling when there is no total. This is a LIVENESS bound on a
+    single-worker box, never a completeness signal -- tripping it marks the
+    result INCOMPLETE, which is why it can afford to be loose.
+    """
+    if total is None or int(total) <= 0:
+        return 5000
+    return (int(total) + page_size - 1) // page_size + 8
+
+
+class DiscoveryService:
+    """The one async read-only chokepoint over ``discovery.db``.
+
+    Constructed with LAZY injected providers -- NOTHING is read from disk
+    until the first available call (F15). Safe to construct at MODULE
+    import time (as ``web/discovery.py`` does) even before the sidecar
+    loader has run.
+    """
+
+    def __init__(
+        self,
+        path_provider: Callable[[], Optional[str]],
+        availability_callable: Optional[Callable[[], bool]] = None,
+        sidecar_version_provider: Optional[Callable[[], Optional[str]]] = None,
+    ) -> None:
+        self._path_provider = path_provider
+        self._availability_callable = availability_callable
+        self._sidecar_version_provider = sidecar_version_provider
+
+        # Lazy connection state (F15) -- deliberately NOT built here.
+        self._conn: Optional[ThreadLocalConnection] = None
+        self._last_path: Optional[str] = None
+        self._last_version: Optional[str] = None
+        self._conn_lock = threading.Lock()
+
+        # Browse-enrichment LRU (version-keyed, F15).
+        self._browse_lru: "OrderedDict[tuple, Any]" = OrderedDict()
+        self._browse_lru_lock = threading.Lock()
+
+        # 136-14: the `scope='band'` measurement lookup, cached per
+        # (path, version) -- see _band_measurements().
+        self._band_measurement_cache: Optional[Tuple[tuple, Dict]] = None
+
+        # 136-22 / ruling U: the launch statistics, cached per (path, version).
+        # The PATH is in the key on purpose and this is not hypothetical -- the
+        # pre-rebuild asset, the private rebuild and the public projection ALL
+        # THREE report `sidecar_version = 'discovery-v1-real'` while the two
+        # rebuilds answer this query differently, so a version-only key would
+        # serve one artifact's headline for the other.
+        self._launch_stats_cache: Optional[Tuple[tuple, Dict[str, Any]]] = None
+
+        # Text-vs-text excerpts (PLAN-textvtext-excerpts.md): whether the
+        # LOADED sidecar carries the excerpt-v1 marker AND the
+        # `discovery_excerpt` table, cached per (path, version) for the SAME
+        # reason `_launch_stats_cache` is: this predicate is checked on every
+        # panel render to decide whether the toggle shows at all, so it must
+        # be cheap, and a version-only key is not safe here -- all three local
+        # artifacts (pre-rebuild, private rebuild, public projection) report
+        # the identical `sidecar_version`, so a version-only cache would serve
+        # one artifact's availability answer for another after a path swap.
+        self._excerpt_availability_cache: Optional[Tuple[tuple, bool]] = None
+        self._locus_display_cache: Optional[Tuple[tuple, bool]] = None
+        self._locus_filter_cache: Optional[Tuple[tuple, bool]] = None
+
+        # Heavy-query bounded concurrency (mirrors web/search_api.py's
+        # _HeavySemaphoreState, kept per-instance since this class -- unlike
+        # the module-function shape of search_api.py -- IS the natural
+        # single-owner scope for its own concurrency budget).
+        capacity = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_QUERIES", _DEFAULT_MAX_CONCURRENT_QUERIES
+        )
+        self._heavy_sem = asyncio.Semaphore(capacity)
+        self._heavy_capacity = capacity
+
+        # The BROWSE-path bound. EVERY executor crossing takes one of these two
+        # slots -- there is no unbounded dispatch left (see `_run_off_loop`).
+        browse_capacity = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES",
+            _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES,
+        )
+        self._browse_sem = asyncio.Semaphore(browse_capacity)
+        self._browse_capacity = browse_capacity
+
+        # The EXPORT-path bound (phase 136.2). Third budget class, same shape.
+        export_capacity = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES",
+            _DEFAULT_MAX_CONCURRENT_EXPORT_QUERIES,
+        )
+        self._export_sem = asyncio.Semaphore(export_capacity)
+        self._export_capacity = export_capacity
+
+        # One executor PER BUDGET CLASS, sized to that class's capacity.
+        #
+        # Without them the split was nominal: both budgets dispatched into the
+        # SAME default `run_in_executor` pool, which this repository never
+        # configures and whose width is not guaranteed, so 24 browse jobs could
+        # occupy or queue ahead of every worker and a heavy read could time out
+        # while its own semaphore still had capacity (round 13, finding 2).
+        # Because `max_workers` EQUALS the semaphore capacity, holding a slot
+        # now guarantees a worker for that class -- and the timed-out-thread
+        # case stays consistent, since the slot is held until the future
+        # completes, which is exactly as long as the worker is busy.
+        #
+        # Built lazily and per class: `ThreadPoolExecutor` spawns a thread only
+        # when it has work, so a process with the discovery flag OFF pays
+        # nothing. Shut down when the service is collected -- the finalizer
+        # closes over the DICT, never over `self`, or it would keep the service
+        # alive forever.
+        self._executors: Dict[str, ThreadPoolExecutor] = {}
+        self._executor_finalizer = weakref.finalize(
+            self, _shutdown_executors, self._executors)
+
+    # ------------------------------------------------------------------
+    # Lazy connection management (F15 / R8)
+    # ------------------------------------------------------------------
+
+    def _get_conn(self) -> Optional[ThreadLocalConnection]:
+        try:
+            path = self._path_provider() if self._path_provider is not None else None
+        except Exception as e:
+            logger.error("DiscoveryService: path_provider raised: %s", e)
+            return None
+        if not path:
+            return None
+
+        version = None
+        if self._sidecar_version_provider is not None:
+            try:
+                version = self._sidecar_version_provider()
+            except Exception as e:
+                logger.error("DiscoveryService: sidecar_version_provider raised: %s", e)
+                version = None
+
+        with self._conn_lock:
+            if self._conn is None or path != self._last_path or version != self._last_version:
+                old_conn = self._conn
+                try:
+                    new_conn = ThreadLocalConnection(f"file:{path}?mode=ro", row_factory=sqlite3.Row)
+                except Exception as e:
+                    logger.error("DiscoveryService: failed to open %s: %s", path, e)
+                    return None
+                self._conn = new_conn
+                self._last_path = path
+                self._last_version = version
+                try:
+                    locus_row = new_conn.execute(
+                        "SELECT value FROM meta WHERE key='locus_display_version'"
+                    ).fetchone()
+                    has_locus_display = bool(
+                        locus_row and locus_row[0] == "locus-display-v1"
+                    )
+                except Exception:
+                    has_locus_display = False
+                self._locus_display_cache = ((path, version), has_locus_display)
+                try:
+                    locus_filter_row = new_conn.execute(
+                        "SELECT value FROM meta WHERE key='locus_filter_version'"
+                    ).fetchone()
+                    has_locus_filter = bool(
+                        locus_filter_row and locus_filter_row[0] == "locus-filter-v1"
+                    )
+                except Exception:
+                    has_locus_filter = False
+                self._locus_filter_cache = ((path, version), has_locus_filter)
+                if old_conn is not None:
+                    try:
+                        old_conn.close()
+                    except Exception:
+                        logger.debug(
+                            "DiscoveryService: error closing prior connection pool", exc_info=True
+                        )
+            return self._conn
+
+    def is_available(self) -> bool:
+        try:
+            if self._availability_callable is not None and not self._availability_callable():
+                return False
+        except Exception as e:
+            logger.error("DiscoveryService.is_available: availability_callable raised: %s", e)
+            return False
+        return self._get_conn() is not None
+
+    def _has_locus_display(self, conn: ThreadLocalConnection) -> bool:
+        """Whether this exact asset advertises the additive baked-label contract."""
+        key = (self._last_path, self._last_version)
+        cached = self._locus_display_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key='locus_display_version'"
+            ).fetchone()
+            enabled = bool(row and row[0] == "locus-display-v1")
+        except Exception:
+            enabled = False
+        self._locus_display_cache = (key, enabled)
+        return enabled
+
+    def _has_locus_filter(self, conn: ThreadLocalConnection) -> bool:
+        """Whether this asset carries the interval index used by range filters."""
+        key = (self._last_path, self._last_version)
+        cached = self._locus_filter_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key='locus_filter_version'"
+            ).fetchone()
+            enabled = bool(row and row[0] == "locus-filter-v1")
+        except Exception:
+            enabled = False
+        self._locus_filter_cache = (key, enabled)
+        return enabled
+
+    # ------------------------------------------------------------------
+    # Pagination helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clamp_page(page: Any) -> int:
+        try:
+            page = int(page)
+        except (TypeError, ValueError):
+            page = 1
+        return page if page >= 1 else 1
+
+    @staticmethod
+    def _clamp_page_size(page_size: Any) -> int:
+        # M3: DISCOVERY_PAGE_SIZE_MAX can only TIGHTEN the frozen absolute
+        # ceiling, never raise it -- a misconfigured env var (0, negative,
+        # or > _ABSOLUTE_PAGE_SIZE_CEILING) falls back to the ceiling itself
+        # rather than being trusted as-is.
+        raw_maximum = _get_int_env("DISCOVERY_PAGE_SIZE_MAX", _DEFAULT_PAGE_SIZE_MAX)
+        if raw_maximum <= 0 or raw_maximum > _ABSOLUTE_PAGE_SIZE_CEILING:
+            maximum = _ABSOLUTE_PAGE_SIZE_CEILING
+        else:
+            maximum = raw_maximum
+
+        default = _get_int_env("DISCOVERY_PAGE_SIZE_DEFAULT", _DEFAULT_PAGE_SIZE_DEFAULT)
+        if default <= 0 or default > maximum:
+            default = min(_DEFAULT_PAGE_SIZE_DEFAULT, maximum)
+
+        if page_size is None:
+            page_size = default
+        try:
+            page_size = int(page_size)
+        except (TypeError, ValueError):
+            page_size = default
+        if page_size <= 0:
+            page_size = default
+        return min(page_size, maximum)
+
+    # ------------------------------------------------------------------
+    # Sync read core (fjms_service graceful-absent shape -- never raises)
+    # ------------------------------------------------------------------
+
+    def get_version(self) -> Optional[str]:
+        if not self.is_available():
+            return None
+        conn = self._get_conn()
+        if conn is None:
+            return None
+        try:
+            cur = conn.execute("SELECT value FROM meta WHERE key = 'sidecar_version'")
+            row = cur.fetchone()
+            return row["value"] if row else None
+        except Exception as e:
+            logger.error("DiscoveryService.get_version error: %s", e)
+            return None
+
+    def excerpts_available(self) -> bool:
+        """PLAN-textvtext-excerpts.md: True iff the LOADED sidecar carries
+        BOTH the `excerpt_schema_version = 'excerpt-v1'` meta marker AND the
+        `discovery_excerpt` table (checked via `sqlite_master`, never by
+        querying the table itself and catching the failure -- a missing table
+        is the ORDINARY older-asset case here, not an error worth logging).
+
+        EITHER half missing reads False: a marker written before its table, or
+        a table copied without its meta row, is a partially-baked asset and
+        must gate exactly like an asset with neither -- "old-asset/new-code:
+        toggle hidden" (the owning plan) depends on this being conjunctive.
+
+        Cached per `(path, version)`, mirroring `_band_measurements` /
+        `_launch_stats_cache` -- and for the SAME reason those two cache that
+        way rather than by version alone: `sidecar_version` can stay identical
+        across a resolved-path swap (the pre-rebuild asset, the private
+        rebuild and the public projection all three report
+        `discovery-v1-real` locally), so a version-only key would serve one
+        artifact's availability answer for another. The connection is
+        resolved FIRST (`_get_conn()`), then keyed on the path/version IT
+        resolved -- reading `self._last_path` before that call would key on
+        the PREVIOUS artifact on the first call after a swap (the same
+        ordering `get_launch_stats_enveloped` documents).
+        """
+        if not self.is_available():
+            return False
+        conn = self._get_conn()
+        if conn is None:
+            return False
+        key = (self._last_path, self._last_version)
+        cached = self._excerpt_availability_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        try:
+            marker_row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'excerpt_schema_version'"
+            ).fetchone()
+            marker_ok = bool(marker_row) and marker_row["value"] == "excerpt-v1"
+            table_row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'discovery_excerpt'"
+            ).fetchone()
+            available = bool(marker_ok and table_row is not None)
+        except Exception as e:
+            logger.error("DiscoveryService.excerpts_available error: %s", e)
+            available = False
+
+        self._excerpt_availability_cache = (key, available)
+        return available
+
+    def get_band_precision(
+        self, evidence_source: Optional[str], confidence_band: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """BAND-02: the matching ``scope='band'`` ``band_precision`` row, or
+        None when absent/unavailable (never raises -- mirrors ``get_version``
+        exactly).
+
+        Uses ``SELECT *`` (never a fixed column list) so the 135-05-added
+        columns (``measurement_status``/``measurement_date``/``grader``/
+        ``audit_status``/``report_id``) surface when present and are simply
+        absent (via ``dict.get`` downstream) against a v1-shaped fixture."""
+        if not self.is_available():
+            return None
+        conn = self._get_conn()
+        if conn is None:
+            return None
+        try:
+            cur = conn.execute(
+                "SELECT * FROM band_precision WHERE scope = 'band' "
+                "AND evidence_source = ? AND confidence_band = ?",
+                (evidence_source, confidence_band),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_band_precision error for (%s, %s): %s",
+                evidence_source, confidence_band, e,
+            )
+            return None
+
+    def get_band_precision_collection(
+        self, collection_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """The ``scope='collection'`` ``band_precision`` row -- the
+        propagated-witness COLLECTION-level number (e.g. 0.926) that never
+        lives on any band row. With ``collection_id=None``, returns the sole
+        collection row when exactly one exists; None when zero or more than
+        one (ambiguous -- never raises, mirrors ``get_version``)."""
+        if not self.is_available():
+            return None
+        conn = self._get_conn()
+        if conn is None:
+            return None
+        try:
+            if collection_id is not None:
+                cur = conn.execute(
+                    "SELECT * FROM band_precision WHERE scope = 'collection' AND collection_id = ?",
+                    (collection_id,),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+            cur = conn.execute("SELECT * FROM band_precision WHERE scope = 'collection'")
+            rows = cur.fetchall()
+            if len(rows) != 1:
+                return None
+            return dict(rows[0])
+        except Exception as e:
+            logger.error("DiscoveryService.get_band_precision_collection error: %s", e)
+            return None
+
+    def get_band_claim_counts(self) -> Dict[Tuple[str, str], int]:
+        """Codex #9/#B1: the version-aware, SHIPPED, DISPLAY-DEDUPLICATED
+        per-(evidence_source, confidence_band) CLAIM-count population --
+        each ``discovery_claim`` counted ONCE via its single
+        ``display_evidence_id`` (per the build frame spec kept in the private
+        repository), NOT raw ``discovery_evidence`` rows (a claim owning >1 evidence row, e.g.
+        the witness + shared_text collision, must not inflate the count).
+        ``{}`` on unavailable/error (never raises). This is the BAND-05
+        "population" source -- reflects whatever sidecar asset is currently
+        loaded (v1 pre-bake, v2 post-deploy), never ``band_precision.
+        denominator`` (the graded-sample size, a different number)."""
+        if not self.is_available():
+            return {}
+        conn = self._get_conn()
+        if conn is None:
+            return {}
+        try:
+            cur = conn.execute(
+                """
+                SELECT e.evidence_source, e.confidence_band, COUNT(*) AS n
+                FROM discovery_claim c
+                JOIN discovery_evidence e ON e.evidence_id = c.display_evidence_id
+                WHERE e.routing_status = 'shipped'
+                GROUP BY e.evidence_source, e.confidence_band
+                """
+            )
+            return {
+                (row["evidence_source"], row["confidence_band"]): row["n"]
+                for row in cur.fetchall()
+            }
+        except Exception as e:
+            logger.error("DiscoveryService.get_band_claim_counts error: %s", e)
+            return {}
+
+    def get_claims_for_page(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """PANEL-01/02: the manuscript's banded claims on this page, each at
+        its display_evidence_id-selected band.
+
+        Defaults to the DEFAULT-SURFACE population, which is NOT "shipped
+        only" -- see ``_CLAIMS_DEFAULT_ROUTING_CLAUSE`` and D-13g. Review-only
+        rows still PERSIST in the sidecar (queryable) -- they are only hidden
+        from this default read surface, never deleted
+        (docs/specs/discovery-sidecar-schema-v1.md SS7); ``include_review=True``
+        opts into all of them.
+
+        Signature and return type are UNCHANGED from 134-06 (a list of dicts,
+        ``[]`` on every failure path, never an exception). The row now carries
+        the panel's display fields as well; the total is available only through
+        the enveloped shape below, since adding it here would change the return
+        type."""
+        try:
+            rows, _total = self._query_claims_for_page(
+                page_id, page=page, page_size=page_size, include_review=include_review)
+        except Exception as e:
+            logger.error("DiscoveryService.get_claims_for_page error for %s: %s", page_id, e)
+            return []
+        return rows
+
+    # ------------------------------------------------------------------
+    # 136-14 Task 1: the panel's ONE query.
+    # ------------------------------------------------------------------
+
+    def _query_claims_for_page(
+        self, page_id: str, *, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """The single page query: claim + display evidence + the materialized
+        identification + the DISPLAY work, plus the real total, in ONE
+        statement.
+
+        ``COUNT(*) OVER ()`` is what makes the total free: SQLite evaluates a
+        window function over the whole result set BEFORE ``LIMIT``, so the
+        panel gets its "N identifications" header without a second query and
+        without a per-row follow-up (T-136-14-03).
+
+        The identification join is a LEFT join deliberately. Its eligibility
+        rule (`shipped` OR `human_confirmed`) matches this query's own default
+        predicate, so it is total for the default population -- but under
+        ``include_review=True`` a review-only/unreviewed claim legitimately has
+        NO identification row, and an inner join would silently drop exactly
+        the rows the opt-in flag exists to reveal. A missing identification
+        surfaces as a NULL bucket, never as a vanished row.
+
+        ``eligibility_basis`` is derived PER ROW here rather than read from
+        ``discovery_identification.eligibility_basis``, for two reasons. It is
+        more precise: the stored column is an AGGREGATE over an identification's
+        evidence rows, so an identification carrying one shipped row and one
+        restored review-only row reports ``shipped`` for both, mislabelling the
+        row the surface must annotate. And it is more portable: that column is
+        not yet in the schema contract's authorized column list (a dated
+        amendment is owed), so a contract-shaped artifact may not carry it at
+        all. Three closed values: ``shipped``, ``human_confirmed`` (D-13g's
+        restore) and ``review_opt_in`` (present only because the caller passed
+        ``include_review``).
+
+        RAISES on a query failure rather than swallowing it into an empty
+        result. That distinction is load-bearing: the legacy list method turns
+        it back into ``[]`` (its contract), while the enveloped method turns it
+        into `unavailable`. Swallowing it here produced a real false zero --
+        against a PRE-REBUILD asset (no ``discovery_identification`` table) the
+        enveloped call reported `ok` with a total of 0, i.e. exactly the
+        "this manuscript has nothing" reading D-13 exists to prevent, on a
+        surface whose rule is to hide itself on a zero.
+
+        The identity join is on ``display_work_id``, NEVER ``canonical_work_id``:
+        the latter is not unique on ``works`` (15 duplicated groups on the live
+        asset, three with different titles and mixed source corpora), so joining
+        on it FANS OUT the identification grain (64,509 -> 65,587 rows) and
+        makes both the displayed title and ``identity_visibility`` a matter of
+        which row the join happened to return.
+        """
+        if not self.is_available():
+            return [], 0
+        conn = self._get_conn()
+        if conn is None:
+            return [], 0
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        routing_clause = "" if include_review else _CLAIMS_DEFAULT_ROUTING_CLAUSE
+        locus_sql = "dc.locus_label" if self._has_locus_display(conn) else "NULL"
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT dc.page_id, dc.work_id, dc.claim_id, dc.claim_type, dc.source_corpus,
+                       de.evidence_id, de.evidence_kind, de.evidence_source, de.confidence_band,
+                       de.adjudication_status, de.audit_status, de.routing_status, de.routing_reason,
+                       de.is_new, de.a_page_id, de.sys_id, de.span_start, de.span_end,
+                       de.text_layer, de.snapshot_hash,
+                       de.matched_letters, de.n_spans, de.band_rank,
+                       de.coverage_ppm, de.coverage_status,
+                       de.novelty_status, de.novelty_source_label,
+                       w.neutral_title, w.author, w.genre, w.canonical_work_id,
+                       di.identification_id, di.display_work_id, di.main_pool,
+                       di.main_pool_reason, di.page_count AS identification_page_count,
+                       {locus_sql} AS locus_label,
+                       -- C-track step 3b: the identification's matrix output, the
+                       -- CAP on what this page-level row may assert (spec 3.2).
+                       -- No new join -- `di` is already here for the display work.
+                       -- It leaves the service inside `rendered_relation`, never as
+                       -- its own surface field: a second relation-shaped column on
+                       -- the row is a second answer waiting for a renderer.
+                       di.rendered_relation AS identification_rendered_relation,
+                       CASE WHEN de.routing_status = 'shipped' THEN 'shipped'
+                            WHEN de.adjudication_status = 'human_confirmed'
+                                 THEN 'human_confirmed'
+                            ELSE 'review_opt_in' END AS eligibility_basis,
+                       dw.neutral_title AS display_neutral_title,
+                       dw.author AS display_author,
+                       dw.genre AS display_genre,
+                       CASE WHEN de.routing_status <> 'shipped'
+                             AND de.adjudication_status = 'human_confirmed'
+                            THEN 1 ELSE 0 END AS restored_by_human_confirmation,
+                       CASE WHEN de.routing_status <> 'shipped'
+                             AND de.routing_reason = 'low_coverage'
+                            THEN 1 ELSE 0 END AS low_coverage_marker,
+                       COUNT(*) OVER () AS _total_rows
+                FROM discovery_claim dc
+                JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
+                JOIN works w ON w.work_id = dc.work_id
+                LEFT JOIN discovery_identification di
+                       ON di.sys_id = de.sys_id
+                      AND di.canonical_work_id = w.canonical_work_id
+                LEFT JOIN works dw ON dw.work_id = di.display_work_id
+                WHERE dc.page_id = ?
+                {routing_clause}
+                ORDER BY COALESCE(de.band_rank, {_UNRANKED_BAND}) ASC, dc.work_id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (page_id, page_size, offset),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error("DiscoveryService.get_claims_for_page error for %s: %s", page_id, e)
+            raise
+        total = rows[0].pop("_total_rows", len(rows)) if rows else 0
+        for row in rows[1:]:
+            row.pop("_total_rows", None)
+        return rows, int(total)
+
+    def _band_measurements(self) -> Dict[Tuple[str, str], Tuple[Optional[str], Optional[float]]]:
+        """`(evidence_source, confidence_band) -> (measurement_status, ci_low)`
+        for every stored `scope='band'` row, cached per sidecar version.
+
+        Read ONCE per version rather than joined into the page query on
+        purpose: `band_precision` carries `precision`/`ci_low`/`ci_high`, and a
+        join would put those columns on every raw row the service returns --
+        one careless caller away from a D-06 violation. Here they exist only
+        inside this module, are consumed by `serialize_banded_claim`, and are
+        dropped by `surface_safe_claim` before anything leaves.
+        """
+        version = None
+        if self._sidecar_version_provider is not None:
+            try:
+                version = self._sidecar_version_provider()
+            except Exception:
+                version = None
+        key = (self._last_path, version)
+        cached = self._band_measurement_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        measurements: Dict[Tuple[str, str], Tuple[Optional[str], Optional[float]]] = {}
+        conn = self._get_conn()
+        if conn is not None:
+            try:
+                cur = conn.execute(
+                    "SELECT evidence_source, confidence_band, measurement_status, ci_low "
+                    "FROM band_precision WHERE scope = 'band'"
+                )
+                for row in cur.fetchall():
+                    measurements[(row["evidence_source"], row["confidence_band"])] = (
+                        row["measurement_status"], row["ci_low"],
+                    )
+            except Exception as e:
+                logger.error("DiscoveryService._band_measurements error: %s", e)
+                return {}
+        self._band_measurement_cache = (key, measurements)
+        return measurements
+
+    def _present_claim_row(
+        self, row: Mapping[str, Any], measurements, lang: str,
+    ) -> Dict[str, Any]:
+        """One raw query row -> the surface-safe panel row.
+
+        Band presentation goes through `serialize_banded_claim`, which RAISES
+        rather than emitting a bandless presentation (SC#1); the result is then
+        projected through the allowlist, which drops `review_overlay` and the
+        band measurement inputs. Both steps are mandatory: the serializer
+        guarantees the band is present, the projection guarantees the badge is
+        not.
+        """
+        measurement_status, ci_low = measurements.get(
+            (row.get("evidence_source"), row.get("confidence_band")), (None, None))
+        banded = serialize_banded_claim(
+            {**row, "measurement_status": measurement_status, "ci_low": ci_low}, lang)
+
+        display_title = row.get("display_neutral_title")
+        claim_title = row.get("neutral_title")
+        title = display_title if display_title else claim_title
+        presented = {
+            **row,
+            "band_label": banded["band_label"],
+            "measurement_status": banded["measurement_status"],
+            "default_eligible": banded["default_eligible"],
+            "display_work_id": row.get("display_work_id") or row.get("work_id"),
+            "neutral_title": title or None,
+            "title_missing": not bool(title),
+            "author": row.get("display_author") if display_title else row.get("author"),
+            "genre": row.get("display_genre") if display_title else row.get("genre"),
+            # C-track step 3b, narrowed by 3d: what this row may SAY, as against
+            # the stored `claim_type` the build recorded. ONE field, because every
+            # display read -- chip, headline, filter code, D-08a's percentage
+            # gate -- goes through it.
+            #
+            # Step 3b also emitted the stored value as `relation_kind`, for one
+            # consumer: `_anchor_identity` turned it into the expansion query's
+            # `anchor_claim_type`. Step 3d retired that consumer (the anchor now
+            # travels already capped) and dropped the field from
+            # `SURFACE_CLAIM_FIELDS`, but left this line building it -- a value
+            # the projection then silently discarded. Removed: a producer writing
+            # a field nothing consumes is the same hazard as an allowlist
+            # carrying one, one layer earlier.
+            #
+            # Capped per matrix-spec §3.2 -- a page-level row never out-asserts
+            # the identification it belongs to.
+            "rendered_relation": cap_member_relation(
+                row.get("claim_type"), row.get("identification_rendered_relation")),
+            "main_pool": None if row.get("main_pool") is None else bool(row.get("main_pool")),
+            "restored_by_human_confirmation": bool(row.get("restored_by_human_confirmation")),
+            "low_coverage_marker": bool(row.get("low_coverage_marker")),
+        }
+        return surface_safe_claim(presented)
+
+    def get_claims_for_page_enveloped(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False, lang: str = "en",
+    ) -> Dict[str, Any]:
+        """The SYNC enveloped shape of `get_claims_for_page` (D-13).
+
+        Two shapes, ONE implementation. This sync callable exists because the
+        panel crosses into `run.io_bound` with an explicit client, and an async
+        function handed to a sync worker silently returns a coroutine nobody
+        awaits; the async wrapper below exists because every other caller is on
+        the loop. Both go through this method -- never two query paths.
+
+        A failed query returns `unavailable`, never `ok` with an empty list: an
+        outage that renders as a genuine zero is the exact defect D-13 exists to
+        prevent (the panel hides itself on a SUCCESSFUL zero).
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        try:
+            rows, total = self._query_claims_for_page(
+                page_id, page=page, page_size=page_size, include_review=include_review)
+            measurements = self._band_measurements()
+            items = [self._present_claim_row(row, measurements, lang) for row in rows]
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_claims_for_page_enveloped error for %s: %s", page_id, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(
+            STATUS_OK, items, total,
+            meta={"page_id": page_id, "include_review": bool(include_review)},
+        )
+
+    # ------------------------------------------------------------------
+    # 136-14 Task 2: manuscript scope that NAMES the works (D-13h).
+    # ------------------------------------------------------------------
+
+    def get_manuscript_works_enveloped(
+        self, page_ids: Iterable[str], page: int = 1, page_size: Optional[int] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """"Elsewhere in this manuscript", as NAMED works (D-13h).
+
+        One row per DISTINCT canonical work identified anywhere in the given
+        page set, each carrying its page count, its strongest band rank, its
+        gating and its title. A bare count was rejected for a measured reason:
+        manuscript-level coherence is the context that makes a single claim
+        judgeable -- a page-23 Esther identification looks arbitrary alone and
+        obviously right once the reader sees that P2-P8 carry Song of Songs and
+        P22 Lamentations, i.e. a Megillot codex in the standard order. (Reader
+        aid ONLY -- it must never feed band assignment or routing, which would
+        be circular.)
+
+        NO routing filter. A work reachable only behind the screening toggle is
+        returned with `gated=True`, never omitted: on the mockup's teaching
+        case the five folios that made the anchor judgeable were ALL
+        `review_only/low_coverage`, so filtering them out removes exactly the
+        context this pane exists to supply.
+
+        `page_ids` empty is reported as `page_scope_resolved=False` rather than
+        as an ordinary zero, so a manuscript whose pages could not be resolved
+        never renders as "no identifications" (T-136-14-11).
+        """
+        page_id_list = [p for p in (page_ids or []) if p]
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        if not page_id_list:
+            return make_envelope(STATUS_OK, [], 0, meta={"page_scope_resolved": False})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        # A page list is bounded by the accessor that produced it; clamp again
+        # here so an unbounded caller cannot build a giant IN (...) list.
+        page_id_list = page_id_list[:_MAX_MANUSCRIPT_PAGE_IDS]
+        try:
+            cur = conn.execute(
+                _build_manuscript_works_sql(len(page_id_list)),
+                [*page_id_list, page_size, offset],
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error("DiscoveryService.get_manuscript_works error: %s", e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        total = int(rows[0]["_total_rows"]) if rows else 0
+        items = []
+        for row in rows:
+            title = row.get("display_neutral_title") or row.get("neutral_title")
+            items.append(surface_safe_work_summary({
+                **row,
+                "neutral_title": title or None,
+                "title_missing": not bool(title),
+                "gated": not bool(row.get("any_main_pool")),
+                "main_pool": bool(row.get("any_main_pool")),
+                # C-track step 3c: the rank comes back from SQL, the vocabulary
+                # from the matrix module. The pane never sees a rank.
+                "rendered_relation": relation_from_rank(row.get("_relation_rank")),
+            }))
+        return make_envelope(STATUS_OK, items, total,
+                             meta={"page_scope_resolved": True, "lang": lang})
+
+    # ------------------------------------------------------------------
+    # 136-14 Task 2: the related-page count (D-11a) and its rows (D-11).
+    # ------------------------------------------------------------------
+
+    def get_related_page_count_enveloped(
+        self, page_id: str, include_review: bool = False,
+    ) -> Dict[str, Any]:
+        """The header figure: DISTINCT opposite pages for this anchor,
+        deduplicated (D-11a).
+
+        NOT evidence rows and NOT directed pairs -- the three populations are
+        genuinely different (40,968 shipped shared-text evidence rows / 37,397
+        directed page pairs / 30,539 unordered), and an earlier published
+        figure conflated them. Returns the count with NO rows: the panel shows
+        the header and count by default and fetches the rows only behind the
+        toggle (D-11).
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        routing_clause = eligibility_clause(_review_toggle_mode(include_review))
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT CASE WHEN a_page_id = ? THEN other_page_id
+                                           ELSE a_page_id END) AS n
+                FROM discovery_evidence
+                WHERE evidence_kind = 'shared_text'
+                  AND (a_page_id = ? OR other_page_id = ?)
+                  {routing_clause}
+                """,
+                (page_id, page_id, page_id),
+            )
+            row = cur.fetchone()
+            total = int(row["n"] or 0) if row else 0
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_related_page_count error for %s: %s", page_id, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(STATUS_OK, [], total, meta={"unit": "distinct_opposite_pages"})
+
+    def get_related_pages_enveloped(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> Dict[str, Any]:
+        """The rows behind the toggle: ONE row per DISTINCT opposite page,
+        carrying how many evidence rows collapsed into it. The total agrees
+        with `get_related_page_count_enveloped` by construction (same
+        grouping).
+
+        EACH ROW NAMES ITS MANUSCRIPT. The rows used to carry the composite
+        `related_page_id` and nothing else, and the panel rendered it -- so a
+        scholarly surface showed readers
+        `990051620920205171_IE167198813_P000003_FL167198817` where a shelfmark
+        belongs. The name is resolved HERE, in ONE joined query against
+        `manuscript_display`, and never per row in the UI layer: this app runs a
+        single uvicorn worker, so a per-row lookup on the event loop stalls
+        every concurrent request.
+
+        The FOLIO number comes out of the id's own shape
+        (`{sys_id}_{ie_id}_P{n:06d}_{fl_id}`), parsed here rather than in a
+        renderer, so no surface has to know that shape to show a page number.
+        `display_missing` is True when the join found no display row -- the
+        surface then says so rather than falling back to the raw id, which is
+        how the defect would come back.
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        routing_clause = eligibility_clause(_review_toggle_mode(include_review))
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT r.related_page_id AS related_page_id,
+                       r.sys_id AS sys_id,
+                       MIN(md.library_code) AS library_code,
+                       MIN(md.shelfmark_display) AS shelfmark_display,
+                       MIN(r.evidence_id) AS evidence_id,
+                       MIN(r.evidence_source) AS evidence_source,
+                       MIN(r.confidence_band) AS confidence_band,
+                       MIN(COALESCE(r.band_rank, {_UNRANKED_BAND})) AS band_rank,
+                       COUNT(*) AS evidence_row_count,
+                       COUNT(*) OVER () AS _total_rows
+                FROM (
+                    SELECT related_page_id,
+                           -- The sys_id is the id's own first component; the
+                           -- shape is `{{sys_id}}_{{ie_id}}_P{{n}}_{{fl_id}}`.
+                           substr(related_page_id, 1,
+                                  instr(related_page_id, '_') - 1) AS sys_id,
+                           evidence_id, evidence_source, confidence_band, band_rank
+                    FROM (
+                        SELECT CASE WHEN a_page_id = ? THEN other_page_id
+                                    ELSE a_page_id END AS related_page_id,
+                               evidence_id, evidence_source, confidence_band, band_rank
+                        FROM discovery_evidence
+                        WHERE evidence_kind = 'shared_text'
+                          AND (a_page_id = ? OR other_page_id = ?)
+                          {routing_clause}
+                    )
+                    WHERE related_page_id IS NOT NULL
+                ) AS r
+                LEFT JOIN manuscript_display md ON md.sys_id = r.sys_id
+                GROUP BY r.related_page_id, r.sys_id
+                ORDER BY band_rank ASC, r.related_page_id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (page_id, page_id, page_id, page_size, offset),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_related_pages error for %s: %s", page_id, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        total = int(rows[0]["_total_rows"]) if rows else 0
+        items = [
+            surface_safe_related_page({
+                **row,
+                "page_number": _page_number_from_page_id(row.get("related_page_id")),
+                # THE VOLUME THAT FOLIO NUMBER BELONGS TO (owner request,
+                # 2026-08-08). This row already linked with `&page=<n>` and NO
+                # volume, which for a multi-volume manuscript is not an
+                # approximate address but a different page in each volume --
+                # `/browse` resolves a bare `page` against whichever volume it
+                # opens. 988 of the artifact's identifications span volumes.
+                #
+                # A SEPARATE key from `page_number`, not folded into it, because
+                # the two serve different jobs: `page_number` is a DISPLAYED
+                # fact ("Folio 3") that stays true whether or not a volume could
+                # be parsed, while the LINK needs a complete address and is
+                # gated on both through `browse_target_is_a_folio`. Collapsing
+                # them would blank a folio label to protect a link.
+                "volume_ie": _volume_ie_from_page_id(row.get("related_page_id")),
+                # A LEFT JOIN that found nothing is a NAMED state, never a
+                # blank: the surface says the manuscript is not in the display
+                # index rather than printing the composite id it does have.
+                "display_missing": (row.get("library_code") is None
+                                    or row.get("shelfmark_display") is None),
+            })
+            for row in rows
+        ]
+        return make_envelope(STATUS_OK, items, total,
+                             meta={"unit": "distinct_opposite_pages"})
+
+    # ------------------------------------------------------------------
+    # 136-14 Task 3: the corpus-wide findings query and its facet cascade.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clamp_findings_page_size(page_size: Any) -> int:
+        if page_size is None:
+            page_size = _get_int_env(
+                "DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT",
+                _DEFAULT_FINDINGS_PAGE_SIZE_DEFAULT,
+            )
+        # The shared DISCOVERY_PAGE_SIZE_MAX ceiling is unchanged and applies.
+        return DiscoveryService._clamp_page_size(page_size)
+
+    def _first_match_pages(
+        self, conn: Any, sys_ids: Sequence[str],
+    ) -> Dict[Tuple[str, str], str]:
+        """`{(sys_id, canonical_work_id): first matched page id}`, in ONE query.
+
+        BATCHED, and that is a correctness property rather than a tuning one:
+        this app runs a SINGLE uvicorn worker, so a per-row lookup on a 50-row
+        result page is 50 serialized round trips inside one request -- the exact
+        shape `get_related_pages_enveloped` already documents as forbidden ("the
+        name is resolved HERE, in ONE joined query, and never per row in the UI
+        layer").
+
+        Measured on the served artifact, batched, for a 50-manuscript page:
+        0.4ms on a default first page, 35.5ms mid-corpus, and 101.2ms on the 50
+        manuscripts with the heaviest evidence fan-out -- against ~425ms for the
+        same work issued one manuscript at a time. The spread is the fan-out, not
+        the page size: a manuscript identified with many works groups all of its
+        eligible evidence. The worst case is bounded by the page size times that
+        fan-out and runs in the HEAVY executor under its own timeout, so it
+        degrades to a `timeout` envelope rather than to a stalled event loop.
+
+        Returns `{}` -- never raises and never propagates -- on ANY failure, and
+        the caller degrades to the pre-existing behaviour (the preview opens the
+        manuscript, and the row's copy says so). A folio that could not be
+        resolved must cost a reader a better link, not the result set.
+        """
+        keys = [s for s in dict.fromkeys(str(x) for x in sys_ids if x)]
+        if not keys:
+            return {}
+        sql = _FIRST_MATCH_PAGE_SQL.format(
+            values=",".join(["(?)"] * len(keys)))
+        try:
+            cur = conn.execute(sql, (*keys, _PAGE_ID_PREFIX_SENTINEL))
+            return {
+                (str(row["sys_id"]), str(row["canonical_work_id"])): str(row["page_id"])
+                for row in cur.fetchall()
+                if row["page_id"]
+            }
+        except Exception as e:  # noqa: BLE001 -- a link detail, never the page
+            logger.error("DiscoveryService._first_match_pages error: %s", e)
+            return {}
+
+    def get_locus_units_enveloped(self, work_id: str) -> Dict[str, Any]:
+        """Ordered address units for one selected work, when the asset supports it."""
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None or not self._has_locus_filter(conn):
+            return unavailable_envelope(meta={"reason": "locus_filter_unavailable"})
+        try:
+            work = conn.execute(
+                "SELECT family, grain FROM locus_work WHERE work_id=?",
+                (str(work_id),),
+            ).fetchone()
+            rows = conn.execute(
+                "SELECT citation_pos, MIN(part_key) AS part_key, "
+                "MIN(label_he) AS label_he FROM locus_unit "
+                "WHERE work_id=? AND citation_pos IS NOT NULL "
+                "GROUP BY citation_pos ORDER BY citation_pos",
+                (str(work_id),),
+            ).fetchall()
+        except Exception as exc:
+            logger.error("DiscoveryService.get_locus_units error: %s", exc)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        items = [surface_safe_locus_unit(dict(row)) for row in rows]
+        work_meta = dict(work) if work is not None else {}
+        return make_envelope(
+            STATUS_OK, items, len(items),
+            meta={
+                "work_id": str(work_id),
+                "locus_filter": True,
+                "family": work_meta.get("family"),
+                "grain": work_meta.get("grain"),
+            },
+        )
+
+    def get_findings_enveloped(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_HIDDEN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """The corpus-wide findings query, in whichever of the three offered
+        units the reader selected.
+
+        The default result set is the MAIN POOL with ruling F's catalogue-
+        divergent rows EXCLUDED, and the envelope's meta says so on both counts
+        (`bucket`, `divergence`) -- the surface narrows the corpus view
+        visibly, never silently.
+
+        An out-of-vocabulary `unit`, `sort` or `bucket` raises `ValueError`
+        rather than returning an outage envelope: those values come from closed
+        enums the surface maps, so an unknown one is a programming error, not a
+        service state. The four envelope statuses stay reserved for things that
+        actually happened to the service.
+        """
+        page = self._clamp_page(page)
+        page_size = self._clamp_findings_page_size(page_size)
+        # Validate the vocabulary BEFORE the availability check, so a bad unit
+        # is a loud error even while the sidecar is off.
+        sql, params = _build_findings_query(
+            unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+            divergence=divergence, domain=domain,
+            author=author, work_id=work_id, locus_from=locus_from,
+            locus_to=locus_to, page=page, page_size=page_size,
+            suppressed=suppressed, sys_id=sys_id)
+
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        locus_filter_enabled = self._has_locus_filter(conn)
+        if self._has_locus_display(conn):
+            sql, params = _build_findings_query(
+                unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                divergence=divergence, domain=domain,
+                author=author, work_id=work_id, locus_from=locus_from,
+                locus_to=locus_to, page=page, page_size=page_size,
+                suppressed=suppressed, sys_id=sys_id, locus_enabled=True,
+                locus_filter_enabled=locus_filter_enabled,
+            )
+
+        novelty_offered = findings_novelty_offered(unit)
+        count_cap = _get_int_env("DISCOVERY_FINDINGS_COUNT_MAX", 0)
+        try:
+            rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+            approximate = False
+            if count_cap > 0:
+                count_sql, count_params = _build_findings_query(
+                    unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                    divergence=divergence,
+                    domain=domain, author=author, work_id=work_id,
+                    locus_from=locus_from, locus_to=locus_to,
+                    suppressed=suppressed, sys_id=sys_id,
+                    count_only=True, count_cap=count_cap,
+                    locus_filter_enabled=locus_filter_enabled)
+                counted = int(conn.execute(count_sql, count_params).fetchone()["n"])
+                if counted > count_cap:
+                    total, approximate = count_cap, True
+                else:
+                    total = counted
+            else:
+                total = int(rows[0]["_total_rows"]) if rows else 0
+                if not rows and page > 1:
+                    # AN OFFSET PAST THE END RETURNS NO ROWS, so `COUNT(*)
+                    # OVER ()` has nothing to count and the window function's
+                    # total is 0 -- for a filtered set that may hold thousands.
+                    # Reported as-is, that zero is indistinguishable from a
+                    # genuine empty result, and every surface downstream renders
+                    # "no results found" over a corpus that has them, with a
+                    # pager that says page 1 of 1 and disables both directions.
+                    # A persisted page (this one is) makes that state STICKY.
+                    #
+                    # So the REAL total is resolved with the count form, on the
+                    # same predicate. It costs one extra aggregate on a path
+                    # nobody reaches in normal paging, and it turns an outage-
+                    # shaped lie into a number the surface can clamp against.
+                    count_sql, count_params = _build_findings_query(
+                        unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                        divergence=divergence,
+                        domain=domain, author=author, work_id=work_id,
+                        locus_from=locus_from, locus_to=locus_to,
+                        suppressed=suppressed, sys_id=sys_id,
+                        count_only=True, locus_filter_enabled=locus_filter_enabled)
+                    total = int(conn.execute(count_sql, count_params).fetchone()["n"])
+        except Exception as e:
+            logger.error("DiscoveryService.get_findings error (unit=%s): %s", unit, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        # WHERE THE MATCH ACTUALLY IS, on the leaf unit only (owner report,
+        # 2026-08-08). Resolved for the rows THIS PAGE returned and no others --
+        # after `LIMIT`, so the cost is bounded by the page size and not by the
+        # filtered set, which can be tens of thousands of rows.
+        #
+        # LEAF ONLY, and for the reason the preview itself is leaf-only: a work
+        # row spans manuscripts and a manuscript row spans works, so "the first
+        # matched folio" on either would have to CHOOSE which of the row's
+        # candidates to answer for, and choosing between a row's candidates is
+        # adjudication -- the one thing no surface in this phase does.
+        first_pages: Dict[Tuple[str, str], str] = {}
+        if unit == FINDINGS_UNIT_IDENTIFICATION and rows:
+            first_pages = self._first_match_pages(
+                conn, [row.get("sys_id") for row in rows])
+
+        items = []
+        for row in rows:
+            work_count = int(row.get("work_count") or 1)
+            first_address = _browse_address_from_page_id(first_pages.get(
+                (str(row.get("sys_id") or ""), str(row.get("canonical_work_id") or ""))))
+            items.append(surface_safe_finding({
+                **row,
+                "unit": unit,
+                # The two components of a `/browse` address, parsed in the
+                # SERVICE so no surface has to know the page id's shape -- and
+                # so that no surface has a reason to hold the composite id at
+                # all. BOTH OR NEITHER, enforced by the one predicate in
+                # `_browse_address_from_page_id`: the row's copy and the row's
+                # link must not be able to disagree about whether there is a
+                # folio, and the only way to guarantee that is for there to be
+                # one answer rather than two derivations of it.
+                "first_match_page": first_address[0],
+                "first_match_volume_ie": first_address[1],
+                "domain": row.get("genre") or DOMAIN_UNASSIGNED,
+                "main_pool": bool(row.get("main_pool")),
+                "novelty_offered": novelty_offered,
+                "novelty_status": row.get("novelty_status") if novelty_offered else None,
+                # Ruling F's marker, on EVERY unit -- deliberately NOT gated on
+                # `novelty_offered`. That flag answers "does a single novelty
+                # verdict mean anything on this row", which is false for a work
+                # row; whether the row disagrees with a catalogue is a
+                # different question and has an answer on all three units.
+                "divergent": bool(row.get("divergent")),
+                "multi_work_annotation": work_count > 1,
+            }))
+        return make_envelope(STATUS_OK, items, total, meta={
+            "unit": unit,
+            "bucket": bucket,
+            "sort": sort,
+            "sort_basis": _FINDINGS_SORT_BASIS[sort],
+            "novelty_offered": novelty_offered,
+            "divergence": divergence,
+            #: WHETHER THE ROWS COUNTED HERE INCLUDE THE CATALOGUE-DIVERGENT
+            #: ONES -- a BOOLEAN derived from the predicate actually applied, so
+            #: the result bar can reconcile its count with the corpus headline
+            #: without re-deriving anything.
+            #:
+            #: Reported as a boolean rather than by echoing the selected shades:
+            #: `meta` is a governed vocabulary (a raw shade list there would be
+            #: stored machine vocabulary in a reader-facing envelope), and the
+            #: only question a surface asks of it is this yes/no. `meta`
+            #: `['divergence']` above can no longer answer it: the page pins that
+            #: axis to `shown` unconditionally now and expresses ruling F's rows
+            #: through `novelty` instead, so it would report "included" on every
+            #: render regardless of what the reader chose.
+            "divergent_included": (
+                divergence != DIVERGENCE_HIDDEN
+                if not novelty
+                else bool(set(novelty) & set(DIVERGENCE_SHADE_ORDER))
+            ),
+            # The page this envelope actually SERVED, after the service's own
+            # clamp. A surface that persists its page needs to compare the page
+            # it asked for against the set that came back, and reading its own
+            # request back for that comparison proves nothing.
+            "page": page,
+            # ...and the page SIZE this envelope was actually built with, after
+            # `_clamp_findings_page_size` applied the shared ceiling. A surface
+            # computing its pager from its own requested size divides a real
+            # total by a size the service refused: with
+            # `DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT` above
+            # `DISCOVERY_PAGE_SIZE_MAX` the page count comes out too small and
+            # the tail of the set is unreachable, with nothing saying so.
+            "page_size": page_size,
+            "approximate_total": approximate,
+            "locus_filter": locus_filter_enabled,
+            "locus_from": locus_from if locus_filter_enabled else None,
+            "locus_to": locus_to if locus_filter_enabled else None,
+        })
+
+    def _export_artifact_identity(self) -> Tuple[Any, Any]:
+        """`(resolved path, sidecar_version)` -- the identity the export pins
+        itself to across its two trips to the sidecar.
+
+        THE VERSION ALONE IS NOT AN IDENTITY, and this module says so about its
+        own caches: `sidecar_version` "can stay identical across a resolved-path
+        swap (the pre-rebuild asset, the private rebuild and the public
+        projection all three report `discovery-v1-real` locally)". An export
+        that compared only the version would therefore accept exactly the swap
+        it was written to detect (Codex review round 3, finding 5) -- so it
+        compares the PAIR, which is the same key `_band_measurements` and
+        `_launch_stats_cache` already use for the same reason.
+        """
+        try:
+            path = self._path_provider() if self._path_provider is not None else None
+        except Exception:  # pragma: no cover - the provider's own failure path
+            path = None
+        return (path, self.get_version())
+
+    def _export_timeout(self) -> float:
+        return _get_positive_float_env(
+            "DISCOVERY_EXPORT_TIMEOUT", _DEFAULT_EXPORT_TIMEOUT)
+
+    def _export_walk(self, **query) -> Tuple[
+            Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[int],
+            Dict[str, Any], bool, bool]:
+        """Every page of ONE `get_findings_enveloped` query, as a flat list.
+
+        Returns `(error_envelope_or_None, items, reported_total, first_page_meta,
+        approximate_total, guard_tripped)`. Extracted from
+        `collect_findings_for_export` because a GROUPED export runs it twice --
+        once on the group grain for its order, once on the leaf grain for its
+        rows -- and two hand-written copies of a paging loop whose whole point
+        is not to end early is two chances to end early differently.
+        """
+        page_size = self._clamp_page_size(_ABSOLUTE_PAGE_SIZE_CEILING)
+        approximate_total = False
+        guard_tripped = False
+        items: List[Dict[str, Any]] = []
+        first_meta: Dict[str, Any] = {}
+        total: Optional[int] = None
+        page = 1
+
+        while True:
+            envelope = self.get_findings_enveloped(page=page,
+                                                   page_size=page_size, **query)
+            if envelope.get("status") != STATUS_OK:
+                return envelope, [], None, {}, False, False
+            if page == 1:
+                first_meta = dict(envelope.get("meta") or {})
+                total = envelope.get("total")
+                # `DISCOVERY_FINDINGS_COUNT_MAX` turns `total` into a CAP and
+                # flags it. Using a capped total as the walk's upper bound would
+                # stop the export at the cap and then compare the rows it
+                # collected against that same cap and call the file complete --
+                # a short workbook certifying itself. When the count is
+                # approximate the bound is DROPPED and the walk ends the honest
+                # way, on a short page.
+                approximate_total = bool(first_meta.get("approximate_total"))
+            batch = list(envelope.get("items") or ())
+            items.extend(batch)
+            # THE ONLY HONEST END OF THE WALK: a page shorter than the page
+            # size. The reported total is deliberately NOT used as a stopping
+            # condition.
+            #
+            # It was, and that was a false-complete generator (Codex review,
+            # finding B): an under-reported total whose value happened to land
+            # on a full-page boundary stopped the loop early AND then satisfied
+            # `len(items) == total`, so the workbook declared itself complete
+            # having never asked whether more rows existed. Stopping on EOF
+            # costs one extra query when the set divides exactly by the page
+            # size, and cannot produce that lie.
+            if len(batch) < page_size:
+                break
+            page += 1
+            # RUNAWAY GUARD ONLY -- generous, and never a completeness signal.
+            # An artifact whose window total disagrees wildly with what the
+            # predicate returns must not spin forever on a single-worker box.
+            # Tripping it marks the walk INCOMPLETE rather than ending it
+            # quietly.
+            #: THE CAPPED TOTAL IS NOT A BOUND. When the count is
+            #: approximate, `total` is a CEILING the counter stopped at,
+            #: not a measurement -- deriving the guard from it stops the
+            #: walk a few pages past the cap and returns an `ok` envelope
+            #: for a file the reader asked to be whole (Codex review of
+            #: PR #322, P1). The stopping condition above already drops
+            #: it for exactly this reason; the guard was left behind,
+            #: which made this code contradict its own comment. Falls
+            #: back to the flat no-total ceiling, which is still a
+            #: liveness bound and still marks the walk INCOMPLETE if it
+            #: ever trips.
+            if page > _export_page_guard(
+                    None if approximate_total else total, page_size):
+                guard_tripped = True
+                logger.error(
+                    "DiscoveryService export walk exceeded its page guard "
+                    "(pages=%s, reported_total=%s) -- returning an INCOMPLETE "
+                    "result set", page, total)
+                break
+        return None, items, total, first_meta, approximate_total, guard_tripped
+
+    def collect_findings_for_export(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_SHOWN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
+        with_excerpts: bool = True,
+    ) -> Dict[str, Any]:
+        """EVERY row matching the filters, plus its excerpt, in ONE envelope.
+
+        EXPORT-01's "one data path, not two": this walks `get_findings_enveloped`
+        page by page rather than issuing its own SQL. The export therefore cannot
+        return a row the page would not, cannot order them differently, and
+        cannot acquire a column the surface projection withholds -- because it
+        is reading through the same method, the same projection and the same
+        predicate the reader is looking at.
+
+        UNCAPPED IN ROWS by owner decision (2026-08-20), and bounded everywhere
+        else instead: one export slot for the whole walk (see `_SLOT_EXPORT`),
+        one timeout for the whole build, and a chunked excerpt read rather than
+        one query per row.
+
+        Paging a live result set is normally a correctness hazard -- rows shift
+        between pages as the data changes underneath. It is safe HERE, and only
+        here, because the sidecar is a READ-ONLY artifact pinned to one
+        `sidecar_version` for the life of the process: there is no writer, so
+        the ordering cannot move mid-walk. `meta['sidecar_version']` is carried
+        out so the caller can state which artifact the file describes.
+
+        FAILS WHOLE, NEVER SHORT. Any page that comes back with a status other
+        than `ok` aborts the walk and returns THAT status. A partial workbook
+        presented as a complete one is the export-shaped version of the defect
+        the envelope exists to prevent -- a reader cannot tell a short file from
+        a small result set, and this one is downloaded and kept.
+        """
+        # THE ARTIFACT IS PINNED ACROSS THE WALK. Paging is only safe because
+        # the sidecar is read-only for the life of a version -- but the loader
+        # supports re-pointing and the service reconnects whenever the path or
+        # version changes, so a deploy landing mid-export could hand the second
+        # half of the walk a different artifact from the first. Recorded before
+        # the walk and re-checked after (Codex review, finding A).
+        identity_before = self._export_artifact_identity()
+        filters = dict(
+            bucket=bucket, novelty=novelty, divergence=divergence,
+            domain=domain, author=author, work_id=work_id,
+            locus_from=locus_from, locus_to=locus_to, sort=sort,
+            suppressed=suppressed, sys_id=sys_id)
+
+        # ---- the grouped units are FLATTENED, not exported as they render ---
+        #
+        # `unit=work` and `unit=manuscript` are GROUP BY grains, and their
+        # SELECT lists write NULL into the columns the other grain carries: a
+        # work row has no `sys_id`, no shelfmark and no `identification_id` (so
+        # no excerpt either), and a manuscript row has no work, author or
+        # relation. On the PAGE that is complete, because the row carries an
+        # EXPANDER. A spreadsheet has none, so the file was a title and two
+        # counts -- "useless xlsx, no expandable id ... so no ms id and not
+        # text" (owner report, 2026-08-21).
+        #
+        # The expander's own contract is that "the children come from the same
+        # read at the leaf grain with this key pinned". So the export walks the
+        # GROUP grain for its order and the LEAF grain for its rows, and emits
+        # the leaves in the groups' order. Every leaf already carries both
+        # identities (`sys_id` + `shelfmark_display` AND `display_work_id` +
+        # `neutral_title`), so the grouping survives as columns a reader can
+        # sort and pivot on -- which is what a spreadsheet has instead of a
+        # disclosure triangle.
+        group_pair = EXPANSION_KEY_BY_UNIT.get(unit)
+        group_order: Dict[str, int] = {}
+        group_total: Optional[int] = None
+        group_order_complete = True
+        # WHICH cause fired, not just that one did. The flag above is the
+        # umbrella and stays conservative; these two are what the About
+        # sheet is allowed to make a sentence out of. Reporting "some rows
+        # appear at the end" for a cause that placed every row is a false
+        # statement in a file that travels without its page.
+        group_unplaced = 0
+        group_count_approximate = False
+        if group_pair is not None:
+            group_field = group_pair[0]
+            err, group_items, group_total, _gmeta, g_approx, g_guard = (
+                self._export_walk(unit=unit, **filters))
+            if err is not None:
+                return err
+            for index, row in enumerate(group_items):
+                key = str(row.get(group_field) or "")
+                if key and key not in group_order:
+                    group_order[key] = index
+            # A short GROUP walk costs ORDER, not rows: the leaves it could not
+            # place sort to the end. Stated separately rather than folded into
+            # `walk_complete`, which is about the ROWS and must not be reddened
+            # by a presentation degradation.
+            group_order_complete = not (g_approx or g_guard)
+            # An approximate count does NOT shorten the walk -- the bound
+            # is dropped and it still ends on a short page -- so the order
+            # survives. What does not survive is `group_total`, which is a
+            # CAP the About sheet would otherwise print as a count.
+            group_count_approximate = bool(g_approx)
+
+        leaf_unit = (FINDINGS_UNIT_IDENTIFICATION if group_pair is not None
+                     else unit)
+        err, items, total, first_meta, approximate_total, guard_tripped = (
+            self._export_walk(unit=leaf_unit, **filters))
+        if err is not None:
+            return err
+        if guard_tripped:
+            # FAILS WHOLE, NEVER SHORT -- this module's stated rule, and a
+            # tripped guard on the LEAF walk is the one case that was
+            # still shipping a file it knew was missing rows. Saying so on
+            # the About sheet is not enough for an endpoint whose contract
+            # is the whole filtered set: a reader who does not open that
+            # sheet cannot tell a truncated download from a small one
+            # (Codex review of PR #323). The GROUP walk's guard is NOT
+            # this -- there every leaf is present and only the ordering is
+            # uncertified, which is a presentation degradation and stays
+            # disclosed rather than fatal.
+            logger.error(
+                "DiscoveryService export: the leaf walk tripped its page "
+                "guard -- refusing a knowingly partial workbook")
+            return unavailable_envelope(
+                meta={"reason": "export_walk_incomplete"})
+
+        if group_pair is not None:
+            group_field = group_pair[0]
+            group_unplaced = sum(
+                1 for row in items
+                if str(row.get(group_field) or "") not in group_order)
+            if group_unplaced:
+                # The two walks share one predicate, so this should be zero.
+                # Counted and carried out rather than assumed: a silent
+                # disagreement between the group list and the leaves under it is
+                # the one thing this two-walk design could get wrong.
+                logger.warning(
+                    "DiscoveryService export: %s leaf row(s) matched no group "
+                    "from the %s walk", group_unplaced, unit)
+                group_order_complete = False
+            # STABLE, so the page's own ordering survives inside each group.
+            items.sort(key=lambda row: group_order.get(
+                str(row.get(group_field) or ""), len(group_order)))
+
+        if self._export_artifact_identity() != identity_before:
+            # A different artifact answered part of this walk. The rows cannot
+            # be reconciled after the fact, so the export fails rather than
+            # shipping a file that mixes two builds.
+            logger.error(
+                "DiscoveryService export walk saw the sidecar version change "
+                "mid-walk -- refusing to build a mixed-artifact export")
+            return unavailable_envelope(meta={"reason": "artifact_changed_mid_export"})
+
+        excerpts: Dict[str, Dict[str, Any]] = {}
+        if with_excerpts and items:
+            try:
+                excerpts = self._query_excerpts_for_identifications(
+                    [row.get("identification_id") for row in items])
+            except Exception as e:
+                # Type name only -- this module reads an artifact that may carry
+                # private content and a driver message can quote its input.
+                logger.error(
+                    "DiscoveryService export excerpt read failed (%s)",
+                    type(e).__name__)
+                return unavailable_envelope(meta={"reason": "excerpt_read_failed"})
+
+        # AND AGAIN AFTER THE EXCERPTS. The excerpt read is a second trip to the
+        # sidecar and `is_available()` will happily reconnect to a newly loaded
+        # artifact, so checking only before it left a window where old finding
+        # rows could be married to new excerpt text and stamped with the new
+        # version (Codex review round 2, finding 5).
+        if self._export_artifact_identity() != identity_before:
+            logger.error(
+                "DiscoveryService export walk saw the sidecar artifact change "
+                "during the excerpt read -- refusing a mixed-artifact export")
+            return unavailable_envelope(meta={"reason": "artifact_changed_mid_export"})
+
+        meta = dict(first_meta)
+        meta.update({
+            "export": True,
+            #: THE UNIT THE READER ASKED FOR, against the grain the file is
+            #: actually on. They differ for a grouped unit, and the About sheet
+            #: has to say so: a file with 40,000 rows headed "one row per work"
+            #: is a puzzle unless it explains itself.
+            "export_unit_requested": unit,
+            "export_grain": leaf_unit,
+            "export_group_count": group_total,
+            "export_group_order_complete": group_order_complete,
+            #: The ONE cause that changes what a reader sees in the rows:
+            #: leaves that matched no group sort to the end. Carried as a
+            #: COUNT rather than a flag so the workbook can tell "nothing
+            #: moved" from "something did" instead of inferring it from
+            #: the umbrella above, which also goes False for causes that
+            #: placed every row.
+            "export_group_unplaced": group_unplaced,
+            #: `export_group_count` is a CAP, not a count. Stating a cap as
+            #: a count is the defect `DISCOVERY_FINDINGS_COUNT_MAX` is
+            #: documented against, and a downloaded file is where it is
+            #: least checkable.
+            "export_group_count_approximate": group_count_approximate,
+            "row_count": len(items),
+            "excerpt_count": len(excerpts),
+            #: The count the FIRST page reported against what the walk actually
+            #: collected. Equal on every healthy read; carried out rather than
+            #: asserted so the workbook can state it, because a silent
+            #: disagreement here is precisely the "short file that looks
+            #: complete" failure.
+            "reported_total": total,
+            #: `None` -- not `True` -- when the reported total was a cap: the
+            #: walk cannot be checked against a number that was never a count,
+            #: and claiming completeness there would be the assertion this key
+            #: exists to avoid making.
+            #: ORDER MATTERS, and it was wrong first time round (Codex
+            #: review round 2, finding 3). A tripped guard means the walk was
+            #: KNOWINGLY cut short, which is a harder fact than "the total was
+            #: a cap so completeness is unverifiable" -- so `False` outranks
+            #: `None`. With the cap branch first, a guard-tripped export
+            #: reported itself merely "unverified" while shipping a file it
+            #: knew was truncated.
+            #: `guard_tripped` returns above, so the `False` arm is now
+            #: reachable only through the count disagreement below. Kept
+            #: rather than simplified: if that early return is ever
+            #: removed, this key must not silently start claiming a
+            #: truncated walk was complete.
+            "walk_complete": (
+                False if guard_tripped
+                else None if approximate_total
+                else (total is None or len(items) == int(total))),
+            #: The version recorded BEFORE the walk, not the one loaded now.
+            #: Both are equal by the time this runs (the two checks above
+            #: guarantee it), and stamping the snapshot rather than re-reading
+            #: keeps that a property of the code instead of a coincidence.
+            "sidecar_version": identity_before[1],
+            "with_excerpts": bool(with_excerpts),
+        })
+        # ATTACHED BEFORE VALIDATION, ON PURPOSE. `make_envelope`'s walker
+        # (`_walk_nodes`) is RECURSIVE, so a nested mapping IS inspected against
+        # `FORBIDDEN_SURFACE_FIELDS` -- an earlier draft attached the excerpt
+        # afterwards on the stated belief that it could not be, which was simply
+        # false (Codex review, finding D). Attaching first costs nothing and
+        # buys the nested rows the same check every flat row gets, on top of the
+        # `surface_safe_excerpt` projection they already carry.
+        #
+        # Consumed by `web/discovery_export_service.py` and by nothing else. A
+        # rendering surface must keep using `get_excerpt_enveloped`, which can
+        # tell an outage apart from an absent excerpt; here the whole walk has
+        # already succeeded or already returned somebody else's status.
+        if excerpts:
+            for row in items:
+                found = excerpts.get(str(row.get("identification_id") or ""))
+                if found is not None:
+                    row["excerpt"] = found
+
+        return make_envelope(
+            STATUS_OK, items, total if total is not None else len(items), meta=meta)
+
+    def get_findings_facets_enveloped(
+        self, level: str, bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_HIDDEN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        suppressed: Optional[Iterable[str]] = None,
+    ) -> Dict[str, Any]:
+        """The domain / author / work cascade, mirroring the catalogue page's
+        accessor SHAPE (`get_browse_authors(domain)` ->
+        `get_browse_works(domain, author)`) but sourced from `works.genre` and
+        the work's own author -- i.e. from the IDENTIFIED WORK.
+
+        Counts come from the materialized grain, so opening the facet tree
+        costs no scan. Every level is cross-filtered by the levels above it,
+        and by the same bucket/novelty/divergence filters the result set
+        carries, so a facet count and the result set it sits beside always
+        agree. `divergence` in particular is NOT optional to thread
+        through: a cascade built without it would count the ~23.6% of the grain
+        the default result set excludes, and every number beside every option
+        would overstate what selecting it returns.
+
+        `unit` IS PART OF THE COUNT (§3.6), not only of the row query. The
+        counts were fixed at the identification grain while the result set
+        honoured the reader's `unit`, so on "one row per manuscript" or "one row
+        per work" a domain reading `(7,000)` sat beside a result bar reporting a
+        few hundred -- two figures over two different populations, presented as
+        one. `_FINDINGS_FACET_COUNT_SQL` maps the unit to the same DISTINCT the
+        row query groups by, so selecting an option returns exactly as many rows
+        as the number beside it said.
+        """
+        if level not in FACET_LEVELS:
+            raise ValueError(
+                f"unknown facet level {level!r} -- offered levels are {sorted(FACET_LEVELS)}")
+        if unit not in FINDINGS_UNITS:
+            raise ValueError(
+                f"unknown findings unit {unit!r} -- offered units are "
+                f"{sorted(FINDINGS_UNITS)}")
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        # The ONE filter builder, cross-filtered by the levels ABOVE this one:
+        # the author list narrows by domain, the work list by domain and
+        # author, and a level never filters by itself (that would collapse the
+        # facet to the single value already selected).
+        where_sql, params = _build_findings_filter(
+            unit=unit, bucket=bucket, novelty=novelty,
+            divergence=divergence,
+            domain=None if level == "domain" else domain,
+            author=author if level == "work" else None,
+            # THE SUPPRESSION REACHES THE FACET COUNTS TOO (owner ruling,
+            # 2026-08-06: the counts follow the hide list). Threading it here is
+            # not optional for the same reason `divergence` is not: a cascade
+            # built without it would count rows the result set beside it does not
+            # show, and `_node_text`'s promise is that a number beside an option
+            # always agrees with what selecting that option returns.
+            suppressed=suppressed,
+        )
+        count_sql = _FINDINGS_FACET_COUNT_SQL[unit]
+
+        if level == "domain":
+            key_sql = _DOMAIN_KEY_SQL
+            label_sql = key_sql
+        elif level == "author":
+            key_sql = f"COALESCE(NULLIF(w.author, ''), '{DOMAIN_UNASSIGNED}')"
+            label_sql = key_sql
+        else:
+            key_sql = "di.display_work_id"
+            label_sql = "MIN(w.neutral_title)"
+
+        def _grouped(group_sql: str, label: str):
+            return conn.execute(
+                f"""
+                SELECT {group_sql} AS value, {label} AS label,
+                       {count_sql} AS count
+                {_FINDINGS_FROM}
+                {where_sql}
+                GROUP BY {group_sql}
+                ORDER BY count DESC, value ASC
+                """,
+                params,
+            ).fetchall()
+
+        try:
+            rows = _grouped(key_sql, label_sql)
+            # THE DOMAIN PARENTS ARE GROUPED IN SQL, not summed in Python.
+            # Summing leaf counts is only correct at the identification grain,
+            # where every identification belongs to exactly one leaf. On the two
+            # grouped units the counts are DISTINCT counts, and one manuscript
+            # (or one work) can appear under two leaves of the same parent -- so
+            # the sum over-counts it, and the parent node would claim more rows
+            # than selecting the parent returns. Grouping by the parent key
+            # answers the question the reader is actually asking.
+            parent_rows = _grouped(_DOMAIN_PARENT_SQL, _DOMAIN_PARENT_SQL) \
+                if level == "domain" else None
+        except Exception as e:
+            logger.error("DiscoveryService.get_findings_facets error (%s): %s", level, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        items = self._project_facets(level, rows, parent_rows)
+        return make_envelope(STATUS_OK, items, len(items), meta={
+            "level": level, "bucket": bucket, "domain": domain, "author": author,
+            "divergence": divergence, "unit": unit,
+        })
+
+    @staticmethod
+    def _project_facets(level: str, rows, parent_rows=None) -> List[Dict[str, Any]]:
+        """Shape the grouped rows into facet rows.
+
+        For `domain` this rebuilds the two-level TREE: the stored genre is a
+        `Parent / Leaf` string, so each parent is emitted as its own selectable
+        node. Its count comes from `parent_rows` -- a second GROUP BY over the
+        parent key -- and is deliberately NOT the sum of its leaves: see
+        `get_findings_facets_enveloped`.
+        """
+        if level != "domain":
+            return [
+                surface_safe_facet({
+                    "level": level, "value": row["value"],
+                    "label": row["label"] or row["value"],
+                    "parent": None, "is_leaf": True, "count": int(row["count"]),
+                })
+                for row in rows
+            ]
+
+        leaves: List[Dict[str, Any]] = []
+        for row in rows:
+            value = row["value"]
+            parent = value.split(" / ", 1)[0] if " / " in value else None
+            leaves.append({
+                "level": level, "value": value, "label": value,
+                "parent": parent, "is_leaf": True, "count": int(row["count"]),
+            })
+
+        # The parent grouping returns a NULL-keyed row for every genre that has
+        # no ' / ' in it; those genres are their OWN leaf nodes and must not also
+        # become a parent node with no children.
+        parents: "OrderedDict[str, int]" = OrderedDict()
+        for row in parent_rows or ():
+            if row["value"] is None:
+                continue
+            parents[row["value"]] = int(row["count"])
+
+        items = [
+            surface_safe_facet({
+                "level": level, "value": parent, "label": parent,
+                "parent": None, "is_leaf": False, "count": count,
+            })
+            for parent, count in parents.items()
+        ]
+        items.extend(surface_safe_facet(leaf) for leaf in leaves)
+        from shared.domain_hierarchy import domain_sort_key
+
+        items.sort(key=lambda item: (
+            domain_sort_key(item["value"]),
+            item["is_leaf"],
+            item["value"],
+        ))
+        return items
+
+    def _findings_timeout(self) -> float:
+        return _get_positive_float_env(
+            "DISCOVERY_QUERY_TIMEOUT_FINDINGS", _DEFAULT_QUERY_TIMEOUT_FINDINGS)
+
+    # ------------------------------------------------------------------
+    # Ruling U (plan 136-22): the launch statistics, read from the ARTIFACT.
+    # ------------------------------------------------------------------
+
+    def _query_launch_contribution(self, conn, *, main_pool_only: bool):
+        """`(rows_by_shade, total, manuscript_count)` on ONE basis.
+
+        The total is the SUM of the returned shade rows -- deliberately not a
+        separately-counted number, so the surface can never be handed a total
+        its shades do not reproduce.
+        """
+        sql, params = _build_launch_contribution_sql(main_pool_only=main_pool_only)
+        by_shade = {
+            row["novelty_status"]: (
+                int(row["identification_count"]), int(row["manuscript_count"]))
+            for row in conn.execute(sql, params).fetchall()
+        }
+        total = sum(counts[0] for counts in by_shade.values())
+        ms_sql, ms_params = _build_launch_manuscript_sql(main_pool_only=main_pool_only)
+        manuscripts = int(conn.execute(ms_sql, ms_params).fetchone()["n"])
+        return by_shade, total, manuscripts
+
+    @staticmethod
+    def _copy_launch_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+        """A DEFENSIVE COPY of a cached launch envelope.
+
+        Every other cached enveloped read gets this for free from
+        `_enveloped_off_loop`'s `cache_name` branch. This read deliberately does
+        NOT go through that branch -- its LRU key carries no path and would
+        cancel the path-aware cache below outright -- so the protection has to
+        live here instead. A cache that hands the same mutable list to every
+        caller produces a WRONG HEADLINE for the next reader and raises nothing.
+        """
+        return {
+            **envelope,
+            "items": [dict(row) for row in envelope.get("items") or ()],
+            "meta": dict(envelope.get("meta") or {}),
+        }
+
+    def get_launch_stats_enveloped(self) -> Dict[str, Any]:
+        """Ruling U's launch statistics, computed from the LOADED artifact.
+
+        `items` is one row per contribution shade in the frozen ruling order,
+        each carrying its identification count and its distinct-manuscript
+        count; `total` is their sum; `meta` carries the basis, the provenance
+        and the context figures. See the module docstring for every basis in SQL
+        terms.
+
+        A failed or unavailable read is an OUTAGE, never `ok` with a zero
+        contribution: a release headline reading "0" during a sidecar failure is
+        the exact defect the envelope exists to prevent.
+
+        THE TRAP, stated where a caller reading this will meet it:
+        `meta['main_pool_total']` and `total` are TWO DIFFERENT POPULATIONS.
+        `total` is the SHADE-FILTERED contribution figure (main pool AND
+        `novelty_status IN LAUNCH_CONTRIBUTION_SHADES`); `main_pool_total`
+        carries NO shade predicate at all and counts every main-pool
+        identification. Likewise `main_pool_total_manuscript_count` is the
+        unfiltered partner of `main_pool_total`, and is NOT
+        `main_pool_manuscript_count`, which is shade filtered. Substituting one
+        for the other, summing them, or pairing a figure from one basis with a
+        figure from the other reproduces exactly the mixed-basis defect ruling U
+        was issued over.
+
+        `meta['more_pool_total']` is the SECOND pool's size -- `COUNT(*) WHERE
+        main_pool = 0`, no shade predicate -- added on the owner's 2026-08-05
+        ruling that the pool's size may be shown. It is a SIZE and never a
+        quality figure: the prohibition on the second pool's assessment ever
+        becoming a percentage, a score or an interval is untouched, and so is
+        ruling T's rule that the bucket CONTROL carries no count.
+
+        `meta['identification_total']`, `meta['work_total']` and
+        `meta['corpus_manuscript_count']` are the headline's three
+        UNCONDITIONAL figures (owner ruling, 2026-08-05): `COUNT(*)`,
+        `COUNT(DISTINCT display_work_id)` and `COUNT(DISTINCT sys_id)` over the
+        identification table, no `main_pool` predicate and no `novelty_status`
+        predicate on any of them. Because they share ONE basis they may be read
+        together; `total` (shade filtered) and `all_bucket_total` (also shade
+        filtered) may NOT be mixed in with them, which is the same mixed-basis
+        substitution this docstring warns about one paragraph up.
+
+        `corpus_manuscript_count` and `corpus_page_count` count the fragments
+        and pages THIS RELEASE TOUCHED, not the corpus. Both names are older
+        than that distinction; the table above states what each one actually
+        counts, and no reader-facing string built from them may say "the whole
+        corpus".
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        # Resolve the connection FIRST, then key on the path IT resolved.
+        # `_band_measurements` has the right key SHAPE and the wrong ORDER: it
+        # reads `self._last_path` before `_get_conn()` refreshes it, so on the
+        # first call after the artifact moves it keys on the PREVIOUS artifact
+        # and returns the previous artifact's answer. All three local artifacts
+        # report the identical `sidecar_version`, so a version-only key -- and a
+        # stale path read -- both serve one artifact's headline for another.
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        key = (self._last_path, self._last_version)
+
+        cached = self._launch_stats_cache
+        if cached is not None and cached[0] == key:
+            return self._copy_launch_envelope(cached[1])
+
+        try:
+            main_by_shade, total, main_manuscripts = self._query_launch_contribution(
+                conn, main_pool_only=True)
+            _all_by_shade, all_total, all_manuscripts = self._query_launch_contribution(
+                conn, main_pool_only=False)
+            # The UNCONDITIONAL main-pool figures: no `novelty_status`
+            # predicate, deliberately a different population from `total` and
+            # `main_pool_manuscript_count` above, which are both shade
+            # filtered. Written as one row so the two can never be read from
+            # two differently-filtered statements.
+            unconditional = conn.execute(
+                "SELECT COUNT(*) AS identifications, "
+                "COUNT(DISTINCT sys_id) AS manuscripts "
+                "FROM discovery_identification WHERE main_pool = 1"
+            ).fetchone()
+            main_pool_total = int(unconditional["identifications"])
+            main_pool_total_manuscripts = int(unconditional["manuscripts"])
+            # The SECOND pool's size (owner ruling, 2026-08-05). Its own
+            # statement on its own stated basis -- `main_pool = 0`, no shade
+            # predicate -- rather than a subtraction from a corpus total: a
+            # figure derived by arithmetic over two other figures is exactly the
+            # mixed-basis shape ruling U was issued over, and it would be wrong
+            # the moment either operand's basis moved.
+            more_pool_total = int(conn.execute(
+                "SELECT COUNT(*) AS n FROM discovery_identification "
+                "WHERE main_pool = 0"
+            ).fetchone()["n"])
+            # THE ALL-IN-ALL figure the headline ledes with (owner ruling,
+            # 2026-08-05). Its own COUNT(*), not `main_pool_total +
+            # more_pool_total`: the identity holds only while `main_pool`
+            # partitions the table, and a figure assembled by adding two
+            # separately-derived numbers goes wrong the first time either
+            # basis moves -- with nothing to notice it.
+            identification_total = int(conn.execute(
+                "SELECT COUNT(*) AS n FROM discovery_identification"
+            ).fetchone()["n"])
+            # The headline's other unconditional figure: how many DISTINCT
+            # WORKS those identifications name. `display_work_id` is not a
+            # choice made here -- it is the column `_FINDINGS_UNIT_GROUP_BY`
+            # groups the per-work row unit by, so this count and the number of
+            # rows that unit would return are the same population by
+            # construction rather than by coincidence.
+            work_total = int(conn.execute(
+                "SELECT COUNT(DISTINCT display_work_id) AS n "
+                "FROM discovery_identification"
+            ).fetchone()["n"])
+            corpus_manuscripts = int(conn.execute(
+                "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification"
+            ).fetchone()["n"])
+            corpus_pages = int(conn.execute(
+                "SELECT COUNT(DISTINCT page_id) AS n FROM discovery_claim"
+            ).fetchone()["n"])
+            provenance = {
+                row["key"]: row["value"] for row in conn.execute(
+                    "SELECT key, value FROM meta WHERE key IN "
+                    "('sidecar_version', 'audience')").fetchall()
+            }
+        except Exception as e:
+            # Log the exception TYPE only: an artifact-derived value must never
+            # be interpolated into a log line or an exception message.
+            logger.error(
+                "DiscoveryService.get_launch_stats_enveloped failed: %s",
+                type(e).__name__)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        items = [
+            surface_safe_launch_shade({
+                "shade": shade,
+                # A shade the artifact has none of is emitted as a ZERO row, not
+                # omitted: a missing row and a zero row read identically to a
+                # renderer, and only one of them is a fact.
+                "identification_count": main_by_shade.get(shade, (0, 0))[0],
+                "manuscript_count": main_by_shade.get(shade, (0, 0))[1],
+            })
+            for shade in LAUNCH_CONTRIBUTION_SHADES
+        ]
+        envelope = make_envelope(STATUS_OK, items, total, meta={
+            "basis": LAUNCH_BASIS,
+            "sidecar_version": provenance.get("sidecar_version") or self._last_version,
+            "audience": provenance.get("audience"),
+            "main_pool_manuscript_count": main_manuscripts,
+            "identification_total": identification_total,
+            "work_total": work_total,
+            "main_pool_total": main_pool_total,
+            "main_pool_total_manuscript_count": main_pool_total_manuscripts,
+            "more_pool_total": more_pool_total,
+            "all_bucket_total": all_total,
+            "all_bucket_manuscript_count": all_manuscripts,
+            "corpus_manuscript_count": corpus_manuscripts,
+            "corpus_page_count": corpus_pages,
+        })
+        self._launch_stats_cache = (key, envelope)
+        return self._copy_launch_envelope(envelope)
+
+    def get_pages_related_to_page(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """PANEL-02: shared_text alignments touching this page, from EITHER
+        side (a_page_id or other_page_id) -- both columns are indexed.
+
+        L1 fix: review_only rows (e.g. the family-router
+        tafsir_targum/with_arabic co-citation collections) are excluded unless
+        ``include_review=True``. Since Codex finding 3 the default is D-13g
+        eligibility (shipped OR human-confirmed) rather than shipped-only, so
+        this query agrees with the claims query and with
+        `discovery_identification.eligibility_basis`. Measured no-op on the
+        served asset: zero shared_text rows are human-confirmed."""
+        if not self.is_available():
+            return []
+        conn = self._get_conn()
+        if conn is None:
+            return []
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        routing_clause = eligibility_clause(_review_toggle_mode(include_review))
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT * FROM discovery_evidence
+                WHERE evidence_kind = 'shared_text'
+                  AND (a_page_id = ? OR other_page_id = ?)
+                  {routing_clause}
+                ORDER BY evidence_id
+                LIMIT ? OFFSET ?
+                """,
+                (page_id, page_id, page_size, offset),
+            )
+            results = []
+            for row in cur.fetchall():
+                d = dict(row)
+                d["related_page_id"] = d["other_page_id"] if d["a_page_id"] == page_id else d["a_page_id"]
+                d["seed_spans"] = _parse_json_field(d.get("seed_spans"))
+                d["seed_ms_ids"] = _parse_json_field(d.get("seed_ms_ids"))
+                results.append(d)
+            return results
+        except Exception as e:
+            logger.error("DiscoveryService.get_pages_related_to_page error for %s: %s", page_id, e)
+            return []
+
+    def get_evidence(
+        self, claim_id: str, page: int = 1, page_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """PANEL-03: every evidence row for a claim (offsets + text_layer +
+        per-side snapshot hash), for on-demand expansion."""
+        if not self.is_available():
+            return []
+        conn = self._get_conn()
+        if conn is None:
+            return []
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        try:
+            cur = conn.execute(
+                """
+                SELECT * FROM discovery_evidence
+                WHERE claim_id = ?
+                ORDER BY evidence_id
+                LIMIT ? OFFSET ?
+                """,
+                (claim_id, page_size, offset),
+            )
+            results = []
+            for row in cur.fetchall():
+                d = dict(row)
+                d["seed_spans"] = _parse_json_field(d.get("seed_spans"))
+                d["seed_ms_ids"] = _parse_json_field(d.get("seed_ms_ids"))
+                results.append(d)
+            return results
+        except Exception as e:
+            logger.error("DiscoveryService.get_evidence error for %s: %s", claim_id, e)
+            return []
+
+    # ------------------------------------------------------------------
+    # Text-vs-text excerpts (PLAN-textvtext-excerpts.md). One row, one
+    # identification: `_query_excerpt_for_identification` RAISES on a genuine
+    # query failure (mirrors `_query_work_expansion`) and is shared by BOTH
+    # public shapes below, exactly the way `get_work_witnesses` /
+    # `get_work_expansion_enveloped` share `_query_work_expansion` -- so the
+    # two entry points cannot classify the same failure differently.
+    # ------------------------------------------------------------------
+
+    def _query_excerpt_for_identification(
+        self, identification_id: str
+    ) -> List[Dict[str, Any]]:
+        """The excerpt row for `identification_id`, projected through
+        `surface_safe_excerpt`, as a list of 0 or 1 items -- RAISES on a query
+        failure, INCLUDING `sqlite3.OperationalError` when `discovery_excerpt`
+        itself does not exist (an older asset, pre `excerpt-v1`). That is
+        deliberate: this helper does not special-case the missing table, so
+        both callers below classify it exactly the way they classify any other
+        query failure, and `excerpts_available()` -- not this method -- is what
+        the UI actually gates the toggle on.
+        """
+        if not self.is_available():
+            return []
+        conn = self._get_conn()
+        if conn is None:
+            return []
+        cur = conn.execute(
+            "SELECT * FROM discovery_excerpt WHERE identification_id = ?",
+            (identification_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return []
+        item = dict(row)
+        # The parallel-highlight intervals are stored as JSON text; decode to
+        # lists of [start, end) pairs so the envelope carries structured data.
+        # A malformed value degrades to None -- the renderer's whole-span
+        # fallback -- rather than taking the excerpt down with it.
+        for key in ("frag_hl", "work_hl"):
+            value = item.get(key)
+            if isinstance(value, str):
+                try:
+                    item[key] = json.loads(value)
+                except (ValueError, TypeError):
+                    item[key] = None
+        return [surface_safe_excerpt(item)]
+
+    @staticmethod
+    def _decode_excerpt_row(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Decode the stored JSON highlight intervals, IN PLACE, and return the
+        row. Factored out of `_query_excerpt_for_identification` so the single
+        and batched readers cannot drift on how a malformed value degrades:
+        `None` is the renderer's whole-span fallback, never an exception that
+        takes the excerpt down with it.
+        """
+        for key in ("frag_hl", "work_hl"):
+            value = item.get(key)
+            if isinstance(value, str):
+                try:
+                    item[key] = json.loads(value)
+                except (ValueError, TypeError):
+                    item[key] = None
+        return item
+
+    def _query_excerpts_for_identifications(
+        self, identification_ids: Sequence[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """`{identification_id: projected excerpt row}` for a SET of ids, read
+        in chunked `IN (...)` batches -- the export's counterpart to
+        `_query_excerpt_for_identification`, which reads exactly one.
+
+        BATCHED for the reason `_first_match_pages` documents, only sharper:
+        the findings export is uncapped in rows by owner decision, so over the
+        main pool a per-row read is 9,523 serialized SQLite round trips inside
+        ONE request on a server with a SINGLE uvicorn worker. This is the same
+        shape the citation-range P1 fix landed on -- a correlated `EXISTS`
+        rewritten as an uncorrelated `IN (SELECT ...)`, 10,478 ms -> 97 ms
+        measured on production (`4f6e31f4`).
+
+        Ids missing from `discovery_excerpt` are simply ABSENT from the result
+        rather than mapped to a placeholder. The caller distinguishes "no
+        excerpt row" from "a row whose work side is empty", and collapsing the
+        two here would hand the export a `None` it could not tell apart from
+        the honest empty-work-side state.
+
+        RAISES on query failure -- including `sqlite3.OperationalError` when
+        `discovery_excerpt` does not exist on a pre-`excerpt-v1` asset. Same
+        contract as the single-row helper, deliberately: the caller classifies
+        the failure, and `excerpts_available()` stays what a surface gates on.
+        """
+        out: Dict[str, Dict[str, Any]] = {}
+        if not identification_ids:
+            return out
+        # RAISES rather than returning `{}` when the sidecar has gone away
+        # mid-walk. An empty mapping here is indistinguishable from "none of
+        # these identifications has an excerpt", and the caller would build a
+        # workbook whose text columns are silently empty for every row -- a
+        # short file in the one dimension the About sheet does not count
+        # (Codex review, finding C). The `{}`-on-everything contract lives in
+        # `get_excerpts_for_identifications`, which is not what the export uses.
+        if not self.is_available():
+            raise DiscoveryUnavailable("sidecar not serving")
+        conn = self._get_conn()
+        if conn is None:
+            raise DiscoveryUnavailable("sidecar not serving")
+
+        chunk_size = min(
+            _get_positive_int_env("DISCOVERY_EXPORT_EXCERPT_CHUNK",
+                                  _DEFAULT_EXPORT_EXCERPT_CHUNK),
+            _EXPORT_EXCERPT_CHUNK_MAX)
+        # De-duplicated but ORDER-PRESERVING: the caller zips the result back
+        # onto its own row order, and a set() here would make the query order
+        # (and so the query plan) vary run to run for identical input.
+        seen: Dict[str, None] = {}
+        for raw in identification_ids:
+            key = str(raw or "")
+            if key:
+                seen.setdefault(key, None)
+        ids = list(seen)
+
+        for start in range(0, len(ids), chunk_size):
+            batch = ids[start:start + chunk_size]
+            placeholders = ",".join("?" * len(batch))
+            cur = conn.execute(
+                "SELECT * FROM discovery_excerpt "
+                "WHERE identification_id IN ({})".format(placeholders),
+                batch,
+            )
+            for row in cur.fetchall():
+                item = self._decode_excerpt_row(dict(row))
+                projected = surface_safe_excerpt(item)
+                ident = str(projected.get("identification_id") or "")
+                if ident:
+                    out[ident] = projected
+        return out
+
+    def get_excerpts_for_identifications(
+        self, identification_ids: Sequence[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """`{}`-on-failure wrapper, mirroring `get_excerpt_for_identification`'s
+        legacy list contract. NOT surface-facing: the export path uses the
+        enveloped async form so a failure is a named state rather than an empty
+        mapping indistinguishable from "this set has no excerpts".
+        """
+        try:
+            return self._query_excerpts_for_identifications(identification_ids)
+        except Exception as e:
+            # Type name only -- this module reads an artifact that may carry
+            # private content and a driver message can quote its input.
+            logger.error(
+                "DiscoveryService.get_excerpts_for_identifications failed (%s)",
+                type(e).__name__)
+            return {}
+
+    def get_excerpt_for_identification(
+        self, identification_id: str
+    ) -> List[Dict[str, Any]]:
+        """LEGACY LIST CONTRACT (mirrors `get_work_witnesses`): `[]` on EVERY
+        failure path, including "no such table" on an older asset -- never
+        raises. Prefer `get_excerpt_enveloped`/`get_excerpt_enveloped_async`
+        on any surface that must tell an outage apart from a genuine "no
+        excerpt for this identification" (D-13); this shape exists for parity
+        with the other PANEL-03-adjacent reads and is not itself
+        surface-facing.
+        """
+        try:
+            return self._query_excerpt_for_identification(identification_id)
+        except Exception as e:
+            # Type name only -- see get_work_witnesses: this module reads an
+            # artifact that may carry private content, and a driver message
+            # can quote its input.
+            logger.error(
+                "DiscoveryService.get_excerpt_for_identification query failed (%s)",
+                type(e).__name__)
+            return []
+
+    def get_excerpt_enveloped(self, identification_id: str) -> Dict[str, Any]:
+        """The text-vs-text excerpt in the CLOSED four-key envelope (D-13):
+        `{status, items, total, meta}` -- mirrors `get_work_expansion_enveloped`
+        exactly.
+
+        `items` is `[]` (with `status='ok'`) both when this identification has
+        no excerpt row (an HONEST EMPTY -- most identifications outside the
+        best-eligible-witness selection never get one, and that is not an
+        outage) and is the ONLY way an absent row is reported; a query failure
+        instead reports `unavailable`, never a silent ok-with-zero.
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        try:
+            rows = self._query_excerpt_for_identification(identification_id)
+        except Exception as e:
+            # Type name only -- see get_work_expansion_enveloped.
+            logger.error(
+                "DiscoveryService.get_excerpt_enveloped query failed (%s)",
+                type(e).__name__)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(
+            STATUS_OK, rows, total=len(rows),
+            meta={"identification_id": identification_id},
+        )
+
+    def get_work_witnesses(
+        self,
+        work_id: str,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        *,
+        anchor_rendered_relation: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> List[Dict[str, Any]]:
+        """DATA-10 unit x work projection: witnesses of ``work_id``, one row
+        per physical-MS witness_unit at its highest member band, the
+        enabled-band filter applied on the DISPLAYED band BEFORE pagination,
+        the anchor's own unit excluded, same-unit members suppressed.
+
+        LEGACY LIST CONTRACT, UNCHANGED: a list of dicts, ``[]`` on EVERY
+        failure path, never an exception (except the all-or-none anchor
+        ValueError below, which is a programming error rather than a service
+        state). Published, and callers depend on it -- which is exactly why the
+        queries now live in ``_query_work_expansion``, which RAISES, and why the
+        ENVELOPED shape maps that raise to a named outage instead of an
+        ok-with-zero.
+
+        136-21 additions, all opt-in through the anchor triple:
+          * ``anchor_rendered_relation`` / ``anchor_evidence_source`` /
+            ``anchor_confidence_band`` -- ALL THREE OR NONE. Every existing call
+            site keeps working unchanged (all three default to None).
+          * every row carries both sides' RENDERED relation (capped per
+            matrix-spec §3.2), ``relations_differ`` computed over that pair,
+            the RESOLVED weaker ``displayed_*`` pair with its ``band_label``,
+            and the carrier's ``library_code`` / ``shelfmark_display`` /
+            ``display_missing``.
+
+        THE ONE DELIBERATE BEHAVIOUR CHANGE, stated because it is silent under
+        the old call shape: when the anchor triple IS supplied, ``enabled_bands``
+        filters on the RESOLVED displayed band -- the band the reader actually
+        sees -- rather than on the other carrier's. When it is absent, filtering
+        is exactly as before. See ``_build_work_expansion_pipeline``.
+
+        H1 (unchanged): the grouping / highest-member-band selection / anchor
+        exclusion / band filtering / deterministic ordering ALL run IN SQL, so
+        ``LIMIT``/``OFFSET`` paginate over UNITS post-grouping, never over a
+        pre-grouping raw-claim cap. ``_project_work_witnesses`` remains the
+        pure-Python reference implementation of these SAME rules.
+        """
+        # Validated OUTSIDE the try: a partial anchor set is a caller bug, and
+        # swallowing it into `[]` is precisely the silence this plan removes.
+        _validate_anchor_identity(
+            anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
+        try:
+            rows, _total = self._query_work_expansion(
+                work_id, enabled_bands=enabled_bands, page=page, page_size=page_size,
+                anchor_sys_id=anchor_sys_id, anchor_rendered_relation=anchor_rendered_relation,
+                anchor_evidence_source=anchor_evidence_source,
+                anchor_confidence_band=anchor_confidence_band, lang=lang,
+            )
+        except Exception as e:
+            # Log the exception TYPE only. This module reads an artifact that
+            # may carry private content, and a driver message can quote its
+            # input; the established pattern (web/discovery_assets.py) is to log
+            # anything not written from our own constants by type name alone.
+            logger.error(
+                "DiscoveryService.get_work_witnesses query failed (%s)",
+                type(e).__name__)
+            return []
+        return rows
+
+    def _query_work_expansion(
+        self,
+        work_id: str,
+        *,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """The expansion's rows AND its EXACT total -- ``(rows, total)``.
+
+        RAISES on a query failure rather than swallowing it into an empty
+        result. That distinction is load-bearing and is the whole reason this
+        helper was factored out: the legacy list method above turns a raise back
+        into ``[]`` (its published contract), while the enveloped method turns
+        it into `unavailable` with a named reason. Swallowing it produced a real
+        false zero on the page query against a real pre-rebuild asset -- `ok`
+        with a total of 0, i.e. "this work has no other carriers" -- and EVERY
+        fixture in the suite carries the tables these queries read, so no
+        ordinary unit test can reach that class of bug. The three forced-failure
+        tests are the only thing that can.
+
+        ``total`` is the count query's EXACT result. There is no approximate,
+        estimated, sampled or capped alternative anywhere on this path: a count
+        that cannot be produced inside its budget degrades to the `timeout`
+        status, never to a softened number. A bounded page cannot supply a
+        total, and a number a reader cannot reproduce is worse than an honest
+        temporary failure.
+        """
+        _validate_anchor_identity(
+            anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
+        if not self.is_available():
+            return [], 0
+        conn = self._get_conn()
+        if conn is None:
+            return [], 0
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+
+        # Mirrors _project_work_witnesses: a given-but-empty enabled_bands
+        # iterable means "filter to nothing" (every unit excluded), not
+        # "no filter" -- short-circuit before building an invalid `IN ()`.
+        enabled_bands_list = list(enabled_bands) if enabled_bands else None
+        if enabled_bands_list is not None and len(enabled_bands_list) == 0:
+            return [], 0
+
+        anchor_unit_key = None
+        if anchor_sys_id:
+            arow = conn.execute(
+                "SELECT unit_id FROM witness_unit_members WHERE sys_id = ?",
+                (anchor_sys_id,),
+            ).fetchone()
+            anchor_unit_id = arow["unit_id"] if arow else None
+            anchor_unit_key = (
+                anchor_unit_id if anchor_unit_id is not None else f"sys:{anchor_sys_id}")
+
+        pipeline_kwargs = {
+            "work_id": work_id,
+            "anchor_unit_key": anchor_unit_key,
+            "anchor_evidence_source": anchor_evidence_source,
+            "anchor_confidence_band": anchor_confidence_band,
+            "enabled_bands": enabled_bands_list,
+        }
+        count_sql, count_params = build_work_expansion_count_sql(**pipeline_kwargs)
+        count_row = conn.execute(count_sql, count_params).fetchone()
+        total = count_row[0]
+
+        rows_sql, rows_params = build_work_expansion_rows_sql(
+            page_size=page_size, offset=offset, **pipeline_kwargs)
+        page_rows = [dict(row) for row in conn.execute(rows_sql, rows_params).fetchall()]
+
+        items: List[Dict[str, Any]] = []
+        if page_rows:
+            unit_keys = [r["unit_key"] for r in page_rows]
+            member_placeholders = ",".join("?" for _ in unit_keys)
+            member_sql = f"""
+                WITH ranked AS ({_WORK_WITNESSES_RANKED_CTE_SQL})
+                SELECT unit_key, sys_id FROM ranked WHERE unit_key IN ({member_placeholders})
+            """
+            member_cur = conn.execute(member_sql, [work_id, *unit_keys])
+            members_by_key: Dict[str, set] = {}
+            for row in member_cur.fetchall():
+                members_by_key.setdefault(row["unit_key"], set()).add(row["sys_id"])
+            measurements = self._band_measurements()
+            items = [
+                _present_expansion_row(
+                    r, members_by_key, measurements, lang,
+                    anchor_rendered_relation=anchor_rendered_relation,
+                    anchor_evidence_source=anchor_evidence_source,
+                    anchor_confidence_band=anchor_confidence_band,
+                )
+                for r in page_rows
+            ]
+        return items, total
+
+    def get_work_expansion_enveloped(
+        self,
+        work_id: str,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """PANEL-02's expansion in the CLOSED four-key envelope (D-13):
+        `{status, items, total, meta}`.
+
+        A failed query returns `unavailable` with a named reason, NEVER `ok`
+        with zero items -- an outage that renders as "no other manuscript
+        carries this work" is the exact false-zero class 136-14 found on a real
+        asset.
+
+        `total` is the COUNT QUERY's exact result, never `len(items)`: a bounded
+        page cannot supply a total, and a page length rendered as a corpus fact
+        is a number the reader will believe. There is no approximate, estimated,
+        sampled or capped alternative anywhere on this path -- a count that
+        cannot be produced inside its budget degrades to the `timeout` status,
+        which is a temporary failure a reader can retry rather than a figure
+        they cannot check.
+
+        `meta` names WHICH of the two documented filter contracts produced the
+        result, so a reader of the envelope never has to guess:
+          * `anchor_mode` -- whether the anchor IDENTITY triple was supplied.
+            That is the axis that decides what the reader sees; `anchor_sys_id`
+            (unit EXCLUSION) is an independent axis and is reported separately
+            as `anchor_excluded`.
+          * `filter_basis` -- `displayed_band` (the resolved weaker band) when
+            anchored, `other_carrier_band` when not.
+        """
+        anchored = _validate_anchor_identity(
+            anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        try:
+            rows, total = self._query_work_expansion(
+                work_id, enabled_bands=enabled_bands, page=page, page_size=page_size,
+                anchor_sys_id=anchor_sys_id, anchor_rendered_relation=anchor_rendered_relation,
+                anchor_evidence_source=anchor_evidence_source,
+                anchor_confidence_band=anchor_confidence_band, lang=lang,
+            )
+            items = [surface_safe_expansion(row) for row in rows]
+        except Exception as e:
+            # Type name only -- see get_work_witnesses.
+            logger.error(
+                "DiscoveryService.get_work_expansion_enveloped query failed (%s)",
+                type(e).__name__)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(
+            STATUS_OK, items, total=total,
+            meta={
+                "work_id": work_id,
+                "anchor_mode": "anchored" if anchored else "unanchored",
+                "filter_basis": "displayed_band" if anchored else "other_carrier_band",
+                "anchor_excluded": anchor_sys_id is not None,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Bounded concurrency (mirrors web/search_api.py's _acquire_heavy_slot
+    # exactly -- non-blocking; raises DiscoveryOverload immediately when full;
+    # release is the caller's responsibility, always wired to a future's
+    # add_done_callback, never a bare finally).
+    #
+    # TWO budgets, and EVERY executor crossing takes one of them:
+    #
+    #   heavy  -- corpus-wide queries (findings, facets, launch stats, work
+    #             witnesses, the per-work expansion). `DISCOVERY_MAX_CONCURRENT_QUERIES`,
+    #             default 4, the figure docs/specs/discovery-budgets.md SS2 fixes.
+    #   browse -- everything else, which is the per-page connections-panel path.
+    #             `DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES`, default 24.
+    #
+    # Until code review round 12 the browse path took NO slot: `heavy` defaults
+    # to False and no browse caller passed it, so "bounded concurrency" was a
+    # documented property the code did not have. The consequence was not merely
+    # cosmetic -- `run_in_executor` threads are NOT cancellable, so a timed-out
+    # read keeps its threadpool worker until the query itself finishes, and an
+    # unbounded retry burst could sustain a backlog on a single-uvicorn-worker
+    # server instead of failing fast as `busy`.
+    # ------------------------------------------------------------------
+
+    _SLOT_HEAVY = "heavy"
+    _SLOT_BROWSE = "browse"
+    _SLOT_EXPORT = "export"
+
+    _SLOT_SPECS = {
+        _SLOT_HEAVY: ("_heavy_sem", "_heavy_capacity",
+                      "DISCOVERY_MAX_CONCURRENT_QUERIES",
+                      _DEFAULT_MAX_CONCURRENT_QUERIES),
+        _SLOT_BROWSE: ("_browse_sem", "_browse_capacity",
+                       "DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES",
+                       _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES),
+        _SLOT_EXPORT: ("_export_sem", "_export_capacity",
+                       "DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES",
+                       _DEFAULT_MAX_CONCURRENT_EXPORT_QUERIES),
+    }
+
+    async def _acquire_slot(self, kind: str) -> Callable[[], None]:
+        sem_attr, cap_attr, env_name, default = self._SLOT_SPECS[kind]
+        desired = _get_positive_int_env(env_name, default)
+        if desired != getattr(self, cap_attr):
+            # Only safe to rebuild when fully idle (no held slots) -- mirrors
+            # web/search_api.py's _HeavySemaphoreState rebuild guard exactly,
+            # so a live rebuild never strands a held slot.
+            current_value = getattr(getattr(self, sem_attr), "_value", None)
+            if current_value == getattr(self, cap_attr):
+                setattr(self, sem_attr, asyncio.Semaphore(desired))
+                setattr(self, cap_attr, desired)
+                # The executor is rebuilt WITH the semaphore or the two sizes
+                # drift apart and the slot stops guaranteeing a worker. Safe
+                # here precisely because the guard above fires only when no
+                # slot is held, and a slot is held for the whole life of the
+                # future -- so this class has nothing in flight.
+                retired = self._executors.pop(kind, None)
+                if retired is not None:
+                    retired.shutdown(wait=False)
+
+        sem = getattr(self, sem_attr)
+        if sem.locked():
+            raise DiscoveryOverload("temporarily unavailable")
+        await sem.acquire()
+
+        def _release() -> None:
+            sem.release()
+
+        return _release
+
+    def _executor_for(self, kind: str) -> ThreadPoolExecutor:
+        """This budget class's OWN threadpool, `max_workers` == its capacity.
+
+        Called between `_acquire_slot` and `run_in_executor`, with no `await`
+        between the three, so a rebuild cannot interleave.
+        """
+        executor = self._executors.get(kind)
+        if executor is None:
+            _sem_attr, cap_attr, _env, _default = self._SLOT_SPECS[kind]
+            executor = ThreadPoolExecutor(
+                max_workers=max(1, int(getattr(self, cap_attr))),
+                thread_name_prefix=f"discovery-{kind}",
+            )
+            self._executors[kind] = executor
+        return executor
+
+    async def _acquire_heavy_slot(self) -> Callable[[], None]:
+        """The heavy budget, by its original name (kept: it is what the
+        DC6 slot-recycling tests and the review brief both refer to)."""
+        return await self._acquire_slot(self._SLOT_HEAVY)
+
+    # ------------------------------------------------------------------
+    # Off-event-loop async dispatch (asyncio.wait, NEVER wait_for, over
+    # run_in_executor -- run_in_executor threads are not cancellable; a
+    # timeout must never await the abandoned future. Mirrors
+    # web/search_api.py lines 1104-1166 exactly, incl. the load-bearing
+    # rationale at lines 1129-1140.)
+    # ------------------------------------------------------------------
+
+    async def _run_off_loop(self, sync_fn: Callable, *args, timeout: float,
+                            heavy: bool = False, slot: Optional[str] = None):
+        # get_RUNNING_loop, never get_event_loop.
+        #
+        # `get_event_loop()` returns whatever loop is SET for the thread, which
+        # inside a coroutine is usually -- but not necessarily -- the running
+        # one; the call is deprecated in this context for exactly that reason.
+        # `tests/conftest.py`'s autouse fixture does set a thread loop when it
+        # finds the current one closed, so the divergence is reachable here.
+        #
+        # HONEST SCOPE: this was changed while chasing an off-loop dispatch
+        # assertion that measures ZERO dispatches under a multi-file run and
+        # passes alone, and it did NOT fix that. It is kept because it is
+        # correct on its own merits -- in production, anything calling
+        # `asyncio.set_event_loop` in the serving thread would otherwise send
+        # discovery reads to a loop that is not serving the request. It is not
+        # the explanation for that failure, which is still open.
+        loop = asyncio.get_running_loop()
+        # EVERY crossing takes a slot; only WHICH budget depends on `heavy`.
+        # There is no third branch and no `bounded=False` escape, deliberately:
+        # an opt-in bound is a bound whose next caller forgets it, which is
+        # exactly how the browse path came to have none (round 12, finding 4).
+        # `slot` NAMES a budget explicitly; `heavy` keeps its original
+        # two-way meaning for every existing caller. Still no unbounded
+        # branch and still no `bounded=False` escape -- a third CLASS is not
+        # a third option to skip the bound, and an unknown name raises here
+        # rather than silently falling through to the browse budget.
+        if slot is not None and slot not in self._SLOT_SPECS:
+            raise ValueError("_run_off_loop: unknown slot {!r}".format(slot))
+        kind = slot or (self._SLOT_HEAVY if heavy else self._SLOT_BROWSE)
+        _release: Optional[Callable[[], None]] = await self._acquire_slot(kind)
+        try:
+            # This class's OWN executor, never the shared default one. Two
+            # budgets over one pool are two names for one budget: browse work
+            # could occupy or queue ahead of every worker and starve a heavy
+            # read that still held capacity (round 13, finding 2).
+            fut = loop.run_in_executor(self._executor_for(kind), sync_fn, *args)
+            if _release is not None:
+                # Ownership of the release callable transfers to the
+                # done-callback -- a timed-out thread keeps occupying the
+                # threadpool worker (run_in_executor cannot cancel a running
+                # thread), so the concurrency slot must stay held until the
+                # thread ACTUALLY finishes, never merely until the awaiter
+                # gives up. Releasing in a plain finally around the await
+                # would recycle the slot while the timed-out call still
+                # runs, re-admitting new heavy work past the budget.
+                fut.add_done_callback(lambda _f, _r=_release: _r())
+                _release = None
+            done, pending = await asyncio.wait({fut}, timeout=timeout)
+            if fut in pending:
+                logger.warning(
+                    "DiscoveryService query timed out after %ss (fn=%s, heavy=%s)",
+                    timeout, getattr(sync_fn, "__name__", sync_fn), heavy,
+                )
+                raise DiscoveryUnavailable("temporarily unavailable")
+            return fut.result()
+        finally:
+            # Safety net: only fires if a slot was acquired but the executor
+            # dispatch itself failed before ownership transferred to the
+            # done-callback above.
+            if _release is not None:
+                _release()
+
+    def _browse_timeout(self) -> float:
+        return _get_positive_float_env("DISCOVERY_QUERY_TIMEOUT_BROWSE", _DEFAULT_QUERY_TIMEOUT_BROWSE)
+
+    def _work_timeout(self) -> float:
+        return _get_positive_float_env("DISCOVERY_QUERY_TIMEOUT_WORK", _DEFAULT_QUERY_TIMEOUT_WORK)
+
+    # ------------------------------------------------------------------
+    # Browse-enrichment version-keyed LRU (F15) -- wraps the cheap,
+    # non-heavy per-page reads (get_claims_for_page / get_pages_related_to_page).
+    # ------------------------------------------------------------------
+
+    async def _browse_cached_call(self, cache_name: str, sync_fn: Callable, args: tuple):
+        max_entries = _get_int_env("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", _DEFAULT_BROWSE_LRU_MAX_ENTRIES)
+        if max_entries <= 0:
+            # M3: a non-positive size means "disable caching" (bounded to
+            # zero), NEVER "unbounded" -- also proactively clears any
+            # entries cached under a previously-valid size so a live env
+            # flip to <=0 frees memory immediately rather than merely
+            # freezing further growth.
+            with self._browse_lru_lock:
+                if self._browse_lru:
+                    self._browse_lru.clear()
+            return await self._run_off_loop(sync_fn, *args, timeout=self._browse_timeout())
+
+        version = None
+        if self._sidecar_version_provider is not None:
+            try:
+                version = self._sidecar_version_provider()
+            except Exception:
+                version = None
+        key = (cache_name,) + tuple(args) + (version,)
+
+        with self._browse_lru_lock:
+            if key in self._browse_lru:
+                self._browse_lru.move_to_end(key)
+                return self._browse_lru[key]
+
+        result = await self._run_off_loop(sync_fn, *args, timeout=self._browse_timeout())
+
+        with self._browse_lru_lock:
+            self._browse_lru[key] = result
+            self._browse_lru.move_to_end(key)
+            while len(self._browse_lru) > max_entries:
+                self._browse_lru.popitem(last=False)
+        return result
+
+    # ------------------------------------------------------------------
+    # Async public API
+    # ------------------------------------------------------------------
+
+    async def get_version_async(self) -> Optional[str]:
+        return await self._run_off_loop(self.get_version, timeout=self._browse_timeout())
+
+    async def excerpts_available_async(self) -> bool:
+        """The async shape of `excerpts_available` -- a thin off-loop wrapper,
+        exactly like `get_version_async`. NOT routed through `cache_name`/
+        `_browse_cached_call`: `excerpts_available` already caches itself, per
+        `(path, version)`, for the reason its own docstring states; layering
+        the generic version-only LRU on top would only add a SECOND, less
+        safe cache in front of the first one."""
+        return await self._run_off_loop(
+            self.excerpts_available, timeout=self._browse_timeout())
+
+    async def get_band_precision_async(
+        self, evidence_source: Optional[str], confidence_band: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        return await self._run_off_loop(
+            self.get_band_precision, evidence_source, confidence_band,
+            timeout=self._browse_timeout(),
+        )
+
+    async def get_band_precision_collection_async(
+        self, collection_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        return await self._run_off_loop(
+            self.get_band_precision_collection, collection_id, timeout=self._browse_timeout()
+        )
+
+    async def get_band_claim_counts_async(self) -> Dict[Tuple[str, str], int]:
+        return await self._run_off_loop(self.get_band_claim_counts, timeout=self._browse_timeout())
+
+    async def get_claims_for_page_async(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> List[Dict[str, Any]]:
+        if include_review:
+            # A distinct cache_name (rather than appending include_review to
+            # the sync call's positional args) keeps the DEFAULT call shape
+            # unchanged -- callers/tests that monkeypatch get_claims_for_page
+            # with a 3-positional-arg fake keep working (L1).
+            return await self._browse_cached_call(
+                "claims_for_page_include_review",
+                lambda p, pg, ps: self.get_claims_for_page(p, pg, ps, include_review=True),
+                (page_id, page, page_size),
+            )
+        return await self._browse_cached_call(
+            "claims_for_page", self.get_claims_for_page, (page_id, page, page_size)
+        )
+
+    async def get_pages_related_to_page_async(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> List[Dict[str, Any]]:
+        if include_review:
+            return await self._browse_cached_call(
+                "pages_related_to_page_include_review",
+                lambda p, pg, ps: self.get_pages_related_to_page(p, pg, ps, include_review=True),
+                (page_id, page, page_size),
+            )
+        return await self._browse_cached_call(
+            "pages_related_to_page", self.get_pages_related_to_page, (page_id, page, page_size)
+        )
+
+    # ------------------------------------------------------------------
+    # 136-14: the enveloped async shapes. ONE exception->status mapping,
+    # shared by every enveloped read, so the four states cannot be
+    # classified differently on two surfaces.
+    # ------------------------------------------------------------------
+
+    async def _enveloped_off_loop(
+        self, sync_fn: Callable, args: tuple, *, timeout: float,
+        heavy: bool = False, cache_name: Optional[str] = None,
+        slot: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run an enveloped SYNC callable off the loop and classify its failure
+        modes into the closed status vocabulary.
+
+        The three outage statuses come from three genuinely different places
+        and must stay distinguishable (T-136-01): the availability predicate
+        returning False is `unavailable` (handled inside the sync callable),
+        `DiscoveryUnavailable` from the timeout path is `timeout`, and the
+        bounded-concurrency rejection is `busy`.
+
+        `busy` is reachable on EVERY read, `cache_name` ones included: the
+        cached path still dispatches through `_run_off_loop` on a MISS, and
+        `_run_off_loop` now takes a slot unconditionally. Before round 12 the
+        `heavy` flag was the only thing that took one, so `busy` was a status
+        this branch could classify but no browse read could ever produce.
+
+        Blocking work goes through `_run_off_loop` (`run_in_executor` +
+        `asyncio.wait`, NEVER `asyncio.wait_for`, since executor threads are
+        not cancellable). The web app runs a SINGLE uvicorn worker: a
+        synchronous database call on the loop stalls every concurrent request
+        while burning no CPU, which is why it is invisible in load average.
+        """
+        try:
+            if cache_name is not None:
+                cached = await self._browse_cached_call(cache_name, sync_fn, args)
+                # The LRU hands the SAME envelope object to every caller; a
+                # surface that appended to `items` would poison the cache for
+                # the next request. Copy the mutable containers (rows
+                # themselves are treated as immutable by contract).
+                return {
+                    **cached,
+                    "items": list(cached.get("items") or []),
+                    "meta": dict(cached.get("meta") or {}),
+                }
+            return await self._run_off_loop(
+                sync_fn, *args, timeout=timeout, heavy=heavy, slot=slot)
+        except DiscoveryOverload:
+            return busy_envelope(meta={"reason": "bounded_concurrency"})
+        except DiscoveryUnavailable:
+            return timeout_envelope(meta={"reason": "query_timeout"})
+
+    async def get_claims_for_page_enveloped_async(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False, lang: str = "en",
+    ) -> Dict[str, Any]:
+        """The async shape of `get_claims_for_page_enveloped` -- a thin wrapper
+        over the SAME sync implementation, never a second query path."""
+        return await self._enveloped_off_loop(
+            self.get_claims_for_page_enveloped,
+            (page_id, page, page_size, include_review, lang),
+            timeout=self._browse_timeout(),
+            cache_name="claims_for_page_enveloped",
+        )
+
+    async def get_manuscript_works_enveloped_async(
+        self, page_ids: Iterable[str], page: int = 1, page_size: Optional[int] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        # The page list is part of the cache key, so it must be hashable.
+        return await self._enveloped_off_loop(
+            self.get_manuscript_works_enveloped,
+            (tuple(page_ids or ()), page, page_size, lang),
+            timeout=self._browse_timeout(),
+            cache_name="manuscript_works_enveloped",
+        )
+
+    async def get_related_page_count_enveloped_async(
+        self, page_id: str, include_review: bool = False,
+    ) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_related_page_count_enveloped,
+            (page_id, include_review),
+            timeout=self._browse_timeout(),
+            cache_name="related_page_count_enveloped",
+        )
+
+    async def get_related_pages_enveloped_async(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_related_pages_enveloped,
+            (page_id, page, page_size, include_review),
+            timeout=self._browse_timeout(),
+            cache_name="related_pages_enveloped",
+        )
+
+    async def get_locus_units_enveloped_async(self, work_id: str) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_locus_units_enveloped,
+            (work_id,),
+            timeout=self._findings_timeout(),
+            heavy=True,
+        )
+
+    async def get_findings_enveloped_async(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_HIDDEN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Heavy by design: the corpus-wide query gets a bounded-concurrency
+        slot, so a burst of findings requests degrades to an explicit `busy`
+        rather than queueing behind each other and starving the browse path."""
+        return await self._enveloped_off_loop(
+            self.get_findings_enveloped,
+            # POSITIONAL: order matches the sync signature, `suppressed` last.
+            # A tuple (not a list) because this is also a cache key.
+            (unit, bucket, tuple(novelty or ()) or None, divergence,
+             domain, author, work_id, locus_from, locus_to, sort, page, page_size,
+             tuple(suppressed or ()) or None, sys_id),
+            timeout=self._findings_timeout(), heavy=True,
+        )
+
+    async def get_launch_stats_enveloped_async(self) -> Dict[str, Any]:
+        """The async shape of `get_launch_stats_enveloped` (ruling U).
+
+        Deliberately passes NO `cache_name`, and passes `_findings_timeout()`
+        EXPLICITLY. Both matter, and both read like free optimisations foregone:
+
+        * `_enveloped_off_loop`'s `cache_name` branch delegates to
+          `_browse_cached_call`, whose key is `(cache_name,) + args + (version,)`
+          -- with NO path component -- and which returns the cached envelope
+          BEFORE the wrapped sync callable runs. Layering it above the reader's
+          own `(path, version)` cache would CANCEL that cache outright: after a
+          path switch at a constant `sidecar_version` (the live situation) the
+          outer LRU hits and serves the previous artifact's headline, while the
+          path-aware reader never gets the chance to miss. Every reader-level
+          test still passes, because they exercise the reader directly.
+        * `_browse_cached_call` also ignores the timeout it is handed and
+          applies `self._browse_timeout()` unconditionally, so routing a
+          corpus-scale count through it would silently put it on the browse
+          budget.
+
+        The reader's own cache already makes the repeat call cheap; the outer
+        layer would add only the defect.
+        """
+        return await self._enveloped_off_loop(
+            self.get_launch_stats_enveloped, (),
+            timeout=self._findings_timeout(), heavy=True,
+        )
+
+    async def get_findings_facets_enveloped_async(
+        self, level: str, bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_HIDDEN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        suppressed: Optional[Iterable[str]] = None,
+    ) -> Dict[str, Any]:
+        # POSITIONAL DISPATCH: the tuple's order must match the sync method's
+        # parameter order exactly, and `suppressed` is LAST there for that reason.
+        # A tuple built in a different order would silently pass the hide list as
+        # `unit` -- which raises, loudly, but only for the shapes a test happens
+        # to drive. Kept adjacent so the two are read together.
+        #
+        # A TUPLE, not a list: this argument tuple is a cache key in
+        # `_browse_cached_call`, so every member must be hashable.
+        return await self._enveloped_off_loop(
+            self.get_findings_facets_enveloped,
+            (level, bucket, tuple(novelty or ()) or None,
+             divergence, domain, author, unit,
+             tuple(suppressed or ()) or None),
+            timeout=self._findings_timeout(), heavy=True,
+        )
+
+    async def collect_findings_for_export_async(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_SHOWN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
+        with_excerpts: bool = True,
+    ) -> Dict[str, Any]:
+        """The export collector, off the loop, on the EXPORT budget.
+
+        Its own slot class rather than `heavy=True`: an export holds its slot
+        for the length of a whole-corpus walk, and sharing the heavy cap of 4
+        would let two concurrent exports take half the budget every
+        corpus-wide interactive query draws on.
+
+        POSITIONAL DISPATCH -- the tuple order must match the sync signature
+        exactly; see `get_findings_facets_enveloped_async` for the same note
+        and the reason it is written next to the call.
+        """
+        return await self._enveloped_off_loop(
+            self.collect_findings_for_export,
+            (unit, bucket, tuple(novelty or ()) or None, divergence,
+             domain, author, work_id, locus_from, locus_to, sort,
+             tuple(suppressed or ()) or None, sys_id, with_excerpts),
+            timeout=self._export_timeout(),
+            slot=self._SLOT_EXPORT,
+        )
+
+    async def run_off_loop(
+        self, sync_fn: Callable, *args, timeout: Optional[float] = None,
+        heavy: bool = False,
+    ):
+        """PUBLIC alias of the off-loop dispatch discipline, for the web
+        composition module.
+
+        `web/discovery.py` has one blocking read that is NOT a sidecar query --
+        the browse-map page-ID accessor the manuscript scope is served by
+        (D-09) -- and it must run under the SAME rules as every sidecar read:
+        `run_in_executor` + `asyncio.wait` (never `wait_for`, because executor
+        threads are not cancellable), under the browse budget. Exposed here
+        rather than duplicated there, so there is one implementation of the
+        discipline and not two.
+        """
+        return await self._run_off_loop(
+            sync_fn, *args,
+            timeout=self._browse_timeout() if timeout is None else timeout,
+            heavy=heavy,
+        )
+
+    async def get_evidence_async(
+        self, claim_id: str, page: int = 1, page_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        return await self._run_off_loop(
+            self.get_evidence, claim_id, page, page_size, timeout=self._browse_timeout()
+        )
+
+    async def get_excerpt_enveloped_async(self, identification_id: str) -> Dict[str, Any]:
+        """The async shape of `get_excerpt_enveloped` -- a thin wrapper over
+        the SAME sync implementation, never a second query path. BROWSE
+        budget (this is a per-identification, per-page-render read, not a
+        corpus-wide one) and `_browse_timeout()`, exactly like
+        `get_claims_for_page_enveloped_async`.
+
+        PATH-AWARE CACHE KEY, and this is load-bearing rather than decorative:
+        `_enveloped_off_loop`'s `cache_name` branch delegates to
+        `_browse_cached_call`, whose key is `(cache_name,) + args +
+        (version,)` -- with NO path component (see that method, and see
+        `get_launch_stats_enveloped_async`'s docstring for the identical
+        hazard spelled out at length). `sidecar_version` can stay IDENTICAL
+        across a resolved-path swap -- the pre-rebuild asset, the private
+        rebuild and the public projection all three report
+        `discovery-v1-real` locally -- so without something path-scoped in the
+        key, a path swap at a constant version would keep serving the
+        PREVIOUS asset's excerpt row for the SAME `identification_id`.
+
+        Unlike `get_launch_stats_enveloped_async`, this read does NOT forego
+        `cache_name` for that reason -- a per-identification cache is exactly
+        the shape `_browse_cached_call` is for, and building a second private
+        cache here would just duplicate `_browse_cached_call`'s own
+        LRU-eviction bookkeeping. Instead the resolved PATH is folded into the
+        cache key by making it part of the args tuple: resolved via the path
+        provider directly (the same call `_get_conn()` makes) so it is correct
+        even before `_get_conn()` has run for this request, then threaded
+        through a two-argument lambda that drops it before calling the real
+        sync method -- `get_excerpt_enveloped` itself takes no path argument,
+        so its call shape and its cache key are decoupled on purpose.
+        """
+        try:
+            path = self._path_provider() if self._path_provider is not None else None
+        except Exception as e:
+            logger.error("DiscoveryService: path_provider raised: %s", e)
+            path = None
+        return await self._enveloped_off_loop(
+            lambda ident, _path: self.get_excerpt_enveloped(ident),
+            (identification_id, path),
+            timeout=self._browse_timeout(),
+            cache_name="excerpt_by_ident",
+        )
+
+    async def get_work_witnesses_async(
+        self,
+        work_id: str,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._run_off_loop(
+            self.get_work_witnesses,
+            work_id, enabled_bands, page, page_size, anchor_sys_id,
+            timeout=self._work_timeout(), heavy=True,
+        )
+
+    async def get_work_expansion_enveloped_async(
+        self,
+        work_id: str,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """The async shape of `get_work_expansion_enveloped` -- a thin wrapper
+        over the SAME sync implementation, never a second query path.
+
+        Heavy: the expansion issues a count, a page and a member lookup over a
+        window query, so a burst degrades to an explicit `busy` rather than
+        queueing behind the browse path. Deliberately NOT LRU-cached: the cache
+        hands one envelope object to every caller, and the forced-failure and
+        exhaustive-pagination contracts here must each see a real query.
+
+        `enabled_bands` is passed through UNCHANGED (an empty iterable keeps its
+        pre-existing meaning); it is only made hashable for the executor call.
+        """
+        return await self._enveloped_off_loop(
+            self.get_work_expansion_enveloped,
+            (work_id,
+             None if enabled_bands is None else tuple(enabled_bands),
+             page, page_size, anchor_sys_id, anchor_rendered_relation,
+             anchor_evidence_source, anchor_confidence_band, lang),
+            timeout=self._browse_timeout(), heavy=True,
+        )

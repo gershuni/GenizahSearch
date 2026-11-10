@@ -1,0 +1,46 @@
+{
+    "prompts": [
+        {
+            "English": "Midrash Rabbah Genesis",
+            "Hebrew": "בראשית רבה"
+        },
+        {
+            "English": "Rashi's Talmud Commentary",
+            "Hebrew": "פירוש רש\"י לתלמוד"
+        },
+        {
+            "English": "Guide for the Perplexed (Arabic)",
+            "Hebrew": "דלאלה אלחאירין"
+        },
+        {
+            "English": "Tafsir R. Saadya Gaon",
+            "Hebrew": "תפסיר רס\"ג"
+        },
+        {
+            "English": "Mishneh Torah",
+            "Hebrew": "משנה תורה"
+        },
+        {
+            "English": "Hilkhot ha-Rif",
+            "Hebrew": "הלכות הרי\"ף"
+        },
+        {
+            "English": "Mekhilta de-Rabbi Yishma'el",
+            "Hebrew": "מכילתא דרבי ישמעאל"
+        },
+        {
+            "English": "Book of Precepts [R. Saadya Gaon]",
+            "Hebrew": "כתאב אלשראיע [רס\"ג]"
+        },
+        {
+            "English": "Responsa of Saadya Gaon",
+            "Hebrew": "שו\"ת סעדיה גאון"
+        },
+        {
+            "English": "Linguistics: glossary of Shabbat 1-6 approximately.",
+            "Hebrew": "בלשנות: מילון למילים בשבת א-ו בערך."
+        }
+    ],
+    "en_category": "English",
+    "he_category": "Hebrew"
+}

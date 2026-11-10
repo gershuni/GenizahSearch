@@ -1,0 +1,153 @@
+# -*- coding: utf-8 -*-
+"""Move closed issues out of docs/OPEN_ISSUES.md and docs/BACKLOG.md into the archive.
+
+Close an issue by setting its status cell to ``✅ Fixed (YYYY-MM-DD, <sha>)`` (or any
+status starting with ✅), then run this. Each closed row, with its section from
+docs/ISSUE_DETAILS.md, is APPENDED to docs/archive/OPEN_ISSUES_ARCHIVE.md; the
+archive is never rewritten (scripts/split_open_issues.ps1 once rebuilt it from
+scratch and would have replaced 355 KB with one run's yield). Only after every
+moved ID and headline is found in the archive are the rows and their details
+removed, and the Summary and the "Last Updated" line regenerated. The IDs stay
+taken: scripts/collect_open_issues.py never gives out an ID the archive holds.
+
+    python scripts/archive_closed_issues.py            # dry run, prints the plan
+    python scripts/archive_closed_issues.py --apply
+"""
+import argparse
+import datetime
+import io
+import posixpath
+import re
+import sys
+from pathlib import Path
+
+import open_issues_model as model   # scripts/ is on sys.path when this runs as a script
+
+
+def archive_block(closed: list, sections: dict, date: str) -> str:
+    out = ["", "---", "", "## Closed entries moved out of the tracker on %s" % date, "",
+           "Moved by `scripts/archive_closed_issues.py`: each row as it stood, then its "
+           "details. The IDs are not reused.", "",
+           model.TABLE_HEAD]
+    for place, issue in closed:
+        out.append(issue.row().replace("[GS-%d](ISSUE_DETAILS.md#gs-%d)" % (issue.id, issue.id),
+                                       "GS-%d (%s)" % (issue.id, place)))
+    for _, issue in closed:
+        out += ["", "### GS-%d" % issue.id, "", rebased(sections[issue.id])]
+    return "\n".join(out) + "\n"
+
+
+_LINK_RE = re.compile(r"\]\((?![a-z][a-z0-9+.-]*:|#|/)([^)\s]+)\)", re.IGNORECASE)
+
+
+def rebased(text: str) -> str:
+    """*text*'s relative links, written from docs/ (ISSUE_DETAILS.md), rewritten for
+    docs/archive/: `plans/X.md` -> `../plans/X.md`, `archive/Y.md` -> `Y.md` (Codex review
+    of PR #449). Absolute URLs and in-page anchors are left alone."""
+    def one(m):
+        path, hash_, anchor = m.group(1).partition("#")
+        new = posixpath.relpath(posixpath.normpath(posixpath.join("docs", path)), "docs/archive")
+        return "](%s%s%s)" % (new, hash_, anchor)
+    return _LINK_RE.sub(one, text)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--date", default=datetime.date.today().isoformat())
+    ap.add_argument("--tracker", type=Path, default=model.TRACKER, help=argparse.SUPPRESS)
+    ap.add_argument("--backlog", type=Path, default=model.BACKLOG, help=argparse.SUPPRESS)
+    ap.add_argument("--details", type=Path, default=model.DETAILS, help=argparse.SUPPRESS)
+    ap.add_argument("--archive", type=Path, default=model.ARCHIVE, help=argparse.SUPPRESS)
+    args = ap.parse_args(argv)
+
+    docs = {"OPEN_ISSUES.md": (args.tracker, model.PRIORITIES),
+            "BACKLOG.md": (args.backlog, model.KINDS)}
+    parsed = {name: model.parse(path.read_text(encoding="utf-8"), groups)
+              for name, (path, groups) in docs.items()}
+    head, sections = model.parse_details(args.details.read_text(encoding="utf-8"))
+    if not args.archive.is_file():
+        raise SystemExit("The issues archive is not there: %s\nCheck out the private repository "
+                         "beside this one, or set GENIZAH_PRIVATE_DIR." % args.archive)
+    with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
+        before = fh.read()
+    closed = [(name, i) for name, doc in parsed.items() for i in doc.issues if i.is_closed]
+    # A run interrupted after its append has archived some IDs already: they are not
+    # appended twice, and a details section it left behind (its row already gone) is
+    # removed now, so running the command again finishes the job (Codex review of #449).
+    archived = {i.id for _, i in closed if _archived(before, i.id, sections.get(i.id, ""))}
+    rows = {i.id for doc in parsed.values() for i in doc.issues}
+    leftover = sorted(k for k in sections if k not in rows and _archived(before, k, sections[k]))
+    if not closed and not leftover:
+        print("No closed rows (a status starting with %s) in the tracker or the backlog."
+              % " ".join(model.CLOSED_MARKS))
+        return 0
+    for name, i in closed:
+        print("  GS-%-4d %-14s %s%s" % (i.id, name, i.headline[:80],
+                                        " (already in the archive)" if i.id in archived else ""))
+    for k in leftover:
+        print("  GS-%-4d details left by an interrupted run (the row is already archived)" % k)
+    # The details are the row's full text: archiving a row without them would lose it
+    # (Codex review of PR #449). An interrupted fold can leave a row so -- finish it first.
+    bare = [i.id for _, i in closed
+            if i.id not in archived and not sections.get(i.id, "").strip()]
+    if bare:
+        print("! GS-%s %s no details section in %s; nothing written. Run "
+              "`python scripts/collect_open_issues.py --apply` (or restore the section) first."
+              % (", GS-".join(map(str, bare)), "has" if len(bare) == 1 else "have",
+                 args.details.name))
+        return 1
+    if not args.apply:
+        print("\n%d row(s) would move to %s (dry run -- pass --apply to write)."
+              % (len(closed), args.archive.name))
+        return 0
+
+    # 1. Append to the archive, keeping its line endings, and verify before removing anything.
+    new = [(name, i) for name, i in closed if i.id not in archived]
+    if new:
+        eol = "\r\n" if before.count("\r\n") > before.count("\n") // 2 else "\n"
+        block = archive_block(new, sections, args.date).replace("\n", eol)
+        with io.open(args.archive, "a", encoding="utf-8", newline="") as fh:
+            fh.write(block)
+        with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
+            after = fh.read()
+        missing = [i.id for _, i in new
+                   if not _archived(after, i.id, sections[i.id]) or i.headline not in after]
+        if missing or not after.startswith(before):
+            print("!! the archive does not hold GS-%s after the append; nothing else was changed"
+                  % ", GS-".join(map(str, missing)))
+            return 1
+
+    # 2. Only now take the rows and their details out (the details last: a run stopped
+    #    before that write leaves sections that the next run removes as leftovers).
+    ids = {i.id for _, i in closed} | set(leftover)
+    label = "archived %s" % ", ".join("GS-%d" % i for i in sorted(ids))
+    for name, (path, _) in docs.items():
+        doc = parsed[name]
+        if not any(i.id in ids for i in doc.issues):
+            continue
+        doc.issues = [i for i in doc.issues if i.id not in ids]
+        model.set_last_updated(doc, args.date, label)
+        model.write_text(path, model.render(doc))                  # all or nothing
+    model.write_text(args.details, model.render_details(
+        head, {k: v for k, v in sections.items() if k not in ids}))
+    print("\nverified and applied: %d row(s) moved to %s%s." % (
+        len(new), args.archive.name,
+        "" if len(ids) == len(new) else "; %d already there, finished" % (len(ids) - len(new))))
+    return 0
+
+
+def _archived(archive: str, issue_id: int, details: str) -> bool:
+    """The archive holds this ID's row ('| GS-<n> (<file>) |') AND, under '### GS-<n>', the
+    whole of *details* (the source section, rebased). A run stopped anywhere inside its
+    append -- after the row, or partway through the details -- leaves the ID not archived,
+    so the next run appends it again in full rather than removing the only complete copy
+    (Codex review of PR #449, twice). Empty *details* never count as archived."""
+    flat = archive.replace("\r\n", "\n")
+    return (bool(details.strip()) and ("| GS-%d (" % issue_id) in flat
+            and ("\n### GS-%d\n\n%s\n" % (issue_id, rebased(details))) in flat)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

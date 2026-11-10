@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "source": "search",
+  "generated_at": "2026-05-04T12:00:00.000Z",
+  "request": {
+    "search_mode": "exact",
+    "query": "ויאמר משה",
+    "gap": 0,
+    "limit": 10,
+    "filters": {}
+  },
+  "count": 2,
+  "total": 2,
+  "warnings": [],
+  "results": [
+    {
+      "uid": "990001234560205171_001r",
+      "locator": {"sys_id": "990001234560205171", "volume_ie": "IE12345", "p_num": 1, "fl_id": "T-S 12.123.1r"},
+      "score": 0.8731,
+      "shelfmark": "T-S 12.123",
+      "title": "Liturgical fragment",
+      "snippet": "...ויאמר משה אל בני ישראל...",
+      "excerpt": "...ויאמר משה אל בני ישראל...",
+      "metadata": {"library": "CUL", "library_name": "Cambridge University Library", "domains": ["Liturgy"], "dating": "11th century"},
+      "image_url": "/api/nli_image_by_sysid/990001234560205171?page=0"
+    },
+    {
+      "uid": "990009876540205171_002v",
+      "locator": {"sys_id": "990009876540205171", "volume_ie": "IE99999", "p_num": 2, "fl_id": "ENA 1234.2v"},
+      "score": 0.6512,
+      "shelfmark": "ENA 1234",
+      "title": "Bible commentary",
+      "snippet": "...ויאמר משה...",
+      "excerpt": "...ויאמר משה...",
+      "metadata": {"library": "JTS", "library_name": "Jewish Theological Seminary", "domains": ["Bible"], "dating": "12th century"},
+      "image_url": "/api/nli_image_by_sysid/990009876540205171?page=1"
+    }
+  ]
+}

@@ -1,0 +1,1901 @@
+# -*- coding: utf-8 -*-
+"""User list management with offline-first caching.
+
+Phase 123: Extracted from genizah_core.py (v8.3.0 God-File Decomposition).
+genizah_core.py retains a permanent same-object re-export shim so all
+existing ``from genizah_core import ListsManager`` callers continue working.
+
+Note: Config is imported at module level BEFORE the class body because
+ListsManager uses Config.INDEX_DIR (bound at class-definition time).
+"""
+
+import logging
+import os
+import pickle
+import re
+import shutil
+import tempfile
+import threading
+import time
+
+from shared.genizah_translations import TRANSLATIONS
+
+from shared.atomic_io import (
+    DEFAULT_BUSY_BUDGET, copy_file, discard, is_busy, read_bytes, replace_file, write_bytes_atomic,
+)
+from shared.config import Config
+
+LOGGER = logging.getLogger("genizah." + __name__)
+
+
+def _tr(text: str) -> str:
+    """Translate text if current language is Hebrew.
+
+    Mirrors genizah_core.tr() — lazy import of CURRENT_LANG inside the
+    function body so we always see the live value (Pitfall 2 of Phase 123).
+    GUARD-01-safe: the import is function-body-only, not module-level.
+    """
+    from genizah_core import CURRENT_LANG  # noqa: PLC0415 — intentional lazy; GUARD-01 safe
+    if CURRENT_LANG == 'he':
+        return TRANSLATIONS.get(text, text)
+    return text
+
+
+def _worth_retrying_at_startup(exc):
+    """Any failed read of lists.pkl is retried at startup, except a file that is gone."""
+    return not isinstance(exc, FileNotFoundError)
+
+
+# --- What a removal or a move here means for the cloud rows (no network) ---
+#
+# item['cloud_rows'][list id] is the website row this computer remembers for that
+# membership (shared/lists_sync.py records it). These helpers are the only code of
+# this module that changes cloud_rows or store['cloud_deletes']. Each takes the store
+# it acts on and reads nothing but cloud_rows and cloud_deletes, so the same call gives
+# the same result on the live store when the user edits and on an upload's copy when
+# ListsManager.finish_upload replays that edit there.
+
+def _item_records(state, item_id):
+    item = (state.get('items') or {}).get(item_id)
+    if not isinstance(item, dict):
+        return None, {}
+    return item, (item.get('cloud_rows') if isinstance(item.get('cloud_rows'), dict) else {})
+
+
+def _pop_record(item, key):
+    recs = item.get('cloud_rows')
+    if isinstance(recs, dict):
+        recs.pop(key, None)
+        if not recs:
+            item.pop('cloud_rows', None)
+
+
+def _queue_record(state, item_id, item, rec, from_list):
+    """An explicit removal of a remembered row: the next upload deletes it, by id and list.
+
+    The entry keeps what it needs to be undone ('item', the local list 'from', the
+    record 'rec'): putting the entry back in that list before the delete is sent gives
+    it the row back (_restore_cloud_row).
+    """
+    from shared.local_sys_id import is_local_sys_id  # noqa: PLC0415 - light, and only when a record exists
+    if not isinstance(rec, dict) or rec.get('gone') or rec.get('id') is None or rec.get('list') is None:
+        return
+    account = state.get('cloud_account')
+    if account is None or is_local_sys_id(item.get('sys_id', item_id)):
+        return
+    state.setdefault('cloud_deletes', {})[str(rec['id'])] = {
+        'id': rec['id'], 'list': rec['list'], 'account': account,
+        'item': item_id, 'ident': _identity(item_id, item), 'from': from_list, 'rec': dict(rec)}
+
+
+def _identity(item_id, item):
+    from shared.lists_sync import _item_identity  # noqa: PLC0415 - GUARD-01: no module-level engine import
+    return list(_item_identity(item_id, item))
+
+
+def _queue_cloud_delete(state, item_id, list_id):
+    """The entry left list_id for good: its row there, and any row on its way there, are to be deleted.
+
+    A row the website already removed (a 'gone' record) is only forgotten. A legacy
+    scalar cloud_id never queues anything.
+    """
+    item, recs = _item_records(state, item_id)
+    if item is None:
+        return
+    rec = recs.get(list_id)
+    _pop_record(item, list_id)
+    _queue_record(state, item_id, item, rec, list_id)
+    for key, moved in list(recs.items()):
+        if str(key).startswith('~') and isinstance(moved, dict) and moved.get('to') == list_id:
+            _pop_record(item, key)
+            _queue_record(state, item_id, item, moved, list_id)
+
+
+def _forget_item(state, item_id):
+    """The entry is deleted: every row still remembered for it is to be deleted.
+
+    The live store's caller then deletes the item. An upload's copy keeps it (with no
+    records): an entry made again under that key while the upload ran gets what the
+    copy holds for it at the install -- nothing, or the rows its return gave back.
+    """
+    item, recs = _item_records(state, item_id)
+    if item is None:
+        return
+    for key, rec in list(recs.items()):
+        _pop_record(item, key)
+        _queue_record(state, item_id, item, rec, rec.get('to') if str(key).startswith('~') else key)
+    for entry in (state.get('cloud_deletes') or {}).values():
+        if isinstance(entry, dict) and entry.get('item') == item_id:
+            entry['deleted'] = True     # an entry made again later holds none of this one's text
+
+
+def _restore_cloud_row(state, item_id, list_id, ident):
+    """The entry is back in list_id before its removal (or move) from there was sent: undone.
+
+    The rows queued when it left list_id are its own again, as they were remembered (a
+    moved row bound for that list is on its way there again), and a row still on its
+    way from list_id to another list stays list_id's -- so the website keeps them where
+    they are, with whatever was written on them there. ident: the entry's identity as
+    it is back (the caller's), so an entry made again as another folio or page, whose
+    row that is not, gets a new one.
+    """
+    item = (state.get('items') or {}).get(item_id)
+    if not isinstance(item, dict):
+        return
+    recs = item.get('cloud_rows') or {}
+    for key, moved in list(recs.items()):
+        if (str(key).startswith('~') and isinstance(moved, dict) and moved.get('from') == list_id
+                and not moved.get('gone') and list_id not in recs):
+            _pop_record(item, key)
+            item.setdefault('cloud_rows', {})[list_id] = {k: v for k, v in moved.items() if k not in ('to', 'from')}
+            recs = item.get('cloud_rows') or {}
+    pending = state.get('cloud_deletes')
+    if not pending:
+        return
+    ident = list(ident)
+    for key, entry in list(pending.items()):
+        if not (isinstance(entry, dict) and entry.get('item') == item_id and isinstance(entry.get('rec'), dict)
+                and entry.get('account') == state.get('cloud_account')
+                and list_id in (entry.get('from'), entry['rec'].get('from'))
+                and entry.get('ident') == ident):     # made again as another folio or page: a new row
+            continue
+        del pending[key]
+        rec = dict(entry['rec'])
+        if entry.get('deleted'):
+            # the entry was deleted and made again: nothing is known of what it holds of the
+            # row's note and tags, so they count as differing until a Download folds them in
+            rec = {k: v for k, v in rec.items() if k in ('id', 'list', 'to', 'from')}
+        if rec.get('from') == list_id or rec.get('to') is None:
+            slot = list_id
+            rec = {k: v for k, v in rec.items() if k not in ('to', 'from')}
+        else:
+            slot = '~' + str(rec['id'])
+        recs = item.setdefault('cloud_rows', {})
+        if slot not in recs:
+            recs[slot] = rec
+    if not pending:
+        state.pop('cloud_deletes', None)
+
+
+def _mark_pending_move(state, item_id, from_list, to_list):
+    """The entry moved from from_list to to_list: its row there goes with it, whatever to_list holds.
+
+    The row's record is kept under '~<row id>' with 'to' (the next upload moves the row
+    into to_list, or deletes it once to_list has its own row) and 'from' (the list it is
+    leaving: putting the entry back there keeps the row there); a row already on its way
+    to from_list is now on its way to to_list. A 'gone' record has nothing left to move.
+    """
+    if from_list == to_list:
+        return
+    item, recs = _item_records(state, item_id)
+    if item is None:
+        return
+    rec = recs.get(from_list)
+    _pop_record(item, from_list)
+    for key, moved in list(recs.items()):
+        if str(key).startswith('~') and isinstance(moved, dict) and moved.get('to') == from_list:
+            moved['to'] = to_list
+    if isinstance(rec, dict) and not rec.get('gone') and rec.get('id') is not None:
+        moved = dict(rec)
+        moved['to'], moved['from'] = to_list, from_list
+        item.setdefault('cloud_rows', {})['~' + str(rec['id'])] = moved
+
+
+def _mark_unsent(state, list_id, key, part=None):
+    """A list was changed here in what an upload sends for it: its name ('list_name_unsent'), or
+    a part of its own state ('list_state_unsent', part 'color', 'project' or 'trash') --
+    lists_sync.LIST_NAME_UNSENT and LIST_STATE_UNSENT. The mark stays until an upload has sent
+    it, and until then a Download keeps this computer's value of what it names. Journaled
+    (ListsManager._book), so a change made while an upload runs on a copy is marked again on the
+    copy when it is installed: that upload sent the value from before.
+    """
+    lst = (state.get('lists') or {}).get(list_id)
+    if not isinstance(lst, dict):
+        return
+    if part is None:
+        lst[key] = True
+        return
+    mark = lst.get(key)
+    if mark and not isinstance(mark, (list, tuple, set, frozenset)):
+        return                               # already holds back every part
+    lst[key] = sorted(set(mark or ()) | {part})
+
+
+def _keep_web_removal(state, item_id, list_id):
+    """Keep an entry the website removed: forget its tombstone, so the next upload inserts it again."""
+    item, recs = _item_records(state, item_id)
+    rec = recs.get(list_id)
+    if item is not None and isinstance(rec, dict) and rec.get('gone'):
+        _pop_record(item, list_id)
+
+
+class ListsManager:
+    """
+    Manages personal lists (starred/saved manuscripts) with tags and notes.
+
+    Features:
+    - Multiple named lists with colors
+    - Built-in "General" default list
+    - Built-in "Recently Viewed" auto-populated list
+    - Tags and notes per item
+    - Export/import functionality
+    """
+
+    LISTS_FILE = os.path.join(Config.INDEX_DIR, "lists.pkl")
+    MAX_RECENT_ITEMS = 50
+    BACKUP_COUNT = 3
+    # How long load() keeps retrying a lists.pkl it cannot read -- Windows
+    # reports it busy while antivirus or the indexer holds it, and a network or
+    # removable drive can fail a read for a moment -- before treating it as
+    # unreadable. It runs once, at startup, and a file taken for a damaged one
+    # would be set aside and an older backup loaded in its place.
+    LOAD_BUSY_BUDGET = 5.0
+
+    # Class-level: every instance writes the same LISTS_FILE. The desktop saves on
+    # its UI thread only (its list syncs run on a copy and are installed there); the
+    # lock is for any other caller that saves from another thread.
+    _save_lock = threading.Lock()
+    # While an upload runs on a copy of the store (begin_upload .. finish_upload or
+    # abandon_upload): the removal and move bookkeeping of every edit made meanwhile,
+    # replayed on the copy when it is installed. In memory only, for one upload.
+    _journal = None
+    _journal_store = None
+    _journal_lock = threading.Lock()
+    # What the last load() found, for the desktop to report: 'ok', 'missing',
+    # 'recovered' (lists.pkl was unreadable and a backup was loaded) or
+    # 'failed' (nothing was readable; the lists start empty). Class-level
+    # defaults so an instance built without __init__ behaves like a fresh start.
+    load_status = 'missing'
+    load_error = None
+    recovered_from = None
+    unreadable_copy = None
+    _backup_done = False
+    # Told when saves stop reaching lists.pkl and when they reach it again:
+    # on_save_failed(reason) after every save that did not write it, and
+    # on_save_recovered() after the first one that does once saves had been
+    # failing. The mutators (create_list, add_item, add_to_recent, ...) ignore
+    # what save() returns, so without these a failing save is only a log line
+    # while the lists on screen look saved. The desktop sets them on its
+    # instance; the web server leaves them None. Called on whichever thread
+    # saved (the desktop's UI thread) with _save_lock held, so the order they
+    # are called in is the order the saves ran: they must return at once and
+    # never save. What they raise is logged.
+    on_save_failed = None
+    on_save_recovered = None
+    # True from a failed save -- or a failed copy of an unreadable lists.pkl,
+    # which every save then needs first -- until a save writes lists.pkl.
+    _saves_failing = False
+
+    # Default colors for lists
+    DEFAULT_COLORS = [
+        '#FFD700',  # Gold (default)
+        '#4CAF50',  # Green
+        '#2196F3',  # Blue
+        '#9C27B0',  # Purple
+        '#FF5722',  # Deep Orange
+        '#00BCD4',  # Cyan
+        '#E91E63',  # Pink
+        '#795548',  # Brown
+        '#607D8B',  # Blue Grey
+        '#F44336',  # Red
+    ]
+
+    def __init__(self, meta_mgr=None):
+        """Initialize the lists manager."""
+        self.meta_mgr = meta_mgr
+        self.data = self._get_default_data()
+        self.load()
+
+    def _get_default_data(self):
+        """Return the default data structure."""
+        import time
+        return {
+            'lists': {
+                'default': {
+                    'name': 'General',
+                    'name_en': 'General',
+                    'color': '#FFD700',
+                    'created': time.time(),
+                    'is_default': True,
+                    'is_system': False,
+                    'project_id': None
+                },
+                'recent': {
+                    'name': 'Recently Viewed',
+                    'name_en': 'Recently Viewed',
+                    'color': '#9E9E9E',
+                    'is_system': True,
+                    'max_items': self.MAX_RECENT_ITEMS,
+                    'project_id': None
+                }
+            },
+            'projects': {},
+            'lists_order': [],
+            'projects_order': [],
+            'items': {},  # sys_id -> item data
+            'recent_items': [],  # ordered list of sys_ids (most recent first)
+            'all_tags': []  # for autocomplete
+        }
+
+    def _backup_paths(self):
+        return [f"{self.LISTS_FILE}.bak{i}" for i in range(1, self.BACKUP_COUNT + 1)]
+
+    def _read_store(self, path, budget=DEFAULT_BUSY_BUDGET, retry_if=is_busy):
+        """Unpickle one copy of the store and fill in the fields newer builds expect."""
+        loaded = pickle.loads(read_bytes(path, budget=budget, retry_if=retry_if))
+        # Merge with defaults to handle new fields
+        defaults = self._get_default_data()
+        for key in defaults:
+            if key not in loaded:
+                loaded[key] = defaults[key]
+        # Ensure system lists exist
+        if 'default' not in loaded['lists']:
+            loaded['lists']['default'] = defaults['lists']['default']
+        if 'recent' not in loaded['lists']:
+            loaded['lists']['recent'] = defaults['lists']['recent']
+        if 'projects' not in loaded:
+            loaded['projects'] = defaults['projects']
+        if 'lists_order' not in loaded:
+            loaded['lists_order'] = defaults['lists_order']
+        if 'projects_order' not in loaded:
+            loaded['projects_order'] = defaults['projects_order']
+        if not loaded.get('lists_order'):
+            loaded['lists_order'] = list(loaded.get('lists', {}).keys())
+        if not loaded.get('projects_order'):
+            loaded['projects_order'] = list(loaded.get('projects', {}).keys())
+        for project_data in loaded.get('projects', {}).values():
+            if 'color' not in project_data:
+                project_data['color'] = self._get_next_project_color(loaded.get('projects', {}))
+        for list_data in loaded.get('lists', {}).values():
+            if 'project_id' not in list_data:
+                list_data['project_id'] = None
+        # Backfill sys_id on stored items (older format used key only)
+        for item_id, item_data in loaded.get('items', {}).items():
+            if isinstance(item_data, dict) and 'sys_id' not in item_data:
+                item_data['sys_id'] = item_id
+        return loaded
+
+    def load(self):
+        """Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
+
+        Never writes, renames or rotates anything: the web server builds a
+        ListsManager at startup and must leave the file alone. A missing
+        lists.pkl is a fresh start (or a deliberate delete), so the backups are
+        not consulted. load_status says what was found.
+        """
+        self.load_status, self.load_error, self.recovered_from = 'missing', None, None
+        self.unreadable_copy = None
+        self._backup_done = False
+        self._saves_failing = False
+        self.data = self._get_default_data()
+        if not os.path.exists(self.LISTS_FILE):
+            return
+        try:
+            self.data = self._read_store(self.LISTS_FILE, budget=self.LOAD_BUSY_BUDGET,
+                                         retry_if=_worth_retrying_at_startup)
+            self.load_status = 'ok'
+            return
+        except FileNotFoundError:
+            return  # removed between the check and the read: the same as missing
+        except Exception as e:
+            self.load_error = str(e)
+            LOGGER.error("Failed to load lists from %s: %s", self.LISTS_FILE, e)
+        for path in self._backup_paths():
+            if not os.path.exists(path):
+                continue
+            try:
+                self.data = self._read_store(path)
+            except Exception as e:
+                LOGGER.error("Lists backup %s is unreadable too: %s", path, e)
+                continue
+            self.load_status, self.recovered_from = 'recovered', path
+            LOGGER.warning("Recovered lists from backup %s", path)
+            return
+        self.load_status = 'failed'
+
+    def _rotate_backups(self):
+        """Make a copy of lists.pkl the new .bak1: .bak2 -> .bak3, .bak1 -> .bak2.
+
+        The copy is made first, under a temporary name in the same folder, so
+        nothing has moved if it fails (lists.pkl stays busy, the disk is full):
+        this raises, save() leaves lists.pkl alone, and the next save tries
+        again. Moving the older backups down is best effort -- one that cannot
+        move is logged, and at worst an older one is overwritten -- and then the
+        copy takes .bak1's place. If even that fails, this raises too, since
+        replacing lists.pkl would then leave no copy of it.
+        """
+        paths = self._backup_paths()
+        folder = os.path.dirname(os.path.abspath(self.LISTS_FILE))
+        fd, fresh = tempfile.mkstemp(
+            prefix=os.path.basename(self.LISTS_FILE) + '.', suffix='.bak.tmp', dir=folder)
+        os.close(fd)
+        try:
+            copy_file(self.LISTS_FILE, fresh)
+            for older, newer in zip(reversed(paths[:-1]), reversed(paths[1:])):
+                if os.path.exists(older):
+                    try:
+                        replace_file(older, newer)
+                    except OSError as e:
+                        LOGGER.warning("Could not move the list backup %s to %s: %s",
+                                       older, newer, e)
+            replace_file(fresh, paths[0])
+        except BaseException:
+            discard(fresh)
+            raise
+
+    def _keep_unreadable_locked(self):
+        """Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
+
+        Called with _save_lock held, before anything replaces lists.pkl. An
+        OSError propagates, so the caller does not overwrite the only copy.
+        """
+        keep = f"{self.LISTS_FILE}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}"
+        shutil.copy2(self.LISTS_FILE, keep)
+        LOGGER.warning("Kept the unreadable lists file as %s", keep)
+        self.unreadable_copy = keep
+        self._backup_done = True
+        return keep
+
+    def keep_unreadable_copy(self):
+        """After a load that could not read lists.pkl, copy it aside now.
+
+        Returns the copy's path, or None when there is nothing to keep or the
+        copy failed (lists.pkl is then left as it is: save() refuses to replace
+        it until the copy succeeds).
+        """
+        with self._save_lock:
+            if self.unreadable_copy:
+                return self.unreadable_copy
+            if (self.load_status not in ('recovered', 'failed') or self._backup_done
+                    or not os.path.exists(self.LISTS_FILE)):
+                return None
+            try:
+                return self._keep_unreadable_locked()
+            except OSError as e:
+                LOGGER.error("Could not keep a copy of the unreadable lists file: %s", e)
+                self._saves_failing = True  # save() refuses until the copy is made
+                return None
+
+    def save(self):
+        """Save lists to file. Returns True when lists.pkl was written.
+
+        Atomic (temp file + os.replace) and serialised across threads. The
+        backups rotate once per session -- on the first save after a load that
+        read lists.pkl itself -- so .bak1-3 are the store as it stood at the
+        start of the last three sessions, not the last three edits. When the
+        new .bak1 cannot be made, lists.pkl is not replaced: the save returns
+        False and the next one tries the rotation again. After a load that
+        could not read lists.pkl, its bytes are kept as
+        lists.pkl.unreadable-<time> before anything replaces it, and the
+        backups are left alone.
+
+        A failed save calls on_save_failed with the reason, and the first save
+        that lands after failures calls on_save_recovered (see the class).
+        """
+        with self._save_lock:
+            try:
+                payload = pickle.dumps(self.data)
+                if not self._backup_done and os.path.exists(self.LISTS_FILE):
+                    if self.load_status == 'ok':
+                        self._rotate_backups()
+                    elif self.load_status in ('recovered', 'failed'):
+                        self._keep_unreadable_locked()
+                self._backup_done = True
+                write_bytes_atomic(self.LISTS_FILE, payload)
+            except Exception as e:
+                LOGGER.error("Failed to save lists: %s", e)
+                self._saves_failing = True
+                self._tell(self.on_save_failed, str(e) or type(e).__name__)
+                return False
+            if self._saves_failing:
+                self._saves_failing = False
+                self._tell(self.on_save_recovered)
+            return True
+
+    @staticmethod
+    def _tell(hook, *args):
+        """Call a save hook, if one is set; what it raises is logged, not passed on."""
+        if hook is None:
+            return
+        try:
+            hook(*args)
+        except Exception as e:
+            LOGGER.error("A lists save hook failed: %s", e)
+
+    def write_snapshot(self, label, payload=None):
+        """Write the in-memory store (or payload, its pickled bytes) to lists.pkl.<label>, atomically.
+
+        The cloud sync takes one before each direction ('pre-download',
+        'pre-upload'), so the state it started from can be recovered by hand.
+        Returns True when the snapshot was written.
+        """
+        path = f"{self.LISTS_FILE}.{label}"
+        with self._save_lock:
+            try:
+                write_bytes_atomic(path, pickle.dumps(self.data) if payload is None else payload)
+                return True
+            except Exception as e:
+                LOGGER.error("Could not write the lists snapshot %s: %s", path, e)
+                return False
+
+    def saves_failing(self):
+        """True while saves do not reach lists.pkl (see save()): the lists live in memory only."""
+        return bool(self._saves_failing)
+
+    def clear_all(self):
+        """Clear all lists and reset to default state. Used after migration."""
+        self.data = self._get_default_data()
+        self.save()
+
+    # --- Cloud Sync Integration ---
+
+    def enable_cloud_sync(self, user_id: str, supabase_client=None):
+        """Enable cloud sync for the given user (call after login).
+
+        Args:
+            user_id: The user's UUID from Supabase auth
+            supabase_client: Optional authenticated Supabase client for RLS
+        """
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            sync.set_user(user_id)
+            if supabase_client:
+                sync.set_client(supabase_client)
+            LOGGER.info(f"Cloud sync enabled for user")
+        except ImportError:
+            LOGGER.debug("lists_sync module not available")
+        except Exception as e:
+            LOGGER.warning(f"Failed to enable cloud sync: {e}")
+
+    def disable_cloud_sync(self):
+        """Disable cloud sync (call on logout)."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            sync.clear_user()
+        except Exception:
+            pass  # Cloud sync best-effort; offline mode continues
+
+    def sync_from_cloud(self):
+        """Pull lists from cloud and merge with local data."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.sync_from_cloud()
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def is_sync_available(self):
+        """Check if cloud sync is available (user logged in, network ok)."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.is_sync_available()
+        except ImportError:
+            return False
+        except Exception:
+            return False  # Cannot determine sync state; assume not synced
+
+    @property
+    def _last_sync(self):
+        """Get timestamp of last sync (for debouncing)."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return getattr(sync, '_last_sync', 0)
+        except Exception:
+            return 0  # Count unavailable; return zero
+
+    def sync_to_cloud(self, **kw):
+        """Push local lists to cloud (keywords as ListsCloudSync.sync_to_cloud: data=, should_stop=, ...)."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.sync_to_cloud(**kw)
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def fetch_cloud_state(self, remembered_ids, **kw):
+        """The network half of a download (ListsCloudSync.fetch_cloud_state): reads nothing local."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            return get_lists_sync(self).fetch_cloud_state(remembered_ids, **kw)
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def apply_cloud_state(self, state):
+        """The local half of a download, on this thread (ListsCloudSync.apply_cloud_state)."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            return get_lists_sync(self).apply_cloud_state(state)
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def cloud_user(self):
+        """The account list sync is set up for, or None."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            return get_lists_sync(self)._user_id
+        except Exception:
+            return None
+
+    def remembered_row_ids(self, user_id):
+        """The rows a download confirms, taken from the store on the thread that owns it."""
+        from shared.lists_sync import remembered_ids
+        return remembered_ids(self.data, user_id)
+
+    # --- An upload on a copy of the store ---
+    #
+    # The desktop uploads from a copy so the user can edit meanwhile: begin_upload()
+    # hands it out, the engine writes the cloud identity into it, and finish_upload()
+    # installs that identity into the live store and then replays on top of it the
+    # removal and move bookkeeping of every edit made while the upload ran -- so every
+    # such edit counts as made after it. One difference from making the edits after
+    # the upload: a removal made during it keeps its delete even when the upload
+    # dropped the record the delete came from (a pending removal persists until the
+    # delete goes through). abandon_upload() is the same install for an upload whose
+    # result never came (the app closed), rebuilt from what it reported.
+
+    def begin_upload(self):
+        """Snapshot lists.pkl.pre-upload and open the journal. Returns (copy, base), two copies of the store."""
+        with self._save_lock:
+            payload = pickle.dumps(self.data)
+        if not self.write_snapshot('pre-upload', payload):
+            LOGGER.warning("Proceeding with the upload without its snapshot")
+        with self._journal_lock:
+            if self._journal is not None:
+                LOGGER.error("An upload began while another was still open; the earlier one is dropped")
+            self._journal = []
+            self._journal_store = self.data
+        return pickle.loads(payload), pickle.loads(payload)
+
+    def withdrawn_now(self):
+        """The memberships removed since the upload began: (item id, list id). The engine's withdrawn()."""
+        with self._journal_lock:
+            journal = list(self._journal or ())
+        return frozenset((args[0], args[1]) for name, args in journal if name == '_queue_cloud_delete')
+
+    def _close_journal(self):
+        with self._journal_lock:
+            journal, store = self._journal, self._journal_store
+            self._journal = self._journal_store = None
+        return journal, store
+
+    def finish_upload(self, copy, base, result=None):
+        """Install an upload's copy, whatever the upload's end (success, failure, stop, error).
+
+        Returns True when the live store's cloud identity changed (it is then saved).
+        """
+        journal, store = self._close_journal()
+        return self._install_upload(copy, self._began_as(base), journal, store)
+
+    @staticmethod
+    def _began_as(base):
+        """What the install needs of the store an upload began from."""
+        return {'cloud_account': base.get('cloud_account'), 'cloud_deletes': set(base.get('cloud_deletes') or {})}
+
+    def abandon_upload(self, base, recorded, user_id):
+        """The app closes while an upload runs: install what it reported, as finish_upload would.
+
+        recorded: every report the upload made, in order -- ('row', item id, list key,
+        row id, cloud list id, note, tags, differs) for each record it wrote, ('field',
+        'lists' | 'projects', local id, key, value) for each cloud-id write (value None:
+        removed). They are applied to base -- begin_upload's second copy, which this
+        consumes -- and the result is installed.
+        """
+        journal, store = self._close_journal()
+        if not recorded:
+            return False     # the live store is base plus the edits; content matching finds the rest
+        from shared.lists_sync import apply_account_guard, record_row, rows_index
+        began = self._began_as(base)
+        scratch = base
+        apply_account_guard(scratch, user_id)
+        named = rows_index(scratch)
+        items = scratch.get('items') or {}
+        for report in recorded:
+            if report[0] == 'row':
+                _, item_id, list_key, row_id, cloud_list_id, note, tags, differs = report
+                if item_id in items:
+                    record_row(scratch, user_id, item_id, list_key, row_id, cloud_list_id, note, tags, differs,
+                               named=named, item=items[item_id])
+            elif report[0] == 'field':
+                _, kind, local_id, key, value = report
+                target = (scratch.get(kind) or {}).get(local_id)
+                if isinstance(target, dict):
+                    if value is None:
+                        target.pop(key, None)
+                    else:
+                        target[key] = value
+        return self._install_upload(scratch, began, journal, store)
+
+    def _install_upload(self, copy, began, journal, store):
+        if store is not self.data:
+            LOGGER.warning("The lists were replaced while an upload ran; its result is not installed")
+            return False
+        if self.data.get('cloud_account') != began['cloud_account']:
+            LOGGER.error("The lists changed account while an upload ran; its result is not installed")
+            return False
+        self._replay(copy, journal or ())
+        self._keep_user_deletes(copy, began['cloud_deletes'])
+        changed = self._install(copy)
+        if changed:
+            self.save()
+        return changed
+
+    def _replay(self, copy, journal):
+        """The bookkeeping of every edit made during the upload, again, in order, on its copy."""
+        for name, args in journal:
+            globals()[name](copy, *args)
+
+    def _keep_user_deletes(self, copy, had):
+        """The deletes queued during the upload that its copy lacks: kept, unless the upload gave that
+        row to a membership (a record of the copy names it) or the replay queued it from the copy.
+
+        had: the keys of the pending deletes the upload began with.
+        """
+        mine = self.data.get('cloud_deletes') or {}
+        named = {str(rec.get('id')) for it in (copy.get('items') or {}).values()
+                 for rec in (it.get('cloud_rows') or {}).values()
+                 if isinstance(rec, dict) and not rec.get('gone') and rec.get('id') is not None}
+        for key, entry in mine.items():
+            if key in had or key in named or key in (copy.get('cloud_deletes') or {}):
+                continue
+            copy.setdefault('cloud_deletes', {})[key] = dict(entry)
+
+    def _install(self, copy):
+        """The copy's cloud identity into the live store; nothing else is touched. Returns whether it changed."""
+        live = self.data
+        before = pickle.dumps((live.get('cloud_account'), live.get('cloud_deletes'),
+                               {k: (v.get('cloud_id'), v.get('list_state_unsent'), v.get('list_name_unsent'))
+                                for k, v in (live.get('lists') or {}).items()},
+                               {k: v.get('cloud_id') for k, v in (live.get('projects') or {}).items()},
+                               {k: (v.get('cloud_id'), v.get('cloud_rows')) for k, v in (live.get('items') or {}).items()}))
+        # the copy is the upload's own and is dropped after this: its objects are taken as they are
+        for key in ('cloud_account', 'cloud_deletes'):
+            if key in copy and not (key == 'cloud_deletes' and not copy[key]):
+                live[key] = copy[key]
+            else:
+                live.pop(key, None)
+        copied_lists = copy.get('lists') or {}
+        for lid, ld in (live.get('lists') or {}).items():
+            theirs = copied_lists.get(lid)
+            if not isinstance(theirs, dict):
+                continue
+            # a list renamed, recoloured, moved to a project or to or from the Trash while the
+            # upload ran was marked again on the copy by the replay (_mark_unsent): what the
+            # upload sent was the value from before
+            for key in ('cloud_id', 'list_state_unsent', 'list_name_unsent'):
+                if key in theirs:
+                    ld[key] = theirs[key]
+                else:
+                    ld.pop(key, None)
+        copied_projects = copy.get('projects') or {}
+        for pid, pd in (live.get('projects') or {}).items():
+            theirs = copied_projects.get(pid)
+            if not isinstance(theirs, dict):
+                continue
+            if 'cloud_id' in theirs:
+                pd['cloud_id'] = theirs['cloud_id']
+            else:
+                pd.pop('cloud_id', None)
+        copied_items = copy.get('items') or {}
+        for iid, it in (live.get('items') or {}).items():
+            theirs = copied_items.get(iid)
+            for key in ('cloud_id', 'cloud_rows'):
+                if isinstance(theirs, dict) and theirs.get(key):
+                    it[key] = theirs[key]
+                else:
+                    it.pop(key, None)       # made during the upload (or made again): no records yet
+        after = pickle.dumps((live.get('cloud_account'), live.get('cloud_deletes'),
+                              {k: (v.get('cloud_id'), v.get('list_state_unsent'), v.get('list_name_unsent'))
+                               for k, v in (live.get('lists') or {}).items()},
+                              {k: v.get('cloud_id') for k, v in (live.get('projects') or {}).items()},
+                              {k: (v.get('cloud_id'), v.get('cloud_rows')) for k, v in (live.get('items') or {}).items()}))
+        return after != before
+
+    def _book(self, helper, *args):
+        """Apply a bookkeeping helper to the live store, and journal it while an upload runs on a copy."""
+        globals()[helper](self.data, *args)
+        with self._journal_lock:
+            if self._journal is not None and self._journal_store is self.data:
+                self._journal.append((helper, args))
+
+    def _back_in_list(self, item_id, list_id):
+        """An entry went into a list: if it left that list since the last upload, it gets its rows back."""
+        item = self.data['items'].get(item_id)
+        if isinstance(item, dict):
+            self._book('_restore_cloud_row', item_id, list_id, _identity(item_id, item))
+
+    def pending_web_removals(self):
+        """[(item id, list id)] of entries the website removed that are still in that list here."""
+        out = []
+        for iid, it in (self.data.get('items') or {}).items():
+            recs = it.get('cloud_rows') or {}
+            for lid in it.get('lists') or []:
+                rec = recs.get(lid)
+                if isinstance(rec, dict) and rec.get('gone'):
+                    out.append((iid, lid))
+        return out
+
+    def resolve_web_removals(self, choices):
+        """Apply the prompt's answers {(item id, list id): 'remove' | 'keep'}. Returns (removed, kept).
+
+        Remove is an explicit removal (a website re-add found meanwhile is deleted too);
+        Keep forgets the tombstone, so the next upload inserts the entry again.
+        """
+        removed = kept = 0
+        items = self.data.get('items') or {}
+        for (iid, lid), choice in choices.items():
+            item = items.get(iid)
+            if not isinstance(item, dict) or lid not in (item.get('lists') or []):
+                continue
+            if choice == 'remove':
+                item['lists'].remove(lid)
+                self._book('_queue_cloud_delete', iid, lid)
+                if not item['lists']:
+                    self._book('_forget_item', iid)
+                    del items[iid]
+                removed += 1
+            elif choice == 'keep':
+                self._book('_keep_web_removal', iid, lid)
+                kept += 1
+        if removed or kept:
+            self.save()
+        return removed, kept
+
+    def has_unsent_changes(self, user_id=None):
+        """Whether lists.pkl holds a change the next upload of this account would send
+        (lists_sync.has_unsent_changes): asked once when the desktop's runner is made and
+        at each log-in, so changes saved before a restart are not taken as sent."""
+        from shared.lists_sync import has_unsent_changes
+        return has_unsent_changes(self.data, user_id)
+
+    def differing_notes_count(self):
+        """Entries in a list whose note or tags differ from the account's copy and were left as they are.
+
+        What the last sync that reached each of them found; it drops only when a
+        later sync resolves them (a Download or Merge keeps both), never because a
+        sync merely succeeded.
+        """
+        try:
+            from shared.lists_sync import count_differing_notes
+            return count_differing_notes(self.data)
+        except Exception:
+            return 0  # Cannot count; nothing is known to differ
+
+    def get_cloud_lists_preview(self, **kw):
+        """Get preview of cloud lists without syncing (for dialog display); should_stop= as the engine's."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.get_cloud_lists_preview(**kw)
+        except ImportError:
+            return {'success': False, 'lists': [], 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'lists': [], 'error': str(e)}
+
+    def get_local_lists_summary(self):
+        """Get summary of local lists for dialog display."""
+        lists = []
+        for list_id, list_data in self.data.get('lists', {}).items():
+            if list_data.get('is_system'):
+                continue
+            lists.append({
+                'id': list_id,
+                'name': list_data.get('name', 'Unnamed'),
+                'color': list_data.get('color', '#FFD700'),
+                'item_count': self._get_list_item_count(list_id)
+            })
+        return lists
+
+    # --- List Management ---
+
+    def get_all_lists(self, include_recent=True, include_deleted=False):
+        """Get all lists sorted alphabetically (system lists have special handling).
+
+        Args:
+            include_recent: Include the "Recently Viewed" system list
+            include_deleted: Include soft-deleted lists (for trash view)
+        """
+        lists = []
+        list_ids = []
+        ordered = [list_id for list_id in self.data.get('lists_order', []) if list_id in self.data['lists']]
+        fallback = [list_id for list_id in self.data['lists'] if list_id not in ordered]
+        list_ids.extend(ordered)
+        list_ids.extend(sorted(fallback, key=lambda list_id: self.data['lists'][list_id].get('name', '')))
+
+        for list_id in list_ids:
+            if list_id == 'recent' and not include_recent:
+                continue
+            list_data = self.data['lists'][list_id]
+            # Skip deleted lists unless explicitly requested
+            if list_data.get('deleted_at') and not include_deleted:
+                continue
+            lists.append({
+                'id': list_id,
+                **list_data,
+                'count': self._get_list_item_count(list_id)
+            })
+
+        return lists
+
+    def get_deleted_lists(self):
+        """Get soft-deleted lists (trash view)."""
+        deleted = []
+        for list_id, list_data in self.data['lists'].items():
+            if list_data.get('deleted_at'):
+                deleted.append({
+                    'id': list_id,
+                    **list_data,
+                    'count': self._get_list_item_count(list_id)
+                })
+        # Sort by deletion time, most recent first
+        deleted.sort(key=lambda x: x.get('deleted_at', 0), reverse=True)
+        return deleted
+
+    def _get_list_item_count(self, list_id):
+        """Get the number of items in a list."""
+        if list_id == 'recent':
+            return len(self.data.get('recent_items', []))
+
+        count = 0
+        for item in self.data['items'].values():
+            if list_id in item.get('lists', []):
+                count += 1
+        return count
+
+    def create_list(self, name, color=None):
+        """Create a new list. Returns the list ID."""
+        import time
+        import uuid
+
+        list_id = f"list_{uuid.uuid4().hex[:8]}"
+
+        if color is None:
+            # Pick next available color
+            used_colors = {lst.get('color') for lst in self.data['lists'].values()}
+            for c in self.DEFAULT_COLORS:
+                if c not in used_colors:
+                    color = c
+                    break
+            if color is None:
+                color = self.DEFAULT_COLORS[0]
+
+        self.data['lists'][list_id] = {
+            'name': name,
+            'color': color,
+            'created': time.time(),
+            'project_id': None
+        }
+        self.data.setdefault('lists_order', []).append(list_id)
+        self.save()
+        return list_id
+
+    def update_list(self, list_id, name=None, color=None):
+        """Update list properties."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_system'):
+            return False  # Cannot edit system lists
+
+        if name is not None and name != lst.get('name'):
+            lst['name'] = name
+            if 'name_en' in lst:
+                # the English interface shows name_en when a list has one (the default
+                # list, lists a Download created); a name given here is the name in both
+                lst['name_en'] = name
+            # lists_sync.LIST_NAME_UNSENT: the next upload sends the new name, and a
+            # Download before it keeps it instead of taking the cloud list's name.
+            self._book('_mark_unsent', list_id, 'list_name_unsent')
+        if color is not None:
+            if color != lst.get('color'):
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'color')
+            lst['color'] = color
+
+        self.save()
+        return True
+
+    def update_list_project(self, list_id, project_id=None):
+        """Assign a list to a project (or clear project)."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_system') or lst.get('is_default'):
+            return False
+
+        if project_id and project_id not in self.data.get('projects', {}):
+            return False
+
+        if lst.get('project_id') != project_id:
+            self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
+        lst['project_id'] = project_id
+        self.save()
+        return True
+
+    def create_project(self, name, color=None):
+        """Create a new project. Returns the project ID.
+
+        Args:
+            name: Project name.
+            color: Optional hex color (e.g. '#4CAF50'). When None, auto-assigned
+                from the palette via _get_next_project_color().
+
+        Phase 89 (D-06): the optional ``color`` parameter was added for parity
+        with web/user_lists.py:UserListsManager.create_project, which used to
+        pass ``self.local_mgr.create_project(name, color)`` (and raised
+        TypeError when local_mgr was a stock ListsManager). The web no longer
+        falls back to this store at all (improvement sweep C2). Desktop callers
+        (genizah_app.py:12237, 12996) pass ``name`` only and are unaffected.
+        """
+        import time
+        import uuid
+
+        project_id = f"project_{uuid.uuid4().hex[:8]}"
+        self.data.setdefault('projects', {})[project_id] = {
+            'name': name,
+            'created': time.time(),
+            'color': color or self._get_next_project_color(),
+        }
+        self.data.setdefault('projects_order', []).append(project_id)
+        self.save()
+        return project_id
+
+    def get_projects(self):
+        """Get projects sorted by name."""
+        projects = []
+        project_ids = []
+        ordered = [project_id for project_id in self.data.get('projects_order', []) if project_id in self.data.get('projects', {})]
+        fallback = [project_id for project_id in self.data.get('projects', {}) if project_id not in ordered]
+        project_ids.extend(ordered)
+        project_ids.extend(sorted(fallback, key=lambda project_id: self.data['projects'][project_id].get('name', '').lower()))
+
+        for project_id in project_ids:
+            data = self.data['projects'][project_id]
+            projects.append({'id': project_id, **data})
+        return projects
+
+    def update_project(self, project_id, name=None):
+        """Update a project's properties."""
+        project = self.data.get('projects', {}).get(project_id)
+        if not project:
+            return False
+        if name is not None:
+            project['name'] = name
+        self.save()
+        return True
+
+    def delete_project(self, project_id, delete_lists=False):
+        """Delete a project and optionally its lists."""
+        if project_id not in self.data.get('projects', {}):
+            return False
+
+        if delete_lists:
+            list_ids = [
+                list_id for list_id, list_data in self.data.get('lists', {}).items()
+                if list_data.get('project_id') == project_id
+            ]
+            for list_id in list_ids:
+                self.delete_list(list_id)
+        else:
+            for list_id, list_data in self.data.get('lists', {}).items():
+                if list_data.get('project_id') == project_id:
+                    list_data['project_id'] = None
+                    self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
+
+        del self.data['projects'][project_id]
+        if project_id in self.data.get('projects_order', []):
+            self.data['projects_order'].remove(project_id)
+        self.save()
+        return True
+
+    def _get_next_project_color(self, projects=None):
+        source = projects if projects is not None else self.data.get('projects', {})
+        used_colors = {
+            project.get('color')
+            for project in source.values()
+            if project.get('color')
+        }
+        for color in self.DEFAULT_COLORS[1:]:
+            if color not in used_colors:
+                return color
+        return self.DEFAULT_COLORS[0]
+
+    def apply_list_layout(self, list_project_map, list_order, project_order):
+        """Apply list ordering and project assignments in one save."""
+        for list_id, project_id in list_project_map.items():
+            lst = self.data['lists'].get(list_id)
+            if not lst or lst.get('is_system') or lst.get('is_default'):
+                continue
+            if project_id and project_id not in self.data.get('projects', {}):
+                continue
+            before = (lst.get('project_id'), lst.get('color'))
+            lst['project_id'] = project_id
+            if project_id:
+                project = self.data.get('projects', {}).get(project_id, {})
+                if project.get('color'):
+                    lst['color'] = project['color']
+            else:
+                default_color = self.data.get('lists', {}).get('default', {}).get('color')
+                if default_color:
+                    lst['color'] = default_color
+            if lst.get('project_id') != before[0]:
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
+            if lst.get('color') != before[1]:
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'color')
+
+        self.data['lists_order'] = [list_id for list_id in list_order if list_id in self.data['lists']]
+        self.data['projects_order'] = [
+            project_id for project_id in project_order if project_id in self.data.get('projects', {})
+        ]
+        self.save()
+
+    def delete_list(self, list_id, permanent=False):
+        """Soft-delete a list (move to trash).
+
+        Args:
+            list_id: The list ID to delete
+            permanent: If True, permanently delete. Default is soft delete.
+        """
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_default') or lst.get('is_system'):
+            return False  # Cannot delete system lists
+
+        if permanent:
+            # Permanent delete - remove list and orphaned items; their cloud rows go at
+            # the next upload (moving the list to the Trash keeps them)
+            items_to_remove = []
+            for sys_id, item in self.data['items'].items():
+                if list_id in item.get('lists', []):
+                    item['lists'].remove(list_id)
+                    self._book('_queue_cloud_delete', sys_id, list_id)
+                    if not item['lists']:
+                        items_to_remove.append(sys_id)
+            for sys_id in items_to_remove:
+                self._book('_forget_item', sys_id)
+                del self.data['items'][sys_id]
+            del self.data['lists'][list_id]
+            if list_id in self.data.get('lists_order', []):
+                self.data['lists_order'].remove(list_id)
+        else:
+            # Soft delete - set deleted_at timestamp
+            import time
+            lst['deleted_at'] = time.time()
+            self._book('_mark_unsent', list_id, 'list_state_unsent', 'trash')
+
+        self.save()
+        return True
+
+    def restore_list(self, list_id):
+        """Restore a soft-deleted list from trash."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if not lst.get('deleted_at'):
+            return False  # Not deleted
+
+        del lst['deleted_at']
+        self._book('_mark_unsent', list_id, 'list_state_unsent', 'trash')
+        self.save()
+        return True
+
+    def permanently_delete_list(self, list_id):
+        """Permanently delete a list (no recovery)."""
+        return self.delete_list(list_id, permanent=True)
+
+    def empty_trash(self):
+        """Permanently delete all soft-deleted lists."""
+        deleted_lists = [lid for lid, data in self.data['lists'].items() if data.get('deleted_at')]
+        count = 0
+        for list_id in deleted_lists:
+            if self.delete_list(list_id, permanent=True):
+                count += 1
+        return count
+
+    def duplicate_list(self, list_id, new_name=None):
+        """Duplicate a list with all its items."""
+        if list_id not in self.data['lists']:
+            return None
+
+        original = self.data['lists'][list_id]
+        if new_name is None:
+            new_name = f"{original.get('name', _tr('List'))} ({_tr('Copy')})"
+
+        new_list_id = self.create_list(new_name, original.get('color'))
+        if original.get('project_id'):
+            self.update_list_project(new_list_id, original.get('project_id'))
+
+        # Copy items
+        for sys_id, item in self.data['items'].items():
+            if list_id in item.get('lists', []):
+                if new_list_id not in item['lists']:
+                    item['lists'].append(new_list_id)
+
+        self.save()
+        return new_list_id
+
+    def merge_lists(self, source_list_id, target_list_id, delete_source=True):
+        """Merge source list into target list."""
+        if source_list_id not in self.data['lists'] or target_list_id not in self.data['lists']:
+            return False
+
+        source = self.data['lists'][source_list_id]
+        if source.get('is_system'):
+            return False  # Cannot merge system lists
+
+        # Move items from source to target
+        for sys_id, item in self.data['items'].items():
+            if source_list_id in item.get('lists', []):
+                if target_list_id not in item['lists']:
+                    item['lists'].append(target_list_id)
+                    self._back_in_list(sys_id, target_list_id)
+
+        if delete_source:
+            self.delete_list(source_list_id)
+        else:
+            self.save()
+
+        return True
+
+    def find_duplicate_lists(self):
+        """
+        Find all duplicate lists (same name) and return info for resolution.
+
+        Returns:
+            List of duplicate groups, each containing:
+            {
+                'name': str,
+                'has_conflict': bool,  # True if different projects
+                'lists': [{'id', 'project_id', 'project_name', 'item_count', 'created', 'has_cloud_id'}, ...]
+            }
+        """
+        from collections import defaultdict
+
+        lists_by_name = defaultdict(list)
+        for list_id, list_data in self.data.get('lists', {}).items():
+            list_name = list_data.get('name', '')
+            lists_by_name[list_name].append((list_id, list_data))
+
+        projects = self.data.get('projects', {})
+        duplicate_groups = []
+
+        for list_name, lists in lists_by_name.items():
+            if len(lists) <= 1:
+                continue
+
+            group_info = {'name': list_name, 'lists': []}
+            project_ids = set()
+
+            for list_id, list_data in lists:
+                project_id = list_data.get('project_id')
+                project_ids.add(project_id)
+
+                if list_id == 'recent':
+                    item_count = len(self.data.get('recent_items', []))
+                else:
+                    item_count = sum(1 for item in self.data.get('items', {}).values()
+                                    if list_id in item.get('lists', []))
+
+                group_info['lists'].append({
+                    'id': list_id,
+                    'project_id': project_id,
+                    'project_name': projects.get(project_id, {}).get('name') if project_id else None,
+                    'item_count': item_count,
+                    'created': list_data.get('created', 0),
+                    'has_cloud_id': bool(list_data.get('cloud_id'))
+                })
+
+            group_info['has_conflict'] = len(project_ids) > 1
+            duplicate_groups.append(group_info)
+
+        return duplicate_groups
+
+    def merge_duplicate_group(self, keep_id, duplicate_ids, target_project_id=None):
+        """Merge a group of duplicate lists into one."""
+        result = {'merged_items': 0, 'deleted_count': 0}
+
+        keeper_data = self.data['lists'].get(keep_id)
+        if not keeper_data:
+            return result
+
+        list_name = keeper_data.get('name', '')
+
+        if target_project_id is not None:
+            if keeper_data.get('project_id') != (target_project_id or None):
+                self._book('_mark_unsent', keep_id, 'list_state_unsent', 'project')
+            keeper_data['project_id'] = target_project_id if target_project_id else None
+
+        for dup_id in duplicate_ids:
+            if dup_id == keep_id:
+                continue
+
+            dup_data = self.data['lists'].get(dup_id)
+            if not dup_data:
+                continue
+
+            if list_name == 'Recently Viewed':
+                recent_items = self.data.setdefault('recent_items', [])
+                for item_id, item in self.data.get('items', {}).items():
+                    if dup_id in item.get('lists', []):
+                        item['lists'].remove(dup_id)
+                        # Recently Viewed is never synced: the entry left a synced list for good
+                        self._book('_queue_cloud_delete', item_id, dup_id)
+                        sys_id = item.get('sys_id', item_id)
+                        if sys_id and sys_id not in recent_items:
+                            recent_items.insert(0, sys_id)
+                            result['merged_items'] += 1
+                if len(recent_items) > self.MAX_RECENT_ITEMS:
+                    self.data['recent_items'] = recent_items[:self.MAX_RECENT_ITEMS]
+            else:
+                for item_id, item in self.data.get('items', {}).items():
+                    if dup_id in item.get('lists', []):
+                        item['lists'].remove(dup_id)
+                        self._book('_mark_pending_move', item_id, dup_id, keep_id)
+                        if keep_id not in item['lists']:
+                            item['lists'].append(keep_id)
+                            self._back_in_list(item_id, keep_id)
+                            result['merged_items'] += 1
+
+            if dup_id in self.data['lists']:
+                del self.data['lists'][dup_id]
+                result['deleted_count'] += 1
+            if dup_id in self.data.get('lists_order', []):
+                self.data['lists_order'].remove(dup_id)
+
+            LOGGER.info(f"Merged duplicate list '{list_name}' ({dup_id}) into {keep_id}")
+
+        self.save()
+        return result
+
+    def auto_merge_duplicate_group(self, group):
+        """Automatically merge a duplicate group using heuristics."""
+        list_name = group['name']
+        lists = group['lists']
+
+        if list_name == 'General':
+            keep_id = 'default'
+        elif list_name == 'Recently Viewed':
+            keep_id = 'recent'
+        else:
+            sorted_lists = sorted(lists, key=lambda x: (
+                0 if x['project_id'] else 1,
+                0 if not x['has_cloud_id'] else 1,
+                x['created']
+            ))
+            keep_id = sorted_lists[0]['id']
+
+        duplicate_ids = [l['id'] for l in lists if l['id'] != keep_id]
+        result = self.merge_duplicate_group(keep_id, duplicate_ids)
+        result['keep_id'] = keep_id
+        return result
+
+    def restore_project_hierarchy(self):
+        """Restore project hierarchy for orphaned lists by color matching."""
+        result = {'restored_count': 0}
+
+        projects = self.data.get('projects', {})
+        if not projects:
+            return result
+
+        color_to_project = {proj.get('color'): pid for pid, proj in projects.items() if proj.get('color')}
+
+        for list_id, list_data in self.data.get('lists', {}).items():
+            if list_id in ['default', 'recent'] or list_data.get('is_system'):
+                continue
+            if list_data.get('project_id') and list_data['project_id'] in projects:
+                continue
+
+            list_color = list_data.get('color')
+            if list_color and list_color in color_to_project:
+                list_data['project_id'] = color_to_project[list_color]
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
+                result['restored_count'] += 1
+                LOGGER.info(f"Restored project for list '{list_data.get('name')}' by color match")
+
+        if result['restored_count'] > 0:
+            self.save()
+
+        return result
+
+    # --- Item Management ---
+
+    def _build_item_id(self, sys_id, img=None, fl_id=None):
+        if img not in (None, ""):
+            return f"{sys_id}::img::{img}"
+        if fl_id not in (None, ""):
+            return f"{sys_id}::fl::{fl_id}"
+        return sys_id
+
+    def add_item(self, sys_id, list_id='default', note='', tags=None, source='', fl_id=None, img=None):
+        """Add an item to a list. Returns True if added, False if already exists."""
+        import time
+
+        if list_id not in self.data['lists']:
+            return False
+
+        item_id = self._build_item_id(sys_id, img=img, fl_id=fl_id)
+
+        if item_id in self.data['items']:
+            # Item exists, add to list if not already
+            item = self.data['items'][item_id]
+            if list_id in item.get('lists', []):
+                return False  # Already in this list
+            item['lists'].append(list_id)
+            if fl_id:
+                item['fl_id'] = fl_id
+            if img not in (None, ""):
+                item['img'] = img
+            item['modified'] = time.time()
+        else:
+            # New item
+            self.data['items'][item_id] = {
+                'sys_id': sys_id,
+                'lists': [list_id],
+                'tags': tags or [],
+                'note': note,
+                'source': source,
+                'added': time.time(),
+                'modified': time.time(),
+                'shelfmark_override': None,  # For unidentified items
+                'fl_id': fl_id,
+                'img': img
+            }
+        self._back_in_list(item_id, list_id)   # back before its removal was sent?
+
+        # Update all_tags
+        if tags:
+            for tag in tags:
+                if tag not in self.data['all_tags']:
+                    self.data['all_tags'].append(tag)
+
+        self.save()
+        return True
+
+    def add_items_bulk(self, items, list_id='default', source='', fl_id_map=None):
+        """Add multiple items to a list at once."""
+        import time
+
+        if list_id not in self.data['lists']:
+            return 0
+
+        added = 0
+        for entry in items:
+            if isinstance(entry, dict):
+                sys_id = entry.get('sys_id')
+                fl_id = entry.get('fl_id')
+                img = entry.get('img')
+            else:
+                sys_id = entry
+                fl_id = fl_id_map.get(sys_id) if fl_id_map else None
+                img = None
+
+            if not sys_id:
+                continue
+
+            item_id = self._build_item_id(sys_id, img=img, fl_id=fl_id)
+
+            if item_id in self.data['items']:
+                item = self.data['items'][item_id]
+                joined = list_id not in item.get('lists', [])
+                if joined:
+                    item['lists'].append(list_id)
+                    item['modified'] = time.time()
+                    added += 1
+                if fl_id and item.get('fl_id') != fl_id:
+                    item['fl_id'] = fl_id
+                    item['modified'] = time.time()
+                if img not in (None, "") and item.get('img') != img:
+                    item['img'] = img
+                    item['modified'] = time.time()
+                if joined:
+                    self._back_in_list(item_id, list_id)
+            else:
+                self.data['items'][item_id] = {
+                    'sys_id': sys_id,
+                    'lists': [list_id],
+                    'tags': [],
+                    'note': '',
+                    'source': source,
+                    'added': time.time(),
+                    'modified': time.time(),
+                    'shelfmark_override': None,
+                    'fl_id': fl_id,
+                    'img': img
+                }
+                self._back_in_list(item_id, list_id)
+                added += 1
+
+        self.save()
+        return added
+
+    def update_item(self, item_id, note=None, tags=None, shelfmark_override=None, fl_id=None, img=None):
+        """Update an item's properties."""
+        import time
+
+        if item_id not in self.data['items']:
+            return False
+
+        item = self.data['items'][item_id]
+
+        if note is not None:
+            item['note'] = note
+        if tags is not None:
+            item['tags'] = tags
+            # Update all_tags
+            for tag in tags:
+                if tag not in self.data['all_tags']:
+                    self.data['all_tags'].append(tag)
+        if shelfmark_override is not None:
+            item['shelfmark_override'] = shelfmark_override
+        if fl_id is not None:
+            item['fl_id'] = fl_id
+        if img is not None:
+            item['img'] = img
+
+        item['modified'] = time.time()
+        self.save()
+        return True
+
+    def remove_item_from_list(self, item_id, list_id):
+        """Remove an item from a specific list."""
+        if item_id not in self.data['items']:
+            return False
+
+        item = self.data['items'][item_id]
+        if list_id not in item.get('lists', []):
+            return False
+
+        item['lists'].remove(list_id)
+        self._book('_queue_cloud_delete', item_id, list_id)   # its row there goes at the next upload
+
+        # If item has no more lists, remove it entirely
+        if not item['lists']:
+            self._book('_forget_item', item_id)
+            del self.data['items'][item_id]
+
+        self.save()
+        return True
+
+    def move_items_to_list(self, sys_ids, from_list_id, to_list_id):
+        """Move items from one list to another (their cloud rows follow at the next upload)."""
+        import time
+
+        for item_id in sys_ids:
+            if item_id in self.data['items']:
+                item = self.data['items'][item_id]
+                if from_list_id in item.get('lists', []):
+                    item['lists'].remove(from_list_id)
+                    self._book('_mark_pending_move', item_id, from_list_id, to_list_id)
+                if to_list_id not in item.get('lists', []):
+                    item['lists'].append(to_list_id)
+                    self._back_in_list(item_id, to_list_id)
+                item['modified'] = time.time()
+
+        self.save()
+
+    def get_items_in_list(self, list_id):
+        """Get all items in a list with their metadata."""
+        if list_id == 'recent':
+            items = []
+            for item_id in self.data.get('recent_items', []):
+                item_data = self.data['items'].get(item_id, {})
+                items.append({
+                    **item_data,
+                    'item_id': item_id
+                })
+                if 'sys_id' not in items[-1] and item_id:
+                    items[-1]['sys_id'] = item_id
+            return items
+
+        items = []
+        for item_id, item_data in self.data['items'].items():
+            if list_id in item_data.get('lists', []):
+                items.append({
+                    **item_data,
+                    'item_id': item_id
+                })
+                if 'sys_id' not in items[-1] and item_id:
+                    items[-1]['sys_id'] = item_id
+        return items
+
+    def get_item(self, item_id):
+        """Get a single item's data."""
+        if item_id in self.data['items']:
+            item = dict(self.data['items'][item_id])
+            if 'sys_id' not in item:
+                item['sys_id'] = item_id
+            item['item_id'] = item_id
+            return item
+        return None
+
+    def is_item_in_any_list(self, item_id):
+        """Check if an item is in any list (excluding recent)."""
+        return item_id in self.data['items']
+
+    def get_item_lists(self, item_id):
+        """Get list of lists an item belongs to."""
+        if item_id not in self.data['items']:
+            return []
+        return self.data['items'][item_id].get('lists', [])
+
+    # --- Recently Viewed ---
+
+    def add_to_recent(self, sys_id, fl_id=None, img=None):
+        """Add an item to the recently viewed list."""
+        import time
+
+        recent = self.data.get('recent_items', [])
+
+        # Remove if already present (we'll add to front)
+        item_id = self._build_item_id(sys_id, img=img, fl_id=fl_id)
+        if item_id in recent:
+            recent.remove(item_id)
+
+        # Add to front
+        recent.insert(0, item_id)
+
+        # Trim to max size
+        if len(recent) > self.MAX_RECENT_ITEMS:
+            recent = recent[:self.MAX_RECENT_ITEMS]
+
+        self.data['recent_items'] = recent
+
+        # Also ensure item exists in items dict for metadata
+        if item_id not in self.data['items']:
+            self.data['items'][item_id] = {
+                'sys_id': sys_id,
+                'lists': [],  # Not in any regular list, just recent
+                'tags': [],
+                'note': '',
+                'source': '',
+                'added': time.time(),
+                'modified': time.time(),
+                'shelfmark_override': None,
+                'fl_id': fl_id,
+                'img': img
+            }
+        else:
+            if fl_id:
+                self.data['items'][item_id]['fl_id'] = fl_id
+            if img is not None:
+                self.data['items'][item_id]['img'] = img
+
+        self.save()
+
+    # --- Tags ---
+
+    def get_all_tags(self):
+        """Get all tags for autocomplete."""
+        return sorted(self.data.get('all_tags', []))
+
+    def add_tag_to_items(self, sys_ids, tag):
+        """Add a tag to multiple items."""
+        import time
+
+        for sys_id in sys_ids:
+            if sys_id in self.data['items']:
+                item = self.data['items'][sys_id]
+                if tag not in item.get('tags', []):
+                    if 'tags' not in item:
+                        item['tags'] = []
+                    item['tags'].append(tag)
+                    item['modified'] = time.time()
+
+        if tag not in self.data['all_tags']:
+            self.data['all_tags'].append(tag)
+
+        self.save()
+
+    # --- Export/Import ---
+
+    def export_list(self, list_id, include_metadata=True, include_snippets=False):
+        """Export a list to a dictionary suitable for JSON serialization."""
+        if list_id not in self.data['lists']:
+            return None
+
+        list_info = self.data['lists'][list_id]
+        items = self.get_items_in_list(list_id)
+
+        export_data = {
+            'version': 1,
+            'list_name': list_info.get('name', ''),
+            'list_color': list_info.get('color', ''),
+            'exported_at': time.time(),
+            'items': []
+        }
+
+        for item in items:
+            item_export = {
+                'sys_id': item.get('sys_id'),
+                'fl_id': item.get('fl_id'),
+                'img': item.get('img'),
+                'tags': item.get('tags', []),
+                'note': item.get('note', ''),
+                'source': item.get('source', ''),
+                'shelfmark_override': item.get('shelfmark_override')
+            }
+
+            if include_metadata and self.meta_mgr:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(item['sys_id'])
+                item_export['shelfmark'] = shelfmark
+                item_export['title'] = title
+
+            # Snippets would require access to the search engine - skip for now
+
+            export_data['items'].append(item_export)
+
+        return export_data
+
+    def import_list(self, import_data, list_name_override=None):
+        """Import a list from exported data. Returns (list_id, imported_count, unidentified_count)."""
+        if not import_data or 'items' not in import_data:
+            return None, 0, 0
+
+        list_name = list_name_override or import_data.get('list_name', _tr("Imported List"))
+        list_color = import_data.get('list_color')
+
+        list_id = self.create_list(list_name, list_color)
+
+        imported = 0
+        unidentified = 0
+
+        for item in import_data['items']:
+            sys_id = item.get('sys_id')
+            if not sys_id:
+                continue
+
+            # Check if this sys_id exists in our database
+            is_identified = True
+            if self.meta_mgr:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+                if not shelfmark or shelfmark == 'Unknown':
+                    is_identified = False
+                    unidentified += 1
+
+            self.add_item(
+                sys_id=sys_id,
+                list_id=list_id,
+                note=item.get('note', ''),
+                tags=item.get('tags', []),
+                source=item.get('source', ''),
+                fl_id=item.get('fl_id'),
+                img=item.get('img')
+            )
+
+            # Set shelfmark override for unidentified items
+            if not is_identified and item.get('shelfmark'):
+                item_id = self._build_item_id(sys_id, img=item.get('img'), fl_id=item.get('fl_id'))
+                self.update_item(item_id, shelfmark_override=item.get('shelfmark'))
+
+            imported += 1
+
+        return list_id, imported, unidentified
+
+    # --- Sorting ---
+
+    @staticmethod
+    def shelfmark_sort_key(shelfmark):
+        """
+        Sort key for shelfmarks that handles dots correctly.
+        E.g., T-S K1.2 < T-S K1.10 (not lexicographic)
+        """
+        if not shelfmark:
+            return ('', [])
+
+        # Split into parts
+        parts = re.split(r'(\d+)', shelfmark)
+        result = []
+        for part in parts:
+            if part.isdigit():
+                result.append((0, int(part)))  # Numbers sort first by value
+            else:
+                result.append((1, part.lower()))  # Strings sort lexicographically
+        return result
+
+    def get_items_sorted(self, list_id, sort_by='shelfmark', reverse=False):
+        """Get items in a list, sorted by the specified field."""
+        items = self.get_items_in_list(list_id)
+
+        # Enrich with metadata
+        if self.meta_mgr:
+            for item in items:
+                sys_id = item['sys_id']
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+                item['shelfmark'] = item.get('shelfmark_override') or shelfmark or 'Unknown'
+                item['title'] = title or ''
+
+        if sort_by == 'shelfmark':
+            items.sort(key=lambda x: self.shelfmark_sort_key(x.get('shelfmark', '')), reverse=reverse)
+        elif sort_by == 'title':
+            items.sort(key=lambda x: x.get('title', '').lower(), reverse=reverse)
+        elif sort_by == 'added':
+            items.sort(key=lambda x: x.get('added', 0), reverse=not reverse)  # Default newest first
+        elif sort_by == 'modified':
+            items.sort(key=lambda x: x.get('modified', 0), reverse=not reverse)
+
+        return items
+
+    # --- Copy Info ---
+
+    def get_item_copy_text(self, item_id, format_type='compact'):
+        """
+        Generate text for copying item info.
+        format_type: 'compact', 'detailed', 'with_link'
+        """
+        if item_id not in self.data['items']:
+            return ''
+
+        item = self.data['items'][item_id]
+        sys_id = item.get('sys_id', item_id)
+
+        shelfmark = 'Unknown'
+        title = ''
+
+        if item.get('shelfmark_override'):
+            shelfmark = item['shelfmark_override']
+        elif self.meta_mgr:
+            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+        if format_type == 'compact':
+            if title:
+                return f"{shelfmark} - {title}"
+            return shelfmark
+
+        elif format_type == 'detailed':
+            lines = [f"{_tr('Shelfmark:')} {shelfmark}"]
+            if title:
+                lines.append(f"{_tr('Title:')} {title}")
+            lines.append(f"{_tr('System ID:')} {sys_id}")
+            if item.get('note'):
+                lines.append(f"{_tr('Note:')} {item['note']}")
+            return '\n'.join(lines)
+
+        elif format_type == 'with_link':
+            from shared.synthetic_sys_id import is_synthetic_sys_id
+            lines = [f"{_tr('Shelfmark:')} {shelfmark}"]
+            if title:
+                lines.append(f"{_tr('Title:')} {title}")
+            lines.append(f"{_tr('System ID:')} {sys_id}")
+            # Add Ktiv link — Phase 85 D-06: skip for synthetic sys_ids
+            if not is_synthetic_sys_id(sys_id):
+                ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+                lines.append(f"{_tr('Link:')} {ktiv_url}")
+            return '\n'.join(lines)
+
+        return shelfmark
+

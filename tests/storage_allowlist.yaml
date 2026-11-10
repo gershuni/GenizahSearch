@@ -1,0 +1,3 @@
+# Raw app.storage.user access allowed under web/ (read by tests/test_no_raw_storage_access.py).
+# Each entry: file, patterns (source + expected_count), justification.
+allowed_raw_access: []

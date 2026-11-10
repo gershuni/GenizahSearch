@@ -1,0 +1,1363 @@
+# -*- coding: utf-8 -*-
+"""Compare modal for the Joins Lab — full-screen two-pane side-by-side fragment comparison.
+
+Phase 119 Plan 03 (CMP-01 / CMP-02 / CMP-03 / VSM-02).
+
+Design invariants
+-----------------
+D-01: Full-screen modal overlay (ui.dialog maximized + persistent), anchor pane |
+      candidate pane.  Each pane uses a FRESH AnchorViewer instance (Pitfall 3 —
+      separate per-pane page state; navigating one pane must NEVER move the other).
+D-02: Compare opens on a FULL candidate (initial_candidate), located in
+      filtered_candidates by per-image identity (uid or (sys_id, page)) — NOT
+      by sys_id alone (same sys_id can appear on multiple folios, Candidate.key
+      == (sys_id, page), joins_lab.py:124-137).
+D-03: Y/?/N verdict buttons; recording a verdict calls on_verdict(sys_id, verdict)
+      and auto-advances to the next candidate (wrap-around).
+D-07/VSM-02: Candidate pane header shows the 👁 badge via badge_and_tooltip() and
+      a size-mismatch warning badge when ratio > 1.4.
+T-119-09 (SSRF prevention): Images load exclusively via AnchorViewer (reuses the
+      per-provider proxy + Phase-98 NLI circuit breaker); no image URLs constructed
+      directly in this module.
+T-119-09 (propagation): Nested clickables use js_handler='(e) => e.stopPropagation()';
+      Python-side propagation methods are not used (AST guard applies).
+T-119-10 (XSS): Shelfmarks/tooltips rendered via ui.label/ui.icon (auto-escaped);
+      no .html() of raw candidate text.
+T-119-11 (state): Compare state is a local mutable dict; zero raw storage access.
+
+IMPORTANT: The viewer asset injection function is NOT called here.  Plan 04 calls it
+once at page-build time; the window._msViewerLoaded idempotency guard in AnchorViewer
+covers the dynamically-created Compare viewers (anchor_viewer.py:59-60).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import Optional, Callable
+
+from nicegui import run, ui
+
+from shared.fragment_details import domain_labels, info_line
+from shared.joins_lab import Candidate, TRIAGE_ICONS, badge_and_tooltip
+from web.clipboard import copy_text_to_clipboard
+from web.components.anchor_viewer import AnchorViewer
+from web.components.candidate_grid import build_browse_url, is_size_mismatch
+from web.translations import is_rtl, tr
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Headless-testable pure helpers (no NiceGUI runtime required)
+# ---------------------------------------------------------------------------
+
+def _find_candidate_idx(cand: Candidate, candidates: list) -> int:
+    """Return the index of cand in candidates by per-image identity.
+
+    Per-image lookup matches on:
+      1. uid (if both sides have a non-empty uid)
+      2. (sys_id, page) tuple — Candidate.key (D-02 / Pitfall 6)
+
+    NOT matched by sys_id alone — the same sys_id can appear on multiple folios
+    (proven by tests/test_joins_lab.py:425-433: two candidates sharing a sys_id
+    on pages 5 and 6 both survive dedup; a sys_id-only lookup would return the
+    WRONG folio).
+
+    Returns:
+        The 0-based index of the matching candidate, or 0 (fallback) when not found.
+    """
+    if not candidates:
+        return 0
+
+    cand_uid = getattr(cand, "uid", None)
+    cand_key = (cand.sys_id, cand.page)
+
+    for i, c in enumerate(candidates):
+        # Primary: uid match (stable opaque key)
+        c_uid = getattr(c, "uid", None)
+        if cand_uid and c_uid and cand_uid == c_uid:
+            return i
+        # Fallback: (sys_id, page) match — D-02 per-image identity
+        if (c.sys_id, c.page) == cand_key:
+            return i
+
+    # Not found — start at index 0 (caller will see a different candidate, but
+    # the modal still opens; the caller should prefer supplying a matching cand).
+    logger.warning(
+        "_find_candidate_idx: candidate %s (page=%s) not found in list of %d; defaulting to 0",
+        cand.sys_id, cand.page, len(candidates),
+    )
+    return 0
+
+
+def create_compare_state(
+    anchor_cand: Candidate,
+    initial_candidate: Candidate,
+    filtered_candidates: list,
+) -> dict:
+    """Create the headless compare state dict.
+
+    Pure factory — no NiceGUI rendering.  Used directly by tests to exercise
+    all flip-through / verdict / folio-independence logic without a live browser.
+
+    State keys:
+        anchor_sys_id       — the anchor's sys_id (for triage and source display)
+        anchor_page         — the anchor pane's current page number (independent)
+        current_candidate   — the currently-displayed Candidate object
+        candidate_page      — the candidate pane's current page number (independent)
+        idx                 — 0-based index into candidates list
+        candidates          — the full filtered list (flip-through source)
+    """
+    idx = _find_candidate_idx(initial_candidate, filtered_candidates)
+    current = filtered_candidates[idx] if filtered_candidates else initial_candidate
+    return {
+        "anchor_sys_id": anchor_cand.sys_id,
+        "anchor_page": anchor_cand.page or 1,
+        "current_candidate": current,
+        "candidate_page": (current.page or 1) if filtered_candidates else (initial_candidate.page or 1),
+        "idx": idx,
+        "candidates": list(filtered_candidates),
+    }
+
+
+def step_pane_page(state: dict, pane: str, delta: int) -> None:
+    """Advance a pane's current page number by delta.
+
+    Pure helper — no NiceGUI.  Used by tests to assert per-pane folio
+    independence (CMP-02 / Pitfall 3).
+
+    Args:
+        state:  Compare state dict from create_compare_state().
+        pane:   'anchor' or 'candidate'.
+        delta:  Number of pages to advance (positive) or retreat (negative).
+    """
+    if pane == "anchor":
+        state["anchor_page"] = max(1, (state.get("anchor_page") or 1) + delta)
+    elif pane == "candidate":
+        state["candidate_page"] = max(1, (state.get("candidate_page") or 1) + delta)
+    else:
+        raise ValueError(f"Unknown pane {pane!r}; expected 'anchor' or 'candidate'")
+
+
+def step_candidate(state: dict, delta: int) -> None:
+    """Advance the candidate flip-through by delta (wrap-around, parity desktop step(delta)).
+
+    Pure helper — no NiceGUI.  Used by tests and by the live _step() closure.
+
+    Args:
+        state:  Compare state dict from create_compare_state().
+        delta:  +1 = next, -1 = previous.  Wrap-around: next after last → first;
+                prev before first → last.
+    """
+    cands = state.get("candidates") or []
+    if not cands:
+        return
+    new_idx = (state["idx"] + delta) % len(cands)
+    state["idx"] = new_idx
+    state["current_candidate"] = cands[new_idx]
+    state["candidate_page"] = cands[new_idx].page or 1
+
+
+def record_verdict(
+    state: dict,
+    verdict: str,
+    triage: dict,
+    on_verdict: Optional[Callable] = None,
+) -> None:
+    """Record a verdict and auto-advance to the next candidate (CMP-03).
+
+    Pure helper — no NiceGUI.  Used by tests and by the live _record_verdict() closure.
+
+    Verdict is keyed by sys_id (triage is per-sys_id, D-11).
+    Navigation/lookup is per-image (state carries the full candidate).
+
+    Args:
+        state:      Compare state dict from create_compare_state().
+        verdict:    'yes' | 'maybe' | 'no'
+        triage:     Shared page-level triage dict keyed by sys_id.
+        on_verdict: Optional callback(sys_id, verdict) — the page-level
+                    triage update hook.  When None, writes directly to triage.
+    """
+    cand = state.get("current_candidate")
+    if cand is None:
+        return
+    # Verdict is keyed by sys_id (D-11)
+    triage[cand.sys_id] = verdict
+    if on_verdict is not None:
+        on_verdict(cand.sys_id, verdict)
+    # Auto-advance to next candidate (D-03, wrap-around)
+    step_candidate(state, delta=1)
+
+
+# ---------------------------------------------------------------------------
+# Per-pane details: copy button, info line and external links
+# ---------------------------------------------------------------------------
+
+def _render_copy_shelfmark_button(shelfmark: str) -> None:
+    """A small copy icon next to a pane's shelfmark."""
+    async def _copy() -> None:
+        await copy_text_to_clipboard(shelfmark, success_message=tr("Copied"))
+
+    (
+        ui.button(icon="content_copy", on_click=_copy)
+        .props(f'flat dense round size=sm aria-label="{tr("Copy Shelfmark")}"')
+        .style("color: var(--text-muted);")
+        .tooltip(tr("Copy Shelfmark"))
+    )
+
+
+def _render_title(row, title: str, marker: str) -> None:
+    """Redraw a pane's title row: the title (RTL, muted, two lines at most) or nothing."""
+    row.clear()
+    if title:
+        with row:
+            ui.label(title).classes("text-sm").mark(marker).style(
+                "color: var(--text-secondary); direction: rtl;"
+                " overflow: hidden; display: -webkit-box;"
+                " -webkit-line-clamp: 2; -webkit-box-orient: vertical;"
+            )
+
+
+def _render_pane_details(
+    container,
+    library_code: str,
+    measurements: Optional[dict],
+    details: Optional[dict],
+) -> None:
+    """Fill *container* with one info line and one row of external links.
+
+    Info line: library · domain · date · size · material (``shared.fragment_details``,
+    the same rule as the desktop Compare window). The library code and measurements
+    are known when the pane is drawn; *details* (domains, date, links) arrive later
+    from the details fetcher, and the container is redrawn then. Kept to two short
+    lines so the images stay high on the screen.
+    """
+    details = details or {}
+    m = measurements or {}
+    line = info_line(
+        library_code or details.get("library_code") or "",
+        domain_labels(details.get("domains") or [], hebrew=is_rtl()),
+        details.get("dating"),
+        m.get("width_cm"),
+        m.get("height_cm"),
+        m.get("material") or "",
+    )
+    container.clear()
+    with container:
+        if line:
+            ui.label(line).classes("text-xs").mark("compare-info-line").style(
+                "color: var(--text-secondary);"
+            )
+        links = details.get("links") or []
+        if links:
+            with ui.row().classes("items-center gap-x-3 gap-y-0 flex-wrap").mark(
+                "compare-links"
+            ):
+                for ln in links:
+                    link = ui.link(ln["label"], ln["url"], new_tab=True).classes(
+                        "text-xs"
+                    ).style("color: var(--primary-600);")
+                    if ln.get("key") == "pgp":
+                        link.tooltip(tr("Princeton Geniza Project"))
+
+
+# ---------------------------------------------------------------------------
+# Live NiceGUI modal factory
+# ---------------------------------------------------------------------------
+
+def create_compare_modal(
+    anchor_cand: Candidate,
+    initial_candidate: Candidate,
+    filtered_candidates: list,
+    triage: dict,
+    on_verdict: Callable,
+    enrichment: Optional[dict] = None,
+    on_close: Optional[Callable] = None,
+    metadata_prefetcher: Optional[Callable] = None,
+    on_candidate_change: Optional[Callable] = None,
+    on_add_as_join: Optional[Callable] = None,
+    on_add_to_puzzle: Optional[Callable] = None,
+    on_copy_link: Optional[Callable] = None,
+    details_fetcher: Optional[Callable] = None,
+) -> ui.dialog:
+    """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
+
+    Desktop parity: join_workbench.py:3724 (_fill_anchor:4051, _fill_candidate:4086,
+    step:3741, _mark:4202).
+
+    Args:
+        anchor_cand:         The anchor fragment (left pane, fixed).
+        initial_candidate:   The FULL candidate to open on (right pane — lookup is
+                             by per-image identity, NOT sys_id alone).
+        filtered_candidates: The current sort/filter order for flip-through nav.
+        triage:              Shared page-level triage dict keyed by sys_id.
+        on_verdict:          Callback(sys_id, verdict) — updates the shared triage.
+        enrichment:          Optional dict[sys_id → {width_cm, height_cm, ...}] for
+                             the size-mismatch badge (D-15).
+        on_close:            Optional callback invoked when the modal closes.
+        metadata_prefetcher: Optional async callable(sys_id) → dict with keys
+                             'fjms_bib': list and 'catalog_detail': dict|None.
+                             When provided the per-pane metadata is fetched off-loop
+                             inside the dialog's async show handler and fed to the
+                             FJMS/PGP info buttons (D-09/H3/R2-H3); when None the
+                             info buttons are not rendered.
+        on_candidate_change: Optional sync callback(center_idx: int) — called when
+                             the shown candidate changes (open, step, verdict).
+                             Used by joins_lab.py D-10 to schedule adjacent image
+                             prefetch; passes the new candidate's index in
+                             filtered_candidates.
+        on_add_as_join:      Optional callback(sys_id, shelfmark) for the "Add as Join"
+                             button in the modal header.  Acts on the CURRENTLY-shown
+                             candidate (_state['current_candidate']).  The callback
+                             handles the anonymous/auth branching + confirm dialog.
+                             When None the button is not rendered.
+        on_add_to_puzzle:    Optional callback(sys_id) for the "Add to Puzzle" button in
+                             the modal header (Round-4 Issue 7).  Stages the anchor + the
+                             CURRENTLY-shown candidate into the Fragment Puzzle.  When None
+                             the button is not rendered.
+        on_copy_link:        Optional callback (sync or async, no arguments) for the
+                             header's "Copy Link" button: the Joins Lab copies a link to
+                             this screen, Compare pair included.  When None the button is
+                             not rendered.
+        details_fetcher:     Optional sync callable(sys_id, page) -> dict in the shape of
+                             ``shared.fragment_details.fetch_fragment_details`` (library,
+                             title, domains, date, external links).  Run off-loop for the
+                             anchor on open and for the candidate on open and on every
+                             flip; fills each pane's info line and links row.  When None
+                             the info line shows only the library and measurements.
+
+    Returns:
+        The ui.dialog() instance (caller opens it with dialog.open()).
+
+    SECURITY:
+        - Viewer assets are NOT injected here — Plan 04 injects them at page-build time.
+        - Zero raw storage access (Phase-87 invariant).
+        - No direct iiif.nli.org.il URL.
+        - Nested clickables use js_handler (see T-119-09).
+
+    ASYNC LOADING (G5 fix):
+        - create_compare_modal stays SYNC (returns the dialog).
+        - Both panes are loaded via an async ``dialog.on("show", _on_show)`` handler
+          that awaits BOTH anchor+candidate pane update_content. This runs in the
+          active NiceGUI client context when the dialog mounts — NOT via a naked
+          background-task coroutine (Codex client-context regression rule, T-119-09).
+        - _step / _record_verdict are ASYNC; they await candidate-pane reload only
+          (anchor pane is never reloaded — per-pane independence, CMP-02).
+        - Modal-level candidate-load generation guard (F-G5): ``_cand_load_gen``
+          is incremented each time _fill_candidate creates a NEW candidate viewer
+          instance. The candidate-reload coroutine captures its generation, awaits
+          update_content, then no-ops if a newer _fill_candidate superseded it.
+          This guard works ACROSS instance replacement — AnchorViewer's per-instance
+          ``_nav_gen`` only guards the SAME instance; it cannot protect against a
+          previous stale instance whose load completes after a new instance is
+          created.
+    """
+    if enrichment is None:
+        enrichment = {}
+
+    # Compare state — mutable dict so closures see current values (D-02 Pitfall 6)
+    _state = create_compare_state(
+        anchor_cand=anchor_cand,
+        initial_candidate=initial_candidate,
+        filtered_candidates=filtered_candidates,
+    )
+
+    dialog = ui.dialog().props("maximized persistent")
+
+    # Container refs to mutate from closures
+    _counter_label_ref: list = []      # [label_element]
+    _cand_shelfmark_ref: list = []     # [label_element]
+    _cand_badge_row_ref: list = []     # [row_element]
+    _cand_viewer_container_ref: list = []  # [column_element]
+    _cand_pane_ref: list = []          # [column_element] — R2-5 verdict border
+    _prev_btn_ref: list = []           # [button_element]
+    _next_btn_ref: list = []           # [button_element]
+    _text_shown: dict = {"value": False}   # phone: transcriptions shown (Show text)
+
+    # Anchor viewer ref — stored here so the show-loader can await update_content.
+    _anchor_viewer_ref: list = []      # [AnchorViewer instance]
+
+    # Candidate viewer ref — replaced each _fill_candidate call (Pitfall 3).
+    _cand_viewer_ref: list = []        # [AnchorViewer instance]
+
+    # Modal-level candidate-load generation counter (F-G5).
+    # Incremented each time _fill_candidate builds a NEW candidate viewer instance.
+    # The candidate-reload coroutine captures its generation; if a newer
+    # _fill_candidate supersedes it (bumps the counter) the stale coroutine no-ops
+    # after its await returns. This guard works ACROSS instance replacement, unlike
+    # AnchorViewer's per-instance _nav_gen which only guards the SAME object.
+    _cand_load_gen: dict = {"n": 0}
+
+    # Verdict button refs — keyed by verdict ('yes'/'maybe'/'no').
+    # Populated during the verdict-buttons loop; refreshed by _refresh_verdict_buttons.
+    _verdict_btn_refs: dict = {}
+
+    # Phase-120 D-08/D-09: per-pane info button container refs.
+    # Populated in the UI build block below; mutated in _on_show to add
+    # Browse buttons and FJMS/PGP info buttons once metadata is prefetched.
+    _anchor_info_row_ref: list = []   # [row_element] — anchor pane info row
+    _cand_info_row_ref: list = []     # [row_element] — candidate pane info row
+
+    # Per-pane info line + external links (shared.fragment_details), and the anchor
+    # title slot, which is filled from the details when the caller passed no title.
+    _anchor_details_ref: list = []    # [column_element]
+    _cand_details_ref: list = []      # [column_element]
+    _anchor_title_row_ref: list = []  # [row_element]
+    # The page each pane's details were last fetched for (None = not yet). The page
+    # picks the PGP document, so a folio change in a pane's viewer fetches them again
+    # (_on_*_page_loaded), and a result for a page no longer wanted is dropped.
+    _details_page: dict = {"anchor": None, "candidate": None}
+    # The folio each pane's viewer last drew (None = not yet). A folio turned before
+    # the details loader starts (the anchor can be turned while the candidate pane is
+    # still loading) is what that loader fetches, not the page the pane opened on.
+    _shown_page: dict = {"anchor": None, "candidate": None}
+
+    # D-08: candidate shelfmark+browse row ref — cleared+rebuilt in _fill_candidate
+    # so the Browse URL stays in sync each time the candidate flips.
+    _cand_shelfmark_row_ref: list = []  # [row_element] — set during UI build
+
+    # Round-4 Issue 3: candidate title row ref — cleared+rebuilt in _fill_candidate
+    # so the title tracks the flipped candidate (was previously missing entirely).
+    _cand_title_row_ref: list = []     # [row_element] — set during UI build
+
+    def _update_counter() -> None:
+        """Update the flip-through counter label (e.g. '3 / 47')."""
+        cands = _state["candidates"]
+        total = len(cands)
+        label_text = f"{_state['idx'] + 1} / {total}" if total else "0 / 0"
+        if _counter_label_ref:
+            _counter_label_ref[0].set_text(label_text)
+
+    def _update_nav_buttons() -> None:
+        """Enable/disable Prev/Next based on candidate count (wrap-around rule).
+
+        With wrap-around (D-03 UI-SPEC): both buttons stay enabled when >1 candidate;
+        disable both when ≤1 (nothing to navigate).
+        """
+        cands = _state["candidates"]
+        enabled = len(cands) > 1
+        if _prev_btn_ref:
+            _prev_btn_ref[0].set_enabled(enabled)
+        if _next_btn_ref:
+            _next_btn_ref[0].set_enabled(enabled)
+
+    def _refresh_verdict_buttons(cand: Candidate) -> None:
+        """Refresh verdict-button active/inactive styling for the SHOWN candidate (G3-compare).
+
+        Reads triage.get(cand.sys_id) and sets the matching button to a filled
+        (unelevated + solid colour) active state; the other two to outline/flat.
+
+        F-G3c contract: this always keys on the candidate CURRENTLY SHOWN.
+        record_verdict writes the verdict AND advances _state atomically, so by
+        the time _fill_candidate calls this, _state["current_candidate"] is already
+        the POST-ADVANCE candidate. The recorded verdict for the previous candidate
+        is persisted in triage and visible when the user navigates back.
+
+        Render-local — _verdict_btn_refs is a factory-scoped dict (no module globals).
+        Also updates the candidate pane border (R2-5).
+        """
+        if not _verdict_btn_refs:
+            return
+        active_verdict = triage.get(cand.sys_id)
+        _triage_colors = {
+            "yes": "positive",
+            "maybe": "warning",
+            "no": "negative",
+        }
+        for v, btn in _verdict_btn_refs.items():
+            if v == active_verdict:
+                # Active: filled / unelevated
+                btn.props(f"color={_triage_colors[v]} unelevated")
+            else:
+                # Inactive: outline style
+                btn.props(f"outline color={_triage_colors[v]}")
+
+        # R2-5: update candidate pane border to reflect verdict state
+        _refresh_pane_border(active_verdict)
+
+    def _refresh_pane_border(active_verdict: Optional[str]) -> None:
+        """Update the candidate pane border to reflect the current verdict (R2-5).
+
+        When a verdict exists: 2px solid {TRIAGE_ICONS[verdict]["color"]} (green/amber/red).
+        When no verdict: 1px solid var(--border-light) — neutral.
+        Mirrors the grid card _make_restyle_fn border formula (candidate_grid.py).
+        """
+        if not _cand_pane_ref:
+            return
+        pane = _cand_pane_ref[0]
+        if active_verdict and active_verdict in TRIAGE_ICONS:
+            color = TRIAGE_ICONS[active_verdict]["color"]
+            pane.style(f"border: 2px solid {color};")
+        else:
+            pane.style("border: 1px solid var(--border-light);")
+
+    def _fill_candidate(cand: Candidate) -> None:
+        """Populate the candidate pane with cand (parity _fill_candidate:4086).
+
+        Rebuilds:
+          - Candidate shelfmark label
+          - Badge row (👁 via badge_and_tooltip + size-mismatch warning)
+          - Candidate AnchorViewer (FRESH instance — Pitfall 3)
+          - Verdict button refresh (G3-compare)
+
+        Also increments ``_cand_load_gen`` so the candidate-reload coroutine
+        (_load_candidate_pane) can detect that a newer instance superseded it (F-G5).
+        """
+        # Update state tracking
+        _state["current_candidate"] = cand
+        _state["candidate_page"] = cand.page or 1
+
+        # D-08: Shelfmark + Browse button row — clear and rebuild on each flip so
+        # the Browse URL tracks the current candidate.  The shelfmark text ref
+        # must be updated too (first child of the rebuilt row).
+        if _cand_shelfmark_row_ref:
+            import json as _json
+            sm_row = _cand_shelfmark_row_ref[0]
+            sm_row.clear()
+            with sm_row:
+                new_sm_label = ui.label(cand.shelfmark or "?").classes(
+                    "text-sm font-semibold"
+                ).style("color: var(--primary-700);")
+                # Replace the shelfmark label ref so other code sees the new element
+                if _cand_shelfmark_ref:
+                    _cand_shelfmark_ref[0] = new_sm_label
+                else:
+                    _cand_shelfmark_ref.append(new_sm_label)
+                _render_copy_shelfmark_button(cand.shelfmark or "")
+                # Browse button — js_handler opens in new tab (no Python navigate call;
+                # avoids server-side stop_propagation AST guard, T-119-09).  Coloured
+                # like the shelfmark: it was white on the light pane, so it could be
+                # seen only in the dark theme.
+                _cand_browse_url = build_browse_url(cand)
+                (
+                    ui.button(icon="open_in_new")
+                    .props(
+                        "flat dense round"
+                        f' aria-label="{tr("Open candidate in Browse (new tab)")}"'
+                    )
+                    .style("color: var(--primary-700);")
+                    .tooltip(tr("Open candidate in Browse (new tab)"))
+                    .on(
+                        "click",
+                        js_handler=(
+                            f"() => {{ window.open({_json.dumps(_cand_browse_url)}, '_blank'); }}"
+                        ),
+                    )
+                )
+        elif _cand_shelfmark_ref:
+            # Fallback: if no shelfmark-row ref just update the label text
+            _cand_shelfmark_ref[0].set_text(cand.shelfmark or "?")
+
+        # Round-4 Issue 3: candidate title — clear + rebuild on each flip.
+        if _cand_title_row_ref:
+            _render_title(_cand_title_row_ref[0], getattr(cand, "title", None) or "",
+                          "compare-candidate-title")
+
+        # Badge row — rebuild (clear + repopulate)
+        if _cand_badge_row_ref:
+            badge_row = _cand_badge_row_ref[0]
+            badge_row.clear()
+            with badge_row:
+                # 👁 badge via badge_and_tooltip (D-07/VSM-02)
+                icon_name, tooltip_text = badge_and_tooltip(cand)
+                if icon_name:
+                    ui.icon(icon_name).style("color:#f59e0b;").tooltip(tr(tooltip_text))
+
+                # Size-mismatch warning badge (D-15: ratio > 1.4, anchor's width_cm)
+                m = enrichment.get(cand.sys_id, {})
+                anchor_w = enrichment.get(anchor_cand.sys_id, {}).get("width_cm")
+                if is_size_mismatch(m.get("width_cm"), anchor_w):
+                    # ui.badge has no `icon` kwarg (TypeError) — render the warning
+                    # glyph as a child element inside the badge instead.
+                    with ui.badge(tr("Size mismatch")).props("color=warning"):
+                        ui.icon("warning").classes("text-xs q-ml-xs")
+
+        # The FJMS/PGP buttons belong to the previous candidate until
+        # _load_candidate_meta refills them: empty and hide the row now, so they can
+        # never open the wrong fragment's data (they used to stay on the first one).
+        if _cand_info_row_ref:
+            _cand_info_row_ref[0].clear()
+            _cand_info_row_ref[0].style("display:none;")
+
+        # Info line from what is known now (library, measurements); domains, date
+        # and links follow from _load_candidate_meta.
+        if _cand_details_ref:
+            _render_pane_details(
+                _cand_details_ref[0],
+                getattr(cand, "library_code", "") or "",
+                enrichment.get(cand.sys_id),
+                None,
+            )
+
+        # Fresh AnchorViewer for candidate pane — independent from anchor pane (Pitfall 3).
+        # Store it in _cand_viewer_ref so _load_candidate_pane can await update_content.
+        # R2-6: suppress_shelfmark_header=True — Compare's green subtitle is the only shelfmark.
+        # R2-3: image_max_height="40vh" — caps image so transcription is also visible.
+        _details_page["candidate"] = None
+        _shown_page["candidate"] = None
+        if _cand_viewer_container_ref:
+            container = _cand_viewer_container_ref[0]
+            container.clear()
+            with container:
+                new_viewer = AnchorViewer(
+                    sys_id=cand.sys_id,
+                    p_num=cand.page,
+                    volume_ie=getattr(cand, "volume_ie", None),
+                    highlight_pattern=getattr(cand, "highlight_pattern", None),
+                    suppress_shelfmark_header=True,
+                    image_max_height="40vh",
+                    on_page_loaded=_make_cand_page_hook(cand),
+                )
+            # Replace the stored viewer ref
+            if _cand_viewer_ref:
+                _cand_viewer_ref[0] = new_viewer
+            else:
+                _cand_viewer_ref.append(new_viewer)
+
+        # F-G5: increment the modal-level generation counter.  Any in-flight
+        # _load_candidate_pane coroutine that was awaiting the PREVIOUS viewer's
+        # update_content will see its captured generation is stale and no-op.
+        _cand_load_gen["n"] += 1
+
+        # Refresh verdict buttons for the newly shown candidate (G3-compare).
+        # This also updates the candidate pane border (R2-5).
+        _refresh_verdict_buttons(cand)
+
+        # D-10: notify caller (joins_lab.py) of the new candidate index so it can
+        # schedule adjacent image prefetch.  The candidate index is stored in
+        # _state["idx"] (set by step_candidate / create_compare_state).
+        if on_candidate_change is not None:
+            try:
+                on_candidate_change(_state.get("idx", 0))
+            except Exception:
+                pass  # prefetch scheduling errors must never crash the modal
+
+    async def _load_candidate_pane() -> None:
+        """Await the current candidate viewer's update_content (modal-level latest-wins).
+
+        Captures the current generation token from _cand_load_gen before the await;
+        after update_content returns, no-ops if a newer _fill_candidate has already
+        superseded this load (F-G5 — works across instance replacement, unlike the
+        per-instance _nav_gen guard inside AnchorViewer).
+
+        CMP-02: only the CANDIDATE pane is reloaded; the anchor pane is fixed.
+        """
+        if not _cand_viewer_ref:
+            return
+        my_gen = _cand_load_gen["n"]
+        cand = _state["current_candidate"]
+        viewer = _cand_viewer_ref[0]
+        await viewer.update_content(p_num=cand.page or 1)
+        # Latest-wins guard: if a newer _fill_candidate ran while we were awaiting,
+        # the new viewer is already stored; our result is stale — discard it.
+        if my_gen != _cand_load_gen["n"]:
+            return
+        # (If generation still matches, the load succeeded for the shown candidate.)
+
+    async def _fetch_pane_meta(sys_id: str, page: Optional[int]) -> tuple:
+        """(FJMS/PGP button metadata, details) for one pane, both fetched off-loop.
+
+        Either is None when its fetcher was not supplied or returned None.
+        """
+        async def _none() -> None:
+            return None
+
+        meta, details = await asyncio.gather(
+            run.io_bound(metadata_prefetcher, sys_id)
+            if metadata_prefetcher is not None else _none(),
+            run.io_bound(details_fetcher, sys_id, page)
+            if details_fetcher is not None else _none(),
+        )
+        return meta, details
+
+    async def _load_anchor_meta() -> None:
+        """Fill the anchor pane's FJMS/PGP buttons, info line, links and title."""
+        try:
+            await _fill_anchor_meta()
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _fill_anchor_meta() -> None:
+        page = _details_page["anchor"] = _shown_page["anchor"] or anchor_cand.page or 1
+        meta, details = await _fetch_pane_meta(anchor_cand.sys_id, page)
+        # A None (cancelled, or the app is stopping) is no metadata: that pane's
+        # info row stays empty rather than claiming "no catalog".
+        if _anchor_info_row_ref and meta is not None:
+            _populate_pane_info_row(
+                _anchor_info_row_ref[0],
+                anchor_cand.sys_id,
+                anchor_cand.shelfmark or "?",
+                meta,
+            )
+        if details is None or _details_page["anchor"] != page:
+            return
+        if _anchor_details_ref:
+            _render_pane_details(
+                _anchor_details_ref[0],
+                getattr(anchor_cand, "library_code", "") or "",
+                enrichment.get(anchor_cand.sys_id),
+                details,
+            )
+        # The Lab passes no anchor title; show the catalogue title when there is one.
+        if _anchor_title_row_ref and not getattr(anchor_cand, "title", None):
+            _render_title(_anchor_title_row_ref[0], details.get("title") or "",
+                          "compare-anchor-title")
+
+    async def _load_candidate_meta() -> None:
+        """Fill the SHOWN candidate's FJMS/PGP buttons, info line and links.
+
+        Latest-wins like _load_candidate_pane: if the candidate changed while the
+        fetch ran, the result belongs to a candidate no longer shown and is dropped.
+        """
+        if metadata_prefetcher is None and details_fetcher is None:
+            return
+        try:
+            my_gen = _cand_load_gen["n"]
+            cand = _state["current_candidate"]
+            page = _details_page["candidate"] = _shown_page["candidate"] or cand.page or 1
+            meta, details = await _fetch_pane_meta(cand.sys_id, page)
+            if my_gen != _cand_load_gen["n"]:
+                return
+            if _cand_info_row_ref and meta is not None:
+                _populate_pane_info_row(
+                    _cand_info_row_ref[0],
+                    cand.sys_id,
+                    cand.shelfmark or "?",
+                    meta,
+                )
+            if details is not None and _cand_details_ref and _details_page["candidate"] == page:
+                _render_pane_details(
+                    _cand_details_ref[0],
+                    getattr(cand, "library_code", "") or "",
+                    enrichment.get(cand.sys_id),
+                    details,
+                )
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _refetch_details(which: str, sys_id: str, page: int, container_ref: list,
+                               library_code: str) -> None:
+        """Fetch one pane's details again for *page* after its viewer changed folio.
+
+        The page picks the PGP document. Dropped if another page was asked for while
+        the fetch ran.
+        """
+        _details_page[which] = page
+        try:
+            details = await run.io_bound(details_fetcher, sys_id, page)
+            if details is None or _details_page[which] != page or not container_ref:
+                return
+            _render_pane_details(container_ref[0], library_code,
+                                 enrichment.get(sys_id), details)
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _on_anchor_page_loaded(page: int) -> None:
+        """AnchorViewer hook: the anchor pane drew *page*; keep its links with it."""
+        _shown_page["anchor"] = page
+        if details_fetcher is None or _details_page["anchor"] in (None, page):
+            return  # details not loaded yet (the show-loader fetches *page*), or same page
+        await _refetch_details("anchor", anchor_cand.sys_id, page, _anchor_details_ref,
+                               getattr(anchor_cand, "library_code", "") or "")
+
+    def _make_cand_page_hook(cand: Candidate) -> Callable:
+        """AnchorViewer hook for one candidate's viewer (ignored once another is shown)."""
+        async def _hook(page: int) -> None:
+            if _state.get("current_candidate") is not cand:
+                return
+            _shown_page["candidate"] = page
+            if details_fetcher is None or _details_page["candidate"] in (None, page):
+                return
+            await _refetch_details("candidate", cand.sys_id, page, _cand_details_ref,
+                                   getattr(cand, "library_code", "") or "")
+        return _hook
+
+    async def _step(delta: int) -> None:
+        """Advance/retreat through filtered_candidates (parity desktop step(delta):3741).
+
+        ASYNC: after rebuilding the candidate viewer via _fill_candidate, awaits
+        _load_candidate_pane so the new candidate's image+transcription actually loads.
+        The anchor pane is NEVER reloaded (per-pane independence, CMP-02).
+        """
+        step_candidate(_state, delta)
+        _fill_candidate(_state["current_candidate"])
+        _update_counter()
+        _update_nav_buttons()
+        await _load_candidate_pane()
+        await _load_candidate_meta()
+
+    async def _record_verdict(verdict: str) -> None:
+        """Record verdict and AUTO-ADVANCE (D-03, parity _mark → wb.mark → triage:4202).
+
+        ASYNC: after record_verdict() writes the verdict and advances _state (F-G3c
+        constraint — write+advance is atomic), _fill_candidate is called on the
+        POST-ADVANCE candidate and its pane is loaded via _load_candidate_pane.
+
+        F-G3c: _refresh_verdict_buttons (inside _fill_candidate) keys on the
+        POST-ADVANCE candidate's triage entry. The recorded verdict for the previous
+        candidate is persisted in triage and visible on back-navigation.
+        """
+        record_verdict(_state, verdict, triage, on_verdict=on_verdict)
+        # After step_candidate() inside record_verdict(), _state["current_candidate"] is updated
+        _fill_candidate(_state["current_candidate"])
+        _update_counter()
+        _update_nav_buttons()
+        await _load_candidate_pane()
+        await _load_candidate_meta()
+
+    def _handle_close() -> None:
+        """Handle modal close — invoke on_close callback if provided."""
+        dialog.close()
+        if on_close:
+            on_close()
+
+    # ── Build the modal UI ────────────────────────────────────────────────────
+    with dialog:
+        # Bind the card to the VIEWPORT height explicitly (not h-full / height:100%):
+        # height:100% only resolves when every ancestor is height-bounded, and that
+        # chain silently breaks inside the maximized dialog wrapper — leaving the
+        # flex body unbounded so the panes grew past the window and the verdict bar
+        # / image overflowed off-screen (round-5 UAT: "does not adapt to window
+        # height").  100dvh (with a 100vh fallback) gives a hard viewport bound so
+        # the inner flex column distributes correctly and the panes' scroll areas
+        # cap to whatever the window actually is.
+        with ui.card().classes("w-full").style(
+            "height:100vh; max-height:100vh;"
+            " display:flex; flex-direction:column; overflow:hidden;"
+        ):
+            # ── Header bar ───────────────────────────────────────────────────
+            # compare-header: on a phone its two icon-only buttons go dense so
+            # the row stays one row (common.css, "Compare on a phone").
+            with ui.row().classes(
+                "w-full items-center justify-between px-4 py-2 compare-header"
+            ).style(
+                "background: var(--bg-header); color: white; flex-shrink:0;"
+            ):
+                # compare-header-title: hidden on a phone, where the row's width
+                # goes to the counter and the buttons.
+                ui.label(tr("Compare")).classes("text-lg font-semibold compare-header-title")
+                # R2-2: force LTR + bidi-isolate so "5 / 118" is not flipped to
+                # "118 / 5" by the Hebrew RTL UI direction.
+                # Marked 'compare-flip-counter' for render-smoke element location.
+                counter_label = ui.label("").classes("text-sm").style(
+                    "color:rgba(255,255,255,0.8); direction:ltr; unicode-bidi:isolate;"
+                ).mark("compare-flip-counter")
+                _counter_label_ref.append(counter_label)
+
+                # Phase-120 ACT-01: Add-as-Join — acts on the CURRENTLY-shown
+                # candidate (_state['current_candidate']).  Primary scholarly action
+                # (UI-SPEC §2); the callback handles the anonymous/auth + confirm flow.
+                if on_add_as_join is not None:
+                    def _on_add_join_click() -> None:
+                        cand = _state.get("current_candidate")
+                        if cand is None:
+                            return
+                        on_add_as_join(cand.sys_id, cand.shelfmark or "?")
+
+                    (
+                        ui.button(
+                            tr("Add as Join"),
+                            icon="add_link",
+                            on_click=_on_add_join_click,
+                        )
+                        .props("unelevated color=primary")
+                        .classes("phone-icon-only")
+                        .mark("compare-add-as-join")
+                        .tooltip(tr("Add as Join"))
+                    )
+
+                # Round-4 Issue 7: Add to Puzzle — stages anchor + CURRENT candidate
+                # into the Fragment Puzzle and navigates to /puzzle.
+                if on_add_to_puzzle is not None:
+                    def _on_add_puzzle_click() -> None:
+                        cand = _state.get("current_candidate")
+                        if cand is None:
+                            return
+                        on_add_to_puzzle(cand.sys_id)
+
+                    (
+                        ui.button(
+                            tr("Add to Puzzle"),
+                            icon="extension",
+                            on_click=_on_add_puzzle_click,
+                        )
+                        .props("flat color=primary")
+                        .classes("phone-icon-only")
+                        .mark("compare-add-to-puzzle")
+                        .tooltip(tr("Add anchor + this candidate to the Fragment Puzzle"))
+                    )
+
+                # On a phone, and on any screen too short for two images with
+                # text under them, the panes show the two images alone (common.css,
+                # "Compare on a phone"); this button brings the transcriptions,
+                # titles and details back. Hidden at desktop widths, where the
+                # panes have room for everything. The choice lasts while the
+                # window is open: the panes row outlives every flip.
+                def _toggle_text() -> None:
+                    _text_shown["value"] = not _text_shown["value"]
+                    panes_row.classes(toggle="compare-text-shown")
+                    text_toggle.classes(toggle="is-on")
+
+                text_toggle = (
+                    ui.button(icon="notes", on_click=_toggle_text)
+                    .props(f'flat dense round aria-label="{tr("Show text")}"')
+                    .classes("text-white compare-text-toggle")
+                    .mark("compare-text-toggle")
+                    .tooltip(tr("Show text"))
+                )
+
+                # Copy a link to this screen with this pair open (the Lab builds it).
+                if on_copy_link is not None:
+                    (
+                        ui.button(icon="link", on_click=on_copy_link)
+                        .props(f'flat dense round aria-label="{tr("Copy Link")}"')
+                        .classes("text-white")
+                        .mark("compare-copy-link")
+                        .tooltip(tr("Copy Link"))
+                    )
+
+                ui.button(icon="close", on_click=_handle_close).props(
+                    "flat dense round"
+                ).classes("text-white")
+
+            # ── Two-pane body ─────────────────────────────────────────────────
+            # Round-5 (UAT): the WHOLE area above the navigation scrolls as ONE
+            # unit — metadata + image + transcription of BOTH panes scroll together
+            # (overflow-y:auto here); the top header and the bottom verdict/nav bar
+            # stay fixed.  Inside, everything is natural height (no per-pane or
+            # per-transcription inner scroll).  align-items:flex-start keeps the
+            # panes at their natural heights (not stretched) so the row's scroll
+            # length is the taller pane's content.
+            # compare-panes: below 641px the two panes stack, anchor above
+            # candidate (common.css, "Joins Lab").
+            _panes_rtl_class = " compare-panes-rtl" if is_rtl() else ""
+            panes_row = ui.row().classes(
+                f"w-full flex-grow min-h-0 compare-panes{_panes_rtl_class}"
+            ).style("overflow-y:auto; flex:1; align-items:flex-start;")
+            with panes_row:
+                # ── Anchor pane (left) ────────────────────────────────────────
+                with ui.column().classes("flex-1 gap-2 p-4").style(
+                    "border-right: 2px solid var(--border-light);"
+                    " display:flex; flex-direction:column;"
+                ):
+                    # Fixed header block (does not scroll). The compare-pane-*
+                    # classes are the phone layout's hooks (common.css, "Compare
+                    # on a phone"): the head becomes one row of role + shelfmark
+                    # and the title, details and info rows hide until "Show text".
+                    with ui.column().classes("w-full gap-1 compare-pane-head").style(
+                        "flex-shrink:0;"
+                    ):
+                        ui.label(tr("Anchor")).classes(
+                            "text-xs font-bold uppercase"
+                        ).style("color: var(--text-muted);")
+
+                        # D-08: shelfmark + Browse button row for anchor pane
+                        with ui.row().classes("items-center gap-1"):
+                            ui.label(anchor_cand.shelfmark or "?").classes(
+                                "text-sm font-semibold"
+                            ).style("color: var(--primary-700);")
+                            _render_copy_shelfmark_button(anchor_cand.shelfmark or "")
+                            # Browse icon — opens anchor in /browse (new tab).  Coloured
+                            # like the shelfmark (it was white on the light pane).
+                            _anchor_browse_url = build_browse_url(anchor_cand)
+                            (
+                                ui.button(icon="open_in_new")
+                                .props(
+                                    "flat dense round"
+                                    f' aria-label="{tr("Open anchor in Browse (new tab)")}"'
+                                )
+                                .style("color: var(--primary-700);")
+                                .tooltip(tr("Open anchor in Browse (new tab)"))
+                                .on(
+                                    "click",
+                                    js_handler=(
+                                        f"() => {{ window.open({json.dumps(_anchor_browse_url)}, '_blank'); }}"
+                                    ),
+                                )
+                            )
+
+                        # Round-4 Issue 3: anchor title (RTL, muted) when present;
+                        # otherwise filled from the details fetcher in _load_anchor_meta.
+                        anchor_title_row = ui.row().classes("w-full compare-pane-title")
+                        _anchor_title_row_ref.append(anchor_title_row)
+                        _render_title(anchor_title_row,
+                                      getattr(anchor_cand, "title", None) or "",
+                                      "compare-anchor-title")
+
+                        # Info line + external links (filled in _load_anchor_meta).
+                        anchor_details = ui.column().classes("w-full gap-0 compare-pane-details")
+                        _anchor_details_ref.append(anchor_details)
+                        _render_pane_details(
+                            anchor_details,
+                            getattr(anchor_cand, "library_code", "") or "",
+                            enrichment.get(anchor_cand.sys_id),
+                            None,
+                        )
+
+                        # D-09/H3: anchor pane info button row — MOVED UP into the
+                        # header so the FJMS/PGP buttons stay visible at 100% zoom
+                        # (Round-4 Issue 3).  Populated off-loop in _on_show.
+                        anchor_info_row = ui.row().classes(
+                            "gap-2 items-center py-1 compare-pane-info"
+                        ).style("display:none;")
+                        _anchor_info_row_ref.append(anchor_info_row)
+
+                    # Viewer area — natural height (image capped at 40vh +
+                    # transcription at full height).  NO inner scroll here: the
+                    # outer two-pane body scrolls as one (round-5 UAT).
+                    with ui.column().classes("w-full gap-4"):
+                        # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
+                        # Stored in _anchor_viewer_ref so the show-loader can await update_content.
+                        # R2-6: suppress_shelfmark_header=True — green subtitle is the only shelfmark.
+                        # R2-3: image_max_height="40vh" — caps image so transcription stays visible.
+                        anchor_viewer = AnchorViewer(
+                            sys_id=anchor_cand.sys_id,
+                            p_num=anchor_cand.page,
+                            volume_ie=getattr(anchor_cand, "volume_ie", None),
+                            highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
+                            suppress_shelfmark_header=True,
+                            image_max_height="40vh",
+                            on_page_loaded=_on_anchor_page_loaded,
+                        )
+                        _anchor_viewer_ref.append(anchor_viewer)
+
+                # ── Candidate pane (right) ────────────────────────────────────
+                # R2-5: capture ref for verdict-border updates; mark for render-smoke.
+                cand_pane_col = ui.column().classes("flex-1 gap-2 p-4").mark(
+                    "compare-candidate-pane"
+                ).style(
+                    "border: 1px solid var(--border-light);"
+                    " display:flex; flex-direction:column;"
+                )
+                _cand_pane_ref.append(cand_pane_col)
+                with cand_pane_col:
+                    # Fixed header block (does not scroll) — shelfmark/title/badges/info.
+                    # Same compare-pane-* hooks as the anchor head.
+                    with ui.column().classes("w-full gap-1 compare-pane-head").style(
+                        "flex-shrink:0;"
+                    ):
+                        ui.label(tr("Candidate")).classes(
+                            "text-xs font-bold uppercase"
+                        ).style("color: var(--text-muted);")
+
+                        # D-08: shelfmark + Browse button row for candidate pane.
+                        # The row is cleared + rebuilt in _fill_candidate so the Browse
+                        # URL stays in sync each time the candidate flips.
+                        cand_shelfmark_row = ui.row().classes("items-center gap-1")
+                        _cand_shelfmark_row_ref.append(cand_shelfmark_row)
+                        # Seed an initial label ref so _fill_candidate can update text too.
+                        with cand_shelfmark_row:
+                            cand_shelfmark_label = ui.label("").classes(
+                                "text-sm font-semibold"
+                            ).style("color: var(--primary-700);")
+                        _cand_shelfmark_ref.append(cand_shelfmark_label)
+
+                        # Round-4 Issue 3: candidate TITLE (RTL, muted) — was missing.
+                        # Cleared + rebuilt on each flip in _fill_candidate.
+                        cand_title_row = ui.row().classes("w-full compare-pane-title")
+                        _cand_title_row_ref.append(cand_title_row)
+
+                        # Info line + external links — redrawn on each flip.
+                        cand_details = ui.column().classes("w-full gap-0 compare-pane-details")
+                        _cand_details_ref.append(cand_details)
+
+                        cand_badge_row = ui.row().classes("gap-2 items-center flex-wrap")
+                        _cand_badge_row_ref.append(cand_badge_row)
+
+                        # D-09/H3: candidate pane info button row — MOVED UP into the
+                        # header (Round-4 Issue 3) so it stays visible at 100% zoom.
+                        cand_info_row = ui.row().classes(
+                            "gap-2 items-center py-1 compare-pane-info"
+                        ).style("display:none;")
+                        _cand_info_row_ref.append(cand_info_row)
+
+                    # Viewer area — natural height; the outer body scrolls (round-5).
+                    with ui.column().classes("w-full gap-4"):
+                        cand_viewer_container = ui.column().classes("w-full gap-4")
+                        _cand_viewer_container_ref.append(cand_viewer_container)
+
+            # ── Verdict bar (sticky bottom) ───────────────────────────────────
+            # RTL: the app reverses flex rows manually for Hebrew (it does NOT rely
+            # on the browser auto-flipping flex order — see joins_lab.py:1169
+            # `flex-row-reverse if is_rtl()`).  Without this, ‹ Prev (DOM-first)
+            # landed on the LEFT and Next › on the RIGHT in Hebrew — the LTR order,
+            # which reads reversed to a Hebrew user (round-5 UAT). Reversing puts
+            # הבא (Next) on the left and הקודם (Prev) on the right.
+            _nav_dir_class = "flex-row-reverse" if is_rtl() else "flex-row"
+            with ui.row().classes(
+                f"w-full items-center justify-between px-4 py-2 flex-wrap gap-2 {_nav_dir_class}"
+            ).style(
+                "background: var(--bg-tertiary); position:sticky; bottom:0; flex-shrink:0;"
+            ):
+                # R2-2: nav buttons — label carries the RTL-correct chevron (from 119-09
+                # HE translations: "‹ Prev"→"הקודם ›", "Next ›"→"‹ הבא").  No fixed
+                # icon= so there is no contradicting LTR chevron-icon under RTL.
+                prev_btn = ui.button(
+                    tr("‹ Prev")
+                ).props("flat dense").on("click", lambda: _step(-1))
+                _prev_btn_ref.append(prev_btn)
+
+                # R2-4: Verdict buttons — ✓/?/✗ glyph buttons (desktop parity).
+                # Refs captured into _verdict_btn_refs so _refresh_verdict_buttons can
+                # toggle active/inactive state on each candidate change (G3-compare).
+                # PRESERVE active(unelevated)/inactive(outline) toggle logic (G3-compare).
+                with ui.row().classes("gap-2 items-center"):
+                    for verdict, q_color in [
+                        ("yes", "positive"),
+                        ("maybe", "warning"),
+                        ("no", "negative"),
+                    ]:
+                        _v = verdict
+
+                        def _make_verdict_handler(v=_v):
+                            async def _handler():
+                                await _record_verdict(v)
+                            return _handler
+
+                        _btn = (
+                            ui.button(TRIAGE_ICONS[_v]["glyph"])
+                            .props(f"outline color={q_color} size=md")
+                            .tooltip(tr(TRIAGE_ICONS[_v]["tooltip"]))
+                            .on("click", _make_verdict_handler())
+                        )
+                        _verdict_btn_refs[_v] = _btn
+
+                # R2-2: Next button — no fixed icon= (avoids LTR chevron contradicting HE label).
+                next_btn = ui.button(
+                    tr("Next ›")
+                ).props("flat dense").on("click", lambda: _step(1))
+                _next_btn_ref.append(next_btn)
+
+    def _populate_pane_info_row(
+        row_el,
+        sys_id: str,
+        shelfmark: str,
+        meta: dict,
+    ) -> None:
+        """Build FJMS + PGP/Bib info buttons inside *row_el* from prefetched *meta*.
+
+        D-09/H3 — called from the async _on_show show-handler AFTER metadata has
+        been fetched off-loop.  Must run on the event loop (NiceGUI element mutation).
+
+        meta must have keys:
+            'fjms_bib'      — list[dict] (bibliography rows from get_bibliography)
+            'catalog_detail'— dict|None (result of get_catalog_detail)
+            'source_names'  — list[str] (result of get_source_names) — the catalog
+                              presence signal.  get_catalog_detail() does NOT contain
+                              a 'source_names' key, so the "has catalog" gate reads
+                              this separately-fetched list, mirroring the Browse
+                              enrichment path (browse_enrichment.py:551).  UAT 2026-06-21:
+                              relying on catalog_detail['source_names'] left the FJMS
+                              Catalog button permanently hidden.
+        """
+        from web.components.catalog_dialog import show_catalog_dialog
+        from web.components.bibliography_dialog import create_fjms_bibliography_dialog
+
+        fjms_bib = meta.get("fjms_bib") or []
+        catalog_detail = meta.get("catalog_detail")  # None means no data or fetch failed
+        # Catalog presence: use the separately-fetched source_names list (mirrors
+        # browse_enrichment.py:551).  Fall back to catalog_detail's records list when
+        # source_names is absent (defensive — a prefetcher that omits the key).
+        source_names = meta.get("source_names") or []
+        catalog_src_count = len(source_names)
+        if catalog_src_count == 0 and catalog_detail and isinstance(catalog_detail, dict):
+            # Defensive fallback: a catalog_detail with records still has data even
+            # if the prefetcher did not supply source_names.
+            catalog_src_count = len(catalog_detail.get("records", []))
+        elif catalog_src_count == 0 and isinstance(catalog_detail, list):
+            # Some service versions return the records list directly
+            catalog_src_count = len(catalog_detail)
+
+        has_bib = bool(fjms_bib)
+        has_catalog = catalog_src_count > 0
+
+        if not has_bib and not has_catalog:
+            # Nothing to show — leave row hidden
+            return
+
+        # Make the row visible
+        row_el.style("display:flex;")
+
+        chip_base = (
+            "border-radius: 12px; min-height: 22px; font-weight: 600;"
+        )
+
+        with row_el:
+            # PGP / Bibliography button
+            if has_bib:
+                bib_dlg = create_fjms_bibliography_dialog(
+                    fjms_bib, sys_id, shelfmark=shelfmark
+                )
+                (
+                    ui.button(
+                        tr("PGP / Bibliography"),
+                        icon="menu_book",
+                        on_click=bib_dlg.open,
+                    )
+                    .props("flat dense no-caps size=sm")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #7e57c2; color: #7e57c2; {chip_base}")
+                    .tooltip(tr("View PGP and bibliography data for this fragment"))
+                )
+            else:
+                (
+                    ui.button(
+                        tr("PGP / Bibliography"),
+                        icon="menu_book",
+                    )
+                    .props("flat dense no-caps size=sm disable")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #bdbdbd; color: #bdbdbd; {chip_base}")
+                    .tooltip(tr("No PGP data for this fragment"))
+                )
+
+            # FJMS Catalog button (R2-H3: pass prefetched catalog_detail so dialog
+            # does NOT call get_catalog_detail synchronously on open)
+            if has_catalog:
+                _cd = catalog_detail  # captured for closure
+
+                def _make_cat_click(s=sys_id, sm=shelfmark, cd=_cd):
+                    def _h():
+                        show_catalog_dialog(s, sm, catalog_detail=cd)
+                    return _h
+
+                (
+                    ui.button(
+                        tr("FJMS Catalog"),
+                        icon="info_outline",
+                        on_click=_make_cat_click(),
+                    )
+                    .props("flat dense no-caps size=sm")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #5c6bc0; color: #5c6bc0; {chip_base}")
+                    .tooltip(tr("View FJMS catalog data for this fragment"))
+                )
+            else:
+                (
+                    ui.button(
+                        tr("FJMS Catalog"),
+                        icon="info_outline",
+                    )
+                    .props("flat dense no-caps size=sm disable")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #bdbdbd; color: #bdbdbd; {chip_base}")
+                    .tooltip(tr("No FJMS catalog data for this fragment"))
+                )
+
+    # Attach async show-loader: fires when dialog mounts in the live client context.
+    # Awaits BOTH the anchor pane and the candidate pane's update_content so images
+    # and transcriptions actually render (G5 fix). Runs in the active NiceGUI client
+    # context via dialog.on("show") — NOT via a naked background coroutine
+    # (T-119-09 / Codex client-context regression rule).
+    async def _on_show(_: object = None) -> None:
+        """Async show handler — awaits both pane update_content calls (G5 fix).
+
+        D-09/H3: When metadata_prefetcher / details_fetcher are provided, also
+        fetches per-pane bibliography + catalog detail and details (info line,
+        links, anchor title) off-loop (run.io_bound) and fills each pane.
+        SEED-008 guarded (entire body).
+        """
+        try:
+            if _anchor_viewer_ref:
+                await _anchor_viewer_ref[0].update_content(p_num=anchor_cand.page or 1)
+            await _load_candidate_pane()
+
+            # D-09/H3: off-loop per-pane metadata (FJMS/PGP buttons) and details
+            # (info line, links, anchor title), both panes concurrently.  Each
+            # fetcher is optional; with neither, nothing is fetched.
+            # Both loaders end on a client-gone RuntimeError themselves, so one pane
+            # can never cut the other short; return_exceptions keeps the show-loader
+            # waiting for both even if one fails some other way, then re-raises it.
+            if metadata_prefetcher is not None or details_fetcher is not None:
+                for outcome in await asyncio.gather(
+                    _load_anchor_meta(), _load_candidate_meta(), return_exceptions=True,
+                ):
+                    if isinstance(outcome, BaseException):
+                        raise outcome
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    dialog.on("show", _on_show)
+
+    # R2-7: Escape-key handler — close the modal when Escape is pressed (keydown only).
+    # The dialog is props("persistent") so the built-in Esc-close is DISABLED;
+    # we install a ui.keyboard listener scoped to this dialog's open state.
+    # Guard: only act when THIS dialog is currently open (dialog.value truthy) so
+    # a stale hidden-dialog keyboard from a prior _open_compare call cannot fire
+    # globally (Codex P119-R2-7-1).
+    def _has_nested_dialog_open() -> bool:
+        """Round-4 Issue 4: True when ANOTHER dialog is open on top of Compare.
+
+        A child dialog opened over Compare (e.g. the Add-as-Join confirm dialog,
+        or the Add-to-List picker) registers as a separate ui.dialog with a truthy
+        ``.value``.  When such a dialog is open, Compare's Esc handler must NOT fire
+        — Esc should dismiss only the TOPMOST dialog.  The nested dialog is itself
+        non-persistent, so NiceGUI's built-in q-dialog handles its own Esc-close
+        client-side; we just have to stop Compare from also closing underneath it.
+
+        We scan THIS dialog's client for other open dialogs.  At the instant the
+        server-side keyboard handler runs, the nested dialog's ``.value`` is still
+        truthy (its client-side close has not round-tripped yet), so this guard sees
+        it and correctly suppresses Compare's close.
+        """
+        try:
+            from nicegui.elements.dialog import Dialog
+            # Scan THIS dialog's client elements directly so the guard works whether
+            # or not it is called inside an ambient client/slot context (ElementFilter
+            # relies on the ambient context and would find nothing off-context).
+            client = getattr(dialog, "client", None)
+            elements = getattr(client, "elements", None)
+            if not elements:
+                return False
+            for el in list(elements.values()):
+                if el is dialog:
+                    continue
+                if isinstance(el, Dialog) and getattr(el, "value", False):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _on_escape(e: object) -> None:
+        """Close the Compare modal on Escape keydown (R2-7).
+
+        Round-4 Issue 4: no-op when a nested dialog (Add-as-Join / Add-to-List) is
+        open on top — Esc dismisses only the topmost dialog, never Compare beneath it.
+        """
+        # Guard: only act when this dialog instance is currently open
+        if not getattr(dialog, "value", False):
+            return
+        # Round-4 Issue 4: a child dialog over Compare owns Esc — leave Compare open.
+        if _has_nested_dialog_open():
+            return
+        # Guard: keydown only (avoid double-fire on keyup)
+        action = getattr(e, "action", None)
+        if action is not None and not getattr(action, "keydown", True):
+            return
+        key = getattr(e, "key", None)
+        key_name = getattr(key, "name", None) if key is not None else str(getattr(e, "key", ""))
+        if key_name == "Escape":
+            _handle_close()
+
+    with dialog:
+        _kb = ui.keyboard(on_key=_on_escape)
+
+    # Expose Esc handler for tests (test seam: invoke directly with a synthetic Escape event).
+    dialog._on_escape = _on_escape  # type: ignore[attr-defined]
+    dialog._keyboard = _kb  # type: ignore[attr-defined]
+
+    # Expose show-loader for behavioral tests (Task 2 test seam):
+    # A test can call _on_show directly via asyncio.run with stub viewers.
+    dialog._on_show = _on_show  # type: ignore[attr-defined]
+    dialog._load_candidate_pane = _load_candidate_pane  # type: ignore[attr-defined]
+    # The pane viewers, so a test can fire their on_page_loaded hooks (folio change).
+    dialog._anchor_viewer_ref = _anchor_viewer_ref  # type: ignore[attr-defined]
+    dialog._cand_viewer_ref = _cand_viewer_ref  # type: ignore[attr-defined]
+
+    # Populate the candidate pane with the initial candidate
+    _fill_candidate(initial_candidate)
+    _update_counter()
+    _update_nav_buttons()
+
+    return dialog

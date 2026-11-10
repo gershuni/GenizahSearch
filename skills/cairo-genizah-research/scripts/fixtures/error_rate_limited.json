@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "Rate limit exceeded. Try again in 12 seconds."
+  }
+}

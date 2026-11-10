@@ -1,0 +1,1215 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GenizahSearch Research Actions",
+    "version": "0.4.0",
+    "description": "Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels."
+  },
+  "servers": [
+    {
+      "url": "https://genizahsearch.com/api/chatgpt"
+    }
+  ],
+  "security": [],
+  "paths": {
+    "/capabilities": {
+      "get": {
+        "operationId": "getGenizahCapabilities",
+        "summary": "Check available search modes and passage features once before research. Runtime errors remain authoritative.",
+        "description": "Check available search modes and passage features once before research. Runtime errors remain authoritative.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/jobs": {
+      "post": {
+        "operationId": "searchManuscripts",
+        "summary": "Submit a phrase, title, or shelfmark search. Returns a job ID, not matches. Call getResearchJob until finished; never resubmit a pending search.",
+        "description": "Submit a phrase, title, or shelfmark search. Returns a job ID, not matches. Call getResearchJob until finished; never resubmit a pending search.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted and queued. Poll this same job ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingJob"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/browse": {
+      "get": {
+        "operationId": "browseManuscriptPage",
+        "summary": "Read a returned manuscript page locator before quoting or evaluating a match. Text may be only an automatic snippet.",
+        "description": "Read a returned manuscript page locator before quoting or evaluating a match. Text may be only an automatic snippet.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Browse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sys_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Copy locator.sys_id from a result."
+          },
+          {
+            "name": "p_num",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Copy the one-based locator.p_num from a result."
+          },
+          {
+            "name": "volume_ie",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Copy locator.volume_ie when present."
+          },
+          {
+            "name": "text_cap",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 10000,
+              "default": 4000
+            },
+            "description": "Start with 4000 characters. A snippet remains a snippet even if not truncated."
+          }
+        ]
+      }
+    },
+    "/manuscript-details": {
+      "get": {
+        "operationId": "getManuscriptDetails",
+        "summary": "Read catalog records, bibliography or edition/translation credits for a returned sys_id. Choose a section; follow next_offset with the same snapshot. Local data only: missing records do not prove absence. References are leads, not proof a passage was published.",
+        "description": "Read catalog records, bibliography or edition/translation credits for a returned sys_id. Choose a section; follow next_offset with the same snapshot. Local data only: missing records do not prove absence. References are leads, not proof a passage was published.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManuscriptDetails"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sys_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Copy the manuscript sys_id from search or browse; never guess."
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fjms_catalog",
+                "fjms_bibliography",
+                "fjms_catalog_refs",
+                "nli_catalog",
+                "nli_bibliography",
+                "pgp_sources",
+                "fgp_sources"
+              ]
+            },
+            "description": "FJMS catalog detail/references and bibliography; NLI cached catalog/MARC bibliography; PGP/FGP edition and translation credits (no text). Sources are separate, not merged."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Start at 0. For more, copy next_offset; null ends this section."
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Omit initially; copy on subsequent pages. Expires within 10 minutes or sooner if evicted. On 409 restart the section; do not mix snapshots."
+          }
+        ]
+      }
+    },
+    "/parallels/jobs": {
+      "post": {
+        "operationId": "findPassageParallels",
+        "summary": "Submit character-level passage or multi-witness matching with method=passage. Call getResearchJob with the returned private job ID until finished.",
+        "description": "Submit character-level passage or multi-witness matching with method=passage. Call getResearchJob with the returned private job ID until finished.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted and queued. Poll this same job ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingJob"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassageRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "operationId": "getResearchJob",
+        "summary": "Poll or page through ONE saved search. Follow pagination.next_page with the same private job ID to see more matches without rerunning. Use collection=filtered for demoted candidates. Null next_page means this collection is finished.",
+        "description": "Poll or page through ONE saved search. Follow pagination.next_page with the same private job ID to see more matches without rerunning. Use collection=filtered for demoted candidates. Null next_page means this collection is finished.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Results"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running; poll this same job again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingJob"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Copy the returned private job_id exactly. Never guess IDs or submit the query again while pending."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Start at 0, then copy pagination.next_page. Page sizes may shrink to fit the response limit."
+          },
+          {
+            "name": "collection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "results",
+                "filtered"
+              ],
+              "default": "results"
+            },
+            "description": "Main matches or demoted/filtered matches. Each collection has its own page sequence."
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Locator": {
+        "type": "object",
+        "properties": {
+          "sys_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "volume_ie": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "p_num": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ],
+            "description": "One-based page number."
+          },
+          "uid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fl_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "Library": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Warning": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Filters": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "works": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "library": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Known library codes, e.g. CUL, JTS, Oxford. Never guess catalog filter values."
+          },
+          "library_filter_mode": {
+            "type": "string",
+            "enum": [
+              "include",
+              "exclude"
+            ]
+          },
+          "date_from": {
+            "type": "integer"
+          },
+          "date_to": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResponsaOptions": {
+        "type": "object",
+        "properties": {
+          "variants": {
+            "type": "boolean"
+          },
+          "ja": {
+            "type": "boolean"
+          },
+          "flex_spacing": {
+            "type": "boolean"
+          },
+          "bidirectional": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SearchRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "search_mode": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "variants",
+              "fuzzy",
+              "responsa",
+              "title",
+              "shelfmark"
+            ],
+            "description": "Start exact; shelfmark resolves call numbers. Search runs as a background job; poll its returned ID."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Total candidates to save from ONE search, not page size. Use 100 for exact/variants/responsa/title/shelfmark; 500 for fuzzy. Other modes allow at most 100. Retrieval pages contain at most 10 rows."
+          },
+          "gap": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Words allowed between terms; must be zero for title/shelfmark."
+          },
+          "responsa_options": {
+            "$ref": "#/components/schemas/ResponsaOptions",
+            "description": "Omit unless search_mode is responsa."
+          },
+          "filters": {
+            "$ref": "#/components/schemas/Filters"
+          }
+        },
+        "required": [
+          "query",
+          "search_mode",
+          "limit"
+        ],
+        "additionalProperties": false
+      },
+      "Witness": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          },
+          "raw_header": {
+            "type": "string",
+            "description": "Exact header returned by a tool; never construct one from a UID or shelfmark."
+          }
+        },
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "text"
+            ]
+          },
+          {
+            "required": [
+              "raw_header"
+            ]
+          }
+        ]
+      },
+      "PassageRequest": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "passage"
+            ],
+            "description": "Required explicitly: the upstream default is chunk."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "A meaningful passage. For longer input, label and search sections separately; never silently cut it."
+          },
+          "witnesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Witness"
+            },
+            "minItems": 1,
+            "maxItems": 3,
+            "description": "Pilot limit: three witnesses of ONE work. Omit text when supplied. Keep witnesses separate."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "fused",
+              "best_match",
+              "witness_count"
+            ],
+            "description": "Only with witnesses; omit for a single text."
+          },
+          "filters": {
+            "$ref": "#/components/schemas/Filters"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "text"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "witnesses"
+                  ]
+                },
+                {
+                  "required": [
+                    "sort"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "witnesses"
+            ],
+            "not": {
+              "required": [
+                "text"
+              ]
+            }
+          }
+        ]
+      },
+      "Match": {
+        "type": "object",
+        "properties": {
+          "chunk_index": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source_chunk_text": {
+            "type": "string"
+          },
+          "manuscript_snippet": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Result": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string"
+          },
+          "raw_header": {
+            "type": "string"
+          },
+          "locator": {
+            "$ref": "#/components/schemas/Locator"
+          },
+          "shelfmark": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "library": {
+            "$ref": "#/components/schemas/Library"
+          },
+          "is_synthetic": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "image_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dating": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "match_terms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Match"
+            }
+          },
+          "witness_fusion": {
+            "type": "object",
+            "properties": {
+              "witness_count": {
+                "type": "integer"
+              },
+              "witness_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fusion_score": {
+                "type": "number"
+              },
+              "best_witness_score": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "locator",
+          "shelfmark",
+          "snippet"
+        ],
+        "additionalProperties": true
+      },
+      "Results": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "generated_at": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Result"
+            }
+          },
+          "filtered": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Result"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            }
+          },
+          "request": {
+            "type": "object",
+            "properties": {},
+            "description": "Effective request parameters and policy after defaulting/capping. Retain for reproducibility.",
+            "additionalProperties": true
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "job_id": {
+                "type": "string"
+              },
+              "collection": {
+                "type": "string",
+                "enum": [
+                  "results",
+                  "filtered"
+                ]
+              },
+              "page": {
+                "type": "integer"
+              },
+              "offset": {
+                "type": "integer"
+              },
+              "returned": {
+                "type": "integer"
+              },
+              "available": {
+                "type": "integer"
+              },
+              "results_available": {
+                "type": "integer"
+              },
+              "filtered_available": {
+                "type": "integer"
+              },
+              "next_page": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schema_version",
+          "source",
+          "generated_at",
+          "count",
+          "total",
+          "results",
+          "warnings",
+          "request"
+        ],
+        "additionalProperties": true
+      },
+      "Browse": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "generated_at": {
+            "type": "string"
+          },
+          "locator": {
+            "$ref": "#/components/schemas/Locator"
+          },
+          "page_indexing": {
+            "type": "string"
+          },
+          "shelfmark": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "library": {
+            "$ref": "#/components/schemas/Library"
+          },
+          "is_synthetic": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "text_source": {
+            "type": "string",
+            "enum": [
+              "pgp_transcription",
+              "snippet",
+              "none"
+            ]
+          },
+          "text_truncated": {
+            "type": "boolean"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "image": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            }
+          }
+        },
+        "required": [
+          "schema_version",
+          "locator",
+          "text",
+          "text_source",
+          "text_truncated",
+          "warnings"
+        ],
+        "additionalProperties": true
+      },
+      "ManuscriptDetails": {
+        "type": "object",
+        "properties": {
+          "sys_id": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "local_records",
+              "local_cache",
+              "unavailable",
+              "not_cached"
+            ]
+          },
+          "generated_at": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "returned": {
+            "type": "integer"
+          },
+          "available": {
+            "type": "integer"
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "data": {},
+                "field": {
+                  "type": "string"
+                },
+                "value": {},
+                "citation": {},
+                "source_scholar": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "doc_relation": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pgpid": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "source_credit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_credit_he": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_credit_en": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "attribution": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            }
+          }
+        },
+        "required": [
+          "sys_id",
+          "section",
+          "provider",
+          "availability",
+          "generated_at",
+          "snapshot",
+          "offset",
+          "returned",
+          "available",
+          "next_offset",
+          "records",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "Capabilities": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer"
+          },
+          "api_version": {
+            "type": "string"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "search_modes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "passage": {
+                "type": "boolean"
+              },
+              "passage_multi_witness": {
+                "type": "boolean"
+              }
+            }
+          },
+          "parallels": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "limits": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "timeouts": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "schema_version",
+          "features",
+          "search_modes"
+        ],
+        "additionalProperties": true
+      },
+      "PendingJob": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "poll_after_seconds": {
+            "type": "integer"
+          },
+          "retention_seconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "state",
+          "next_action"
+        ],
+        "additionalProperties": true
+      }
+    }
+  }
+}

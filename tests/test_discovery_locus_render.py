@@ -1,0 +1,1123 @@
+# -*- coding: utf-8 -*-
+"""Tests for shared/discovery_locus.py: span-to-unit mapping, citation rendering,
+numerals and the letter-stream coordinates.
+
+House rule: a gate that cannot be shown to fail is not a gate. Each behavioural
+test below is paired with a test that reintroduces the real defect against a LOCAL
+re-implementation and asserts the assertion would have caught it -- so the test's
+own sensitivity is demonstrated, not assumed.
+
+The tests that need a reference corpus's own file format, or the gitignored
+research tree, are kept in the private repository.
+"""
+import unicodedata
+from array import array
+
+import pytest
+
+from shared.discovery_locus import (
+    PIECE_SEP,
+    RANGE_SEP,
+    RefAlignment,
+    RefSpanProjectionError,
+    amud_ordinal,
+    citation_runs,
+    citation_seq_for_daf,
+    compress_pieces,
+    daf_label_he,
+    heb_numeral,
+    label_segments,
+    merge_witnessed_spans,
+    norm_stream,
+    parse_ref_span_alignments,
+    parse_unit_numeral,
+    render_ranges,
+    render_locus_label,
+    sefaria_daf,
+    select_locus_work,
+    select_primary_alignment,
+    shorten_range_tail,
+    split_at_citation_breaks,
+    strip_work_title_prefix,
+    stream_offset_for_raw,
+    units_for_span,
+    MIN_UNIT_OVERLAP,
+)
+
+#: A local copy of the letter values, so the buggy re-implementations below are
+#: genuinely independent of the module under test rather than importing its table.
+_HEB_VALUE_LOCAL = {
+    "א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5, "ו": 6, "ז": 7, "ח": 8, "ט": 9,
+    "י": 10, "כ": 20, "ל": 30, "מ": 40, "נ": 50, "ס": 60, "ע": 70, "פ": 80, "צ": 90,
+    "ק": 100, "ר": 200, "ש": 300, "ת": 400,
+}
+
+
+class TestUnitsForSpan:
+    STARTS = [0, 100, 200, 300]
+
+    def test_a_span_inside_one_unit_yields_that_unit_twice(self):
+        assert units_for_span(self.STARTS, 110, 150) == (1, 1)
+
+    def test_a_span_crossing_units_yields_the_inclusive_pair(self):
+        assert units_for_span(self.STARTS, 50, 250) == (0, 2)
+
+    def test_a_span_ending_exactly_on_a_boundary_stops_before_that_unit(self):
+        """[0,100) touches only unit 0 -- citing unit 1 would name text it never reaches."""
+        assert units_for_span(self.STARTS, 0, 100) == (0, 0)
+
+    def test_the_off_by_one_at_the_boundary_is_detectable(self):
+        """Probing `end` instead of `end - 1` is the defect; prove the case separates."""
+        def buggy(starts, start, end):
+            lo = max(sum(1 for s in starts if s <= start) - 1, 0)
+            hi = max(sum(1 for s in starts if s <= end) - 1, 0)   # <- probes `end`
+            return lo, max(lo, hi)
+
+        assert buggy(self.STARTS, 0, 100) == (0, 1)
+        assert units_for_span(self.STARTS, 0, 100) == (0, 0)
+
+    def test_a_work_with_no_units_cannot_carry_a_locus(self):
+        with pytest.raises(ValueError):
+            units_for_span([], 0, 10)
+
+    def test_a_reversed_span_is_refused_rather_than_guessed(self):
+        with pytest.raises(ValueError):
+            units_for_span(self.STARTS, 250, 100)
+
+
+class TestTheMinimumOverlap:
+    """A first unit the span barely grazes is not a place the fragment witnesses.
+
+    The case it guards: `פרק ג, משנה ה–ו` where `משנה ו` is right, because the span
+    opens a few letters before משנה ו begins and so clips only the tail of משנה ה.
+    """
+
+    STARTS = [0, 100, 200, 300]
+
+    def test_a_sliver_of_the_first_unit_does_not_earn_a_citation(self):
+        assert units_for_span(self.STARTS, 76, 250) == (1, 2)
+
+    def test_without_the_rule_that_sliver_bought_a_whole_unit(self):
+        """PROVEN ABLE TO FAIL, and this assertion is what keeps the one above
+        honest: it pins the pre-rule answer, so a threshold widened until everything
+        advances cannot make the test pass for the wrong reason."""
+        assert units_for_span(self.STARTS, 76, 250, min_overlap=0) == (0, 2)
+
+    def test_the_threshold_can_never_empty_a_range(self):
+        """One letter of unit 0 on a two-unit span still yields a citable range."""
+        lo, hi = units_for_span(self.STARTS, 99, 150)
+        assert (lo, hi) == (1, 1)
+        assert lo <= hi
+
+    def test_a_short_span_inside_one_unit_still_cites_it(self):
+        """A span that does not cross a boundary is untouched however short it is --
+        `lo < hi` is the whole condition, so this holds by construction rather than
+        by a second check."""
+        assert units_for_span([0, 1_000], 500, 536) == (0, 0)
+
+    def test_a_span_that_covers_the_first_unit_outright_keeps_it(self):
+        """Starting before unit 0 means witnessing all of it, so the overlap is the
+        unit, not the distance from the span's start."""
+        assert units_for_span(self.STARTS, 0, 250) == (0, 2)
+
+    def test_a_unit_SHORTER_than_the_threshold_is_not_thereby_uncitable(self):
+        """Without the half-unit guard, a unit shorter than the threshold could never
+        open a citation, and a span that witnessed such a unit ENTIRELY would drop it:
+        a 7-letter chapter, wholly inside the span, removed for being small. The touch
+        being small and the touch being a CLIP are different questions."""
+        tiny = [0, 7, 1_000]                       # unit 0 is 7 letters long
+        assert units_for_span(tiny, 0, 500) == (0, 1)
+
+    def test_the_guard_does_not_rescue_a_genuine_clip(self):
+        """PROVEN ABLE TO FAIL in the other direction: a tail-of-the-unit touch is
+        still refused, which is the case the rule exists for."""
+        assert units_for_span([0, 100, 200], 76, 150) == (1, 1)
+
+    def test_the_threshold_itself_is_pinned_not_merely_its_existence(self):
+        """The assertions above hold at ANY threshold from 25 to 50 -- they pin the
+        rule's existence, not its size. So the boundary is pinned exactly, and the
+        constant with it: moving it is a deliberate act, not a tuning accident."""
+        starts = [0, 1_000, 2_000]
+        assert units_for_span(starts, 1_000 - MIN_UNIT_OVERLAP, 1_500) == (0, 1)
+        assert units_for_span(starts, 1_000 - MIN_UNIT_OVERLAP + 1, 1_500) == (1, 1)
+        assert MIN_UNIT_OVERLAP == 30
+
+    def test_the_END_probe_is_a_different_rule_and_is_not_disturbed(self):
+        """`end - 1` refuses a unit the span never reaches; the threshold refuses one
+        it reaches and barely touches. Merging them would lose one of the two."""
+        assert units_for_span(self.STARTS, 0, 100) == (0, 0)
+        assert units_for_span(self.STARTS, 0, 100, min_overlap=0) == (0, 0)
+
+    def test_a_negative_threshold_is_refused_rather_than_ignored(self):
+        with pytest.raises(ValueError):
+            units_for_span(self.STARTS, 0, 250, min_overlap=-1)
+
+
+class TestCompressPieces:
+    def test_adjacent_units_merge_into_one_run(self):
+        assert compress_pieces([(0, 1), (2, 3)]) == [(0, 3)]
+
+    def test_overlapping_pieces_merge(self):
+        assert compress_pieces([(0, 5), (3, 7)]) == [(0, 7)]
+
+    def test_a_skipped_unit_stays_a_gap(self):
+        """THE rule: 2 and 4 must not become 2-4, because unit 3 is not witnessed."""
+        assert compress_pieces([(2, 2), (4, 4)]) == [(2, 2), (4, 4)]
+
+    def test_character_gap_merging_would_have_swallowed_the_skipped_unit(self):
+        """The defect, proven able to fail: merge on proximity rather than adjacency."""
+        def buggy(pieces, tolerance=2):
+            ordered = sorted(set(pieces))
+            merged = [list(ordered[0])]
+            for lo, hi in ordered[1:]:
+                if lo <= merged[-1][1] + tolerance:      # <- proximity, not successor
+                    merged[-1][1] = max(merged[-1][1], hi)
+                else:
+                    merged.append([lo, hi])
+            return [(lo, hi) for lo, hi in merged]
+
+        assert buggy([(2, 2), (4, 4)]) == [(2, 4)]
+        assert compress_pieces([(2, 2), (4, 4)]) == [(2, 2), (4, 4)]
+
+    def test_duplicate_pieces_collapse(self):
+        assert compress_pieces([(1, 2), (1, 2)]) == [(1, 2)]
+
+    def test_no_pieces_is_no_locus(self):
+        assert compress_pieces([]) == []
+
+    def test_a_reversed_piece_is_refused(self):
+        with pytest.raises(ValueError):
+            compress_pieces([(5, 2)])
+
+
+class TestCitationOrderIsNotTableOrder:
+    """A work's units are ordered by where they sit in the stream, because that is
+    what the bisect needs. Where a text's order follows the CHAPTERS while its folio
+    labels follow the FOLIATION, the folio sequence steps backwards wherever the two
+    disagree.
+
+    This fixture has that shape -- four consecutive units whose folios run צג ע"ב,
+    צד ע"א, סג ע"ב, סד ע"א: a 31-folio step back at the seam.
+    """
+
+    #: (daf, amud) per table unit, in stream order.
+    MENACHOT = [(93, 2), (94, 1), (63, 2), (64, 1)]
+    SEQ = citation_seq_for_daf(MENACHOT)
+
+    def test_a_span_crossing_the_inversion_is_split_not_bridged(self):
+        assert split_at_citation_breaks(0, 3, self.SEQ) == [(0, 1), (2, 3)]
+
+    def test_a_span_inside_one_forward_run_is_left_whole(self):
+        assert split_at_citation_breaks(0, 1, self.SEQ) == [(0, 1)]
+
+    def test_compression_will_not_join_across_the_seam(self):
+        assert compress_pieces([(1, 1), (2, 2)], self.SEQ) == [(1, 1), (2, 2)]
+
+    def test_table_adjacency_alone_would_have_printed_a_descending_citation(self):
+        """The defect, proven able to fail: without the citation sequence, a span
+        crossing the seam renders backwards -- `צד ע\"א–סג ע\"ב`."""
+        labels = [daf_label_he(d, a) for d, a in self.MENACHOT]
+
+        table_only = compress_pieces([(1, 1), (2, 2)])          # <- no citation_seq
+        assert table_only == [(1, 2)]
+        assert render_ranges(table_only, labels) == 'צד ע"א–סג ע"ב'
+
+        honest = compress_pieces([(1, 1), (2, 2)], self.SEQ)
+        assert render_ranges(honest, labels) == 'צד ע"א; סג ע"ב'
+
+    def test_the_forward_facing_inversion_is_the_dangerous_one(self):
+        """Backwards is the lucky case -- it is at least visible. The same step the
+        other way prints a forward range claiming folios never touched."""
+        rising = citation_seq_for_daf([(63, 2), (64, 1), (93, 1), (94, 1)])
+        labels = [daf_label_he(d, a) for d, a in [(63, 2), (64, 1), (93, 1), (94, 1)]]
+
+        assert render_ranges(compress_pieces([(1, 1), (2, 2)]), labels) == 'סד ע"א–צג ע"א'
+        assert compress_pieces([(1, 1), (2, 2)], rising) == [(1, 1), (2, 2)]
+
+    def test_a_yerushalmi_leaf_runs_four_columns_before_it_turns(self):
+        seq = citation_seq_for_daf([(7, 3), (7, 4), (8, 1)], columns_per_folio=4)
+        assert split_at_citation_breaks(0, 2, seq) == [(0, 2)]
+
+    def test_the_two_column_rule_would_have_broken_that_leaf_in_two(self):
+        """The defect, proven able to fail: ע\"ד is not adjacent to the next ח ע\"א
+        under a two-sided model, so a continuous Yerushalmi span splits."""
+        two = citation_seq_for_daf([(7, 3), (7, 4), (8, 1)])
+        assert two[1] is None                                   # ע"ד has no place
+        assert split_at_citation_breaks(0, 2, two) == [(0, 0), (1, 1), (2, 2)]
+
+    def test_an_unreadable_folio_breaks_the_run_rather_than_bridging_it(self):
+        seq = citation_seq_for_daf([(5, 1), (None, 1), (5, 2)])
+        assert seq[1] is None
+        assert split_at_citation_breaks(0, 2, seq) == [(0, 0), (1, 1), (2, 2)]
+
+    def test_a_chapter_table_that_really_is_monotonic_still_merges(self):
+        """The rule must not be so strict that it refuses the families where table
+        order IS citation order -- Bible and Sefaria chapters, proven increasing."""
+        assert compress_pieces([(0, 1), (2, 3)], [1, 2, 3, 4]) == [(0, 3)]
+
+    def test_a_reversed_range_is_refused_rather_than_reordered(self):
+        with pytest.raises(ValueError):
+            split_at_citation_breaks(3, 1, self.SEQ)
+
+
+class TestCitationRuns:
+    """Rendering from citation positions rather than table ordinals.
+
+    A text can revisit folios: here four table units name only two folios, נו ע"ב
+    and נז ע"א.
+    """
+
+    BERAKHOT = [(57, 1), (56, 2), (57, 1), (56, 2)]
+    SEQ = citation_seq_for_daf(BERAKHOT)
+    #: citation position -> label, which is what a citation-space render indexes
+    LABEL_AT = {p: daf_label_he(d, a) for p, (d, a) in zip(SEQ, BERAKHOT)}
+
+    def test_the_same_folio_visited_twice_is_cited_once(self):
+        runs, unplaced = citation_runs([(0, 3)], self.SEQ)
+        assert unplaced == []
+        assert render_ranges(runs, self.LABEL_AT) == 'נו ע"ב–נז ע"א'
+
+    def test_rendering_from_ordinals_would_have_repeated_the_folios(self):
+        """The defect, proven able to fail -- honest about the pieces, unreadable
+        as a citation."""
+        labels = [daf_label_he(d, a) for d, a in self.BERAKHOT]
+        by_ordinal = render_ranges(compress_pieces([(0, 3)], self.SEQ), labels)
+        assert by_ordinal == 'נז ע"א; נו ע"ב–נז ע"א; נו ע"ב'
+        assert render_ranges(*citation_runs([(0, 3)], self.SEQ)[:1], self.LABEL_AT) != by_ordinal
+
+    def test_a_genuine_gap_is_still_a_gap_in_citation_space(self):
+        """Folding to a set must not become folding to a hull.
+
+        The first run reads `ב ע"א–ע"ב` and not `ב ע"א–ב ע"ב`: both ends are the same
+        leaf, so the repeated folio is dropped (see `shorten_range_tail`). The gap
+        after it is what this test is actually about, and it survives.
+        """
+        seq = citation_seq_for_daf([(2, 1), (2, 2), (9, 1)])
+        labels = {p: daf_label_he(d, a) for p, (d, a) in zip(seq, [(2, 1), (2, 2), (9, 1)])}
+        runs, _ = citation_runs([(0, 2)], seq)
+        assert render_ranges(runs, labels) == 'ב ע"א–ע"ב; ט ע"א'
+
+    def test_taking_the_hull_would_have_claimed_seven_unwitnessed_folios(self):
+        """The defect, proven able to fail."""
+        seq = citation_seq_for_daf([(2, 1), (2, 2), (9, 1)])
+        places = [p for p in seq if p is not None]
+        hull = [(min(places), max(places))]
+        assert hull == [(4, 18)]
+        assert citation_runs([(0, 2)], seq)[0] == [(4, 5), (18, 18)]
+
+    def test_a_unit_with_no_citation_position_is_reported_not_dropped(self):
+        seq = citation_seq_for_daf([(5, 1), (None, 1)])
+        runs, unplaced = citation_runs([(0, 1)], seq)
+        assert unplaced == [1]
+        assert runs == [(10, 10)]
+
+    def test_an_inversion_folds_away_because_position_order_is_the_only_order(self):
+        runs, _ = citation_runs([(0, 3)], citation_seq_for_daf(
+            [(93, 2), (94, 1), (63, 2), (64, 1)]))
+        assert runs == [(127, 128), (187, 188)]
+
+    def test_a_reversed_piece_is_refused(self):
+        with pytest.raises(ValueError):
+            citation_runs([(3, 1)], self.SEQ)
+
+
+class TestRenderRangesLabelLookup:
+    def test_a_missing_citation_position_is_refused_rather_than_guessed(self):
+        with pytest.raises(IndexError):
+            render_ranges([(4, 4)], {5: "ה"})
+
+    def test_a_negative_key_does_not_wrap_round_to_the_end_of_the_work(self):
+        """On a list, -1 would silently cite the work's last unit."""
+        with pytest.raises(IndexError):
+            render_ranges([(-1, -1)], ["א", "ב", "ג"])
+
+    def test_a_reversed_range_is_refused(self):
+        with pytest.raises(ValueError):
+            render_ranges([(3, 1)], ["א", "ב", "ג", "ד"])
+
+
+class TestCitationSeqForDaf:
+    def test_consecutive_amudim_are_consecutive_positions(self):
+        assert citation_seq_for_daf([(2, 1), (2, 2), (3, 1)]) == [4, 5, 6]
+
+    def test_a_four_column_leaf_uses_four_slots(self):
+        """ז ע\"ד is 7*4+3 = 31 and ח ע\"א is 8*4+0 = 32 -- successors, as they must
+        be: the last column of a leaf runs straight into the first of the next."""
+        assert citation_seq_for_daf([(7, 4), (8, 1)], columns_per_folio=4) == [31, 32]
+
+    def test_a_skipped_column_is_not_a_successor(self):
+        assert citation_seq_for_daf([(7, 1), (8, 1)]) == [14, 16]
+
+    def test_a_column_count_no_folio_has_is_refused(self):
+        with pytest.raises(ValueError):
+            citation_seq_for_daf([(2, 1)], columns_per_folio=3)
+
+
+class TestRenderRanges:
+    LABELS = ["א", "ב", "ג", "ד", "ה"]
+
+    def test_a_single_unit_renders_bare(self):
+        assert render_ranges([(0, 0)], self.LABELS) == "א"
+
+    def test_a_run_renders_as_a_range(self):
+        assert render_ranges([(0, 2)], self.LABELS) == f"א{RANGE_SEP}ג"
+
+    def test_separate_runs_are_visibly_separate(self):
+        rendered = render_ranges([(0, 1), (3, 4)], self.LABELS)
+        assert rendered == f"א{RANGE_SEP}ב{PIECE_SEP}ד{RANGE_SEP}ה"
+
+    def test_the_rendered_citation_is_never_bracketed(self):
+        """A bracketed numeric pair is rejected by the surface envelope, and that
+        guard covers the whole envelope -- one bad string costs the entire page."""
+        rendered = render_ranges([(0, 2), (3, 4)], self.LABELS)
+        assert not any(ch in rendered for ch in "[]()")
+
+    def test_an_out_of_range_ordinal_is_refused_rather_than_silently_clipped(self):
+        with pytest.raises(IndexError):
+            render_ranges([(0, 9)], self.LABELS)
+
+
+class TestLabelSegments:
+    def test_a_compound_label_splits_on_its_parts(self):
+        assert label_segments("פרק ג, משנה ה") == ["פרק ג", "משנה ה"]
+
+    def test_a_simple_label_is_one_part(self):
+        assert label_segments('יד ע"א') == ['יד ע"א']
+
+    def test_commas_inside_a_witness_list_are_not_part_boundaries(self):
+        """A Judeo-Arabic section can be numbered and then list the manuscripts that
+        witness it. Splitting inside the brackets would let the range renderer elide
+        half the list as a shared prefix, so the reader would be shown a witness list
+        with manuscripts missing from one end."""
+        assert label_segments("1. [פ, מ, לא, לו, ליא]") == ["1. [פ, מ, לא, לו, ליא]"]
+
+    def test_a_bracketed_list_still_splits_from_a_following_part(self):
+        assert label_segments("1. [פ, מ], עמ' 12") == ["1. [פ, מ]", "עמ' 12"]
+
+    def test_an_unclosed_bracket_does_not_swallow_the_rest_of_the_label(self):
+        """THE DEFECT, PROVEN ABLE TO FAIL. A heading can arrive unbalanced --
+        `הקדמה למסכת אבות [שמונה פרקים` below is one. A running-depth counter never
+        returns to zero after that stray `[`, so the page part fuses to the section
+        name and a range in that work can never shorten."""
+        label = "הקדמה למסכת אבות [שמונה פרקים, עמ' 372"
+        assert label_segments(label) == ["הקדמה למסכת אבות [שמונה פרקים", "עמ' 372"]
+
+        def running_depth(text: str) -> list:
+            parts, depth, current, index = [], 0, [], 0
+            while index < len(text):
+                ch = text[index]
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth = max(0, depth - 1)
+                if depth == 0 and text.startswith(", ", index):
+                    parts.append("".join(current))
+                    current = []
+                    index += 2
+                    continue
+                current.append(ch)
+                index += 1
+            parts.append("".join(current))
+            return parts
+
+        assert running_depth(label) == [label]
+
+    def test_an_unclosed_bracket_still_lets_a_page_range_shorten(self):
+        head = "הקדמה למסכת אבות [שמונה פרקים, עמ' 372"
+        tail = "הקדמה למסכת אבות [שמונה פרקים, עמ' 373"
+        assert shorten_range_tail(head, tail) == "373"
+
+
+class TestShortenRangeTail:
+    def test_a_repeated_page_word_is_dropped(self):
+        assert shorten_range_tail("עמ' 43", "עמ' 47") == "47"
+
+    def test_a_repeated_leading_part_is_dropped(self):
+        assert shorten_range_tail("פרק ג, משנה ה", "פרק ג, משנה ז") == "ז"
+
+    def test_a_daf_range_within_one_leaf_keeps_only_the_column(self):
+        assert shorten_range_tail('יד ע"א', 'יד ע"ב') == 'ע"ב'
+
+    def test_a_repeated_address_LEVEL_is_dropped(self):
+        """`/` is a word boundary here, because it is how an address states a level.
+
+        A hierarchical address rendered `ויקרא/כ–ויקרא/כג; ויקרא/כה–ויקרא/כז`,
+        repeating the book in both ends of every run. Splitting on whitespace alone
+        left it whole, because `ויקרא/כ` is one word by that measure.
+        """
+        assert shorten_range_tail("ויקרא/כ", "ויקרא/כג") == "כג"
+        assert shorten_range_tail("שבת/פרק א", "שבת/פרק ב") == "ב"
+
+    def test_a_dropped_level_keeps_the_separators_of_what_survives(self):
+        """The rejoin is a slice of the original tokens, not `" ".join(words)`.
+
+        Under the whitespace-only split this returned `ד ה` -- a flat two-word label
+        where the address had two LEVELS. The bug was latent (no shipped label had a
+        multi-level remainder) and would have surfaced the moment one did, as a
+        citation quietly pointing somewhere else.
+        """
+        assert shorten_range_tail("א/ב/ג", "א/ד/ה") == "ד/ה"
+
+    def test_a_differing_level_is_not_elided(self):
+        assert shorten_range_tail("בראשית/יד", "שמות/ב") == "שמות/ב"
+
+    def test_nothing_shared_means_nothing_dropped(self):
+        assert shorten_range_tail('צג ע"ב', 'צד ע"א') == 'צד ע"א'
+
+    def test_a_differing_first_part_protects_the_rest_from_elision(self):
+        """THE DEFECT THIS EXISTS FOR.
+
+        A collection of letters can name its sections `אגרת תימן`, `אגרת פרידה` and so
+        on -- so two ends of a range can share the leading word `אגרת` while naming
+        DIFFERENT letters. Eliding a shared word without first requiring that
+        every part before it matched turns
+
+            אגרת תימן, עמ' 43 – אגרת פרידה, עמ' 12
+        into
+            אגרת תימן, עמ' 43 – פרידה, עמ' 12
+
+        which reads as though `פרידה` were a subdivision of the Epistle to Yemen. The
+        guard is the `shared == len(head_parts) - 1` condition; reintroduced below
+        without it.
+        """
+        head, tail = "אגרת תימן, עמ' 43", "אגרת פרידה, עמ' 12"
+        assert shorten_range_tail(head, tail) == tail
+
+        def unconditional(head: str, tail: str) -> str:
+            head_parts, tail_parts = label_segments(head), label_segments(tail)
+            shared = 0
+            while (shared < min(len(head_parts), len(tail_parts))
+                   and head_parts[shared] == tail_parts[shared]):
+                shared += 1
+            rest = tail_parts[shared:]
+            if not rest or shared >= len(head_parts):
+                return tail
+            head_words, tail_words = head_parts[shared].split(), rest[0].split()
+            common = 0
+            while (common < min(len(head_words), len(tail_words)) - 1
+                   and head_words[common] == tail_words[common]):
+                common += 1
+            return ", ".join([" ".join(tail_words[common:])] + rest[1:])
+
+        assert unconditional(head, tail) == "פרידה, עמ' 12"
+
+    def test_the_last_word_is_never_elided_away(self):
+        """Two labels that agree on everything are not a range; the caller gets the
+        tail back whole rather than a dash with nothing after it."""
+        assert shorten_range_tail("עמ' 43", "עמ' 43") == "עמ' 43"
+
+    def test_a_witness_list_is_not_half_elided(self):
+        head, tail = "1. [פ, מ, לא]", "2. [פ, מ, לא]"
+        assert shorten_range_tail(head, tail) == tail
+
+    def test_render_ranges_applies_it(self):
+        labels = ["הקדמה, עמ' 9", "הקדמה, עמ' 10", "הקדמה, עמ' 11"]
+        assert render_ranges([(0, 2)], labels) == f"הקדמה, עמ' 9{RANGE_SEP}11"
+
+    def test_render_ranges_leaves_a_cross_section_range_fully_named(self):
+        labels = ["הקדמה, עמ' 20", "פרק א, עמ' 21"]
+        assert render_ranges([(0, 1)], labels) == f"הקדמה, עמ' 20{RANGE_SEP}פרק א, עמ' 21"
+
+    def test_the_shortened_citation_is_still_never_bracketed(self):
+        labels = ["עמ' 4", "עמ' 9"]
+        assert not any(ch in render_ranges([(0, 1)], labels) for ch in "()")
+
+
+class TestParseRefSpanAlignments:
+    """WP4: the bake kept ONE alignment per row; the locus needs every one."""
+
+    REAL = ('[{"p0": 0, "p1": 576, "dens": 0.3, "rg0": 5656, "rg1": 6245, "cigar": "X"},'
+            ' {"p0": 1142, "p1": 1772, "dens": 0.29, "rg0": 4936, "rg1": 5628, "cigar": "Y"},'
+            ' {"p0": 981, "p1": 1705, "dens": 0.24, "rg0": 4735, "rg1": 5461, "cigar": "Z"}]')
+
+    def test_every_alignment_is_returned_in_the_producers_order(self):
+        got = parse_ref_span_alignments(self.REAL)
+        assert len(got) == 3
+        assert got[0] == RefAlignment(0, 576, 5656, 6245)
+        assert got[2] == RefAlignment(981, 1705, 4735, 5461)
+
+    def test_the_cigar_is_never_read(self):
+        """Reference-text-derived; it has no place in the shipped asset."""
+        assert all(len(a) == 4 for a in parse_ref_span_alignments(self.REAL))
+        assert "cigar" not in str(parse_ref_span_alignments(self.REAL))
+
+    def test_a_row_with_no_reference_spans_yields_nothing(self):
+        for empty in (None, "", "[]"):
+            assert parse_ref_span_alignments(empty) == []
+
+    def test_an_incomplete_entry_raises_rather_than_being_skipped(self):
+        """PROVEN ABLE TO FAIL. Skipping changes WHICH entry wins, and the row still
+        comes out carrying plausible offsets, so nothing downstream can see it."""
+        blob = '[{"p0": 0, "p1": 999}, {"p0": 0, "p1": 10, "rg0": 1, "rg1": 5}]'
+        with pytest.raises(RefSpanProjectionError, match="complete dual-side"):
+            parse_ref_span_alignments(blob)
+
+        def skipping(text):
+            out = []
+            for entry in __import__("json").loads(text):
+                try:
+                    out.append(RefAlignment(int(entry["p0"]), int(entry["p1"]),
+                                            int(entry["rg0"]), int(entry["rg1"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+            return out
+
+        survived = skipping(blob)
+        assert len(survived) == 1
+        assert select_primary_alignment(survived) == RefAlignment(0, 10, 1, 5)
+
+    def test_unparseable_json_raises(self):
+        with pytest.raises(RefSpanProjectionError, match="parseable"):
+            parse_ref_span_alignments("{not json")
+
+
+class TestSelectPrimaryAlignment:
+    """The frozen rule. Changing it moves the work-side offsets of the whole asset."""
+
+    def test_the_largest_page_extent_wins(self):
+        got = select_primary_alignment(
+            parse_ref_span_alignments(TestParseRefSpanAlignments.REAL))
+        assert got == RefAlignment(981, 1705, 4735, 5461)
+
+    def test_it_does_not_depend_on_the_order_the_entries_arrived_in(self):
+        entries = parse_ref_span_alignments(TestParseRefSpanAlignments.REAL)
+        baseline = select_primary_alignment(entries)
+        for rotation in range(1, len(entries)):
+            assert select_primary_alignment(
+                entries[rotation:] + entries[:rotation]) == baseline
+
+    def test_an_exact_tie_breaks_on_the_work_side(self):
+        tied = [RefAlignment(0, 100, 900, 1000), RefAlignment(0, 100, 500, 600)]
+        assert select_primary_alignment(tied) == RefAlignment(0, 100, 500, 600)
+        assert select_primary_alignment(list(reversed(tied))) == \
+            RefAlignment(0, 100, 500, 600)
+
+    def test_nothing_to_select_from_is_None_not_an_invented_zero(self):
+        """`0` is a valid offset, so a fabricated zero is indistinguishable from an
+        alignment at the start of the work."""
+        assert select_primary_alignment([]) is None
+
+
+class TestMergeWitnessedSpans:
+    def test_overlapping_spans_become_one(self):
+        assert merge_witnessed_spans([(100, 200), (150, 300)]) == [(100, 300)]
+
+    def test_touching_spans_become_one(self):
+        assert merge_witnessed_spans([(100, 200), (200, 300)]) == [(100, 300)]
+
+    def test_a_nested_span_adds_nothing(self):
+        assert merge_witnessed_spans([(100, 300), (150, 200)]) == [(100, 300)]
+
+    def test_a_GAP_is_never_bridged(self):
+        """THE DEFECT THIS EXISTS TO AVOID, and it runs the opposite way from the
+        merge: joining `[100,200)` to `[201,300)` claims offset 200, which nothing
+        witnesses. Reintroduced locally as a merge that ignores the gap test."""
+        assert merge_witnessed_spans([(100, 200), (201, 300)]) == \
+            [(100, 200), (201, 300)]
+
+        def gapless(spans):
+            ordered = sorted(spans)
+            out = [ordered[0]]
+            for start, end in ordered[1:]:
+                out[-1] = (out[-1][0], max(out[-1][1], end))
+            return out
+
+        assert gapless([(100, 200), (201, 300)]) == [(100, 300)]
+
+    def test_the_input_order_does_not_matter(self):
+        assert merge_witnessed_spans([(300, 400), (100, 200)]) == \
+            [(100, 200), (300, 400)]
+
+    def test_a_reversed_span_is_refused(self):
+        with pytest.raises(ValueError):
+            merge_witnessed_spans([(300, 100)])
+
+    def test_nothing_in_nothing_out(self):
+        assert merge_witnessed_spans([]) == []
+
+    def test_a_real_shaped_row_folds_to_the_spans_it_witnesses(self):
+        alignments = parse_ref_span_alignments(TestParseRefSpanAlignments.REAL)
+        merged = merge_witnessed_spans((a.w_start, a.w_end) for a in alignments)
+        # 4735-5461 and 4936-5628 overlap; 5656-6245 sits apart and must stay apart.
+        assert merged == [(4735, 5628), (5656, 6245)]
+
+
+class TestNormStream:
+    """The ported normalizer. A drift here does not raise -- it silently moves every
+    stored offset at once -- so it is pinned by fixed vectors here; the check against
+    the pipeline's own normalizer is kept in the private repository."""
+
+    def test_it_keeps_only_base_letters_and_folds_finals(self):
+        stream, _ = norm_stream("בְּרוּךֶ אַתָּה [יי] מלך העולם, צ̇מאן")
+        assert stream.startswith("ברוכאתה")
+        assert not any(ch in stream for ch in " [],ְֶּ")
+        assert not any(ch in stream for ch in "ךםןףץ")
+
+    def test_the_offset_map_is_one_index_per_stream_character(self):
+        text = "אב, גד"
+        stream, offsets = norm_stream(text)
+        assert stream == "אבגד"
+        assert list(offsets) == [0, 1, 4, 5]
+        assert all(text[o] == c for o, c in zip(offsets, "אבגד"))
+
+    def test_offsets_index_the_NFC_text_not_the_input(self):
+        """NFC is applied first, so an offset is only meaningful against NFC text.
+
+        The source character at an offset is the UNFOLDED one -- ם where the stream
+        holds מ -- which is the whole reason a snippet must be sliced from the source
+        and never reconstructed from the stream.
+        """
+        decomposed = unicodedata.normalize("NFD", "שָׁלוֹם")
+        stream, offsets = norm_stream(decomposed)
+        nfc = unicodedata.normalize("NFC", decomposed)
+        assert stream == "שלומ"
+        assert [nfc[o] for o in offsets] == ["ש", "ל", "ו", "ם"]
+        assert nfc[offsets[-1]] == "ם" and stream[-1] == "מ"
+
+    def test_a_stream_with_no_hebrew_is_empty_rather_than_an_error(self):
+        assert norm_stream("hello, 1234!") == ("", array("i"))
+
+    def test_pinned_vectors(self):
+        """Fixed values, so the contract holds even where the research tree is not."""
+        assert norm_stream("")[0] == ""
+        assert norm_stream("שלום")[0] == "שלומ"
+        assert norm_stream("אְ̇ב")[0] == "אב"
+        assert list(norm_stream("אְ̇ב")[1]) == [0, 3]
+
+
+class TestStreamOffsetForRaw:
+    """The bridge between the raw body (which the versemaps index) and the
+    normalized stream (which the stored offsets index)."""
+
+    # "אב, גד" -> stream "אבגד"; raw indices of the four letters:
+    OFFSETS = [0, 1, 4, 5]
+
+    def test_a_raw_position_on_a_letter_maps_to_that_letter(self):
+        assert stream_offset_for_raw(self.OFFSETS, 4) == 2
+
+    def test_a_raw_position_on_dropped_punctuation_maps_to_the_next_letter(self):
+        """Raw 2 is the comma and raw 3 the space; a unit starting there starts at ג."""
+        assert stream_offset_for_raw(self.OFFSETS, 2) == 2
+        assert stream_offset_for_raw(self.OFFSETS, 3) == 2
+
+    def test_a_position_past_the_last_letter_is_the_end_of_the_stream(self):
+        assert stream_offset_for_raw(self.OFFSETS, 99) == 4
+
+    def test_bisect_right_would_have_skipped_a_unit_starting_on_its_first_letter(self):
+        """The defect, proven able to fail.
+
+        `bisect_right` answers "after any equal entry", so a unit whose raw start IS
+        a letter would begin one letter late -- every unit shifted, and no error.
+        """
+        import bisect as _b
+
+        assert _b.bisect_right(self.OFFSETS, 4) == 3      # <- starts at ד, one late
+        assert stream_offset_for_raw(self.OFFSETS, 4) == 2
+
+    def test_a_work_whose_offsets_are_empty_yields_the_empty_stream_end(self):
+        assert stream_offset_for_raw([], 7) == 0
+
+
+class TestHebrewNumerals:
+    def test_the_ordinary_cases(self):
+        assert heb_numeral(1) == "א"
+        assert heb_numeral(9) == "ט"
+        assert heb_numeral(10) == "י"
+        assert heb_numeral(11) == "יא"
+        assert heb_numeral(100) == "ק"
+        assert heb_numeral(176) == "קעו"
+
+    def test_fifteen_and_sixteen_are_not_written_as_the_name(self):
+        assert heb_numeral(15) == "טו"
+        assert heb_numeral(16) == "טז"
+        assert heb_numeral(115) == "קטו"
+        assert heb_numeral(116) == "קטז"
+
+    def test_the_naive_tens_plus_ones_rule_would_have_spelled_the_name(self):
+        """The defect, proven able to fail -- and it is not merely improper: an
+        edition does not print יה for 15, so the citation would not match the page."""
+        def buggy(value):
+            hundreds, rest = divmod(value, 100)
+            tens, ones = divmod(rest, 10)
+            return ("", "ק", "ר")[hundreds] + ("", "י")[tens > 0] + "אבגדהוזחט"[ones - 1]
+
+        assert buggy(15) == "יה"
+        assert heb_numeral(15) == "טו"
+
+    def test_every_daf_a_tractate_can_reach_round_trips(self):
+        """Bava Batra reaches 176; the whole range must survive render -> parse."""
+        for n in range(1, 500):
+            assert parse_unit_numeral(heb_numeral(n)) == n, n
+
+    def test_a_numeral_is_read_through_the_punctuation_editions_put_round_it(self):
+        assert parse_unit_numeral('ק"עו') == 176
+        assert parse_unit_numeral("יד'") == 14
+
+    def test_final_letters_carry_their_ordinary_value(self):
+        assert parse_unit_numeral("ך") == 20
+
+    def test_a_folio_spelled_in_digits_is_still_a_folio(self):
+        """Some folio labels are written in ASCII digits. A Hebrew-only parser drops
+        them -- and a dropped label does not lose a citation, it widens its neighbour
+        over the text it was there to divide."""
+        assert parse_unit_numeral("17") == 17
+        assert parse_unit_numeral("120") == 120
+        assert parse_unit_numeral(" 159 ") == 159
+
+    def test_a_hebrew_only_parser_would_have_dropped_the_decimal_markers(self):
+        """The defect, proven able to fail."""
+        def hebrew_only(label):
+            vals = [_HEB_VALUE_LOCAL[c] for c in label if c in _HEB_VALUE_LOCAL]
+            return sum(vals) if vals else None
+
+        assert hebrew_only("120") is None
+        assert parse_unit_numeral("120") == 120
+
+    def test_mixed_script_is_refused_rather_than_half_read(self):
+        assert parse_unit_numeral("12ג") is None
+
+    def test_a_decimal_outside_the_citable_range_is_refused(self):
+        assert parse_unit_numeral("0") is None
+        assert parse_unit_numeral("4096") is None
+
+    def test_a_label_with_no_numeral_is_none_rather_than_zero(self):
+        """Zero would sort as a real daf; None makes the caller decide."""
+        assert parse_unit_numeral("") is None
+        assert parse_unit_numeral("עמוד") is None
+
+    def test_a_hebrew_WORD_is_not_a_numeral(self):
+        """הקדמה is five Hebrew letters and sums to 154."""
+        assert parse_unit_numeral("הקדמה") is None
+        assert parse_unit_numeral("ברכות") is None
+        assert parse_unit_numeral("פרק") is None
+
+    def test_summing_every_letter_would_have_sorted_a_word_into_the_tractate(self):
+        """The defect, proven able to fail -- the obvious letter-summing parser.
+
+        154 is a real daf in half the tractates, so an unnumbered opening section
+        titled הקדמה sorts between 153 and 155 and nothing about it looks wrong.
+        """
+        def buggy(label):
+            total = sum(_HEB_VALUE_LOCAL.get(ch, 0) for ch in label or "")
+            return total or None
+
+        assert buggy("הקדמה") == 154
+        assert parse_unit_numeral("הקדמה") is None
+
+    def test_a_descending_word_is_also_refused(self):
+        """The near-miss rule, proven insufficient: requiring non-increasing letter
+        values rejects הקדמה but accepts עמוד (70, 40, 6, 4 = 120) -- and עמוד is a
+        word that appears in labels. Only the round-trip separates them."""
+        def near_miss(label):
+            vals = [_HEB_VALUE_LOCAL[c] for c in label if c in _HEB_VALUE_LOCAL]
+            if not vals or any(a < b for a, b in zip(vals, vals[1:])):
+                return None
+            return sum(vals)
+
+        assert near_miss("הקדמה") is None          # the easy word, caught
+        assert near_miss("עמוד") == 120            # the hard word, missed
+        assert parse_unit_numeral("עמוד") is None   # round-trip catches both
+
+    def test_the_well_formedness_rule_does_not_reject_real_daf_labels(self):
+        """A rule that rejected everything would pass the tests above vacuously."""
+        for n in range(1, 200):
+            assert parse_unit_numeral(heb_numeral(n)) == n, n
+
+    def test_a_value_outside_the_citable_range_is_refused(self):
+        for bad in (0, -1, 1000, True, "ג"):
+            with pytest.raises(ValueError):
+                heb_numeral(bad)
+
+
+class TestSefariaDaf:
+    def test_the_index_where_every_tractate_begins(self):
+        assert sefaria_daf(3) == (2, 1)      # 2a
+
+    def test_recto_and_verso_alternate(self):
+        assert sefaria_daf(4) == (2, 2)      # 2b
+        assert sefaria_daf(5) == (3, 1)      # 3a
+
+    def test_a_rif_work_starts_at_its_own_first_folio(self):
+        assert sefaria_daf(1) == (1, 1)      # Rif 1a
+
+    def test_the_recovered_last_daf_never_overshoots_the_tractate(self):
+        """The oracle, in miniature: staged maxima against tractate lengths."""
+        for last_index, tractate_dapim in (
+            (351, 176),   # Bava Batra   -> 176a
+            (314, 157),   # Shabbat      -> 157b
+            (224, 112),   # Ketubot      -> 112b
+            (175, 88),    # Yoma         -> 88a
+            (123, 64),    # Berakhot     -> 62a
+        ):
+            daf, _amud = sefaria_daf(last_index)
+            assert daf <= tractate_dapim, (last_index, daf, tractate_dapim)
+
+    def test_a_work_that_starts_late_needs_no_per_work_correction(self):
+        """Tosafot on Keritot starts at index 17. That is 9a, which is where that
+        commentary begins -- not an offset to be subtracted away."""
+        assert sefaria_daf(17) == (9, 1)
+
+    def test_treating_the_index_as_a_daf_would_have_doubled_every_citation(self):
+        """The defect, proven able to fail: the plausible reading of `chapter`."""
+        assert sefaria_daf(314) == (157, 2)          # Shabbat's true last daf
+        assert 314 > 157                              # the raw index as a daf
+
+    def test_an_index_below_one_is_refused(self):
+        for bad in (0, -3, True, 2.5):
+            with pytest.raises(ValueError):
+                sefaria_daf(bad)
+
+
+class TestDafLabel:
+    def test_the_ordinary_label(self):
+        assert daf_label_he(14, 1) == 'יד ע"א'
+        assert daf_label_he(14, 2) == 'יד ע"ב'
+
+    def test_a_foliation_that_is_not_the_tractates_is_named_in_the_label(self):
+        """A Rif index rendered bare points the reader at a real Bavli page that is
+        not the text -- a wrong citation that resolves."""
+        assert daf_label_he(3, 1, prefix='רי"ף') == 'רי"ף ג ע"א'
+        assert daf_label_he(3, 1) == 'ג ע"א'
+
+    def test_the_label_is_never_bracketed(self):
+        assert not any(ch in daf_label_he(176, 2) for ch in "[]()")
+
+    def test_a_column_no_folio_has_is_refused(self):
+        for bad in (0, 5, -1, None, True, "א"):
+            with pytest.raises(ValueError):
+                daf_label_he(14, bad)
+
+
+class TestAmudOrdinal:
+    def test_recto_and_verso(self):
+        assert amud_ordinal("א") == 1
+        assert amud_ordinal("ב") == 2
+
+    def test_a_yerushalmi_folio_has_four_columns(self):
+        """Yerushalmi folios are printed four columns to the leaf."""
+        assert amud_ordinal("ג") == 3
+        assert amud_ordinal("ד") == 4
+        assert daf_label_he(7, 3) == 'ז ע"ג'
+        assert daf_label_he(7, 4) == 'ז ע"ד'
+
+    def test_a_two_sided_model_would_have_dropped_the_third_and_fourth_columns(self):
+        """The defect, proven able to fail. Not a mislabelling: a recto/verso model
+        has nowhere to put ע"ג, so the marker is dropped -- and its neighbour then
+        silently spans the column it was there to divide."""
+        def two_sided(label):
+            return {"א": 1, "ב": 2}.get((label or "").strip()[:1], 0)
+
+        assert two_sided("ג") == 0
+        assert amud_ordinal("ג") == 3
+
+    def test_anything_else_names_no_column(self):
+        assert amud_ordinal("") == 0
+        assert amud_ordinal("ה") == 0
+        assert amud_ordinal(None) == 0
+
+    def test_a_fifth_column_is_refused(self):
+        with pytest.raises(ValueError):
+            daf_label_he(7, 5)
+
+
+class TestSelectLocusWork:
+    def test_the_member_carrying_the_most_matched_text_wins(self):
+        assert select_locus_work({"w000465": 59_759, "w001238": 27_963}, "w001238") == "w000465"
+
+    def test_a_tiny_display_member_does_not_override_the_heavier_member(self):
+        """The display member can carry very little of the matched text."""
+        assert select_locus_work({"w000192": 493_820, "w001269": 40}, "w001269") == "w000192"
+
+    def test_display_first_would_have_picked_the_wrong_coordinate_space(self):
+        """The defect, proven able to fail."""
+        def buggy(letters, display):
+            return display if letters.get(display) else max(letters, key=letters.get)
+
+        assert buggy({"w000192": 493_820, "w001269": 40}, "w001269") == "w001269"
+        assert select_locus_work({"w000192": 493_820, "w001269": 40}, "w001269") == "w000192"
+
+    def test_a_tie_goes_to_the_display_work(self):
+        assert select_locus_work({"w000191": 321, "w001337": 321}, "w001337") == "w001337"
+
+    def test_an_equal_tie_without_the_display_work_is_still_deterministic(self):
+        assert select_locus_work({"wB": 10, "wA": 10}, "wZZZ") == "wA"
+
+    def test_a_member_with_no_matched_text_is_not_eligible(self):
+        assert select_locus_work({"wA": 0, "wB": 5}, "wA") == "wB"
+
+    def test_no_evidence_anywhere_means_no_place_rather_than_an_invented_one(self):
+        assert select_locus_work({"wA": 0, "wB": 0}, "wA") is None
+        assert select_locus_work({}, "wA") is None
+
+
+class TestRenderLocusLabel:
+    def test_separate_witness_spans_never_bridge_an_unwitnessed_unit(self):
+        assert render_locus_label(
+            [0, 100, 200, 300], ["א", "ב", "ג", "ד"], [1, 2, 3, 4],
+            [(10, 80), (220, 280)],
+        ) == f"א{PIECE_SEP}ג"
+
+    def test_minimum_overlap_drops_a_clipped_leading_unit(self):
+        assert render_locus_label(
+            [0, 100, 200], ["א", "ב", "ג"], [1, 2, 3], [(90, 180)]
+        ) == "ב"
+
+    def test_missing_citation_positions_fall_back_as_one_ordinal_system(self):
+        assert render_locus_label(
+            [0, 100, 200], ["א", "ב", "ג"], [10, None, 12], [(0, 250)]
+        ) == f"א{RANGE_SEP}ג"
+
+    @pytest.mark.parametrize(
+        "starts,labels,positions",
+        [([], [], []), ([0, 0], ["א", "ב"], [1, 2]), ([0], [""], [1])],
+    )
+    def test_invalid_unit_tables_fail_closed(self, starts, labels, positions):
+        with pytest.raises(ValueError):
+            render_locus_label(starts, labels, positions, [(0, 10)])
+
+class TestStripWorkTitlePrefix:
+    """`_locus_label` qualifies every chapter/section address with the work title,
+    and every surface renders that title beside the address -- so the reader gets it
+    twice, once per rendered run.
+
+    The cases below cover the shapes that move and the ones that must NOT move.
+    """
+
+    def test_a_chapter_address_keeps_only_its_numeral(self):
+        assert strip_work_title_prefix(
+            ["ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"],
+            "ארבעה טורים, יורה דעה",
+        ) == ["א", "ב"]
+
+    def test_a_hierarchical_address_sheds_only_the_title_levels(self):
+        assert strip_work_title_prefix(
+            ["בעל הטורים על התורה/בראשית/א", "בעל הטורים על התורה/ויקרא/כ"],
+            "בעל הטורים על התורה",
+        ) == ["בראשית/א", "ויקרא/כ"]
+
+    def test_a_title_repeated_twice_in_one_address_comes_off_twice(self):
+        """Word membership, not a literal title prefix.
+
+        `משנה תורה, ספר קדושה` addresses its units
+        `משנה תורה, ספר קדושה, משנה תורה, הלכות איסורי ביאה` -- the title, then the
+        title's own head again. Stripping the literal title would leave the second
+        `משנה תורה` and the address would still read doubled.
+        """
+        assert strip_work_title_prefix(
+            ["משנה תורה, ספר קדושה, משנה תורה, הלכות איסורי ביאה",
+             "משנה תורה, ספר קדושה, משנה תורה, הלכות שחיטה"],
+            "משנה תורה, ספר קדושה",
+        ) == ["הלכות איסורי ביאה", "הלכות שחיטה"]
+
+    def test_an_abbreviation_matches_its_parenthesised_form_in_the_title(self):
+        assert strip_work_title_prefix(
+            ['ספר מצוות גדול (סמ"ג), סמ"ג לאו א',
+             'ספר מצוות גדול (סמ"ג), סמ"ג עשה ב'],
+            'ספר מצוות גדול (סמ"ג)',
+        ) == ["לאו א", "עשה ב"]
+
+    def test_an_already_clean_address_is_returned_unchanged(self):
+        assert strip_work_title_prefix(
+            ["פרק א", "פרק ב"], 'רד"ק על ישעיה'
+        ) == ["פרק א", "פרק ב"]
+
+    def test_the_prefix_is_the_works_and_never_each_labels(self):
+        """The Zohar regression, pinned.
+
+        Its addresses are daf/amud, `ג` is a word of `ספר הזוהר, חלק ג`, and an
+        earlier draft consumed title words greedily per label -- so a daf that
+        happened to be ג lost it and rendered `ע"א`, while the others were untouched.
+        """
+        assert strip_work_title_prefix(
+            ['ב ע"א', 'ג ע"א', 'ג ע"ב'], "ספר הזוהר, חלק ג"
+        ) == ['ב ע"א', 'ג ע"א', 'ג ע"ב']
+
+    def test_a_lone_division_word_is_not_a_title(self):
+        """`ספר המצוות לחפץ בן יצליח` numbers its units `ספר ג` -- "book 3", not the
+        title's first word. Without the guard the rule strips it.
+        """
+        assert strip_work_title_prefix(
+            ["ספר ג, עמ' 121", "ספר ד, עמ' 200"],
+            "ספר המצוות לחפץ בן יצליח",
+        ) == ["ספר ג, עמ' 121", "ספר ד, עמ' 200"]
+
+    def test_a_one_word_title_that_names_the_work_does_come_off(self):
+        """The partner of the guard above: `רי"ף` names the work, so the daf address
+        under `רי"ף חולין` sheds it.
+        """
+        assert strip_work_title_prefix(
+            ['רי"ף א ע"א', 'רי"ף א ע"ב'], 'רי"ף חולין'
+        ) == ['א ע"א', 'א ע"ב']
+
+    def test_an_address_made_only_of_title_words_keeps_its_last_word(self):
+        assert strip_work_title_prefix(
+            ["מסכת אבות דרבי נתן, נוסח א א", "מסכת אבות דרבי נתן, נוסח א ב"],
+            "מסכת אבות דרבי נתן, נוסח א",
+        ) == ["א", "ב"]
+
+    def test_a_unit_equal_to_the_shared_prefix_keeps_every_label_uniform(self):
+        """The clamp that keeps one word in every label, stated as what it protects.
+
+        SYNTHETIC, and said so: the shape is a unit whose address is exactly the
+        prefix its siblings share while differing from the whole title (which the
+        guard above already reverts). It is reachable
+        though -- a title carrying a volume designation over units addressed by an
+        inner level, one of them unnumbered -- and without the clamp that one unit
+        falls back to its address WHOLE (`remainder or label`) while every sibling
+        sheds the prefix. Uniformity across a work is the property being defended,
+        so a fallback that applies to one unit and not its siblings is the defect.
+        """
+        assert strip_work_title_prefix(
+            ["אור זרוע חלק", "אור זרוע חלק ב"], "אור זרוע חלק א"
+        ) == ["חלק", "חלק ב"]
+
+    def test_a_label_that_IS_the_title_is_left_alone(self):
+        """A one-unit work's address is the whole work; there is no citation
+        underneath to uncover, and stripping would leave the meaningless tail `שבת`.
+        """
+        assert strip_work_title_prefix(
+            ["קידוש ליל שבת"], "קידוש ליל שבת"
+        ) == ["קידוש ליל שבת"]
+
+    def test_a_strip_that_would_collapse_two_addresses_reverts_the_work(self):
+        """Distinctness is what makes word membership safe to apply blind: a
+        citation that no longer identifies its unit is worse than a repetitive one.
+
+        Two units distinguished ONLY by the punctuation inside the part being removed
+        are the case that reaches the guard -- the surviving words are identical, so
+        the trimmed remainders are equal and one address would answer for both. The
+        WHOLE work reverts, so its units stay distinguishable.
+        """
+        assert strip_work_title_prefix(
+            ["דבר אחד, א", "דבר אחד א"], "דבר אחד"
+        ) == ["דבר אחד, א", "דבר אחד א"]
+        assert strip_work_title_prefix(
+            ["דבר אחד א", "דבר אחד ב"], "דבר אחד"
+        ) == ["א", "ב"]
+
+    @pytest.mark.parametrize("title", [None, "", "   ", 123])
+    def test_a_missing_title_strips_nothing(self, title):
+        labels = ["ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"]
+        assert strip_work_title_prefix(labels, title) == labels
+
+    def test_the_input_list_is_never_mutated(self):
+        labels = ["ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"]
+        before = list(labels)
+        strip_work_title_prefix(labels, "ארבעה טורים, יורה דעה")
+        assert labels == before
+
+    def test_a_stripped_range_renders_as_the_citation_alone(self):
+        """The end-to-end shape: runs of one work rendered
+        `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט קנז; ...`.
+        """
+        labels = strip_work_title_prefix(
+            ["ארבעה טורים, חושן משפט קנג", "ארבעה טורים, חושן משפט קנד",
+             "ארבעה טורים, חושן משפט קנה", "ארבעה טורים, חושן משפט קנו",
+             "ארבעה טורים, חושן משפט קנז"],
+            "ארבעה טורים, חושן משפט",
+        )
+        assert render_locus_label(
+            [0, 100, 200, 300, 400], labels, [1, 2, 3, 4, 5],
+            [(0, 250), (410, 450)],
+        ) == f"קנג{RANGE_SEP}קנה{PIECE_SEP}קנז"

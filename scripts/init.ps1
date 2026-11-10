@@ -1,0 +1,169 @@
+<#
+.SYNOPSIS
+    Session-start orientation for GenizahSearch. Run this instead of reading docs.
+
+.DESCRIPTION
+    Prints, in one screen: repo state, milestone state (from the private repository, when
+    it is checked out), the tracker's newest entry and open-item count, the most recent
+    working notes, and the exit code of every gate.
+
+    This exists because session-start re-orientation used to mean reading CLAUDE.md +
+    docs/OPEN_ISSUES.md in full (~135k resident tokens before any work began). The
+    files are now split and capped; this script covers the rest, and its output is a
+    few hundred tokens.
+
+.EXAMPLE
+    powershell -File scripts/init.ps1
+    powershell -File scripts/init.ps1 -NoGates    # skip the gate run (faster)
+#>
+param([switch]$NoGates)
+
+$ErrorActionPreference = 'Continue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Set-Location (Split-Path $PSScriptRoot -Parent)
+
+function Section([string]$t) {
+    Write-Host ""
+    Write-Host ("== " + $t + " " + ("=" * [Math]::Max(0, 58 - $t.Length))) -ForegroundColor Cyan
+}
+
+Write-Host ""
+Write-Host "GenizahSearch - session start  ($(Get-Date -Format 'yyyy-MM-dd HH:mm'))" -ForegroundColor White
+
+# ---------------------------------------------------------------- repo ----
+Section "Repo"
+$branch = (git rev-parse --abbrev-ref HEAD)
+$dirty  = @(git status --porcelain)
+Write-Host ("branch      : {0}" -f $branch)
+Write-Host ("uncommitted : {0} file(s)" -f $dirty.Count)
+if ($dirty.Count -gt 0 -and $dirty.Count -le 12) { $dirty | ForEach-Object { Write-Host ("              " + $_) } }
+Write-Host "recent commits:"
+git log --oneline -5 | ForEach-Object { Write-Host ("  " + $_) }
+
+# ------------------------------------------------------------ worktree ----
+# A linked worktree (its .git is a FILE) has none of the gitignored sidecars. Sessions
+# have bridged that with junctions into the main checkout, and on 2026-11-04 a forced
+# removal of such a worktree walked them and emptied C:\GenizahSearch\nli_data and
+# fgp_data. So: name every reparse point, loudly, before anything else happens.
+$isWorktree = Test-Path -LiteralPath '.git' -PathType Leaf
+$wtRoot = '.claude\worktrees'
+if ($isWorktree -or (Test-Path -LiteralPath $wtRoot -PathType Container)) {
+    Section "Worktree links"
+    $links = @(& (Join-Path $PSScriptRoot 'check_worktree_links.ps1') -Quiet 2>&1)
+    $linksExit = $LASTEXITCODE
+    if ($isWorktree) {
+        Write-Host ("  linked worktree: " + (Get-Location).Path)
+    } else {
+        Write-Host ("  main checkout; scanned " + $wtRoot + "\*")
+    }
+    if ($linksExit -ne 0) {
+        Write-Host ""
+        Write-Host "  !!! WARNING: reparse point(s) in a worktree, or folder(s) the scan could not read." -ForegroundColor Red
+        Write-Host "  !!! Do NOT 'git worktree remove --force' or 'rm -rf' the worktree that holds them: both" -ForegroundColor Red
+        Write-Host "  !!! walk a junction INTO ITS TARGET (2026-11-04: the main checkout's nli_data/ and" -ForegroundColor Red
+        Write-Host "  !!! fgp_data/ were emptied that way). Remove each link with 'cmd /c rmdir <path>' (no /S)," -ForegroundColor Red
+        Write-Host "  !!! then copy the sidecar under %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\ instead" -ForegroundColor Red
+        Write-Host "  !!! (CLAUDE.md, How to work here). A 'could not scan' line = unchecked until it is fixed." -ForegroundColor Red
+        $links | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
+    } else {
+        Write-Host "  no reparse points. A worktree never links to the main checkout's data: copy a sidecar" -ForegroundColor DarkGray
+        Write-Host "  under %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\ or set GENIZAH_FJMS_DB_PATH (ENV_VARS.md)." -ForegroundColor DarkGray
+    }
+}
+
+# ----------------------------------------------------------- milestone ----
+# The planning record is in the private repository, checked out beside the main checkout
+# as GenizahSearch-private (also from a worktree); GENIZAH_PRIVATE_DIR overrides that.
+$priv = if ($env:GENIZAH_PRIVATE_DIR) { $env:GENIZAH_PRIVATE_DIR } else { Join-Path (Split-Path -Parent (git rev-parse --path-format=absolute --git-common-dir | Split-Path -Parent)) 'GenizahSearch-private' }
+$stateMd = Join-Path $priv '.planning\STATE.md'
+Section "Milestone (private repository: .planning/STATE.md frontmatter)"
+if (Test-Path -LiteralPath $stateMd) {
+    $st = Get-Content -LiteralPath $stateMd -Encoding UTF8 -TotalCount 40
+    $inFm = $false
+    foreach ($l in $st) {
+        if ($l -match '^---\s*$') { if ($inFm) { break }; $inFm = $true; continue }
+        if ($inFm -and $l -match '^(milestone|milestone_name|status|stopped_at|last_activity|  (total_phases|completed_phases|total_plans|completed_plans|percent))') {
+            Write-Host ("  " + $l)
+        }
+    }
+} else {
+    Write-Host ("  (no " + $stateMd + ")")
+}
+
+# ------------------------------------------------------------- tracker ----
+Section "Open issues tracker"
+$oi = 'docs\OPEN_ISSUES.md'
+if (Test-Path $oi) {
+    $lines  = Get-Content $oi -Encoding UTF8
+    $bytes  = (Get-Item $oi).Length
+    $ceiling = 80000    # scripts/check_docs.py CONTEXT_BUDGET
+    $rows   = @($lines | Where-Object { $_ -match '^\| \[GS-\d+\]' })    # rows, not the status legend
+    $openN  = @($rows | Where-Object { $_ -match [char]0x274C }).Count
+    $pendN  = @($rows | Where-Object { $_ -match [char]0x23F3 }).Count
+    Write-Host ("  size        : {0:N0} bytes / {1:N0} ceiling  ({2:N0}%)" -f $bytes, $ceiling, (100 * $bytes / $ceiling))
+    Write-Host ("  open marks  : {0} open, {1} needing a check" -f $openN, $pendN)
+    $lu = $lines | Where-Object { $_ -match '^\>\s*\*\*Last Updated' } | Select-Object -First 1
+    if ($lu) {
+        $txt = ($lu -replace '^\>\s*', '') -replace '\s+', ' '
+        if ($txt.Length -gt 400) { $txt = $txt.Substring(0, 400) + ' ...' }
+        Write-Host "  newest entry:"
+        Write-Host ("    " + $txt) -ForegroundColor Gray
+    }
+    Write-Host "  (read the Summary + your area's rows. Grep docs/ISSUE_DETAILS.md for GS-<n>," -ForegroundColor DarkGray
+    Write-Host "   docs/BACKLOG.md for debt/ideas; closed rows are in the private repository's" -ForegroundColor DarkGray
+    Write-Host "   docs/archive/OPEN_ISSUES_ARCHIVE.md.)" -ForegroundColor DarkGray
+    # New rows wait as fragments until scripts/collect_open_issues.py folds them in.
+    $frags = @(Get-ChildItem 'docs\open_issues.d' -Filter '*.md' -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -ne 'README.md' })
+    if ($frags.Count) {
+        Write-Host ("  not yet in the tracker: {0} fragment(s) in docs/open_issues.d/" -f $frags.Count)
+        $frags | ForEach-Object { Write-Host ("    " + $_.Name) -ForegroundColor Gray }
+    }
+}
+
+# ------------------------------------------------------- working notes ----
+Section "Most recent working notes (_tmp/, untracked)"
+if (Test-Path '_tmp') {
+    Get-ChildItem '_tmp' -Filter *.md -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 6 |
+        ForEach-Object { Write-Host ("  {0:yyyy-MM-dd HH:mm}  {1}" -f $_.LastWriteTime, $_.Name) }
+} else {
+    Write-Host "  (no _tmp/)"
+}
+
+# --------------------------------------------------------------- gates ----
+if ($NoGates) {
+    Section "Gates"
+    Write-Host "  skipped (-NoGates)"
+} else {
+    Section "Gates"
+    $env:PYTHONUTF8 = '1'
+    $results = @()
+
+    python scripts\check_docs.py *> $null
+    $results += , @('check_docs.py', $LASTEXITCODE, '')
+
+    $ruff = Get-Command ruff -ErrorAction SilentlyContinue
+    if ($ruff) {
+        ruff check . *> $null
+        $results += , @('ruff check', $LASTEXITCODE, '')
+    } else {
+        $results += , @('ruff check', 'SKIPPED', 'ruff not on PATH')
+    }
+
+    foreach ($r in $results) {
+        $name = $r[0]; $code = $r[1]; $note = $r[2]
+        if ($code -eq 0) {
+            Write-Host ("  [ ok ] {0,-22} exit 0 {1}" -f $name, $note) -ForegroundColor Green
+        } elseif ($code -eq 'SKIPPED') {
+            Write-Host ("  [skip] {0,-22}        {1}" -f $name, $note) -ForegroundColor Yellow
+        } else {
+            Write-Host ("  [FAIL] {0,-22} exit {1} {2}" -f $name, $code, $note) -ForegroundColor Red
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "Do NOT read whole: CHANGELOG.md (~227 KB), and in the private repository" -ForegroundColor DarkGray
+Write-Host "docs/archive/OPEN_ISSUES_ARCHIVE.md (~320 KB) and .planning/STATE.md (~106 KB). Grep them." -ForegroundColor DarkGray
+Write-Host ""

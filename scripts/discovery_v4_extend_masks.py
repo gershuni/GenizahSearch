@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Compute canonical-text masks only for the references appended by V4."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pickle
+import sys
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+try:
+    from scripts.discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
+        raw_id_prefix,
+        require_hash,
+        sha256_file,
+        stable_json_dump,
+    )
+except ModuleNotFoundError:  # direct invocation
+    from discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
+        raw_id_prefix,
+        require_hash,
+        sha256_file,
+        stable_json_dump,
+    )
+
+
+#: Works whose text, when quoted inside an edited work, is blanked there so a
+#: fragment of the QUOTED text is never credited to the QUOTING work.
+#:
+#: "Liturgy" joined the set on 2026-08-17 (owner ruling
+#: liturgy-is-a-masking-authority). Without it a prayer-book compendium acts as
+#: a proxy for generic liturgy: מחזור ויטרי earned 6,869 live matches across
+#: 6,227 manuscripts with ~84% of them in its order-of-prayer divisions, and it
+#: SHADOWED 6,948 rows -- more than it earned -- including 220 belonging to the
+#: purpose-built Amidah reference. The corpus already carries 13 dedicated
+#: `Liturgy` references, so this is attribution capture, not a coverage gap.
+#:
+#: NOT in the set, and the same class of shared known text: `Targum` (42
+#: works). Raised with the owner, deliberately not ruled on yet.
+CANONICAL_CATEGORIES = {"Bible", "Mishnah", "Tosefta", "Bavli", "Yerushalmi", "Liturgy"}
+
+#: Which category set produced a mask artifact. Recorded in the report because
+#: the policy is COHORT-SCOPED: references appended before the liturgy ruling
+#: carry v1 masks and are not comparable with v2 ones, so a consumer must be
+#: able to tell which policy a mask set was computed under rather than assume
+#: one corpus-wide answer.
+MASK_POLICY_VERSION = "canonical-mask-policy-v2-liturgy"
+
+
+def run(args: argparse.Namespace) -> dict:
+    probe_root = Path(args.probe_root).resolve()
+    scripts_dir = probe_root / "scripts"
+    if not scripts_dir.is_dir():
+        raise FileNotFoundError(f"research scripts directory not found: {scripts_dir}")
+    sys.path.insert(0, str(scripts_dir))
+    from mask_ref_canon import mask_edited_works, mask_one_work  # noqa: PLC0415
+    from track1_match import build_ref_index  # noqa: PLC0415
+
+    base_reference = Path(args.base_reference)
+    v4_reference = Path(args.v4_reference)
+    base_masks_path = Path(args.base_masks)
+    output_path = Path(args.output)
+    require_hash(base_reference, args.base_reference_sha256, "base reference")
+    require_hash(v4_reference, args.v4_reference_sha256, "V4 reference")
+    require_hash(base_masks_path, args.base_masks_sha256, "base canonical masks")
+    with base_reference.open("rb") as stream:
+        base = pickle.load(stream)
+    with v4_reference.open("rb") as stream:
+        v4 = pickle.load(stream)
+    if v4[: len(base)] != base:
+        raise ValueError("V4 reference does not preserve the complete base-corpus prefix")
+    appended = v4[len(base) :]
+    prefix = raw_id_prefix(args.reference_namespace)
+    if not appended or any(
+        not work.get("id", "").startswith(prefix) for work in appended
+    ):
+        raise ValueError(
+            "reference append set is missing or contains an id outside "
+            f"{args.reference_namespace}"
+        )
+    # A masking authority must never be masked against itself or its peers: it
+    # would match itself end to end and come out ~100% blank, i.e. removed from
+    # matching altogether. The append sets so far carry no canonical-category
+    # work, so this is a guard against a future append quietly self-erasing.
+    self_masking = sorted(
+        str(work.get("id"))
+        for work in appended
+        if work.get("cat") in CANONICAL_CATEGORIES
+    )
+    if self_masking:
+        raise ValueError(
+            "appended reference is itself a masking authority and would be "
+            f"masked against its own category: {self_masking[:4]}"
+        )
+    canonical = [work for work in v4 if work.get("cat") in CANONICAL_CATEGORIES]
+    index = build_ref_index(canonical)
+    stats: Counter[str] = Counter()
+    if args.workers == 1:
+        new_masks = mask_edited_works(appended, *index[:-1], stats)
+    else:
+        seg_streams, _seg_work, _seg_off, codes_f, seg_f, pos_f = index[:-1]
+
+        def mask_one(work):
+            local: Counter[str] = Counter()
+            merged = mask_one_work(
+                work["stream"], seg_streams, codes_f, seg_f, pos_f, local
+            )
+            return work["id"], merged, local
+
+        new_masks = {}
+        completed = 0
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = [executor.submit(mask_one, work) for work in appended]
+            for future in as_completed(futures):
+                raw_id, merged, local = future.result()
+                stats.update(local)
+                if merged:
+                    new_masks[raw_id] = merged
+                completed += 1
+                print(
+                    f"canonical masks: {completed}/{len(appended)} references complete",
+                    flush=True,
+                )
+    base_masks = json.loads(base_masks_path.read_text(encoding="utf-8"))
+    overlap = set(base_masks) & set(new_masks)
+    if overlap:
+        raise ValueError("V4 mask ids collide with the base mask set")
+    merged = {**base_masks, **new_masks}
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    stable_json_dump(merged, output_path)
+    report = {
+        "schema_version": "discovery-v4-canonical-masks-v1",
+        "base_reference_sha256": sha256_file(base_reference),
+        "v4_reference_sha256": sha256_file(v4_reference),
+        "base_masks_sha256": sha256_file(base_masks_path),
+        "output_masks_sha256": sha256_file(output_path),
+        "mask_policy_version": MASK_POLICY_VERSION,
+        "mask_policy_categories": sorted(CANONICAL_CATEGORIES),
+        "canonical_authority_count": len(canonical),
+        "appended_reference_count": len(appended),
+        "new_masked_reference_count": len(new_masks),
+        "new_masked_letters": sum(
+            end - start for ranges in new_masks.values() for start, end in ranges
+        ),
+        "total_masked_reference_count": len(merged),
+        "workers": args.workers,
+        "stats": dict(stats),
+    }
+    if args.reference_namespace != DEFAULT_REFERENCE_NAMESPACE:
+        report["reference_namespace"] = args.reference_namespace
+    stable_json_dump(report, output_path.with_suffix(".report.json"))
+    print(json.dumps(report, indent=2))
+    return report
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--probe-root", required=True)
+    parser.add_argument("--base-reference", required=True)
+    parser.add_argument("--base-reference-sha256", required=True)
+    parser.add_argument("--v4-reference", required=True)
+    parser.add_argument("--v4-reference-sha256", required=True)
+    parser.add_argument("--base-masks", required=True)
+    parser.add_argument("--base-masks-sha256", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--reference-namespace",
+        default=DEFAULT_REFERENCE_NAMESPACE,
+        help="raw-id namespace every appended reference must carry",
+    )
+    parser.add_argument("--workers", type=int, default=1)
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    parsed = parse_args()
+    if parsed.workers <= 0:
+        raise ValueError("--workers must be positive")
+    run(parsed)

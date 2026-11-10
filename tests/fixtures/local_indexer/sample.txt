@@ -1,0 +1,3 @@
+This is a sample text file for testing.
+שלום עולם — Hello World in Hebrew.
+Line 3 of the sample text.

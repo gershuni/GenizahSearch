@@ -1,0 +1,169 @@
+# -*- coding: utf-8 -*-
+"""Search page bulk "Add to List": re-checks sign-in and reports the real outcome.
+
+The sign-in check ran only when the dialog opened. If the session ended while
+it was open, every UserListsManager.add_item_sync() returned False, yet the
+callbacks still toasted "0 items added to list" as a success and closed the
+dialog. ``_bulk_add_items`` now re-checks sign-in, counts the writes that
+succeeded, and toasts a failure (nothing added), a warning (some added) or a
+success (all added); the dialog closes only when something was added.
+
+2026-10-21: the writes are one ``await lists_mgr.add_items(...)`` (one insert
+in a worker thread), so ``_bulk_add_items`` and both callbacks are async.
+"""
+from __future__ import annotations
+
+import ast
+import asyncio
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+SEARCH_PY = Path(__file__).resolve().parent.parent / 'web' / 'pages' / 'search.py'
+
+
+@pytest.fixture
+def search_page(monkeypatch):
+    mod = pytest.importorskip('web.pages.search')
+    monkeypatch.setattr(mod, 'ui', MagicMock())
+    return mod
+
+
+def _signed_in(monkeypatch, value):
+    from web.auth_state import GlobalAuthState
+    monkeypatch.setattr(GlobalAuthState, 'is_logged_in', staticmethod(lambda: value))
+
+
+def _toast_types(mod):
+    return [c.kwargs.get('type') for c in mod.ui.notify.call_args_list]
+
+
+class _Mgr:
+    def __init__(self, ok_ids):
+        self.ok_ids = set(ok_ids)
+        self.calls = []
+
+    async def add_items(self, sys_ids, list_id, **kw):
+        self.calls.append((list(sys_ids), list_id))
+        return len([s for s in sys_ids if s in self.ok_ids])
+
+
+def _bulk_add(search_page, mgr, sys_ids, list_id):
+    return asyncio.run(search_page._bulk_add_items(mgr, sys_ids, list_id))
+
+
+def test_signed_out_bulk_add_writes_nothing(monkeypatch, search_page):
+    _signed_in(monkeypatch, False)
+    mgr = _Mgr(ok_ids={'1', '2'})
+    assert _bulk_add(search_page, mgr, ['1', '2'], 'L') is None
+    assert mgr.calls == []
+    assert _toast_types(search_page) == ['warning']
+
+
+def test_nothing_added_is_a_failure(monkeypatch, search_page):
+    _signed_in(monkeypatch, True)
+    mgr = _Mgr(ok_ids=set())
+    assert _bulk_add(search_page, mgr, ['1', '2'], 'L') == 0
+    assert _toast_types(search_page) == ['negative']
+
+
+def test_some_added_is_a_warning(monkeypatch, search_page):
+    _signed_in(monkeypatch, True)
+    mgr = _Mgr(ok_ids={'1'})
+    assert _bulk_add(search_page, mgr, ['1', '2', None, ''], 'L') == 1
+    assert mgr.calls == [(['1', '2'], 'L')], 'empty sys_ids must be skipped; one call for the batch'
+    assert _toast_types(search_page) == ['warning']
+
+
+def test_all_added_is_a_success(monkeypatch, search_page):
+    _signed_in(monkeypatch, True)
+    mgr = _Mgr(ok_ids={'1', '2'})
+    assert _bulk_add(search_page, mgr, ['1', '2'], 'L') == 2
+    assert _toast_types(search_page) == ['positive']
+
+
+def test_bulk_add_is_async_and_awaits_the_batched_manager_write():
+    """``_bulk_add_items`` must await ``add_items`` (one offloaded insert), never
+    call ``add_item_sync`` per item on the event loop."""
+    tree = ast.parse(SEARCH_PY.read_text(encoding='utf-8'))
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == '_bulk_add_items')
+    assert isinstance(fn, ast.AsyncFunctionDef), '_bulk_add_items is not async'
+    assert not _calls(fn, 'add_item_sync'), '_bulk_add_items still writes one item at a time on the loop'
+    awaited = [n for n in ast.walk(fn) if isinstance(n, ast.Await)
+               and isinstance(n.value, ast.Call) and _calls(n.value, 'add_items')]
+    assert awaited, '_bulk_add_items does not await lists_mgr.add_items'
+    for closure in ('add_all', 'create_and_add_all'):
+        cb = _bulk_add_closures()[closure]
+        assert isinstance(cb, ast.AsyncFunctionDef), f'{closure} must be async to await _bulk_add_items'
+        assert all(isinstance(parent, ast.Await) for parent, call in _parented_calls(cb, '_bulk_add_items')), (
+            f'{closure} calls _bulk_add_items without awaiting it')
+
+
+@pytest.mark.parametrize('closure', ['add_all', 'create_and_add_all'])
+def test_a_second_click_during_a_bulk_add_adds_nothing(closure):
+    """The insert runs off the loop now, so a second click on Add All / Create and
+    Add would run while the first is in flight and insert the batch twice
+    (list_items has no unique key; Codex on #430). Both handlers share one
+    in-flight flag: checked first, set before the await, cleared in a finally."""
+    fn = _bulk_add_closures()[closure]
+    first = fn.body[0]
+    assert (isinstance(first, ast.If) and "adding['busy']" in ast.unparse(first.test)
+            and isinstance(first.body[0], ast.Return)), f'{closure} does not start by refusing a second click'
+    tries = [n for n in ast.walk(fn) if isinstance(n, ast.Try) and n.finalbody]
+    assert tries and any("adding['busy'] = False" in ast.unparse(stmt)
+                         for t in tries for stmt in t.finalbody), f'{closure} never clears the flag in a finally'
+    guarded = [t for t in tries if _calls(t, '_bulk_add_items')]
+    assert guarded, f'{closure} awaits the bulk add outside the guarded block'
+
+
+def _parented_calls(fn, name):
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return [(parents.get(call), call) for call in _calls(fn, name)]
+
+
+def _bulk_add_closures():
+    tree = ast.parse(SEARCH_PY.read_text(encoding='utf-8'))
+    outer = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == 'bulk_add_to_list')
+    return {n.name: n for n in ast.walk(outer) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _calls(fn, name):
+    return [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+            and ((isinstance(n.func, ast.Name) and n.func.id == name)
+                 or (isinstance(n.func, ast.Attribute) and n.func.attr == name))]
+
+
+@pytest.mark.parametrize('closure', ['add_all', 'create_and_add_all'])
+def test_bulk_add_callbacks_route_through_the_counted_helper(closure):
+    fn = _bulk_add_closures()[closure]
+    assert not _calls(fn, 'add_item_sync'), f'{closure} still calls add_item_sync directly'
+    assert _calls(fn, '_bulk_add_items'), f'{closure} does not use _bulk_add_items'
+    closes = _calls(fn, 'close')
+    assert closes, f'{closure} never closes the dialog'
+    # Every dialog.close() sits under an `if` (only close when something was added).
+    tree_parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            tree_parents[child] = node
+    for call in closes:
+        node, guarded = call, False
+        while node in tree_parents:
+            node = tree_parents[node]
+            if isinstance(node, ast.If):
+                guarded = True
+                break
+        assert guarded, f'{closure}: dialog.close() at line {call.lineno} runs unconditionally'
+
+
+def test_create_and_add_rechecks_sign_in_before_creating_the_list():
+    fn = _bulk_add_closures()['create_and_add_all']
+    login = [c.lineno for c in _calls(fn, 'is_logged_in')]
+    create = [c.lineno for c in _calls(fn, 'create_list_sync')]
+    assert create, 'create_and_add_all no longer creates the list'
+    assert login and min(login) < min(create), 'sign-in is not re-checked before create_list_sync'

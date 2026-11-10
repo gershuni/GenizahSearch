@@ -1,0 +1,1733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dicta Genizah Search Pro – Help</title>
+<style>
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        margin: 24px;
+        line-height: 1.6;
+    }
+    h1, h2, h3 {
+        margin-top: 1.2em;
+        margin-bottom: 0.5em;
+    }
+    h1 {
+        text-align: center;
+        border-bottom: 2px solid #3498db;
+        padding-bottom: 10px;
+        margin-bottom: 30px;
+    }
+    h2 {
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 5px;
+    }
+    h4 {
+        margin-top: 15px;
+        margin-bottom: 5px;
+    }
+    a {
+        text-decoration: none;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
+    .subtitle {
+        text-align: center;
+        font-size: 1.1em;
+        margin-bottom: 2em;
+        opacity: 0.8;
+    }
+    .section {
+        margin-bottom: 50px;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #e0e0e0;
+    }
+    .box {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 20px;
+    }
+    .nav-box {
+        max-width: 800px;
+        margin: 0 auto 30px auto;
+        border: 1px solid #d6eaf8;
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 8px;
+    }
+    .rtl {
+        direction: rtl;
+        unicode-bidi: isolate;
+    }
+    .ltr {
+        direction: ltr;
+        text-align: left;
+    }
+    code {
+        background-color: #f4f4f4;
+        padding: 2px 5px;
+        border-radius: 3px;
+        font-family: monospace;
+        color: #c7254e;
+    }
+    .highlight {
+        color: #e67e22;
+        font-weight: bold;
+    }
+</style>
+</head>
+<body>
+
+<!-- ================= ENGLISH CONTENT ================= -->
+<!-- START_LANG_EN -->
+<div class="lang-en ltr" dir="ltr" lang="en">
+    <h1>Dicta Genizah Search Pro – User Guide</h1>
+    <div class="subtitle">Comprehensive guide for searching, analyzing, and browsing the Cairo Genizah</div>
+
+    <div class="box nav-box">
+    <h3>Table of Contents</h3>
+    <ul>
+        <li><a href="#intro">Introduction: How it Works</a></li>
+        <li><a href="#search">Search Tab</a></li>
+        <li><a href="#responsa">Responsa-Style Search</a></li>
+        <li><a href="#position">Line & Text Position Search</a></li>
+        <li><a href="#filters">Focus Search</a></li>
+        <li><a href="#translations">Catalog & Metadata Translations</a></li>
+        <li><a href="#composition">Composition Search</a></li>
+        <li><a href="#browse">Browse by Shelfmark</a></li>
+        <li><a href="#catalog-browse">Browse by Identification</a></li>
+        <li><a href="#pgp">Princeton Geniza Project (PGP) Data</a></li>
+        <li><a href="#reading-desk">Reading Desk</a></li>
+        <li><a href="#puzzle">Fragment Puzzle</a></li>
+        <li><a href="#joins-lab">Joins Lab</a></li>
+        <li><a href="#lists">Personal Lists</a></li>
+        <li><a href="#community">Community Tab</a></li>
+        <li><a href="#community-publish">Community Publishing</a></li>
+        <li><a href="#lab">Lab Mode</a></li>
+        <li><a href="#api">Public API & AI Tools</a></li>
+        <li><a href="#my-library">My Library — Local Documents</a></li>
+        <li><a href="#export">Exporting Data</a></li>
+        <li><a href="#settings">Settings & About</a></li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="intro">Introduction: How it Works</h2>
+    <p>Dicta Genizah Search Pro provides fast and advanced access to the transcription corpus of the "MiDRASH" project. The software is based on a high-speed search engine (Tantivy) and integrates unique algorithms to handle the Hebrew spelling variations typical of Genizah manuscripts.</p>
+    <p>The software runs locally on your computer but uses an internet connection to fetch metadata and images from the National Library of Israel, Oxford Bodlean Library and Cambridge University Library. It will work without an internet connection, but without images and some extended information. Note: If your connection is not a home network (such as a mobile hotspot), library servers may block your access.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="search">Search Tab</h2>
+    <p>This is the entry point for free text or metadata searches within the corpus.</p>
+
+    <h3>Search Modes</h3>
+    <ul>
+        <li><b>Exact:</b> Matches only the exact word as typed.</li>
+        <li><b>Variants (?):</b> Accounts for common letter substitutions in these texts. After selecting Variants mode, choose a level: <b>Basic</b> (e.g., Dalet/Resh, He/Het, Vav/Yod), <b>Extended</b> (adds Qof/Kaf, Tet/Tav, etc.), or <b>Maximum</b> (broadest flexibility). Higher levels may return less relevant results ("noise") and take longer. The <b>×1 / ×2 / ×3</b> box next to the level buttons sets how many letters in each word may be swapped; each level keeps its own (by default ×1 for Basic, ×2 for Extended and Maximum).</li>
+        <li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, offering both a textual syntax with operators for prefixes, suffixes, plene/defective spelling, wildcards, and proximity gaps, and an intuitive tabular search interface that builds the query for you. See <a href="#responsa">Responsa-Style Search</a> below.</li>
+        <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with decoding errors.</li>
+        <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph.</li>
+        <li><b>Title:</b> Searches within the catalog titles of compositions. Example: searching "Mishneh Torah" will retrieve all manuscripts identified as Maimonides' Mishneh Torah.</li>
+        <li><b>Shelfmark:</b> Fast search for shelfmarks (e.g., "T-S 13.15").</li>
+        <li><b>PGP Tags:</b> Browse manuscripts by topic tags from the Princeton Geniza Project. Tags are organized into categories and displayed with Hebrew translations. See <a href="#pgp">PGP Data</a> below.</li>
+    </ul>
+
+    <h3>Additional Options</h3>
+    <ul>
+        <li><b>Gap:</b> Defines how many words can separate search terms. A value of 0 requires an exact sequence. At most 10 in Exact, Variants and Fuzzy searches; Responsa-style and Regex searches have no limit.</li>
+        <li><b>Select All:</b> A checkbox at the top of the table allows you to select all results (or currently displayed results) for focused export.</li>
+        <li><b>Preview:</b> Double-clicking a row opens the full Manuscript Viewer on that page. Clicking the "&#128065;" button will lead to the same result.</li>
+        <li><b>Browse manuscript:</b> Clicking the "&#128214;" icon will open the manuscript in the "Browse by Shelfmark" tab. A similar browse button is also found in the Manuscript Viewer.</li>
+        <li><b>Column Filtering:</b> Click on column headers (Shelfmark, Title, Snippet) to filter results by text. Check "Exclude" to hide matching results instead of showing them.</li>
+        <li><b>Recent and saved searches:</b> the arrow at the end of the query box (or the Down key in it) lists your recent searches; click one to run it again with the settings and filters it had. Click &#9734; beside a search to save it: saved searches are listed first, under <i>Saved searches</i>, and stay until you remove them (&#9733; again, or &#10005;), while the rest of the list keeps only the latest searches (<i>History Limit</i> in Settings, 20 by default). <i>Clear history</i> leaves the saved ones. Composition Search has the same list, on its title box.</li>
+    </ul>
+
+    <h3>Stopping and Pausing a Search</h3>
+    <p>While a search is running the <b>Search</b> button becomes <b>Stop</b>, and a pause button (<b>&#9208;</b>) appears beside it. The two together take up exactly the space the Search button used, so nothing shifts under the mouse when a search starts.</p>
+    <ul>
+        <li><b>Stop</b> ends the search and keeps every result it had already found. The results header marks the list as "Partial results" so you can see it was not a complete run.</li>
+        <li><b>&#9208; Pause</b> suspends the search at its next checkpoint. Because it waits for a checkpoint rather than stopping instantly, the button shows <b>&#8987;</b> for a moment first; once the search has actually paused it becomes <b>&#9654;</b>. Hover over the button for a description of whichever state it is in.</li>
+        <li><b>&#9654; Resume</b> continues from exactly where the search stopped &mdash; nothing already scanned is scanned again. Time spent paused is not counted in the elapsed time, and in Composition Search it is excluded from the estimated time remaining.</li>
+        <li>A paused search releases the setting that keeps the computer awake, so a machine left paused can sleep normally.</li>
+        <li><b>A paused search is held in memory only.</b> Closing the program ends it &mdash; there is nothing to resume when you next start up.</li>
+    </ul>
+    <p>Pause is available for regular searches, Lab Mode searches and Composition Search. It is not offered during the grouping step at the end of a composition scan, which cannot currently be interrupted cleanly.</p>
+
+    <h3>Search Settings (&#9881;)</h3>
+    <p>Click the gear icon to open advanced search settings:</p>
+    <ul>
+        <li><b>Limit Short Words:</b> Words with &le; N characters receive only 1 character change in variant modes.</li>
+        <li><b>Max Changes per Word:</b> Maximum number of character substitutions allowed per word, one value for each level (default: ×1 for Basic, ×2 for Extended and Maximum).</li>
+        <li><b>Aggressive Mode:</b> Ignores word length limits for variant generation.</li>
+        <li><b>Custom Variant Pairs:</b> Define your own letter substitution pairs (e.g., "&#1502;=&#1504;&#1493;", one per line).</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="responsa">Responsa-Style Search</h2>
+    <p>This mode offers two search methods inspired by the <b>Bar-Ilan Responsa Project</b> (&#1508;&#1512;&#1493;&#1497;&#1511;&#1496; &#1492;&#1513;&#1493;"&#1514;): a textual syntax with operators for prefixes, suffixes, plene/defective spelling and more; and an intuitive tabular search interface that builds the query for you.</p>
+
+    <h3>Activating Responsa Mode</h3>
+    <ul>
+        <li>Select <b>Responsa (R)</b> from the search Mode dropdown, or</li>
+        <li>Type <code>R </code> (R followed by a space) at the beginning of your query</li>
+    </ul>
+
+    <h3>Syntax Reference</h3>
+    <ul>
+        <li><b><code>#word</code></b> — Prefix expansion: adds 24 Hebrew prefix forms (&#1493;, &#1492;, &#1489;, &#1499;, &#1500;, &#1502;, &#1513; + compounds). Example: <code>#&#1513;&#1500;&#1493;&#1501;</code> finds &#1493;&#1513;&#1500;&#1493;&#1501;, &#1492;&#1513;&#1500;&#1493;&#1501;, &#1489;&#1513;&#1500;&#1493;&#1501;, etc.</li>
+        <li><b><code>word#</code></b> — Suffix expansion: adds 25 Hebrew suffix forms (&#1497;, &#1493;, &#1501;, &#1503;, &#1492;, &#1498;, &#1499;&#1501;, &#1499;&#1503;, etc.). Example: <code>&#1513;&#1500;&#1493;&#1501;#</code> finds &#1513;&#1500;&#1493;&#1502;&#1501;, &#1513;&#1500;&#1493;&#1502;&#1493;, &#1513;&#1500;&#1493;&#1502;&#1498;, etc.</li>
+        <li><b><code>#word#</code></b> — Both prefix and suffix expansion. Example: <code>#&#1513;&#1500;&#1493;&#1501;#</code> finds all 600 prefix+suffix combinations.</li>
+        <li><b><code>word*</code></b> — Any letters after the word, none included. Example: <code>&#1513;&#1500;&#1493;&#1501;*</code> finds &#1513;&#1500;&#1493;&#1501;, &#1513;&#1500;&#1493;&#1502;&#1493;&#1514;, &#1513;&#1500;&#1493;&#1502;&#1504;&#1493;, etc.</li>
+        <li><b><code>wo*rd</code></b> — Any letters inside the word, none included, as many <code>*</code> as you like. Example: <code>&#1499;*&#1504;&#1497;&#1501;</code> finds &#1499;&#1492;&#1504;&#1497;&#1501;, &#1499;&#1493;&#1492;&#1504;&#1497;&#1501;, &#1499;&#1504;&#1497;&#1501;, etc.</li>
+        <li><b><code>*word</code></b> — Any letters before the word, none included. Example: <code>*&#1504;&#1497;&#1501;</code> finds &#1499;&#1492;&#1504;&#1497;&#1501;, &#1489;&#1504;&#1497;&#1501;, &#1504;&#1497;&#1501;, etc.</li>
+        <li><b><code>%word</code></b> — Plene/defective variants: inserts/removes &#1493;/&#1497; for spelling variants. Example: <code>%&#1513;&#1500;&#1493;&#1501;</code> finds &#1513;&#1500;&#1493;&#1501;, &#1513;&#1500;&#1501;.</li>
+        <li><b><code>(a/b)</code></b> — OR alternatives: matches any of the listed options. Example: <code>(&#1513;&#1500;&#1493;&#1501;/&#1513;&#1500;&#1493;&#1502;&#1493;&#1514;)</code> matches either.</li>
+        <li><b><code>[N]</code></b> — Gap of N words between terms. Example: <code>&#1513;&#1500;&#1493;&#1501; [3] &#1506;&#1493;&#1500;&#1501;</code> = up to 3 words between.</li>
+    </ul>
+    <p><b>Tip:</b> Modifiers can be combined, e.g. <code>#%word*</code> applies prefix expansion + plene variants + wildcard suffix.</p>
+    <p><b>Whole words:</b> every word of the query is matched as a whole word, the first and the last too: <code>&#1499;&#1492;&#1504;&#1497;&#1501; &#1490;&#1491;&#1493;&#1500;</code> does not find <code>&#1499;&#1492;&#1504;&#1497;&#1501; &#1490;&#1491;&#1493;&#1500;&#1497;&#1501;</code>. Brackets inside a word of the text do not get in the way: <code>&#1513;&#1500;&#1493;&#1501;</code> finds <code>&#1513;&#1500;[&#1493;]&#1501;</code>.</p>
+    <p><b>Stars:</b> a <code>*</code> stands for any letters inside one word, none included &mdash; never a space, a digit or punctuation: <code>&#1502;&#1488;&#1502;* &#1511;&#1493;&#1512;*</code> finds <code>&#1502;&#1488;&#1502;&#1514;&#1497; &#1511;&#1493;&#1512;&#1497;&#1503;</code>, and spelling variants and Judeo-Arabic apply to the letters around it. A <code>*</code> can stand anywhere in a word, as often as you like: <code>*&#1504;&#1497;&#1501; *&#1500;&#1497;&#1501;</code> finds <code>&#1499;&#1492;&#1504;&#1497;&#1501; &#1490;&#1491;&#1493;&#1500;&#1497;&#1501;</code>, and <code>*&#1499;&#1492;&#1504;*</code> finds every word that holds <code>&#1499;&#1492;&#1504;</code>. A <code>*</code> alone matches every word: for any one word, use a gap such as <code>[1]</code>. A word with only one or two letters besides its <code>*</code> matches very many words, so its list may end with "+".</p>
+    <p><b>Across pages:</b> matches that run from one page into the next are found too, read from the pages that follow each other in the manuscript. When a search with <code>*</code> cannot read all of them in good time, the count shows "+" and the results line says which were not searched.</p>
+
+    <h3>Sub-Options</h3>
+    <p>When Responsa mode is active, four checkboxes appear below the search field:</p>
+    <ul>
+        <li><b>Variants:</b> Enable letter-variant matching (same as Variants mode) on all expanded terms.</li>
+        <li><b>Judeo-Arabic:</b> Expand words with the Arabic definite article &#1488;&#1500;- (8 forms per word).</li>
+        <li><b>Flex Spacing:</b> Ignore erroneous spaces within words — very useful given the many spacing errors in automatic transcription, but adds load to the query.</li>
+        <li><b>Bidirectional:</b> Search for terms in both forward and reverse order.</li>
+    </ul>
+
+    <h3>Tabular Search</h3>
+    <p>The Tabular Search provides a visual interface for constructing Responsa queries:</p>
+    <ol>
+        <li>Click the <b>Tabular Search</b> button (visible when Responsa mode is active).</li>
+        <li>Add 2–4 <b>components</b>, each representing a search term or group.</li>
+        <li>Enter one or more <b>words</b> per component (multiple words = OR alternatives).</li>
+        <li>Toggle <b>per-word modifiers</b>: prefix (#), suffix (#), wildcard (*), plene (%), negation.</li>
+        <li>Set the <b>distance</b> (max words) between components using the spinners.</li>
+        <li>Watch the <b>live preview</b> update as you modify the query.</li>
+        <li>Click <b>Search</b> to generate the Responsa syntax and trigger a search.</li>
+    </ol>
+
+    <p><i>Note:</i> When a query expands beyond 500 terms, the system automatically downgrades options (variants, Judeo-Arabic, plene, etc.) to maintain speed, and displays a notification accordingly.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="position">Line &amp; Text Position Search</h2>
+    <p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is particularly useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p>
+
+    <p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p>
+
+    <p><i>Note: This feature requires a rebuilt index. Please rebuild the index from Settings to use it.</i></p>
+    </div>
+
+    <div class="section">
+    <h2 id="filters">Focus Search</h2>
+    <p>Click <b>Focus Search</b> to open the <b>Search only in...</b> window and narrow the search by manuscript properties before searching. This focuses your search on specific subsets of the corpus.</p>
+
+    <h3>Available Filters</h3>
+    <ul>
+        <li><b>Include</b> / <b>Exclude:</b> Choose whether the Subject Domain, Author and Work selections below narrow the search to matching manuscripts, or rule them out instead</li>
+        <li><b>Subject Domain:</b> Filter by scholarly classification (e.g., Bible, Talmud, Poetry); you can select more than one</li>
+        <li><b>Author:</b> Filter by attributed author; you can select more than one</li>
+        <li><b>Work:</b> Filter by specific work title; you can select more than one</li>
+        <li><b>Type:</b> Filter by material type: <b>Show all</b>, <b>Exclude printed</b>, or <b>Printed only</b></li>
+        <li><b>Catalog Data Text:</b> Search the catalog's own descriptive text (not the manuscript's transcription) for words you add under <b>All words</b>, <b>Any word</b>, or <b>Not these words</b></li>
+        <li><b>Manuscript features:</b> a window of catalogue criteria &mdash; period of copy, language and script, script style and region, vocalization, columns, lines, physical status, material, attributes, and computer-generated measurements. Each list can take <b>Only these</b> or <b>All except these</b>; lines, size and material can come from the catalogue, the measurement, or either. The window shows how many manuscripts match before you apply it. The same window is on the Browse by Identification tab.</li>
+    </ul>
+    <p>A running count of matching manuscripts is shown at the bottom of the window as you adjust filters, and <b>Clear All</b> resets them. Active filters appear as removable <b>chips</b> in this window; after you click <b>OK</b>, they also appear as chips above the results, except for <b>Printed only</b>. Filters apply to all search modes, but not in <b>Lab Mode</b>.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="translations">Catalog &amp; Metadata Translations</h2>
+    <p>Catalog data, titles, and scholarly descriptions are available in both Hebrew and English, powered by machine translation via <a href="https://translate.dicta.org.il/" target="_blank">Dicta Translation</a>.</p>
+    <p>Use the <b>Show Translations</b> toggle in Settings to enable translated descriptions in search results, browse views, and catalog dialogs. When enabled, translated text appears with a clickable <b>Translated/Original</b> badge &mdash; click to toggle between the translated and original text.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="composition">Composition Search</h2>
+    <p>This tool is designed for researchers wishing to find parallels for a complete literary text (such as a Piyyut, medieval commentary, or other rare work) within the Genizah, thereby locating additional textual witnesses, both direct and indirect.</p>
+
+    <h3>Two Search Methods</h3>
+    <p>Composition Search offers two ways to find parallels. They are complementary: neither replaces the other, and which one suits you depends on the text in front of you.</p>
+    <ul>
+        <li><b>Chunk search</b> is the original method. It compares blocks of words, and it is the only method that offers the Exact / Variants / Fuzzy modes and cross-paragraph filtering described below.</li>
+        <li><b>Letter-level search</b> compares sequences of letters instead. It is much faster than chunk search and returns far fewer unrelated results, but it does not offer the chunk-mode parameters &mdash; when you select it, those controls are set aside and the letter-level controls appear in their place.</li>
+    </ul>
+    <p>In a sample test at the default settings, letter-level search ran 8&times; to 22&times; faster than chunk search; the share of relevant results in the first 100 and first 500 was 3 to 25 percentage points higher; and chunk search's noisiest form (2-word chunks) did yield true results letter-level search missed &mdash; but only past its first 1,500 results, some of them fragments too short to be in the letter-level index at all.</p>
+    <p>Letter-level search runs on an index built on this computer from the transcriptions you already have. The program offers to build it once, and you can build or rebuild it at any time from Settings. The build takes about ten minutes, needs about 11 GB of free disk space while it runs, and produces an index of about 3.5 GB. Cancelling a build, or a build that fails, always leaves the index you already had intact and working.</p>
+    <p>Letter-level search also works on My Library, with an index of its own, built from the texts My Library has already extracted. When you choose letter-level search with the Local or ALL scope and that index has not been built yet, the program offers to build it; you can also build or rebuild it at any time from Settings. It does not update by itself: after a scan that changes My Library, a notice tells you to rebuild it. Unlike the Genizah index, it keeps short pages, catalog cards and stamps, since those filters are meant for the Genizah photographs, not your own documents. With the ALL scope, results from both indexes are ranked together in one list, and My Library results can be used as witnesses like any other. Quoting texts and conditions (see <i>Filter Texts</i> below) work only with the Genizah scope.</p>
+    <p>Once the Genizah index exists on this computer, letter-level search is the method the Composition Search tab starts on; if you have already chosen a method yourself, your choice is kept.</p>
+
+    <p>The Genizah letter-level index deliberately leaves some pages out. Three kinds are dropped when it is built: pages whose transcription holds fewer than about 80 Hebrew letters &mdash; a line or two, too little text to carry letter-level evidence; microfilm catalog cards; and library-stamp pages photographed alongside the manuscripts. On the current corpus that is about a quarter of the pages, almost all of them tiny scraps. The practical consequence: a very small fragment can be found by chunk search, which searches every transcribed page, and never by letter-level search &mdash; one more reason the two methods complement each other.</p>
+
+    <h4>Several Witnesses of One Work</h4>
+
+<p>A work survives in many manuscripts, and no single copy of it finds every
+other. Letter-level search can be given more than one copy of the text you are
+looking for &mdash; each is searched on its own, and the results are merged
+into one list. Press <b>Witnesses</b> beside the letter-level controls to open
+the list.</p>
+
+<p>There are three ways to add one:</p>
+<ul>
+<li><b>Paste a text</b> &mdash; one witness at a time.</li>
+<li><b>Load from files...</b> &mdash; choose one or more files. By default each
+whole file is one witness; tick <b>Split each file on blank lines</b> to split
+each file on blank lines as well. A message then tells you how many witnesses
+were added and how many were skipped as too short.</li>
+<li><b>Promote from your results</b> &mdash; tick manuscripts in the result
+list and press <i>Search with these too</i>. The text comes from the pages
+that actually matched, not from the manuscript record.</li>
+</ul>
+
+<p><b>In letter-level search, do not join several copies into one box.</b>
+Joining works in chunk search &mdash; that is how you would use several copies
+there &mdash; but letter-level search spends a fixed budget per query, so
+joining measurably harms it: measured against the 614 Birkat Hamazon census
+manuscripts that have any indexed text, the best single copy finds 348 and
+seventeen copies searched separately and merged find 455 &mdash; while the
+same seventeen joined into one query find 296, fewer than a single copy on its
+own.</p>
+
+<p>The results list gains a <b>Witnesses</b> column saying how many distinct
+copies point at each manuscript, with a tooltip naming them, and two new
+orderings: by combined score and by number of witnesses.</p>
+
+<p><b>Auto-expand</b> repeats the search using the best results as new
+witnesses. It reaches further and it puts more to skim at the top of the list,
+so it is a button you press rather than something the search does on its own.
+In letter-level mode the same button reads <i>Run auto-expand now</i> and runs
+this expansion; in chunk mode it keeps its own name and behaviour, which is
+correct for that engine.</p>
+
+<p>A multi-witness search can be <b>stopped</b>, which a single letter-level
+search still cannot: the copy being searched finishes first, and everything
+found so far is kept. Up to 25 witnesses can be held at once.</p>
+
+<h4>Letter-Level Controls</h4>
+    <ul>
+        <li><b>Match width:</b> How far a manuscript may drift from your text and still count as a match. Wider settings find more damaged or variant witnesses; the strongest matches are always ranked first.</li>
+        <li><b>Passage length:</b> Whether a short shared passage counts as a match. "Also short passages" roughly doubles what you have to read through, and finds witnesses that the normal setting does not reach.</li>
+        <li><b>Search depth:</b> How much of the corpus the search may examine. Deeper searches take seconds longer and return more manuscripts, including badly damaged and reworked copies that a fast pass misses. Long texts benefit the most. <b>A deep search cannot be interrupted once it has started</b> &mdash; Stop, Escape and closing the window all wait for it to finish.</li>
+    </ul>
+
+    <h3>Opening a Result</h3>
+    <p>Double-clicking a result opens the Manuscript Viewer on that page, with the matched text marked in red. Beside it the viewer shows your own text, with the part that matched marked there too.</p>
+    <p>In letter-level search the two sides are not the same letters &mdash; that is what approximate matching means. What is marked in the manuscript is what the manuscript has; what is marked in your text is what yours has. Where the copy that produced the match was not the text in the box &mdash; a promoted manuscript, or another witness &mdash; the panel shows that witness's own excerpt instead of your unmarked text.</p>
+    <p>A composition result list is made of <i>pages</i>, so several results in a row can belong to one manuscript. <b>Next Manuscript</b> and <b>Prev Manuscript</b> go to the nearest result belonging to a different one, skipping the remaining pages of the fragment you are reading. They appear only when some manuscript in the list holds more than one result.</p>
+
+    <h3>How Chunk Search Works (The Mechanism)</h3>
+    <p>Unlike a regular search, the engine does not search for the entire text as a single unit. The process works as follows:</p>
+    <ol>
+        <li>The software splits the source text you entered into small segments ("Chunks").</li>
+        <li>Each chunk is searched separately in the Genizah database.</li>
+        <li>If a specific chunk is found in a manuscript, it receives a "score".</li>
+        <li>At the end of the process, the software <b>aggregates</b> the results: if a manuscript contains many found chunks, it receives a high score and appears at the top of the list.</li>
+    </ol>
+
+    <h3>Important Parameters (Chunk Search)</h3>
+    <p>These apply to chunk search. In letter-level search they are set aside and replaced by the three controls described above.</p>
+    <ul>
+        <li><b>Chunk:</b> The number of words in each search unit. A value too low will return many irrelevant results; a value too high might miss true results.</li>
+        <li><b>Max Freq:</b> A tool to filter common expressions. If the engine detects that a sequence appears many times in the corpus (like idioms or verses), it will filter it to the Appendix.</li>
+        <li><b>Filter &gt;:</b> If a specific title (e.g., "Siddur Rav Saadia Gaon") appears more than X times in the results, the software groups these results under a single "Group" in the Appendix to avoid flooding the main list.</li>
+        <li><b>Sort by shelfmark only:</b> Disables smart grouping and displays a flat, sorted list of all found manuscripts.</li>
+        <li><b>Exact / Variants / Fuzzy:</b> the search mode (see Search Modes above). In Variants mode a slider (<i>Variant intensity</i>) appears beside it instead of the Basic / Extended / Maximum buttons; it sets how many letter substitutions are tried. The number of changes is not shown here: Composition Search uses the ×1&ndash;×3 value set for the Basic level in the Search tab (Fuzzy: always ×2).</li>
+        <li><b>Min chunks:</b> A page is listed only if at least this many different chunks matched on it (default 1; turning on Lab Mode sets it to 3). It applies with Full search; in the two cross-paragraph modes the <i>Min. cross-paragraph matches</i> setting (gear button) is used instead.</li>
+    </ul>
+
+    <h3>Advanced Options</h3>
+    <ul>
+        <li><b>Exclude Manuscripts:</b> Allows you to enter a list of known manuscripts to hide from results (they will appear under the "Excluded" category).</li>
+        <li><b>Filter texts:</b> A menu of three ways to keep other texts out of your results. See <i>Filter Texts</i> below.</li>
+        <li><b>Full Recursive Search / Recursive Search in Results:</b> After getting results, this button searches again using the texts of the found manuscripts as a basis for further searching. Until you tick results the button reads <i>Full Recursive Search</i>; when you tick results it reads <i>Recursive Search in Results</i> and searches only those.</li>
+    </ul>
+
+    <h3>Filter Texts</h3>
+    <p>The <b>Filter texts</b> button opens a menu of three items. Hover over an item to see an example.</p>
+    <ul>
+        <li><b>Quoted texts...</b> &mdash; texts that your composition quotes, such as Bible verses quoted in the Talmud. Results that match only these quotations are marked "Filtered", so this noise is not shown among the main results. The number after the item is how many quoted texts are switched on.</li>
+        <li><b>Quoting texts...</b> &mdash; works that quote your composition, such as the Rif quoting the Talmud. A result page on which the quoting work is found moves to the "Removed by a condition" group, with the reason. <b>Load from Sefaria...</b> lets you choose a book and then the passage that discusses your text (for example Rif Berakhot 1a-2b). Choose a passage, not the whole book: a whole book is too long, and it quotes much more than your passage. You can also paste a text (<b>Add Custom Text</b>) or load it from files. All the texts you add form one condition; choose the item again to change them.<br>
+        Load or paste the passage as it is, quotations included. A page is removed only where the quoting work has on it one unbroken stretch of at least 40 letters that are not also in your main text (shorter stretches are not added together), so the manuscripts of your own composition are not removed just because the quoting work quotes it.</li>
+        <li><b>Add condition...</b> &mdash; a text that must appear, for example to show only results where an adjacent image (before or after) includes a certain text. Pages without it move to the "Removed by a condition" group. To give several versions of the text, separate them with a blank line; any one of them counts.</li>
+    </ul>
+    <p>For quoting texts and conditions you also choose where to look: on the same image, on an adjacent image, or anywhere in the manuscript. What you set is listed under the main text, where each row can be edited (&#9998;) or removed (&#10005;). Up to four can be set.</p>
+    <p>Quoting texts and conditions work only in letter-level search of the Genizah corpus. "Not found" means not found in the pages the letter-level index covers (see above). When a page could not be checked completely &mdash; the search was stopped or reached its limit, or the page could not be identified &mdash; it goes to a "Not fully checked" group instead of being counted as passing. The Manuscript Viewer shows, for each result, on which image each text was found. Results of a search with conditions are not kept between sessions, and Auto-expand is not available while conditions are set.</p>
+
+    <h3>Understanding Results</h3>
+    <p>Results are grouped by manuscript and sorted by score (Max Score / Avg Score). Click on a result to expand and see your source chunk alongside the matching manuscript text, with matching words highlighted for easy comparison.</p>
+
+    <h3>Cross-Paragraph Search</h3>
+    <p>When searching for parallels to a text that contains paragraph breaks (e.g., a piyyut with stanzas, or a text with section divisions), you can enable <b>cross-paragraph search</b> to specifically find manuscripts that preserve text spanning across these boundaries.</p>
+
+    <h4>Why is this useful?</h4>
+    <ul>
+        <li>Text <b>within</b> paragraphs often contains citations from other sources (Mishnah, Talmud, known phrases) or sources that quote the composition you're searching for.</li>
+        <li>Text that <b>crosses</b> paragraph boundaries is much less likely to be a citation, since citations rarely span across structural breaks.</li>
+        <li>This effectively filters out most of the "noise" and helps you find genuine textual witnesses.</li>
+    </ul>
+
+    <h4>How to use</h4>
+    <ol>
+        <li>Enter your text with paragraph breaks (or set a custom delimiter like period or colon).</li>
+        <li>Select a <b>Paragraph search</b> mode:
+            <ul>
+                <li><b>Full search</b> – All results (default behavior)</li>
+                <li><b>Cross-paragraph only</b> – Only matches that span paragraph breaks</li>
+                <li><b>Full + Cross-paragraph boost</b> – All results, with boundary-crossing matches ranked higher</li>
+            </ul>
+        </li>
+        <li>Choose a <b>Paragraph separator</b>: Line break, Blank line, Period (.), or Colon (:).</li>
+        <li>The status label shows how many boundaries are detected and how many chunks will cross them.</li>
+        <li>Results that cross paragraph boundaries are marked with a &#128279; indicator in the score column.</li>
+    </ol>
+
+    <h4>Advanced Settings (&#9881;)</h4>
+    <p>Click the gear button (visible in non-full modes) to configure:</p>
+    <ul>
+        <li><b>Cross-paragraph boost:</b> Score multiplier for boundary-crossing matches (1.0–3.0).</li>
+        <li><b>Min. cross-paragraph matches:</b> Filter out results with fewer boundary matches.</li>
+        <li><b>Min. words between separators:</b> Ignore delimiters too close together.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="browse">Browse by Shelfmark</h2>
+    <p>This tab enables convenient continuous reading of a full manuscript, synchronized with source images.</p>
+    <ul>
+        <li><b>Load:</b> Enter a System ID, Shelfmark, or FL ID. The search is flexible and ignores spaces or punctuation (e.g., <code>TS NS 13 15</code> finds <code>T-S NS 13.15</code>). Autocomplete is available for shelfmarks.</li>
+        <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
+        <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&#9664;</span> <span style="border:1px solid #ccc; padding:0 4px;">&#9654;</span> at the top left to move to the previous or next manuscript in the database file order.</li>
+        <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge/Oxford where supported). Use &#128444;&#65039; to show/hide the image panel.</li>
+        <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling and for saving as a text file.</li>
+        <li><b>Find in Text:</b> Type in the search field to highlight matching text in real-time within the current manuscript.</li>
+        <li><b>Parallels:</b> Sends the current page text to the Composition Search tab for finding parallels across the corpus.</li>
+        <li><b>View on Ktiv:</b> Opens the manuscript in the National Library of Israel's online catalog.</li>
+        <li><b>PGP Info:</b> If Princeton Geniza Project data is available, an information panel is displayed with transcriptions, description, tags, and dating.</li>
+        <li><b>Volume Selector:</b> Manuscripts with multiple microfilm scans (~1.5% of the collection) show a volume dropdown. Previously, images could be mismatched with the text — the volume selector fixes this by displaying each volume's own images and transcription, with page navigation staying within the active volume.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="catalog-browse">Browse by Identification</h2>
+    <p>Browse the scholarly catalog by domain classification, author, or work title.</p>
+    <ul>
+        <li><b>Domain Hierarchy:</b> The left panel shows the domain tree (e.g., Bible &gt; Torah &gt; Genesis). Click a domain to see all manuscripts classified under it. Counts show how many manuscripts belong to each category.</li>
+        <li><b>Author &amp; Work Filters:</b> Use the search dropdowns to filter by author name or work title. Filters combine — selecting a domain and an author shows only manuscripts matching both.</li>
+        <li><b>Manuscript features:</b> list the manuscripts by period of copy, script, region, lines, material and the other features (see Focus Search above). The list covers all 255,723 manuscripts: those with a catalogue record first, then those without one, and the domain tree has a "No catalogue record" entry.</li>
+        <li><b>Text Filter:</b> Type keywords to search across catalog titles, descriptions, and domain names. Choose ALL (all terms must match), ANY (any term matches), or NOT (exclude matching terms). Add multiple terms as color-coded chips.</li>
+        <li><b>Transcriptions and library:</b> <i>Filter PGP</i> and <i>Filter Scholarly Transcriptions</i> cycle through all, has, and has not; <i>Filter by library</i> shows or hides libraries.</li>
+        <li><b>Filter Chips:</b> Active filters appear as removable chips above the results.</li>
+        <li><b>Search in these results</b> / <b>Parallel search in these results</b> run a search limited to the current list; <b>Clear All</b> clears the filters.</li>
+        <li><b>Pagination:</b> Results display 50 per page with navigation controls.</li>
+        <li><b>Cross-links:</b> Domain and author labels on the Browse by Shelfmark tab link directly here with the appropriate filter pre-set.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="pgp">Princeton Geniza Project (PGP) Data</h2>
+    <p>The system integrates data from the Princeton Geniza Project (PGP) — a scholarly database containing approximately 36,000 cataloged documents with transcriptions, translations, descriptions, and detailed subject tagging.</p>
+
+    <h3>PGP Badge in Search Results</h3>
+    <p>Manuscripts with available PGP data are marked with a green "PGP" badge in search results, so you can quickly identify manuscripts with scholarly transcriptions and additional research information.</p>
+
+    <h3>PGP Information in Browse by Shelfmark</h3>
+    <p>When a manuscript has PGP data, an information panel is displayed showing:</p>
+    <ul>
+        <li><b>Document Type</b> (e.g., Letter)</li>
+        <li><b>Tags</b> — clicking a tag searches for all manuscripts with that topic</li>
+        <li><b>Description</b> in English (with translation option)</li>
+        <li><b>Date</b></li>
+        <li><b>View on PGP</b> — a link to the original document on the Princeton website</li>
+    </ul>
+
+    <h3>Transcriptions and Translations</h3>
+    <p>When scholarly transcriptions or translations from the Princeton project are available, they appear in the version selector alongside the automatic transcription. The system automatically prefers a PGP edition (if available) over the automatic reading.</p>
+
+    <h3>Search by Tags</h3>
+    <p>Select <b>PGP Tags</b> from the search Mode dropdown to browse manuscripts by topic. Tags are organized into categories (Document Types, Law &amp; Society, Medicine &amp; Illness, Trade &amp; Travel, and more) and displayed in a dropdown with Hebrew translations.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="reading-desk">Reading Desk</h2>
+    <p>A side-by-side view that allows you to examine multiple manuscripts together, with synchronized images and a version selector for each fragment.</p>
+    <p>The Reading Desk is useful for any researcher who wants to view multiple shelfmarks together — whether they are fragments that join into a single document (according to PGP or other joins) or any collection of manuscripts you wish to examine side by side.</p>
+    <h3>How to use</h3>
+    <ul>
+        <li>Click the <b>Add to View</b> button (eye icon) on the Browse by Shelfmark tab</li>
+        <li>Add more manuscripts from search results or from browsing other manuscripts</li>
+        <li>In the Reading Desk toolbar, type a shelfmark and click <b>Add to Desk</b>, or click <b>Add from List</b> to open your personal lists and click an item to add it.</li>
+        <li>From the joins menu of the &#128279; button on the Browse by Shelfmark tab, <b>Open in Reading Desk</b> loads all joined fragments at once.</li>
+        <li>Each fragment is displayed with its source image, version selector (including PGP editions if available), and extended information</li>
+        <li>Click <b>Exit Reading Desk</b> when done</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="puzzle">Fragment Puzzle</h2>
+    <p>A visual canvas for arranging manuscript fragment images side by side to reconstruct physical joins between Genizah fragments.</p>
+
+    <h3>Adding Fragments</h3>
+    <ul>
+        <li>Type a shelfmark in the input box and press Enter or click the add button</li>
+        <li>From a personal list: click the <b>Add from personal list</b> button (&#128203;), pick a list in the window that opens, then select the fragments to add</li>
+        <li>From known joins: when PGP or FJMS joins are available for a fragment, click the joins button to load all related fragments at once</li>
+    </ul>
+
+    <h3>Canvas Controls</h3>
+    <ul>
+        <li><b>Zoom:</b> Scroll to zoom in/out on the canvas; double-click to reset view</li>
+        <li><b>Rotate:</b> Select a fragment and use the rotate controls (or keyboard arrows) to fine-tune the angle</li>
+        <li><b>Background removal:</b> Adjust the threshold slider to remove parchment/paper background from fragment images, isolating the text</li>
+        <li><b>Background modes:</b> Cycle through canvas backgrounds (Dark Gray, Black, White, Checkerboard, Light Table, Grid) to find the best contrast</li>
+        <li><b>Crop:</b> Trim away empty margins from a fragment image</li>
+        <li><b>Flip:</b> Mirror a fragment horizontally or vertically</li>
+        <li><b>Folio navigation:</b> Use Previous/Next page controls to switch between recto and verso, or navigate to other folios of the same manuscript</li>
+    </ul>
+
+    <h3>Layer Controls</h3>
+    <ul>
+        <li><b>Bring Forward / Send Backward:</b> When fragments overlap, use these controls to change the stacking order so you can position fragments on top of or behind each other</li>
+    </ul>
+
+    <h3>Fragment Selector</h3>
+    <p>Use the combobox above the canvas to select a loaded fragment. The <b>Browse</b> button opens that fragment in the Browse by Shelfmark tab.</p>
+
+    <h3>Saving &amp; Loading</h3>
+    <ul>
+        <li>Click the <b>Save</b> button to save the current arrangement as a join document with a title and optional notes</li>
+        <li>After the first save, changes are auto-saved as you move, rotate, or resize fragments</li>
+        <li>Click the <b>Open</b> button to browse your saved joins; each entry shows a thumbnail preview</li>
+        <li>Select a saved join to load it back onto the canvas</li>
+    </ul>
+
+    <h3>Export</h3>
+    <ul>
+        <li>Click the <b>Export</b> button to generate a composite PNG image of all fragments as arranged on the canvas</li>
+        <li>Choose from multiple resolution levels: <b>Draft</b>, <b>Standard</b>, or <b>Full</b> resolution</li>
+        <li>The exported image includes a metadata banner listing all fragment shelfmarks</li>
+    </ul>
+
+    <h3>Recto / Verso</h3>
+    <p>The <b>⇄</b> button (Flip all fragments) mirrors the entire canvas arrangement and navigates each fragment to its verso (or recto), so you can examine the reverse side of a reconstructed join.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="joins-lab">Joins Lab</h2>
+    <p>The <b>Joins Lab</b> is a dedicated workspace for hunting <b>physical joins</b> — fragments that were
+    once part of the same leaf or codex and are now scattered across collections. You pin one fragment as the
+    <b>anchor</b>, then search for and triage candidate fragments against it, side by side.</p>
+
+    <h4>Opening the Joins Lab</h4>
+    <ul>
+        <li>The <b>Joins Lab</b> button at the top of the window, or <b>Joins Lab</b> in the &#9776; menu (in the side menu, when the menu is at the side).</li>
+        <li>The <b>Find joins</b> button on the <b>Browse by Shelfmark</b> tab.</li>
+        <li>From any search result or Browse page — an action opens the Lab anchored on that page.</li>
+    </ul>
+    <p>The window is <b>modeless</b>: it stays open alongside the main window, and you can re-anchor it on a new
+    fragment at any time without closing it.</p>
+
+    <h4>The anchor (left pane)</h4>
+    <p>The pinned fragment — its shelfmark, brief metadata, and page image. Use the folio arrows to page through
+    the anchor's images, and zoom in to inspect the script. <b>Known joins</b> for the anchor (saved by you or by
+    the community) are listed in a collapsible section.</p>
+
+    <h4>Building a query (right pane)</h4>
+    <p>Build a line-by-line query describing the text you expect on the joining fragment:</p>
+    <ul>
+        <li><b>Mode</b> — <b>Responsa</b> (the structured line-by-line builder described here) or <b>Exact</b> / <b>Variants</b> / <b>Fuzzy</b> / <b>Regex</b> (a single free-text query, as in the main search).</li>
+        <li><b>+ Add Line</b> — add another manuscript line, and set how many lines to skip before it
+        (0 = the very next line).</li>
+        <li><b>+ or</b> — add an alternative word that may appear instead on the same line.</li>
+        <li><b>Line options (⚙)</b> — per-line modifiers: negation (−), plene/defective spelling (%),
+        prefixes (<code dir="ltr">#_</code>), suffixes (<code dir="ltr">_#</code>), wildcards (<code dir="ltr">*</code>),
+        and "⊢ starts line" / "⊣ ends line" position anchors.</li>
+        <li><b>Search options</b> — global toggles: <i>Variants</i>, <i>Judeo-Arabic</i>, <i>Flex Spacing</i> and
+        <i>Bidirectional</i>.</li>
+        <li><b>Position</b> — restrict a line to the start or end of the page text.</li>
+        <li><b>Other side of the leaf (p ±1)</b> — also require or include text on the adjacent page;
+        <b>Narrow</b> keeps only candidates whose adjacent page also matches, <b>Widen</b> adds adjacent pages
+        as extra candidates.</li>
+        <li><b>Visual Similarity</b> — show only fragments that look alike, optionally combined with a text query.</li>
+    </ul>
+    <p class="box"><span class="highlight">⚠ About visual similarity:</span> the visual-similarity index covers
+    only about <b>half of the Genizah</b>, and the algorithm is not conclusive — so it can miss real matches.
+    <b>Do not assume that a fragment absent from the visual-similarity results is not a join.</b> Use visual
+    similarity to surface candidates, never to rule a fragment out.</p>
+    <p>Click <b>Find Candidates</b> to run the query.</p>
+
+    <h4>Triaging candidates</h4>
+    <p>Candidates appear as cards with their image and metadata. For each one you can:</p>
+    <ul>
+        <li>Mark <b>Yes</b> / <b>Maybe</b> / <b>No</b> to triage it, then filter the list by triage state.</li>
+        <li><b>Browse</b> — open the candidate in the Browse view.</li>
+        <li><b>Compare</b> — view it side by side with the anchor.</li>
+        <li><b>Re-anchor</b> — make the candidate the new anchor and keep hunting from there.</li>
+        <li><b>Add as Join</b> — record a confirmed join between the candidate and the anchor.</li>
+        <li><b>Add to Puzzle</b> — send the candidate, together with the anchor, to the Fragment Puzzle for
+        visual reassembly.</li>
+        <li><b>Add to list</b> — save it to one of your lists.</li>
+    </ul>
+    <p><b>Browse results</b> (the <b>Browse results ▶</b> button on the results toolbar) opens a compare window
+    that steps through the filtered candidates <b>one at a time</b>, each shown side by side with the anchor —
+    the fastest way to review a long candidate list. If exactly one candidate is selected it opens there;
+    otherwise it starts at the first result. This complements the per-card <b>Compare</b> action, which opens a
+    single candidate against the anchor.</p>
+    <p>A <b>⚠ size mismatch</b> note flags candidates whose physical dimensions differ from the anchor's, so you
+    can spot unlikely joins at a glance. Use <b>Filter ▾</b> to narrow candidates by shelfmark, text or title,
+    by library and domain, by triage state, or by <b>Manuscript features</b> (the same window as on Browse by
+    Identification: material, size, script, period and more, checked per manuscript); <b>match material</b> and
+    <b>width ±2 cm of anchor</b> fill the features in from the anchor. Switch to a compact <b>Table view</b> when
+    you have many results.
+    <b>⬇ Export XLSX</b> exports the checked candidates (or all shown, if none are checked) to an Excel workbook.
+    <b>Clear</b> resets the anchor, query, candidates and triage state, and clears the text, Manuscript features and triage filters.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="lists">Personal Lists</h2>
+    <p>The <b>Personal Lists</b> tab lets you keep your own lists of manuscripts and local documents, group
+    them into projects, add notes and tags, and sync them with your account on <bdi dir="ltr">genizahsearch.com</bdi>.</p>
+
+    <h3>Lists and Projects</h3>
+    <ul>
+        <li>Click <b>Add list...</b> (or the <b>+</b> button above the list tree) to create a new list, and
+        <b>Add project...</b> to create a folder that groups several lists together.</li>
+        <li>Use the &#9999;&#65039; <b>Edit List</b> and &#128465;&#65039; <b>Delete List</b> buttons above the items table to
+        rename or delete the list you are viewing (they do not work on the default list or on <b>Recently Viewed</b>);
+        a deleted list goes to the <b>Trash</b>, where you can restore it or delete it permanently.</li>
+        <li><b>Duplicate List</b> makes a copy of the current list; <b>Merge Lists</b> combines it into another list
+        you choose.</li>
+        <li><b>Fix Duplicates</b> finds lists that share the same name (for example, copies left by a sync problem)
+        and merges each group into one list, asking which one to keep when they belong to different projects.</li>
+        <li>There is always a default list, initially named <b>General</b>, and a <b>Recently Viewed</b> list. The
+        default list cannot be deleted; to rename it, right-click it in the list tree and choose <b>Rename List</b>.
+        <b>Recently Viewed</b> fills itself automatically as you view manuscripts; it cannot be renamed or deleted,
+        and is never synced to the cloud.</li>
+    </ul>
+
+    <h3>Adding and Managing Items</h3>
+    <p>Items are added with the <b>&#9734; List</b> button (<b>Add to List</b>) in Search, Composition Search, and the
+    Browse by Shelfmark tab — or the &#9734; icon on each row of Search results — and from candidates in the Joins Lab.</p>
+    <ul>
+        <li>Use the <b>Filter items...</b> box and the <b>Sort by</b> menu (Shelfmark, Title, or Date Added) to find
+        items in a long list.</li>
+        <li>Check items with <b>Select All</b> or individually, then use <b>Move to List...</b>, <b>Add Tag...</b>,
+        or <b>Remove Selected</b> on everything checked.</li>
+        <li>Each row has its own buttons: &#128065;&#65039; <b>Quick View</b> opens a quick view of that page
+        (Genizah manuscripts only; a local document from My Library cannot be opened this way),
+        &#128214; <b>Browse</b> opens the manuscript on the Browse by Shelfmark tab, &#128203; <b>Copy Info</b> copies its details
+        (<b>Compact</b>, <b>Detailed</b>, or <b>With Link</b>) to the clipboard, &#129513; <b>Add to Puzzle</b> sends
+        it to the Fragment Puzzle canvas, and &#128465;&#65039; <b>Remove from List</b> takes it off the current list
+        only.</li>
+    </ul>
+
+    <h3>Item Details and Preview</h3>
+    <p>Selecting an item shows the <b>Item Details</b>: <b>Library</b>, <b>Shelfmark</b>, <b>Image</b>, <b>Title</b>,
+    <b>Lists</b>, <b>System ID</b>, and <b>Tags</b>, next to a text and image preview of the page. The preview is
+    for Genizah manuscripts: a local document from My Library is not previewed there. Type in the <b>Note</b> field
+    and click <b>Save Changes</b> to keep it; the preview panel can be collapsed with the &#9664;/&#9654; button
+    at its top.</p>
+
+    <h3>Export and Import</h3>
+    <ul>
+        <li><b>Export List...</b> saves the list you are viewing as <b>Text (plain)</b>, <b>JSON</b>,
+        <b>Excel (.xlsx)</b>, or <b>Word (.docx)</b>.</li>
+        <li><b>Import List...</b> reads a list back in from a JSON file and reports how many items it added and how
+        many of them it could not identify.</li>
+    </ul>
+
+    <h3>Syncing with Your Account</h3>
+    <p><b>Sync lists now</b> is enabled only when you are signed in to your <bdi dir="ltr">genizahsearch.com</bdi>
+    account; once signed in, every change you make is uploaded automatically.</p>
+    <ul>
+        <li>Clicking <b>Sync lists now</b> offers <b>Download from Cloud</b>, <b>Upload to Cloud</b>,
+        <b>Merge Both</b> (combine what is on this computer with what is in your account), or <b>Skip</b>; each of
+        the first three appears only when there are lists for it to work on.</li>
+        <li>When the same note was edited on both sides, <b>Merge Both</b> keeps both versions, separated by a
+        marker line; uploading alone leaves a differing note in your account as it is.</li>
+        <li>If an item was removed from one of your lists on the website, you are asked to choose, for each such item,
+        <b>Remove from this computer too</b>, <b>Keep it (and add it back on the website)</b>, or <b>Decide later</b>.</li>
+        <li>Items from your local documents (see <a href="#my-library">My Library — Local Documents</a>) are never
+        uploaded, even in a list that is otherwise synced.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="community">Community Tab</h2>
+    <p>The <b>Community</b> tab brings together what researchers have shared: discoveries and questions, transcription corrections, page comments, and fragment-join proposals — each in its own panel, with a quick list plus a fuller window for browsing more.</p>
+
+    <h3>Signing In</h3>
+    <p>Loading what others have shared needs an internet connection but no account; without a connection, each quick list shows what it loaded last time (for comments, the beginning of each comment's text). To contribute, or to see your own items, sign in.</p>
+    <ul>
+        <li>Click <b>Login</b>, next to the tab bar at the top of the window (at the foot of the side menu when the menu is at the side), to sign in, or click <b>Register</b> in the Community tab's own header to create an account.</li>
+        <li>Once signed in, the <b>Login</b> button shows your name. Click it for <b>Sync lists now</b> or <b>Logout</b>.</li>
+        <li>Once signed in, the header shows <b>Logged in as</b> your username and your <b>Reputation</b> score; signed out, it reads <b>Not logged in - Login to participate in the community</b>.</li>
+    </ul>
+
+    <h3>Discoveries</h3>
+    <p>Share something you noticed about a manuscript, ask a question, announce an identification, or leave a general note — and read what other researchers have shared.</p>
+    <ul>
+        <li>Click <b>+</b> to share one: choose a <b>Type</b> (<b>Discovery - Found something interesting</b>, <b>Question - Need help</b>, <b>Identification - Identified a text</b>, or <b>Note - General observation</b>), fill in a <b>Title</b> and <b>Description</b>, optionally attach one or more shelfmarks, and tick <b>Post anonymously</b> to hide your name.</li>
+        <li>Filter the quick list by type, or click <b>View All Discoveries...</b> to open the <b>Discoveries Center</b>, which adds activity statistics and <b>Type</b> and <b>Period</b> filters spanning corrections, comments, joins, and puzzle joins as well.</li>
+        <li>Double-click an item, or choose <b>View Details</b> from its right-click menu, to read it, vote on it with <b>Upvote</b> or <b>Downvote</b>, and add a response; for a question, its author (or an admin) can also click <b>Mark as Answered</b>.</li>
+        <li>Right-click your own discovery to choose <b>Edit</b> or <b>Delete</b>.</li>
+    </ul>
+
+    <h3>Corrections</h3>
+    <p>A correction is a transcription fix that a researcher proposed while browsing a page.</p>
+    <ul>
+        <li><b>All Corrections</b> and <b>My Corrections</b> list them, each marked with its status: 🔵 pending, ✅ approved, or ❌ rejected. Double-click one to open the page it corrects.</li>
+        <li>Click <b>Browse Corrections...</b> for a table of every correction, which you can filter by status (<b>Pending</b>, <b>Approved</b>, <b>Rejected</b>) and search, showing the original and corrected text side by side.</li>
+        <li>Right-click a correction and choose <b>View Correction Details</b> to vote on it with 👍 (<b>Upvote</b>) or 👎 (<b>Downvote</b>).</li>
+    </ul>
+
+    <h3>Comments</h3>
+    <p>A comment is a note a researcher left on a specific manuscript page while browsing it, with the <b>💬 Comment</b> button on the <b>Browse by Shelfmark</b> tab.</p>
+    <ul>
+        <li><b>All Comments</b> and <b>My Comments</b> list them; double-click one to jump straight to that page.</li>
+        <li>Click <b>View All My Comments...</b> to page through all of your own comments.</li>
+    </ul>
+
+    <h3>Joins</h3>
+    <p>This panel brings together two kinds of fragment-join proposals: records that pair two fragments, and visual puzzle-join reconstructions.</p>
+    <ul>
+        <li><b>All Joins</b> and <b>My Joins</b> list the join records; each pairs two fragments and, when its author chose one, shows the relationship: <b>Physical join</b> or <b>Same composition</b>.</li>
+        <li><b>All Puzzles</b> and <b>My Puzzles</b> list published puzzle-join reconstructions; see <a href="#community-publish">Community Publishing</a> for how to publish, unpublish, and open a copy of one.</li>
+        <li>Click <b>Browse Joins...</b> for the full <b>Fragment Joins</b> window, with all four lists together in one place.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="community-publish">Community Publishing</h2>
+    <p>Share your puzzle join reconstructions with the research community and browse joins published by other scholars.</p>
+
+    <h3>Publishing a Join</h3>
+    <ul>
+        <li>After saving a puzzle join, click the 🌐 (<b>Publish to Community</b>) button in the toolbar</li>
+        <li>When published, the button turns green and a message shows the share link, which is already copied to your clipboard, so you can send it to colleagues</li>
+        <li>Your arrangement is uploaded as a composite image along with metadata (title, notes, fragment list)</li>
+    </ul>
+
+    <h3>Unpublishing</h3>
+    <ul>
+        <li>Click the green 🌐 button again to remove your join from the community feed</li>
+        <li>Deleting a local join document also automatically removes it from the community if it was published</li>
+    </ul>
+
+    <h3>Browsing Published Joins</h3>
+    <ul>
+        <li>The <b>Discoveries Center</b> lists published puzzle joins alongside other community activity; choose <b>Puzzle Joins</b> in its <b>Type</b> filter to see only them.</li>
+        <li>To browse all published puzzles, or only your own, use the <b>All Puzzles</b> and <b>My Puzzles</b> tabs of the <b>Joins</b> panel on the <b>Community</b> tab, or of the <b>Fragment Joins</b> window opened with <b>Browse Joins...</b>.</li>
+    </ul>
+
+    <h3>Opening a Published Join</h3>
+    <ul>
+        <li>Click <b>Open in Puzzle</b> on any published join to fork a copy into your local workspace</li>
+        <li>This creates an independent copy you can modify without affecting the original publication</li>
+    </ul>
+
+    <h3>Community Puzzle Joins Panel</h3>
+    <p>When browsing a manuscript, a panel shows any published joins that contain that fragment. This helps you discover existing reconstructions relevant to the manuscript you are studying.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="lab">Lab Mode</h2>
+    <p>The "Lab Mode" button activates an experimental and more advanced search engine.</p>
+    <ul>
+        <li><b>Deep Scan:</b> A much deeper and thorough scan. Significantly slower, but recommended for finding rare phrases or ensuring nothing is missed.</li>
+    </ul>
+
+    <h3>Lab Mode Parameters</h3>
+    <p>When Lab Mode is active, a settings panel appears. The available settings depend on the active tab.</p>
+
+    <h4>Search Tab Parameters</h4>
+    <ul>
+        <li><b>Minimum Match %:</b> Minimum percentage of the query text required to consider a result relevant.</li>
+        <li><b>Max Results to Process:</b> Maximum number of raw candidates to fetch from the index before detailed scoring. The software first retrieves potential candidates, then searches within them. More candidates result in better accuracy but slower performance.</li>
+        <li><b>Deep Limit:</b> Maximum number of documents to scan in Deep Scan mode.</li>
+    </ul>
+
+    <h4>Composition Tab Parameters</h4>
+    <ul>
+        <li><b>Max Candidates per Chunk:</b> Maximum number of index hits to process per text chunk.</li>
+        <li><b>Min Chunk Score:</b> Minimum score required for a chunk to be considered a match.</li>
+        <li><b>Max Final Results:</b> Maximum number of results to display in the tree to prevent freezing (all results are still exported).</li>
+    </ul>
+
+    <h4>Advanced Scoring</h4>
+    <p>Accessible via the "Advanced Scoring..." button:</p>
+    <ul>
+        <li><b>Sequential Order Bonus:</b> Bonus points for finding words in the correct order.</li>
+        <li><b>Coverage Penalty Power:</b> Penalizes results that do not contain all search terms.</li>
+        <li><b>Stop-Word Suppression:</b> Lowers the score for very short or common words to reduce noise.</li>
+        <li><b>Long Word Bonus:</b> Gives higher weight to longer words.</li>
+        <li><b>Unique Match Base Score:</b> The base score for finding a unique word.</li>
+        <li><b>Distance Penalty:</b> Penalizes words found far apart from each other.</li>
+        <li><b>Repeated Word Factor:</b> Reduces score for words appearing more often in the text than in the query.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="api">Public API & AI Tools</h2>
+    <p>Dicta Genizah Search exposes a public HTTP/JSON API so that researchers and AI
+    tools can work with the corpus programmatically. There are two ways to use it: a
+    ready-made AI skill for conversational research, and the raw API for developers.</p>
+
+    <h3>Use it from Claude and other AI agents</h3>
+    <p>A ready-to-use <b>Cairo Genizah Research</b> skill lets you drive the search
+    engine from Claude in plain language. Ask it to search intelligently for phrases or
+    parallels — candidate witnesses for a phrase, piyyut, responsum, letter, or
+    composition — and it returns a ranked list together with the transcription text,
+    library attribution, and image links, so you can review and display the results
+    without leaving the conversation. You can also point other AI engines, including
+    local ones, at the same skill.</p>
+    <p>The skill is available here:
+    <a href="https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research" dir="ltr">github.com/gershuni/GenizahSearch &rarr; skills/cairo-genizah-research</a>.</p>
+    <p>GenizahSearch is also available in ChatGPT, and as an MCP server
+    (<code dir="ltr">https://genizahsearch.com/mcp</code>) for any assistant that supports
+    MCP connectors. All the AI options are listed at
+    <a href="https://genizahsearch.com/ai" dir="ltr">genizahsearch.com/ai</a>.</p>
+
+    <h3>For developers</h3>
+    <p>The same data is available directly over a public HTTP/JSON API:</p>
+    <ul>
+        <li><code dir="ltr">POST /api/search</code> — text search across the corpus.</li>
+        <li><code dir="ltr">GET /api/browse</code> — fetch the transcription, metadata, and image for a manuscript.</li>
+        <li><code dir="ltr">POST /api/parallels</code> — find Genizah manuscripts containing chunks that match a long source text.</li>
+    </ul>
+    <p>The full API is described by an OpenAPI schema at
+    <a href="https://genizahsearch.com/api/openapi.json" dir="ltr">genizahsearch.com/api/openapi.json</a>.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="my-library">My Library — Local Documents</h2>
+    <p>The <b>My Library</b> tab lets you index your own <code>.docx</code>, <code>.pdf</code>, <code>.txt</code>,
+    <code>.html</code>, <code>.xlsx</code>, and <code>.csv</code> files alongside the Genizah corpus.
+    Your personal documents appear inline in Search, Composition Search, and Parallels results with a
+    <code>LOCAL</code> badge and a three-state filter button.</p>
+
+    <h4>What gets indexed</h4>
+    <p>Word documents, PDF files (text-layer PDFs only — scanned PDFs without OCR are skipped), plain text files,
+    HTML files, Excel spreadsheets, and CSV files. The indexer skips other file types.</p>
+
+    <h4>Where data lives</h4>
+    <p><code dir="ltr">%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> on Windows.</p>
+
+    <h4>Indexing large folders</h4>
+    <p>If you add a folder with many files, you'll be warned that indexing may take a long time. At any point
+    you can stop indexing and choose whether to cancel indexing for the files already scanned, keep the partial
+    results, or resume indexing.</p>
+
+    <h4>Adding, removing, and selecting folders and files to search</h4>
+    <p>You can add folders to your local library, remove them, and also choose which of the indexed files are
+    searched — by clicking the checkboxes next to each folder or file.</p>
+
+    <h4>Rebuilding the index</h4>
+    <p>Clicking <b>Refresh</b> rescans all your registered folders, not just the selected one, and looks for new files to index. To rebuild the
+    index from scratch, click <b>Re-index All</b>. If you run into problems, you can click <b>Reset My Library</b>
+    and the index will be deleted entirely. In every case, your original files remain safe.</p>
+
+    <h4>Privacy</h4>
+    <p>Details of your local documents are <b>never</b> uploaded to GenizahSearch's servers. Three boundaries
+    enforce this:</p>
+    <ul>
+        <li>The <code dir="ltr">/api/search</code> endpoint filters out local items defensively.</li>
+        <li>Lists cloud sync never uploads local items: an entry for one of your own documents stays on this computer.</li>
+        <li>Corrections submission rejects local document IDs with a clear error.</li>
+    </ul>
+    <p><b>Note:</b> the indexed text is stored in <code dir="ltr">local_index.sqlite3</code> inside your LOCAL
+    index folder, compressed with <b>zstd</b> (compression, <b>not encryption</b>) — the stored text is cleartext.
+    Use OS-level disk encryption (BitLocker / FileVault) if you need encryption.</p>
+
+    <h4>Pre-selection and post-search filtering</h4>
+    <p>Both regular Search and Composition Search include a button that lets you choose where the search runs:
+    Genizah, Local, or All. You can also use the three-state <b>Filter Local</b> button to show only local files,
+    only Genizah, or all results.</p>
+
+    <h4>Renaming your computer</h4>
+    <p><b>Note:</b> if you change your computer's name, the SQLite cache is invalidated and the next scan
+    re-extracts all files.</p>
+
+    <p><em>The My Library feature was inspired by Yehuda Seewald's GenizahLocal prototype.</em></p>
+    </div>
+
+    <div class="section">
+    <h2 id="export">Exporting Data</h2>
+    <p>At any stage, you can export results for external use:</p>
+    <ul>
+        <li><b>XLSX (Excel) — Research workbook:</b> for Search results, a bilingual research workbook with four sheets (Search Results, Manuscripts, Bibliography, Credits and Info) with clickable image links per row and clickable PGP, Library Viewer, and GenizahSearch URLs per manuscript. When the export includes My Library results, a Local Documents sheet is added for them; an export of My Library results alone has only the Local Documents and Credits and Info sheets. A Composition Search export has its own sheets instead: Report View, Raw Data and Query information, plus Excluded Manuscripts and Local Documents when they apply; one with only My Library results has Local Documents and Query information.</li>
+        <li><b>CSV:</b> Raw data format, suitable for importing into other databases.</li>
+        <li><b>TXT:</b> Simple readable text report.</li>
+        <li><b>DOCX (Word):</b> Microsoft Word document with formatted report.</li>
+    </ul>
+    <p><b>Note:</b> Export applies to selected results (checkboxes). If nothing is selected, the software exports all available results in the table.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="settings">Settings & About</h2>
+    <p>The Settings tab provides configuration options and information about the application.</p>
+
+    <h3>Data & Index</h3>
+    <ul>
+        <li><b>Download Transcriptions (Zenodo):</b> Opens a link to download the latest transcription data from Zenodo.</li>
+        <li><b>Build / Rebuild Index:</b> Creates or updates the search index from the Transcriptions.txt file. Required after downloading new transcriptions. When an index already exists and the disk has room for a second one (about the current index's size plus 1.5 GB), the new index is built beside it: searching keeps working on the current index, and the new one takes over when the build ends. A line at the top of the main window shows the progress and about how long is left. Without that room the index is rebuilt in place, and searching waits until the build ends. A build interrupted by a crash or a shutdown leaves the index you had.</li>
+        <li><b>The rebuild offer:</b> When the index on this computer was built by an earlier version, the program offers a rebuild once after startup, with three answers: <i>Rebuild now</i>, <i>Rebuild when I exit</i> (the build runs after you close the program, in a small window whose Cancel keeps the index you have), and <i>Later</i> (the index stays as it is; rebuild it at any time from here).</li>
+    </ul>
+
+    <h3>Menu</h3>
+    <ul>
+        <li><b>Menu:</b> <i>Tabs at the top</i> (the default) shows the sections as tabs, with the &#9776; menu, Login, the language switch, the website, the Fragment Puzzle, the Joins Lab and Settings beside them. <i>Side menu</i> lists the same things down the side of the window instead. The change applies at once. The &#9776; menu also offers <b>Move the menu to the side</b>; the side menu has its opposite, <b>Move the menu to tabs</b> (also on its right-click menu).</li>
+        <li><b>The side menu:</b> &#9776; at its top shows or hides the labels. On a narrow window it shows icons only (hover for the name), and &#9776; opens the full list.</li>
+        <li><b>The &#9776; menu</b> sits at the edge of the window, before the first tab (on the right in Hebrew, on the left in English). It lists every section, then <b>Go to...</b>, the Fragment Puzzle, the Joins Lab, <b>Help</b>, <b>Keyboard shortcuts</b> and Settings.</li>
+        <li><b>Go to (Ctrl+G or Ctrl+O):</b> type a shelfmark or a system number to open the manuscript in Browse by Shelfmark from anywhere in the window. Hebrew or Arabic words are searched instead, on the Search tab with its current settings. Under the box are the last ten manuscripts you opened: the Down key, then Enter, opens one; typing narrows the list.</li>
+        <li><b>Window size:</b> the window opens where, and as large as, it was when you closed it. The first time it opens maximized.</li>
+        <li><b>Tips:</b> from the second start on, a strip under the top bar shows one tip about a feature that is easy to miss. <b>Show me</b> opens the feature and points at it (for a tip that needs the letter-level index or an account, the button builds the index or opens the login instead), <b>Next tip</b> shows another, and <b>Don't show tips</b> turns them off; <i>Show a tip when the program starts</i> in Settings turns them back on. Each tip is shown once, tips about features you already use are skipped, and closing five tips in a row turns them off.</li>
+        <li><b>Keyboard:</b> <b>Ctrl+1</b> to <b>Ctrl+7</b> open the sections in their order, from Search to My Library, with the cursor in the section's results when Search or Composition Search shows some (a click on their tab or side-menu entry does the same), otherwise in its search box where it has one; <b>Ctrl+R</b> puts the cursor in the results list of the section in front; <b>Ctrl+8</b> opens the Fragment Puzzle and <b>Ctrl+9</b> the Joins Lab. <b>Ctrl+G</b> or <b>Ctrl+O</b> opens Go to, <b>F1</b> opens this Help at the section in front, <b>Ctrl+,</b> opens Settings, <b>Ctrl+/</b> (or &#9000; beside A&minus;) lists the keys, and <b>Ctrl+F</b> or <b>Ctrl+E</b> puts the cursor in the section's own search or find box (the query on Search, the source text on Composition Search, <i>Find</i> on Browse by Shelfmark, or the shelfmark box while no manuscript is open there, the author box on Browse by Identification, the item filter on Personal Lists). When the program starts, the cursor is already in the search box, ready to type. When a search finds results, the cursor moves to the results, unless you put it somewhere else while the search ran, and Ctrl+F or Ctrl+E goes back to the box. In the result lists, <b>Space</b> ticks a result (Search), <b>Enter</b> opens it and <b>Ctrl+Enter</b> or <b>Ctrl+B</b> opens it in Browse by Shelfmark; <b>Ctrl+A</b> ticks them all (Search). <b>Esc</b> stops a running search; in Composition Search, <b>Ctrl+Enter</b> in the source text runs it. In Browse by Shelfmark and the Manuscript Viewer, <b>Ctrl+PgDown</b> / <b>Ctrl+PgUp</b> go to the next / previous image and <b>Ctrl+Shift+Right</b> / <b>Ctrl+Shift+Left</b> to the next / previous manuscript; in the Manuscript Viewer, <b>Ctrl+Right</b> / <b>Ctrl+Left</b> go to the next / previous result, <b>Ctrl+B</b> opens Browse and <b>Ctrl+F</b> the Find box. In a text box, such as <i>Find</i>, Ctrl with the arrows moves the cursor word by word, as usual. <b>Ctrl+/</b> lists them all.</li>
+    </ul>
+
+    <h3>Text size</h3>
+    <ul>
+        <li><b>Text size in result lists:</b> <i>Normal</i>, <i>Large</i>, <i>Larger</i> or <i>Largest</i>, for the text in the Search, Composition Search, Browse by Identification and Personal Lists results; the column headings keep their size. The change applies at once. <b>Ctrl+=</b> and <b>Ctrl+-</b> step it from anywhere in the window, and so do the <b>A&minus;</b> and <b>A+</b> buttons beside the tabs (in the side menu: <b>Smaller text</b> and <b>Larger text</b>); <b>Ctrl+0</b> returns to normal.</li>
+        <li><b>The transcription:</b> the <b>A&minus;</b> and <b>A+</b> buttons beside <b>Find</b>, on the Browse by Shelfmark tab and in the Manuscript Viewer, set one size for both. On the Browse by Shelfmark tab, Ctrl+=, Ctrl+- and Ctrl+0 size the transcription instead of the lists.</li>
+    </ul>
+
+    <h3>Application</h3>
+    <ul>
+        <li><b>Version:</b> Displays the current application version.</li>
+        <li><b>Check for Updates:</b> Checks GitHub for new releases. When a new version is available, a notification bar appears at the top of the window.</li>
+    </ul>
+
+    <h3>About</h3>
+    <p>Contains information about the application, credits, data sources, and citation information. To copy a citation of the application, use the <b>Copy Citation</b> button at the bottom of the main window; to cite a specific manuscript page, use <b>Cite this page</b> on the Browse by Shelfmark toolbar.</p>
+    </div>
+</div>
+<!-- END_LANG_EN -->
+
+<!-- ================= HEBREW CONTENT ================= -->
+
+<!-- START_LANG_HE -->
+<div class="lang-he rtl" dir="rtl" lang="he">
+    <h1>עזרה למשתמש – <bdi dir="ltr">Dicta Genizah Search Pro</bdi></h1>
+    <div class="subtitle">מדריך מקיף לחיפוש, ניתוח ועיון בגניזה הקהירית</div>
+
+    <div class="box nav-box">
+    <h3>תוכן העניינים</h3>
+    <ul>
+        <li><a href="#intro">הקדמה: איך זה עובד?</a></li>
+        <li><a href="#search">לשונית חיפוש</a></li>
+        <li><a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a></li>
+        <li><a href="#position">חיפוש לפי מיקום בשורה/טקסט</a></li>
+        <li><a href="#filters">מקד חיפוש</a></li>
+        <li><a href="#translations">תרגומי קטלוג ומטא-נתונים</a></li>
+        <li><a href="#composition">חיפוש חיבורים</a></li>
+        <li><a href="#browse">עיון לפי מספר מדף</a></li>
+        <li><a href="#catalog-browse">עיון לפי זיהוי</a></li>
+        <li><a href="#pgp">מידע מפרויקט הגניזה של פרינסטון (PGP)</a></li>
+        <li><a href="#reading-desk">שולחן עיון (Reading Desk)</a></li>
+        <li><a href="#puzzle">פאזל קטעים</a></li>
+        <li><a href="#joins-lab">מעבדת צירופים</a></li>
+        <li><a href="#lists">רשימות אישיות</a></li>
+        <li><a href="#community">לשונית קהילה</a></li>
+        <li><a href="#community-publish">פרסום לקהילה</a></li>
+        <li><a href="#lab">מצב מעבדה</a></li>
+        <li><a href="#api">ממשק API וכלי בינה מלאכותית</a></li>
+        <li><a href="#my-library">הספרייה שלי — מסמכים מקומיים</a></li>
+        <li><a href="#export">ייצוא נתונים</a></li>
+        <li><a href="#settings">הגדרות ואודות</a></li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="intro">הקדמה: איך זה עובד?</h2>
+    <p>תוכנת <bdi dir="ltr">Dicta Genizah Search Pro</bdi> מאפשרת גישה מהירה ומתקדמת לקורפוס התעתוקים של פרויקט "מדרש" (<bdi dir="ltr">MiDRASH</bdi>). התוכנה מבוססת על מנוע חיפוש מהיר (<bdi dir="ltr">Tantivy</bdi>) ומשלבת אלגוריתמים ייחודיים לטיפול בשונות הכתיב העברית המאפיינת את כתבי היד של הגניזה.</p>
+    <p>התוכנה פועלת באופן מקומי על המחשב שלכם, אך משתמשת בחיבור אינטרנט כדי למשוך מידע ותמונות מהספרייה הלאומית, מספריית אוקספורד ומספריית האוניברסיטה של קמברידג'. בלי חיבור לאינטרנט היא תעבוד, אך ללא התמונות וללא חלק מהמידע המורחב. שימו לב: אם החיבור שלכם אינו ביתי (כמו נקודה חמה מהטלפון הנייד שלכם) שרתי הספרייה יכולים לחסום אתכם מלקבל מידע.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="search">לשונית חיפוש</h2>
+    <p>זוהי נקודת הכניסה לחיפוש טקסט חופשי או מטא-נתונים בקורפוס.</p>
+
+    <h3>סוגי חיפוש</h3>
+    <ul>
+        <li><b>מדויק:</b> מוצא רק את המילה בדיוק כפי שנכתבה.</li>
+        <li><b>וריאנטים (?):</b> מתחשב בחילופי אותיות נפוצים בטקסטים אלו. לאחר בחירת מצב וריאנטים, בחרו רמה: <b>בסיסי</b> (למשל ד/ר, ה/ח, ו/י), <b>מורחב</b> (מוסיף ק/כ, ט/ת וכו'), או <b>מרבי</b> (הגמישות הרחבה ביותר). רמות גבוהות יותר עלולות להחזיר תוצאות פחות רלוונטיות (רעש) ולקחת יותר זמן. התיבה <b>×1 / ×2 / ×3</b> שליד כפתורי הרמה קובעת כמה אותיות בכל מילה אפשר להחליף; לכל רמה ערך משלה (ברירת מחדל: ×1 בבסיסי, ×2 במורחב ובמרבי).</li>
+        <li><b>פרויקט השו"ת (R):</b> תחביר חיפוש בהשראת פרויקט השו"ת של אוניברסיטת בר-אילן, המציע הן תחביר טקסטואלי עם אופרטורים לתחיליות, סיומות, כתיב מלא/חסר, תווים כלליים ומרווחים, והן ממשק חיפוש טבלאי אינטואיטיבי שבונה את השאילתה עבורכם. ראו <a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a> להלן.</li>
+        <li><b>מקורב:</b> משתמש במרחק לווינשטיין (<bdi dir="ltr">Levenshtein distance</bdi>) למציאת מילים דומות גם אם יש שגיאות פענוח.</li>
+        <li><b>ביטוי רגולרי (<bdi dir="ltr">Regex</bdi>):</b> חיפוש מתקדם למשתמשים מנוסים. לדוגמה, <code><bdi dir="ltr">\bא[א-ת]{3}\b</bdi></code> ימצא מילים בנות 4 אותיות המתחילות ב-א'.</li>
+        <li><b>כותרת:</b> חיפוש בתוך המידע הקטלוגי של הכותרות. דוגמה: חיפוש "משנה תורה" יביא את כל כתבי היד המזוהים כמשנה תורה לרמב"ם.</li>
+        <li><b>מספר מדף:</b> חיפוש מהיר של מספר מדף (למשל: "<bdi dir="ltr">T-S 13.15</bdi>").</li>
+        <li><b>תגיות PGP:</b> עיון לפי נושאים בכתבי יד שקוטלגו על ידי פרויקט הגניזה של פרינסטון (Princeton Geniza Project). התגיות מאורגנות בקטגוריות ומוצגות עם תרגום לעברית. ראו <a href="#pgp">מידע PGP</a> להלן.</li>
+    </ul>
+
+    <h3>אפשרויות נוספות</h3>
+    <ul>
+        <li><b>מרחק:</b> מגדיר כמה מילים יכולות להפריד בין מילות החיפוש. ערך 0 מחייב רצף מדויק. לכל היותר 10 בחיפוש מדויק, וריאנטים ומקורב; בחיפוש בסגנון פרויקט השו"ת ובביטוי רגולרי אין מגבלה.</li>
+        <li><b>בחר הכל:</b> בראש הטבלה ישנה תיבת סימון המאפשרת לבחור את כל התוצאות (או את התוצאות המוצגות כרגע) לצורך ייצוא ממוקד.</li>
+        <li><b>תצוגה מקדימה:</b> לחיצה כפולה על שורה תפתח את חלון <b>צפייה בכתב יד</b> באותו עמוד. לחיצה על לחצן ה"&#128065;" תוביל לאותה תוצאה.</li>
+		<li><b>עיין בכתב יד:</b> לחיצה על לחצן ה"&#128214;" תוביל לפתיחת כתב היד בלשונית עיון לפי מספר מדף. לחצן עיון דומה נמצא גם בחלון צפייה בכתב יד.</li>
+        <li><b>סינון עמודות:</b> לחיצה על כותרות העמודות (מספר מדף, כותרת, קטע) מאפשרת לסנן תוצאות לפי טקסט. סמנו "החרג" כדי להסתיר תוצאות תואמות במקום להציג אותן.</li>
+        <li><b>חיפושים אחרונים ושמורים:</b> החץ שבקצה תיבת השאילתה (או המקש חץ למטה בתוכה) מציג את החיפושים האחרונים; לחיצה על אחד מהם מריצה אותו שוב עם ההגדרות והמסננים שהיו לו. לחיצה על &#9734; ליד חיפוש שומרת אותו: החיפושים השמורים מופיעים ראשונים, תחת <i>חיפושים שמורים</i>, ונשארים עד שתסירו אותם (שוב &#9733;, או &#10005;), ואילו שאר הרשימה שומרת רק את החיפושים האחרונים (<i>מגבלת היסטוריה</i> בהגדרות, 20 כברירת מחדל). <i>ניקוי ההיסטוריה</i> משאיר את השמורים. לחיפוש חיבורים יש אותה רשימה, בתיבת הכותרת שלו.</li>
+    </ul>
+
+    <h3>עצירה והשהיה של חיפוש</h3>
+    <p>בזמן שחיפוש רץ, לחצן <b>חיפוש</b> הופך ל<b>עצור</b>, ולצדו מופיע לחצן השהיה (<b>&#9208;</b>). שניהם יחד תופסים בדיוק את המקום שתפס לחצן החיפוש, כך ששום דבר לא זז מתחת לעכבר כשהחיפוש מתחיל.</p>
+    <ul>
+        <li><b>עצור</b> מסיים את החיפוש ושומר כל תוצאה שכבר נמצאה. כותרת התוצאות מסמנת את הרשימה כ"תוצאות חלקיות", כדי שיהיה ברור שהריצה לא הושלמה.</li>
+        <li><b>&#9208; השהיה</b> משהה את החיפוש בנקודת הביקורת הבאה שלו. מכיוון שהוא ממתין לנקודת ביקורת ואינו נעצר מיידית, הלחצן מציג תחילה <b>&#8987;</b> לרגע; משעה שהחיפוש הושהה בפועל הוא הופך ל<b>&#9654;</b>. רחפו מעל הלחצן לתיאור המצב שבו הוא נמצא.</li>
+        <li><b>&#9654; המשך</b> ממשיך בדיוק מהנקודה שבה החיפוש נעצר &mdash; שום דבר שכבר נסרק אינו נסרק שוב. זמן ההשהיה אינו נספר בזמן שחלף, ובחיפוש חיבורים הוא מוחרג גם מהערכת הזמן שנותר.</li>
+        <li>חיפוש מושהה משחרר את ההגדרה שמונעת מהמחשב לישון, כך שמחשב שנשאר מושהה יכול לישון כרגיל.</li>
+        <li><b>חיפוש מושהה נשמר בזיכרון בלבד.</b> סגירת התוכנה מסיימת אותו &mdash; אין מה להמשיך בהפעלה הבאה.</li>
+    </ul>
+    <p>השהיה זמינה בחיפוש רגיל, בחיפושים של מצב מעבדה ובחיפוש חיבורים. היא אינה מוצעת בשלב הקיבוץ שבסוף סריקת חיבורים, שכרגע אינו ניתן להפסקה נקייה.</p>
+
+    <h3>הגדרות חיפוש (&#9881;)</h3>
+    <p>לחצו על סמל גלגל השיניים לפתיחת הגדרות חיפוש מתקדמות:</p>
+    <ul>
+        <li><b>הגבלת מילים קצרות:</b> מילים עם &le; N תווים יקבלו שינוי תו אחד בלבד במצבי וריאנטים.</li>
+        <li><b>מקסימום שינויים למילה:</b> מספר החלפות התווים המרבי המותר למילה, ערך לכל רמה (ברירת מחדל: ×1 בבסיסי, ×2 במורחב ובמרבי).</li>
+        <li><b>מצב אגרסיבי:</b> מתעלם ממגבלות אורך מילה ביצירת וריאנטים.</li>
+        <li><b>זוגות וריאנטים מותאמים אישית:</b> הגדירו זוגות החלפת אותיות משלכם (למשל: "נו=מ", אחד בכל שורה).</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="responsa">חיפוש בסגנון פרויקט השו"ת</h2>
+    <p>מצב זה מציע שתי דרכי חיפוש ברוח פרויקט השו"ת של אוניברסיטת בר-אילן: האחת בתחביר טקסטואלי עם אופרטורים לתחיליות, סיומות, כתיב מלא/חסר ועוד; והשנייה בצורת חיפוש טבלאי אינטואיטיבי, שבפועל בונה את השאילתה עבורכם.</p>
+
+    <h3>הפעלת המצב</h3>
+    <ul>
+        <li>בחרו <b>פרויקט השו"ת (R)</b> מתפריט מצב החיפוש, או</li>
+        <li>הקלידו <code><bdi dir="ltr">R </bdi></code> (R ואחריו רווח) בתחילת השאילתה</li>
+    </ul>
+
+    <h3>מדריך תחביר</h3>
+    <ul>
+        <li><b><code><bdi dir="ltr">#word</bdi></code></b> — הרחבת תחיליות: מוסיף 24 צורות תחילית עבריות (ו, ה, ב, כ, ל, מ, ש + צירופים). דוגמה: <code>#שלום</code> מוצא ושלום, השלום, בשלום וכו'.</li>
+        <li><b><code><bdi dir="ltr">word#</bdi></code></b> — הרחבת סיומות: מוסיף 25 צורות סיומת עבריות (י, ו, ם, ן, ה, ך, כם, כן וכו'). דוגמה: <code>שלום#</code> מוצא שלומם, שלומו, שלומך וכו'.</li>
+        <li><b><code><bdi dir="ltr">#word#</bdi></code></b> — הרחבת תחיליות וסיומות יחד. דוגמה: <code>#שלום#</code> מוצא את כל 600 הצירופים.</li>
+        <li><b><code><bdi dir="ltr">word*</bdi></code></b> — אותיות כלשהן אחרי המילה, או בלי אותיות. דוגמה: <code>שלום*</code> מוצא שלום, שלומות, שלומנו וכו'.</li>
+        <li><b><code><bdi dir="ltr">wo*rd</bdi></code></b> — אותיות כלשהן בתוך המילה, או בלי אותיות, בכמה כוכביות שתרצו. דוגמה: <code>כ*נים</code> מוצא כהנים, כוהנים, כנים וכו'.</li>
+        <li><b><code><bdi dir="ltr">*word</bdi></code></b> — אותיות כלשהן לפני המילה, או בלי אותיות. דוגמה: <code>*נים</code> מוצא כהנים, בנים, נים וכו'.</li>
+        <li><b><code><bdi dir="ltr">%word</bdi></code></b> — חלופות כתיב מלא/חסר: הוספת/הסרת ו/י. דוגמה: <code>%שלום</code> מוצא שלום, שלם.</li>
+        <li><b><code><bdi dir="ltr">(a/b)</bdi></code></b> — חלופות: מתאים לכל אחת מהאפשרויות. דוגמה: <code>(שלום/שלומות)</code> מתאים לשתיהן.</li>
+        <li><b><code><bdi dir="ltr">[N]</bdi></code></b> — מרווח של N מילים בין מונחים. דוגמה: <code>שלום [3] עולם</code> = עד 3 מילים ביניהם.</li>
+    </ul>
+    <p><b>טיפ:</b> ניתן לשלב סימנים, למשל <code><bdi dir="ltr">#%word*</bdi></code> מפעיל הרחבת תחיליות + חלופות כתיב + תו כללי בסוף.</p>
+    <p><b>מילים שלמות:</b> כל מילה בשאילתה נמצאת כמילה שלמה, גם הראשונה והאחרונה: <code>כהנים גדול</code> אינו מוצא <code>כהנים גדולים</code>. סוגריים בתוך מילה בטקסט אינם מפריעים: <code>שלום</code> מוצא <code>של[ו]ם</code>.</p>
+    <p><b>כוכביות:</b> <code>*</code> מייצגת כל רצף אותיות בתוך מילה אחת, גם רצף ריק &mdash; לעולם לא רווח, ספרה או סימן פיסוק: <code>מאמ* קור*</code> מוצא <code>מאמתי קורין</code>, והאפשרויות <b>וריאנטים</b> ו<b>ערבית-יהודית</b> חלות על האותיות שסביבה. <code>*</code> יכולה לעמוד בכל מקום במילה, ובכמה מקומות שתרצו: <code>*נים *לים</code> מוצא <code>כהנים גדולים</code>, ו-<code>*כהנ*</code> מוצא כל מילה שיש בה <code>כהנ</code>. <code>*</code> לבדה מתאימה לכל מילה: למילה אחת כלשהי השתמשו במרווח, למשל <code>[1]</code>. מילה שיש בה רק אות אחת או שתיים מלבד הכוכבית מתאימה למילים רבות מאוד, ולכן הרשימה עשויה להסתיים ב-"+".</p>
+    <p><b>בין עמודים:</b> נמצאות גם התאמות שמתחילות בעמוד אחד ונמשכות בעמוד שאחריו בכתב היד. כשחיפוש עם <code>*</code> אינו מספיק לבדוק את כולן בזמן סביר, הספירה מסתיימת ב-"+", ושורת התוצאות מציינת מה לא נבדק.</p>
+
+    <h3>אפשרויות משנה</h3>
+    <p>כאשר מצב זה פעיל, מופיעות ארבע תיבות סימון מתחת לשדה החיפוש:</p>
+    <ul>
+        <li><b>וריאנטים:</b> חילופי אותיות (כמו במצב וריאנטים) בכל המילים, גם בצורות המורחבות.</li>
+        <li><b>ערבית-יהודית:</b> כל מילה גם עם תווית היידוע הערבית אל- (8 צורות למילה).</li>
+        <li><b>ריווח גמיש:</b> התעלמות מרווחים שגויים בתוך מילים — שימושי מאוד בגלל ריבוי הרווחים השגויים בקריאה האוטומטית, אך מאט את החיפוש.</li>
+        <li><b>דו-כיווני:</b> המילים נמצאות גם בסדר הפוך.</li>
+    </ul>
+
+    <h3>חיפוש טבלאי</h3>
+    <p>החיפוש הטבלאי מספק ממשק ויזואלי לבניית שאילתות בתחביר השו"ת:</p>
+    <ol>
+        <li>לחצו על כפתור <b>חיפוש טבלאי</b> (גלוי כאשר מצב פרויקט השו"ת פעיל).</li>
+        <li>הוסיפו 2–4 <b>רכיבים</b>, כל אחד מייצג מונח חיפוש או קבוצה.</li>
+        <li>הזינו <b>מילה</b> אחת או יותר לכל רכיב (כמה מילים = חלופות: די באחת מהן).</li>
+        <li>סמנו את <b>אפשרויות המילה</b>: תחילית (#), סיומת (#), תו כללי (*), כתיב מלא/חסר (%), שלילה.</li>
+        <li>הגדירו את ה<b>מרחק</b> (מספר מילים מרבי) בין הרכיבים בתיבות המספרים.</li>
+        <li>צפו ב<b>תצוגה מקדימה חיה</b> המתעדכנת בזמן שאתם משנים את השאילתה.</li>
+        <li>לחצו על <b>חפש</b> כדי ליצור את שאילתת השו"ת ולהפעיל חיפוש.</li>
+    </ol>
+
+    <p><i>הערה:</i> כאשר שאילתה מתרחבת מעבר ל-500 מונחים, המערכת מורידה אוטומטית אפשרויות (וריאנטים, ערבית-יהודית, כתיב וכו') כדי לשמור על מהירות, ומציגה התראה בהתאם.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="position">חיפוש לפי מיקום בשורה/טקסט</h2>
+    <p>השתמשו ב<b>תפריט המיקום</b> ליד שורת החיפוש כדי להגביל את מיקום ההתאמות: תחילת טקסט, סוף טקסט, תחילת שורה או סוף שורה. שימושי במיוחד ל<b>זיהוי צירופים</b> בין קטעים &mdash; אם ידוע כיצד כתב יד מסתיים, חפשו את המילים האלה ב&ldquo;סוף טקסט&rdquo; כדי למצוא המשכים אפשריים.</p>
+    <p>ב<b>מצב פרויקט השו"ת</b>, ניתן להחיל אילוצי מיקום לכל מילה בנפרד באמצעות <code>|_</code> (תחילת שורה) ו-<code>_|</code> (סוף שורה). בשילוב עם תחביר שבירת שורה (<code>|</code>), ניתן לבנות שאילתות מיקום רב-שורתיות &mdash; למשל, למצוא מילים מסוימות בסוף שורה אחת ומילים אחרות בתחילת שורה 4 שורות מאוחר יותר. <b>בונה השאילתות הטבלאי</b> מספק ממשק ויזואלי לבניית שאילתות אלה.</p>
+    <p><i>הערה: תכונה זו דורשת בניית אינדקס מחדש. בנו מחדש מההגדרות כדי להשתמש בה.</i></p>
+    </div>
+
+    <div class="section">
+    <h2 id="filters">מקד חיפוש</h2>
+    <p>לחצו על <b>מקד חיפוש</b> כדי לפתוח את החלון <b>חפש רק ב...</b> ולצמצם את החיפוש לפי מאפייני כתבי היד לפני החיפוש.</p>
+    <h3>מסננים זמינים</h3>
+    <ul>
+        <li><b>כלול</b> / <b>שלילה:</b> בחרו אם הבחירות בתחום הנושא, במחבר ובחיבור שלהלן מצמצמות את החיפוש לכתבי היד התואמים, או מוציאות אותם ממנו</li>
+        <li><b>תחום נושא:</b> סינון לפי סיווג (כגון תנ"ך, תלמוד, שירה); ניתן לבחור בכמה תחומים</li>
+        <li><b>מחבר:</b> סינון לפי מחבר מיוחס; ניתן לבחור בכמה מחברים</li>
+        <li><b>חיבור:</b> סינון לפי שם חיבור; ניתן לבחור בכמה חיבורים</li>
+        <li><b>סוג:</b> סינון לפי סוג חומר: <b>הצג הכל</b>, <b>ללא דפוסים</b> או <b>דפוסים בלבד</b></li>
+        <li><b>טקסט נתוני קטלוג:</b> חיפוש בטקסט התיאורי של הקטלוג עצמו (לא בתעתוק של כתב היד), לפי מילים שתוסיפו תחת <b>כל המילים</b>, <b>כל מילה</b> או <b>ללא מילים אלה</b></li>
+        <li><b>מאפייני כתב היד:</b> חלון של מאפיינים מהקטלוג &mdash; תקופת העתקה, שפה ואות, כתב ואזור, ניקוד, מספר טורים, מספר שורות, מצב פיזי, חומר, תכונות ונתונים ממוחשבים. בכל רשימה אפשר לבחור <b>רק אלה</b> או <b>הכול חוץ מאלה</b>; שורות, מידות וחומר יכולים לבוא מהקטלוג, מהמדידה או מאחד מהם. החלון מראה כמה כתבי יד מתאימים לפני שמחילים אותו. אותו חלון נמצא גם בלשונית עיון לפי זיהוי.</li>
+    </ul>
+    <p>ספירה מתעדכנת של כתבי היד התואמים מוצגת בתחתית החלון בזמן שאתם משנים מסננים, וכפתור <b>ניקוי הכל</b> מאפס אותם. מסננים פעילים מופיעים בחלון זה כ<b>תגיות</b> ניתנות להסרה; לאחר שתלחצו על <b>אישור</b> הם מופיעים כתגיות גם מעל התוצאות, פרט ל<b>דפוסים בלבד</b>. המסננים חלים על כל מצבי החיפוש, אך לא ב<b>מצב מעבדה</b>.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="translations">תרגומי קטלוג ומטא-נתונים</h2>
+    <p>נתוני קטלוג, כותרות ותיאורים מדעיים זמינים גם בעברית וגם באנגלית, באמצעות <a href="https://translate.dicta.org.il/" target="_blank">תרגום דיקטה</a>.</p>
+    <p>הפעילו את מתג <b>הצג תרגומים</b> בהגדרות כדי להציג תיאורים מתורגמים בתוצאות חיפוש, תצוגות עיון ובחלונות הקטלוג. כאשר מופעל, טקסט מתורגם מופיע עם תג <b>מתורגם/מקור</b> לחיץ &mdash; לחצו כדי לעבור בין הטקסט המתורגם למקורי.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="composition">חיפוש חיבורים</h2>
+    <p>כלי זה נועד לחוקרים המעוניינים למצוא מקבילות לטקסט ספרותי שלם (כגון פיוט, פירוש מימי הביניים או חיבור נדיר אחר) בתוך הגניזה, ובכך לאתר עדי נוסח נוספים, ישירים ועקיפים.</p>
+
+    <h3>שתי שיטות חיפוש</h3>
+    <p>חיפוש חיבורים מציע שתי דרכים למצוא מקבילות. הן משלימות זו את זו: אף אחת אינה מחליפה את השנייה, והמתאימה לכם תלויה בטקסט שלפניכם.</p>
+    <ul>
+        <li><b>חיפוש מקטעים</b> הוא השיטה המקורית. הוא משווה גושי מילים, והוא השיטה היחידה המציעה את מצבי מדויק / וריאנטים / מקורב ואת החיפוש חוצה-הפסקאות המתוארים להלן.</li>
+        <li><b>חיפוש ברמת האות</b> משווה רצפי אותיות במקום זאת. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות, אך אינו מציע את הפרמטרים של חיפוש מקטעים — כשבוחרים בו, הפקדים ההם מוסטים הצידה ובמקומם מופיעים פקדי רמת האות.</li>
+    </ul>
+    <p>בבדיקה מדגמית, עלה כי בהגדרות ברירת המחדל מהירות החיפוש ברמת האות גבוהה פי 8 עד פי 22 ממהירות חיפוש המקטעים; אחוז התוצאות הרלוונטיות ב־100 וב־500 התוצאות הראשונות גבוה יותר ב־3 עד 25 נקודות אחוז; וחיפוש המקטעים בגרסתו ה"רועשת" ביותר (מקטעים של 2 מילים) מניב תוצאות אמת שהחיפוש ברמת האות לא השיג — אך רק לאחר 1,500 התוצאות הראשונות, וחלקן קטעים קצרים שאינם כלולים באינדקס של רמת האות כלל.</p>
+    <p>חיפוש ברמת האות פועל על אינדקס הנבנה במחשב הזה מתוך התעתוקים שכבר נמצאים כאן. התוכנה מציעה לבנות אותו פעם אחת, ואפשר לבנות או לבנות מחדש בכל עת מתוך ההגדרות. הבנייה אורכת כעשר דקות, דורשת כ-11 ג'יגה-בייט מקום פנוי בזמן שהיא רצה, ומייצרת אינדקס בגודל כ-3.5 ג'יגה-בייט. ביטול בנייה, או בנייה שנכשלה, משאירים תמיד את האינדקס שכבר היה לכם שלם ופעיל.</p>
+    <p>חיפוש ברמת האות פועל גם על הספרייה המקומית, עם אינדקס משלה, שנבנה מהטקסטים שכבר חולצו מהספרייה המקומית. כשבוחרים חיפוש ברמת האות בהיקף "מקומי" או "הכול" והאינדקס הזה עדיין לא נבנה, התוכנה מציעה לבנות אותו; אפשר גם לבנות או לבנות מחדש בכל עת מתוך ההגדרות. האינדקס אינו מתעדכן מעצמו: אחרי סריקה ששינתה את הספרייה המקומית, תוצג הודעה לבנות אותו מחדש. בשונה מהאינדקס של הגניזה, הוא שומר גם עמודים קצרים, כרטיסי קטלוג וחותמות, כי הסינונים האלה נועדו לצילומי הגניזה ולא למסמכים שלכם. בהיקף "הכול" התוצאות משני האינדקסים מדורגות יחד ברשימה אחת, ואפשר להשתמש בתוצאות מהספרייה המקומית כעדים כמו בכל תוצאה אחרת. חיבורים מצטטים ותנאים (ראו <i>סינון טקסטים</i> בהמשך) פועלים רק בהיקף הגניזה.</p>
+    <p>ברגע שהאינדקס של הגניזה קיים במחשב הזה, חיפוש ברמת האות הוא השיטה שבה נפתחת לשונית חיפוש חיבורים; אם כבר בחרתם שיטה בעצמכם, הבחירה שלכם נשמרת.</p>
+
+    <p>האינדקס של רמת האות לגניזה משמיט חלק מהעמודים במכוון. שלושה סוגים נופלים בבנייתו: עמודים שבתעתוקם פחות מכ־80 אותיות — שורה או שתיים, מעט מדי טקסט לראָיה ברמת האות; כרטיסי קטלוג של מיקרופילם; ועמודי חותמת ספרייה שצולמו לצד כתבי היד. בקורפוס הנוכחי מדובר בכרבע מהעמודים, כמעט כולם קטעי טקסט זעירים. המסקנה המעשית: קטע קטן מאוד יכול להימצא בחיפוש מקטעים, שמחפש בכל עמוד מתועתק, ולא להימצא כלל בחיפוש ברמת האות — עוד סיבה לכך ששתי השיטות משלימות זו את זו.</p>
+
+    <h4>כמה עדי נוסח של יצירה אחת</h4>
+    <p>יצירה שורדת בכתבי יד רבים, ואף עותק אחד שלה אינו מוצא את כל האחרים. אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים — כל אחד נבדק בנפרד, והתוצאות מתמזגות לרשימה אחת. לחצו על <b>עדים</b> לצד פקדי רמת האות כדי לפתוח את הרשימה.</p>
+    <p>יש שלוש דרכים להוסיף עד:</p>
+    <ul>
+        <li><b>הדבקת טקסט</b> — עד אחד בכל פעם.</li>
+        <li><b>טען מקבצים...</b> — בחרו קובץ אחד או יותר. כברירת מחדל כל קובץ שלם הוא עד אחד; סמנו <b>פצל כל קובץ לפי שורות ריקות</b> כדי לחלק כל קובץ גם לפי שורות ריקות. לאחר מכן הודעה מראה כמה עדים נוספו וכמה דולגו כי היו קצרים מדי.</li>
+        <li><b>קידום מתוך התוצאות שלכם</b> — סמנו כתבי יד ברשימת התוצאות ולחצו <i>חפש גם עם אלו</i>. הטקסט נלקח מן העמודים שנמצאו בפועל, לא מרשומת כתב היד.</li>
+    </ul>
+    <p><b>בחיפוש ברמת האות, אל תאחדו כמה עותקים לתיבה אחת.</b> בחיפוש מקטעים האיחוד עובד — כך אכן משתמשים שם בכמה עותקים — אבל חיפוש ברמת האות מקצה תקציב קבוע לכל שאילתה, ולכן האיחוד פוגע בו במידה מדידה: במדידה מול 614 כתבי היד שברשימת ברכת המזון שיש להם טקסט מאונדקס, העותק היחיד הטוב ביותר מוצא 348, ושבעה-עשר עותקים שנבדקו בנפרד ומוזגו מוצאים 455 — ואילו אותם שבעה-עשר, מאוחדים לשאילתה אחת, מוצאים 296, פחות מעותק בודד.</p>
+    <p>ברשימת התוצאות מתווספת עמודת <b>עדים</b> המציינת כמה עותקים שונים מצביעים על כל כתב יד, עם חלונית מידע המונה אותם בשמם, ושני מיונים חדשים: לפי ציון משולב ולפי מספר העדים.</p>
+    <p><b>הרחבה אוטומטית</b> חוזרת על החיפוש כשהתוצאות הטובות ביותר משמשות כעדים חדשים. היא מגיעה רחוק יותר, אבל גם מוסיפה חומר לסריקה בראש הרשימה — ולכן היא לחצן שאתם לוחצים ולא משהו שהחיפוש עושה מעצמו. במצב רמת האות אותו כפתור נקרא <i>הפעל הרחבה אוטומטית</i> ומפעיל את ההרחבה הזו; במצב מקטעים הוא שומר על שמו ועל ההתנהגות שלו, הנכונה למנוע ההוא.</p>
+    <p>חיפוש עם כמה עדים אפשר <b>לעצור</b>, מה שחיפוש יחיד ברמת האות עדיין לא מאפשר: העותק שנבדק כרגע מסיים, וכל מה שנמצא עד כה נשמר. אפשר להחזיק עד 25 עדים בבת אחת.</p>
+
+    <h4>פקדי רמת האות</h4>
+    <ul>
+        <li><b>רוחב התאמה:</b> עד כמה כתב יד רשאי להתרחק מהטקסט שלכם ועדיין להיחשב התאמה. הגדרות רחבות יותר מוצאות עדי נוסח פגומים או שונים; ההתאמות החזקות ביותר תמיד מדורגות ראשונות.</li>
+        <li><b>אורך הקטע:</b> האם קטע משותף קצר נחשב התאמה. "גם קטעים קצרים" מכפיל בערך את כמות החומר שצריך לעבור עליו, ומוצא עדים שההגדרה הרגילה אינה מגיעה אליהם.</li>
+        <li><b>עומק החיפוש:</b> כמה מן הקורפוס החיפוש רשאי לבחון. חיפושים עמוקים אורכים שניות ספורות יותר ומחזירים יותר כתבי יד, כולל עותקים פגומים ומעובדים שמעבר מהיר מפספס. הטקסטים הארוכים מרוויחים מזה הכי הרבה. <b>חיפוש עמוק אינו ניתן להפסקה אחרי שהתחיל</b> — עצירה, Escape וסגירת החלון, כולם ממתינים לסיומו.</li>
+    </ul>
+
+    <h3>פתיחת תוצאה</h3>
+    <p>לחיצה כפולה על תוצאה פותחת את חלון <b>צפייה בכתב יד</b> באותו עמוד, כשהטקסט שנמצא מסומן באדום. לצדו מוצג הטקסט שלכם, והחלק שהתאים מסומן גם בו.</p>
+    <p>בחיפוש ברמת האות שני הצדדים אינם אותן אותיות — זו בדיוק משמעותה של התאמה מקורבת. מה שמסומן בכתב היד הוא מה שיש בכתב היד; מה שמסומן בטקסט שלכם הוא מה שיש בשלכם. כאשר העותק שהניב את ההתאמה לא היה הטקסט שבתיבה — כתב יד שקודם, או עד אחר — הפאנל מציג את הקטע של אותו עד במקום את הטקסט שלכם ללא סימון.</p>
+    <p>רשימת תוצאות של חיפוש חיבורים בנויה מ<i>עמודים</i>, ולכן כמה תוצאות רצופות יכולות להיות של אותו כתב יד. <b>לכתב היד הבא</b> ו<b>לכתב היד הקודם</b> עוברים לתוצאה הקרובה ביותר ששייכת לכתב יד אחר, ומדלגים על שאר עמודי הקטע שאתם קוראים. הלחצנים מופיעים רק כאשר לכתב יד כלשהו ברשימה יש יותר מתוצאה אחת.</p>
+
+    <h3>איך חיפוש מקטעים עובד? (המנגנון)</h3>
+    <p>בניגוד לחיפוש רגיל, המנוע לא מחפש את הטקסט כולו כמקשה אחת. התהליך מתבצע כך:</p>
+    <ol>
+        <li>התוכנה מחלקת את טקסט המקור שהזנתם למקטעים קטנים.</li>
+        <li>כל מקטע נשלח לחיפוש בנפרד במאגר הגניזה.</li>
+        <li>אם מקטע מסוים נמצא בכתב יד, הוא מקבל "ציון".</li>
+        <li>בסוף התהליך, התוכנה <b>מקשרת מחדש</b> את התוצאות: אם כתב יד מכיל הרבה מקטעים שנמצאו, הוא יקבל ציון גבוה ויופיע בראש הרשימה.</li>
+    </ol>
+
+    <h3>פרמטרים חשובים (חיפוש מקטעים)</h3>
+    <ul>
+        <li><b>מקטע:</b> מספר המילים בכל יחידת חיפוש. ערך נמוך יחזיר הרבה תוצאות לא רלוונטיות; ערך גבוה עלול להחמיץ תוצאות אמת.</li>
+        <li><b>תדירות מקס':</b> כלי לסינון ביטויים נפוצים. אם המנוע מגלה שרצף מילים מסוים מופיע פעמים רבות בקורפוס (כמו מטבעות לשון או פסוקים), הוא יסנן אותו לנספח.</li>
+        <li><b>סינון &gt;:</b> אם כותרת מסוימת (למשל "סידור רב סעדיה גאון") מופיעה בתוצאות יותר מ-X פעמים, התוכנה תקבץ את כל התוצאות הללו תחת "קבוצה" אחת בנספח, כדי לא להציף את הרשימה הראשית.</li>
+        <li><b>מיין לפי מספר מדף בלבד:</b> מבטל את הקיבוץ החכם ומציג רשימה שטוחה וממוינת של כל כתבי היד שנמצאו.</li>
+        <li><b>מדויק / וריאנטים / מקורב:</b> מצב החיפוש (ראו מצבי חיפוש לעיל). במצב וריאנטים מופיע לידו מחוון (<i>עוצמת וריאנטים</i>) במקום הכפתורים בסיסי / מורחב / מרבי; הוא קובע כמה חילופי אותיות ייבדקו. מספר השינויים אינו מוצג כאן: חיפוש חיבורים משתמש בערך ×1&ndash;×3 שנקבע לרמה בסיסי בלשונית "חפש" (במקורב תמיד ×2).</li>
+        <li><b>מינ' מקטעים:</b> עמוד יוצג רק אם נמצאו בו לפחות מספר זה של מקטעים שונים תואמים (ברירת מחדל 1; הפעלת מצב מעבדה קובעת 3). הערך חל בחיפוש מלא; בשני מצבי חוצה-הפסקאות חלה במקומו ההגדרה <i>מינימום התאמות חוצות-פסקאות</i> (כפתור גלגל השיניים).</li>
+    </ul>
+
+    <h3>אפשרויות מתקדמות</h3>
+    <ul>
+        <li><b>החרג כתבי יד:</b> מאפשר להזין רשימה של כתבי יד שאתם כבר מכירים ורוצים להסתיר מהתוצאות (יופיעו תחת קטגוריית "מוחרגים").</li>
+        <li><b>סנן טקסטים:</b> תפריט ובו שלוש דרכים להרחיק טקסטים אחרים מהתוצאות. ראו <i>סינון טקסטים</i> בהמשך.</li>
+        <li><b>חיפוש רקורסיבי מלא / חיפוש רקורסיבי בתוצאות:</b> לאחר קבלת תוצאות, כפתור זה יחפש שוב במאגר, הפעם תוך שימוש בטקסטים של כתבי היד שנמצאו כבסיס לחיפוש נוסף. כל עוד לא סימנתם תוצאות הכפתור נקרא <i>חיפוש רקורסיבי מלא</i>; כשסימנתם תוצאות הכפתור נקרא <i>חיפוש רקורסיבי בתוצאות</i> ומחפש רק בהן.</li>
+    </ul>
+
+    <h3>סינון טקסטים</h3>
+    <p>הכפתור <b>סנן טקסטים</b> פותח תפריט ובו שלושה פריטים. העבירו את העכבר מעל פריט כדי לראות דוגמה.</p>
+    <ul>
+        <li><b>מקורות מצוטטים...</b> &mdash; טקסטים שהחיבור שלכם מצטט, כמו פסוקי תנ"ך המצוטטים בתלמוד. תוצאות שתואמות רק את הציטוטים האלה מסומנות כ"מסוננים", וכך רעש זה לא מוצג בין התוצאות העיקריות. המספר שליד הפריט הוא מספר המקורות המצוטטים הפעילים.</li>
+        <li><b>חיבורים מצטטים...</b> &mdash; חיבורים שמצטטים את החיבור שלכם, כמו הרי"ף המצטט את התלמוד. עמוד תוצאה שבו נמצא החיבור המצטט עובר לקבוצה "הוסרו בגלל תנאי", יחד עם הסיבה. <b>טען מספריא...</b> מאפשר לבחור ספר ואחר כך את הקטע שעוסק בטקסט שלכם (למשל רי"ף ברכות 1a-2b). בחרו קטע ולא את כל הספר: ספר שלם ארוך מדי, והוא מצטט הרבה יותר מהקטע שלכם. אפשר גם להדביק טקסט (<b>הוסף טקסט מותאם</b>) או לטעון אותו מקבצים. כל הטקסטים שתוסיפו הם תנאי אחד; בחרו בפריט שוב כדי לשנות אותם.<br>
+        טענו או הדביקו את הקטע כמות שהוא, כולל הציטוטים. עמוד יוסר רק אם יש בו רצף אחד של 40 אותיות לפחות מהחיבור המצטט שאינן גם בטקסט הראשי שלכם (רצפים קצרים יותר אינם מצטרפים זה לזה), וכך כתבי היד של החיבור שלכם עצמו אינם מוסרים רק משום שהחיבור המצטט מצטט אותו.</li>
+        <li><b>הוסף תנאי...</b> &mdash; טקסט שחייב להופיע, למשל כדי להציג רק תוצאות שבתמונה סמוכה (לפניה או אחריה) מופיע טקסט מסוים. עמודים שהוא אינו מופיע בהם עוברים לקבוצה "הוסרו בגלל תנאי". כדי לתת כמה נוסחים של הטקסט, הפרידו ביניהם בשורה ריקה; די שאחד מהם יימצא.</li>
+    </ul>
+    <p>בחיבורים מצטטים ובתנאים בוחרים גם היכן לחפש: באותה תמונה, בתמונה סמוכה, או באותו כתב יד. מה שהגדרתם מופיע מתחת לטקסט הראשי, ושם אפשר לערוך (&#9998;) או להסיר (&#10005;) כל שורה. אפשר להגדיר עד ארבעה.</p>
+    <p>חיבורים מצטטים ותנאים פועלים רק בחיפוש ברמת האות בקורפוס הגניזה. "לא נמצא" פירושו שלא נמצא בעמודים שהאינדקס של רמת האות מכסה (ראו לעיל). כשלא ניתן היה לבדוק עמוד עד הסוף &mdash; החיפוש נעצר או הגיע למגבלה, או שהעמוד לא זוהה &mdash; הוא עובר לקבוצה "לא נבדקו עד הסוף" ואינו נחשב כעומד בתנאי. חלון צפייה בכתב יד מראה, לכל תוצאה, באיזו תמונה נמצא כל טקסט. תוצאות של חיפוש עם תנאים אינן נשמרות בין הפעלות, והרחבה אוטומטית אינה זמינה כשמוגדרים תנאים.</p>
+
+    <h3>הבנת התוצאות</h3>
+    <p>התוצאות מקובצות לפי כתב יד וממוינות לפי ציון (ציון מקסימלי / ציון ממוצע). לחצו על תוצאה כדי להרחיב ולראות את מקטע המקור שלכם לצד הטקסט התואם מכתב היד, עם הדגשת מילים תואמות להשוואה נוחה.</p>
+
+    <h3>חיפוש חוצה-פסקאות</h3>
+    <p>כאשר מחפשים מקבילות לטקסט המכיל מעברי פסקה (למשל: פיוט עם בתים, או טקסט עם חלוקה לסעיפים), ניתן להפעיל <b>חיפוש חוצה-פסקאות</b> כדי למצוא באופן ספציפי כתבי יד ששומרים על טקסט החוצה גבולות אלה.</p>
+
+    <h4>למה זה שימושי?</h4>
+    <ul>
+        <li>טקסט <b>בתוך</b> פסקאות לעתים קרובות מכיל ציטוטים ממקורות אחרים (משנה, תלמוד, ביטויים ידועים) או מקורות שמצטטים את החיבור שאתם מחפשים.</li>
+        <li>טקסט ש<b>חוצה</b> גבולות פסקה הוא בסבירות נמוכה בהרבה ציטוט, מכיוון שציטוטים לעיתים רחוקות חוצים גבולות מבניים.</li>
+        <li>זה מסנן ביעילות את רוב הרעש ועוזר לכם למצוא עדי נוסח אמיתיים.</li>
+    </ul>
+
+    <h4>כיצד להשתמש</h4>
+    <ol>
+        <li>הזינו את הטקסט שלכם עם מעברי פסקה (או הגדירו מפריד מותאם אישית כמו נקודה או נקודתיים).</li>
+        <li>בחרו מצב <b>חיפוש פסקאות</b>:
+            <ul>
+                <li><b>חיפוש מלא</b> – כל התוצאות (ברירת מחדל)</li>
+                <li><b>חוצה-פסקאות בלבד</b> – רק התאמות שחוצות מעברי פסקה</li>
+                <li><b>מלא + העדפת חוצה-פסקאות</b> – כל התוצאות, כשהתאמות חוצות-פסקאות מדורגות גבוה יותר</li>
+            </ul>
+        </li>
+        <li>בחרו <b>מפריד פסקאות</b>: מעבר שורה, שורה ריקה, נקודה (.) או נקודתיים (:).</li>
+        <li>תווית הסטטוס מציגה כמה גבולות זוהו וכמה מקטעים יחצו אותם.</li>
+        <li>תוצאות שחוצות גבולות פסקה מסומנות באינדיקטור &#128279; בעמודת הציון.</li>
+    </ol>
+
+    <h4>הגדרות מתקדמות (&#9881;)</h4>
+    <p>לחצו על כפתור גלגל השיניים (מופיע במצבים שאינם "מלא") כדי להגדיר:</p>
+    <ul>
+        <li><b>תוספת חוצה-פסקאות:</b> מכפיל ציון להתאמות חוצות-גבול (1.0–3.0).</li>
+        <li><b>מינימום התאמות חוצות-פסקאות:</b> סינון תוצאות עם פחות התאמות חוצות-גבול.</li>
+        <li><b>מינימום מילים בין מפרידים:</b> התעלמות ממפרידים קרובים מדי.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="browse">עיון לפי מספר מדף</h2>
+    <p>לשונית זו מאפשרת קריאה רציפה ונוחה של כתב יד שלם, עם סנכרון לתמונות המקור.</p>
+    <ul>
+        <li><b>טעינה:</b> הזינו מספר מערכת, מספר מדף או מזהה FL. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS NS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S NS 13.15</bdi></code>). השלמה אוטומטית זמינה למספרי מדף.</li>
+        <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
+        <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&#9654;</span> <span style="border:1px solid #ccc; padding:0 4px;">&#9664;</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
+        <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצגות התמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג'/אוקספורד במקרים נתמכים). השתמשו ב-&#128444;&#65039; כדי להציג/להסתיר את פאנל התמונות.</li>
+        <li><b>הכל:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה ולשמירה כקובץ טקסט.</li>
+        <li><b>חיפוש בטקסט:</b> הקלידו בשדה החיפוש כדי להדגיש טקסט תואם בזמן אמת בתוך כתב היד הנוכחי.</li>
+        <li><b>מקבילות:</b> שולח את טקסט העמוד הנוכחי ללשונית חיפוש חיבורים לאיתור מקבילות בכל הקורפוס.</li>
+        <li><b>עיין בכתיב:</b> פותח את כתב היד בקטלוג המקוון של הספרייה הלאומית.</li>
+        <li><b>מידע PGP:</b> אם קיים מידע מפרויקט הגניזה של פרינסטון, יוצג פאנל מידע עם תעתוקים, תיאור, תגיות ותיארוך.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="catalog-browse">עיון לפי זיהוי</h2>
+    <p>עיון בקטלוג המדעי לפי סיווג תחום, מחבר או כותרת יצירה.</p>
+    <ul>
+        <li><b>היררכיית תחומים:</b> הפאנל הימני מציג את עץ התחומים (למשל: מקרא &gt; תורה &gt; בראשית). לחצו על תחום כדי לראות את כל כתבי היד המסווגים תחתיו. המספרים מראים כמה כתבי יד שייכים לכל קטגוריה.</li>
+        <li><b>סינון לפי מחבר ויצירה:</b> השתמשו בתפריטי החיפוש לסינון לפי שם מחבר או כותרת יצירה. המסננים משתלבים — בחירת תחום ומחבר מציגה רק כתבי יד התואמים לשניהם.</li>
+        <li><b>מאפייני כתב היד:</b> הצגת כתבי היד לפי תקופת העתקה, כתב, אזור, שורות, חומר ושאר המאפיינים (ראו מקד חיפוש למעלה). הרשימה כוללת את כל 255,723 כתבי היד: תחילה אלה שיש להם רשומה בקטלוג, ואחריהם אלה שאין להם, ובעץ התחומים יש פריט "אין רשומה בקטלוג".</li>
+        <li><b>סינון טקסט:</b> הקלידו מילות מפתח לחיפוש בכותרות, תיאורים ושמות תחומים. בחרו כל (כל המונחים חייבים להתאים), אחד מ- (כל מונח מתאים), או ללא (הוצאת תוצאות תואמות). הוסיפו מספר מונחים כצ׳יפים צבעוניים.</li>
+        <li><b>תעתיקים וספרייה:</b> <i>סנן PGP</i> ו<i>סנן לפי תעתיק מדעי</i> עוברים בין הכול, יש ואין; <i>סינון לפי ספרייה</i> מציג או מסתיר ספריות.</li>
+        <li><b>צ׳יפים של מסננים:</b> מסננים פעילים מופיעים כצ׳יפים ניתנים להסרה מעל התוצאות.</li>
+        <li><b>חפש בתוצאות אלה</b> / <b>חפש מקבילות בתוצאות אלה</b> מריצים חיפוש המוגבל לרשימה הנוכחית; <b>ניקוי הכל</b> מנקה את המסננים.</li>
+        <li><b>דפדוף:</b> התוצאות מוצגות 50 בעמוד עם פקדי ניווט.</li>
+        <li><b>קישורים צולבים:</b> תוויות תחום ומחבר בלשונית עיון לפי מספר מדף מקשרות ישירות לכאן עם המסנן המתאים.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="pgp">מידע מפרויקט הגניזה של פרינסטון (PGP)</h2>
+    <p>המערכת משלבת נתונים מפרויקט הגניזה של פרינסטון (Princeton Geniza Project) — מאגר מחקרי הכולל כ-36,000 מסמכים מקוטלגים עם תעתוקים, תרגומים, תיאורים ותיוג נושאי מפורט.</p>
+
+    <h3>תג PGP בתוצאות חיפוש</h3>
+    <p>כתבי יד שקיים עליהם מידע מפרויקט הגניזה של פרינסטון מסומנים בתג ירוק "PGP" בתוצאות החיפוש, כך שתוכלו לזהות במהירות כתבי יד עם תעתוקים ומידע מחקרי נוסף.</p>
+
+    <h3>מידע PGP בלשונית עיון לפי מספר מדף</h3>
+    <p>כאשר לכתב יד קיים מידע מפרויקט הגניזה של פרינסטון, מוצג פאנל מידע הכולל:</p>
+    <ul>
+        <li><b>סוג מסמך</b> (למשל: מכתב)</li>
+        <li><b>תגיות</b> — לחיצה על תגית מעבירה לחיפוש כל כתבי היד באותו נושא</li>
+        <li><b>תיאור</b> מחקרי באנגלית (עם אפשרות תרגום)</li>
+        <li><b>תאריך</b></li>
+        <li><b>צפה ב-PGP</b> — קישור למסמך המקורי באתר פרינסטון</li>
+    </ul>
+
+    <h3>תעתוקים ותרגומים</h3>
+    <p>כשקיימים תעתוקים או תרגומים של חוקרים מפרויקט הגניזה של פרינסטון, הם זמינים בבורר הגרסאות לצד התעתוק האוטומטי. המערכת מעדיפה אוטומטית תעתוק PGP (אם קיים) על פני הקריאה האוטומטית.</p>
+
+    <h3>חיפוש לפי תגיות</h3>
+    <p>בחרו מצב <b>תגיות PGP</b> מתפריט מצבי החיפוש כדי לעיין בכתבי יד לפי נושא. התגיות מאורגנות בקטגוריות (סוגי מסמכים, הלכה וחברה, רפואה ומחלה, מסחר ונסיעות ועוד) ומוצגות בתפריט נפתח עם תרגום לעברית.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="reading-desk">שולחן עיון (Reading Desk)</h2>
+    <p>תצוגה מקבילה המאפשרת עיון במספר כתבי יד זה לצד זה, עם תמונות מסונכרנות ובורר גרסאות לכל קטע בנפרד.</p>
+    <p>שולחן העיון שימושי לכל חוקר המעוניין לצפות בכמה מספרי מדף יחד — בין אם מדובר בקטעים המצטרפים למסמך אחד (על פי PGP או צירופים אחרים) ובין אם בכל אוסף כתבי יד שברצונכם לעיין בהם ברצף.</p>
+    <h3>כיצד להשתמש</h3>
+    <ul>
+        <li>לחצו על כפתור <b>הוסף לתצוגה</b> (סמל העין) בלשונית עיון לפי מספר מדף</li>
+        <li>הוסיפו כתבי יד נוספים מתוצאות חיפוש או מעיון בכתבי יד אחרים</li>
+        <li>בסרגל שולחן העיון הקלידו מספר מדף ולחצו <b>הוסף לשולחן</b>, או לחצו <b>הוסף מרשימה</b> כדי לפתוח את הרשימות האישיות, ולחצו על פריט כדי להוסיף אותו.</li>
+        <li>מתפריט הצירופים של כפתור &#128279; בלשונית עיון לפי מספר מדף, <b>פתח בשולחן העיון</b> טוען בבת אחת את כל הקטעים המצורפים.</li>
+        <li>כל קטע מוצג עם תמונת המקור, בורר גרסאות (כולל תעתוקי PGP אם קיימים), ומידע מורחב</li>
+        <li>לסיום לחצו <b>צא משולחן העיון</b></li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="puzzle">פאזל קטעים</h2>
+    <p>קנבס חזותי לסידור תמונות קטעי כתבי יד זה לצד זה, לשחזור צירופים פיזיים בין קטעי גניזה.</p>
+
+    <h3>הוספת קטעים</h3>
+    <ul>
+        <li>הקלידו מספר מדף בתיבת הקלט ולחצו Enter או על כפתור ההוספה</li>
+        <li>מרשימה אישית: לחצו על כפתור <b>הוסף מרשימה אישית</b> (&#128203;), בחרו רשימה בחלון שנפתח, ואז בחרו את הקטעים להוספה</li>
+        <li>מצירופים ידועים: כשקיימים צירופי PGP או פרידברג לקטע מסוים, לחצו על כפתור הצירופים כדי לטעון את כל הקטעים הקשורים בבת אחת</li>
+    </ul>
+
+    <h3>פקדי הקנבס</h3>
+    <ul>
+        <li><b>זום:</b> גלילה להגדלה/הקטנה; לחיצה כפולה לאיפוס התצוגה</li>
+        <li><b>סיבוב:</b> בחרו קטע והשתמשו בפקדי הסיבוב (או במקשי החצים) לכוונון עדין של הזווית</li>
+        <li><b>הסרת רקע:</b> כוונו את מחוון הסף להסרת רקע הקלף/נייר מתמונות הקטעים, לבידוד הטקסט</li>
+        <li><b>מצבי רקע:</b> מעבר בין רקעי קנבס (אפור כהה, שחור, לבן, משבצות, שולחן אור, רשת) למציאת הניגודיות האופטימלית</li>
+        <li><b>חיתוך:</b> חיתוך שוליים ריקים מתמונת קטע</li>
+        <li><b>היפוך:</b> שיקוף קטע אופקית או אנכית</li>
+        <li><b>ניווט בדפים:</b> השתמשו בפקדי עמוד קודם/הבא למעבר בין רקטו וורסו, או לניווט לדפים אחרים של אותו כתב יד</li>
+    </ul>
+
+    <h3>שכבות</h3>
+    <ul>
+        <li><b>הבא קדימה / העבר אחורה:</b> כשקטעים חופפים, השתמשו בפקדים אלה לשינוי סדר השכבות כדי למקם קטעים מעל או מתחת לאחרים</li>
+    </ul>
+
+    <h3>בורר קטעים</h3>
+    <p>השתמשו בתיבת הבחירה מעל הקנבס לבחירת קטע טעון. כפתור <b>עיין</b> פותח את הקטע בלשונית עיון לפי מספר מדף.</p>
+
+    <h3>שמירה וטעינה</h3>
+    <ul>
+        <li>לחצו על כפתור <b>שמירה</b> לשמירת הסידור הנוכחי כמסמך צירוף עם כותרת והערות</li>
+        <li>לאחר השמירה הראשונה, שינויים נשמרים אוטומטית בכל הזזה, סיבוב או שינוי גודל</li>
+        <li>לחצו על כפתור <b>פתיחה</b> לעיון בצירופים שמורים; כל רשומה מציגה תמונה ממוזערת</li>
+        <li>בחרו צירוף שמור כדי לטעון אותו חזרה לקנבס</li>
+    </ul>
+
+    <h3>ייצוא</h3>
+    <ul>
+        <li>לחצו על כפתור <b>ייצוא</b> ליצירת תמונת PNG מורכבת של כל הקטעים כפי שסודרו על הקנבס</li>
+        <li>בחרו מבין מספר רמות רזולוציה: <b>טיוטה</b>, <b>רגילה</b> או <b>רזולוציה מלאה</b></li>
+        <li>התמונה המיוצאת כוללת באנר מטא-נתונים עם רשימת מספרי המדף של כל הקטעים</li>
+    </ul>
+
+    <h3>רקטו / ורסו</h3>
+    <p>כפתור <b>⇄</b> (הפוך את כל הקטעים) משקף את כל סידור הקנבס ומנווט כל קטע לצד ורסו (או רקטו), כדי שתוכלו לבחון את הצד ההפוך של צירוף משוחזר.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="joins-lab">מעבדת צירופים</h2>
+    <p><b>מעבדת הצירופים</b> היא סביבת עבודה ייעודית לאיתור <b>צירופים פיזיים</b> — קטעים שהיו בעבר חלק מאותו
+    דף או כרך, וכיום מפוזרים בין אוספים שונים. אתם מקבעים קטע אחד כ<b>עוגן</b>, ואז מחפשים קטעים מועמדים
+    וממיינים אותם מולו, זה לצד זה.</p>
+
+    <h4>כיצד לפתוח את מעבדת הצירופים</h4>
+    <ul>
+        <li>כפתור <b>מעבדת צירופים</b> בראש החלון, או <b>מעבדת צירופים</b> בתפריט &#9776; (בתפריט הצד, כשהתפריט בצד).</li>
+        <li>כפתור <b>מצא צירופים</b> בלשונית <b>עיון לפי מספר מדף</b>.</li>
+        <li>מכל תוצאת חיפוש או עמוד עיון — פעולה הפותחת את המעבדה כשהיא מעוגנת על אותו עמוד.</li>
+    </ul>
+    <p>החלון אינו מודאלי: הוא נשאר פתוח לצד החלון הראשי, ותוכלו לעגן אותו מחדש על קטע חדש בכל עת בלי
+    לסגור אותו.</p>
+
+    <h4>העוגן (פאנל ימני)</h4>
+    <p>הקטע המקובע — סימן המדף שלו, מטא-נתונים תמציתיים, ותמונת העמוד. השתמשו בחצי הדפדוף כדי לעבור בין
+    תמונות העוגן, והגדילו כדי לבחון את הכתב. <b>צירופים ידועים</b> לעוגן (ששמרתם אתם או הקהילה) מופיעים
+    בקטע מתקפל.</p>
+
+    <h4>בניית שאילתה (פאנל שמאלי)</h4>
+    <p>בנו שאילתה שורה-אחר-שורה המתארת את הטקסט שאתם מצפים למצוא בקטע המצורף:</p>
+    <ul>
+        <li><b>מצב</b> — <b>פרויקט השו"ת</b> (בונה השורות המובנה המתואר כאן) או <b>מדויק</b> / <b>וריאנטים</b> / <b>מקורב</b> / <b>ביטוי רגולרי</b> (שאילתת טקסט חופשי אחת, כמו בחיפוש הראשי).</li>
+        <li><b>+ הוסף שורה</b> — הוסיפו שורת כתב יד נוספת, וקבעו כמה שורות לדלג לפניה (0 = השורה הבאה מיד).</li>
+        <li><b>+ או</b> — הוסיפו מילה חלופית שעשויה להופיע במקומה באותה שורה.</li>
+        <li><b>אפשרויות שורה (⚙)</b> — שינויים לכל שורה: שלילה (−), כתיב מלא/חסר (%),
+        תחיליות (<code dir="ltr">#_</code>), סיומות (<code dir="ltr">_#</code>), תווים כלליים (<code dir="ltr">*</code>),
+        ועוגני מיקום "⊢ מתחיל שורה" / "⊣ מסיים שורה".</li>
+        <li><b>אפשרויות חיפוש</b> — מתגים גלובליים: <i>וריאנטים</i>, <i>ערבית-יהודית</i>, <i>ריווח גמיש</i> ו<i>דו-כיווני</i>.</li>
+        <li><b>מיקום</b> — הגבילו שורה לתחילת טקסט העמוד או לסופו.</li>
+        <li><b>הצד השני של הדף (p ±1)</b> — דרשו או כללו גם טקסט בעמוד שמנגד;
+        <b>צמצום</b> משאיר רק מועמדים שגם העמוד הסמוך שלהם תואם, <b>הרחבה</b> מוסיפה עמודים סמוכים כמועמדים נוספים.</li>
+        <li><b>דמיון חזותי</b> — הציגו רק קטעים הדומים חזותית, אפשר בשילוב עם שאילתת טקסט.</li>
+    </ul>
+    <p class="box"><span class="highlight">⚠ על אודות הדמיון החזותי:</span> מאגר הדמיון החזותי מכסה כיום רק
+    כמחצית מן הגניזה, והאלגוריתם אינו חד-משמעי — ולכן הוא עלול להחמיץ התאמות אמיתיות.
+    <b>אין להסיק שקטע שאינו מופיע בתוצאות הדמיון החזותי אינו צירוף.</b> השתמשו בדמיון החזותי כדי להעלות
+    מועמדים, ולעולם לא כדי לפסול קטע.</p>
+    <p>לחצו <b>מצא מועמדים</b> כדי להריץ את השאילתה.</p>
+
+    <h4>מיון מועמדים</h4>
+    <p>המועמדים מופיעים ככרטיסים עם תמונה ומטא-נתונים. עבור כל אחד תוכלו:</p>
+    <ul>
+        <li>לסמן <b>כן</b> / <b>אולי</b> / <b>לא</b> למיון, ואחר כך לסנן את הרשימה לפי מצב המיון.</li>
+        <li><b>עיין</b> — פתחו את המועמד בתצוגת העיון.</li>
+        <li><b>השווה</b> — הציגו אותו זה לצד זה עם העוגן.</li>
+        <li><b>עגן מחדש</b> — הפכו את המועמד לעוגן החדש והמשיכו לחפש ממנו.</li>
+        <li><b>הוסף כצירוף</b> — תעדו צירוף מאושר בין המועמד לעוגן.</li>
+        <li><b>הוסף לפאזל</b> — שלחו את המועמד, יחד עם העוגן, אל פאזל הקטעים להרכבה חזותית.</li>
+        <li><b>הוסף לרשימה</b> — שמרו אותו לאחת הרשימות שלכם.</li>
+    </ul>
+    <p><b>עיין בתוצאות</b> (כפתור <b>◀ עיין בתוצאות</b> בסרגל התוצאות) פותח חלון השוואה העובר על המועמדים
+    המסוננים <b>אחד-אחד</b>, כל אחד מוצג זה לצד זה עם העוגן — הדרך המהירה ביותר לסקור רשימת מועמדים ארוכה.
+    אם נבחר מועמד יחיד, החלון נפתח עליו; אחרת הוא מתחיל מן התוצאה הראשונה. זאת בנוסף לפעולת <b>השווה</b>
+    שבכל כרטיס, הפותחת מועמד יחיד מול העוגן.</p>
+    <p>הערת <b>⚠ אי-התאמת גודל</b> מסמנת מועמדים שמידותיהם הפיזיות שונות מאלו של העוגן, כדי שתוכלו לזהות
+    במהירות צירופים בלתי-סבירים. השתמשו ב<b>סנן ▾</b> לצמצום המועמדים לפי סימן מדף, טקסט או כותרת, לפי
+    ספרייה ותחום, לפי מצב מיון, או לפי <b>מאפייני כתב היד</b> (אותו חלון כמו בעיון לפי זיהוי: חומר, מידות,
+    כתב, תקופה ועוד, נבדקים לפי כתב היד); <b>התאם חומר</b> ו<b>רוחב ±2 ס"מ מהעוגן</b> ממלאים את המאפיינים לפי
+    העוגן. עברו ל<b>תצוגת טבלה</b> קומפקטית כשיש הרבה תוצאות. <b>⬇ ייצוא XLSX</b> מייצא את
+    המועמדים המסומנים (או את כל המוצגים, אם לא סומן אף אחד) לחוברת Excel. <b>נקה הכל</b> מאפס את העוגן,
+    השאילתה, המועמדים ומצב המיון, ומנקה את מסנני הטקסט, מאפייני כתב היד והמיון.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="lists">רשימות אישיות</h2>
+    <p>לשונית <b>רשימות אישיות</b> מאפשרת לכם לנהל רשימות משלכם של כתבי יד ומסמכים מהספרייה המקומית, לקבץ
+    אותן בפרויקטים, להוסיף הערות ותגיות, ולסנכרן אותן עם החשבון שלכם באתר <bdi dir="ltr">genizahsearch.com</bdi>.</p>
+
+    <h3>רשימות ופרויקטים</h3>
+    <ul>
+        <li>לחצו על <b>הוסף רשימה...</b> (או על כפתור <b>+</b> מעל עץ הרשימות) כדי ליצור רשימה חדשה, ועל
+        <b>הוסף פרויקט...</b> כדי ליצור תיקייה שמקבצת כמה רשימות יחד.</li>
+        <li>השתמשו בכפתורים &#9999;&#65039; <b>ערוך רשימה</b> ו-&#128465;&#65039; <b>מחק רשימה</b> מעל טבלת הפריטים
+        כדי לשנות את שם הרשימה המוצגת או למחוק אותה (הם אינם פועלים על רשימת ברירת המחדל ועל <b>נצפו לאחרונה</b>);
+        רשימה שנמחקה עוברת ל<b>סל אשפה</b>, שממנו תוכלו לשחזר אותה או למחוק אותה לצמיתות.</li>
+        <li><b>שכפל רשימה</b> יוצר עותק של הרשימה הנוכחית; <b>מזג רשימות</b> ממזג אותה לתוך רשימה אחרת שתבחרו.</li>
+        <li><b>תקן כפילויות</b> מאתר רשימות שיש להן אותו שם (למשל עותקים שנוצרו עקב בעיית סנכרון) וממזג כל קבוצה
+        כזו לרשימה אחת, ושואל איזו מהן לשמור כשהן שייכות לפרויקטים שונים.</li>
+        <li>תמיד קיימות רשימת ברירת מחדל, ששמה בהתחלה <b>כללי</b>, ורשימת <b>נצפו לאחרונה</b>. את רשימת ברירת המחדל
+        אי אפשר למחוק; כדי לשנות את שמה, לחצו עליה לחיצה ימנית בעץ הרשימות ובחרו <b>שנה שם רשימה</b>.
+        רשימת <b>נצפו לאחרונה</b> מתמלאת אוטומטית ככל שאתם צופים בכתבי יד; אי אפשר לשנות את שמה או למחוק אותה,
+        והיא אינה מסתנכרנת לענן.</li>
+    </ul>
+
+    <h3>הוספה וניהול של פריטים</h3>
+    <p>פריטים מתווספים באמצעות כפתור <b>&#9734; רשימה</b> (<b>הוסף לרשימה</b>) בחיפוש, בחיפוש חיבורים ובלשונית
+    עיון לפי מספר מדף — או בסמל &#9734; שבכל שורה בתוצאות החיפוש — וכן ממועמדים במעבדת הצירופים.</p>
+    <ul>
+        <li>השתמשו בתיבת <b>סנן פריטים...</b> ובתפריט <b>מיון לפי</b> (מספר מדף, כותרת או תאריך הוספה) כדי
+        למצוא פריטים ברשימה ארוכה.</li>
+        <li>סמנו פריטים באמצעות <b>בחר הכל</b> או אחד-אחד, ואז השתמשו ב<b>העבר לרשימה...</b>,
+        <b>הוסף תגית...</b> או <b>הסר נבחרים</b> על כל מה שסומן.</li>
+        <li>לכל שורה יש גם כפתורים משלה: &#128065;&#65039; <b>מבט מהיר</b> פותח תצוגה מהירה של העמוד
+        (בכתבי יד מהגניזה בלבד; אי אפשר לפתוח כך מסמך מקומי מהספרייה שלי),
+        &#128214; <b>עיין</b> פותח את כתב היד בלשונית עיון לפי מספר מדף, &#128203; <b>העתק מידע</b> מעתיק את פרטיו
+        (<b>צמצם</b>, <b>מפורט</b> או <b>עם קישור</b>) ללוח ההעתקה, &#129513; <b>הוסף לפאזל</b> שולח אותו ללוח
+        הפאזל, ו-&#128465;&#65039; <b>הסר מרשימה</b> מסיר אותו מהרשימה הנוכחית בלבד.</li>
+    </ul>
+
+    <h3>פרטי הפריט ותצוגה מקדימה</h3>
+    <p>בחירת פריט מציגה את <b>פרטי הפריט</b>: <b>ספרייה</b>, <b>מספר מדף</b>, <b>תמונה</b>, <b>כותרת</b>,
+    <b>רשימות</b>, <b>מספר מערכת</b> ו<b>תגיות</b>, לצד תצוגה מקדימה של הטקסט והתמונה של העמוד. התצוגה המקדימה
+    מיועדת לכתבי יד מהגניזה: מסמך מקומי מהספרייה שלי אינו מוצג בה. הקלידו בשדה <b>הערה</b>
+    ולחצו על <b>שמור שינויים</b> כדי לשמור אותה; את חלונית התצוגה המקדימה אפשר לכווץ בכפתור &#9664;/&#9654;
+    שבראשה.</p>
+
+    <h3>ייצוא וייבוא</h3>
+    <ul>
+        <li><b>ייצוא רשימה...</b> שומר את הרשימה המוצגת כ<b>טקסט (רגיל)</b>, <b>JSON</b>, <b>אקסל (<bdi dir="ltr">.xlsx</bdi>)</b>
+        או <b>וורד (<bdi dir="ltr">.docx</bdi>)</b>.</li>
+        <li><b>ייבוא רשימה...</b> טוען רשימה בחזרה מקובץ JSON, ומדווח כמה פריטים נוספו וכמה מהם לא זוהו.</li>
+    </ul>
+
+    <h3>סנכרון עם החשבון שלכם</h3>
+    <p>כפתור <b>סנכרן רשימות עכשיו</b> פעיל רק כשאתם מחוברים לחשבון שלכם באתר
+    <bdi dir="ltr">genizahsearch.com</bdi>; לאחר ההתחברות, כל שינוי שתעשו מועלה אוטומטית.</p>
+    <ul>
+        <li>לחיצה על <b>סנכרן רשימות עכשיו</b> מציעה <b>הורד מהענן</b>, <b>העלה לענן</b>, <b>מזג את שתיהן</b>
+        (שילוב של מה שיש במחשב הזה עם מה שיש בחשבון שלכם) או <b>דלג</b>; כל אחת משלוש האפשרויות הראשונות מוצגת
+        רק כשיש רשימות שהיא יכולה לפעול עליהן.</li>
+        <li>כשאותה הערה נערכה בשני הצדדים, <b>מזג את שתיהן</b> שומר את שתי הגרסאות, כשביניהן שורה מפרידה; העלאה
+        בלבד משאירה הערה שונה בחשבון שלכם כפי שהיא.</li>
+        <li>אם פריט הוסר מאחת הרשימות שלכם באתר, תתבקשו לבחור עבור כל פריט כזה: <b>להסיר גם מהמחשב הזה</b>,
+        <b>להשאיר (ולהוסיף שוב לאתר)</b> או <b>להחליט אחר כך</b>.</li>
+        <li>פריטים מהספרייה המקומית (ראו <a href="#my-library">הספרייה שלי — מסמכים מקומיים</a>) לעולם אינם
+        מועלים, גם כשהם נמצאים ברשימה ששאר פריטיה מסתנכרנים.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="community">לשונית קהילה</h2>
+    <p>לשונית <b>קהילה</b> מרכזת את מה שחוקרים שיתפו: תגליות ושאלות, תיקוני תעתיק, הערות על עמודים, והצעות לצירופי קטעים — כל אחד בפאנל משלו, עם רשימה מהירה וגם חלון מלא יותר לעיון נרחב.</p>
+
+    <h3>התחברות</h3>
+    <p>טעינת מה שאחרים שיתפו דורשת חיבור לאינטרנט, אך לא חשבון; בלי חיבור, כל רשימה מהירה מציגה את מה שנטען בה בפעם הקודמת (בהערות — תחילת הטקסט של כל הערה). כדי לתרום, או כדי לראות את הפריטים שלכם, התחברו.</p>
+    <ul>
+        <li>לחצו על <b>התחבר</b>, לצד שורת הלשוניות בראש החלון (בתחתית תפריט הצד, כשהתפריט בצד), כדי להתחבר, או על <b>הרשמה</b> שבכותרת לשונית קהילה עצמה כדי ליצור חשבון.</li>
+        <li>לאחר ההתחברות הכפתור <b>התחבר</b> מציג את שמכם. לחצו עליו ובחרו <b>סנכרן רשימות עכשיו</b> או <b>התנתקות</b>.</li>
+        <li>לאחר ההתחברות הכותרת מציגה <b>מחובר כ</b> שם המשתמש שלכם ואת ציון ה<b>מוניטין</b> שלכם; כשאינכם מחוברים היא מציגה <b>לא מחובר - התחבר כדי להשתתף בקהילה</b>.</li>
+    </ul>
+
+    <h3>תגליות</h3>
+    <p>שתפו משהו ששמתם לב אליו בכתב יד, שאלו שאלה, הכריזו על זיהוי, או השאירו הערה כללית — וקראו מה שחוקרים אחרים שיתפו.</p>
+    <ul>
+        <li>לחצו על <b>+</b> כדי לשתף: בחרו <b>סוג</b> (<b>תגלית - מצאתי משהו מעניין</b>, <b>שאלה - צריך עזרה</b>, <b>זיהוי - זיהיתי טקסט</b>, או <b>הערה - תצפית כללית</b>), מלאו <b>כותרת</b> ו<b>תיאור</b>, צרפו אם תרצו מספר מדף אחד או יותר, וסמנו <b>פרסם באופן אנונימי</b> כדי להסתיר את שמכם.</li>
+        <li>סננו את הרשימה המהירה לפי סוג, או לחצו על <b>צפה בכל התגליות...</b> כדי לפתוח את <b>מרכז התגליות</b>, שמוסיף סטטיסטיקות פעילות ומסנני <b>סוג</b> ו<b>תקופה</b> המקיפים גם תיקונים, הערות, צירופים וצירופי פאזל.</li>
+        <li>לחצו פעמיים על פריט, או בחרו <b>הצג פרטים</b> בתפריט הלחיצה הימנית שלו, כדי לקרוא אותו, להצביע עליו בלחיצה על <b>הצבע בעד</b> או <b>הצבע נגד</b>, ולהוסיף תגובה; בשאלה, מי שפרסם אותה (או מנהל) יכול גם ללחוץ על <b>סמן כנענה</b>.</li>
+        <li>לחצו לחיצה ימנית על תגלית שלכם כדי לבחור <b>ערוך</b> או <b>מחק</b>.</li>
+    </ul>
+
+    <h3>תיקונים</h3>
+    <p>תיקון הוא תיקון לתעתיק שחוקר הציע בעת עיון בעמוד.</p>
+    <ul>
+        <li>הלשוניות <b>כל התיקונים</b> ו<b>התיקונים שלי</b> מציגות אותם, כל אחד עם סימן הסטטוס שלו: 🔵 ממתין, ✅ אושר או ❌ נדחה. לחצו פעמיים על אחד מהם כדי לפתוח את העמוד שהוא מתקן.</li>
+        <li>לחצו על <b>עיין בתיקונים...</b> כדי לפתוח טבלה של כל התיקונים, שאפשר לסנן לפי סטטוס (<b>ממתין</b>, <b>אושר</b>, <b>נדחה</b>) ולחפש בה, ובה הטקסט המקורי והמתוקן זה לצד זה.</li>
+        <li>לחצו לחיצה ימנית על תיקון ובחרו <b>צפיה בפרטי השינוי</b> כדי להצביע עליו ב־👍 (<b>הצבע בעד</b>) או ב־👎 (<b>הצבע נגד</b>).</li>
+    </ul>
+
+    <h3>הערות</h3>
+    <p>הערה היא פתק שחוקר השאיר על עמוד מסוים בכתב יד בעת העיון בו, בכפתור <b>💬 הערה</b> שבלשונית <b>עיון לפי מספר מדף</b>.</p>
+    <ul>
+        <li>הלשוניות <b>כל ההערות</b> ו<b>ההערות שלי</b> מציגות אותן; לחצו פעמיים על אחת מהן כדי לעבור ישירות לאותו עמוד.</li>
+        <li>לחצו על <b>צפה בכל ההערות שלי...</b> כדי לדפדף בכל ההערות שלכם.</li>
+    </ul>
+
+    <h3>צירופים</h3>
+    <p>פאנל זה מרכז שני סוגים של הצעות לצירופי קטעים: רשומות המצמידות שני קטעים זה לזה, ושחזורי צירוף חזותיים (פאזל).</p>
+    <ul>
+        <li>הלשוניות <b>כל הצירופים</b> ו<b>הצירופים שלי</b> מציגות את רשומות הצירוף; כל אחת מצמידה שני קטעים, ואם מי שיצר אותה בחר סוג קשר, היא מציגה אותו: <b>צירוף פיזי</b> או <b>אותו חיבור</b>.</li>
+        <li>הלשוניות <b>כל הפאזלים</b> ו<b>הפאזלים שלי</b> מציגות שחזורי צירוף פאזל שפורסמו; ראו <a href="#community-publish">פרסום לקהילה</a> לאופן הפרסום, ביטול הפרסום ופתיחת עותק של אחד מהם.</li>
+        <li>לחצו על <b>עיין בצירופים...</b> כדי לפתוח את חלון <b>צירופי קטעים</b> המלא, שבו כל ארבע הרשימות יחד במקום אחד.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="community-publish">פרסום לקהילה</h2>
+    <p>שתפו את שחזורי הצירופים שלכם עם קהילת החוקרים ועיינו בצירופים שפורסמו על ידי חוקרים אחרים.</p>
+
+    <h3>פרסום צירוף</h3>
+    <ul>
+        <li>לאחר שמירת צירוף בפאזל, לחצו על כפתור הגלובוס 🌐 (<b>פרסם לקהילה</b>) בסרגל הכלים</li>
+        <li>לאחר הפרסום, הכפתור הופך לירוק ומופיעה הודעה עם קישור השיתוף, שכבר הועתק ללוח, כדי שתוכלו לשלוח אותו לעמיתים</li>
+        <li>הסידור שלכם מועלה כתמונה מורכבת יחד עם מטא-נתונים (כותרת, הערות, רשימת קטעים)</li>
+    </ul>
+
+    <h3>ביטול פרסום</h3>
+    <ul>
+        <li>לחצו שוב על כפתור הגלובוס 🌐 הירוק כדי להסיר את הצירוף מהקהילה</li>
+        <li>מחיקת מסמך צירוף מקומי מסירה אותו אוטומטית גם מהקהילה אם היה מפורסם</li>
+    </ul>
+
+    <h3>עיון בצירופים שהתפרסמו</h3>
+    <ul>
+        <li><b>מרכז התגליות</b> מציג צירופי פאזל שפורסמו לצד שאר פעילות הקהילה; בחרו <b>צירופי פאזל</b> במסנן <b>סוג</b> כדי לראות רק אותם.</li>
+        <li>לעיון בכל הפאזלים שפורסמו, או רק באלה שלכם, השתמשו בלשוניות <b>כל הפאזלים</b> ו<b>הפאזלים שלי</b> בחלונית <b>צירופים</b> שבלשונית <b>קהילה</b>, או בחלון <b>צירופי קטעים</b> שנפתח בלחיצה על <b>עיין בצירופים...</b>.</li>
+    </ul>
+
+    <h3>פתיחת צירוף מפורסם</h3>
+    <ul>
+        <li>לחצו על <b>פתח בפאזל</b> בכל צירוף מפורסם כדי ליצור עותק מקומי בסביבת העבודה שלכם</li>
+        <li>נוצר עותק עצמאי שתוכלו לערוך מבלי להשפיע על הפרסום המקורי</li>
+    </ul>
+
+    <h3>פאנל צירופי קהילה</h3>
+    <p>בעת עיון בכתב יד, מוצג פאנל עם צירופים שהתפרסמו הכוללים את הקטע הנוכחי. זה מסייע לגלות שחזורים קיימים הרלוונטיים לכתב היד שאתם חוקרים.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="lab">מצב מעבדה</h2>
+    <p>כפתור "מצב מעבדה" מפעיל מנוע חיפוש ניסיוני ומתקדם יותר.</p>
+    <ul>
+        <li><b>סריקה עמוקה:</b> סריקה מעמיקה ויסודית יותר. איטית משמעותית, אך מומלצת לחיפוש ביטויים נדירים או כשרוצים לוודא שלא החמצתם כלום.</li>
+    </ul>
+
+    <h3>פרמטרים של מצב מעבדה</h3>
+    <p>כאשר מצב מעבדה פעיל, מופיע פאנל הגדרות. ההגדרות הזמינות משתנות בהתאם ללשונית הפעילה.</p>
+
+    <h4>פרמטרים ללשונית חיפוש</h4>
+    <ul>
+        <li><b>אחוז התאמה מינימלי:</b> אחוז הטקסט המזערי מהשאילתה שחייב להופיע כדי שהתוצאה תיחשב רלוונטית.</li>
+        <li><b>מקסימום תוצאות לעיבוד:</b> מספר המועמדים הגולמיים המרבי שיישלף מהאינדקס לפני שלב הניקוד המפורט. התוכנה שולפת ראשית מועמדים פוטנציאליים, ואז מחפשת בהם. מספר מועמדים רב יותר ימצא תוצאות טובות יותר, אבל יהיה איטי יותר.</li>
+        <li><b>מגבלת עומק:</b> מספר המסמכים המרבי לסריקה במצב "סריקה עמוקה".</li>
+    </ul>
+
+    <h4>פרמטרים ללשונית חיפוש חיבורים</h4>
+    <ul>
+        <li><b>מקסימום מועמדים למקטע:</b> מספר התוצאות המרבי שיעובדו עבור כל מקטע טקסט.</li>
+        <li><b>ציון מקטע מינימלי:</b> הניקוד המזערי הנדרש כדי שמקטע ייחשב כ"נמצא".</li>
+        <li><b>מקסימום תוצאות סופיות:</b> מספר התוצאות שיוצגו בעץ כדי למנוע קיפאון של הממשק (כל התוצאות עדיין נשמרות בייצוא).</li>
+    </ul>
+
+    <h4>ניקוד מתקדם</h4>
+    <p>זמין דרך כפתור "ניקוד מתקדם...":</p>
+    <ul>
+        <li><b>בונוס רצף מילים:</b> ניקוד נוסף על מציאת מילים בסדר הנכון.</li>
+        <li><b>מקדם קנס כיסוי:</b> קנס על תוצאות שאינן מכילות את כל מילות החיפוש.</li>
+        <li><b>סינון מילות עצירה:</b> מפחית את הניקוד למילים קצרות או נפוצות מאוד כדי להפחית רעש.</li>
+        <li><b>בונוס מילה ארוכה:</b> נותן משקל רב יותר למילים ארוכות.</li>
+        <li><b>ניקוד בסיס להתאמה ייחודית:</b> הניקוד הבסיסי למציאת מילה ייחודית.</li>
+        <li><b>קנס מרחק:</b> מפחית ניקוד למילים שנמצאו רחוק זו מזו.</li>
+        <li><b>קנס על מילים חוזרות:</b> מפחית ניקוד למילים המופיעות בטקסט יותר פעמים מאשר בשאילתה.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="api">ממשק API וכלי בינה מלאכותית</h2>
+    <p>מערכת Dicta Genizah Search מציעה ממשק HTTP/JSON ציבורי, כדי שחוקרים וכלי בינה מלאכותית
+    יוכלו לעבוד עם הקורפוס באופן תכנותי. ישנן שתי דרכים להשתמש בו: סקיל מוכן למחקר בשיחה חופשית,
+    וממשק ה-API הגולמי למפתחים.</p>
+
+    <h3>שימוש מתוך קלוד וסוכני בינה מלאכותית אחרים</h3>
+    <p>סקיל <b>Cairo Genizah Research</b> מוכן לשימוש מאפשר לכם להפעיל את מנוע החיפוש מתוך קלוד
+    בשפה טבעית. בקשו ממנו לחפש באופן חכם ביטויים או מקבילות — עדי נוסח אפשריים לביטוי, פיוט, תשובה,
+    מכתב או חיבור — והוא יחזיר רשימה מדורגת ובה הטקסט מתוך עמוד העיון, ייחוס לספרייה וקישורי תמונה,
+    כך שתוכלו לעיין בתוצאות ולהציגן בלי לצאת מן השיחה. תוכלו להפנות גם מנועי בינה מלאכותית מקומיים
+    אחרים לסקיל זה.</p>
+    <p>הסקיל זמין כאן:
+    <a href="https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research" dir="ltr">github.com/gershuni/GenizahSearch &rarr; skills/cairo-genizah-research</a>.</p>
+    <p>GenizahSearch זמין גם ב-ChatGPT, וכשרת MCP (<code dir="ltr">https://genizahsearch.com/mcp</code>) לכל עוזר
+    שתומך בחיבורי MCP. כל אפשרויות ה-AI מרוכזות בעמוד
+    <a href="https://genizahsearch.com/ai" dir="ltr">genizahsearch.com/ai</a>.</p>
+
+    <h3>למפתחים</h3>
+    <p>אותם נתונים זמינים ישירות דרך ממשק HTTP/JSON ציבורי:</p>
+    <ul>
+        <li><code dir="ltr">POST /api/search</code> — חיפוש טקסטואלי בקורפוס.</li>
+        <li><code dir="ltr">GET /api/browse</code> — טעינת תעתיק, מטא-נתונים ותמונה של כתב יד.</li>
+        <li><code dir="ltr">POST /api/parallels</code> — מציאת כתבי יד מהגניזה הכוללים מקטעים תואמים לטקסט מקור ארוך.</li>
+    </ul>
+    <p>המבנה המלא של הממשק מתועד בסכמת OpenAPI בכתובת
+    <a href="https://genizahsearch.com/api/openapi.json" dir="ltr">genizahsearch.com/api/openapi.json</a>.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="my-library">הספרייה שלי — מסמכים מקומיים</h2>
+    <p>לשונית <b>הספרייה שלי</b> מאפשרת לכם לאנדקס קובצי <code dir="ltr">.docx</code>, <code dir="ltr">.pdf</code>,
+    <code dir="ltr">.txt</code>, <code dir="ltr">.html</code>, <code dir="ltr">.xlsx</code> ו-<code dir="ltr">.csv</code>
+    משלכם לצד קורפוס הגניזה. המסמכים האישיים שלכם מופיעים ישירות בתוצאות החיפוש, חיפוש חיבורים ומקבילות
+    עם תגית <code>LOCAL</code> וכפתור סינון תלת-מצבי.</p>
+
+    <h4>מה מאונדקס</h4>
+    <p>מסמכי Word, קובצי PDF (PDF עם שכבת טקסט בלבד — קובצי PDF סרוקים ללא OCR מדולגים),
+    קובצי טקסט רגיל, קובצי HTML, מסמכי אקסל וקובצי CSV. האינדקס מדלג על סוגי קבצים אחרים.</p>
+
+    <h4>היכן נשמרים הנתונים</h4>
+    <p><code dir="ltr">%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> ב-Windows.</p>
+
+    <h4>אינדקס של תיקיות גדולות</h4>
+    <p>אם תוסיפו תיקייה מרובת קבצים, תקבלו אזהרה שהאינדוקס עלול לקחת זמן ממושך. בכל שלב תוכלו לעצור
+    את האינדוקס ולבחור אם לבטל את האינדוקס לקבצים שכבר נסרקו, להשאיר את התוצאות החלקיות,
+    או להמשיך בפעולת האינדוקס.</p>
+
+    <h4>הוספה, הסרה ובחירה של תיקיות וקבצים לחיפוש</h4>
+    <p>ניתן להוסיף תיקיות לספרייה המקומית, ניתן להסיר אותן, וניתן גם לבחור באילו מן הקבצים המאונדקסים
+    יתבצע החיפוש, על ידי לחיצה על תיבות הסימון ליד כל תיקייה או קובץ.</p>
+
+    <h4>בנייה מחדש של האינדקס</h4>
+    <p>לחיצה על "רענן" סורקת מחדש את כל התיקיות הרשומות, לא רק את התיקייה הנבחרת, ומחפשת קבצים חדשים לאינדקס. אם ברצונכם לבנות
+    מחדש את האינדקס לחצו על "אנדקס מחדש הכל". אם נתקלתם בבעיות, תוכלו ללחוץ על "אפס את הספרייה המקומית"
+    והאינדקס יימחק לחלוטין. בכל מצב, הקבצים המקוריים שלכם בטוחים.</p>
+
+    <h4>פרטיות</h4>
+    <p>פרטים על המסמכים המקומיים שלכם לעולם אינם מועלים לשרתי GenizahSearch. שלושה גבולות אוכפים זאת:</p>
+    <ul>
+        <li>נקודת הקצה <code dir="ltr">/api/search</code> מסננת פריטים מקומיים באופן הגנתי.</li>
+        <li>סנכרון הרשימות לענן לעולם אינו מעלה פריטים מקומיים: פריט של מסמך משלכם נשאר במחשב הזה.</li>
+        <li>הגשת תיקונים דוחה מזהי מסמך מקומי עם שגיאה ברורה.</li>
+    </ul>
+    <p>שימו לב: הטקסט המאונדקס נשמר בקובץ <code dir="ltr">local_index.sqlite3</code> בתיקיית האינדקס המקומי,
+    דחוס באמצעות <b>zstd</b> (דחיסה, לא הצפנה) — הטקסט המאוחסן אינו מוצפן. השתמשו בהצפנת דיסק ברמת מערכת
+    ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה.</p>
+
+    <h4>בחירה מראש וסינון לאחר החיפוש</h4>
+    <p>החיפוש הרגיל וחיפוש החיבורים כוללים כפתור המאפשר לכם לבחור היכן יתבצע החיפוש: גניזה, מקומי,
+    או הכול. ניתן גם להשתמש בכפתור הסינון התלת-מצבי "סנן מקומי", שיאפשר לכם להציג רק קבצים מקומיים,
+    רק גניזה, או כל התוצאות.</p>
+
+    <h4>שינוי שם מחשב</h4>
+    <p>שימו לב: אם תשנו את שם המחשב שלכם, מטמון ה-SQLite יתבטל והסריקה הבאה מחלצת מחדש את כל הקבצים.</p>
+
+    <p><em>תכונת הספרייה שלי נוצרה בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.</em></p>
+    </div>
+
+    <div class="section">
+    <h2 id="export">ייצוא נתונים</h2>
+    <p>בכל שלב ניתן לייצא את התוצאות לשימוש חיצוני:</p>
+    <ul>
+        <li><b><bdi dir="ltr">XLSX</bdi> (אקסל) — חוברת מחקרית:</b> בתוצאות חיפוש, חוברת דו-לשונית בת 4 גיליונות (תוצאות חיפוש, כתבי יד, ביבליוגרפיה, קרדיט ומידע) עם קישורים לחיצים לתמונה בכל שורה וקישורים לחיצים ל-PGP, לצפייה בספרייה ול-GenizahSearch לכל כתב יד. כאשר הייצוא כולל תוצאות מ"הספרייה שלי", מתווסף עבורן גיליון "מסמכים מקומיים"; ייצוא של תוצאות מ"הספרייה שלי" בלבד כולל רק את הגיליונות "מסמכים מקומיים" ו"קרדיט ומידע". לייצוא של חיפוש חיבורים יש גיליונות משלו: "תצוגת דו"ח", "נתונים גולמיים" ו"מידע על השאילתה", ובנוסף "כתבי יד מוחרגים" ו"מסמכים מקומיים" כשהם רלוונטיים; ייצוא שכולו תוצאות מ"הספרייה שלי" כולל את "מסמכים מקומיים" ו"מידע על השאילתה".</li>
+        <li><b><bdi dir="ltr">CSV</bdi>:</b> פורמט נתונים גולמי, מתאים לייבוא למסדי נתונים אחרים.</li>
+        <li><b><bdi dir="ltr">TXT</bdi>:</b> דוח טקסט פשוט וקריא.</li>
+        <li><b><bdi dir="ltr">DOCX</bdi> (וורד):</b> מסמך מעוצב של מייקרוסופט וורד.</li>
+    </ul>
+    <p><b>שימו לב:</b> הייצוא מתייחס לתוצאות שנבחרו (באמצעות תיבות הסימון). אם לא נבחר כלום, התוכנה תייצא את כל התוצאות הקיימות בטבלה.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="settings">הגדרות ואודות</h2>
+    <p>לשונית ההגדרות מספקת אפשרויות תצורה ומידע על האפליקציה.</p>
+
+    <h3>נתונים ואינדקס</h3>
+    <ul>
+        <li><b>הורד תעתיקים (Zenodo):</b> פותח קישור להורדת נתוני התעתוק העדכניים מ-Zenodo.</li>
+        <li><b>בנייה / בנייה מחדש של אינדקס:</b> יוצר או מעדכן את אינדקס החיפוש מקובץ Transcriptions.txt. נדרש לאחר הורדת תעתיקים חדשים.</li>
+    </ul>
+
+    <h3>תפריט</h3>
+    <ul>
+        <li><b>תפריט:</b> <i>לשוניות למעלה</i> (ברירת המחדל) מציג את הלשוניות בראש החלון, ולצידן את תפריט &#9776;, התחברות, החלפת השפה, האתר, פאזל קטעים, מעבדת צירופים והגדרות. <i>תפריט צד</i> מציג את כל אלה לאורך צד החלון. השינוי חל מיד. בתפריט &#9776; יש גם <b>העברת התפריט לצד</b>; ובתפריט הצד יש את ההפך, <b>העברת התפריט לתצורת לשוניות</b> (גם בלחיצה ימנית עליו).</li>
+        <li><b>תפריט הצד:</b> &#9776; בראשו מציג או מסתיר את השמות. בחלון צר הוא מציג סמלים בלבד (השם מופיע במעבר העכבר), ו-&#9776; פותח את הרשימה המלאה.</li>
+        <li><b>תפריט &#9776;</b> נמצא בקצה החלון, לפני הלשונית הראשונה (מימין בעברית, משמאל באנגלית). הוא מציג את כל הלשוניות, ואחריהן <b>מעבר אל...</b>, פאזל קטעים, מעבדת צירופים, <b>עזרה</b>, <b>קיצורי מקלדת</b> והגדרות.</li>
+        <li><b>מעבר אל (<bdi dir="ltr">Ctrl+G</bdi> או <bdi dir="ltr">Ctrl+O</bdi>):</b> הקלידו מספר מדף או מספר מערכת כדי לפתוח את כתב היד בעיון לפי מספר מדף מכל מקום בחלון. מילים בעברית או בערבית נשלחות במקום זאת לחיפוש, בלשונית חפש ובהגדרות הנוכחיות שלה. מתחת לתיבה מופיעים עשרת כתבי היד האחרונים שפתחתם: המקש חץ למטה ואחריו Enter פותחים אחד מהם; הקלדה מצמצמת את הרשימה.</li>
+        <li><b>גודל החלון:</b> החלון נפתח במקום ובגודל שהיו לו כשסגרתם אותו. בפעם הראשונה הוא נפתח מוגדל למסך מלא.</li>
+        <li><b>טיפים:</b> מהפתיחה השנייה ואילך, פס מתחת לסרגל העליון מציג טיפ אחד על אפשרות שקל לפספס. <b>הראה לי</b> פותח את האפשרות ומצביע עליה (בטיפ שדורש את אינדקס החיפוש ברמת האות או חשבון, הכפתור בונה את האינדקס או פותח את ההתחברות), <b>הטיפ הבא</b> מציג טיפ אחר, ו<b>לא להציג טיפים</b> מכבה אותם; <i>הצגת טיפ בפתיחת התוכנה</i> בהגדרות מפעיל אותם שוב. כל טיפ מוצג פעם אחת, טיפים על אפשרויות שאתם כבר משתמשים בהן מדולגים, וסגירת חמישה טיפים ברצף מכבה אותם.</li>
+        <li><b>מקלדת:</b> <bdi dir="ltr">Ctrl+1</bdi> עד <bdi dir="ltr">Ctrl+7</bdi> פותחים את הלשוניות לפי סדרן, מחפש ועד הספרייה שלי, עם הסמן בתוצאות כשבחפש או בחיפוש חיבורים יש תוצאות (וכך גם בלחיצה על הלשונית או על שמה בתפריט הצד), ואחרת בתיבת החיפוש של הלשונית, אם יש בה; <bdi dir="ltr"><b>Ctrl+R</b></bdi> מעביר את הסמן לרשימת התוצאות של הלשונית הפתוחה; <bdi dir="ltr">Ctrl+8</bdi> פותח את פאזל הקטעים ו-<bdi dir="ltr">Ctrl+9</bdi> את מעבדת הצירופים. <bdi dir="ltr">Ctrl+G</bdi> או <bdi dir="ltr">Ctrl+O</bdi> פותחים את מעבר אל, <bdi dir="ltr">F1</bdi> פותח עזרה זו בפרק של הלשונית הפתוחה, <bdi dir="ltr">Ctrl+,</bdi> פותח את ההגדרות, <bdi dir="ltr">Ctrl+/</bdi> (או &#9000; ליד <bdi dir="ltr">A&minus;</bdi>) מציג את המקשים, ו-<bdi dir="ltr">Ctrl+F</bdi> או <bdi dir="ltr">Ctrl+E</bdi> מעבירים את הסמן לתיבת החיפוש או הסינון של הלשונית (השאילתה בחפש, טקסט המקור בחיפוש חיבורים, <i>מצא</i> בעיון לפי מספר מדף, או תיבת מספר המדף כשלא פתוח שם כתב יד, תיבת המחבר בעיון לפי זיהוי, סינון הפריטים ברשימות אישיות). בפתיחת התוכנה הסמן כבר נמצא בתיבת החיפוש, מוכן להקלדה. כשחיפוש מוצא תוצאות, הסמן עובר לרשימת התוצאות, אלא אם העברתם אותו למקום אחר בזמן החיפוש, ו-<bdi dir="ltr">Ctrl+F</bdi> או <bdi dir="ltr">Ctrl+E</bdi> מחזירים לתיבה. ברשימות התוצאות, <b>מקש הרווח</b> מסמן תוצאה (חפש), <bdi dir="ltr"><b>Enter</b></bdi> פותח אותה ו-<bdi dir="ltr"><b>Ctrl+Enter</b></bdi> או <bdi dir="ltr"><b>Ctrl+B</b></bdi> פותחים אותה בעיון לפי מספר מדף; <bdi dir="ltr"><b>Ctrl+A</b></bdi> מסמן את כולן (חפש).<bdi dir="ltr"><b>Esc</b></bdi> עוצר חיפוש שרץ; בחיפוש חיבורים, <bdi dir="ltr"><b>Ctrl+Enter</b></bdi> בטקסט המקור מריץ אותו. בעיון לפי מספר מדף ובחלון "צפייה בכתב יד", <bdi dir="ltr"><b>Ctrl+PgDown</b></bdi> / <bdi dir="ltr"><b>Ctrl+PgUp</b></bdi> עוברים לתמונה הבאה / הקודמת ו-<b>Ctrl+Shift+חץ שמאלה</b> / <b>Ctrl+Shift+חץ ימינה</b> לכתב היד הבא / הקודם; בחלון "צפייה בכתב יד", <b>Ctrl+חץ שמאלה</b> / <b>Ctrl+חץ ימינה</b> עוברים לתוצאה הבאה / הקודמת, <bdi dir="ltr"><b>Ctrl+B</b></bdi> פותח את העיון ו-<bdi dir="ltr"><b>Ctrl+F</b></bdi> את תיבת החיפוש בטקסט. בתיבת טקסט, כמו <i>מצא</i>, <bdi dir="ltr">Ctrl</bdi> עם החצים מזיז את הסמן מילה אחר מילה, כרגיל.<bdi dir="ltr"><b>Ctrl+/</b></bdi> מציג את כולם.</li>
+    </ul>
+
+    <h3>גודל הטקסט</h3>
+    <ul>
+        <li><b>גודל הטקסט ברשימות התוצאות:</b> <i>רגיל</i>, <i>גדול</i>, <i>גדול יותר</i> או <i>הגדול ביותר</i>, לטקסט בתוצאות החיפוש, חיפוש החיבורים, העיון לפי זיהוי והרשימות האישיות; כותרות העמודות נשארות בגודלן. השינוי חל מיד. <bdi dir="ltr">Ctrl+=</bdi> ו-<bdi dir="ltr">Ctrl+-</bdi> משנים אותו מכל מקום בחלון, וכך גם הכפתורים <b><bdi dir="ltr">A&minus;</bdi></b> ו-<b><bdi dir="ltr">A+</bdi></b> שליד הלשוניות (בתפריט הצד: <b>הקטנת הטקסט</b> ו<b>הגדלת הטקסט</b>); <bdi dir="ltr">Ctrl+0</bdi> מחזיר לגודל הרגיל.</li>
+        <li><b>התעתיק:</b> הכפתורים <b><bdi dir="ltr">A&minus;</bdi></b> ו-<b><bdi dir="ltr">A+</bdi></b> לצד <b>מצא</b>, בלשונית עיון לפי מספר מדף ובמציג כתבי היד, קובעים גודל אחד לשניהם. בלשונית עיון לפי מספר מדף, <bdi dir="ltr">Ctrl+=</bdi>, <bdi dir="ltr">Ctrl+-</bdi> ו-<bdi dir="ltr">Ctrl+0</bdi> משנים את גודל התעתיק במקום את הרשימות.</li>
+    </ul>
+
+    <h3>אפליקציה</h3>
+    <ul>
+        <li><b>גרסה:</b> מציג את גרסת האפליקציה הנוכחית.</li>
+        <li><b>בדוק עדכונים:</b> בודק אם יש גרסאות חדשות ב-GitHub. כאשר גרסה חדשה זמינה, מופיעה התראה בראש החלון.</li>
+    </ul>
+
+    <h3>אודות</h3>
+    <p>מכיל מידע על התוכנה, קרדיטים, מקורות נתונים ומידע לציטוט. כדי להעתיק ציטוט של התוכנה, לחצו על <b>העתק ציטוט</b> בתחתית החלון הראשי; כדי לצטט דף כתב יד מסוים, לחצו על <b>צטט דף זה</b> בסרגל הכלים של לשונית עיון לפי מספר מדף.</p>
+    </div>
+</div>
+<!-- END_LANG_HE -->
+
+<!-- Browser-only Script for toggling -->
+<script>
+    (function() {
+        // Simple logic to detect user language or show both if in browser
+        // This script is ignored by QTextBrowser
+        var userLang = navigator.language || navigator.userLanguage;
+        var isHebrew = userLang.indexOf("he") === 0;
+
+        var en = document.querySelector('.lang-en');
+        var he = document.querySelector('.lang-he');
+
+        // Add Toggle Button
+        var btn = document.createElement("button");
+        btn.innerHTML = "Switch Language / החלף שפה";
+        btn.style.cssText = "position:fixed; top:10px; right:10px; padding:10px; z-index:1000; background:#3498db; color:white; border:none; cursor:pointer;";
+        document.body.appendChild(btn);
+
+        function updateView(hebrew) {
+            if(hebrew) {
+                if(en) en.style.display = 'none';
+                if(he) he.style.display = 'block';
+            } else {
+                if(en) en.style.display = 'block';
+                if(he) he.style.display = 'none';
+            }
+        }
+
+        // Initial state
+        updateView(isHebrew);
+
+        btn.onclick = function() {
+            isHebrew = !isHebrew;
+            updateView(isHebrew);
+        };
+    })();
+</script>
+
+</body>
+</html>

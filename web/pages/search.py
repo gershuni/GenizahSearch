@@ -1,0 +1,6581 @@
+# -*- coding: utf-8 -*-
+"""
+Advanced Search Page - Dicta Genizah Search
+
+A comprehensive search interface with:
+- Multiple search modes (exact, variants, fuzzy, regex, shelfmark, title)
+- Advanced filtering options
+- Lab Mode integration
+- Real-time results with pagination
+- Export capabilities
+"""
+
+from nicegui import ui, run, app
+from web import io_bound_result
+from web.state import state
+from web.pages.search_helpers import compute_selected_uids
+from web.translations import tr, tr_engine_message, is_rtl, get_language, using_language
+from web.ux_timing import ux_done, ux_ignored
+from web.components.typography import h2, h3, h4
+from web.clipboard import copy_text_to_clipboard
+from web.components.filter_panel import (
+    build_domain_options, build_author_options, build_work_options,
+    build_filter_summary, has_active_filters, load_history_labels_then, persist_value,
+    load_filter_state, consume_incoming_filters, recompute_filter_count,
+    corpus_universe, create_filter_handlers, filter_unavailable_message,
+    apply_criteria, retire_old_saved_filters, restore_saved_criteria,
+)
+from web.components.criteria_panel import CriteriaControl, active_criteria_count
+from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES
+from web.pages.search_state import (
+    SearchUIState, SearchPageRefs,
+    get_search_history, add_to_search_history,
+    delete_search_history_entry, clear_search_history,
+    domain_display_name,
+    persist_search_snapshot, clear_search_snapshot, clear_search_filters,
+    get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
+    compact_result_rows, preview_shows_final_rows, engine_mode,
+    run_filter_state, apply_run_filter_state, save_post_filters_with_run,
+    live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot, save_search_run,
+    discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
+)
+from web import search_runs
+from shared.search_box_input import TEXT_MODES, search_box_input_kind, split_placeholder
+from web.home_query import home_query_target
+from shared.keyboard_layout import layout_suggestion
+from web.pages.search_results import (
+    toggle_expansion as _toggle_expansion,
+    render_results as _render_results,
+    render_preview_results as _render_preview_results,
+    create_result_card as _create_result_card,
+    open_advanced_dialog as _open_advanced_dialog,
+    copy_result_text,
+    show_add_to_list_dialog as show_add_to_list_dialog_local,
+)
+from genizah_core import generate_tabular_syntax
+from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts, sanitize_library_codes
+from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict, step_partial,
+                               needs_mode_labels, truncate_chain, replay_chain, scope_signature,
+                               steps_that_cannot_complete)
+from shared.search_engine import _consume_last_responsa_downgrade, consume_last_search_cutoff
+from shared.exclusion_service import (
+    ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
+    resolve_shelfmarks, build_shelf_map, compute_excluded_ids, catalog_fallback,
+    serialize_sources, deserialize_sources,
+)
+from web.document_service import (
+    get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
+    get_fragments_by_tag, get_all_distinct_tags,
+)
+from web.search_load_control import enrichment_batch_slot
+from web.research_jobs import (ResearchJobError, consume_time_limit_stop, run_research_call,
+                                shared_time_limit, with_request_settings)
+from shared.config import Config
+from web import variant_preferences
+from shared.fgp_service import get_sys_ids_with_fgp_sources
+from shared.search_regex import SearchBudgetExceeded
+from shared.transcription_service import union_manual_transcriptions
+from urllib.parse import quote
+import copy
+import logging
+import json
+import html
+import asyncio
+import time
+
+logger = logging.getLogger(__name__)
+
+
+def _get_fjms_for_criteria():
+    """The FJMS service the "Manuscript features" panel and the post-search
+    criteria read (looked up when used, as everywhere on this page)."""
+    from shared.fjms_service import get_fjms_service
+    return get_fjms_service(thread_safe=True)
+
+
+def _web_fgp_sys_ids(sys_ids):
+    """FGP presence set, gated by the WEB-ONLY FGP kill switch (GitHub Codex #303).
+
+    The shared ``get_sys_ids_with_fgp_sources`` only honors the shared
+    ``FGP_TRANSCRIPTIONS_ENABLED`` flag; on web, FGP can be turned off independently
+    via ``WEB_FGP_ENABLED=0`` (mirrors the result-dialog/chooser gating). Without
+    this, a web deploy with FGP disabled but the sidecar present would still badge
+    FGP-only manuscripts the user cannot open. Returns set() when web FGP is off.
+    """
+    from web.feature_flags import web_fgp_enabled
+    if not web_fgp_enabled():
+        return set()
+    return get_sys_ids_with_fgp_sources(sys_ids)
+
+
+def _web_manual_transcription_ids(sys_ids):
+    """Web-aware manual-transcription union (PGP readable text ∪ web-gated FGP).
+
+    Used by the PGP-tag-browse and session-restore paths, which would otherwise call
+    the shared union helper that always includes FGP regardless of the web flag."""
+    return union_manual_transcriptions(get_sys_ids_with_pgp_text(sys_ids), _web_fgp_sys_ids(sys_ids))
+
+
+async def _bulk_add_items(lists_mgr, sys_ids, list_id):
+    """Add ``sys_ids`` to ``list_id`` for the signed-in user; toast the real outcome.
+
+    Returns the number added, or None when the visitor is no longer signed in.
+    The bulk-add dialog's sign-in check ran when it opened; a session can end
+    while it is open, and every write then returns False. Nothing added is a
+    failure, some added a warning, all added a success -- never "0 items added"
+    as a success. The write is ONE insert off the event loop
+    (``UserListsManager.add_items``), not one round trip per item on it.
+    """
+    from web.auth_state import GlobalAuthState
+    if not GlobalAuthState.is_logged_in():
+        ui.notify(tr('Please log in to access lists'), type='warning')
+        return None
+    wanted = [s for s in sys_ids if s]
+    added = await lists_mgr.add_items(wanted, list_id)
+    if added == 0:
+        ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+    elif added < len(wanted):
+        ui.notify(f"{added} {tr('items added to list')}", type='warning')
+    else:
+        ui.notify(f"{added} {tr('items added to list')}", type='positive')
+    return added
+
+
+def create_search_page(initial_query: str = None, initial_tag: str = None,
+                       initial_mode: str = None, initial_variants: int = None,
+                       initial_ja: int = None, initial_flex_spaces: int = None,
+                       initial_bidirectional: int = None, initial_domain: str = None,
+                       from_browse: int = None,
+                       vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
+                       initial_run: str = None):
+    """Create the advanced search page."""
+
+
+    # === State Management ===
+    PAGE_SIZE = 50  # Results per page for pagination
+
+    search_state = SearchUIState()
+
+    # #22: Readiness flag for the filter chip bar. `_update_chip_bar` is defined far
+    # below (after chip_bar_container is created), but early render-time callbacks
+    # (e.g. save_text_position) may reference it. Gate those calls on this explicit
+    # flag instead of catching NameError — a broad NameError catch masks real bugs.
+    _chip_bar_ready = {'value': False}
+
+    # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
+    # Capture NiceGUI client for deferred async tasks (slot context)
+    _page_client = ui.context.client
+    # ux_timing: the next search was started by this page's URL, not a click.
+    _ux_url_start = {'nav': False}
+    _page_run = {'run': None}  # the run this page's search is (web/search_runs.py)
+
+    async def _after_delay(delay, coro_func, *args):
+        """Schedule an async callback after a delay, with NiceGUI client context."""
+        await asyncio.sleep(delay)
+        try:
+            with _page_client:
+                await coro_func(*args)
+        except RuntimeError as e:
+            if 'slot stack' not in str(e) and 'deleted' not in str(e):
+                logger.error("_after_delay error in %s: %s", coro_func.__name__, e)
+        except Exception as e:
+            logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
+
+    # Resolve which persisted search state, if any, should be reused for this request.
+    # 2026-05-12: pruned-session AssertionError fix — route through safe_user_get
+    # so a fresh page handler racing with prune_user_storage degrades to defaults
+    # instead of returning 500. Codex flagged these 5 raw reads as still-vulnerable.
+    from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
+    raw_saved_mode = _safe_get('search_mode', 'exact')
+    raw_saved_query = _safe_get('search_query', '')
+    saved_preset = _safe_get('search_preset', 30)
+    saved_gap = _safe_get('search_gap', 0)
+
+    use_slider = bool(variant_preferences.get('variant_use_slider'))
+    # Num Changes shows the x1-x3 of the level the page opens on.
+    saved_max_changes = variant_preferences.max_changes(variant_preferences.level_of(
+        (saved_preset or 30) if use_slider else
+        variant_preferences.PRESET_PAIRS.get(raw_saved_mode, 30)))
+
+    # Count saved results to detect back-navigation from /browse: a non-zero
+    # count combined with URL `q` matching saved_query means the browser restored
+    # a URL this session stamped via history.replaceState at end of a successful
+    # search. Without this signal, Back would fire a fresh search and lose state.
+    # R2: a session saved with the old measurement filters is not restored
+    # with them; its stored rows go too, so the search runs again.
+    retire_old_saved_filters('search', run_key='search_last_run', reset={
+        'search_results': [], 'search_last_run': None, 'search_refinement_chain': [],
+        'search_result_count_capped': False, 'search_result_partial': False})
+    _saved_active_snapshot = get_search_active_snapshot(initial_run)
+    _saved_results = (
+        _saved_active_snapshot.get('results', [])
+        if _saved_active_snapshot else
+        (_safe_get('search_results', []) or [])
+    )
+    try:
+        _saved_results_count = len(_saved_results)
+    except TypeError:
+        _saved_results_count = 0
+    # The run those results came from, from the same snapshot: a Responsa search's
+    # URL carries its mode, options and run stamp, and Back is told apart by this.
+    _saved_run = (
+        _saved_active_snapshot.get('last_run')
+        if _saved_active_snapshot else
+        _safe_get('search_last_run', None)
+    )
+    # The run in the address while its search still runs (left before it finished):
+    # the page waits for it instead of starting it again. A scoped run (a search within,
+    # a visual-similarity set) is not followed: its scope is not in the address.
+    _live_run = live_search_run(initial_run)
+    if _live_run is not None and _live_run.scoped:
+        _live_run = None
+
+    bootstrap_state = resolve_search_bootstrap(
+        initial_query=initial_query,
+        initial_tag=initial_tag,
+        initial_mode=initial_mode,
+        initial_domain=initial_domain,
+        from_browse=from_browse,
+        saved_mode=raw_saved_mode,
+        saved_query=raw_saved_query,
+        saved_results_count=_saved_results_count,
+        use_slider=use_slider,
+        initial_responsa={
+            'variants': initial_variants, 'ja': initial_ja,
+            'flex_spacing': initial_flex_spaces, 'bidirectional': initial_bidirectional,
+        },
+        initial_run=initial_run,
+        saved_run=_saved_run,
+        live_run=_live_run.snapshot.get('last_run') if _live_run is not None else None,
+    )
+    if not bootstrap_state['rejoin_run']:
+        _live_run = None
+    saved_mode = bootstrap_state['mode']
+    saved_query = bootstrap_state['query']
+    restore_saved_results = bootstrap_state['restore_saved_results']
+    restore_saved_filters = bootstrap_state['restore_saved_filters']
+    restore_saved_exclusions = bootstrap_state['restore_saved_exclusions']
+
+    # Restore domain exclusions / printed filter from storage only for session restores
+    if restore_saved_exclusions:
+        _de = _safe_get('domain_exclusions')
+        search_state.domain_exclusions = set(_de) if _de is not None else set()
+        search_state.printed_filter = _safe_get('search_printed_filter', 'all')
+        search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
+        # SEED-026 / DMF (LIBFILTER-01): library dual-mode filter — mode-aware restore with D-06 legacy migration.
+        # D-46/D-NEW-7: exclude 'LOCAL' — My Library is desktop-only and must never appear as a web filter.
+        # New shape: {'mode':'show_only'|'hide', 'codes':[...]}; legacy shape: plain list (v8.3.0).
+        _lib_raw = _safe_get('search_library_filter', None)
+        if isinstance(_lib_raw, list):
+            # D-06 legacy migration: plain list → Show-only (v8.3.0 values were inclusion-only lists).
+            # sanitize_library_codes: drops non-str items, unknown codes, and 'LOCAL' (Codex HIGH fix).
+            _lib_codes = sanitize_library_codes(_lib_raw)
+            if _lib_codes:
+                search_state.library_mode = 'show_only'
+                search_state.library_filter = _lib_codes
+            else:
+                search_state.library_mode = 'hide'
+                search_state.library_filter = []
+        elif isinstance(_lib_raw, dict):
+            # New dict shape: read mode + codes directly, sanitize codes against LIBRARY_CODES and 'LOCAL'.
+            # sanitize_library_codes: accepts only lists of canonical str codes (Codex HIGH fix).
+            _lib_mode = _lib_raw.get('mode', 'hide')
+            _lib_codes = sanitize_library_codes(_lib_raw.get('codes'))
+            _lib_mode = _lib_mode if _lib_mode in ('show_only', 'hide') else 'hide'
+            # Normalize invalid show_only+empty to the canonical neutral (Codex HIGH fix):
+            # a persisted show_only with no valid codes means "show nothing" which is never
+            # the user's intent — treat as hide/[] (show all).
+            if _lib_mode == 'show_only' and not _lib_codes:
+                _lib_mode = 'hide'
+            search_state.library_mode = _lib_mode
+            search_state.library_filter = _lib_codes
+        else:
+            # Fresh/absent/garbage: default Hide mode, empty set (D-05 — show all by default).
+            search_state.library_mode = 'hide'
+            search_state.library_filter = []
+
+    # Clear exclusions if initial_domain provided (from browse page navigation)
+    if initial_domain:
+        search_state.domain_exclusions = set()
+        persist_search_snapshot(search_state)
+
+    # --- Incoming filters from catalog browse (Path B: browse -> search) ---
+    _filters_from_browse = False
+    if from_browse:
+        _filters_from_browse = consume_incoming_filters(search_state, 'search', require_from_browse=False)
+
+    # Restore filter state from session only when the request itself is not explicit
+    if restore_saved_filters and not _filters_from_browse:
+        if load_filter_state(search_state, 'search'):
+            # #17: a saved measurement filter the catalog is known to lack.
+            ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
+                      type='info')
+    # A stamped Responsa Back: the filters its rows were searched with, from its own
+    # run -- not the shared current filter keys another tab may have changed.
+    if bootstrap_state['restore_run_filters']:
+        _matched_run = _live_run.snapshot.get('last_run') if _live_run is not None else _saved_run
+        apply_run_filter_state(search_state, _matched_run.get('pre_search_filters'))
+    if _live_run is not None:
+        # What the page showed with the search when it started: its display filters
+        # and exclusions, and the run itself (its code, for the address and the save).
+        apply_run_start_snapshot(search_state, _live_run.snapshot)
+
+    # Restore word search excluded ids from session
+    if restore_saved_exclusions:
+        _wse = _safe_get('word_search_excluded_ids')
+        search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
+
+    # Phase 56: Restore manuscript exclusion sources from session
+    if restore_saved_exclusions:
+        _saved_excl = _safe_get('search_exclusion_sources', [])
+        if _saved_excl:
+            try:
+                search_state.exclusion_sources = deserialize_sources(_saved_excl)
+            except Exception:
+                search_state.exclusion_sources = []  # Lookup failed; use empty list
+
+    # Phase 55: Restore refinement chain from session (D-14)
+    _saved_refinement_chain = _safe_get('search_refinement_chain', [])
+    if _saved_refinement_chain and restore_saved_results:
+        try:
+            search_state.refinement_chain = [RefinementStep.from_dict(d) for d in _saved_refinement_chain]
+        except Exception:
+            search_state.refinement_chain = []  # Lookup failed; use empty list
+
+    # Phase 57: Visual Similarity URL param initialization
+    if vs_src:
+        _vs_source_ids = [s.strip() for s in vs_src.split(',') if s.strip()]
+        _vs_mode_val = vs_mode or 'union'
+        _vs_browse_val = vs_browse == 1
+
+        # Try tab storage cache first (fast, set by browse page), else recompute
+        _vs_cached = None
+        try:
+            _vs_cached = app.storage.tab.get('vs_partner_cache')
+        except Exception:
+            pass  # Cache operation failed; continue without cached data
+
+        if _vs_cached:
+            import json as _json_vs
+            try:
+                _vs_sys_ids = set(_json_vs.loads(_vs_cached))
+                del app.storage.tab['vs_partner_cache']  # One-time use
+            except Exception:
+                _vs_sys_ids = None  # Initialization failed; feature degrades gracefully
+        else:
+            _vs_sys_ids = None
+
+        if _vs_sys_ids is None and _vs_source_ids:
+            # Recompute from source IDs (handles refresh/new tab/shared link)
+            try:
+                from shared.visual_similarity_service import get_vs_service
+                _vs_svc = get_vs_service(thread_safe=True)
+                _vs_sys_ids = _vs_svc.get_suggestion_partners(_vs_source_ids, _vs_mode_val)
+            except Exception:
+                _vs_sys_ids = set()  # Batch lookup failed; use empty set for this batch
+
+        if _vs_sys_ids:
+            # Resolve shelfmarks for display label
+            _csv_bank = state.meta_mgr.csv_bank if state.meta_mgr else None
+            _vs_shelfmarks = []
+            for _sid in _vs_source_ids:
+                _meta = _csv_bank.get(_sid) if _csv_bank else None
+                _vs_shelfmarks.append(_meta.get('shelfmark', _sid) if _meta else _sid)
+            search_state.vs_restrict_sys_ids = _vs_sys_ids
+            search_state.vs_restrict_label = f'{tr("Visual Similarity")} \u2014 {", ".join(_vs_shelfmarks)}'
+            search_state.vs_restrict_source_ids = _vs_source_ids
+            search_state.vs_restrict_mode = _vs_mode_val
+            search_state.vs_browse_mode = _vs_browse_val
+
+    def _has_active_filters() -> bool:
+        """Check if any pre-search filters are active."""
+        return has_active_filters(search_state)
+
+    def _active_filter_count() -> int:
+        """How many pre-search filters are set: the badge on the "Search only in..." button."""
+        s = search_state
+        n = len(s.filter_domains or []) + len(s.filter_authors or []) + len(s.filter_works or [])
+        n += len(s.filter_material_exclude or [])
+        n += active_criteria_count(s.filter_criteria)  # one per criterion, as its chips
+        # Text position is not in has_active_filters (it changes the search's
+        # semantics rather than its scope) but the chip bar shows it, so the
+        # badge counts it too (Codex on #434). The select exists before the
+        # first call: _panel_toggles['ready'] is set after the form is built.
+        n += 1 if (text_position_select.value or 'anywhere') != 'anywhere' else 0
+        n += 1 if (s.filter_text_all or s.filter_text_any or s.filter_text_not) else 0
+        return n
+
+    # _domain_display_name closure wrapper (delegates to module-level function with search_state)
+    def _domain_display_name(en_name: str) -> str:
+        return domain_display_name(search_state, en_name)
+
+    # AdvancedViewState is now imported from search_state.py
+
+    # === VIEWER_STYLES for Advanced View image handling (must be at page level) ===
+    ADVANCED_VIEWER_STYLES = '''
+    <script src="/static/manuscript_viewer.js"></script>
+    <script>
+    // Create advanced viewer via shared factory
+    window.advViewer = createManuscriptViewer({
+        imageSelector: '.adv-zoomable-image',
+        containerSelector: '.adv-image-container',
+        zoomLabelSelector: '.adv-zoom-label',
+        gammaFilterId: 'gamma-adv'
+    });
+    </script>
+    <svg style="position:absolute;width:0;height:0"><filter id="gamma-adv"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
+    <style>
+    .adv-image-container { position: relative; background: #1a1a1a; border-radius: 8px; overflow: hidden; min-height: 400px; display: flex; align-items: center; justify-content: center; }
+    .adv-zoomable-image { max-width: 100%; max-height: 100%; object-fit: contain; cursor: grab; transform-origin: center center; transition: transform 0.1s ease-out; }
+    .adv-zoomable-image:active { cursor: grabbing; }
+    </style>
+    '''
+
+    # Restore previous results (transcription lookup deferred to after UI renders)
+    if restore_saved_results:
+        try:
+            restore_search_snapshot(search_state, initial_run)
+        except Exception:
+            pass  # Snapshot restore failed; page starts empty
+
+
+    # === UI Layout ===
+    # Add Advanced View image handler JavaScript at page level (must be outside dialog)
+    ui.add_head_html(ADVANCED_VIEWER_STYLES)
+
+    # Domain filter dialog JS helpers (must be at page level for inline onchange handlers)
+    # Functions accept containerId parameter for unique dialog instances
+    # Library filter dialog JS helpers (BUG-B fix: must be at page level, NOT inside ui.html)
+    ui.add_head_html('''<script>
+    // DMF (Phase 130-02) — mode-aware Apply enable:
+    // In Show-only mode, zero-checked DISABLES Apply (can't show nothing).
+    // In Hide mode, zero-checked LEAVES Apply ENABLED (hide nothing = show all = valid).
+    function libFilterUpdateApply(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var cbs = cont.querySelectorAll('.lib-cb');
+        var n = 0;
+        cbs.forEach(function(cb) { if (cb.checked) n++; });
+        var btn = document.getElementById('libApplyBtn_' + cid);
+        if (!btn) return;
+        var mode = cont.getAttribute('data-libmode') || 'hide';
+        // Only disable when show_only AND zero checked; hide mode allows empty (= hide nothing).
+        btn.disabled = (mode === 'show_only' && n === 0);
+    }
+    function libFilterGetChecked(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return [];
+        var result = [];
+        cont.querySelectorAll('.lib-cb:checked').forEach(function(cb) { result.push(cb.dataset.code); });
+        return result;
+    }
+    function libFilterSelectAll(cid, val) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.querySelectorAll('.lib-cb').forEach(function(cb) { cb.checked = val; });
+        libFilterUpdateApply(cid);
+    }
+    // Set the mode attribute and re-run Apply-enable after a mode toggle flip.
+    function libFilterSetMode(cid, mode) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.setAttribute('data-libmode', mode);
+        // Reset all checkboxes (D-04: flipping mode clears the selection).
+        cont.querySelectorAll('.lib-cb').forEach(function(cb) { cb.checked = false; });
+        libFilterUpdateApply(cid);
+    }
+    // Text-search row filter: hide rows whose label text does not contain the typed substring.
+    function libFilterSearch(cid, query) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var q = query.toLowerCase().trim();
+        cont.querySelectorAll('.lib-cb-row').forEach(function(row) {
+            if (!q) { row.style.display = 'flex'; return; }
+            var label = (row.getAttribute('data-label') || '').toLowerCase();
+            row.style.display = (label.indexOf(q) >= 0) ? 'flex' : 'none';
+        });
+    }
+    </script>''')
+    ui.add_head_html('''<script>
+    function domainFilterParentChanged(parentCb) {
+        try {
+            var children = JSON.parse(parentCb.getAttribute('data-children') || '[]');
+            var container = parentCb.closest('[id^="domain-filter-"]');
+            if (!container) return;
+            for (var i = 0; i < children.length; i++) {
+                var childCb = container.querySelector(
+                    'input[data-domain="' + CSS.escape(children[i]) + '"]'
+                );
+                if (childCb) childCb.checked = parentCb.checked;
+            }
+        } catch(e) { console.error('domainFilterParentChanged:', e); }
+    }
+    function domainFilterSelectAll(containerId, checked) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+        var cbs = container.querySelectorAll('input[type="checkbox"]');
+        for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked;
+    }
+    function domainFilterGetExcluded(containerId) {
+        var container = document.getElementById(containerId);
+        if (!container) return [];
+        var excluded = [];
+        var cbs = container.querySelectorAll('input[type="checkbox"]');
+        for (var i = 0; i < cbs.length; i++) {
+            if (!cbs[i].checked) excluded.push(cbs[i].getAttribute('data-domain'));
+        }
+        return excluded;
+    }
+    </script>''')
+
+    # `search-shell`: a fixed-height shell on wide screens (the results scroll
+    # inside it); on a phone common.css lets the page scroll instead, so the
+    # header and the browser's address bar hide on scroll (owner, 2026-10-22).
+    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0 search-shell'):
+
+        # === Search Header Panel (Collapsible) ===
+        search_panel_container = ui.column().classes('w-full gap-0 search-panel-container')
+
+        with search_panel_container:
+            # --- Collapsed View (Hidden by default) ---
+            collapsed_panel = ui.card().classes(
+                'w-full px-4 py-2 rounded-none border-0 border-b search-panel-collapsed'
+            ).style(
+                'background: var(--bg-card); border-color: var(--border-light) !important; display: none;'
+            )
+
+            with collapsed_panel:
+                with ui.row().classes('w-full items-center justify-between gap-3'):
+                    # Left: Query summary
+                    with ui.row().classes('items-center gap-3 flex-grow min-w-0'):
+                        ui.icon('search').classes('text-lg').style('color: var(--primary-600);')
+                        collapsed_query_label = ui.label('').classes(
+                            'text-sm font-medium truncate'
+                        ).style('color: var(--text-primary); direction: rtl; max-width: 300px;')
+                        collapsed_mode_badge = ui.badge('').props('outline').classes('text-xs')
+
+                    # Right: Search button and expand
+                    with ui.row().classes('items-center gap-2 shrink-0'):
+                        collapsed_search_btn = ui.button(
+                            tr('Search'), icon='search', on_click=lambda: execute_search()
+                        ).classes('btn-primary h-8 px-4 text-sm').props('data-ux=search_results')
+
+                        def expand_panel():
+                            search_state.is_panel_collapsed = False
+                            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+                            expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+
+                        ui.button(
+                            icon='expand_more', on_click=expand_panel
+                        ).props(f'flat round dense size=sm aria-label="{tr("Expand search options")}"').tooltip(tr('Expand search options'))
+
+            # --- Expanded View (Full panel) ---
+            expanded_panel = ui.card().classes(
+                'w-full p-6 rounded-none border-0 border-b search-panel-expanded'
+            ).style(
+                'background: var(--bg-card); border-color: var(--border-light) !important;'
+            )
+
+            with expanded_panel:
+                # The collapse handlers. The button itself sits at the end of the
+                # main row (owner's mockup, 2026-10-22); this element draws nothing.
+                with ui.element('div').classes('hidden'):
+                    def _fill_collapsed_strip():
+                        """Write the query and mode into the collapsed strip."""
+                        query_val = query_input.value or ''
+                        collapsed_query_label.text = query_val[:50] + ('...' if len(query_val) > 50 else '') if query_val else tr('Enter search query')
+                        mode_val = mode_select.value
+                        mode_names = {'exact': '=', 'variants': '?', 'variants_extended': '??',
+                                     'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
+                                     'Shelfmark': '#', 'Title': '$', 'pgp_tags': 'PGP'}
+                        collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
+
+                    def collapse_panel():
+                        search_state.is_panel_collapsed = True
+                        _fill_collapsed_strip()
+                        expanded_panel.style('display: none !important;')
+                        collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+                        _close_filters_panel()
+
+                    async def _collapse_panel_on_phone():
+                        """Fold the form away when a search starts on a phone.
+
+                        The open form is a third of a phone screen and stayed
+                        open through the whole search (owner's screenshots,
+                        2026-10-22): the auto-collapse keys off scrolling inside
+                        the results pane, which on a phone is too short to
+                        scroll. The width is asked of the browser and the fold
+                        is done from Python (collapse_panel), not by script in
+                        the page: a `display` set by script on the collapsed
+                        strip lasts only until the next render, when Vue
+                        re-applies the strip's own `display: none` (traced
+                        2026-10-22), so the strip's state has to live here.
+                        """
+                        try:
+                            width = await ui.run_javascript('window.innerWidth', timeout=1.0)
+                        except Exception:
+                            return  # no answer in time: leave the form as it is
+                        if isinstance(width, (int, float)) and width <= 640:
+                            collapse_panel()
+
+
+                # Main Search Row: one line on wide screens (owner's mockup, 2026-10-22)
+                with ui.row().classes('w-full items-center gap-2 flex-wrap search-main-row'):
+
+                    # Search Input (Main) — swaps between text input and tag select
+                    with ui.column().classes('flex-grow min-w-80 gap-1') as query_column:
+                        # Changed to H2 semantic label
+                        query_label = h2(tr('Search Query'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
+                        query_input = ui.input(
+                            placeholder=tr('Enter Hebrew text to search'),
+                            value=saved_query
+                        ).classes('w-full text-lg').props(
+                            # data-no-loading-bar: the search runs in the page with its own
+                            # progress bar; the site's top bar would run on 15 s (web/main.py).
+                            'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
+                            ' data-gs-primary-search'  # "/" jumps here (web/keyboard_shortcuts.py)
+                        ).style('direction: rtl;')
+                        query_input.on('keydown.enter', lambda: execute_search())
+
+                        # --- Live shortcut detection: switch mode when user types prefix + space ---
+                        _shortcut_prefixes = [
+                            ('???', 'variants_maximum'),
+                            ('??', 'variants_extended'),
+                            ('R', 'responsa'),
+                            ('?', 'variants'),
+                            ('=', 'exact'),
+                            ('~', 'fuzzy'),
+                            ('/', 'Regex'),
+                            ('$', 'Title'),
+                            ('#', 'Shelfmark'),
+                        ]
+
+                        def on_query_input_change():
+                            val = query_input.value or ''
+                            # Check if text starts with a shortcut followed by a space
+                            for prefix, target_mode in _shortcut_prefixes:
+                                if val.startswith(prefix + ' ') or val == prefix + ' ':
+                                    # Strip the prefix and leading space
+                                    clean = val[len(prefix):].lstrip()
+                                    query_input.value = clean
+                                    # Switch mode (map variant subtypes for slider)
+                                    if use_slider and target_mode in ('variants_extended', 'variants_maximum'):
+                                        # ?? and ??? name a level: the slider shows it.
+                                        _show_level_on_slider(target_mode)
+                                        mode_select.value = 'variants'
+                                    else:
+                                        mode_select.value = target_mode
+                                    # Explicitly trigger mode change handler — programmatic
+                                    # value assignment doesn't fire Vue 'update:model-value'
+                                    on_mode_change()
+                                    break
+                        query_input.on('update:model-value', on_query_input_change)
+                        # Fire shortcut detection immediately on space press (avoids
+                        # one-keystroke delay from NiceGUI's batched model-value updates)
+                        query_input.on('keyup.space', on_query_input_change)
+
+                        # Save query on change
+                        def save_query():
+                            _safe_set('search_query', query_input.value or '')
+                        query_input.on('blur', save_query)
+
+                    # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
+                    refine_badge = ui.chip('', icon='filter_list', color='amber-3').classes('text-sm')
+                    refine_badge.set_visibility(False)
+                    refine_cancel_btn = ui.button(tr('Cancel'), icon='close',
+                        on_click=lambda: _exit_refine_mode()
+                    ).classes('text-xs').props('flat dense no-caps')
+                    refine_cancel_btn.set_visibility(False)
+
+                    # Tag Select (for PGP Tags mode) — hidden by default
+                    with ui.column().classes('flex-grow min-w-80 gap-1') as tag_column:
+                        h2(tr('PGP Tags'), classes='text-sm font-medium search-field-label', style='color: var(--success-600);')
+                        tag_select = ui.select(
+                            [], with_input=True, value=None
+                        ).classes('w-full text-lg').props('outlined dense clearable use-input input-debounce="200"'
+                                                          ' data-gs-primary-search')  # "/" here in PGP Tags mode
+                        tag_select.props(f'popup-content-class="max-h-64" label="{tr("Select a tag...")}"')
+                    tag_column.set_visibility(False)
+
+                    # Load PGP tags asynchronously with categorized Hebrew translations
+                    async def load_pgp_tags():
+                        from shared.pgp_tag_translations import get_categorized_tags_for_display
+                        from web.translations import get_language
+                        tags = await run.io_bound(get_all_distinct_tags)
+                        if tags is None:
+                            return  # cancelled or the app is stopping
+                        lang = get_language()
+                        categorized = get_categorized_tags_for_display(tags, lang)
+                        # NiceGUI dict format: {value: label} — category headers as visual separators
+                        opts = {}
+                        for header, display, en_tag in categorized:
+                            if en_tag == "":
+                                # Visual separator — use unique non-colliding key
+                                opts[f'__sep_{header}'] = display
+                            else:
+                                opts[en_tag] = display
+                        tag_select.options = opts
+                        tag_select.update()
+                    # Cat-2: deferred to let tag select mount before loading PGP tag options.
+                    asyncio.ensure_future(_after_delay(0.1, load_pgp_tags))
+
+                    # Mode Selector - includes variant levels when not using slider
+                    with ui.column().classes('gap-1'):
+                        h3(tr('Mode'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
+
+                        _responsa_label = tr('Responsa') + ' (R)'
+
+                        if use_slider:
+                            # Slider mode: single variants option, level controlled by slider
+                            mode_options = {
+                                'exact': tr('Exact') + ' (=)',
+                                'variants': tr('Variants') + ' (?)',
+                                'responsa': _responsa_label,
+                                'fuzzy': tr('Fuzzy') + ' (~)',
+                                'Regex': tr('Regex') + ' (/)',
+                                'Shelfmark': tr('Shelfmark') + ' (#)',
+                                'Title': tr('Title') + ' ($)',
+                                'pgp_tags': tr('PGP Tags'),
+                            }
+                        else:
+                            # Preset mode: separate variant levels in dropdown
+                            mode_options = {
+                                'exact': tr('Exact') + ' (=)',
+                                'variants': tr('Variants Basic') + ' (?)',
+                                'variants_extended': tr('Variants Extended') + ' (??)',
+                                'variants_maximum': tr('Variants Maximum') + ' (???)',
+                                'responsa': _responsa_label,
+                                'fuzzy': tr('Fuzzy') + ' (~)',
+                                'Regex': tr('Regex') + ' (/)',
+                                'Shelfmark': tr('Shelfmark') + ' (#)',
+                                'Title': tr('Title') + ' ($)',
+                                'pgp_tags': tr('PGP Tags'),
+                            }
+
+                        mode_select = ui.select(
+                            mode_options,
+                            value=saved_mode
+                        ).classes('w-48').props(f'outlined dense label="{tr("Mode")}"')
+
+
+                    # Track current preset level based on mode
+                    def get_level_from_mode(mode):
+                        """Get variant level from mode name."""
+                        if mode == 'variants_extended':
+                            return 70
+                        elif mode == 'variants_maximum':
+                            return 150
+                        elif mode == 'variants':
+                            return 30
+                        return 30
+
+                    raw_preset = saved_preset if saved_preset else get_level_from_mode(saved_mode)
+                    current_preset = {'value': raw_preset}
+
+                    # Create variables for elements (needed for callbacks)
+                    variant_slider = None
+                    max_changes_select = None
+
+                    # Max Changes selector (visible for all variant modes in non-slider mode)
+                    with ui.column().classes('gap-1') as max_changes_col:
+                        h3(tr('Num Changes'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
+                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                        ui.tooltip(tr('Letter changes per word at this level (1-3)'))
+
+                    # Show max changes only for variant modes when not using slider
+                    is_variant_mode = saved_mode in ('variants', 'variants_extended', 'variants_maximum')
+                    max_changes_col.set_visibility(is_variant_mode and not use_slider)
+
+                    def set_level(level_value):
+                        """Remember this visitor's variant level (sent with each search)."""
+                        current_preset['value'] = level_value
+                        _safe_set('search_preset', level_value)
+
+
+                    # Gap Control - restore from storage
+                    with ui.column().classes('gap-1'):
+                        # Changed to H3 semantic label
+                        h3(tr('Gap'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
+                        gap_input = ui.number(value=saved_gap, min=0, max=10).classes('w-20').props(f'outlined dense label="{tr("Gap")}"')
+                        ui.tooltip(tr('Gap description'))
+
+                        def save_gap():
+                            _safe_set('search_gap', int(gap_input.value or 0))
+                        gap_input.on('blur', save_gap)
+
+                    # Search/Stop Button Container - buttons swap in same position
+                    with ui.column().classes('items-center gap-0'):
+                        # Search Button
+                        search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
+                            'btn-primary h-10 px-8'
+                        ).props('data-ux=search_results')
+
+                        # Stop Button (hidden by default) - replaces search button
+                        stop_btn = ui.button(
+                            tr('Stop'),
+                            icon='stop',
+                            on_click=lambda: cancel_search()
+                        ).classes('h-10 px-4').style('display: none;').props('outline color=red')
+                        stop_btn.tooltip(tr('Stops the search and shows partial results'))
+
+                    # New Search (reset) button
+                    with ui.column().classes('items-center gap-0'):
+                        ui.button(icon='restart_alt', on_click=lambda: _reset_search()).props(
+                            f'flat dense round aria-label="{tr("New Search")}"'
+                        ).tooltip(tr('New Search'))
+
+                    # Search History Button + Menu
+                    with ui.column().classes('items-center gap-0'):
+                        history_btn = ui.button(icon='history', on_click=lambda: (
+                            _refresh_history_menu(), history_menu.open()
+                        )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(
+                            tr('Search History')).mark('search-history-button')
+
+                        history_menu = ui.menu()
+
+                    # Advanced Options and "Search only in..." open from two buttons
+                    # here instead of two full-width bars (owner's mockup,
+                    # 2026-10-22). The panels keep every control they had; only
+                    # their headers are hidden (common.css `.search-adv-panel`,
+                    # `.search-filters-panel`). The collapse chevron sits at the
+                    # row's end instead of on a 44px line of its own.
+                    _panel_toggles = {}
+
+                    def _toggle_adv_panel():
+                        panel = _panel_toggles.get('adv')
+                        if panel is None:
+                            return
+                        panel.value = not panel.value
+                        adv_toggle_btn.props(f'color={"primary" if panel.value else "grey-8"}')
+
+                    def _toggle_filters_panel():
+                        panel = _panel_toggles.get('filters')
+                        if panel is None:
+                            return
+                        panel.value = not panel.value
+                        _update_filters_toggle_btn()
+
+                    def _update_filters_toggle_btn():
+                        panel = _panel_toggles.get('filters')
+                        is_open = bool(panel.value) if panel is not None else False
+                        n = _active_filter_count()
+                        filters_toggle_btn.props(f'color={"primary" if (is_open or n) else "grey-8"}')
+                        filters_badge.text = str(n)
+                        filters_badge.set_visibility(n > 0)
+
+                    def _close_filters_panel():
+                        """Fold the "Search only in..." panel with the form.
+
+                        The panel is a sibling of the form, not part of it, and its
+                        own header is hidden at every width: its toggle is a button
+                        in the form. Folded with the panel open, it stayed open with
+                        no close control in sight (Codex on #434), so every fold the
+                        server performs closes it; the chips keep showing what is
+                        active, and the panel also carries a close button of its own
+                        for the fold the browser performs on scroll.
+                        """
+                        panel = _panel_toggles.get('filters')
+                        if panel is not None and panel.value:
+                            panel.value = False
+                            _update_filters_toggle_btn()
+
+                    with ui.column().classes('items-center gap-0'):
+                        adv_toggle_btn = ui.button(
+                            tr('Advanced Options'), icon='tune', on_click=lambda: _toggle_adv_panel(),
+                        ).props('outline dense no-caps color=grey-8').classes('search-row-btn')
+                    with ui.column().classes('items-center gap-0'):
+                        with ui.button(
+                            tr('Search only in...'), icon='filter_alt', on_click=lambda: _toggle_filters_panel(),
+                        ).props('outline dense no-caps color=grey-8').classes('search-row-btn') as filters_toggle_btn:
+                            filters_badge = ui.badge('0').props('floating rounded color=primary')
+                            filters_badge.set_visibility(False)
+                    with ui.column().classes('items-center gap-0'):
+                        ui.button(
+                            icon='expand_less', on_click=collapse_panel
+                        ).props(f'flat round dense size=sm aria-label="{tr("Collapse search panel")}"').tooltip(tr('Collapse search panel'))
+
+                # === Responsa Sub-Options (visible only when mode is 'responsa') ===
+                responsa_sub_row = ui.row().classes('w-full items-center gap-4 px-2 flex-wrap')
+                with responsa_sub_row:
+                    # Sub-checkboxes for Responsa mode
+                    responsa_variants_cb = ui.checkbox(tr('Variants'))
+                    responsa_variants_cb.tooltip(tr('Include spelling variant pairs'))
+
+                    responsa_ja_cb = ui.checkbox(tr('Judeo-Arabic'))
+                    responsa_ja_cb.tooltip(tr('Expand with Judeo-Arabic article forms (al-)'))
+
+                    responsa_flex_cb = ui.checkbox(tr('Flex Spacing'))
+                    responsa_flex_cb.tooltip(tr('Allow flexible spacing between characters (helps with OCR text)'))
+
+                    bidirectional_cb = ui.checkbox(tr('Bidirectional Gap'))
+                    bidirectional_cb.tooltip(tr('Search for words in either order'))
+
+                    # Syntax legend
+                    with ui.row().classes('items-center gap-1 ml-4'):
+                        ui.icon('help_outline').classes('text-sm').style('color: var(--text-muted);')
+                        ui.label(tr('Syntax:')).classes('text-xs font-medium').style('color: var(--text-muted);')
+                        ui.label('#מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('prefix'))
+                        ui.label('מילה#').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('suffix'))
+                        ui.label('%מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('plene'))
+                        ui.label('מילה* / *מילה / מי*לה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
+                        ui.label('(א/ב)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR'))
+                        ui.label('-מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Exclude'))
+                        ui.label('|מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Line starts'))
+                        ui.label('מילה|').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Line ends'))
+
+                    # Tabular Search button (pushed to right side)
+                    ui.space()
+                    builder_btn = ui.button(tr('Tabular Search'), icon='grid_view',
+                        on_click=lambda: open_query_builder()).classes('ml-auto').props('outline dense')
+
+
+                # Initially hide if mode is not responsa
+                responsa_sub_row.set_visibility(saved_mode == 'responsa')
+
+                # Advanced Options panel (inside expanded_panel, collapses with search bar);
+                # opened from the row's button, its own header hidden.
+                with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-2 search-adv-panel').style(
+                    'background: var(--bg-tertiary); border-radius: 12px;'
+                ) as adv_expansion:
+                    _panel_toggles['adv'] = adv_expansion
+                    with ui.column().classes('w-full p-4 gap-6'):
+                        # Options Grid
+                        with ui.row().classes('w-full gap-8 flex-wrap'):
+                            # Lab Mode Section
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Lab Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
+                                with ui.row().classes('gap-2 items-center'):
+                                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
+                                    ui.icon('info').classes('text-sm cursor-help').tooltip(
+                                        tr('Searches more candidates for comprehensive results')
+                                    )
+
+                            # NOT Filter Section
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Exclude Words')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                not_filter = ui.input(
+                                    placeholder=tr('Words to exclude (space separated)')
+                                ).classes('w-full').props('outlined dense').style('direction: rtl;')
+                                ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
+
+                            # Text Position Filter (for join detection)
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Text Position')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                saved_text_position = _safe_get('search_text_position', 'anywhere')
+                                text_position_select = ui.select(
+                                    {
+                                        'anywhere': tr('Anywhere'),
+                                        'start': tr('Start of text'),
+                                        'end': tr('End of text'),
+                                        'line_start': tr('Line starts'),
+                                        'line_end': tr('Line ends'),
+                                    },
+                                    value=saved_text_position,
+                                ).classes('w-40').props('outlined dense')
+                                ui.tooltip(tr('Constrain matches to text boundaries (for join detection)'))
+
+                                def save_text_position():
+                                    _safe_set('search_text_position', text_position_select.value)
+                                    # #22: only call once the chip bar (and its updater) exist.
+                                    if _chip_bar_ready['value']:
+                                        _update_chip_bar()
+                                text_position_select.on('update:model-value', save_text_position)
+
+
+            # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
+            variant_slider_row = None
+            if use_slider:
+                variant_slider_row = ui.row().classes('w-full items-center gap-4 px-2')
+                with variant_slider_row:
+                    ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('flex-grow').props('label-always')
+                    max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-20').props('outlined dense')
+                    ui.tooltip(tr('Letter changes per word at this level (1-3)'))
+                variant_slider_row.set_visibility(saved_mode == 'variants')
+
+                # Slider change handler
+                def on_slider_change():
+                    val = int(variant_slider.value)
+                    current_preset['value'] = val
+                    _safe_set('search_preset', val)
+                    _show_level_changes()
+                variant_slider.on('update:model-value', on_slider_change)
+
+            def _show_level_on_slider(mode):
+                """In slider mode ?? and ??? choose a level, as the preset buttons do."""
+                level = variant_preferences.PRESET_PAIRS[mode]
+                if variant_slider:
+                    variant_slider.value = level
+                current_preset['value'] = level
+                _safe_set('search_preset', level)
+                _show_level_changes()
+
+            def _shown_level():
+                """The variant level the controls show: the slider's, or the mode's."""
+                if variant_slider:
+                    return variant_preferences.level_of(int(variant_slider.value))
+                return variant_preferences.level_of(mode_select.value)
+
+            def _show_level_changes():
+                """Num Changes shows the shown level's own x1-x3 (no change event)."""
+                if max_changes_select:
+                    max_changes_select.value = variant_preferences.max_changes(_shown_level())
+
+            # Save max changes on change: for the level shown (each level keeps its own)
+            if max_changes_select:
+                def save_max_changes():
+                    variant_preferences.set_max_changes(_shown_level(), int(max_changes_select.value))
+                max_changes_select.on('update:model-value', save_max_changes)
+
+            # Mode change handler (must be after variant_slider_row is defined)
+            def on_mode_change():
+                mode = mode_select.value
+                is_variants = mode in ('variants', 'variants_extended', 'variants_maximum')
+                is_tags = mode == 'pgp_tags'
+                is_responsa = mode == 'responsa'
+
+                if use_slider:
+                    # Slider mode: show/hide slider row
+                    if variant_slider_row:
+                        variant_slider_row.set_visibility(is_variants)
+                else:
+                    # Preset mode: show/hide max changes column, update level based on mode
+                    max_changes_col.set_visibility(is_variants and not is_tags)
+                    if is_variants:
+                        set_level(get_level_from_mode(mode))
+                        _show_level_changes()
+
+                # Toggle between query input and tag select
+                query_column.set_visibility(not is_tags)
+                tag_column.set_visibility(is_tags)
+
+                # Responsa sub-options: visible only in Responsa mode
+                responsa_sub_row.set_visibility(is_responsa)
+
+                # Save mode to storage (don't persist pgp_tags)
+                if not is_tags:
+                    _safe_set('search_mode', mode)
+
+            mode_select.on('update:model-value', on_mode_change)
+
+        # === Search only in... Filter Panel (BEFORE Advanced Options & progress bar) ===
+        _pos_pref = _safe_get('search_text_position', 'anywhere') or 'anywhere'
+        _adv_filters_expanded = _has_active_filters() or _filters_from_browse or _pos_pref != 'anywhere'
+        adv_filters_panel = ui.expansion(
+            text=tr('Search only in...'),
+            icon='filter_alt',
+            value=_adv_filters_expanded,
+        ).classes('w-full search-filters-panel').style(
+            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+        ).props('dense header-class="text-subtitle2 text-weight-medium"')
+        # Opened from the search row's button; the header above is hidden (common.css).
+        _panel_toggles['filters'] = adv_filters_panel
+        _panel_toggles['ready'] = True
+        _update_filters_toggle_btn()
+
+        _filter_refs = {}
+
+        with adv_filters_panel:
+            with ui.column().classes('w-full px-4 py-3 gap-4'):
+                # The panel's own title and close button: its expansion header
+                # is hidden and its toggle sits in the form, which the scroll
+                # fold hides from script without telling Python (Codex on #434).
+                with ui.row().classes('w-full items-center justify-between'):
+                    ui.label(tr('Search only in...')).classes('text-subtitle2 text-weight-medium')
+                    ui.button(icon='close', on_click=lambda: _toggle_filters_panel()).props(
+                        f'flat round dense size=sm aria-label="{tr("Close")}"'
+                    ).tooltip(tr('Close'))
+
+                # Include/Exclude toggle
+                with ui.row().classes('w-full items-center gap-2'):
+                    filter_mode_toggle = ui.toggle(
+                        {True: tr('Include'), False: tr('Exclude')},
+                        value=search_state.filter_include_mode,
+                    ).props('dense no-caps size=sm')
+                    _filter_refs['mode'] = filter_mode_toggle
+
+                with ui.row().classes('w-full gap-4 flex-wrap items-end'):
+                    # Domain filter (multi-select) — options loaded asynchronously after page renders
+                    with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                        ui.label(tr('Domain')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        domain_select = ui.select(
+                            options={},
+                            value=search_state.filter_domains,
+                            multiple=True,
+                            with_input=True,
+                            clearable=True,
+                        ).classes('w-full').props('outlined dense use-chips')
+                        _filter_refs['domain'] = domain_select
+
+                    # Author filter (multi-select) — options loaded asynchronously after page renders
+                    with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                        ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        author_select = ui.select(
+                            options={},
+                            value=search_state.filter_authors,
+                            multiple=True,
+                            with_input=True,
+                            clearable=True,
+                        ).classes('w-full').props('outlined dense use-chips')
+                        _filter_refs['author'] = author_select
+
+                    # Work filter (multi-select) — options loaded asynchronously after page renders
+                    with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                        ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        work_select = ui.select(
+                            options={},
+                            value=search_state.filter_works,
+                            multiple=True,
+                            with_input=True,
+                            clearable=True,
+                        ).classes('w-full').props('outlined dense use-chips')
+                        _filter_refs['work'] = work_select
+
+                with ui.row().classes('w-full gap-4 flex-wrap items-end'):
+                    # Manuscript features: period of copy, script, size and the
+                    # rest of the catalogue criteria (replaced the date range, the
+                    # script lists and the Measurements group). Its chips are in
+                    # the chip bar below.
+                    with ui.column().classes('gap-1 min-w-32'):
+                        async def _on_criteria_applied(criteria):
+                            if apply_criteria(search_state, 'search', criteria):
+                                await _recompute_filter_count()
+                            _update_chip_bar()
+                        criteria_control = CriteriaControl(
+                            get_criteria=lambda: search_state.filter_criteria,
+                            on_apply=_on_criteria_applied,
+                            fjms=lambda: _get_fjms_for_criteria(),
+                            universe=corpus_universe,
+                            mark='search-criteria',
+                            show_chips=False,
+                            on_chips=lambda _chips: _update_chip_bar() if _chip_bar_ready['value'] else None,
+                        ).build()
+
+                    # Material exclude (Printed)
+                    with ui.column().classes('gap-1 min-w-48'):
+                        ui.label(tr('Material')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        exclude_printed_cb = ui.checkbox(
+                            tr('Exclude Printed'),
+                            value='Printed' in search_state.filter_material_exclude,
+                        ).props('dense')
+                        _filter_refs['exclude_printed'] = exclude_printed_cb
+
+                    # Clear all filters button
+                    with ui.column().classes('gap-1 justify-end'):
+                        def _clear_all_adv_filters():
+                            """Clear all filter selections."""
+                            search_state.filter_domains = []
+                            search_state.filter_authors = []
+                            search_state.filter_works = []
+                            search_state.filter_include_mode = True
+                            search_state.filter_material_exclude = []
+                            search_state.filter_criteria = {}
+                            search_state.filter_text_all = []
+                            search_state.filter_text_any = []
+                            search_state.filter_text_not = []
+                            search_state.filter_manuscript_count = None
+                            search_state.restrict_sys_ids = None
+                            domain_select.value = []
+                            author_select.value = []
+                            work_select.value = []
+                            filter_mode_toggle.value = True
+                            exclude_printed_cb.value = False
+                            if _filter_refs.get('text_input'):
+                                _filter_refs['text_input'].value = ''
+                            criteria_control.refresh()
+                            # Reset filter-only storage keys (Phase 74: narrower helper).
+                            # clear_search_snapshot() was too broad here - it wiped
+                            # live search_results / exclusions / refinement chain
+                            # leaving storage divergent from the visible page
+                            # (Codex 74-CODEX-REVIEW2 #3).
+                            clear_search_filters()
+                            _update_chip_bar()
+
+                        ui.button(tr('Clear All'), icon='clear_all',
+                                  on_click=_clear_all_adv_filters).props('flat dense no-caps')
+
+                # Text filter row
+                with ui.row().classes('w-full gap-2 items-end'):
+                    with ui.column().classes('gap-1 flex-grow'):
+                        ui.label(tr('Text Filter')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            text_mode_select = ui.select(
+                                options={
+                                    'all': tr('All words'),
+                                    'any': tr('Any word'),
+                                    'not': tr('Not these words'),
+                                },
+                                value='all',
+                            ).classes('w-36').props('outlined dense')
+                            _filter_refs['text_mode'] = text_mode_select
+
+                            text_filter_input = ui.input(
+                                placeholder=tr('Add term'),
+                            ).classes('flex-grow').props('outlined dense').on(
+                                'keydown.enter', lambda e: _add_text_term()
+                            )
+                            _filter_refs['text_input'] = text_filter_input
+
+                            ui.button(icon='add', on_click=lambda: _add_text_term()).props(
+                                f'flat dense round aria-label="{tr("Add term")}"'
+                            ).tooltip(tr('Add term'))
+
+                    # Display current text filter chips
+                    with ui.row().classes('w-full gap-1 flex-wrap') as text_chip_row:
+                        _filter_refs['text_chips'] = text_chip_row
+
+                async def _add_text_term():
+                    """Add a text filter term from the input."""
+                    term = text_filter_input.value.strip() if text_filter_input.value else ''
+                    if not term:
+                        return
+                    mode = text_mode_select.value
+                    if mode == 'all':
+                        if term not in search_state.filter_text_all:
+                            search_state.filter_text_all.append(term)
+                    elif mode == 'any':
+                        if term not in search_state.filter_text_any:
+                            search_state.filter_text_any.append(term)
+                    elif mode == 'not':
+                        if term not in search_state.filter_text_not:
+                            search_state.filter_text_not.append(term)
+                    text_filter_input.value = ''
+                    persist_value('search_filter_text_all', search_state.filter_text_all)
+                    persist_value('search_filter_text_any', search_state.filter_text_any)
+                    persist_value('search_filter_text_not', search_state.filter_text_not)
+                    await _recompute_filter_count()
+                    _update_chip_bar()
+                    _rebuild_text_chips()
+
+                async def _remove_text_term(mode, term):
+                    """Remove a text filter term."""
+                    target = getattr(search_state, f'filter_text_{mode}')
+                    if term in target:
+                        target.remove(term)
+                    persist_value(f'search_filter_text_{mode}', target)
+                    await _recompute_filter_count()
+                    _update_chip_bar()
+                    _rebuild_text_chips()
+
+                def _rebuild_text_chips():
+                    """Rebuild text filter chip display."""
+                    text_chip_row = _filter_refs.get('text_chips')
+                    if not text_chip_row:
+                        return
+                    text_chip_row.clear()
+                    with text_chip_row:
+                        for t in search_state.filter_text_all:
+                            ui.chip(f"+ {t}", icon='check_circle', removable=True,
+                                    color='green-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_text_term('all', _t))
+                        for t in search_state.filter_text_any:
+                            ui.chip(f"~ {t}", icon='help_outline', removable=True,
+                                    color='blue-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_text_term('any', _t))
+                        for t in search_state.filter_text_not:
+                            ui.chip(f"- {t}", icon='block', removable=True,
+                                    color='red-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_text_term('not', _t))
+
+                # Initialize text chips on page load
+                _rebuild_text_chips()
+
+                # Phase 56: Exclude manuscripts shortcut in pre-search panel
+                ui.separator()
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button(
+                        tr('Exclude known manuscripts'), icon='person_remove',
+                        on_click=lambda: _show_exclusion_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    # Show active exclusion count
+                    pre_excl_label = ui.label('')
+                    pre_excl_label.set_visibility(False)
+                    if search_state.exclusion_sources:
+                        n_total = sum(len(s.sys_ids) for s in search_state.exclusion_sources)
+                        pre_excl_label.text = f"{n_total} {tr('manuscripts excluded')}"
+                        pre_excl_label.set_visibility(True)
+                        pre_excl_label.classes('text-xs text-red-600 font-medium')
+
+        # --- Filter chip bar (always visible, even when panel is collapsed) ---
+        chip_bar_container = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
+            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0; margin-bottom: 16px; position: relative; z-index: 1;'
+        )
+        chip_bar_container.set_visibility(False)
+
+        # #11: per-op feedback for the (background) filter-count recompute — spinner
+        # while pending, an error chip on failure — instead of leaving the count
+        # silently stale.
+        # GitHub Codex PR #300 P2: this row must live OUTSIDE chip_bar_container.
+        # _update_chip_bar() calls chip_bar_container.clear() (including on the initial
+        # render), which previously destroyed these stored elements, so every later
+        # pending/error update mutated detached nodes and never became visible. Keep it
+        # in its own persistent, chip-bar-aligned container below the chips.
+        _filter_status_row = ui.row().classes('w-full px-4 items-center gap-1')
+        _filter_status_row.set_visibility(False)
+        with _filter_status_row:
+            _filter_status_spinner = ui.spinner(size='sm').props('aria-hidden=true')
+            _filter_status_label = ui.label('').classes('text-xs').style('color: var(--text-muted);')
+
+        def _set_filter_recompute_state(status):
+            """Render pending/error feedback for the filter-count recompute (#11)."""
+            try:
+                if status == 'pending':
+                    _filter_status_spinner.set_visibility(True)
+                    _filter_status_label.text = tr('Updating filter count…')
+                    _filter_status_label.style('color: var(--text-muted);')
+                    _filter_status_row.set_visibility(True)
+                elif status == 'error':
+                    _filter_status_spinner.set_visibility(False)
+                    _filter_status_label.text = tr('Could not update filter count')
+                    _filter_status_label.style('color: var(--accent-red, #ef4444);')
+                    _filter_status_row.set_visibility(True)
+                else:  # 'done'
+                    _filter_status_row.set_visibility(False)
+            except Exception:
+                logger.debug("filter recompute status render failed", exc_info=True)
+
+        def _get_display_name(key, opts_dict):
+            """Extract display name from options dict (strip trailing count suffix only)."""
+            if isinstance(opts_dict, dict) and key in opts_dict:
+                import re
+                # Strip only the trailing " (N,NNN)" count, preserving qualified names like "Other (Bible)"
+                raw = opts_dict[key].lstrip(' \u2514').strip()
+                return re.sub(r'\s*\([\d,]+\)\s*$', '', raw).strip()
+            return key
+
+        def _update_chip_bar():
+            """Rebuild chip bar from current filter state.
+
+            SEED-026 (smoke 2026-06-29): there are NO library chips. The library filter state
+            is shown on library_filter_btn itself (red + "Filter Libraries (shown/total)").
+            chip_bar_container is the PRE-search 'search only in…' bar and only shows
+            domain/text-position/material/criteria chips.
+            """
+            chip_bar_container.clear()
+            _pos = (text_position_select.value or 'anywhere')
+            _pos_active = _pos != 'anywhere'
+            # NOTE: library_filter is intentionally NOT included here — its state lives on
+            # the library_filter_btn (see _update_library_btn). The pre-search
+            # chip_bar_container only shows filters that apply during search construction.
+            has_any = _has_active_filters() or _pos_active
+            chip_bar_container.set_visibility(has_any)
+            if _panel_toggles.get('ready'):
+                _update_filters_toggle_btn()
+            if not has_any:
+                return
+
+            mode_prefix = tr('Exclude') + ': ' if not search_state.filter_include_mode else ''
+            opts_d = domain_select.options if hasattr(domain_select, 'options') else {}
+            opts_a = author_select.options if hasattr(author_select, 'options') else {}
+            opts_w = work_select.options if hasattr(work_select, 'options') else {}
+
+            with chip_bar_container:
+                # Text-position chip (shown when dropdown != Anywhere). Placed first
+                # because it changes search semantics, not just display filtering.
+                if _pos_active:
+                    _pos_label_map = {
+                        'start': tr('Start of text'),
+                        'end': tr('End of text'),
+                        'line_start': tr('Line starts'),
+                        'line_end': tr('Line ends'),
+                    }
+                    def _clear_text_position():
+                        text_position_select.value = 'anywhere'
+                        _safe_set('search_text_position', 'anywhere')
+                        _update_chip_bar()
+                    ui.chip(
+                        f"{tr('Text Position')}: {_pos_label_map.get(_pos, _pos)}",
+                        icon='vertical_align_top', removable=True,
+                        on_click=lambda: None, color='amber-3',
+                    ).on('remove', _clear_text_position)
+
+                # Mode indicator
+                if not search_state.filter_include_mode and (
+                    search_state.filter_domains or search_state.filter_authors or search_state.filter_works
+                ):
+                    ui.chip(tr('Exclude selected'), icon='block', color='red-2')
+
+                # Domain chips
+                for d in search_state.filter_domains:
+                    dname = _get_display_name(d, opts_d)
+                    ui.chip(
+                        dname, icon='category', removable=True,
+                        on_click=lambda: None, color='deep-purple-2',
+                    ).on('remove', lambda _d=d: _remove_filter('domain', _d))
+
+                # Author chips
+                for a in search_state.filter_authors:
+                    aname = _get_display_name(a, opts_a)
+                    ui.chip(
+                        aname, icon='person', removable=True,
+                        on_click=lambda: None, color='blue-2',
+                    ).on('remove', lambda _a=a: _remove_filter('author', _a))
+
+                # Work chips
+                for w in search_state.filter_works:
+                    wname = _get_display_name(w, opts_w)
+                    ui.chip(
+                        wname, icon='menu_book', removable=True,
+                        on_click=lambda: None, color='teal-2',
+                    ).on('remove', lambda _w=w: _remove_filter('work', _w))
+
+                # Material exclude chip
+                if search_state.filter_material_exclude:
+                    for mat in search_state.filter_material_exclude:
+                        ui.chip(
+                            f"{tr('Exclude')} {mat}", icon='block', removable=True,
+                            on_click=lambda: None, color='red-2',
+                        ).on('remove', lambda m=mat: _remove_filter('material', m))
+
+                # Manuscript features: one chip per criterion (its text read by
+                # the control, off the loop; drawn when it arrives).
+                _active_keys = set(search_state.filter_criteria or {})
+                for _ckey, _ctext in criteria_control.chips:
+                    if _ckey in _active_keys:
+                        ui.chip(
+                            _ctext, icon='tune', removable=True,
+                            on_click=lambda: None, color='brown-2',
+                        ).on('remove', lambda _k=_ckey: criteria_control.remove(_k)).mark(
+                            'search-criteria-chip')
+
+                # Text filter chips
+                for t in search_state.filter_text_all:
+                    ui.chip(f"+ {t}", icon='check_circle', removable=True,
+                            color='green-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_text_term('all', _t))
+                for t in search_state.filter_text_any:
+                    ui.chip(f"~ {t}", icon='help_outline', removable=True,
+                            color='blue-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_text_term('any', _t))
+                for t in search_state.filter_text_not:
+                    ui.chip(f"- {t}", icon='block', removable=True,
+                            color='red-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_text_term('not', _t))
+
+                # Manuscript count badge
+                if search_state.filter_manuscript_count is not None:
+                    ui.label(
+                        f"{search_state.filter_manuscript_count:,} {tr('manuscripts')}"
+                    ).classes('text-xs px-2 py-0.5 rounded ml-2').style(
+                        'background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-light);'
+                    )
+
+                # NOTE (SEED-026): there are no library chips. The library filter state is
+                # shown on library_filter_btn itself (red + "Filter Libraries (shown/total)"),
+                # not in chip_bar_container (_update_chip_bar). See _update_library_btn().
+
+        async def _remove_filter(filter_type, value=None):
+            """Remove a specific filter and update state."""
+            if filter_type == 'domain':
+                if value and value in search_state.filter_domains:
+                    search_state.filter_domains.remove(value)
+                else:
+                    search_state.filter_domains = []
+                domain_select.value = search_state.filter_domains
+                persist_value('search_filter_domains', search_state.filter_domains)
+                await _refresh_author_options()
+                await _refresh_work_options()
+            elif filter_type == 'author':
+                if value and value in search_state.filter_authors:
+                    search_state.filter_authors.remove(value)
+                else:
+                    search_state.filter_authors = []
+                author_select.value = search_state.filter_authors
+                persist_value('search_filter_authors', search_state.filter_authors)
+                await _refresh_work_options()
+            elif filter_type == 'work':
+                if value and value in search_state.filter_works:
+                    search_state.filter_works.remove(value)
+                else:
+                    search_state.filter_works = []
+                work_select.value = search_state.filter_works
+                persist_value('search_filter_works', search_state.filter_works)
+            elif filter_type == 'material':
+                if value and value in search_state.filter_material_exclude:
+                    search_state.filter_material_exclude.remove(value)
+                    persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
+                    exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
+            await _recompute_filter_count()
+            _update_chip_bar()
+
+        _filter_refresh_seq = {'author': 0, 'work': 0}
+
+        async def _refresh_author_options():
+            """Refresh author select options based on current domain filter (async)."""
+            _filter_refresh_seq['author'] += 1
+            seq = _filter_refresh_seq['author']
+            author_select.props('loading')
+            lang = get_language()
+            new_opts = await run.io_bound(build_author_options, lang, search_state.filter_domains)
+            if _filter_refresh_seq['author'] != seq:
+                return  # Stale -- newer request in flight
+            author_select.props(remove='loading')
+            if new_opts is None:
+                return  # cancelled or app stopping: keep the options shown
+            author_select.options = new_opts
+            author_select.update()
+
+        async def _refresh_work_options():
+            """Refresh work select options based on current domain and author filters (async)."""
+            _filter_refresh_seq['work'] += 1
+            seq = _filter_refresh_seq['work']
+            work_select.props('loading')
+            lang = get_language()
+            new_opts = await run.io_bound(
+                build_work_options, lang, search_state.filter_domains, search_state.filter_authors
+            )
+            if _filter_refresh_seq['work'] != seq:
+                return  # Stale -- newer request in flight
+            work_select.props(remove='loading')
+            if new_opts is None:
+                return  # cancelled or app stopping: keep the options shown
+            work_select.options = new_opts
+            work_select.update()
+
+        async def _recompute_filter_count():
+            """Recompute manuscript count for current filters (background)."""
+            await recompute_filter_count(
+                search_state, _update_chip_bar, on_state=_set_filter_recompute_state
+            )
+            # D-16: Detect scope change during active refinement chain
+            if search_state.refinement_chain:
+                new_sig = scope_signature(search_state.restrict_sys_ids)
+                if new_sig != search_state._refinement_scope_sig:
+                    search_state._refinement_stale = True
+
+        # --- Filter change handlers (via shared factory) ---
+        _handlers = create_filter_handlers(
+            search_state, 'search', _filter_refs,
+            _refresh_author_options, _refresh_work_options,
+            _recompute_filter_count, _update_chip_bar,
+        )
+
+        # Wire up change handlers
+        domain_select.on('update:model-value', _handlers['on_domain_change'])
+        author_select.on('update:model-value', _handlers['on_author_change'])
+        work_select.on('update:model-value', _handlers['on_work_change'])
+        filter_mode_toggle.on('update:model-value', _handlers['on_mode_change'])
+        exclude_printed_cb.on('update:model-value', _handlers['on_exclude_printed_change'])
+
+        # #22: chip bar + updater now exist — mark ready so early callbacks may call it.
+        _chip_bar_ready['value'] = True
+
+        # Initialize chip bar on page load
+        _update_chip_bar()
+
+        # === Progress Bar ===
+        progress_container = ui.column().classes('w-full mt-2')
+        with progress_container:
+            with ui.linear_progress(0, show_value=False).props('stripe animate').classes('w-full opacity-0 my-2').style('height: 12px;') as progress_bar:
+                ui.label().classes('absolute-center text-xs text-white').bind_text_from(
+                    progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
+                )
+            status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary); display: none;')
+
+        # === Phase 55: Refinement replay helpers ===
+        def _step_searcher():
+            """Each step is searched again with the variant settings it first ran with.
+
+            A step saved without them (before they were recorded) runs with the
+            website defaults at its level's preset and that level's default x1-x3
+            (Fuzzy at x2) -- never with this visitor's current preferences, which
+            say nothing about how it first ran.
+            """
+            from shared.variants import DEFAULT_MAX_CHANGES_BY_PRESET
+
+            def pick(step):
+                settings = step.variant_settings
+                if settings is None:
+                    pairs = variant_preferences.PRESET_PAIRS.get(step.mode, variant_preferences.BASIC_PAIRS)
+                    settings = {'variant_pairs_count': pairs}
+                    if step.mode == 'fuzzy':
+                        settings['variant_max_changes'] = 2
+                    elif step.mode in variant_preferences.PRESET_PAIRS:
+                        settings['variant_max_changes'] = DEFAULT_MAX_CHANGES_BY_PRESET[
+                            variant_preferences.level_of(pairs)]
+                return with_request_settings(state.searcher, **settings)
+            return pick
+
+        def _still_the_chain(chain):
+            """Whether the page's refinement chain is still *chain* (the same steps).
+            A replay answers for the chain it replayed: when the visitor cleared or
+            changed the chain while it ran or waited for a worker (a new search, Clear
+            all, a chip), its answer belongs to no chain on the page -- never commit it."""
+            current = search_state.refinement_chain
+            return len(current) == len(chain) and all(a is b for a, b in zip(current, chain))
+
+        async def _deferred_chain_replay():
+            """Replay saved refinement chain on session restore (D-14). Shows feedback."""
+            if not search_state.refinement_chain:
+                return
+            status_label.text = tr('Restoring refinement chain...')
+            status_label.style('display: block;')
+            # Read now, not in the worker: an emptied chain replays to None.
+            chain = list(search_state.refinement_chain)
+            try:
+                step_searcher = _step_searcher()
+                filter_restrict = search_state.restrict_sys_ids
+                def _do_replay():
+                    with shared_time_limit():  # one time limit for the chain, not one per step
+                        return replay_chain(chain, state.searcher,
+                                            filter_restrict, searcher_for_step=step_searcher)
+                result = await run.io_bound(_do_replay)
+                # None: no answer (cancelled, or the app is stopping) -- a non-empty
+                # chain never replays to None, and None would mean "no restriction".
+                # Keep what is set; the strip below is still brought up to date.
+                if result is not None and _still_the_chain(chain):
+                    search_state.refinement_restrict_sys_ids = result
+                    search_state._refinement_scope_sig = scope_signature(filter_restrict)
+            except Exception as e:
+                logger.error(f"Refinement chain replay failed: {e}")
+                if _still_the_chain(chain):  # never clear a chain built since
+                    search_state.refinement_chain = []
+                    search_state.refinement_restrict_sys_ids = None
+                    persist_value('search_refinement_chain', [])
+            finally:
+                status_label.text = ''
+                status_label.style('display: none;')
+            # Update UI (breadcrumb strip etc.) -- called after UI widgets exist
+            try:
+                _update_refinement_strip()
+                _update_search_within_btn()
+            except Exception:
+                pass  # UI widgets may not exist yet on first load
+
+        async def _replay_refinement_chain_and_search():
+            """Re-execute chain after chip removal (D-13). Shows 'Re-evaluating...' feedback."""
+            status_label.text = tr('Re-evaluating refinement...')
+            status_label.style('display: block;')
+            try:
+                step_searcher = _step_searcher()
+                # Read now, not in the worker: an emptied chain replays to None.
+                chain = list(search_state.refinement_chain)
+                filter_restrict = search_state.restrict_sys_ids
+                def _do_replay():
+                    with shared_time_limit():  # one time limit for the chain, not one per step
+                        return replay_chain(chain, state.searcher,
+                                            filter_restrict, searcher_for_step=step_searcher)
+                result = await run.io_bound(_do_replay)
+                # None: no answer (cancelled, or the app is stopping) -- a non-empty
+                # chain never replays to None, and None would mean "no restriction".
+                # Keep the restriction (the next "Search within" sets it again); the
+                # shortened chain is still what the visitor asked for.
+                if result is not None and _still_the_chain(chain):
+                    search_state.refinement_restrict_sys_ids = result
+                persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
+            except Exception as e:
+                logger.error(f"Refinement replay failed: {e}")
+            finally:
+                status_label.text = ''
+                status_label.style('display: none;')
+            _update_refinement_strip()
+            _update_search_within_btn()
+
+        # === Main Content Area (full-width, no splitter) ===
+        # Accordion expansion state
+        search_state.expanded_index = None
+        search_state.expansion_refs = {}
+
+        with ui.column().classes('w-full flex-grow'):
+
+            # `results-header` / `results-count-group` / `results-export-group`:
+            # one line on a phone, the count and filter buttons scrolling
+            # sideways, the export icons folded into a menu (common.css).
+            results_header = ui.row().classes('w-full px-3 py-2 items-center justify-between results-header').style(
+                'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+            )
+            with results_header:
+                with ui.row().classes('items-center gap-3 results-count-group'):
+                    # Select all checkbox
+                    select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
+                    results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
+                    # Selection counter (initially hidden)
+                    selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
+                    # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
+                    def _set_btn_visible(btn, visible):
+                        # Wide screens reserve the space (no layout shift when a
+                        # filter appears); a phone cannot afford a blank row, so
+                        # `tb-hidden` removes the button there (common.css).
+                        btn.style(f'visibility: {"visible" if visible else "hidden"};')
+                        if visible:
+                            btn.classes(remove='tb-hidden')
+                        else:
+                            btn.classes(add='tb-hidden')
+
+                    # Domain filter button (hidden until search with domain data)
+                    domain_filter_btn = ui.button(
+                        tr('Filter by domains'), icon='category',
+                        on_click=lambda: _open_domain_filter_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    _set_btn_visible(domain_filter_btn, False)
+
+                    # Restore visibility if stored exclusions exist (persistence across navigation)
+                    if search_state.domain_exclusions:
+                        _set_btn_visible(domain_filter_btn, True)
+                        n_excl = len(search_state.domain_exclusions)
+                        domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
+                        domain_filter_btn.props('outline dense no-caps color=red')
+
+                    # Printed filter toggle (hidden until search has printed data)
+                    def _toggle_printed_filter():
+                        states = ['all', 'hide_printed', 'only_printed']
+                        current_idx = states.index(search_state.printed_filter)
+                        search_state.printed_filter = states[(current_idx + 1) % 3]
+                        persist_value('search_printed_filter', search_state.printed_filter)
+                        save_post_filters_with_run(search_state)
+                        _update_printed_filter_btn()
+                        # Re-apply filters and re-render (manuscript exclusions first if active)
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    def _update_printed_filter_btn():
+                        if search_state.printed_filter == 'all':
+                            printed_filter_btn.text = tr('Filter Printed')
+                            # Keep the default primary color when cycled back to 'all' so it
+                            # stays blue like the sibling filter buttons (smoke 2026-06-23).
+                            printed_filter_btn.props('outline dense no-caps color=primary')
+                        elif search_state.printed_filter == 'hide_printed':
+                            printed_filter_btn.text = tr('Hiding printed')
+                            printed_filter_btn.props(remove='color')
+                            printed_filter_btn.props('outline dense no-caps color=red')
+                        elif search_state.printed_filter == 'only_printed':
+                            printed_filter_btn.text = tr('Only printed')
+                            printed_filter_btn.props(remove='color')
+                            printed_filter_btn.props('outline dense no-caps color=deep-orange')
+
+                    printed_filter_btn = ui.button(
+                        tr('Filter Printed'), icon='local_printshop',
+                        on_click=lambda: _toggle_printed_filter()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    _set_btn_visible(printed_filter_btn, False)
+
+                    # Phase 999.2 (PGP-FILTER-01): PGP filter toggle (hidden until search has PGP data).
+                    # Mirrors _toggle_printed_filter end-to-end per CONTEXT D-01..D-11. D-12: web only.
+                    def _toggle_pgp_filter():
+                        states = ['all', 'only_pgp', 'hide_pgp']  # D-02 cycle order
+                        current_idx = states.index(search_state.pgp_filter)
+                        search_state.pgp_filter = states[(current_idx + 1) % 3]
+                        persist_value('search_pgp_filter', search_state.pgp_filter)  # D-10
+                        save_post_filters_with_run(search_state)
+                        _update_pgp_filter_btn()
+                        _update_pgp_filter_chip()  # D-08 (real impl lands in Task 4; stub below until then)
+                        # Re-apply filters and re-render — same cascade as _toggle_printed_filter.
+                        # PGP filter is applied INSIDE every render branch per D-11 (Task 3); this dispatch
+                        # only chooses the right cascade entry point.
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    def _update_pgp_filter_btn():
+                        # Labels mirror Filter Printed pattern (smoke-feedback 2026-05-19):
+                        # default state shows "Filter PGP" not "All" so the button is self-describing.
+                        if search_state.pgp_filter == 'all':
+                            pgp_filter_btn.text = tr('Filter PGP')
+                            # Match the other filter buttons (Filter by domains / Filter
+                            # Printed) — keep the default primary color in the 'all' state.
+                            # Removing the color prop here made the button render white/grey
+                            # while the siblings stayed blue (smoke 2026-06-23).
+                            pgp_filter_btn.props('outline dense no-caps color=primary')
+                        elif search_state.pgp_filter == 'only_pgp':
+                            pgp_filter_btn.text = tr('Has PGP')
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps color=green')
+                        elif search_state.pgp_filter == 'hide_pgp':
+                            pgp_filter_btn.text = tr('No PGP')
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps color=red')
+
+                    def _update_pgp_filter_chip():
+                        # Chip removed per smoke-feedback 2026-05-19: the colored button label
+                        # already conveys state, the chip was duplicate. Function preserved as a
+                        # no-op so callers (_toggle_pgp_filter, restore paths) stay stable.
+                        return
+
+                    # Mirrors printed_filter_btn construction exactly (no icon per user, smoke-feedback 2026-05-19).
+                    # min-height matches the icon-bearing sibling buttons: a dense q-btn with an
+                    # icon renders at ~2.286em (icon 1.715em + 0.285em vertical padding ×2),
+                    # taller than the icon-less default 2em min-height (smoke 2026-06-23).
+                    pgp_filter_btn = ui.button(
+                        tr('Filter PGP'),
+                        on_click=lambda: _toggle_pgp_filter()
+                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    pgp_filter_btn.tooltip(tr('Filter by PGP coverage'))
+                    _set_btn_visible(pgp_filter_btn, False)
+                    # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
+                    if search_state.pgp_filter != 'all':
+                        _update_pgp_filter_btn()
+
+                    # SEED-026 GAP-A/B/C/D: Library multi-select filter — redesigned as a checkbox
+                    # dialog (mirroring _open_domain_filter_dialog) with inclusion semantics.
+                    # Button hidden via _set_btn_visible (CSS visibility, same as sibling buttons).
+                    # No ui.menu — dialog only. Active-filter state shows on the button itself
+                    # (red + "Filter Libraries (shown/total)"); there are no chips.
+
+                    def _library_apply_selection(checked_codes, all_codes):
+                        """Pure mapping helper: returns [] when all codes are checked (= clear filter /
+                        show all — the '[]' sentinel means 'show all' in the data layer), else returns
+                        the inclusion list (= the checked subset). MUST only be called with a non-empty
+                        checked_codes set — the Apply guard in _open_library_filter_dialog ensures this.
+
+                        Contract (FINDING 1):
+                        - all-checked ⇒ [] (clear filter; '[]' = show all)
+                        - strict subset ⇒ that subset (inclusion filter)
+                        - zero-checked ⇒ NEVER CALLED (blocked by Apply guard)
+                        """
+                        if set(checked_codes) == set(all_codes):
+                            return []
+                        return list(checked_codes)
+
+                    def _compute_library_facets(results_list):
+                        """SEED-026 (LIBFILTER-01): per-library counts over the FULL pre-filter set.
+
+                        Returns a Counter of library_code -> count. Codes with 0 results are absent
+                        (not in the Counter). Defined HERE (before _update_library_btn's first call
+                        at session-restore time) — it must exist before any _update_library_btn()
+                        invocation, including the early restore sync below.
+                        """
+                        from collections import Counter
+                        return Counter(
+                            r.get('display', {}).get('library_code', '')
+                            for r in results_list
+                            if r.get('display', {}).get('library_code')
+                        )
+
+                    def _update_library_btn():
+                        """Sync the library filter button: 3-state label, count, and color (DMF D-07).
+
+                        Three states keyed on mode + active-ness:
+                          Neutral:        tr('Filter by library') — outline primary.
+                          Show-only active: f"{tr('Showing')} {shown}/{total}" — filled negative/red.
+                          Hide active:    f"{tr('Hiding')} {N}" — filled deep-orange (distinct from Show-only).
+
+                        "Active" per mode:
+                          Show-only: non-empty codes AND doesn't include every in-result library.
+                          Hide: mode=='hide' AND non-empty hide-set.
+                        An EMPTY code set is neutral in BOTH modes — so the Task-1 show-all
+                        normalization (hide/[]) reads as the neutral button state (MEDIUM confirm).
+                        """
+                        facets = _compute_library_facets(search_state.results) if search_state.results else {}
+                        total = len(facets)
+                        codes = set(search_state.library_filter)
+                        mode = getattr(search_state, 'library_mode', 'hide')
+
+                        # Determine active state per mode.
+                        if mode == 'show_only' and codes:
+                            # Show-only active: non-empty codes set.
+                            shown = sum(1 for c in facets if c in codes)
+                            active = bool(total) and shown != total
+                            show_only_active = active
+                        else:
+                            show_only_active = False
+
+                        hide_active = (mode == 'hide' and bool(codes))
+
+                        if show_only_active:
+                            # WR-05: reuse `shown` computed above — no duplicate iteration.
+                            # Phase 130 UAT: pluralized noun (singular when total==1).
+                            _lib_btn_key = ('Showing {shown}/{total} library' if total == 1
+                                            else 'Showing {shown}/{total} libraries')
+                            library_filter_btn.text = tr(_lib_btn_key).format(shown=shown, total=total)
+                            library_filter_btn.props(remove='color outline')
+                            library_filter_btn.props('dense no-caps color=negative')
+                        elif hide_active:
+                            # Phase 130 UAT: pluralized noun (singular when hiding exactly 1).
+                            _n = len(codes)
+                            _lib_btn_key = ('Hiding {n} library' if _n == 1
+                                            else 'Hiding {n} libraries')
+                            library_filter_btn.text = tr(_lib_btn_key).format(n=_n)
+                            library_filter_btn.props(remove='color outline')
+                            library_filter_btn.props('dense no-caps color=deep-orange')
+                        else:
+                            # Neutral: no active filter (empty codes, or show-only with all in-result showing).
+                            library_filter_btn.text = tr('Filter by library')
+                            library_filter_btn.props(remove='color')
+                            library_filter_btn.props('outline dense no-caps color=primary')
+
+                    def _open_library_filter_dialog():
+                        """Open dual-mode library filter dialog (Phase 130-02 / DMF redesign).
+
+                        Dialog layout:
+                          1. Mode toggle (Show-only | Hide) at TOP — D-03.
+                          2. Text-search input filtering the combined list client-side.
+                          3. Count shortlist — libraries present in current results, sorted by
+                             count desc, labeled "Display Name (count)" — HIGH-2: LOCAL excluded.
+                          4. Expandable section — ALL canonical libraries not in shortlist,
+                             sorted A–Z by display name, no count — LOCAL excluded by construction.
+                          5. Select All / Select None / Apply / Cancel buttons.
+
+                        Mode semantics (D-01/D-02):
+                          - Show-only: keep results whose library_code IN checked set.
+                          - Hide: keep results whose library_code NOT IN checked set.
+                          Empty Hide set = show all (applyable, D-08); empty Show-only = blocked.
+
+                        Show-all normalization (MEDIUM / D-05):
+                          When Show-only Apply resolves to empty codes (all-in-result checked
+                          -> _library_apply_selection -> []), normalize to neutral Hide/[] before
+                          persisting — "show all" has exactly ONE persisted representation.
+
+                        BUG-B: NO <script> inside ui.html() — all JS at page level (add_head_html).
+                        """
+                        if not search_state.results:
+                            return
+                        facets = _compute_library_facets(search_state.results)
+                        if not facets:
+                            return
+
+                        import html as _html
+                        import uuid as _uuid
+
+                        lang = get_language()
+                        container_id = f'lib-filter-{_uuid.uuid4().hex[:8]}'
+                        current_filter = set(search_state.library_filter)
+                        current_mode = [getattr(search_state, 'library_mode', 'hide')]  # mutable cell
+
+                        # --- Build shortlist (present in results, LOCAL excluded) ---
+                        # HIGH-2: explicit `c != 'LOCAL'` guard so even a result row with
+                        # library_code=='LOCAL' is dropped by construction (T-130-02-02).
+                        shortlist_codes = sorted(
+                            [c for c in facets if c in LIBRARY_CODES and c != 'LOCAL'],
+                            key=lambda c: -facets[c],
+                        )
+                        shortlist_set = set(shortlist_codes)
+
+                        # --- Build expand section (canonical library list minus shortlist, LOCAL excluded) ---
+                        # Keep literal `c != 'LOCAL'` so the AST LOCAL guard passes (D-46/DMF-10).
+                        # Phase 130 UAT: also exclude codes with zero manuscripts in the corpus.
+                        _codes_with_mss = library_codes_with_manuscripts()
+                        expand_codes = sorted(
+                            [c for c in LIBRARY_CODES if c != 'LOCAL' and c not in shortlist_set
+                             and c in _codes_with_mss],
+                            key=lambda c: get_library_display(c, short=False, lang=lang),
+                        )
+
+                        def _make_cb_row(code, label_text, checked):
+                            """Single checkbox row HTML (no <script>; BUG-B safe)."""
+                            code_attr = _html.escape(code, quote=True)
+                            label_esc = _html.escape(label_text, quote=True)  # IN-02: quote=True guards data-label attr
+                            checked_attr = 'checked' if checked else ''
+                            return (
+                                f'<label class="lib-cb-row" data-label="{label_esc.lower()}" '
+                                f'style="display:flex;align-items:center;gap:8px;'
+                                f'padding:4px 0;cursor:pointer;font-size:0.9rem">'
+                                f'<input type="checkbox" class="lib-cb" data-code="{code_attr}" '
+                                f'{checked_attr} '
+                                f'style="width:16px;height:16px;accent-color:#1976d2;cursor:pointer" '
+                                f'onchange="libFilterUpdateApply(\'{container_id}\')">'
+                                f'<span>{label_esc}</span></label>'
+                            )
+
+                        # Shortlist rows (with count)
+                        shortlist_rows = []
+                        for code in shortlist_codes:
+                            count = facets[code]
+                            label = get_library_display(code, short=False, lang=lang, with_code=True)
+                            label_with_count = f"{label} ({count})"
+                            # Initial checked state per current mode:
+                            if current_mode[0] == 'show_only':
+                                # Show-only: checked if code is in the active allowlist (or filter empty = show all).
+                                is_checked = (not current_filter) or (code in current_filter)
+                            else:
+                                # Hide: checked if code is in the active hide-set.
+                                is_checked = code in current_filter
+                            shortlist_rows.append(_make_cb_row(code, label_with_count, is_checked))
+
+                        # Expand section rows (no count)
+                        expand_rows = []
+                        for code in expand_codes:
+                            label = get_library_display(code, short=False, lang=lang, with_code=True)
+                            if current_mode[0] == 'show_only':
+                                is_checked = (not current_filter) or (code in current_filter)
+                            else:
+                                is_checked = code in current_filter
+                            expand_rows.append(_make_cb_row(code, label, is_checked))
+
+                        shortlist_html = '\n'.join(shortlist_rows)
+                        expand_html = '\n'.join(expand_rows)
+                        # Wrap in data-libmode container so JS can read mode for Apply-enable.
+                        init_mode = _html.escape(current_mode[0], quote=True)
+                        full_html = (
+                            f'<div id="{container_id}" data-libmode="{init_mode}">'
+                            f'{shortlist_html}'
+                        )
+                        if expand_rows:
+                            expand_label = _html.escape(tr('All libraries'))
+                            full_html += (
+                                f'<details style="margin-top:8px">'
+                                f'<summary style="cursor:pointer;font-size:0.85rem;color:#666;'
+                                f'padding:4px 0">{expand_label}</summary>'
+                                f'{expand_html}'
+                                f'</details>'
+                            )
+                        full_html += '</div>'
+
+                        with ui.dialog() as dialog, ui.card().classes('w-[520px] max-h-[80vh]'):
+                            with ui.column().classes('w-full gap-2'):
+                                ui.label(tr('Filter by Library')).classes('text-lg font-bold')
+
+                                # Mode toggle (D-03): Show-only | Hide, initialized from current mode.
+                                mode_options = {
+                                    'show_only': tr('Show only selected'),
+                                    'hide': tr('Hide selected'),
+                                }
+                                mode_toggle = ui.toggle(
+                                    options=mode_options,
+                                    value=current_mode[0],
+                                ).props('dense no-caps')
+
+                                def _on_mode_change(new_mode):
+                                    current_mode[0] = new_mode
+                                    # D-04: flipping the mode resets the checked set + re-syncs Apply-enable.
+                                    # libFilterSetMode also sets data-libmode so mode-aware JS sees the new mode.
+                                    ui.run_javascript(f'libFilterSetMode("{container_id}", "{new_mode}")')
+
+                                # CR-01: use on_value_change so e.value is the dict key
+                                # ('show_only'/'hide'), not the raw integer index (0/1) that
+                                # the low-level update:modelValue event emits.
+                                mode_toggle.on_value_change(lambda e: _on_mode_change(e.value))
+
+                                # Text-search input — client-side row filter, no Python round-trip.
+                                # WR-04: json.dumps is the correct JS-safe serializer (not repr()).
+                                import json as _json_libfilter
+                                ui.input(
+                                    placeholder=tr('Search libraries...'),
+                                    on_change=lambda e: ui.run_javascript(
+                                        f'libFilterSearch("{container_id}", {_json_libfilter.dumps(e.value or "")})'
+                                    ),
+                                ).props('dense clearable').classes('w-full')
+
+                                with ui.scroll_area().classes('w-full').style('max-height: 45vh;'):
+                                    # BUG-B: NO <script> inside ui.html — JS is at page level (add_head_html).
+                                    ui.html(full_html, sanitize=False)
+
+                                # Buttons row
+                                with ui.row().classes('w-full justify-between'):
+                                    _cid = container_id  # capture for closures
+                                    _all_shortlist = shortlist_codes  # for all-checked -> [] mapping
+                                    # WR-01: full selectable universe (shortlist + expand) for show-all
+                                    # normalization — "Select All + Apply" when expand codes are checked
+                                    # must also normalize to neutral (hide/[]).
+                                    _all_for_norm = shortlist_codes + expand_codes
+
+                                    with ui.row().classes('gap-1'):
+                                        ui.button(
+                                            tr('Select All'),
+                                            on_click=lambda: ui.run_javascript(
+                                                f'libFilterSelectAll("{_cid}", true)')
+                                        ).props('flat dense no-caps')
+                                        ui.button(
+                                            tr('Select None'),
+                                            on_click=lambda: ui.run_javascript(
+                                                f'libFilterSelectAll("{_cid}", false)')
+                                        ).props('flat dense no-caps')
+
+                                    with ui.row().classes('gap-2'):
+                                        async def apply_library_filter():
+                                            checked_list = await ui.run_javascript(
+                                                f'libFilterGetChecked("{_cid}")', timeout=5.0
+                                            )
+                                            checked = list(checked_list) if checked_list else []
+                                            # HIGH-3: sanitize JS-returned codes (T-130-02-02).
+                                            # sanitize_library_codes: drops non-str items, unknown codes, LOCAL (Codex HIGH fix).
+                                            checked = sanitize_library_codes(checked)
+                                            committed_mode = current_mode[0]
+
+                                            if committed_mode == 'show_only':
+                                                # Show-only guard: empty checked set blocked (can't show nothing).
+                                                if not checked:
+                                                    ui.notify(
+                                                        tr('Select at least one library, or check all to clear the filter'),
+                                                        type='warning',
+                                                    )
+                                                    return
+                                                # WR-01: All-in-result-checked -> [] mapping (show-all for Show-only).
+                                                # Compare against full selectable universe (shortlist + expand)
+                                                # so "Select All" when expand codes are checked also normalizes.
+                                                new_filter = _library_apply_selection(checked, _all_for_norm)
+                                                # SHOW-ALL NORMALIZATION (MEDIUM): Show-only + empty codes = neutral Hide/[].
+                                                if not new_filter:
+                                                    search_state.library_mode = 'hide'
+                                                    search_state.library_filter = []
+                                                else:
+                                                    search_state.library_mode = 'show_only'
+                                                    search_state.library_filter = new_filter
+                                            else:
+                                                # Hide mode: empty set allowed (= hide nothing = show all, D-08).
+                                                search_state.library_mode = 'hide'
+                                                search_state.library_filter = checked
+
+                                            # Persist dict shape (D-09): both mode and codes in one key.
+                                            persist_value('search_library_filter', {
+                                                'mode': search_state.library_mode,
+                                                'codes': search_state.library_filter,
+                                            })
+                                            save_post_filters_with_run(search_state)
+                                            _update_library_btn()
+                                            if search_state.exclusion_sources:
+                                                _apply_manuscript_exclusions()
+                                            elif search_state.domain_exclusions and search_state.has_domain_data:
+                                                _apply_domain_exclusions()
+                                            elif search_state.results:
+                                                _apply_printed_filter_and_render(search_state.results)
+                                            dialog.close()
+
+                                        apply_btn = ui.button(
+                                            tr('Apply'), on_click=apply_library_filter
+                                        ).props('dense no-caps color=primary')
+                                        apply_btn.props(f'id="libApplyBtn_{container_id}"')
+                                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
+
+                        dialog.open()
+                        # Initialize Apply disabled-state from current checked count + mode.
+                        ui.run_javascript(f'libFilterUpdateApply("{container_id}")')
+
+                    library_filter_btn = ui.button(
+                        tr('Filter by library'),
+                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    library_filter_btn.tooltip(tr('Filter results by library'))
+                    # GAP-A: use _set_btn_visible (CSS visibility) to match sibling buttons.
+                    # set_visibility(False) uses display:none which conflicts with the
+                    # results-arrive reveal path that uses _set_btn_visible.
+                    _set_btn_visible(library_filter_btn, False)
+                    library_filter_btn.on('click', lambda: _open_library_filter_dialog())
+
+                    # If session restored a library filter, sync button state now (still hidden until search).
+                    if search_state.library_filter:
+                        _update_library_btn()
+
+                    # Phase 55: "Search within" button (D-01)
+                    search_within_btn = ui.button(
+                        '', icon='filter_list',
+                        on_click=lambda: _enter_refine_mode()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    search_within_btn.set_visibility(False)
+
+                    # Phase 56 entry-point 1 (top-toolbar "Exclude manuscripts"
+                    # button) was removed — the filter-panel "Exclude known
+                    # manuscripts" button at line ~1617 is the sole entry point.
+                    # Per-source exclusion chips remain here so users still see
+                    # active exclusions at a glance from the results bar.
+                    exclusion_chips_row = ui.row().classes('gap-1 items-center')
+                    exclusion_chips_row.set_visibility(bool(search_state.exclusion_sources))
+
+                    # Phase 93 chip removed per smoke-feedback 2026-05-19: the colored button label
+                    # alone conveys filter state (Filter PGP / Has PGP / No PGP); a chip on top of it
+                    # was visual duplication. The _update_pgp_filter_chip no-op above keeps callers stable.
+
+                with ui.row().classes('gap-2 results-export-group'):
+                    # Bulk actions (initially hidden)
+                    bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
+                    with bulk_actions_row:
+                        ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
+                            f'flat round dense size=sm aria-label="{tr("Add Selected to List")}"'
+                        ).tooltip(tr('Add Selected to List'))
+                        ui.button(icon='content_copy', on_click=lambda: bulk_copy_text()).props(
+                            f'flat round dense size=sm aria-label="{tr("Copy Selected Text")}"'
+                        ).tooltip(tr('Copy Selected Text'))
+
+                    # Filter toggle button
+                    # Row density (owner's mockup, 2026-10-22): compact rows by
+                    # default, remembered per visitor; comfortable is the older card.
+                    # The list's class switches live; no re-render.
+                    _density = {'value': _safe_get('search_density', 'compact') or 'compact'}
+
+                    def _update_density_buttons():
+                        compact = _density['value'] == 'compact'
+                        density_compact_btn.props(f'color={"primary" if compact else "grey-7"}')
+                        density_comfortable_btn.props(f'color={"grey-7" if compact else "primary"}')
+
+                    def _set_density(value):
+                        _density['value'] = value
+                        _safe_set('search_density', value)
+                        lst = getattr(refs, 'results_list', None)
+                        if lst is not None:
+                            lst.classes(remove='density-compact density-comfortable', add=f'density-{value}')
+                        _update_density_buttons()
+
+                    with ui.row().classes('items-center gap-0 density-toggle'):
+                        density_compact_btn = ui.button(icon='view_headline', on_click=lambda: _set_density('compact')).props(
+                            f'flat dense size=sm aria-label="{tr("Compact rows")}"'
+                        ).tooltip(tr('Compact rows'))
+                        density_comfortable_btn = ui.button(icon='view_agenda', on_click=lambda: _set_density('comfortable')).props(
+                            f'flat dense size=sm aria-label="{tr("Comfortable rows")}"'
+                        ).tooltip(tr('Comfortable rows'))
+                    _update_density_buttons()
+
+                    # One menu for the post-filters and the three exports, at every width.
+                    with ui.button(icon='more_vert').props(
+                        f'flat round dense size=sm aria-label="{tr("More actions")}"'
+                    ).classes('results-more-btn').tooltip(tr('More actions')):
+                        with ui.menu().props('auto-close'):
+                            ui.menu_item(tr('Toggle Filters'), lambda: toggle_filters())
+                            ui.menu_item(tr('Export Word'), lambda: ui.download('/api/export/word'))
+                            ui.menu_item(tr('Export Excel'), lambda: ui.download('/api/export/excel'))
+                            ui.menu_item(tr('Export JSON'), lambda: ui.download('/api/export/json'))
+
+            # SEED-026 (smoke 2026-06-29): the post-search library chip row was REMOVED.
+            # Per-library chips proved noisy when many libraries were selected; the filter
+            # state now lives entirely on the library_filter_btn itself, which turns red and
+            # reads "Filter Libraries (shown/total)" when a restriction is active (see
+            # _update_library_btn). The dialog (Select All / Select None / Apply) is the sole
+            # control surface.
+
+            # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
+            refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
+                'background: var(--bg-secondary, #f0f4ff); '
+                'border-bottom: 1px solid rgba(128,128,128,0.3); '
+                'overflow-x: auto; white-space: nowrap; min-height: 0; display: none;'
+            )
+
+            # Phase 57: Visual Similarity restriction strip (orange-themed)
+            vs_restrict_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
+                'background: #fff3e0; '
+                'border-bottom: 1px solid #ffe0b2; '
+                'min-height: 0; display: none;'
+            )
+
+            def _update_vs_strip():
+                """Update Visual Similarity restriction indicator."""
+                vs_restrict_strip.clear()
+                if not search_state.vs_restrict_label:
+                    vs_restrict_strip.style('display: none;')
+                    return
+                vs_restrict_strip.style('display: flex;')
+                with vs_restrict_strip:
+                    ui.icon('compare').classes('text-sm').style('color: #ef6c00;')
+                    ui.label(search_state.vs_restrict_label).classes('text-xs font-semibold').style('color: #ef6c00;')
+                    if search_state.vs_restrict_sys_ids:
+                        ui.label(f'({len(search_state.vs_restrict_sys_ids):,} {tr("manuscripts")})').classes('text-xs').style('color: #e65100;')
+                    def _clear_vs():
+                        search_state.vs_restrict_sys_ids = None
+                        search_state.vs_restrict_label = None
+                        search_state.vs_restrict_source_ids = []
+                        search_state.vs_restrict_mode = 'union'
+                        search_state.vs_browse_mode = False
+                        _update_vs_strip()
+                    ui.button(icon='close', on_click=_clear_vs).props(
+                        f'flat dense round size=xs aria-label="{tr("Clear visual similarity restriction")}"'
+                    ).style('color: #ef6c00;').tooltip(tr('Clear visual similarity restriction'))
+
+            _update_vs_strip()
+
+            # Filters Panel (initially hidden)
+            filters_visible = {'value': False}
+            filters_panel = ui.column().classes('w-full px-4 py-3 gap-3').style(
+                'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+            )
+            filters_panel.set_visibility(False)
+            with filters_panel:
+                with ui.row().classes('w-full gap-2 items-center'):
+                    ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
+                    # Changed to H4 semantic heading
+                    h4(tr('Filter Results'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+
+                with ui.grid(columns=3).classes('w-full gap-2'):
+                    filter_shelfmark = ui.input(
+                        placeholder=tr('Filter by shelfmark')
+                    ).classes('w-full').props('outlined dense clearable')
+
+                    filter_title = ui.input(
+                        placeholder=tr('Filter by title')
+                    ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
+
+                    filter_snippet = ui.input(
+                        placeholder=tr('Filter by text')
+                    ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
+
+                # Post-search measurement filters (Phase 54, DIM-03), with the
+                # panel's meaning (D20): width, height and lines from the catalogue
+                # or a measured page, line height and text density on a measured
+                # page -- every measured range on ONE page -- and material from the
+                # catalogue or the measurement. Not persisted (only these inputs
+                # set them). Shown when the open catalog has measurements (#17).
+                from shared.fjms_service import measurement_filters_available as _post_meas_available
+                with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
+                    'dense default-closed header-class="text-sm"'
+                ).mark('post-filter-measurements-group') as _post_meas_expansion:
+                    _post_meas_expansion.set_visibility(_post_meas_available())
+                    with ui.column().classes('gap-2 w-full'):
+                        def _make_post_meas_row(label, key, suffix='', integer=False):
+                            with ui.row().classes('gap-1 items-center w-full').mark(f'post-filter-{key}-row'):
+                                ui.label(label).classes('text-xs w-28 shrink-0')
+                                fmt, step = ('%d', 1) if integer else ('%.1f', 0.1)
+                                min_inp = ui.number(placeholder=tr('Min'), format=fmt).props(
+                                    f'outlined dense type=number step={step}'
+                                ).classes('w-20')
+                                ui.label('\u2013').classes('text-xs')
+                                max_inp = ui.number(placeholder=tr('Max'), format=fmt).props(
+                                    f'outlined dense type=number step={step}'
+                                ).classes('w-20')
+                                if suffix:
+                                    ui.label(suffix).classes('text-xs text-gray-500')
+                            for bound, inp in (('min', min_inp), ('max', max_inp)):
+                                inp.on('blur', lambda _=None, k=key, b=bound, w=inp, i=integer:
+                                       _set_post_bound(k, b, w.value, i))
+                            return min_inp, max_inp
+
+                        _make_post_meas_row(tr('Width'), 'width', tr('cm'))
+                        _make_post_meas_row(tr('Height'), 'height', tr('cm'))
+                        _make_post_meas_row(tr('Lines'), 'lines', integer=True)
+                        _make_post_meas_row(tr('Line Height'), 'line_height', tr('mm'))
+                        _make_post_meas_row(tr('Text Density'), 'text_density',
+                                            '/10' + tr('cm') + '\u00b2')
+
+                        post_mat_select = ui.select(
+                            options={},
+                            label=tr('Material'),
+                            multiple=True,
+                        ).props('outlined dense clearable use-chips').classes('w-full').mark(
+                            'post-filter-material')
+
+                        def _on_post_mat_change(e=None):
+                            _set_post_criterion('material', {'values': list(post_mat_select.value or [])})
+                        post_mat_select.on('update:model-value', _on_post_mat_change)
+
+                # Phase 56: Exclude manuscripts (D-01 entry point 2: filter panel)
+                ui.separator()
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button(
+                        tr('Exclude known manuscripts'), icon='person_remove',
+                        on_click=lambda: _show_exclusion_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    # Show active exclusion sources as chips
+                    filter_excl_chips = ui.row().classes('gap-1 items-center flex-wrap')
+
+                with ui.row().classes('gap-2'):
+                    ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
+                        'flat dense color=green size=sm'
+                    )
+                    ui.button(tr('Clear Filters'), icon='clear', on_click=lambda: clear_filters()).props(
+                        'flat dense size=sm'
+                    )
+
+            # One line under the count for what the page did with the input: a
+            # shelfmark run in Shelfmark mode, or the Hebrew a Latin-script query
+            # spells on the Hebrew keyboard layout (shared/search_box_input.py,
+            # shared/keyboard_layout.py). Filled after a search, cleared at the
+            # start of the next one.
+            input_notice_row = ui.row().classes('w-full px-6 py-1 items-center gap-2 text-sm').style(
+                'background: var(--bg-tertiary); color: var(--text-secondary);'
+            )
+            input_notice_row.set_visibility(False)
+
+            results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
+                'background: var(--bg-secondary); min-height: 300px;'
+            )
+
+    # === Phase 55: Refinement UI helper functions ===
+
+    def _responsa_options_from_controls():
+        """The Responsa options the controls describe (None outside Responsa mode)."""
+        if mode_select.value != 'responsa':
+            return None
+        return {
+            'responsa_mode': True,
+            'variants': responsa_variants_cb.value,
+            'ja': responsa_ja_cb.value,
+            'flex_spacing': responsa_flex_cb.value,
+            'bidirectional': bidirectional_cb.value,
+            'variant_mode': 'variants' if responsa_variants_cb.value else 'exact',
+        }
+
+    def _run_params_from_controls():
+        """The shown results' search as the controls describe it, for results restored
+        from a session saved before the search itself was saved with them
+        (search_state.last_run): the query without its mode prefix, its NOT-words,
+        position and Responsa options, so a replay or a completion runs the search
+        that was shown."""
+        raw = query_input.value.strip()
+        is_responsa = mode_select.value == 'responsa'
+        mode_override, parsed = state.searcher.parse_query_syntax(raw, responsa_mode=is_responsa)
+        not_words = (not_filter.value.split() if not_filter.value else []) + list(
+            search_state.builder_negated_words or [])
+        position = text_position_select.value
+        return {'query': parsed if mode_override else raw,
+                'mode': engine_mode(mode_override or mode_select.value),
+                'gap': int(gap_input.value), 'exclude_words': not_words,
+                'text_position': position if position != 'anywhere' else None,
+                'responsa_options': _responsa_options_from_controls(),
+                'corpus_scope': 'genizah',
+                'variant_settings': search_state.last_variant_settings}
+
+    def _shown_run():
+        """The parameters of the search the shown results came from: as it ran
+        (search_state.last_run, saved with them), else as the controls describe it.
+        Only RefinementStep's own fields, whatever a saved session holds."""
+        run_params = search_state.last_run or _run_params_from_controls()
+        return {k: v for k, v in run_params.items()
+                if k in RefinementStep.__dataclass_fields__ and not k.startswith('_')}
+
+    def _commit_refinement_step(rows):
+        """Append the search that just ran (search_state.last_run) to the refinement
+        chain, with the manuscripts and pages of *rows* (its raw results, before the
+        display filters). No rows: no step, and the zero-result recovery shows (D-14a)."""
+        raw_ids = {r.get('display', {}).get('id') for r in rows if r.get('display', {}).get('id')}
+        if not raw_ids:
+            search_state._zero_result_refine = True
+            return
+        step = RefinementStep(**_shown_run(),
+                              result_count=len(rows),  # total results (matches display count)
+                              result_count_capped=search_state.result_count_capped,
+                              result_partial=search_state.result_partial)
+        step._result_sys_ids = set(raw_ids)
+        # Capture page-level uids for "all terms" filter
+        step._result_uids = {r.get('uid') or r.get('display', {}).get('id') for r in rows
+                             if r.get('uid') or r.get('display', {}).get('id')}
+        search_state.refinement_chain.append(step)
+        search_state.refinement_restrict_sys_ids = raw_ids
+        search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+        search_state._zero_result_refine = False
+        # Persist chain metadata only (D-14) -- no sys_id lists stored
+        persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
+
+    async def _enter_refine_mode():
+        """D-02: Activate refine mode -- scroll to search bar, show badge."""
+        if search_state.is_running:
+            return
+        # Capture current RAW result sys_ids as the refinement scope BEFORE the user searches
+        raw_ids = {r.get('display', {}).get('id') for r in search_state.results if r.get('display', {}).get('id')}
+        if not raw_ids:
+            return
+        search_state.refinement_restrict_sys_ids = raw_ids
+        search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+        # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
+        if not search_state.refinement_chain and query_input.value:
+            step0 = RefinementStep(
+                **_shown_run(),
+                result_count=len(search_state.results),
+                result_count_capped=search_state.result_count_capped,
+                result_partial=search_state.result_partial,
+            )
+            step0._result_sys_ids = set(raw_ids)
+            # Capture page-level uids for "all terms" filter
+            step0._result_uids = {
+                r.get('uid') or r.get('display', {}).get('id')
+                for r in search_state.results
+                if r.get('uid') or r.get('display', {}).get('id')
+            }
+            search_state.refinement_chain.append(step0)
+            _update_refinement_strip()
+        # D8: the next search is restricted to these manuscripts; a step that was cut
+        # off is completed first, or the search would miss what it left out. Stopped
+        # or failed, it searches within the shown results' manuscripts, said "+".
+        completed = await _complete_chain(None)
+        if completed is None and search_state.refinement_chain:
+            # Nothing left to complete: an earlier completion already gave the last
+            # step its complete set, which the shown rows may only start.
+            known = search_state.refinement_chain[-1]._result_sys_ids
+            if known is not None and raw_ids <= known:
+                raw_ids = set(known)
+                search_state.refinement_restrict_sys_ids = raw_ids
+        if steps_that_cannot_complete(search_state.refinement_chain):
+            ui.notify(tr('A search with a line break, or one that leaves matches across pages out, cannot be '
+                         'completed; searching within the shown results.'), type='warning')
+        if completed and not completed['interrupted'] and completed['restrict'] is not None:
+            if raw_ids <= completed['restrict']:
+                raw_ids = completed['restrict']
+                search_state.refinement_restrict_sys_ids = raw_ids
+            else:
+                # The complete set must hold every shown manuscript: never search
+                # within fewer than are shown.
+                logger.warning('Completed refinement set misses %d shown manuscripts; '
+                               'searching within the shown ones',
+                               len(raw_ids - completed['restrict']))
+                search_state.refinement_chain[-1].result_count_capped = True
+        capped = bool(search_state.refinement_chain and search_state.refinement_chain[-1].result_count_capped)
+        ms_count = len(raw_ids)  # unique manuscript count
+        search_state._refine_mode = True
+        search_state._zero_result_refine = False
+        _ms = f"{ms_count:,}+" if capped else f"{ms_count:,}"
+        refine_badge.text = f"{tr('Searching within')} {_ms} {tr('manuscripts')}"
+        refine_badge.set_visibility(True)
+        refine_cancel_btn.set_visibility(True)
+        # Scroll to search bar and focus (D-02)
+        ui.run_javascript(f'''
+            document.getElementById("c{query_input.id}").scrollIntoView({{behavior: "smooth", block: "center"}});
+            setTimeout(() => {{
+                var el = document.getElementById("c{query_input.id}");
+                if (el) {{ var inp = el.querySelector("input"); if (inp) inp.focus(); }}
+            }}, 500);
+        ''')
+
+    def _exit_refine_mode():
+        """D-02a: Cancel refine mode without running search."""
+        search_state._refine_mode = False
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+
+    def _update_refinement_strip():
+        """Rebuild the breadcrumb chip chain (D-04, D-05, D-06, D-07, D-10)."""
+        refinement_strip.clear()
+        chain = search_state.refinement_chain
+        if not chain:
+            refinement_strip.style('display: none;')
+            return
+        refinement_strip.style('display: flex;')
+        show_modes = needs_mode_labels(chain)
+        with refinement_strip:
+            for i, step in enumerate(chain):
+                if i > 0:
+                    ui.label('\u203a' if is_rtl() else '\u2039').classes('text-lg mx-1').style('color: var(--text-secondary, #999);')
+                label = step.display_label
+                if show_modes:
+                    _mode_labels = {'exact': tr('Exact'), 'literal': tr('Exact'), 'variants': tr('Variants'),
+                                    'variants_extended': tr('Variants'), 'variants_maximum': tr('Variants'),
+                                    'responsa': tr('Responsa'), 'fuzzy': tr('Fuzzy'), 'Regex': tr('Regex'),
+                                    'Title': tr('Title'), 'Shelfmark': tr('Shelfmark')}
+                    label = f"{step.query} ({_mode_labels.get(step.mode, step.mode)})"
+                chip = ui.chip(label, removable=True, color='blue-grey-3').classes('text-sm dark:bg-blue-grey-7')
+                chip.on('remove', lambda _idx=i: _remove_refinement_step(_idx))
+            # Result count for final step only (D-06)
+            ui.label(f'{chain[-1].result_count:,}' + ('+' if chain[-1].result_count_capped else '')
+                     ).classes('text-sm font-bold ml-2 text-primary')
+            # "Only results with all terms" checkbox (visible when 2+ steps)
+            if len(chain) >= 2:
+                ui.separator().props('vertical').classes('mx-2')
+                all_terms_cb = ui.checkbox(
+                    tr('Only results with all terms'),
+                    value=search_state._all_terms_filter,
+                    on_change=lambda e: _toggle_all_terms_filter(e.value),
+                ).classes('text-xs').style('color: var(--text-primary);')
+            # Clear all (D-11)
+            ui.button(tr('Clear all'), icon='clear_all',
+                      on_click=_clear_refinement_chain
+            ).classes('text-xs ml-2').props('flat dense no-caps')
+            # Stale indicator (D-16)
+            if search_state._refinement_stale:
+                ui.label(tr('Scope changed \u2014 results will update on next search')).classes('text-xs ml-2').style('color: #e67e22; font-style: italic;')
+
+    async def _remove_refinement_step(index):
+        """D-12: Remove chip at index and all subsequent, then re-execute with feedback."""
+        search_state.refinement_chain = truncate_chain(search_state.refinement_chain, index)
+        # Always clear refine mode badge after chip removal
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+        if search_state.refinement_chain:
+            await _replay_refinement_chain_and_search()
+        else:
+            _clear_refinement_chain()
+
+    async def _complete_chain(upto, *, notify_failure=True):
+        """Complete the refinement chain's cut-off steps (D8; shared.refinement.complete_chain).
+
+        Returns None when nothing needed completing; else complete_chain's
+        {'restrict', 'interrupted'} -- interrupted also when it failed or was
+        stopped (the steps completed so far keep their complete sets). Runs in a
+        search worker like any search, with progress and Stop."""
+        chain = search_state.refinement_chain
+        if not chain_needs_completion(chain, upto):
+            return None
+        step_searcher = _step_searcher()
+        filter_restrict = search_state.restrict_sys_ids
+
+        def _progress(current, total):
+            if search_state.is_cancelled:
+                raise InterruptedError('Search cancelled')
+            if total > 0:
+                search_state.progress = current / total
+
+        stopped = {'time_limit': False}
+
+        def _complete():
+            try:
+                with shared_time_limit():  # one time limit for the chain, not one per step
+                    return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
+                                          upto=upto, searcher_for_step=step_searcher)
+            finally:
+                stopped['time_limit'] = consume_time_limit_stop()
+
+        was_running = search_state.is_running
+        search_state.is_running = True
+        search_state.is_cancelled = False
+        search_state.progress = 0
+        search_state.running_label = tr('Completing the cut-off results')
+        if not was_running:
+            search_state.search_start_time = time.time()
+        try:
+            result = await run_research_call(_complete)
+        except InterruptedError:
+            result = {'restrict': None, 'interrupted': True}
+        except Exception as e:
+            logger.warning('Completing the refinement chain failed: %s', e)
+            if notify_failure:
+                ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
+                          type='warning')
+            result = {'restrict': None, 'interrupted': True}
+        finally:
+            search_state.running_label = None
+            search_state.is_running = was_running
+            if not was_running:
+                results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+        if stopped['time_limit'] and notify_failure:
+            # The time limit stopped the completion: the search within uses the shown rows.
+            ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
+                      type='warning')
+        persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
+        _update_refinement_strip()
+        return result
+
+    async def _toggle_all_terms_filter(checked):
+        """Toggle 'Only results with all terms' post-filter and re-render."""
+        search_state._all_terms_filter = checked
+        persist_value('search_all_terms_filter', checked)
+        if checked and len(search_state.refinement_chain) >= 2:
+            # D8: the earlier steps' page sets must be complete, or rows they left
+            # out would hide shown rows (the shown step only filters what is shown).
+            completed = await _complete_chain(len(search_state.refinement_chain) - 1,
+                                              notify_failure=False)
+            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+            earlier = len(search_state.refinement_chain) - 1
+            if ((completed and completed['interrupted'])
+                    or steps_that_cannot_complete(search_state.refinement_chain, earlier)):
+                # Earlier steps' page sets are incomplete (the completion stopped, or a
+                # line-break step cannot be completed): filtering by them would hide
+                # shown rows that do have every term. Leave the filter off and say so.
+                search_state._all_terms_filter = False
+                persist_value('search_all_terms_filter', False)
+                ui.notify(tr('Could not complete the cut-off results; the \"Only results with all terms\" filter was not applied.'), type='warning')
+                _update_refinement_strip()
+        # Re-render with filter applied
+        if search_state.results:
+            render_results(search_state.results, page=0)
+
+    def _clear_refinement_chain():
+        """D-11: Remove entire chain, return to unrestricted search."""
+        search_state.refinement_chain = []
+        search_state.refinement_restrict_sys_ids = None
+        search_state._refine_mode = False
+        search_state._refinement_stale = False
+        search_state._refinement_scope_sig = ''
+        search_state._all_terms_filter = False
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+        persist_value('search_refinement_chain', [])
+        persist_value('search_all_terms_filter', False)
+        _update_refinement_strip()
+        _update_search_within_btn()
+
+    def _total_text(n):
+        """A result total as shown: "N+" when the list leaves matches out (D8)."""
+        return f"{n}+" if search_state.result_count_capped else f"{n}"
+
+    def _downgrade_suffix():
+        """The Responsa guard's downgrade of the results shown, on every line that
+        counts them: it stays while they show (plan §5.3) -- a filter or exclusion
+        re-render dropped it (Codex review of PR #433)."""
+        note = search_state.responsa_warning
+        return (" · " + tr_engine_message(note)) if note else ''
+
+    def _update_search_within_btn():
+        """D-01: Show/hide search within button based on result availability."""
+        has_results = len(search_state.results) > 0
+        is_searching = search_state.is_running
+        # Compute unique manuscript count for the button
+        if has_results:
+            ms_ids = {r.get('display', {}).get('id') for r in search_state.results if r.get('display', {}).get('id')}
+            ms_count = len(ms_ids)
+        else:
+            ms_count = 0
+        search_within_btn.set_visibility(ms_count > 0 and not is_searching)
+        if ms_count > 0:
+            _ms = f"{ms_count:,}+" if search_state.result_count_capped else f"{ms_count:,}"
+            search_within_btn.text = f"{tr('Search within')} {_ms} {tr('manuscripts')}"
+
+    async def _undo_zero_result_refine():
+        """D-14a: Recover from zero-result refinement — re-run previous chain step's query."""
+        search_state._zero_result_refine = False
+        search_state._refine_mode = False
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+        if search_state.refinement_chain:
+            # Restore the last chain step's query and re-execute it
+            last_step = search_state.refinement_chain[-1]
+            query_input.value = last_step.query
+            mode_select.value = 'exact' if last_step.mode == 'literal' else last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
+            # Remove the last step so re-search in refine mode re-adds it
+            search_state.refinement_chain = search_state.refinement_chain[:-1]
+            if search_state.refinement_chain:
+                # Replay to rebuild restrict from remaining chain
+                async def _replay_and_search():
+                    # Read now, not in the worker: an emptied chain replays to None. Taken
+                    # before the try, so the failure path checks ownership as well.
+                    chain = list(search_state.refinement_chain)
+                    try:
+                        step_searcher = _step_searcher()
+                        filter_restrict = search_state.restrict_sys_ids
+                        def _do_replay():
+                            with shared_time_limit():  # one time limit for the chain, not one per step
+                                return replay_chain(chain, state.searcher,
+                                                    filter_restrict, searcher_for_step=step_searcher)
+                        result = await run.io_bound(_do_replay)
+                        if not _still_the_chain(chain):
+                            # Cleared or changed meanwhile (a new search, Clear all, a
+                            # chip): that action owns the page now; search nothing here.
+                            return
+                        # None: no answer (cancelled, or the app is stopping) -- never
+                        # search within "no restriction". The search below then runs
+                        # within the restriction already set, as after a failed replay.
+                        if result is not None:
+                            search_state.refinement_restrict_sys_ids = result
+                            # D8: the replay reads cut-off lists; complete them first.
+                            completed = await _complete_chain(None)
+                            if (completed and not completed['interrupted'] and completed['restrict'] is not None
+                                    and _still_the_chain(chain)):
+                                search_state.refinement_restrict_sys_ids = completed['restrict']
+                    except Exception:
+                        pass  # the replay failed: search within the restriction already set
+                    if not _still_the_chain(chain):
+                        # Cleared or changed while the replay ran or failed: that action owns
+                        # the page now. Never re-enter refinement for a chain that is gone.
+                        return
+                    search_state._refine_mode = True
+                    await execute_search()
+                await _replay_and_search()
+            else:
+                # No chain left — just re-run as normal search
+                await execute_search()
+
+    # === Panel Toggle Functions ===
+
+    def toggle_search_panel():
+        """Toggle between collapsed and expanded search panel."""
+        if search_state.is_panel_collapsed:
+            # Expand
+            search_state.is_panel_collapsed = False
+            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+            expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+        else:
+            # Collapse
+            search_state.is_panel_collapsed = True
+            query_val = query_input.value or ''
+            collapsed_query_label.text = query_val[:50] + ('...' if len(query_val) > 50 else '') if query_val else tr('Enter search query')
+            mode_val = mode_select.value
+            mode_names = {'exact': '=', 'variants': '?', 'variants_extended': '??',
+                         'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
+                         'Shelfmark': '#', 'Title': '$'}
+            collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
+            expanded_panel.style('display: none !important;')
+            _close_filters_panel()
+            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+
+    # === Keyboard Shortcut Handler ===
+
+    # Add keyboard shortcut for panel toggle (Escape to toggle, / to focus search)
+    ui.keyboard(on_key=lambda e: handle_keyboard_shortcut(e), ignore=['input', 'textarea'])
+
+    def handle_keyboard_shortcut(e):
+        """Handle keyboard shortcuts for search panel."""
+        if e.action.keydown:
+            if e.key == 'Escape':
+                toggle_search_panel()
+            elif e.key == '/' and not e.action.repeat:
+                # Focus search input and expand panel if collapsed
+                if search_state.is_panel_collapsed:
+                    search_state.is_panel_collapsed = False
+                    collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+                    expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+                query_input.run_method('focus')
+
+    # === Auto-collapse on Scroll (Simplified Approach) ===
+    # Using a debounced scroll detection that only collapses - user manually expands
+    # This avoids complex bidirectional sync issues
+
+    scroll_collapse_enabled = {'value': True}  # Can be disabled during search
+
+    async def setup_scroll_collapse():
+        """Set up scroll-based auto-collapse using JavaScript."""
+        # Get a stable reference to the results container
+        collapsed_id = f'collapsed-{id(collapsed_panel)}'
+        expanded_id = f'expanded-{id(expanded_panel)}'
+        collapsed_panel.props(f'id="{collapsed_id}"')
+        expanded_panel.props(f'id="{expanded_id}"')
+
+        js_code = f'''
+        (function() {{
+            // Find the scroll area - look for the results scroll area's inner container
+            const findScrollArea = () => {{
+                // First try the direct class we added
+                const scrollAreaEl = document.querySelector('.results-scroll-area');
+                if (scrollAreaEl) {{
+                    // Quasar scroll-area has an inner container that actually scrolls
+                    const inner = scrollAreaEl.querySelector('.q-scrollarea__container');
+                    if (inner) return inner;
+                    // Fallback: the element itself might be scrollable
+                    return scrollAreaEl;
+                }}
+                return null;
+            }};
+
+            let attempts = 0;
+            const setupScroll = () => {{
+                const scrollArea = findScrollArea();
+                if (!scrollArea && attempts < 20) {{
+                    attempts++;
+                    setTimeout(setupScroll, 300);
+                    return;
+                }}
+                if (!scrollArea) {{
+                    console.warn('Could not find scroll area for auto-collapse');
+                    return;
+                }}
+
+                let lastScrollTop = 0;
+                let scrollThreshold = 50;  // Lower threshold for easier triggering
+                let collapseTimeout = null;
+
+                scrollArea.addEventListener('scroll', function() {{
+                    const currentScrollTop = scrollArea.scrollTop;
+                    const scrollDelta = currentScrollTop - lastScrollTop;
+
+                    // Clear any pending collapse
+                    if (collapseTimeout) {{
+                        clearTimeout(collapseTimeout);
+                        collapseTimeout = null;
+                    }}
+
+                    // Only collapse when scrolling down past threshold
+                    if (scrollDelta > scrollThreshold && currentScrollTop > 100) {{
+                        collapseTimeout = setTimeout(() => {{
+                            const expandedEl = document.getElementById('{expanded_id}');
+                            const collapsedEl = document.getElementById('{collapsed_id}');
+                            if (expandedEl && collapsedEl) {{
+                                const isVisible = !expandedEl.style.display || !expandedEl.style.display.includes('none');
+                                if (isVisible) {{
+                                    expandedEl.style.cssText = 'display: none !important;';
+                                    collapsedEl.style.cssText = 'background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;';
+                                }}
+                            }}
+                        }}, 100);
+                    }}
+
+                    lastScrollTop = currentScrollTop;
+                }});
+
+                console.log('Scroll auto-collapse setup complete');
+            }};
+
+            // Start looking for scroll area
+            setTimeout(setupScroll, 300);
+        }})();
+        '''
+        try:
+            await ui.run_javascript(js_code, timeout=5.0)
+        except TimeoutError:
+            pass  # JS still executes, timeout is just about awaiting response
+
+    async def setup_space_scroll():
+        """Install client-side Space key scroll handler for the results pane (SCROLL-01 / D-03).
+
+        Injects a single self-contained IIFE via ui.run_javascript that:
+        - Guards against double-install with window._gsSpaceScrollInstalled.
+        - Intercepts document keydown for the Space key only.
+        - Returns without action when an actionable control has focus (D-01 suppression set)
+          or a Quasar dialog is open — a11y intact.
+        - Scrolls .results-scroll-area > .q-scrollarea__container by ±clientHeight (D-02/D-03).
+        - Uses scrollTop += delta (universal / Safari < 15.4-safe, Open Question 1 RESOLVED).
+        """
+        js_code = '''
+        (function() {
+            if (window._gsSpaceScrollInstalled) return;
+            window._gsSpaceScrollInstalled = true;
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== ' ') return;
+
+                // Guard: any open Quasar dialog (Quick View etc.)
+                if (document.querySelector('.q-dialog')) return;
+
+                // Guard: actionable active element (D-01 suppression set)
+                var ae = document.activeElement;
+                if (!ae) return;
+                var tag = ae.tagName;
+                if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'A') return;
+                if (ae.closest && ae.closest('a[href]')) return;
+                if (ae.getAttribute('role') === 'button') return;
+                if (ae.isContentEditable) return;
+
+                // Scroll the results pane (D-03 / Finding W-3)
+                var outer = document.querySelector('.results-scroll-area');
+                if (!outer) return;
+                var inner = outer.querySelector('.q-scrollarea__container') || outer;
+                var delta = e.shiftKey ? -inner.clientHeight : inner.clientHeight;
+                inner.scrollTop += delta;
+                e.preventDefault();
+            });
+        })();
+        '''
+        try:
+            await ui.run_javascript(js_code, timeout=5.0)
+        except TimeoutError:
+            pass  # JS still executes; timeout is just about awaiting the response
+
+    # Set up scroll handlers after a short delay
+    # Cat-2: _after_delay pattern for JS DOM readiness - scroll handlers bind to
+    # dynamically rendered elements that must exist before JS runs.
+    asyncio.ensure_future(_after_delay(1.0, setup_scroll_collapse))
+    asyncio.ensure_future(_after_delay(1.0, setup_space_scroll))
+
+    # === Helper Functions ===
+
+    def prepend_to_query(prefix):
+        current = query_input.value or ""
+        if not current.startswith(prefix):
+            query_input.set_value(prefix + current)
+
+    # === Filtering Functions ===
+
+    def toggle_filters():
+        """Toggle visibility of filters panel."""
+        filters_visible['value'] = not filters_visible['value']
+        filters_panel.set_visibility(filters_visible['value'])
+
+    async def apply_filters():
+        """Apply filters to results."""
+        if not search_state.results:
+            return
+        # The measured matches are read off the loop; the filter below then
+        # finds them cached.
+        await _prefetch_post_matches(search_state.results)
+
+        filtered = []
+        shelfmark_filter = (filter_shelfmark.value or '').lower().strip()
+        title_filter = (filter_title.value or '').lower().strip()
+        snippet_filter = (filter_snippet.value or '').lower().strip()
+        for res in search_state.results:
+            display = res.get('display', {})
+            shelfmark = (display.get('shelfmark', '') or '').lower()
+            title = (display.get('title', '') or '').lower()
+            snippet = (res.get('snippet', '') or '').lower()
+
+            # All filters must match
+            if shelfmark_filter and shelfmark_filter not in shelfmark:
+                continue
+            if title_filter and title_filter not in title:
+                continue
+            if snippet_filter and snippet_filter not in snippet:
+                continue
+
+            filtered.append(res)
+
+        # Apply measurement post-filters (Phase 54, review concern #1)
+        filtered = _apply_measurement_post_filters(filtered, search_state)
+
+        render_results(filtered, page=0)
+        shown = len(filtered)
+        results_count.text = f"{shown} / {_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+        ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
+
+    def clear_filters():
+        """Clear all filters and show all results."""
+        filter_shelfmark.value = ''
+        filter_title.value = ''
+        filter_snippet.value = ''
+        # Clear post-search measurement state (Phase 54)
+        search_state.post_filter_criteria = {}
+        # Note: do NOT clear _measurement_cache here — it's enrichment data,
+        # not filter state. Clearing it would break reapplying filters later.
+
+        if search_state.results:
+            render_results(search_state.results, page=0)
+            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+            ui.notify(tr('Filters cleared'), type='info')
+
+    # === Reset Search ===
+
+    def _reset_search():
+        """Reset all search state, clear results, filters, exclusions, and persistent storage."""
+        # Clear query input
+        query_input.value = ''
+        # Reset mode to exact
+        mode_select.value = 'exact'
+        # Clear results
+        search_state.results = []
+        search_state.responsa_warning = None
+        search_state.displayed_results = []
+        search_state.selected_indices.clear()
+        search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()  # SEED-022
+        search_state.total_count = 0
+        search_state.current_page = 0
+        search_state.result_domains = {}
+        search_state.all_result_domains = {}
+        search_state.has_domain_data = False
+        search_state.domain_name_map = {}
+        search_state.catalog_source_counts = {}
+        search_state.printed_ids = set()
+        search_state.translation_data = {}
+        search_state.domain_excluded_results = []
+        search_state.word_search_excluded_results = []
+        # Clear domain exclusions
+        search_state.domain_exclusions = set()
+        # Clear word search exclusions
+        search_state.word_search_excluded_ids = set()
+        # Reset printed filter
+        search_state.printed_filter = 'all'
+        # Clear pre-search filters
+        _clear_all_adv_filters()
+        # Clear post-search filters
+        clear_filters()
+        # Clear results container
+        results_container.clear()
+        with results_container:
+            with ui.column().classes('w-full h-64 items-center justify-center'):
+                ui.icon('search').classes('text-6xl').style('color: var(--text-muted);')
+                ui.label(tr('Enter a search query')).classes('mt-4').style('color: var(--text-muted);')
+        # Reset results count label
+        results_count.text = tr('Results')
+        _clear_input_notice()  # the shelfmark note or layout suggestion of the last search
+        # A layout-suggestion check still running for the last search finds another
+        # generation and shows nothing (Codex round 3 on #469).
+        search_state.search_generation += 1
+        # Hide domain filter and printed filter buttons
+        _set_btn_visible(domain_filter_btn, False)
+        _set_btn_visible(printed_filter_btn, False)
+        # Phase 999.2 (PGP-FILTER-02): hide PGP button + reset in-memory state on New Search.
+        # The persisted 'search_pgp_filter' key is reset by clear_search_snapshot() below
+        # (Task 1 Edit 2 added it to that helper's defaults dict — MEDIUM-2 fix routes
+        # through the central path instead of the session-persistence-gated persist_value).
+        _set_btn_visible(pgp_filter_btn, False)
+        search_state.pgp_filter = 'all'
+        _update_pgp_filter_btn()
+        _update_pgp_filter_chip()
+        # SEED-026 / DMF (LIBFILTER-01): hide library button + reset in-memory state on New Search.
+        # The persisted 'search_library_filter' key is reset by clear_search_snapshot() (added to defaults).
+        _set_btn_visible(library_filter_btn, False)
+        search_state.library_filter = []
+        search_state.library_mode = 'hide'  # DMF D-04: reset mode to fresh default on New Search
+        _update_library_btn()
+        # Phase 55: Clear refinement chain
+        _clear_refinement_chain()
+        search_within_btn.set_visibility(False)
+        # Phase 56: Clear exclusion sources
+        search_state.exclusion_sources = []
+        _update_exclude_btn()
+        # The run the page showed is forgotten and the address loses it, so a refresh
+        # or a Back cannot bring the cleared results back (Codex, PR #436).
+        discard_search_run(search_state)
+        search_state.last_run = None
+        try:
+            ui.run_javascript("history.replaceState(null, '', '/search')")
+        except Exception:
+            pass  # JavaScript execution failed; non-fatal UI glitch
+        # Reset persistent storage to clean defaults (Phase 74: via helper).
+        # search_query/search_mode are bootstrap-input keys NOT owned by the helper;
+        # keep their UX-driven writes here to wipe the query bar on New Search.
+        clear_search_snapshot()
+        _safe_set('search_query', '')
+        _safe_set('search_mode', 'exact')
+        # Bootstrap-input precedent (Phase 74): text_position is NOT a
+        # SearchUIState field and is excluded from _SEARCH_SNAPSHOT_KEYS,
+        # so reset it directly here — same shape as search_query/search_mode.
+        text_position_select.value = 'anywhere'
+        _safe_set('search_text_position', 'anywhere')
+        # Phase 88: Clear per-session export payload — singleton mirror removed.
+        from web.export_state import clear_search_export
+        clear_search_export()
+        ui.notify(tr('Search reset'), type='info', timeout=2000)
+
+    # === Bulk Operations ===
+
+    def toggle_select_all(is_checked):
+        """Toggle selection of all results."""
+        if is_checked:
+            # Select all current results
+            for i in range(len(search_state.results)):
+                search_state.selected_indices.add(i)
+        else:
+            # Deselect all
+            search_state.selected_indices.clear()
+
+        # Re-render to update checkboxes (keeps current page)
+        _display = _apply_measurement_post_filters(search_state.results, search_state)
+        render_results(_display)
+        update_selection_ui()
+        # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
+        _selected_uids = compute_selected_uids(search_state)
+        from web.export_state import update_search_export_selection
+        update_search_export_selection(_selected_uids)
+
+    def update_selection_ui():
+        """Update selection counter and bulk actions visibility."""
+        selected_count = len(search_state.selected_indices)
+
+        if selected_count > 0:
+            selection_counter.text = f"{selected_count} {tr('selected')}"
+            selection_counter.style('color: var(--primary-600);')
+            bulk_actions_row.style('')  # Show bulk actions
+        else:
+            selection_counter.text = ''
+            selection_counter.style('display: none;')
+            bulk_actions_row.style('display: none;')  # Hide bulk actions
+
+        # Update select all checkbox state
+        if selected_count == len(search_state.results) and len(search_state.results) > 0:
+            select_all_checkbox.value = True
+        else:
+            select_all_checkbox.value = False
+
+    def bulk_add_to_list():
+        """Add all selected results to a list."""
+        from web.components.add_to_list_dialog import require_login_for_lists
+        if not require_login_for_lists():  # sweep C2: before any lists_mgr read
+            return
+        if not search_state.selected_indices:
+            ui.notify(tr('No results selected'), type='warning')
+            return
+
+        selected_results = [search_state.results[i] for i in sorted(search_state.selected_indices)
+                          if i < len(search_state.results)]
+
+        if not selected_results:
+            ui.notify(tr('No valid selections'), type='warning')
+            return
+
+        # State for inline list creation
+        creating_new_list = {'active': False}
+
+        # Show list selection dialog
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
+            # Changed to H3 semantic heading
+            h3(tr('Add Selected to List'), classes='text-xl font-bold mb-2')
+            ui.label(f"{len(selected_results)} {tr('items selected')}").style('color: var(--text-secondary);')
+
+            if state.lists_mgr:
+                lists = state.lists_mgr.data.get('lists', {})
+                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
+
+                # Container for list selection form
+                form_container = ui.column().classes('w-full mt-4 gap-3')
+                # Container for new list creation form
+                new_list_container = ui.column().classes('w-full mt-4 gap-3')
+                new_list_container.set_visibility(False)
+
+                with form_container:
+                    if not list_options:
+                        ui.label(tr('No lists yet. Create your first list!')).style('color: var(--text-muted);')
+                    else:
+                        # List selection with "Create new list" option
+                        list_options_with_new = {'__new__': f"+ {tr('Create new list')}", **list_options}
+                        selected_list = ui.select(
+                            list_options_with_new,
+                            label=tr('Select List'),
+                            value=list(list_options.keys())[0] if list_options else '__new__'
+                        ).classes('w-full').props('outlined').style('color: var(--text-primary);')
+
+                        def on_list_change():
+                            if selected_list.value == '__new__':
+                                form_container.set_visibility(False)
+                                new_list_container.set_visibility(True)
+                                creating_new_list['active'] = True
+
+                        selected_list.on('update:model-value', on_list_change)
+
+                    # Create New List button (shown when no lists exist)
+                    if not list_options:
+                        ui.button(
+                            tr('Create new list'),
+                            icon='add',
+                            on_click=lambda: (form_container.set_visibility(False), new_list_container.set_visibility(True))
+                        ).classes('btn-primary')
+
+                # New list creation form
+                with new_list_container:
+                    ui.label(tr('Create New List')).classes('font-semibold').style('color: var(--text-primary);')
+                    new_list_name = ui.input(label=tr('List Name')).classes('w-full').props('outlined')
+
+                    # Color picker
+                    ui.label(tr('Color')).classes('text-sm mt-2').style('color: var(--text-secondary);')
+                    selected_color = {'value': '#4CAF50'}
+
+                    with ui.row().classes('gap-2 flex-wrap'):
+                        colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
+                                  '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
+                        for color in colors:
+                            btn = ui.button(icon='circle').props(
+                                f'flat round dense aria-label="{tr("Color")} {color}"'
+                            ).style(
+                                f'color: {color}; font-size: 1.5rem;'
+                            )
+                            btn.on('click', lambda c=color: selected_color.update({'value': c}))
+
+                    with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                        def back_to_list_selection():
+                            new_list_container.set_visibility(False)
+                            form_container.set_visibility(True)
+                            creating_new_list['active'] = False
+
+                        if list_options:
+                            ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
+
+                        adding = {'busy': False}  # a bulk add is in flight (see create_and_add_all)
+
+                        async def create_and_add_all():
+                            # One bulk add at a time: the insert runs off the loop, so a second click
+                            # would otherwise run while the first is in flight and add the batch twice
+                            # (list_items has no unique key). Shared with add_all below.
+                            if adding['busy']:
+                                return
+                            adding['busy'] = True
+                            try:
+                                name = new_list_name.value.strip()
+                                if not name:
+                                    ui.notify(tr('Please enter a list name'), type='warning')
+                                    return
+
+                                from web.auth_state import GlobalAuthState
+                                if not GlobalAuthState.is_logged_in():
+                                    # The session ended while the dialog was open.
+                                    ui.notify(tr('Please log in to access lists'), type='warning')
+                                    return
+                                new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
+                                if not new_list_id:
+                                    ui.notify(tr('Failed to create list'), type='negative')
+                                    return
+                                ui.notify(f"{tr('List created')}: {name}", type='positive')
+                                sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                                if await _bulk_add_items(state.lists_mgr, sys_ids, new_list_id):
+                                    dialog.close()
+                            finally:
+                                adding['busy'] = False
+
+                        ui.button(tr('Create and Add'), on_click=create_and_add_all).classes('btn-primary')
+
+                # Action buttons for existing list selection
+                with ui.row().classes('w-full justify-end gap-2 mt-6') as action_row:
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+
+                    async def add_all():
+                        if adding['busy']:  # one bulk add at a time (see create_and_add_all)
+                            return
+                        adding['busy'] = True
+                        try:
+                            if not list_options or creating_new_list['active']:
+                                return
+
+                            if selected_list.value == '__new__':
+                                form_container.set_visibility(False)
+                                new_list_container.set_visibility(True)
+                                creating_new_list['active'] = True
+                                return
+
+                            sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                            if await _bulk_add_items(state.lists_mgr, sys_ids, selected_list.value):
+                                dialog.close()
+                        finally:
+                            adding['busy'] = False
+
+                    add_btn = ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
+                    if not list_options:
+                        add_btn.set_visibility(False)
+            else:
+                ui.label(tr('Lists manager not available')).style('color: var(--error);')
+
+        dialog.open()
+
+    async def bulk_copy_text():
+        """Copy all selected results' text to clipboard (exactly; toast = real outcome)."""
+        if not search_state.selected_indices:
+            ui.notify(tr('No results selected'), type='warning')
+            return
+
+        selected_results = [search_state.results[i] for i in sorted(search_state.selected_indices)
+                          if i < len(search_state.results)]
+
+        if not selected_results:
+            ui.notify(tr('No valid selections'), type='warning')
+            return
+
+        # Compile all text
+        compiled_text = []
+        for i, res in enumerate(selected_results, 1):
+            display = res.get('display', {})
+            shelfmark = display.get('shelfmark', 'Unknown')
+            full_text = res.get('full_text', '')
+            if not full_text and res.get('uid') and state.searcher:
+                try:
+                    full_text = state.searcher.get_full_text_by_id(res.get('uid')) or ''
+                except Exception:
+                    full_text = ''
+            snippet = res.get('snippet', '').replace('*', '')
+            text = full_text or res.get('full_text_excerpt', '') or snippet
+
+            compiled_text.append(f"=== {i}. {shelfmark} ===\n{text}\n")
+
+        final_text = '\n'.join(compiled_text)
+        await copy_text_to_clipboard(
+            final_text,
+            success_message=f"{len(selected_results)} {tr('results copied to clipboard')}",
+        )
+
+    def cancel_search():
+        """Cancel the current search and show partial results."""
+        search_state.is_cancelled = True
+        if _page_run['run'] is not None and search_state.is_running:
+            _page_run['run'].cancelled = True
+        search_state.status = tr('Cancelling...')
+
+    def update_progress_ui():
+        """Update progress bar, elapsed time, and button states.
+
+        Returns True to keep the async loop running, False to stop it
+        (e.g. when the client/elements have been deleted due to navigation).
+        """
+        try:
+            # Check if client still exists
+            _ = progress_bar.client
+        except (RuntimeError, Exception):
+            # Client deleted — stop the loop
+            return False
+
+        try:
+            if search_state.is_running:
+                progress_bar.classes(remove='opacity-0')
+                progress_bar.value = search_state.progress
+                # Compute elapsed time and prepend to status
+                elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+                if elapsed >= 3600:
+                    elapsed_str = f"{int(elapsed // 3600)}:{int((elapsed % 3600) // 60):02d}:{int(elapsed % 60):02d}"
+                else:
+                    elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+                # Show elapsed time in results_count during search (will be overwritten on completion)
+                doing = getattr(search_state, 'running_label', None) or tr('Searching...')
+                results_count.text = f"{doing} · {elapsed_str}"
+                # Swap buttons: hide search, show stop (using style to avoid performance issues)
+                search_btn.style('display: none;')
+                stop_btn.style('display: inline-flex;')
+            else:
+                # Swap buttons: show search, hide stop
+                search_btn.style('display: inline-flex;')
+                stop_btn.style('display: none;')
+                if search_state.progress >= 1.0:
+                    progress_bar.value = 1.0
+                    progress_bar.classes(add='opacity-0')
+                else:
+                    progress_bar.classes(add='opacity-0')
+        except Exception:
+            return False  # Client may have been deleted
+        return True
+
+    # Use asyncio loop for progress updates instead of ui.timer to avoid
+    # "parent slot of the element has been deleted" RuntimeError on navigation
+    if search_state.update_timer:
+        search_state.update_timer.cancel()
+
+    async def _progress_update_loop():
+        while True:
+            if not update_progress_ui():
+                break
+            await asyncio.sleep(0.5)
+
+    # Cat-3: long-running owned task handle - intentionally detached. Task stored
+    # on search_state.update_timer so it can be cancelled on new search.
+    search_state.update_timer = asyncio.ensure_future(_progress_update_loop())
+
+    def open_query_builder():
+        """Open the tabular query builder dialog for composing Responsa queries visually."""
+        # === Builder State ===
+        _updating_modifiers = {'flag': False}  # Guard to prevent on_change loops when updating checkboxes
+
+        def make_word(text=''):
+            return {'text': text, 'mods': {
+                'prefix': False, 'suffix': False,
+                'wildcard_prefix': False, 'wildcard_suffix': False,
+                'plene': False, 'negation': False,
+                'line_start': False, 'line_end': False,
+            }}
+
+        def make_component():
+            return {'words': [make_word(), make_word(), make_word(), make_word()]}
+
+        builder_state = {
+            'components': [make_component(), make_component()],
+            'distances': [0],
+            'scope': 'word_range',
+            'active_word': None,  # (comp_idx, word_idx) tuple
+            'num_components': 2,
+        }
+
+        # UI element references
+        comp_cards = []  # List of component card containers
+        word_inputs = []  # word_inputs[comp_idx][word_idx] = ui.input element
+        word_containers = []  # word_containers[comp_idx][word_idx] = container element
+        add_word_btns = []  # Per-component add word buttons
+        distance_spinners = []  # Distance column containers between components
+        distance_number_els = []  # The actual ui.number elements for distance
+        remove_comp_btns = []  # Remove buttons per component
+        visible_words = []  # visible_words[comp_idx] = number of visible word slots
+        preview_label_ref = {'el': None}
+        scope_toggle_ref = {'el': None}
+        add_comp_btn_ref = {'el': None}
+
+        # Modifier checkbox references
+        mod_cbs = {}
+        # Per-word modifier indicator labels: mod_indicators[comp_idx][word_idx] = ui.label element
+        mod_indicators = []
+
+        # Modifier display names (Hebrew)
+        MOD_DISPLAY = {
+            'prefix': '#_',
+            'suffix': '_#',
+            'wildcard_prefix': '*_',
+            'wildcard_suffix': '_*',
+            'plene': '%',
+            'negation': '−',
+            'line_start': '|_',
+            'line_end': '_|',
+        }
+
+        def _build_mod_indicator_text(mods):
+            """Build a short string showing active modifiers for a word."""
+            parts = []
+            for key in ['prefix', 'suffix', 'wildcard_prefix', 'wildcard_suffix', 'plene', 'negation',
+                         'line_start', 'line_end']:
+                if mods.get(key):
+                    parts.append(MOD_DISPLAY[key])
+            return ' '.join(parts)
+
+        def _update_mod_indicator(comp_idx, word_idx):
+            """Update the modifier indicator label for a specific word."""
+            if comp_idx < len(mod_indicators) and word_idx < len(mod_indicators[comp_idx]):
+                mods = builder_state['components'][comp_idx]['words'][word_idx]['mods']
+                text = _build_mod_indicator_text(mods)
+                indicator = mod_indicators[comp_idx][word_idx]
+                indicator.text = text
+                indicator.set_visibility(bool(text))
+
+        def _update_active_word_highlight(new_comp=None, new_word=None):
+            """Apply/remove highlight border on word inputs to show which word is selected."""
+            # Remove highlight from all
+            for ci_list in word_inputs:
+                for inp in ci_list:
+                    inp.props(remove='color=primary')
+                    inp.classes(remove='ring-2 ring-primary')
+            # Add highlight to the new active word
+            if new_comp is not None and new_word is not None:
+                if new_comp < len(word_inputs) and new_word < len(word_inputs[new_comp]):
+                    word_inputs[new_comp][new_word].props('color=primary')
+
+        # === Core Functions ===
+        def update_preview():
+            """Regenerate preview text from current builder state."""
+            comps = []
+            for ci in range(builder_state['num_components']):
+                comp = builder_state['components'][ci]
+                words = []
+                for wi in range(visible_words[ci] if ci < len(visible_words) else 2):
+                    w = comp['words'][wi]
+                    words.append({'text': w['text'], 'mods': dict(w['mods'])})
+                comps.append({'words': words})
+            dists = builder_state['distances'][:builder_state['num_components'] - 1]
+            try:
+                syntax, neg = generate_tabular_syntax(comps, dists, builder_state['scope'])
+                if preview_label_ref['el']:
+                    if syntax.strip():
+                        neg_text = f"  [- {' '.join(neg)}]" if neg else ""
+                        preview_label_ref['el'].text = syntax + neg_text
+                    else:
+                        preview_label_ref['el'].text = tr('No words entered')
+            except Exception:
+                if preview_label_ref['el']:  # Operation failed; use fallback value
+                    preview_label_ref['el'].text = ''
+
+        def on_word_focus(comp_idx, word_idx):
+            """Track the active word and update modifier checkboxes to reflect its state."""
+            builder_state['active_word'] = (comp_idx, word_idx)
+            _updating_modifiers['flag'] = True
+            try:
+                mods = builder_state['components'][comp_idx]['words'][word_idx]['mods']
+                for key, cb in mod_cbs.items():
+                    cb.set_value(mods.get(key, False))
+            finally:
+                _updating_modifiers['flag'] = False
+            _update_active_word_highlight(comp_idx, word_idx)
+
+        def on_modifier_change(modifier_name, value):
+            """Save modifier change to the currently active word."""
+            if _updating_modifiers['flag']:
+                return
+            aw = builder_state['active_word']
+            if aw is None:
+                return
+            ci, wi = aw
+            builder_state['components'][ci]['words'][wi]['mods'][modifier_name] = value
+            _update_mod_indicator(ci, wi)
+            update_preview()
+
+        def on_word_text_change(comp_idx, word_idx, value):
+            """Update builder state when word text changes."""
+            builder_state['components'][comp_idx]['words'][word_idx]['text'] = value or ''
+            update_preview()
+
+        def on_distance_change(pair_idx, value):
+            """Update distance between component pair."""
+            while len(builder_state['distances']) <= pair_idx:
+                builder_state['distances'].append(0)
+            builder_state['distances'][pair_idx] = int(value or 0)
+            update_preview()
+
+        def on_scope_change(value):
+            """Toggle scope and show/hide distance spinners and line modifiers."""
+            builder_state['scope'] = value
+            show_dists = (value in ('word_range', 'lines'))
+            n = builder_state.get('num_components', 2)
+            for i, ds in enumerate(distance_spinners):
+                ds.set_visibility(show_dists and i < n - 1)
+            # Show/hide line position modifiers
+            is_lines = (value == 'lines')
+            if 'line_start' in mod_cbs:
+                mod_cbs['line_start'].set_visibility(is_lines)
+            if 'line_end' in mod_cbs:
+                mod_cbs['line_end'].set_visibility(is_lines)
+            # Update distance labels
+            for dn_el in distance_number_els:
+                dn_el.suffix = tr('lines') if is_lines else tr('words') if value == 'word_range' else ''
+            update_preview()
+
+        def add_word_slot(comp_idx):
+            """Show the next hidden word slot in a component."""
+            if comp_idx >= len(visible_words):
+                return
+            if visible_words[comp_idx] < 4:
+                wi = visible_words[comp_idx]
+                visible_words[comp_idx] += 1
+                if comp_idx < len(word_containers) and wi < len(word_containers[comp_idx]):
+                    word_containers[comp_idx][wi].set_visibility(True)
+                # Hide the + button if we've reached 4
+                if visible_words[comp_idx] >= 4 and comp_idx < len(add_word_btns):
+                    add_word_btns[comp_idx].set_visibility(False)
+
+        def remove_component(comp_idx):
+            """Remove a component (only 3rd and 4th can be removed)."""
+            n = builder_state['num_components']
+            if n <= 2 or comp_idx < 2:
+                return
+            # Hide this component card
+            if comp_idx < len(comp_cards):
+                comp_cards[comp_idx].set_visibility(False)
+            # Hide the distance spinner before this component
+            dist_idx = comp_idx - 1
+            if dist_idx < len(distance_spinners):
+                distance_spinners[dist_idx].set_visibility(False)
+            # Clear word data
+            builder_state['components'][comp_idx] = make_component()
+            builder_state['num_components'] -= 1
+            # Show add component button if under max
+            if add_comp_btn_ref['el'] and builder_state['num_components'] < 4:
+                add_comp_btn_ref['el'].set_visibility(True)
+            update_preview()
+
+        def add_component():
+            """Add a new component (up to 4)."""
+            n = builder_state['num_components']
+            if n >= 4:
+                return
+            # Show the next hidden component card
+            if n < len(comp_cards):
+                comp_cards[n].set_visibility(True)
+                visible_words[n] = 2  # Reset to 2 visible words
+                # Show first 2 word slots, hide 3rd and 4th
+                for wi in range(4):
+                    if n < len(word_containers) and wi < len(word_containers[n]):
+                        word_containers[n][wi].set_visibility(wi < 2)
+                if n < len(add_word_btns):
+                    add_word_btns[n].set_visibility(True)
+            # Show the distance spinner before this new component
+            dist_idx = n - 1
+            if dist_idx < len(distance_spinners):
+                distance_spinners[dist_idx].set_visibility(True)
+            # Ensure distance list is long enough
+            while len(builder_state['distances']) <= dist_idx:
+                builder_state['distances'].append(0)
+            # Show remove button for this component
+            if n < len(remove_comp_btns):
+                remove_comp_btns[n].set_visibility(True)
+            builder_state['num_components'] = n + 1
+            # Hide add button if at max
+            if add_comp_btn_ref['el'] and builder_state['num_components'] >= 4:
+                add_comp_btn_ref['el'].set_visibility(False)
+            update_preview()
+
+        def clear_all():
+            """Reset all inputs without closing the dialog."""
+            for ci in range(4):
+                for wi in range(4):
+                    builder_state['components'][ci]['words'][wi] = make_word()
+                    if ci < len(word_inputs) and wi < len(word_inputs[ci]):
+                        word_inputs[ci][wi].set_value('')
+                    # Hide modifier indicators
+                    if ci < len(mod_indicators) and wi < len(mod_indicators[ci]):
+                        mod_indicators[ci][wi].text = ''
+                        mod_indicators[ci][wi].set_visibility(False)
+            # Reset distances
+            for i in range(3):
+                builder_state['distances'][i] = 0
+                if i < len(distance_number_els):
+                    distance_number_els[i].set_value(0)
+            # Reset scope
+            builder_state['scope'] = 'word_range'
+            if scope_toggle_ref['el']:
+                scope_toggle_ref['el'].set_value('word_range')
+            # Reset to 2 components, 2 words each
+            for ci in range(4):
+                if ci < len(comp_cards):
+                    comp_cards[ci].set_visibility(ci < 2)
+                visible_words[ci] = 2
+                for wi in range(4):
+                    if ci < len(word_containers) and wi < len(word_containers[ci]):
+                        word_containers[ci][wi].set_visibility(ci < 2 and wi < 2)
+                if ci < len(add_word_btns):
+                    add_word_btns[ci].set_visibility(ci < 2)
+                if ci < len(remove_comp_btns):
+                    remove_comp_btns[ci].set_visibility(False)
+            builder_state['num_components'] = 2
+            builder_state['active_word'] = None
+            # Show only the first distance spinner (between comp 0 and 1, word_range is default scope)
+            for i, ds in enumerate(distance_spinners):
+                ds.set_visibility(i < 1)
+            # Reset modifier checkboxes
+            _updating_modifiers['flag'] = True
+            for cb in mod_cbs.values():
+                cb.set_value(False)
+            _updating_modifiers['flag'] = False
+            if add_comp_btn_ref['el']:
+                add_comp_btn_ref['el'].set_visibility(True)
+            update_preview()
+
+        async def on_apply():
+            """Generate syntax, populate search field, close dialog, trigger search."""
+            comps = []
+            for ci in range(builder_state['num_components']):
+                comp = builder_state['components'][ci]
+                words = []
+                for wi in range(visible_words[ci] if ci < len(visible_words) else 2):
+                    w = comp['words'][wi]
+                    words.append({'text': w['text'], 'mods': dict(w['mods'])})
+                comps.append({'words': words})
+            dists = builder_state['distances'][:builder_state['num_components'] - 1]
+            syntax, neg = generate_tabular_syntax(comps, dists, builder_state['scope'])
+            if not syntax.strip():
+                ui.notify(tr('No words entered'), type='warning')
+                return
+            # Set negated words on search state and show in exclude field
+            search_state.builder_negated_words = neg
+            if neg:
+                current_not = not_filter.value.strip() if not_filter.value else ''
+                new_not = (current_not + ' ' + ' '.join(neg)).strip() if current_not else ' '.join(neg)
+                not_filter.set_value(new_not)
+            # Set query and close dialog
+            query_input.set_value(syntax)
+            builder_dialog.close()
+            # Trigger search
+            await execute_search()
+
+        # === Build the Dialog UI ===
+        with ui.dialog() as builder_dialog, ui.card().classes('p-4 q-pa-md builder-dialog-card').style(
+            'min-width: min(700px, 95vw); max-width: 900px; direction: rtl;'
+        ):
+            # Title
+            with ui.row().classes('w-full items-center justify-between mb-2'):
+                ui.label(tr('Tabular Search')).classes('text-lg font-bold').style('color: var(--primary-600);')
+                ui.button(icon='close', on_click=builder_dialog.close).props(
+                    f'flat round dense aria-label="{tr("Close")}"'
+                ).tooltip(tr('Close'))
+
+            # Scope Toggle
+            scope_toggle = ui.toggle(
+                {'word_range': tr('Word Range'), 'within_document': tr('Within Document'), 'lines': tr('Lines')},
+                value='word_range',
+                on_change=lambda e: on_scope_change(e.value)
+            ).classes('mb-3')
+            scope_toggle_ref['el'] = scope_toggle
+
+            # Pre-create all 4 components and 3 distance spinners (hide extras)
+            # Ensure builder_state has 4 components and 3 distances
+            while len(builder_state['components']) < 4:
+                builder_state['components'].append(make_component())
+            while len(builder_state['distances']) < 3:
+                builder_state['distances'].append(0)
+
+            # Components container (RTL: component 1 on right)
+            with ui.row().classes('w-full gap-3 flex-wrap justify-end items-start') as comps_row:
+                for ci in range(4):
+                    # Distance spinner BEFORE component (except for first component)
+                    if ci > 0:
+                        with ui.column().classes('items-center justify-center gap-0').style('min-width: 130px;') as dist_col:
+                            ui.label(tr('Distance')).classes('text-xs').style('color: var(--text-muted);')
+                            dist_num = ui.number(
+                                value=0, min=0, max=50
+                            ).classes('w-32').props('outlined dense')
+
+                            def _make_dist_handler(dn, idx):
+                                def handler():
+                                    on_distance_change(idx, dn.value)
+                                return handler
+                            dist_num.on('update:model-value', _make_dist_handler(dist_num, ci - 1))
+                        dist_col.set_visibility(ci < 2)  # Only show first distance initially
+                        distance_spinners.append(dist_col)
+                        distance_number_els.append(dist_num)
+
+                    # Component card
+                    with ui.card().classes('p-3').style(
+                        'border: 1px solid var(--border-light); border-radius: 8px; min-width: 150px; flex: 1;'
+                    ) as comp_card:
+                        with ui.row().classes('w-full items-center justify-between mb-1'):
+                            ui.label(f"{tr('Component')} {ci+1}").classes('text-sm font-medium')
+                            # Remove button (only for 3rd and 4th components)
+                            rm_btn = ui.button(icon='close', on_click=lambda _, c=ci: remove_component(c)).props(
+                                f'flat round dense size=xs color=red aria-label="{tr("Remove component")}"'
+                            ).tooltip(tr('Remove component'))
+                            rm_btn.set_visibility(False)  # Hidden initially
+                            remove_comp_btns.append(rm_btn)
+
+                        comp_word_inputs = []
+                        comp_word_containers = []
+
+                        comp_mod_indicators = []
+                        for wi in range(4):
+                            with ui.column().classes('w-full gap-0') as word_row:
+                                with ui.row().classes('w-full items-center gap-1'):
+                                    inp = ui.input(
+                                        placeholder=f"\u05de\u05d9\u05dc\u05d4 {wi+1}"  # "מילה N"
+                                    ).classes('flex-grow').props('outlined dense').style('direction: rtl;')
+                                    inp.on('focus', lambda _, c=ci, w=wi: on_word_focus(c, w))
+
+                                    def _make_text_handler(input_el, c_idx, w_idx):
+                                        def handler(e):
+                                            val = e.args if hasattr(e, 'args') else e
+                                            on_word_text_change(c_idx, w_idx, val if isinstance(val, str) else (str(val) if val is not None else ''))
+                                        return handler
+                                    inp.on('update:model-value', _make_text_handler(inp, ci, wi))
+                                # Modifier indicator label (hidden until modifiers are set)
+                                mod_ind = ui.label('').classes('text-xs').style(
+                                    'color: var(--primary-600); direction: ltr; margin-top: -2px; padding-right: 4px;'
+                                )
+                                mod_ind.set_visibility(False)
+                                comp_mod_indicators.append(mod_ind)
+                            word_row.set_visibility(wi < 2)  # First 2 visible
+                            comp_word_inputs.append(inp)
+                            comp_word_containers.append(word_row)
+
+                        word_inputs.append(comp_word_inputs)
+                        word_containers.append(comp_word_containers)
+                        mod_indicators.append(comp_mod_indicators)
+
+                        # Add Word button
+                        aw_btn = ui.button(tr('Add Word'), icon='add', on_click=lambda _, c=ci: add_word_slot(c)).props(
+                            'outline dense size=sm'
+                        ).classes('mt-1')
+                        add_word_btns.append(aw_btn)
+
+                    comp_card.set_visibility(ci < 2)  # Only first 2 visible
+                    comp_cards.append(comp_card)
+
+            visible_words.extend([2, 2, 2, 2])  # Initial visible word count per component
+
+            # Add Component button
+            add_comp_btn = ui.button(tr('Add Component'), icon='add',
+                on_click=lambda: add_component()).props('outline dense').classes('mt-2')
+            add_comp_btn_ref['el'] = add_comp_btn
+
+            # === Shared Modifier Checkboxes Row ===
+            with ui.row().classes('w-full gap-3 mt-3 items-center flex-wrap'):
+                ui.label(tr('Modifiers') + ':').classes('text-sm font-medium')
+                prefix_cb = ui.checkbox(tr('Prefixes #_')).tooltip(tr('Grammatical prefixes tooltip'))
+                suffix_cb = ui.checkbox(tr('Suffixes _#')).tooltip(tr('Grammatical suffixes tooltip'))
+                wild_start_cb = ui.checkbox(tr('Wildcard *_')).tooltip(tr('Words ending with...'))
+                wild_end_cb = ui.checkbox(tr('Wildcard _*')).tooltip(tr('Words starting with...'))
+                plene_cb = ui.checkbox(tr('Plene/Defective %')).tooltip(tr('Plene/defective spelling tooltip'))
+                negation_cb = ui.checkbox(tr('Negation −')).tooltip(tr('Negation tooltip'))
+                line_start_cb = ui.checkbox(tr('Start of line |_')).tooltip(tr('Word must appear at start of line'))
+                line_start_cb.set_visibility(False)  # Only visible in Lines scope
+                line_end_cb = ui.checkbox(tr('End of line _|')).tooltip(tr('Word must appear at end of line'))
+                line_end_cb.set_visibility(False)  # Only visible in Lines scope
+
+                mod_cbs['prefix'] = prefix_cb
+                mod_cbs['suffix'] = suffix_cb
+                mod_cbs['wildcard_prefix'] = wild_start_cb
+                mod_cbs['wildcard_suffix'] = wild_end_cb
+                mod_cbs['plene'] = plene_cb
+                mod_cbs['negation'] = negation_cb
+                mod_cbs['line_start'] = line_start_cb
+                mod_cbs['line_end'] = line_end_cb
+
+                def _make_mod_handler(cb_el, mod_name):
+                    def handler():
+                        on_modifier_change(mod_name, cb_el.value)
+                    return handler
+                prefix_cb.on('update:model-value', _make_mod_handler(prefix_cb, 'prefix'))
+                suffix_cb.on('update:model-value', _make_mod_handler(suffix_cb, 'suffix'))
+                wild_start_cb.on('update:model-value', _make_mod_handler(wild_start_cb, 'wildcard_prefix'))
+                wild_end_cb.on('update:model-value', _make_mod_handler(wild_end_cb, 'wildcard_suffix'))
+                plene_cb.on('update:model-value', _make_mod_handler(plene_cb, 'plene'))
+                negation_cb.on('update:model-value', _make_mod_handler(negation_cb, 'negation'))
+                line_start_cb.on('update:model-value', _make_mod_handler(line_start_cb, 'line_start'))
+                line_end_cb.on('update:model-value', _make_mod_handler(line_end_cb, 'line_end'))
+
+            # === Search Options Row (synced with outer Responsa checkboxes) ===
+            with ui.row().classes('w-full gap-3 mt-2 items-center flex-wrap'):
+                ui.label(tr('Search Options') + ':').classes('text-sm font-medium')
+                bld_variants_cb = ui.checkbox(tr('Variants'), value=responsa_variants_cb.value)
+                bld_ja_cb = ui.checkbox(tr('Judeo-Arabic'), value=responsa_ja_cb.value)
+                bld_flex_cb = ui.checkbox(tr('Flex Spacing'), value=responsa_flex_cb.value)
+                bld_bidir_cb = ui.checkbox(tr('Bidirectional Gap'), value=bidirectional_cb.value)
+
+                # Two-way sync: builder checkboxes ↔ outer Responsa checkboxes
+                def _sync_to_outer(outer_cb, bld_cb):
+                    def handler():
+                        outer_cb.set_value(bld_cb.value)
+                    return handler
+                bld_variants_cb.on('update:model-value', _sync_to_outer(responsa_variants_cb, bld_variants_cb))
+                bld_ja_cb.on('update:model-value', _sync_to_outer(responsa_ja_cb, bld_ja_cb))
+                bld_flex_cb.on('update:model-value', _sync_to_outer(responsa_flex_cb, bld_flex_cb))
+                bld_bidir_cb.on('update:model-value', _sync_to_outer(bidirectional_cb, bld_bidir_cb))
+
+            # === Live Preview ===
+            with ui.row().classes('w-full mt-3 items-center'):
+                ui.label(tr('Preview') + ':').classes('text-sm font-medium')
+                preview_label = ui.label(tr('No words entered')).classes('text-sm font-mono').style(
+                    'direction: rtl; color: var(--primary-600);'
+                )
+                preview_label_ref['el'] = preview_label
+
+            # === Bottom Buttons ===
+            with ui.row().classes('w-full justify-between mt-4'):
+                ui.button(tr('Clear All'), on_click=clear_all, icon='delete_sweep').props('flat')
+                with ui.row().classes('gap-2'):
+                    ui.button(tr('Cancel'), on_click=builder_dialog.close).props('flat')
+                    ui.button(tr('Search'), on_click=on_apply, icon='search').props('color=primary')
+
+        builder_dialog.open()
+
+    def _update_domain_filter_btn():
+        """Update domain filter button text and styling based on exclusion state."""
+        if search_state.domain_exclusions:
+            n = len(search_state.domain_exclusions)
+            domain_filter_btn.text = f"{tr('Filter by domains')} ({n} {tr('excluded')})"
+            domain_filter_btn.props('outline dense no-caps color=red')
+        else:
+            domain_filter_btn.text = tr('Filter by domains')
+            domain_filter_btn.props('outline dense no-caps color=primary')
+
+    def _open_domain_filter_dialog():
+        """Open modal dialog with domain filter checkboxes.
+
+        Uses a single HTML container with client-side JavaScript for checkbox
+        interactions to avoid the overhead of creating ~200 individual NiceGUI
+        ui.checkbox elements (which each generate a separate Vue component and
+        WebSocket message, causing 7-19 second dialog open times).
+
+        Data flow:
+        - Python builds checkbox HTML from the domain hierarchy (fast, ~0ms)
+        - Single ui.html() renders all checkboxes as one DOM insertion
+        - Parent-child propagation and Select All/None run client-side via JS
+        - Only on Apply: JS reads checkbox states, sends to Python via callback
+        """
+        if not search_state.has_domain_data:
+            if search_state.domain_exclusions:
+                ui.notify(tr('Run a search first to see domain options.'), type='info', timeout=3000)
+            return
+
+        # Use pre-cached hierarchy (fetched during execute_search) -- no DB call
+        hierarchy = search_state.domain_hierarchy
+        if not hierarchy:
+            # Fallback: fetch synchronously if cache is empty
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            hierarchy = fjms.get_domain_hierarchy() if fjms.is_available() else {}
+            search_state.domain_hierarchy = hierarchy
+
+        # Count results per domain from all_result_domains
+        domain_counts = {}  # domain_name -> count of results
+        for sys_id, domain_names in search_state.all_result_domains.items():
+            for d in domain_names:
+                domain_counts[d] = domain_counts.get(d, 0) + 1
+
+        # Build filtered hierarchy: only domains present in current results
+        from shared.fjms_service import qualify_domain_name, AMBIGUOUS_CHILD_DOMAINS
+        result_hierarchy = {}
+        for parent_name, info in hierarchy.items():
+            parent_in_results = parent_name in domain_counts
+            children_in_results = []
+            for child in info.get('children', []):
+                qname = qualify_domain_name(child['domain'], parent_name)
+                child_key = None
+                if qname in domain_counts:
+                    child_key = qname
+                elif child['domain'] in domain_counts and child['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
+                    child_key = child['domain']
+                # Collect sub-sub-domains in results
+                subchildren_in_results = []
+                for sc in child.get('children', []):
+                    sc_qname = qualify_domain_name(sc['domain'], child['domain'])
+                    if sc_qname in domain_counts:
+                        subchildren_in_results.append({
+                            'domain': sc_qname,
+                            'domain_heb': sc.get('domain_heb', sc['domain']),
+                            'count': domain_counts[sc_qname],
+                        })
+                    elif sc['domain'] in domain_counts and sc['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
+                        subchildren_in_results.append({
+                            'domain': sc['domain'],
+                            'domain_heb': sc.get('domain_heb', sc['domain']),
+                            'count': domain_counts[sc['domain']],
+                        })
+                if child_key:
+                    children_in_results.append({
+                        'domain': child_key,
+                        'domain_heb': child.get('domain_heb', child['domain']),
+                        'count': domain_counts[child_key],
+                        'children': subchildren_in_results,
+                    })
+                elif subchildren_in_results:
+                    # Sub-sub-domains present but parent sub-domain not — still show parent
+                    children_in_results.append({
+                        'domain': qname,
+                        'domain_heb': child.get('domain_heb', child['domain']),
+                        'count': sum(sc['count'] for sc in subchildren_in_results),
+                        'children': subchildren_in_results,
+                    })
+            if parent_in_results or children_in_results:
+                parent_count = domain_counts.get(parent_name, 0)
+                if children_in_results and parent_count == 0:
+                    parent_count = sum(c['count'] for c in children_in_results)
+                result_hierarchy[parent_name] = {
+                    'parent_domain_heb': info.get('parent_domain_heb', parent_name),
+                    'count': parent_count,
+                    'children': children_in_results,
+                }
+
+        # Also handle domains in results that are NOT in the hierarchy (orphans)
+        known_domains = set()
+        for parent_name, info in result_hierarchy.items():
+            known_domains.add(parent_name)
+            for c in info['children']:
+                known_domains.add(c['domain'])
+                for sc in c.get('children', []):
+                    known_domains.add(sc['domain'])
+        for domain_name, count in domain_counts.items():
+            if domain_name not in known_domains:
+                result_hierarchy[domain_name] = {
+                    'parent_domain_heb': domain_name,
+                    'count': count,
+                    'children': [],
+                }
+
+        # Count results with NO domain data ("Uncategorized")
+        uncategorized_count = sum(
+            1 for sys_id in [r.get('display', {}).get('id') for r in search_state.results]
+            if sys_id and sys_id not in search_state.all_result_domains
+        )
+        if uncategorized_count > 0:
+            result_hierarchy['Uncategorized'] = {
+                'parent_domain_heb': tr('Uncategorized'),
+                'count': uncategorized_count,
+                'children': [],
+            }
+
+        total_results = len(search_state.results)
+        current_exclusions = search_state.domain_exclusions.copy()
+
+        # Build checkbox HTML -- all checkboxes as a single HTML string
+        # Each checkbox uses data-domain attribute for identification
+        # Parents use data-children attribute listing child domain names (JSON)
+        # Use unique container ID to avoid conflicts with stale dialog DOM nodes
+        import json as _json
+        import uuid as _uuid
+        container_id = f'domain-filter-{_uuid.uuid4().hex[:8]}'
+        checkbox_html_parts = []
+        for parent_name, info in sorted(result_hierarchy.items(), key=lambda x: -x[1]['count']):
+            children = info.get('children', [])
+            parent_checked = 'checked' if parent_name not in current_exclusions else ''
+            parent_label = f"{_domain_display_name(parent_name)} ({info['count']})"
+            # Collect ALL descendant domain names for parent checkbox propagation
+            all_descendant_names = []
+            for c in children:
+                all_descendant_names.append(c['domain'])
+                for sc in c.get('children', []):
+                    all_descendant_names.append(sc['domain'])
+            # Escape for HTML attributes
+            parent_domain_attr = html.escape(parent_name, quote=True)
+            children_json_attr = html.escape(_json.dumps(all_descendant_names), quote=True)
+            parent_label_html = html.escape(parent_label)
+            checkbox_html_parts.append(
+                f'<label class="domain-parent" style="display:flex;align-items:center;gap:6px;'
+                f'font-weight:bold;padding:4px 0;cursor:pointer">'
+                f'<input type="checkbox" data-domain="{parent_domain_attr}" '
+                f'data-children="{children_json_attr}" '
+                f'{parent_checked} onchange="domainFilterParentChanged(this)" '
+                f'style="width:18px;height:18px;accent-color:#1976d2">'
+                f'<span>{parent_label_html}</span></label>'
+            )
+            for child in children:
+                child_checked = 'checked' if child['domain'] not in current_exclusions else ''
+                child_label = f"{_domain_display_name(child['domain'])} ({child['count']})"
+                child_domain_attr = html.escape(child['domain'], quote=True)
+                child_label_html = html.escape(child_label)
+                subchildren = child.get('children', [])
+                if subchildren:
+                    # Sub-domain with sub-sub-domains: acts as sub-parent
+                    sc_names = [sc['domain'] for sc in subchildren]
+                    sc_json_attr = html.escape(_json.dumps(sc_names), quote=True)
+                    checkbox_html_parts.append(
+                        f'<label class="domain-child" style="display:flex;align-items:center;gap:6px;'
+                        f'font-weight:bold;padding:2px 0;padding-inline-start:2rem;cursor:pointer">'
+                        f'<input type="checkbox" data-domain="{child_domain_attr}" '
+                        f'data-children="{sc_json_attr}" '
+                        f'{child_checked} onchange="domainFilterParentChanged(this)" '
+                        f'style="width:16px;height:16px;accent-color:#1976d2">'
+                        f'<span>{child_label_html}</span></label>'
+                    )
+                    for sc in subchildren:
+                        sc_checked = 'checked' if sc['domain'] not in current_exclusions else ''
+                        sc_label = f"{_domain_display_name(sc['domain'])} ({sc['count']})"
+                        sc_domain_attr = html.escape(sc['domain'], quote=True)
+                        sc_label_html = html.escape(sc_label)
+                        checkbox_html_parts.append(
+                            f'<label class="domain-subchild" style="display:flex;align-items:center;gap:6px;'
+                            f'padding:2px 0;padding-inline-start:4rem;cursor:pointer">'
+                            f'<input type="checkbox" data-domain="{sc_domain_attr}" '
+                            f'{sc_checked} '
+                            f'style="width:14px;height:14px;accent-color:#1976d2">'
+                            f'<span>{sc_label_html}</span></label>'
+                        )
+                else:
+                    checkbox_html_parts.append(
+                        f'<label class="domain-child" style="display:flex;align-items:center;gap:6px;'
+                        f'padding:2px 0;padding-inline-start:2rem;cursor:pointer">'
+                        f'<input type="checkbox" data-domain="{child_domain_attr}" '
+                        f'{child_checked} '
+                        f'style="width:16px;height:16px;accent-color:#1976d2">'
+                        f'<span>{child_label_html}</span></label>'
+                    )
+
+        checkbox_html = '\n'.join(checkbox_html_parts)
+
+        # Build the dialog with minimal NiceGUI elements (5 elements vs ~200)
+        with ui.dialog() as dialog, ui.card().classes('w-[600px] max-h-[80vh]'):
+            with ui.column().classes('w-full gap-2'):
+                ui.label(tr('Filter by Domain')).classes('text-lg font-bold')
+                ui.label(
+                    f"{tr('Showing')} {total_results} {tr('of')} {_total_text(total_results)} {tr('results')}"
+                ).classes('text-sm text-gray-500')
+
+                # Single HTML container with all checkboxes (JS helpers loaded at page level)
+                with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
+                    ui.html(f'<div id="{container_id}">{checkbox_html}</div>', sanitize=False)
+
+                # Buttons
+                with ui.row().classes('w-full justify-between'):
+                    _cid = container_id  # capture for closures
+
+                    with ui.row().classes('gap-2'):
+                        ui.button(
+                            tr('Select All'),
+                            on_click=lambda: ui.run_javascript(
+                                f'domainFilterSelectAll("{_cid}", true)')
+                        ).props('flat dense no-caps')
+                        ui.button(
+                            tr('Select None'),
+                            on_click=lambda: ui.run_javascript(
+                                f'domainFilterSelectAll("{_cid}", false)')
+                        ).props('flat dense no-caps')
+
+                    with ui.row().classes('gap-2'):
+                        async def apply_filter():
+                            excluded_list = await ui.run_javascript(
+                                f'domainFilterGetExcluded("{_cid}")', timeout=5.0
+                            )
+                            excluded = set(excluded_list) if excluded_list else set()
+                            search_state.domain_exclusions = excluded
+                            persist_search_snapshot(search_state)
+                            if search_state.exclusion_sources:
+                                _apply_manuscript_exclusions()
+                            else:
+                                _apply_domain_exclusions()
+                            _update_domain_filter_btn()
+                            dialog.close()
+
+                        ui.button(tr('Apply'), on_click=apply_filter).props('dense no-caps color=primary')
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
+
+        dialog.open()
+
+    # --- Measurement post-filter helpers (Phase 54, review concern #1) ---
+
+    def _set_post_criterion(key, spec):
+        """One post-search criterion changed (an input left, a material ticked)."""
+        from shared.catalog_criteria import clean_criteria
+        criteria = dict(search_state.post_filter_criteria or {})
+        criteria[key] = spec
+        search_state.post_filter_criteria = clean_criteria(criteria, strict=False)[0]
+
+    def _set_post_bound(key, bound, value, integer):
+        spec = dict((search_state.post_filter_criteria or {}).get(key) or {})
+        spec.pop(bound, None)
+        if value is not None and value != '':
+            spec[bound] = int(value) if integer else float(value)
+        _set_post_criterion(key, spec)
+
+    async def _prefetch_post_matches(results):
+        """Work out the post-search matches of *results* off the loop, so the
+        render that follows finds them cached. A failure is kept: the render
+        then shows the rows unfiltered and says so."""
+        from shared.catalog_criteria import criteria_token
+        if not search_state.post_filter_criteria:
+            return
+        token = criteria_token(search_state.post_filter_criteria)
+        try:
+            await run.io_bound(post_criteria_matches, search_state, list(results))
+        except Exception:
+            logger.info("post-search criteria lookup failed", exc_info=True)
+            search_state._post_match_failed = token
+        else:
+            search_state._post_match_failed = None
+
+    def _rerender_after_refill():
+        with _page_client:
+            _apply_manuscript_exclusions(reset_expansion=False)
+
+    # A render met rows not checked yet (e.g. a new search's): check them off
+    # the loop, then render the list again through the whole cascade.
+    _post_refill = PostMatchRefill(_prefetch_post_matches, _rerender_after_refill,
+                                   busy=lambda: search_state.is_running)
+
+    def _refill_post_matches(results):
+        _post_refill.request(results)
+
+    def _apply_measurement_post_filters(results: list, state) -> list:
+        """Apply the post-search measurement filters (D20) to a results list.
+        Called from ALL rerender paths (review concern #1: domain exclusion,
+        printed toggle, history restore, enrichment) -- from the cache only:
+        the event loop never waits for the sidecar here. Rows not checked yet
+        stay out until they are (``_refill_post_matches``). A lookup that
+        could not run leaves the list as it is and says so -- never an empty
+        list (rule 9)."""
+        from shared.catalog_criteria import criteria_token
+        criteria = getattr(state, 'post_filter_criteria', None)
+        if not criteria:
+            return results
+        if getattr(state, '_post_match_failed', None) == criteria_token(criteria):
+            try:
+                ui.notify(tr('The manuscript features could not be applied to these results.'),
+                          type='warning')
+            except RuntimeError:  # a render outside the page's context: the log has it
+                pass
+            return results
+        matched = post_criteria_matches(state, results, fetch=False)
+        if matched is None:
+            _refill_post_matches(results)
+            matched = state._post_match['ids']
+        return [r for r in results if result_sys_id(r) in matched]
+
+    def _apply_printed_filter(results_list):
+        """Apply printed material filter to a results list and return filtered list."""
+        if search_state.printed_filter == 'all' or not search_state.printed_ids:
+            return results_list
+        filtered = []
+        for r in results_list:
+            sys_id = r.get('display', {}).get('id')
+            is_printed = sys_id and sys_id in search_state.printed_ids
+            if search_state.printed_filter == 'hide_printed' and is_printed:
+                continue
+            elif search_state.printed_filter == 'only_printed' and not is_printed:
+                continue
+            filtered.append(r)
+        return filtered
+
+    def _apply_pgp_filter(results_list):
+        """Apply PGP-presence filter to a results list and return filtered list.
+
+        Phase 999.2 (PGP-FILTER-04, D-03, D-11). Mirrors _apply_printed_filter shape.
+        Criterion: a result has PGP iff its sys_id is in search_state.transcription_sys_ids
+        (the same set that drives the green 'PGP' badge in search_results.py:397-400).
+        """
+        if search_state.pgp_filter == 'all' or not search_state.transcription_sys_ids:
+            return results_list
+        filtered = []
+        for r in results_list:
+            sys_id = r.get('display', {}).get('id')
+            has_pgp = bool(sys_id and sys_id in search_state.transcription_sys_ids)
+            if search_state.pgp_filter == 'only_pgp' and not has_pgp:
+                continue
+            elif search_state.pgp_filter == 'hide_pgp' and has_pgp:
+                continue
+            filtered.append(r)
+        return filtered
+
+    def _apply_library_filter(results_list):
+        """SEED-026 / DMF (LIBFILTER-01): dual-mode filter results by selected library codes.
+
+        Mode branch (D-01/D-02):
+          - Show-only (library_mode=='show_only'): keep rows where library_code IN codes set.
+            Empty Show-only set = show all (D-08; no [] collision).
+          - Hide (library_mode=='hide'): keep rows where library_code NOT IN codes set.
+            Empty Hide set = show all (D-05 default).
+          - Fully-populated Hide set yields [] → clean 0-results render downstream (DMF-06).
+        Iterates the FULL results list — never sliced first.
+        """
+        mode = getattr(search_state, 'library_mode', 'hide')  # 'show_only' | 'hide'
+        codes = set(search_state.library_filter)
+
+        if mode == 'show_only':
+            if not codes:
+                return results_list  # empty Show-only = show all (D-08)
+            return [r for r in results_list
+                    if r.get('display', {}).get('library_code', '') in codes]
+        else:  # hide
+            if not codes:
+                return results_list  # empty Hide = show all (D-05 default)
+            return [r for r in results_list
+                    if r.get('display', {}).get('library_code', '') not in codes]
+
+    def _apply_printed_filter_and_render(results_list, reset_expansion=True):
+        """Apply printed filter + PGP filter to results and re-render (used when no domain exclusions active).
+
+        Phase 999.2 (PGP-FILTER-04, D-11): PGP filter stacks AFTER printed_filter and BEFORE
+        measurement post-filters, per the canonical cascade ordering.
+        SEED-026 (LIBFILTER-01): library filter stacks AFTER pgp and BEFORE measurement.
+        """
+        filtered = _apply_printed_filter(results_list)
+        filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
+        filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01)
+        # Apply measurement post-filters (Phase 54, review concern #1)
+        filtered = _apply_measurement_post_filters(filtered, search_state)
+        total = len(search_state.results)
+        showing = len(filtered)
+        count_parts = []
+        if search_state.printed_filter != 'all':
+            count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
+            count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
+            count_parts.append(tr('Library filter'))
+        if count_parts:
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
+        else:
+            results_count.text = f"{_total_text(total)} {tr('Results')}{_downgrade_suffix()}"
+        render_results(filtered, page=0, reset_expansion=reset_expansion)
+
+    def _apply_manuscript_exclusions(reset_expansion=True):
+        """Filter displayed results based on manuscript exclusion sources (Phase 56).
+        Post-search only. This is the FIRST filter in the chain --
+        all other re-render paths call this when exclusion sources are active."""
+        all_excluded_ids = compute_excluded_ids(search_state.exclusion_sources)
+        if not all_excluded_ids:
+            search_state.manuscript_excluded_results = []
+            # Pass through to existing filter pipeline (unchanged)
+            if search_state.word_search_excluded_ids:
+                _apply_word_search_exclusions_and_render()
+            elif search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions(reset_expansion=reset_expansion)
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+                # Phase 999.2 (PGP-FILTER-04): route through unified printed+PGP filter when EITHER is active.
+                # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
+                _apply_printed_filter_and_render(search_state.results, reset_expansion=reset_expansion)
+            elif search_state.results:
+                filtered = _apply_measurement_post_filters(search_state.results, search_state)
+                render_results(filtered, page=0, reset_expansion=reset_expansion)
+            return
+
+        # Filter out excluded manuscripts
+        filtered = []
+        excluded_items = []
+        for r in search_state.results:
+            sys_id = r.get('display', {}).get('id')
+            if sys_id and sys_id in all_excluded_ids:
+                sources = [s.label for s in search_state.exclusion_sources if sys_id in s.sys_ids]
+                excluded_items.append({'result': r, 'reason': ', '.join(sources)})
+            else:
+                filtered.append(r)
+        search_state.manuscript_excluded_results = excluded_items
+
+        # Continue pipeline with filtered results (temporarily swap for downstream filters)
+        original_results = search_state.results
+        search_state.results = filtered
+        try:
+            if search_state.word_search_excluded_ids:
+                _apply_word_search_exclusions_and_render()
+            elif search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions(reset_expansion=reset_expansion)
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+                # Phase 999.2 (PGP-FILTER-04): widened — routes through unified printed+PGP helper.
+                # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
+                _apply_printed_filter_and_render(filtered, reset_expansion=reset_expansion)
+            else:
+                filtered2 = _apply_measurement_post_filters(filtered, search_state)
+                render_results(filtered2, page=0, reset_expansion=reset_expansion)
+        finally:
+            search_state.results = original_results
+
+        # Update exclusion count in button
+        _update_exclude_btn()
+
+    def _update_exclude_btn():
+        """Render per-source exclusion chips next to the top results bar.
+
+        The top-toolbar "Exclude manuscripts" button was removed (duplicate of
+        the filter-panel "Exclude known manuscripts" entry point). Chips remain
+        as the sole indicator that exclusions are active, carrying the count
+        per source. Single-source case now shows its count on the chip text.
+        """
+        exclusion_chips_row.clear()
+        if not search_state.exclusion_sources:
+            exclusion_chips_row.set_visibility(False)
+            return
+        exclusion_chips_row.set_visibility(True)
+        with exclusion_chips_row:
+            for src in search_state.exclusion_sources:
+                def _make_remove(s=src):
+                    return lambda: _remove_exclusion_source(s)
+                ui.chip(
+                    f"{src.label} ({len(src.sys_ids)})", icon='close',
+                    on_click=_make_remove()
+                ).props('outline dense removable color=red')
+
+    def _remove_exclusion_source(source):
+        """Remove a single exclusion source (D-06 per-source clear)."""
+        search_state.exclusion_sources = [s for s in search_state.exclusion_sources if s.source_id != source.source_id]
+        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+        save_post_filters_with_run(search_state)
+        _apply_manuscript_exclusions()
+        _update_exclude_btn()
+
+    async def _show_exclusion_dialog():
+        """Show the exclusion picker dialog with List and File tabs (Phase 56)."""
+        with ui.dialog().props('maximized=false') as dlg, ui.card().classes('w-full max-w-xl').style('background: var(--bg-secondary);'):
+            with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                'background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);'
+            ):
+                with ui.row().classes('items-center gap-2'):
+                    ui.icon('person_remove').classes('text-xl').style('color: white !important;')
+                    ui.label(tr('Exclude manuscripts')).classes('text-lg font-bold').style('color: white !important;')
+                ui.button(icon='close', on_click=dlg.close).props(
+                    f'flat round size=sm text-color=white aria-label="{tr("Close")}"'
+                ).tooltip(tr('Close'))
+
+            # Show currently active exclusion sources with remove buttons
+            if search_state.exclusion_sources:
+                active_container = ui.column().classes('w-full px-4 pt-3 pb-1 gap-1')
+                with active_container:
+                    ui.label(tr('Active exclusions')).classes('text-xs font-bold text-red-600')
+                    for src in list(search_state.exclusion_sources):
+                        with ui.row().classes('w-full items-center gap-2'):
+                            ui.icon('block', size='xs').classes('text-red-400')
+                            ui.label(f"{src.label} ({len(src.sys_ids)})").classes('text-sm flex-grow')
+                            def _make_dlg_remove(s=src):
+                                def _remove():
+                                    _remove_exclusion_source(s)
+                                    dlg.close()
+                                    ui.notify(f"{tr('Removed')}: {s.label}", type='info')
+                                return _remove
+                            ui.button(icon='delete', on_click=_make_dlg_remove()).props(
+                                f'flat round dense size=sm color=red aria-label="{tr("Remove")}"'
+                            ).tooltip(tr('Remove'))
+                    def _clear_all_exclusions():
+                        search_state.exclusion_sources = []
+                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_post_filters_with_run(search_state)
+                        _apply_manuscript_exclusions()
+                        _update_exclude_btn()
+                        dlg.close()
+                        ui.notify(tr('All exclusions cleared'), type='info')
+                    ui.button(tr('Clear all'), icon='delete_sweep', on_click=_clear_all_exclusions).props(
+                        'flat dense no-caps color=red size=sm'
+                    ).classes('self-end')
+                ui.separator()
+
+            with ui.tabs().classes('w-full') as tabs:
+                tab_paste = ui.tab(tr('Paste Shelfmarks'), icon='content_paste')
+                tab_list = ui.tab(tr('From List'), icon='list')
+                tab_file = ui.tab(tr('From File'), icon='upload_file')
+
+            with ui.tab_panels(tabs).classes('w-full'):
+                # Tab 0: Paste Shelfmarks
+                with ui.tab_panel(tab_paste):
+                    ui.label(tr('Paste shelfmarks, one per line. Lines starting with # are ignored.')).classes('text-xs text-gray-500')
+                    paste_area = ui.textarea(
+                        placeholder='T-S 12.123\nMS Heb a.1\nEVR II B 1011',
+                    ).classes('w-full').props('outlined rows=8')
+                    paste_report = ui.column().classes('w-full gap-2')
+
+                    async def _apply_paste_exclusion():
+                        text = paste_area.value or ''
+                        lines = parse_shelfmark_file(text)
+                        if not lines:
+                            ui.notify(tr('No shelfmarks entered'), type='warning')
+                            return
+                        # Build shelf_map lazily (async)
+                        if search_state._exclusion_shelf_map is None:
+                            search_state._exclusion_shelf_map = await run.io_bound(
+                                build_shelf_map, state.meta_mgr.csv_bank
+                            )
+                            if search_state._exclusion_shelf_map is None:
+                                return  # cancelled or app stopping
+                        resolved = await run.io_bound(
+                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map,
+                            catalog_fallback(state.meta_mgr),
+                        )
+                        if resolved is None:
+                            return  # cancelled or app stopping
+                        ids, unresolved, entries = resolved
+                        if not ids:
+                            paste_report.clear()
+                            with paste_report:
+                                ui.label(f"0/{len(lines)} {tr('resolved')} — {tr('no matches found')}").classes('text-red-500 text-sm')
+                            return
+                        n_found = sum(1 for e in entries if e.status == 'found')
+                        source = ExclusionSource(
+                            label=tr('Pasted shelfmarks'),
+                            source_type='file',
+                            source_id='paste',
+                            sys_ids=ids,
+                            unresolved=unresolved,
+                            resolved_entries=entries,
+                        )
+                        search_state.exclusion_sources.append(source)
+                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_post_filters_with_run(search_state)
+                        dlg.close()
+                        _apply_manuscript_exclusions()
+                        _update_exclude_btn()
+                        ui.notify(f"{n_found}/{len(lines)} {tr('resolved')}", type='positive')
+
+                    ui.button(tr('Apply'), icon='check', on_click=_apply_paste_exclusion).props(
+                        'color=red no-caps'
+                    ).classes('mt-2')
+
+                # Tab 1: From List
+                with ui.tab_panel(tab_list):
+                    from web.auth_state import GlobalAuthState
+                    if not GlobalAuthState.is_logged_in():
+                        with ui.column().classes('items-center py-6'):
+                            ui.icon('lock', size='3rem').classes('text-gray-300')
+                            ui.label(tr('Log in to use saved lists')).classes('text-gray-500')
+                    elif not state.lists_mgr:
+                        ui.label(tr('Lists not available')).classes('text-gray-500')
+                    else:
+                        lists_mgr = state.lists_mgr
+                        try:
+                            all_lists = lists_mgr.get_all_lists(include_recent=False)
+                        except Exception:
+                            all_lists = []  # Lookup failed; use empty list
+                        if not all_lists:
+                            with ui.column().classes('items-center py-6'):
+                                ui.icon('list_alt', size='3rem').classes('text-gray-300')
+                                ui.label(tr('No lists found')).classes('text-gray-500')
+                        else:
+                            # {list_id: {sys_id: True/False}} tracks per-item selection
+                            _excl_selections = {}
+                            _excl_item_cbs = {}  # {list_id: [checkbox, ...]}
+                            _excl_hdr_cbs = {}   # {list_id: checkbox}
+
+                            with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
+                                with ui.column().classes('w-full gap-0'):
+                                    for lst in all_lists:
+                                        list_id = lst.get('id', '')
+                                        list_name = lst.get('name', list_id)
+
+                                        # Fetch items
+                                        try:
+                                            list_items = lists_mgr.get_items_in_list_sync(list_id)
+                                        except Exception:
+                                            list_items = []  # Lookup failed; use empty list
+                                        resolved = []
+                                        for it in list_items:
+                                            sid = it.get('sys_id', '')
+                                            if not sid:
+                                                continue
+                                            sm = it.get('shelfmark', '')
+                                            if not sm and state.meta_mgr:
+                                                try:
+                                                    sm, _ = state.meta_mgr.get_meta_for_id(sid)
+                                                except Exception:
+                                                    pass  # Shelfmark lookup failed; use fallback identifier
+                                            resolved.append({'sys_id': sid, 'shelfmark': sm or sid})
+                                        if not resolved:
+                                            continue
+
+                                        _excl_selections[list_id] = {r['sys_id']: False for r in resolved}
+                                        _excl_item_cbs[list_id] = []
+
+                                        exp = ui.expansion(
+                                            text=f"{list_name} ({len(resolved)})"
+                                        ).classes('w-full').props(
+                                            'dense header-class="text-weight-medium"'
+                                        )
+                                        with exp:
+                                            # Header checkbox above items: select/deselect all
+                                            def _make_hdr_toggle(lid=list_id, res=resolved):
+                                                def toggle(e):
+                                                    val = e.value
+                                                    for r in res:
+                                                        _excl_selections[lid][r['sys_id']] = val
+                                                    for cb in _excl_item_cbs.get(lid, []):
+                                                        cb.set_value(val)
+                                                return toggle
+                                            hdr_cb = ui.checkbox(
+                                                tr('Select all'), value=False,
+                                                on_change=_make_hdr_toggle()
+                                            ).props('dense').classes('text-xs font-bold mb-1')
+                                            _excl_hdr_cbs[list_id] = hdr_cb
+
+                                            # Individual items
+                                            for r in resolved:
+                                                def _make_item_toggle(lid=list_id, sid=r['sys_id']):
+                                                    def toggle(e):
+                                                        _excl_selections[lid][sid] = e.value
+                                                    return toggle
+                                                item_cb = ui.checkbox(
+                                                    r['shelfmark'], value=False,
+                                                    on_change=_make_item_toggle()
+                                                ).props('dense').classes('text-xs ml-6')
+                                                _excl_item_cbs[list_id].append(item_cb)
+
+                            async def _apply_list_exclusion():
+                                any_selected = False
+                                for lid, sids_map in _excl_selections.items():
+                                    selected_sids = {sid for sid, checked in sids_map.items() if checked}
+                                    if not selected_sids:
+                                        continue
+                                    any_selected = True
+                                    list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
+                                    search_state.exclusion_sources.append(ExclusionSource(
+                                        label=list_name,
+                                        source_type='list',
+                                        source_id=lid,
+                                        sys_ids=selected_sids,
+                                        unresolved=[],
+                                    ))
+                                if not any_selected:
+                                    ui.notify(tr('Select a list first'), type='warning')
+                                    return
+                                persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                                save_post_filters_with_run(search_state)
+                                dlg.close()
+                                _apply_manuscript_exclusions()
+                                _update_exclude_btn()
+
+                            ui.button(tr('Apply'), icon='check', on_click=_apply_list_exclusion).props(
+                                'color=red no-caps'
+                            ).classes('mt-4')
+
+                # Tab 2: From File
+                with ui.tab_panel(tab_file):
+                    report_container = ui.column().classes('w-full gap-2')
+                    file_source_ref = {'entries': None, 'ids': None, 'unresolved': None, 'filename': None}
+
+                    async def _on_file_upload(e):
+                        content = e.content.read().decode('utf-8-sig')
+                        filename = e.name or 'uploaded_file'
+                        file_source_ref['filename'] = filename
+
+                        # Parse based on extension
+                        if filename.lower().endswith('.csv'):
+                            lines = parse_csv_shelfmarks(content)
+                        else:
+                            lines = parse_shelfmark_file(content)
+
+                        if not lines:
+                            with report_container:
+                                report_container.clear()
+                                ui.label(tr('No shelfmarks found in file')).classes('text-red-500')
+                            return
+
+                        # Build shelf_map lazily (async)
+                        if search_state._exclusion_shelf_map is None:
+                            search_state._exclusion_shelf_map = await run.io_bound(
+                                build_shelf_map, state.meta_mgr.csv_bank
+                            )
+                            if search_state._exclusion_shelf_map is None:
+                                return  # cancelled or app stopping
+
+                        resolved = await run.io_bound(
+                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map,
+                            catalog_fallback(state.meta_mgr),
+                        )
+                        if resolved is None:
+                            return  # cancelled or app stopping
+                        ids, unresolved, entries = resolved
+                        file_source_ref['entries'] = entries
+                        file_source_ref['ids'] = ids
+                        file_source_ref['unresolved'] = unresolved
+
+                        # Show resolution report (D-04)
+                        report_container.clear()
+                        with report_container:
+                            n_found = sum(1 for e in entries if e.status == 'found')
+                            n_notfound = sum(1 for e in entries if e.status == 'not_found')
+                            n_dup = sum(1 for e in entries if e.status == 'duplicate')
+                            ui.label(
+                                f"{tr('Resolved')} {n_found}/{len(entries)} | "
+                                f"{n_notfound} {tr('not found')} | {n_dup} {tr('duplicates')}"
+                            ).classes('text-sm font-medium')
+
+                            columns = [
+                                {'name': 'original', 'label': tr('Shelfmark'), 'field': 'original', 'align': 'left'},
+                                {'name': 'normalized', 'label': tr('Normalized'), 'field': 'normalized', 'align': 'left'},
+                                {'name': 'sys_id', 'label': 'sys_id', 'field': 'sys_id', 'align': 'left'},
+                                {'name': 'status', 'label': tr('Status'), 'field': 'status', 'align': 'left'},
+                            ]
+                            rows = [
+                                {
+                                    'original': e.original,
+                                    'normalized': e.normalized,
+                                    'sys_id': e.sys_id or '--',
+                                    'status': e.status,
+                                }
+                                for e in entries[:200]  # Cap display at 200 rows
+                            ]
+                            ui.table(columns=columns, rows=rows).classes('w-full').props(
+                                'dense flat bordered separator=cell virtual-scroll'
+                            ).style('max-height: 300px;')
+                            if len(entries) > 200:
+                                ui.label(f"... {tr('and')} {len(entries) - 200} {tr('more')}").classes('text-xs text-gray-400')
+
+                    ui.upload(
+                        auto_upload=True, on_upload=_on_file_upload
+                    ).props('accept=".txt,.csv" flat bordered color=red-9').classes('w-full').style(
+                        'background: var(--bg-tertiary); border-color: var(--border-light);'
+                    )
+
+                    async def _apply_file_exclusion():
+                        if not file_source_ref['ids']:
+                            ui.notify(tr('Upload a file first'), type='warning')
+                            return
+                        source = ExclusionSource(
+                            label=file_source_ref['filename'] or 'file',
+                            source_type='file',
+                            source_id=file_source_ref['filename'] or 'file',
+                            sys_ids=file_source_ref['ids'],
+                            unresolved=file_source_ref['unresolved'] or [],
+                            resolved_entries=file_source_ref['entries'] or [],
+                        )
+                        search_state.exclusion_sources.append(source)
+                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_post_filters_with_run(search_state)
+                        dlg.close()
+                        _apply_manuscript_exclusions()
+                        _update_exclude_btn()
+
+                    ui.button(tr('Apply'), icon='check', on_click=_apply_file_exclusion).props(
+                        'color=red no-caps'
+                    ).classes('mt-4')
+
+        dlg.open()
+
+    def _apply_word_search_exclusions_and_render():
+        """Apply word search per-result exclusions and re-render."""
+        if not search_state.word_search_excluded_ids or not search_state.results:
+            search_state.word_search_excluded_results = []
+            if search_state.results:
+                _display = _apply_measurement_post_filters(search_state.results, search_state)
+                render_results(_display, page=0)
+            return
+
+        filtered = []
+        excluded_items = []
+        for r in search_state.results:
+            sys_id = r.get('display', {}).get('id')
+            if sys_id and sys_id in search_state.word_search_excluded_ids:
+                excluded_items.append({
+                    'result': r,
+                    'reason': tr('Excluded'),
+                })
+            else:
+                filtered.append(r)
+        search_state.word_search_excluded_results = excluded_items
+
+        # Apply domain exclusions and printed filter on top of word search filtering
+        if search_state.domain_exclusions and search_state.has_domain_data:
+            # Temporarily swap results to filtered set, then apply domain exclusions
+            original_results = search_state.results
+            search_state.results = filtered
+            _apply_domain_exclusions()
+            search_state.results = original_results
+        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+            # Phase 999.2 (PGP-FILTER-04): widened — apply printed AND/OR PGP filter post-word-search.
+            # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
+            filtered = _apply_printed_filter(filtered)
+            filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
+            filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01)
+            filtered = _apply_measurement_post_filters(filtered, search_state)
+            total = len(search_state.results)
+            showing = len(filtered)
+            n_excl = len(excluded_items)
+            count_parts = [f"{n_excl} {tr('excluded')}"]
+            if search_state.library_filter:  # SEED-026 (WR-04 / Codex): indicator in the library-active branch
+                count_parts.append(tr('Library filter'))
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
+            render_results(filtered, page=0)
+        else:
+            filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01): library-only post-word-search
+            filtered = _apply_measurement_post_filters(filtered, search_state)
+            total = len(search_state.results)
+            showing = len(filtered)
+            n_excl = len(excluded_items)
+            count_parts = [f"{n_excl} {tr('excluded')}"]
+            if search_state.library_filter:  # SEED-026 (WR-04): show indicator when library filter active
+                count_parts.append(tr('Library filter'))
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
+            render_results(filtered, page=0)
+
+    def _apply_domain_exclusions(reset_expansion=True):
+        """Filter displayed results based on domain exclusions without re-searching."""
+        if not search_state.domain_exclusions:
+            # No exclusions -- show all results
+            filtered = search_state.results
+            search_state.domain_excluded_results = []
+        else:
+            hide_uncategorized = 'Uncategorized' in search_state.domain_exclusions
+            filtered = []
+            excluded_with_reasons = []
+            for r in search_state.results:
+                sys_id = r.get('display', {}).get('id')
+                result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
+                if not result_domains:
+                    # No domain data -- hide if Uncategorized is excluded
+                    if not hide_uncategorized:
+                        filtered.append(r)
+                    else:
+                        excluded_with_reasons.append({
+                            'result': r,
+                            'reason': tr('Uncategorized')
+                        })
+                    continue
+                elif all(d in search_state.domain_exclusions for d in result_domains):
+                    # ALL domains excluded -- track with reason
+                    domain_names = [_domain_display_name(d) for d in result_domains]
+                    excluded_with_reasons.append({
+                        'result': r,
+                        'reason': ', '.join(domain_names)
+                    })
+                    continue
+                else:
+                    # At least one domain not excluded -- keep
+                    filtered.append(r)
+            search_state.domain_excluded_results = excluded_with_reasons
+            # Save excluded result reasons for restore (lightweight, capped)
+            excluded_reasons = [{'sys_id': r.get('result', {}).get('display', {}).get('id', ''), 'reason': r.get('reason', '')} for r in excluded_with_reasons[:500]]
+            persist_value('search_excluded_reasons', excluded_reasons)
+
+        # Apply printed filter on top of domain-filtered results
+        filtered = _apply_printed_filter(filtered)
+        # Apply PGP filter on top of printed-filtered results (Phase 999.2, D-11)
+        filtered = _apply_pgp_filter(filtered)
+        # Apply library filter on top of PGP-filtered results (SEED-026, LIBFILTER-01)
+        filtered = _apply_library_filter(filtered)
+        # Apply measurement post-filters (Phase 54, review concern #1)
+        filtered = _apply_measurement_post_filters(filtered, search_state)
+
+        # Update count display
+        total = len(search_state.results)
+        showing = len(filtered)
+        count_parts = []
+        if search_state.domain_exclusions:
+            count_parts.append(f"{len(search_state.domain_exclusions)} {tr('domains excluded')}")
+        if search_state.printed_filter != 'all':
+            count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
+            count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
+            count_parts.append(tr('Library filter'))
+        if count_parts:
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
+        else:
+            results_count.text = f"{_total_text(total)} {tr('Results')}{_downgrade_suffix()}"
+
+        # Update result_domains for badge rendering (use visible page slice)
+        page_start = search_state.current_page * PAGE_SIZE
+        page_end = page_start + PAGE_SIZE
+        page_slice = filtered[page_start:page_end]
+        result_sys_ids = [r.get('display', {}).get('id') for r in page_slice if r.get('display', {}).get('id')]
+        search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
+
+        # Re-render with filtered results (resets to page 0)
+        render_results(filtered, page=0, reset_expansion=reset_expansion)
+
+    # --- Search History UI Helpers ---
+    def _refresh_history_menu(load_labels: bool = True):
+        """Refresh the history dropdown menu contents."""
+        history_menu.clear()
+        history = get_search_history()
+        if not history:
+            with history_menu:
+                ui.menu_item(tr('No search history')).props('disable')
+            return
+
+        def _build_web_filter_summary(filters: dict, max_len: int = 50) -> str:
+            return build_filter_summary(filters, tr, get_language, max_len)
+
+        with history_menu:
+            for i, entry in enumerate(history):
+                query_text = entry.get('query', '')
+                query_display = (query_text[:35] + '...') if len(query_text) > 35 else query_text
+                count = entry.get('result_count', 0)
+                mode = entry.get('mode', '')
+                mode_short = {'exact': '=', 'variants': '?', 'variants_extended': '??',
+                              'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
+                              'Shelfmark': '#', 'Title': '$', 'responsa': 'R'}.get(mode, mode)
+                # Build filter summary text from params
+                filters = entry.get('params', {}).get('filters')
+                filter_text = _build_web_filter_summary(filters) if filters else ''
+                label = f"{query_display}  ({count}) [{mode_short}]"
+
+                idx = i  # Capture for closure
+                with ui.menu_item(label, on_click=lambda e, idx=idx: _on_history_item_clicked(idx)).style('direction: rtl;'):
+                    if filter_text:
+                        ui.label(filter_text).style('font-size: 0.7rem; color: var(--primary-600); direction: ltr;')
+                    # Delete button on each item
+                    ui.button(icon='close', on_click=lambda e, idx=idx: (
+                        delete_search_history_entry(idx), _refresh_history_menu()
+                    )).props(f'flat dense size=xs round aria-label="{tr("Delete history entry")}"').classes('ml-auto').tooltip(tr('Delete history entry'))
+
+            ui.separator()
+            ui.menu_item(tr('Clear all'), on_click=lambda: (
+                clear_search_history(), _refresh_history_menu()
+            ))
+        if load_labels:
+            load_history_labels_then(history, get_language(), _redraw_history_menu)
+
+    def _redraw_history_menu():
+        if not history_menu.is_deleted:
+            with history_menu:
+                _refresh_history_menu(load_labels=False)
+
+    async def _on_history_item_clicked(index: int):
+        """Restore state from a search history entry."""
+        history = get_search_history()
+        if index >= len(history):
+            return
+        entry = history[index]
+        state_snapshot = entry.get('state', {})
+        params = entry.get('params', {})
+
+        # Restore query and params
+        query_input.value = entry.get('query', '')
+        if params.get('mode'):
+            mode_select.value = params['mode']
+        if params.get('preset') and current_preset:
+            current_preset['value'] = params['preset']
+        if params.get('gap') is not None:
+            gap_input.value = params['gap']
+        if params.get('text_position'):
+            text_position_select.value = params['text_position']
+
+        # Restore filters if present
+        filters = params.get('filters')
+        if filters and isinstance(filters, dict):
+            # Every list is a COPY: the entry lives in the visitor's storage,
+            # and a chip removal or an added term edits these lists in place
+            # -- sharing them rewrote the saved history entry.
+            # Migrate from legacy single-value to lists
+            _d = list(filters.get('domains') or ([filters['domain']] if filters.get('domain') else []))
+            _a = list(filters.get('authors') or ([filters['author']] if filters.get('author') else []))
+            _w = list(filters.get('works') or ([filters['work']] if filters.get('work') else []))
+            search_state.filter_domains = _d
+            search_state.filter_authors = _a
+            search_state.filter_works = _w
+            search_state.filter_include_mode = filters.get('include_mode', True)
+            search_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            # An entry from before the criteria: its dates as the period (D18).
+            search_state.filter_criteria = restore_saved_criteria(filters)
+            search_state.filter_text_all = list(filters.get('text_all') or [])
+            search_state.filter_text_any = list(filters.get('text_any') or [])
+            search_state.filter_text_not = list(filters.get('text_not') or [])
+            # Update filter UI elements
+            domain_select.value = search_state.filter_domains
+            author_select.value = search_state.filter_authors
+            work_select.value = search_state.filter_works
+            filter_mode_toggle.value = search_state.filter_include_mode
+            exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
+            persist_value('search_filter_criteria', search_state.filter_criteria)
+            criteria_control.refresh()
+            # Persist restored filters
+            persist_value('search_filter_domains', search_state.filter_domains)
+            persist_value('search_filter_authors', search_state.filter_authors)
+            persist_value('search_filter_works', search_state.filter_works)
+            persist_value('search_filter_include_mode', search_state.filter_include_mode)
+            persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
+            persist_value('search_filter_text_all', search_state.filter_text_all)
+            persist_value('search_filter_text_any', search_state.filter_text_any)
+            persist_value('search_filter_text_not', search_state.filter_text_not)
+            _update_chip_bar()
+            _rebuild_text_chips()
+        else:
+            # Clear filters if history entry had none
+            _clear_all_adv_filters()
+
+        # Restore results and state from snapshot
+        if state_snapshot.get('results'):
+            search_state.results = state_snapshot['results']
+            await _prefetch_post_matches(search_state.results)
+            search_state.responsa_warning = responsa_note_of(state_snapshot['results'])
+            # An entry from a build that kept the rows: their variant settings are
+            # unknown, never those of the search shown before (a step recorded from
+            # them replays with the website defaults at its level).
+            search_state.last_variant_settings = None
+            # Nor are they the shown search's rows: their search is the restored one,
+            # as the controls now describe it, and cut off only if the entry says so.
+            search_state.last_run = None
+            # No search runs here: the address keeps the code of the search shown
+            # before, and Back to it would bring that run back over these rows.
+            ui.run_javascript("(function(){var u=new URL(location.href);"
+                              "if(u.searchParams.has('run')){u.searchParams.delete('run');"
+                              "history.replaceState(null,'',u.pathname+u.search);}})()")
+            search_state.result_count_capped = bool(state_snapshot.get('result_count_capped'))
+            # Nor do they carry the shown search's "cannot be completed" (Codex round 3
+            # on PR #442): an entry that says it was cut is completed by its own search.
+            search_state.result_partial = False
+            search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
+            search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
+            # Phase 88: populate per-session export payload after history restore so JSON
+            # export after restore is identical-shape to live export. The snapshot already
+            # carries query (entry['query'] read into query_input.value at line 3687) and
+            # params (mode/gap/filters at line 3684). See 77-REVIEWS.md HIGH-01 for the
+            # historical Phase 77 framing; the singleton mirror has been removed.
+            _results = state_snapshot['results']
+            _query = entry.get('query', '') or ''
+            _mode = params.get('mode') or 'text'
+            try:
+                _gap = int(params['gap']) if params.get('gap') is not None else None
+            except (ValueError, TypeError):
+                _gap = None
+            # Snapshot's filters dict already has the 10-key shape constructed at
+            # search.py:4232-4242. Pass it through verbatim (None when no active filters).
+            _filters_applied = params.get('filters')
+            _warnings = ['restored-from-history']
+            # SHOULD-FIX 94-02-C: history-restore ships empty enrichment containers,
+            # but the export consumer needs to know has_pgp/is_printed/domains are
+            # NOT authoritative on a restored snapshot. Surface a machine-readable
+            # marker in the warnings list; live re-runs of the search repopulate
+            # enrichment via update_search_export_enrichment and the marker no
+            # longer applies on the next set_search_export.
+            _warnings = list(_warnings or []) + ['metadata_incomplete_restored_from_history']
+            from web.export_state import set_search_export
+            set_search_export(
+                results=_results,
+                query=_query,
+                mode=_mode,
+                gap=_gap,
+                filters=_filters_applied,
+                warnings=_warnings,
+                selected_uids=None,
+                # Phase 94 EXPORT-META-06: history-restore replays a completed search
+                # without re-running enrichment; ship empty containers -- user can
+                # re-run the search to repopulate enrichment if needed.
+                transcription_sys_ids=set(),
+                printed_ids=set(),
+                result_domains={},
+            )
+            # Update count display
+            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+            # Re-render with restored exclusions (manuscript exclusions first if active)
+            if search_state.exclusion_sources:
+                _apply_manuscript_exclusions()
+            elif search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions()
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or bool(search_state.library_filter):
+                # SEED-026 (LIBFILTER-01): widened — library-only history-restore routes through filtering helper.
+                _apply_printed_filter_and_render(search_state.results)
+            else:
+                # Apply measurement post-filters on history restore (Phase 54)
+                await _prefetch_post_matches(search_state.results)
+                _restored = _apply_measurement_post_filters(search_state.results, search_state)
+                render_results(_restored, page=0)
+
+        history_menu.close()
+        if state_snapshot.get('results'):
+            ui.notify(tr('Search restored from history'), type='info', timeout=2000)
+            return
+
+        ui.notify(tr('Re-running search from history'), type='info', timeout=2000)
+        await execute_search()
+
+
+    # === SearchPageRefs construction (Phase 72-02) ===
+    # Wired after all callbacks are defined; passed to extracted rendering functions.
+    refs = SearchPageRefs(
+        results_container=results_container,
+        query_input=query_input,
+        page_client=_page_client,
+        page_size=PAGE_SIZE,
+        update_search_within_btn=_update_search_within_btn,
+        update_refinement_strip=_update_refinement_strip,
+        undo_zero_result_refine=_undo_zero_result_refine,
+        apply_word_search_exclusions_and_render=_apply_word_search_exclusions_and_render,
+        update_selection_ui=update_selection_ui,
+        show_add_to_list_dialog=show_add_to_list_dialog_local,
+        copy_result_text=copy_result_text,
+        domain_display_name=lambda name: domain_display_name(search_state, name),
+    )
+
+    # Thin local wrappers preserving original calling convention for all existing call sites
+    def toggle_expansion(index):
+        _toggle_expansion(search_state, refs, index)
+
+    def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
+        _render_results(search_state, refs, results, page, scroll_to_top, reset_expansion)
+
+    def create_result_card(index, result):
+        _create_result_card(search_state, refs, index, result)
+
+    def open_advanced_dialog(index, result):
+        _open_advanced_dialog(search_state, refs, index, result)
+
+    # SEED-026 (smoke 2026-06-29): lifted to PAGE LEVEL (were nested in execute_search)
+    # so the session-restore path (_deferred_transcription_restore) can re-run the same
+    # cheap FJMS enrichment and re-reveal the domain/printed filter buttons after a
+    # language change rebuilds the page from the snapshot. Pure relative to execute_search
+    # (only close over search_state + module imports), so behaviour is identical there.
+    def collect_fjms_enrichment(sys_ids):
+        """Collect all FJMS enrichment in one sidecar pass for this batch."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service(thread_safe=True)
+        if not fjms.is_available():
+            return {}, {}, set(), {}
+        return (
+            fjms.get_domains_for_sys_ids(sys_ids),
+            fjms.get_catalog_source_counts(sys_ids),
+            fjms.get_printed_sys_ids(sys_ids),
+            fjms.get_measurement_summaries_batch(sys_ids),  # Phase 54: measurement cache
+        )
+
+    def _process_domain_data(raw_domains):
+        """Process raw domain data into search_state fields."""
+        from shared.fjms_service import qualify_domain_name
+        for sys_id, doms in raw_domains.items():
+            child_names = {d['domain'] for d in doms}
+            filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            # Smoke round 5 (2026-05-21): dedupe in first-seen order.
+            # A manuscript can have multiple FJMS rows for the same
+            # domain; without dedupe the Domains xlsx cell rendered the
+            # name n times (e.g. 'Arabic Tafsir|Arabic Tafsir|...').
+            # dict.fromkeys preserves insertion order on Python 3.7+.
+            filtered = list(dict.fromkeys(filtered))
+            if filtered:
+                search_state.all_result_domains[sys_id] = filtered
+            for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    search_state.domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
+                if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
+                    search_state.domain_name_map[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
+                    search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
+
+    def _search_url(clean_query, mode, stamp=None):
+        """The address of a search: its query, mode, Responsa options and run code.
+        Back to it finds the run (web/search_bootstrap.py); a link without the code
+        searches again, in the same mode."""
+        params = f'?q={quote(clean_query)}'
+        tag_value = tag_select.value if mode_select.value == 'pgp_tags' else None
+        if tag_value:
+            params += f'&tag={quote(str(tag_value))}'
+        if mode in VALID_SEARCH_MODES and mode != 'pgp_tags':
+            params += f'&mode={quote(mode)}'
+        if mode == 'responsa':
+            if responsa_variants_cb.value: params += '&variants=1'
+            if responsa_ja_cb.value: params += '&ja=1'
+            if responsa_flex_cb.value: params += '&flex_spaces=1'
+            if bidirectional_cb.value: params += '&bidirectional=1'
+        if stamp:
+            params += f'&run={stamp}'
+        return f'/search{params}'
+
+    def _show_search_url(clean_query, mode, stamp=None):
+        try:
+            url = _search_url(clean_query, mode, stamp)
+            ui.run_javascript(f"history.replaceState(null, '', {json.dumps(url)})")
+        except Exception:
+            pass  # JavaScript execution failed; non-fatal UI glitch
+
+    # --- The line under the count: what the page did with what was typed ---
+
+    def _clear_input_notice():
+        input_notice_row.clear()
+        input_notice_row.set_visibility(False)
+
+    def _link_like(text):
+        """A label that reads and works as a link (click, Enter), for an action
+        that stays on this page and so has no address of its own."""
+        return ui.label(text).classes('cursor-pointer underline').style(
+            'color: var(--primary-600);').props('role="link" tabindex="0"')
+
+    def _show_shelfmark_notice():
+        """"Searched as a shelfmark", with the same query as text one click away."""
+        _clear_input_notice()
+        input_notice_row.set_visibility(True)
+        with input_notice_row:
+            ui.label(tr('Searched as a shelfmark.'))
+            as_text = _link_like(tr('Search as text instead'))
+
+        async def _run_as_text():
+            await execute_search(as_text=True)
+        as_text.on('click', _run_as_text)
+        as_text.on('keydown.enter', _run_as_text)
+
+    def _show_layout_suggestion(hebrew, mode):
+        """"Did you mean <Hebrew>?": the Hebrew as a link to the same search in the
+        page's mode. The click runs it here (the address is for a new tab); shown
+        and taken are both counted (PostHog search_suggestion, kind=layout)."""
+        from web.analytics import posthog_capture
+        _clear_input_notice()
+        input_notice_row.set_visibility(True)
+        before, after = split_placeholder(tr('Did you mean {query}?'))
+        with input_notice_row:
+            # One run of text: the Hebrew sits inside the sentence (its article
+            # letter is glued to it in Hebrew), so no gap between the pieces.
+            with ui.row().classes('items-center gap-0'):
+                if before:
+                    ui.label(before).style('white-space: pre;')
+                link = ui.link(hebrew, _search_url(hebrew, mode)).style('color: var(--primary-600);')
+                if after:
+                    ui.label(after).style('white-space: pre;')
+
+        async def _take():
+            posthog_capture('search_suggestion', {'kind': 'layout', 'taken': True}, client=_page_client)
+            query_input.value = hebrew
+            await execute_search()
+        link.on('click.prevent', _take)
+        posthog_capture('search_suggestion', {'kind': 'layout', 'taken': False}, client=_page_client)
+
+    async def _offer_layout_suggestion(clean_query, mode, generation):
+        """Under a text search that found nothing: the Hebrew a Latin-script query
+        spells on the Hebrew keyboard layout, when the corpus holds those words
+        (``SearchEngine.words_occur``: one count query in this process, off the
+        loop). Nothing when the reader has started another search meanwhile."""
+        hebrew = layout_suggestion(clean_query)
+        if not hebrew:
+            return
+        occurs = getattr(state.searcher, 'words_occur', None)
+        if occurs is None:
+            return  # an engine without the check (a test stub): no suggestion
+        try:
+            found = await run.io_bound(occurs, hebrew)
+        except Exception:
+            logger.debug('Layout suggestion check failed for %r', clean_query, exc_info=True)
+            return
+        if not found or search_state.search_generation != generation or search_state.is_running:
+            return
+        _show_layout_suggestion(hebrew, mode)
+
+    # Run the search the controls describe; with *attach* (a run still running, found
+    # by Back), follow that run's search instead of starting it again. (No docstring:
+    # the double-submit guard stays the first statement -- tests/test_ux_timing.py.)
+    async def execute_search(attach=None, as_text=False):
+        # Guard against double-submit (rage-clicking while search is running)
+        if search_state.is_running:
+            ux_ignored(_page_client, 'search_results')
+            return
+        # The criteria this search runs with, read once: its lookup, history
+        # entry and export say the same even if the panel changes meanwhile.
+        _dispatch_criteria = copy.deepcopy(search_state.filter_criteria or {})
+        _dispatch_had_filters = _has_active_filters()
+
+        # Handle PGP tag search mode — navigate to tag results page
+        if mode_select.value == 'pgp_tags':
+            tag = tag_select.value
+            if tag and not str(tag).startswith('__sep_'):
+                ui.navigate.to(f'/search?tag={quote(tag)}')
+            return
+
+        query = query_input.value.strip() if query_input.value else ""
+
+        if not query:
+            return
+
+        if not state.is_ready():
+            ui.notify(tr("Engine not ready."), type='warning')
+            return
+
+        # Parse syntax shortcuts (Delegated to Core)
+        # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
+        clean_query = query
+        is_responsa = (mode_select.value == 'responsa')
+        mode_override, parsed_query = state.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
+
+        # Typed into the box in a text mode (shared/search_box_input.py): a system
+        # number opens that manuscript in Browse, as the homepage box does (the
+        # Shelfmark lookup compares shelfmarks, never ids: Codex on #469); a
+        # shelfmark runs in Shelfmark mode as the `#` prefix would, and the line
+        # under the count says so, with the same query as text one click away
+        # (*as_text*). The mode selector is left as it was: the next query is text
+        # again. A Hebrew query, or a prefixed one, is untouched.
+        _typed_shelfmark = False
+        if mode_override:
+            mode = mode_override
+            clean_query = parsed_query
+            # In slider mode, map all variant modes to 'variants'
+            if use_slider and mode in ('variants', 'variants_extended', 'variants_maximum'):
+                if mode != 'variants':
+                    _show_level_on_slider(mode)
+                mode = 'variants'
+            mode_select.value = mode
+        else:
+            mode = mode_select.value
+            kind = search_box_input_kind(query) if (not as_text and mode in TEXT_MODES) else 'text'
+            if kind == 'sys_id':
+                ui.navigate.to(home_query_target(query))
+                return
+            if kind == 'shelfmark':
+                mode = 'Shelfmark'
+                _typed_shelfmark = True
+
+        # This visitor's variant level and Num Changes, read now: they travel with
+        # this search only. The engine's settings object is shared by every visitor
+        # and is never written here.
+        if mode in ('variants', 'variants_extended', 'variants_maximum', 'fuzzy'):
+            if variant_slider:
+                pairs_count = int(variant_slider.value)
+            elif mode == 'fuzzy':
+                pairs_count = int(current_preset['value'])
+            else:
+                pairs_count = get_level_from_mode(mode)
+            variant_settings = variant_preferences.for_search(mode, pairs_count)
+            _show_level_changes()
+        else:
+            variant_settings = variant_preferences.for_search(mode)
+        search_state.last_variant_settings = dict(variant_settings)
+
+        # Reset UI
+        search_state.is_running = True
+        search_state.is_cancelled = False  # Reset cancellation flag
+        search_state.progress = 0
+        search_state.status = tr("Starting...")
+        search_state.search_start_time = time.time()
+        search_state.results = []
+        search_state.responsa_warning = None
+        # SEED-022 (Codex #303 review): clear enrichment presence sets at new-search
+        # START, not only at the later common reset (~line 4460) which a cancelled/
+        # partial render path can skip — otherwise the prior search's PGP / manual-
+        # transcription / printed icons leak onto partial results of the new one.
+        search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()
+        search_state.printed_ids = set()
+        search_state.search_generation += 1  # Invalidate stale background enrichment
+
+        # Get NOT filter words (merge manual filter + builder negated words)
+        not_words = not_filter.value.split() if not_filter.value else []
+        if search_state.builder_negated_words:
+            not_words = not_words + search_state.builder_negated_words
+
+        # Build Responsa options dict from mode selection
+        responsa_options = _responsa_options_from_controls()
+
+        _tp = text_position_select.value
+        search_state.last_run = {
+            'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
+            # Lab Mode is not in the address either: a page back on this run shows it.
+            'lab_mode': bool(lab_mode.value), 'deep_scan': bool(deep_scan.value),
+            'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
+            'responsa_options': responsa_options, 'corpus_scope': 'genizah',
+            'variant_settings': dict(variant_settings),
+            # What a stamped Back restores with the rows (search_state.RUN_FILTER_FIELDS).
+            'pre_search_filters': run_filter_state(search_state),
+        }
+        if attach is not None:
+            # The run as it started (its gap, NOT-words, position and code are not in
+            # the address), and its clock.
+            search_state.last_run = dict(attach.snapshot.get('last_run') or search_state.last_run)
+            search_state.last_variant_settings = attach.snapshot.get('last_variant_settings')
+            search_state.search_start_time = attach.started
+
+        # This search's run (web/search_runs.py), registered before the first await:
+        # its code goes into the address now, so a Back while it prepares or runs finds
+        # it and follows it; a page that found it so follows it here. Whichever page
+        # reaches the job first starts it, the other follows that job (below).
+        # (search_run, never `run`: that name is NiceGUI's run module in this function.)
+        if attach is not None:
+            search_run = attach
+        else:
+            stamp = search_runs.new_stamp()
+            search_state.last_run = {**search_state.last_run, 'url_stamp': stamp}
+            search_run = start_search_run(search_state, stamp)
+            if not search_run.scoped:
+                # A scoped run's address is stamped when it is saved (the end of the
+                # search): a Back before that returns to the address it was started from.
+                _show_search_url(clean_query, mode, stamp)
+        _page_run['run'] = search_run
+        # The page that started the run, or the page a Back brought to it later, saves
+        # it (its snapshot, the history entry); another page following it only shows it.
+        search_run.owner = search_state
+
+        # The phone fold asks the browser for its width BESIDE the search, never
+        # before it: awaited here, it first waited for the page to connect, so a
+        # search opened from its address started only once the browser had
+        # loaded the page (+~2 s on the server, ux_timing 2026-10-24..28) and
+        # every other search waited one round trip. It still starts AFTER
+        # is_running is set (Codex on #434). Its failure is swallowed.
+        asyncio.ensure_future(_after_delay(0, _collapse_panel_on_phone))
+
+        # ux_timing (web/ux_timing.py): report this search's first visible rows, once.
+        _ux = {'sent': False, 'nav': _ux_url_start['nav'], 'generation': search_state.search_generation}
+        _ux_url_start['nav'] = False
+
+        def _ux_first_rows(outcome):
+            if _ux['sent'] or search_state.search_generation != _ux['generation']:
+                return
+            _ux['sent'] = True
+            ux_done(_page_client, 'search_results', outcome, nav=_ux['nav'],
+                    server_ms=(time.time() - search_state.search_start_time) * 1000)
+
+        # Immediate visual feedback — swap buttons before the 500ms timer tick
+        search_btn.style('display: none;')
+        stop_btn.style('display: inline-flex;')
+        progress_bar.classes(remove='opacity-0')
+        search_within_btn.set_visibility(False)  # Hide during search
+        # Hide post-search filter buttons during the search — they reappear together
+        # via _apply_enrichment_to_ui() once enrichment completes. Without this, a stale
+        # PGP/domain/printed button left visible by the session-restore path
+        # (_deferred_transcription_restore) would persist through the new search
+        # (smoke 2026-06-23: "Filter PGP" showed while Searching...).
+        _set_btn_visible(domain_filter_btn, False)
+        _set_btn_visible(printed_filter_btn, False)
+        _set_btn_visible(pgp_filter_btn, False)
+        # SEED-026 (smoke round 3): hide the library button during the search too; it is
+        # re-revealed at RENDER time (not enrichment time) once results exist.
+        _set_btn_visible(library_filter_btn, False)
+        _clear_input_notice()  # the last search's shelfmark note or suggestion
+        progress_bar.value = 0
+        # Collapse filter panel — chips summarize active filters
+        adv_filters_panel.value = False
+        # Scroll progress into view (may fail if called from background task — non-essential)
+        try:
+            ui.run_javascript(f'document.getElementById("c{progress_container.id}").scrollIntoView({{behavior: "smooth", block: "start"}})')
+        except RuntimeError:
+            pass
+
+        # Show loading spinner immediately
+        render_results([])
+
+        def progress_cb(current, total):
+            # Check if search was cancelled -- here, or on a page that followed this
+            # run after a Back (web/search_runs.py)
+            followed = _page_run['run']
+            if search_state.is_cancelled or (followed is not None and followed.cancelled):
+                raise InterruptedError("Search cancelled")
+            for shown in (list(followed.watchers) if followed is not None else []) or [search_state]:
+                if current < 0:
+                    shown.status = (
+                        f'ממתין בתור: {-current}' if get_language() == 'he'
+                        else f'Queued: {-current}')
+                elif total > 0:
+                    shown.progress = current / total
+                    shown.status = f"{current} / {total}"
+
+        # Phase 55: If not in refine mode, clear any stale refinement chain
+        # A normal search should NOT be restricted by a previous refinement --
+        # an EMPTY restriction ("within no manuscripts") included, falsy as it is.
+        if not search_state._refine_mode and (search_state.refinement_chain
+                                              or search_state.refinement_restrict_sys_ids is not None):
+            search_state.refinement_chain = []
+            search_state.refinement_restrict_sys_ids = None
+            search_state._refinement_stale = False
+            search_state._refinement_scope_sig = ''
+            search_state._all_terms_filter = False
+            persist_value('search_refinement_chain', [])
+            persist_value('search_all_terms_filter', False)
+            refine_badge.set_visibility(False)
+            refine_cancel_btn.set_visibility(False)
+            _update_refinement_strip()
+
+        # Compute pre-search filter set from active filters
+        restrict_sys_ids = None
+        if _has_active_filters():
+            from shared.fjms_service import get_fjms_service
+
+            # Every filter is read HERE, on the loop, and the lists copied: the
+            # lookup can wait for a free worker, and a filter the visitor changes
+            # meanwhile must not change the search they asked for.
+            _inc = search_state.filter_include_mode
+
+            def _copied(values):
+                if not values:
+                    return None
+                return list(values) if isinstance(values, (list, tuple, set, frozenset)) else values
+
+            import copy as _copy
+            filter_kwargs = dict(
+                material_exclude=_copied(search_state.filter_material_exclude),
+                criteria=_copy.deepcopy(_dispatch_criteria) or None,
+                text_all=_copied(search_state.filter_text_all),
+                text_any=_copied(search_state.filter_text_any),
+                text_not=_copied(search_state.filter_text_not),
+            )
+            if _inc:
+                filter_kwargs['domains'] = _copied(search_state.filter_domains)
+                filter_kwargs['authors'] = _copied(search_state.filter_authors)
+                filter_kwargs['works'] = _copied(search_state.filter_works)
+            else:
+                filter_kwargs['domains_exclude'] = _copied(search_state.filter_domains)
+                filter_kwargs['authors_exclude'] = _copied(search_state.filter_authors)
+                filter_kwargs['works_exclude'] = _copied(search_state.filter_works)
+
+            def _compute_restrict():
+                # No is_available() short-cut: with no sidecar the lookup
+                # raises FilterUnavailable (handled below) instead of running
+                # the search over the whole corpus (#17).
+                fjms = get_fjms_service(thread_safe=True)
+                return fjms.get_filter_sys_ids(universe=corpus_universe(), **filter_kwargs)
+
+            def _stop_before_running():
+                # Undo the "searching" UI set above: no run will clear it.
+                discard_search_run(search_state)
+                search_state.is_running = False
+                search_state.is_cancelled = False
+                search_btn.style('display: inline-flex;')
+                stop_btn.style('display: none;')
+                progress_bar.classes('opacity-0')
+                render_results([])
+
+            from shared.fjms_service import FilterUnavailable
+            try:
+                restrict_sys_ids = await io_bound_result.io_bound(_compute_restrict)
+            except FilterUnavailable as exc:
+                # #17: the filters could not be applied. Never "no manuscripts
+                # match", never a search without them: say so, and stop.
+                logger.warning("search: filters could not be applied (%s)", exc.reason)
+                ui.notify(filter_unavailable_message(exc, tr), type='negative')
+                _stop_before_running()
+                return
+            if restrict_sys_ids is io_bound_result.INTERRUPTED:
+                # No answer (cancelled, or the app is stopping) -- not the lookup's
+                # own None, which means "no restriction". Never a search without
+                # the filters (#17): stop.
+                _stop_before_running()
+                return
+            search_state.restrict_sys_ids = restrict_sys_ids
+
+        # D8: search-within completes the chain first (_enter_refine_mode); a step
+        # still cut off (completion stopped or failed) makes this result cut off too.
+        _restricted_to_incomplete = bool(
+            search_state._refine_mode and search_state.refinement_chain
+            and search_state.refinement_chain[-1].result_count_capped)
+
+        # Phase 55: compute effective restrict = intersection of filter restrict + refinement restrict
+        effective_restrict = compute_effective_restrict(restrict_sys_ids, search_state.refinement_restrict_sys_ids)
+
+        # Phase 57: merge Visual Similarity restriction (intersect with existing effective restrict)
+        if search_state.vs_restrict_sys_ids:
+            effective_restrict = compute_effective_restrict(effective_restrict, search_state.vs_restrict_sys_ids)
+
+        # If effective restriction matches nothing, show message and return
+        if effective_restrict is not None and len(effective_restrict) == 0:
+            ui.notify(tr("No manuscripts match the current filters."), type='warning')
+            discard_search_run(search_state)
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_btn.style('display: inline-flex;')
+            stop_btn.style('display: none;')
+            progress_bar.classes('opacity-0')
+            render_results([])
+            _ux_first_rows('zero')
+            return
+
+        # Early rows (2026-10-05): the worker hands over the first rows it finds
+        # (execute_search's preview_callback, the desktop's streaming) and the
+        # page shows them while the search runs. Only where the engine offers
+        # them (no NOT-words, not Responsa) and no post-search filter could hide
+        # one; the completed search then renders the whole list as before.
+        _preview_wanted = (not lab_mode.value and not not_words and responsa_options is None
+                           and preview_shows_final_rows(search_state))
+        _loop = asyncio.get_running_loop()
+        _preview_ready = asyncio.Event()
+        _preview_box = {'rows': None}
+
+        def preview_cb(rows):
+            # Runs on the thread waiting for the worker: hand over to the loop.
+            _preview_box['rows'] = rows
+            # And on the run: a page that follows it after a Back keeps them for a Stop or
+            # the time limit, as this page would (Codex, PR #436).
+            search_run.preview_rows = rows
+            _loop.call_soon_threadsafe(_preview_ready.set)
+
+        async def _paint_previews(generation, lang):
+            painted = 0
+            while True:
+                await _preview_ready.wait()
+                _preview_ready.clear()
+                rows = _preview_box['rows']
+                if not rows or len(rows) <= painted:
+                    continue
+                rows = compact_result_rows(rows)
+                sids = [r.get('display', {}).get('id') for r in rows if r.get('display', {}).get('id')]
+
+                def _fetch_preview_titles():
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    tt = svc.get_title_translations_batch(sids) if svc.titles_available() else {}
+                    svc.close()
+                    return tt
+                try:
+                    titles = await run.io_bound(_fetch_preview_titles) if sids else {}
+                except Exception:
+                    titles = {}  # Titles are added again with the result.
+                if titles is None:
+                    # run.io_bound swallows the cancel the search sends this painter when
+                    # it ends (or the app is stopping) and returns None: stop painting.
+                    return
+                if (search_state.search_generation != generation or not search_state.is_running
+                        or search_state.is_cancelled):
+                    return
+                search_state.title_translations = titles
+                try:
+                    with refs.page_client, using_language(lang):
+                        _render_preview_results(search_state, refs, rows)
+                except RuntimeError:
+                    return  # The page is gone.
+                except Exception:
+                    logger.exception('Search preview render failed')
+                    return
+                _ux_first_rows('preview')
+                painted = len(rows)
+                logger.info('Search perf: preview_rows=%d since_submit_ms=%.0f', painted,
+                            (time.time() - search_state.search_start_time) * 1000)
+
+        _run_cutoff = {'capped': False, 'interrupted': False}
+
+        def run_core_search():
+            # The engine's cut-off signal arrives on this thread (IsolatedEngine), and
+            # so does the Responsa guard's downgrade: with no rows there is no first
+            # row to carry it (Codex review of PR #433).
+            consume_last_search_cutoff()
+            _consume_last_responsa_downgrade()
+            try:
+                return _run_core_search()
+            finally:
+                _run_cutoff.update(consume_last_search_cutoff())
+                _run_cutoff['time_limit'] = consume_time_limit_stop()
+                _run_cutoff['downgrade'] = _consume_last_responsa_downgrade()
+
+        def _run_core_search():
+            try:
+                if lab_mode.value:
+                    lab_search_mode = 'variants' if mode not in ['Regex', 'exact'] else mode
+                    return with_request_settings(state.lab_engine, **variant_settings).lab_search(
+                        clean_query,
+                        mode=lab_search_mode,
+                        gap=int(gap_input.value),
+                        deep_scan=deep_scan.value,
+                        progress_callback=progress_cb
+                    )
+                else:
+                    tp = text_position_select.value
+                    return with_request_settings(state.searcher, **variant_settings).execute_search(
+                        clean_query,
+                        mode=engine_mode(mode),
+                        gap=int(gap_input.value),
+                        progress_callback=progress_cb,
+                        exclude_words=not_words,
+                        responsa_options=responsa_options,
+                        restrict_sys_ids=effective_restrict,
+                        text_position=tp if tp != 'anywhere' else None,
+                        # The website has no My Library: say so, which is also
+                        # what lets the engine hand over early rows.
+                        corpus_scope='genizah',
+                        preview_callback=preview_cb if _preview_wanted else None,
+                    )
+            except InterruptedError:
+                return []
+            except ResearchJobError as e:
+                return {'error': str(e)}
+            except SearchBudgetExceeded:
+                logger.warning('Search stopped after exceeding its computation budget')
+                return {'error': 'search_budget_exceeded'}
+            except ValueError as e:
+                # Explosion guard or other validation error — surface to user
+                error_msg = str(e)
+                logger.error(f"Search Validation Error: {error_msg}")
+                return {'error': error_msg}
+            except Exception as e:
+                logger.exception(f"Search Error: {e}")
+                return []
+
+        # Admission, FIFO waiting and process termination are shared by text,
+        # parallels and API searches. Waiting does not occupy NiceGUI's pool.
+        _painter = (asyncio.ensure_future(_paint_previews(search_state.search_generation, get_language()))
+                    if _preview_wanted and attach is None else None)
+        try:
+            if search_run.job is None:
+                # The first page here starts the job (no await since the check).
+                search_run.cutoff = _run_cutoff
+                search_run.job = asyncio.ensure_future(run_research_call(run_core_search))
+            search_run.watchers.append(search_state)
+            # Shielded: this page going away never stops a search a Back may return to.
+            results = await asyncio.shield(search_run.job)
+        finally:
+            if _painter is not None:
+                _painter.cancel()
+            if search_state in search_run.watchers:
+                search_run.watchers.remove(search_state)
+        if attach is not None:
+            # Its cut-off signals and early rows were recorded by the page that started it.
+            _run_cutoff.update(search_run.cutoff or {})
+            if not _preview_box['rows'] and search_run.preview_rows:
+                _preview_box['rows'] = list(search_run.preview_rows)
+        if search_run.cancelled:
+            # Stop on any page following this run stopped it for all of them: each one
+            # shows (and its owner saves) the partial rows (Codex, PR #436).
+            search_state.is_cancelled = True
+            if not _preview_box['rows'] and search_run.preview_rows:
+                _preview_box['rows'] = list(search_run.preview_rows)
+        # The web side stopped a worker that had not stopped itself at its time limit
+        # (TIME_LIMIT_GRACE_SECONDS later), or the limit stopped a part of the search
+        # that returns no rows: the early rows it had handed over are verified rows,
+        # the start of its list. They are kept, as Stop keeps them.
+        _forced_stop = bool(isinstance(results, dict) and results.get('error') == 'search_budget_exceeded'
+                            and _preview_box['rows'])
+        if _forced_stop:
+            results = list(_preview_box['rows'])
+        _time_limited = bool(_run_cutoff.get('time_limit') or _forced_stop)
+        # Cut at the candidate limit, stopped (Stop or the time limit), or searched
+        # within an incomplete set: the list leaves matches out. The time limit counts
+        # on its own: an engine that returns its rows without saying it was stopped
+        # would otherwise show a list the limit cut short as complete.
+        search_state.result_count_capped = bool(_run_cutoff.get('capped') or _run_cutoff.get('interrupted')
+                                                or _time_limited or _restricted_to_incomplete)
+        # Searched within a step completing cannot fix, this one cannot be either (Codex
+        # round 2 on PR #442), unless its own candidate limit cut it.
+        _parent_step = (search_state.refinement_chain[-1]
+                        if search_state._refine_mode and search_state.refinement_chain else None)
+        search_state.result_partial = step_partial(_run_cutoff, _parent_step) and not (
+            _run_cutoff.get('interrupted') or _time_limited)
+        if _time_limited:
+            ui.notify(tr('The search stopped after {minutes} minutes; showing the results found so far.').format(minutes=Config.WEB_SEARCH_TIME_LIMIT // 60),
+                      type='warning', timeout=10000, close_button=True)
+
+        # Handle validation errors from explosion guard (returned as sentinel dict
+        # because run_core_search runs in io_bound thread and cannot call ui.notify)
+        if isinstance(results, dict) and 'error' in results:
+            discard_search_run(search_state)  # nothing to come back to: Back searches again
+            error_msg = results['error']
+            if error_msg == 'search_budget_exceeded':
+                error_msg = (
+                    'החיפוש חרג ממגבלת הזמן ונעצר. נסו לצמצם את השאילתה או את טווח החיפוש.'
+                    if get_language() == 'he' else
+                    'The search exceeded its time limit and was stopped. Try a narrower query or search scope.'
+                )
+            # A refused Responsa query (shared/responsa_match.py) or the guard's message
+            # arrives in English from the worker, its numbers filled in.
+            error_msg = tr_engine_message(error_msg)
+            ui.notify(error_msg, type='warning', timeout=8000, close_button=True)
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_state.progress = 0
+            search_btn.style('display: inline-flex;')
+            stop_btn.style('display: none;')
+            progress_bar.classes('opacity-0')
+            # The message stays on the status line: a refused query is not "0 results".
+            status_label.text = error_msg
+            results_count.text = f"0 {tr('Results')}"
+            render_results([])
+            _ux_first_rows('error')
+            return
+
+        # Skip expensive enrichment when search was cancelled (GAP-R7 round 3), or the
+        # web side stopped it at the time limit after it had handed over early rows.
+        if search_state.is_cancelled or _forced_stop:
+            # Stop kills the worker, so it returns nothing; the early rows it had
+            # handed over are verified rows (the start of its list): keep them.
+            if not results and _preview_box['rows']:
+                results = list(_preview_box['rows'])
+            # Stopped, the rows are the start of the list, never all of it: "+", and a
+            # search within them completes the step first (D8) -- even within a step
+            # that cannot be completed itself (step_partial).
+            search_state.result_count_capped = True
+            search_state.result_partial = False
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_state.progress = 1.0
+            search_state.results = results
+            search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
+            search_state.domain_excluded_results = []
+
+            # Phase 88: populate per-session export payload on the cancelled-partial path so
+            # partial-result exports carry their own query/mode/gap/filters instead of
+            # inheriting stale values from a previous completed search. Historical context:
+            # 77-REVIEWS.md HIGH-01; the singleton mirror has been removed.
+            _current_search_query = clean_query
+            _current_search_mode = mode
+            try:
+                _current_search_gap = int(gap_input.value) if gap_input.value else None
+            except (ValueError, TypeError):
+                _current_search_gap = None
+            _last_filters_applied = {
+                'domains': list(getattr(search_state, 'filter_domains', None) or []),
+                'authors': list(getattr(search_state, 'filter_authors', None) or []),
+                'works': list(getattr(search_state, 'filter_works', None) or []),
+                'include_mode': getattr(search_state, 'filter_include_mode', True),
+                'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
+                'criteria': copy.deepcopy(_dispatch_criteria),
+                'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
+                'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
+                'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
+            }
+            _last_search_warnings = ['partial-results', 'results-cut-off']  # signal partial-result fidelity to consumers
+            _last_results = results
+            from web.export_state import set_search_export
+            set_search_export(
+                results=results,
+                query=clean_query,
+                mode=mode,
+                gap=_current_search_gap,
+                filters=_last_filters_applied,
+                warnings=_last_search_warnings,
+                selected_uids=None,
+                # Phase 94 EXPORT-META-06: enrichment runs AFTER this call; the
+                # update_search_export_enrichment(...) post-write at the Stage-1
+                # / Stage-2 sites patches the live values in.
+                transcription_sys_ids=set(),
+                printed_ids=set(),
+                result_domains={},
+            )
+            results = compact_result_rows(results)
+            search_state.results = results
+            search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
+            # A stopped search within results is still the chain's next step: marked
+            # "+", it is completed before anything searches within it.
+            if search_state._refine_mode and results:
+                _commit_refinement_step(results)
+                search_state._refine_mode = False
+                search_state._refinement_stale = False
+
+            # Compute elapsed
+            total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+            if total_elapsed >= 3600:
+                total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
+            else:
+                total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
+
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('partial')}){_downgrade_suffix()}"
+            status_label.text = ''
+            if not _forced_stop:  # the time-limit notice above already says so
+                ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+
+            # Fast title-only translation fetch for partial results (~1ms SQLite)
+            _partial_sids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+            if _partial_sids:
+                try:
+                    def _fetch_partial_titles():
+                        from shared.translation_service import TranslationService
+                        svc = TranslationService(thread_safe=True)
+                        tt = svc.get_title_translations_batch(_partial_sids) if svc.titles_available() else {}
+                        svc.close()
+                        return tt
+                    # None (cancelled or app stopping): no titles, never None.
+                    search_state.title_translations = await run.io_bound(_fetch_partial_titles) or {}
+                except Exception:
+                    pass  # Translation lookup failed; continue without translation
+
+            # Render what we have (no enrichment badges -- acceptable for partial results)
+            render_results(results, page=0)
+            _ux_first_rows('partial')
+            if _typed_shelfmark:
+                _show_shelfmark_notice()
+            # Back to this address shows these rows, cut off ("+"), as the page did.
+            if search_run.owner is search_state:
+                try:
+                    persist_search_snapshot(search_state)
+                    # Its query with its rows, as a completed search saves them: the
+                    # query-only Back pairs the two (it matched these rows to an older
+                    # query -- found in the browser, 2026-10-22).
+                    _safe_set('search_query', clean_query)
+                    if save_search_run(search_state) and search_run.scoped:
+                        # Kept: a scoped run's address is stamped now (Back returns here).
+                        _show_search_url(clean_query, mode, url_stamp_of(search_state))
+                except Exception:
+                    pass  # Browser storage operation failed; snapshot not persisted
+            return
+
+        # --- Staged enrichment: render fast, enrich progressively ---
+        all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+        this_generation = search_state.search_generation
+        _t_stage0 = time.perf_counter()
+
+        # --- STAGE 0: Fast title translations + immediate render ---
+        # (Reuses the fast path from cancel flow — ~1ms SQLite lookup)
+        if all_sys_ids:
+            try:
+                def _fetch_titles_fast():
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    tt = svc.get_title_translations_batch(all_sys_ids) if svc.titles_available() else {}
+                    svc.close()
+                    return tt
+                # None (cancelled or app stopping): no titles, never None.
+                search_state.title_translations = await run.io_bound(_fetch_titles_fast) or {}
+            except Exception:
+                pass  # Translation lookup failed; continue without translation
+
+        # Phase 88: populate per-session export payload for JSON export envelope echo
+        # (Phase 77 D-06) and filename. Singleton mirror removed. Historical context:
+        # 77-RESEARCH.md §Pitfall 2 documented the latent bug where current_search_query
+        # was declared in web/state.py but never assigned (filenames silently defaulted
+        # to "genizah.xlsx"); the per-session export payload now carries this value
+        # exclusively. /api/export/* (Excel/Word/JSON) honor this session's data only.
+        _current_search_query = clean_query
+        _current_search_mode = mode
+        try:
+            _current_search_gap = int(gap_input.value) if gap_input.value else None
+        except (ValueError, TypeError):
+            _current_search_gap = None
+        # Page-scoped filters threaded into the export payload so the JSON download
+        # handler can echo them in the envelope. The 10-key shape mirrors the live
+        # snapshot at web/pages/search.py history-restore branch so envelope replay
+        # matches what the search-history restore branch reconstructs. List() copies
+        # prevent mutation-after-search bugs. Per HIGH-02 review feedback.
+        _last_filters_applied = {
+            'domains': list(getattr(search_state, 'filter_domains', None) or []),
+            'authors': list(getattr(search_state, 'filter_authors', None) or []),
+            'works': list(getattr(search_state, 'filter_works', None) or []),
+            'include_mode': getattr(search_state, 'filter_include_mode', True),
+            'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
+            'criteria': copy.deepcopy(_dispatch_criteria),
+            'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
+            'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
+            'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
+        }
+        # A cut-off list exports as one: its count says "N+".
+        _last_search_warnings = ['results-cut-off'] if search_state.result_count_capped else []
+        _last_results = results
+        from web.export_state import set_search_export
+        set_search_export(
+            results=results,
+            query=clean_query,
+            mode=mode,
+            gap=_current_search_gap,
+            filters=_last_filters_applied,
+            warnings=_last_search_warnings,
+            selected_uids=None,
+            # Phase 94 EXPORT-META-06: enrichment runs AFTER this call; the
+            # update_search_export_enrichment(...) post-write at the Stage-1
+            # / Stage-2 sites patches the live values in.
+            transcription_sys_ids=set(),
+            printed_ids=set(),
+            result_domains={},
+        )
+        results = compact_result_rows(results)
+        search_state.is_running = False
+        search_state.is_cancelled = False
+        search_state.progress = 1.0
+        search_state.results = results
+
+        # --- Phase 55: Refinement chain update ---
+        if search_state._refine_mode:
+            # RAW results (before domain/printed/measurement post-filters)
+            _commit_refinement_step(results)
+            search_state._refine_mode = False
+            search_state._refinement_stale = False
+
+        # Initialize enrichment fields to empty (will be populated progressively)
+        search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()  # SEED-022
+        search_state.all_result_domains = {}
+        search_state.result_domains = {}
+        search_state.domain_name_map = {}
+        search_state.has_domain_data = False
+        search_state.catalog_source_counts = {}
+        search_state.printed_ids = set()
+        search_state.translation_data = {}
+        search_state._measurement_cache = {}  # Phase 54: reset on new search
+        search_state.domain_excluded_results = []
+        search_state.word_search_excluded_results = []
+
+        # Compute elapsed time
+        total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+        if total_elapsed >= 3600:
+            total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
+        else:
+            total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
+
+        # Build filter summary suffix
+        _filter_suffix = ''
+        if _has_active_filters() and search_state.filter_manuscript_count is not None:
+            filter_parts = []
+            opts_d = domain_select.options if hasattr(domain_select, 'options') else {}
+            opts_a = author_select.options if hasattr(author_select, 'options') else {}
+            opts_w = work_select.options if hasattr(work_select, 'options') else {}
+            for d in search_state.filter_domains:
+                filter_parts.append(_get_display_name(d, opts_d))
+            for a in search_state.filter_authors:
+                filter_parts.append(_get_display_name(a, opts_a))
+            for w in search_state.filter_works:
+                filter_parts.append(_get_display_name(w, opts_w))
+            if filter_parts:
+                _filter_suffix = f" ({tr('filtered')}: {', '.join(filter_parts)}, {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
+            else:
+                _filter_suffix = f" ({tr('filtered')}: {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
+
+        # Merged status: results count + time + filter info in one label
+        expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+        # A star word is one pattern, not a list of terms (plan §5.7).
+        pattern_count = results[0].get('responsa_pattern_count', 0) if results else 0
+        # A Responsa downgrade (the guard turned an option off) is part of the count's
+        # line, for as long as these results show (plan §5.3: not a 5-second toast) --
+        # "0 Results" too, from the engine's own signal.
+        search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
+        if expanded_count > 0 or pattern_count > 0:
+            _searched = ' + '.join(
+                ([f"{expanded_count} {tr('expanded terms')}"] if expanded_count else [])
+                + ([f"{pattern_count} {tr('patterns')}"] if pattern_count else []))
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {_searched}){_filter_suffix}{_downgrade_suffix()}"
+        else:
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str}{_filter_suffix}{_downgrade_suffix()}"
+        status_label.text = ''
+
+        # PostHog event
+        from web.analytics import posthog_capture
+        posthog_capture('search_executed', {
+            'query': clean_query[:100],
+            'mode': mode,
+            'result_count': len(results),
+            'duration_seconds': round(total_elapsed, 1),
+            'was_cancelled': False,
+        })
+
+        # URL state persistence: the address the search got when it started, again
+        # (a Back finds this run by its code: web/search_bootstrap.py). A scoped run's
+        # address carries no scope, so it is stamped only once the run is kept (below):
+        # one not kept would bring Back to an unscoped search (Codex, PR #436).
+        if not search_run.scoped:
+            _show_search_url(clean_query, mode, url_stamp_of(search_state))
+
+        # Only the run's owner saves it: a page that a Back took over from (left,
+        # and gone) still finishes the search, and must not save it a second time.
+        _owns_run = search_run.owner is search_state
+
+        # Storage persistence via snapshot helper (Phase 74).
+        # The helper handles capping at 1000 and stripping full_text fields
+        # internally (matches pre-Phase-74 inline behavior).
+        if _owns_run:
+            try:
+                persist_search_snapshot(search_state)
+                # The run's own save: its rows are on the page now (search_state).
+                if save_search_run(search_state) and search_run.scoped:
+                    _show_search_url(clean_query, mode, url_stamp_of(search_state))
+            except Exception:
+                pass  # Browser storage operation failed; preference not persisted
+
+            # 75-03 Edit 2b: write search_query at search-execute time so back-nav
+            # detection (saved_query == URL q) works reliably. Without this, the
+            # blur-only write at search.py:~401 misses Enter-to-search flows, and the
+            # is_back_navigation guard in resolve_search_bootstrap silently fails.
+            # This mirrors the query that history.replaceState just stamped into the URL.
+            _safe_set('search_query', clean_query)
+
+        # Search history -- D-15: Refined searches don't enter history
+        if _owns_run and not search_state.refinement_chain:
+            try:
+                add_to_search_history(
+                    query=query_input.value or '',
+                    result_count=len(results),
+                    mode=mode_select.value or 'exact',
+                    params={
+                        'mode': mode_select.value,
+                        'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
+                        'gap': int(gap_input.value or 0),
+                        'text_position': text_position_select.value,
+                        # COPIES: a live list loaded from storage is stored
+                        # as-is, so the entry would share it and a later chip
+                        # removal would rewrite the saved history.
+                        'filters': {
+                            'domains': list(search_state.filter_domains or []),
+                            'authors': list(search_state.filter_authors or []),
+                            'works': list(search_state.filter_works or []),
+                            'include_mode': search_state.filter_include_mode,
+                            'material_exclude': list(search_state.filter_material_exclude or []),
+                            'criteria': copy.deepcopy(_dispatch_criteria),
+                            'text_all': list(search_state.filter_text_all or []),
+                            'text_any': list(search_state.filter_text_any or []),
+                            'text_not': list(search_state.filter_text_not or []),
+                        } if _dispatch_had_filters or _has_active_filters() else None,
+                    },
+                    state_snapshot={
+                        'domain_exclusions': sorted(search_state.domain_exclusions),
+                        'printed_filter': search_state.printed_filter,
+                    },
+                )
+            except Exception:
+                pass  # Filter operation failed; continue with defaults
+
+        # IMMEDIATE RENDER — user sees results with title translations only
+        render_results(results, page=0)
+        _ux_first_rows('ok' if results else 'zero')
+        if _typed_shelfmark:
+            _show_shelfmark_notice()
+        elif not results and mode in TEXT_MODES:
+            # "Did you mean <Hebrew>?" for a query typed on the English layout:
+            # beside the rest of the page's work, not before it (its corpus check
+            # is one index query, off the loop).
+            asyncio.ensure_future(_after_delay(0, _offer_layout_suggestion, clean_query, mode, this_generation))
+        # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
+        # HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library filter
+        # needs no enrichment data (only bool(search_state.results)); enrichment runs later
+        # in a background task that can time out (IIIF) or touch a torn-down slot ("parent
+        # element slot deleted"), which left the button permanently hidden. _update_library_btn
+        # computes its (shown/total) count from search_state.results, available now.
+        try:
+            _set_btn_visible(library_filter_btn, bool(search_state.results))
+            _update_library_btn()
+        except Exception:
+            logger.exception("SEED-026: library filter reveal at render time failed (non-fatal)")
+        _t_render = time.perf_counter()
+        logger.info("Search perf: first_render_ms=%.0f (results=%d)", (_t_render - _t_stage0) * 1000, len(results))
+
+        # --- Enrichment helper functions (defined once, used for both stages) ---
+        # NOTE (SEED-026 smoke 2026-06-29): collect_fjms_enrichment + _process_domain_data
+        # were lifted to PAGE LEVEL (see above execute_search) so the restore path can reuse
+        # them. They resolve via closure here — behaviour unchanged.
+        _show_trans_for_enrich = _safe_get('show_translations', False)
+
+        def collect_translations(sys_ids, show_trans=False):
+            try:
+                from shared.translation_service import TranslationService
+                svc = TranslationService(thread_safe=True)
+                pgp_trans = {}
+                if show_trans and svc.pgp_available():
+                    pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids)
+                svc.close()
+                return pgp_trans
+            except Exception as e:
+                logger.warning("Translation batch lookup failed: %s", e)
+                return {}
+
+        def collect_vs_availability(sys_ids):
+            """Phase 57: Batch check which sys_ids have visual similarity suggestions."""
+            try:
+                from shared.visual_similarity_service import get_vs_service
+                svc = get_vs_service(thread_safe=True)
+                if svc.is_available():
+                    return svc.batch_has_suggestions(sys_ids)
+            except Exception as e:
+                logger.warning("VS batch check failed: %s", e)
+            return {}
+
+        def _apply_enrichment_to_ui():
+            """Update UI elements after enrichment data changes."""
+            search_state.has_domain_data = bool(search_state.all_result_domains)
+            search_state.result_domains = dict(search_state.all_result_domains)
+            _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
+            _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
+            # Phase 999.2 (PGP-FILTER-02, D-07): PGP button visible iff some result has PGP.
+            _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+            # BUG-A fix: reveal library button FIRST (before any _update_* calls that might
+            # raise). If an exception in _update_pgp_filter_btn/_update_domain_filter_btn/
+            # _update_exclude_btn aborts the chain, the button still appears.
+            # SEED-026 (LIBFILTER-01): library filter button — visible whenever results exist.
+            _set_btn_visible(library_filter_btn, bool(search_state.results))
+            # Re-sync defensively — enrichment can fire multiple times per session
+            # (stage1 + stage2 background passes both call this function), and the
+            # button state must reflect the latest search context on every call.
+            _update_pgp_filter_btn()
+            _update_pgp_filter_chip()  # Sync chip (includes MEDIUM-1 zero-hits gating)
+            _update_domain_filter_btn()
+            # Phase 56: refresh exclusion chips when results render
+            _update_exclude_btn()
+            _update_library_btn()
+
+        def _render_with_filters(reset_expansion=True):
+            """Re-render applying exclusions and filters.
+
+            Phase 999.2 (PGP-FILTER-04, HIGH-1): the printed-filter elif is widened to
+            also fire when PGP filter is active, so PGP-only filtering routes through
+            _apply_printed_filter_and_render (which applies BOTH printed and PGP per Task 3).
+            """
+            # Phase 56: Manuscript exclusions run first in the chain
+            if search_state.exclusion_sources:
+                _apply_manuscript_exclusions(reset_expansion=reset_expansion)
+                return
+
+            display_results = results
+            if search_state.word_search_excluded_ids:
+                ws_filtered = []
+                ws_excluded = []
+                for r in results:
+                    sid = r.get('display', {}).get('id')
+                    if sid and sid in search_state.word_search_excluded_ids:
+                        ws_excluded.append({'result': r, 'reason': tr('Excluded')})
+                    else:
+                        ws_filtered.append(r)
+                search_state.word_search_excluded_results = ws_excluded
+                display_results = ws_filtered
+            else:
+                search_state.word_search_excluded_results = []
+
+            if search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions(reset_expansion=reset_expansion)
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+                # Phase 999.2 (PGP-FILTER-04, HIGH-1): widened — printed OR PGP routes through
+                # the unified _apply_printed_filter_and_render (which applies BOTH per Task 3).
+                # SEED-026 (LIBFILTER-01): widened — library-only also routes through filtering helper.
+                search_state.domain_excluded_results = []
+                _apply_printed_filter_and_render(display_results, reset_expansion=reset_expansion)
+            else:
+                search_state.domain_excluded_results = []
+                # Apply measurement post-filters (Phase 54, review concern #1)
+                display_results = _apply_measurement_post_filters(display_results, search_state)
+                render_results(display_results, page=0, reset_expansion=reset_expansion)
+
+        # --- STAGE 1: Enrich visible page (first PAGE_SIZE sys_ids) ---
+        _t_stage1 = time.perf_counter()
+        visible_ids = all_sys_ids[:PAGE_SIZE]
+        if visible_ids and search_state.search_generation == this_generation:
+            # SEED-022: fetch the PGP-text set and FGP set alongside the existing
+            # PGP link-presence set (transcription_ids, which still feeds the PGP
+            # badge). pgp_text ∪ fgp = the new "has manual transcription" union.
+            _visible_enrichment = await asyncio.gather(
+                io_bound_result.io_bound(collect_fjms_enrichment, visible_ids),
+                io_bound_result.io_bound(get_sys_ids_with_transcriptions, visible_ids),
+                io_bound_result.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
+                io_bound_result.io_bound(collect_vs_availability, visible_ids),
+                io_bound_result.io_bound(get_sys_ids_with_pgp_text, visible_ids),
+                io_bound_result.io_bound(_web_fgp_sys_ids, visible_ids),
+            )
+            fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids = _visible_enrichment
+            # Check generation before applying (user may have started a new search).
+            # A lookup with no answer (cancelled, or the app is stopping) commits
+            # nothing: the cards keep their plain form, the filter buttons stay hidden.
+            if (search_state.search_generation == this_generation
+                    and not io_bound_result.interrupted(*_visible_enrichment)):
+                raw_domains, catalog_counts, printed_ids, meas_batch = fjms_tuple
+                search_state._measurement_cache.update(meas_batch)  # Phase 54
+                _process_domain_data(raw_domains)
+                search_state.transcription_sys_ids = transcription_ids
+                search_state.manual_transcription_sys_ids = union_manual_transcriptions(pgp_text_ids, fgp_ids)
+                search_state.catalog_source_counts = catalog_counts
+                search_state.printed_ids = printed_ids
+                search_state.translation_data = trans_data
+                search_state.vs_availability.update(vs_avail)  # Phase 57
+                # Phase 94 EXPORT-META-06: propagate enrichment to the export
+                # payload so /api/export/excel and /api/export/json reflect
+                # has_pgp / is_printed / domains for visible-page results.
+                # Smoke verification round 2 (2026-05-21) added the
+                # ``domain_name_map`` kwarg for the xlsx Hebrew domain
+                # substitution path; built by ``_process_domain_data`` above.
+                # SEED-022 (Codex #303 review): the new manual-transcription
+                # indicator is intentionally UI-ONLY for now — it is NOT plumbed
+                # into the export payload / JSON / xlsx (the seed deferred the
+                # API/export column; adding `has_transcription` would touch the
+                # public API contract + 12-col xlsx + parity tests). Revisit if a
+                # caller asks for it.
+                from web.export_state import update_search_export_enrichment
+                update_search_export_enrichment(
+                    transcription_sys_ids=search_state.transcription_sys_ids,
+                    printed_ids=search_state.printed_ids,
+                    result_domains=search_state.result_domains,
+                    domain_name_map=search_state.domain_name_map,
+                )
+                # Pre-cache domain hierarchy
+                if search_state.all_result_domains:
+                    def fetch_hierarchy():
+                        from shared.fjms_service import get_fjms_service
+                        fjms = get_fjms_service(thread_safe=True)
+                        return fjms.get_domain_hierarchy() if fjms.is_available() else {}
+                    search_state.domain_hierarchy = await run.io_bound(fetch_hierarchy)
+                else:
+                    search_state.domain_hierarchy = {}
+                # Re-check generation after hierarchy await (P1 fix: close race window)
+                if search_state.search_generation == this_generation:
+                    _apply_enrichment_to_ui()
+                    _render_with_filters(reset_expansion=False)
+
+        _t_stage1_done = time.perf_counter()
+        logger.info("Search perf: visible_enrichment_ms=%.0f (ids=%d)", (_t_stage1_done - _t_stage1) * 1000, len(visible_ids))
+
+        # --- STAGE 2: Background-enrich remaining sys_ids in chunks ---
+        remaining_ids = all_sys_ids[PAGE_SIZE:]
+
+        async def _enrich_remaining_results():
+            """Fill non-visible cards without holding up the completed search."""
+            _t_stage2 = time.perf_counter()
+            async with enrichment_batch_slot():
+                CHUNK_SIZE = 200
+                for chunk_start in range(0, len(remaining_ids), CHUNK_SIZE):
+                    if search_state.search_generation != this_generation:
+                        return  # A newer search owns the page now.
+                    chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
+                    _chunk_enrichment = await asyncio.gather(
+                        io_bound_result.io_bound(collect_fjms_enrichment, chunk_ids),
+                        io_bound_result.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
+                        io_bound_result.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
+                        io_bound_result.io_bound(collect_vs_availability, chunk_ids),
+                        io_bound_result.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
+                        io_bound_result.io_bound(_web_fgp_sys_ids, chunk_ids),
+                    )
+                    if search_state.search_generation != this_generation:
+                        return
+                    if io_bound_result.interrupted(*_chunk_enrichment):
+                        return  # no answer (cancelled, or the app is stopping): commit nothing
+                    bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = _chunk_enrichment
+                    bg_domains, bg_counts, bg_printed, bg_meas = bg_fjms_tuple
+                    search_state._measurement_cache.update(bg_meas)
+                    _process_domain_data(bg_domains)
+                    search_state.transcription_sys_ids |= bg_trans_ids
+                    search_state.manual_transcription_sys_ids |= union_manual_transcriptions(bg_pgp_text_ids, bg_fgp_ids)
+                    search_state.catalog_source_counts.update(bg_counts)
+                    search_state.printed_ids |= bg_printed
+                    search_state.translation_data.update(bg_trans_data)
+                    search_state.vs_availability.update(bg_vs)
+
+                if search_state.search_generation != this_generation:
+                    return
+                _apply_enrichment_to_ui()
+                _render_with_filters(reset_expansion=False)
+                from web.export_state import update_search_export_enrichment
+                update_search_export_enrichment(
+                    transcription_sys_ids=search_state.transcription_sys_ids,
+                    printed_ids=search_state.printed_ids,
+                    result_domains=search_state.result_domains,
+                    domain_name_map=search_state.domain_name_map,
+                )
+            _t_stage2_done = time.perf_counter()
+            logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))
+
+        if remaining_ids and search_state.search_generation == this_generation:
+            async def _run_remaining_enrichment():
+                try:
+                    with _page_client:
+                        await _enrich_remaining_results()
+                except RuntimeError:
+                    # The page may be gone before its optional enrichment starts.
+                    pass
+                except Exception:
+                    logger.exception("Search background enrichment failed")
+
+            asyncio.ensure_future(_run_remaining_enrichment())
+
+    # --- Restore Responsa state from URL parameters ---
+    if initial_mode == 'responsa':
+        mode_select.value = 'responsa'
+        responsa_sub_row.set_visibility(True)
+        if initial_variants:
+            responsa_variants_cb.value = True
+        if initial_ja:
+            responsa_ja_cb.value = True
+        if initial_flex_spaces:
+            responsa_flex_cb.value = True
+        if initial_bidirectional:
+            bidirectional_cb.value = True
+
+    def _show_run_controls(run):
+        """The controls a run was searched with that its address does not carry -- gap,
+        NOT-words, text position, variant level, Num Changes and Lab Mode -- so a page restoring
+        or following it shows (and, on Search, runs) that run, not the shared settings
+        (Codex, PR #436). No change event: the shared preferences stay as they were."""
+        if not isinstance(run, dict):
+            return
+        try:
+            gap_input.value = int(run.get('gap') or 0)
+        except (TypeError, ValueError):
+            pass
+        not_filter.value = ' '.join(str(w) for w in (run.get('exclude_words') or []))
+        text_position_select.value = run.get('text_position') or 'anywhere'
+        settings = run.get('variant_settings') if isinstance(run.get('variant_settings'), dict) else {}
+        pairs = settings.get('variant_pairs_count')
+        if isinstance(pairs, int):
+            current_preset['value'] = pairs
+            if variant_slider:
+                variant_slider.value = pairs
+        if max_changes_select and isinstance(settings.get('variant_max_changes'), int):
+            max_changes_select.value = settings['variant_max_changes']
+        # Lab Mode and Deep Scan: the algorithm that produced the rows (Codex, PR #436).
+        lab_mode.value = bool(run.get('lab_mode'))
+        deep_scan.value = bool(run.get('deep_scan'))
+
+    # A Back to a run (restored, or followed while it runs): its own controls.
+    if bootstrap_state['restore_run_filters']:
+        _show_run_controls(search_state.last_run)
+
+    # Handle tag search — switch UI to PGP Tags mode and show the selected tag
+    if initial_tag:
+        mode_select.value = 'pgp_tags'
+        query_column.set_visibility(False)
+        tag_column.set_visibility(True)
+        tag_select.value = initial_tag
+        def _tag_to_result(tag_result):
+            """Convert a tag search result dict to the shape expected by open_advanced_dialog."""
+            return {
+                'display': {
+                    'id': tag_result.get('sys_id', ''),
+                    'shelfmark': tag_result.get('shelfmark', 'Unknown'),
+                    'library_code': '',
+                    'title': tag_result.get('description', ''),
+                    'source': 'PGP',
+                },
+                'snippet': '',
+                'full_text': '',
+            }
+
+
+        async def load_tag_results():
+            """Load results for a tag-based search."""
+            results_container.clear()
+            with results_container:
+                with ui.column().classes('w-full h-64 items-center justify-center'):
+                    ui.spinner('bars', size='xl', color='primary').classes('mb-4')
+                    ui.label(tr("Searching by tag...")).classes('text-xl font-bold animate-pulse').style('color: var(--primary-600);')
+
+            tag_results = await run.io_bound(get_fragments_by_tag, initial_tag)
+
+            # Filter to only fragments that exist in local index (browseable)
+            if tag_results and hasattr(state, 'meta_mgr') and state.meta_mgr and hasattr(state.meta_mgr, 'csv_bank'):
+                tag_results = [r for r in tag_results if r.get('sys_id') in state.meta_mgr.csv_bank]
+
+            # Batch-fetch PGP translations for tag results (Hebrew descriptions/types)
+            _tag_trans = {}
+            if tag_results and get_language() == 'he':
+                try:
+                    _tag_show = _safe_get('show_translations', False)
+                    if _tag_show:
+                        _tag_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
+                        if _tag_sids:
+                            def _fetch_tag_trans():
+                                from shared.translation_service import TranslationService
+                                svc = TranslationService(thread_safe=True)
+                                result = svc.get_pgp_translations_by_sys_ids(_tag_sids) if svc.pgp_available() else {}
+                                svc.close()
+                                return result
+                            _tag_trans = await run.io_bound(_fetch_tag_trans)
+                except Exception:
+                    pass  # Translation lookup failed; continue without translation
+
+            # SEED-022: which tag-result sys_ids have readable manual text (PGP
+            # text ∪ FGP). The PGP badge below is unconditional (tag search is
+            # PGP-scoped); the new manual badge is conditional on actual text.
+            _tag_manual_ids: set = set()
+            try:
+                _tag_all_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
+                if _tag_all_sids:
+                    _tag_manual_ids = await run.io_bound(
+                        _web_manual_transcription_ids, _tag_all_sids
+                    ) or set()  # None (cancelled / app stopping): no badge
+            except Exception:
+                pass  # Manual-transcription lookup failed; omit the badge
+
+            results_container.clear()
+            with results_container:
+                if not tag_results:
+                    with ui.column().classes('w-full h-64 items-center justify-center'):
+                        ui.icon('label_off').classes('text-5xl').style('color: var(--text-muted);')
+                        ui.label(f'{tr("No results for tag")}: "{initial_tag}"').classes('mt-4').style('color: var(--text-muted);')
+                    return
+
+                # Tag results header
+                with ui.column().classes('w-full gap-2 p-4'):
+                    with ui.row().classes('items-center gap-2 mb-3'):
+                        ui.icon('label').classes('text-lg').style('color: var(--success-600);')
+                        ui.label(f'{tr("Tag")}: ').classes('text-sm').style('color: var(--text-secondary);')
+                        ui.badge(initial_tag, color='green').props('outline').classes('text-sm')
+                        ui.label(f'({len(tag_results)} {tr("results")})').classes('text-sm').style('color: var(--text-muted);')
+
+                    # Render tag results as cards
+                    for i, result in enumerate(tag_results):
+                        with ui.card().classes(
+                            'w-full p-4 cursor-pointer transition-all hover:shadow-md'
+                        ).style('border-radius: 10px;'):
+                            with ui.row().classes('w-full items-start justify-between'):
+                                with ui.column().classes('flex-grow min-w-0 gap-1').props('data-ux=result_quick_view').on(
+                                    'click',
+                                    lambda r=result: open_advanced_dialog(None, _tag_to_result(r))
+                                ):
+                                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                                        ui.label(f"#{i + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                            'background: var(--bg-tertiary); color: var(--text-muted);'
+                                        )
+                                        # PGP indicator
+                                        ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                            'background: var(--success-100); color: var(--success-700); font-weight: 600;'
+                                        ).tooltip(tr('Has PGP info'))
+                                        # SEED-022: manual-transcription indicator (icon + tooltip)
+                                        if result.get('sys_id') in _tag_manual_ids:
+                                            ui.icon('description').classes('text-sm shrink-0').props(
+                                                f'role=img aria-label="{tr("scholarly transcription/translation available")}"'
+                                            ).style(
+                                                'color: var(--accent-amber, #b45309);'
+                                            ).tooltip(tr('scholarly transcription/translation available'))
+                                        ui.label(result.get('shelfmark', 'Unknown')).classes(
+                                            'font-bold break-all'
+                                        ).style('color: var(--primary-700);')
+
+                                    # Document type (with translation if available)
+                                    _tag_r_trans = _tag_trans.get(result.get('sys_id'), {}) if _tag_trans else {}
+                                    _tag_doc_type = _tag_r_trans.get('document_type_he') or result.get('document_type')
+                                    if _tag_doc_type:
+                                        ui.label(_tag_doc_type).classes('text-xs').style(
+                                            'color: var(--text-tertiary);'
+                                        )
+
+                                    # Description snippet (with translation if available)
+                                    desc = _tag_r_trans.get('description_he') or result.get('description', '') or ''
+                                    if desc:
+                                        truncated = (desc[:150] + '...') if len(desc) > 150 else desc
+                                        ui.label(truncated).classes('text-sm').style('color: var(--text-secondary); line-height: 1.4; font-size: 0.75rem;')
+
+        # Cat-2: deferred page-mount init - tag results need container to mount.
+        asyncio.ensure_future(_after_delay(0.1, load_tag_results))
+
+    # Initialize with restored results or initial query
+    elif search_state.vs_browse_mode and search_state.vs_restrict_sys_ids:
+        # VS Browse mode: auto-search with wildcard restricted to suggestion pool
+        query_input.value = '*'
+        mode_select.value = 'shelfmark'
+        # Next tick, not a fixed wait: everything execute_search sends is held in
+        # the outbox until the socket connects (tests/test_search_url_start_delay.py).
+        asyncio.ensure_future(_after_delay(0, execute_search))
+    elif _live_run is not None:
+        # Back to a search still running: wait for that run, never a second one.
+        asyncio.ensure_future(_after_delay(0, execute_search, _live_run))
+    elif search_state.results:
+        results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+        render_results(search_state.results, page=0)
+        # SEED-026 (smoke 2026-06-29): on session restore (e.g. after a UI-language
+        # change rebuilds the page from the snapshot), reveal the buttons whose data is
+        # already restored — library (needs only results) + exclude (exclusion_sources).
+        # PGP is revealed by _deferred_transcription_restore; domain/printed are revealed
+        # there too after the cheap FJMS re-fetch. Without this, all filter buttons stayed
+        # hidden on restore because the reveal lived only in the fresh-search enrichment path.
+        try:
+            _set_btn_visible(library_filter_btn, True)
+            _update_library_btn()
+            _update_exclude_btn()
+        except Exception:
+            logger.exception("SEED-026: filter button reveal on session restore failed (non-fatal)")
+        ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
+    elif restore_saved_results and bootstrap_state['restore_run_filters']:
+        # Back to a run that found nothing: it ran, and it is shown as it was.
+        results_count.text = f"0 {tr('Results')}{_downgrade_suffix()}"
+        render_results([])
+    elif initial_query:
+        _ux_url_start['nav'] = True
+        # Next tick, not a fixed wait: a 0.5 s wait here delayed every homepage-box
+        # search's first rows; execute_search reads only server-side values and
+        # what it sends waits in the outbox for the socket.
+        asyncio.ensure_future(_after_delay(0, execute_search))
+
+    # --- Deferred initialization (runs after UI renders) ---
+
+    async def _deferred_filter_init():
+        """Load filter select options asynchronously after page renders."""
+        lang = get_language()  # Capture in client context before io_bound
+        # None (cancelled / app stopping) would break the select: options=None.
+        d = await run.io_bound(build_domain_options, lang)
+        if d is None:
+            return
+        domain_select.options = d
+        domain_select.update()
+        a = await run.io_bound(build_author_options, lang, search_state.filter_domains)
+        if a is None:
+            return
+        author_select.options = a
+        author_select.update()
+        w = await run.io_bound(build_work_options, lang, search_state.filter_domains, search_state.filter_authors)
+        if w is None:
+            return
+        work_select.options = w
+        work_select.update()
+        _update_chip_bar()
+        # The post-search Material values (catalogue and measured, D20).
+        try:
+            mats = await run.io_bound(_get_fjms_for_criteria().get_criterion_values, 'material')
+        except Exception:
+            logger.info("post-search material values failed", exc_info=True)
+            mats = None
+        if mats:
+            post_mat_select.options = {
+                m['value']: (m.get('label_he') if lang == 'he' else m.get('label_en')) or m['value']
+                for m in mats}
+            post_mat_select.update()
+
+    # Cat-2: deferred select option population - filter selects must be mounted.
+    asyncio.ensure_future(_after_delay(0.1, _deferred_filter_init))
+
+    async def _deferred_transcription_restore():
+        """Restore transcription indicators for saved results asynchronously.
+
+        Phase 999.2 (PGP-FILTER-02 + HIGH-4): on session reload, after fetching
+        transcription_sys_ids, the PGP button + chip must be synced to the restored
+        pgp_filter state AND the result set must be rendered through the unified
+        filter cascade — otherwise a persisted pgp_filter='only_pgp' restores the
+        state but renders unfiltered results (silent inconsistency).
+        """
+        if search_state.results:
+            sys_ids = [
+                r.get('display', {}).get('id')
+                for r in search_state.results
+                if r.get('display', {}).get('id')
+            ]
+            if sys_ids:
+                # SEED-022: restore the PGP link set (PGP badge) AND the manual-
+                # transcription union (new badge) in parallel, so both reappear on a
+                # reloaded session.
+                try:
+                    link_ids, manual_ids = await asyncio.gather(
+                        io_bound_result.io_bound(get_sys_ids_with_transcriptions, sys_ids),
+                        io_bound_result.io_bound(_web_manual_transcription_ids, sys_ids),
+                    )
+                    if io_bound_result.interrupted(link_ids, manual_ids):
+                        return  # no answer (cancelled, or the app is stopping): never store it
+                    search_state.transcription_sys_ids = link_ids
+                    search_state.manual_transcription_sys_ids = manual_ids
+                except Exception:
+                    link_ids = await run.io_bound(get_sys_ids_with_transcriptions, sys_ids)
+                    if link_ids is None:
+                        return  # cancelled or app stopping: never store None
+                    search_state.transcription_sys_ids = link_ids
+                    search_state.manual_transcription_sys_ids = set()
+                # SEED-026 (smoke 2026-06-29): re-run the cheap FJMS enrichment on restore
+                # (domains + printed + catalog counts + measurements) so the domain/printed
+                # filter buttons reappear after a UI-language change rebuilds the page from
+                # the snapshot. Mirrors fresh-search STAGE-1 enrichment but is all SQLite
+                # sidecar reads (no IIIF/NLI), so it is fast and cannot hit the image-fetch
+                # timeout path. Runs BEFORE the cascade below so has_domain_data is set in
+                # time for the domain-exclusions branch.
+                try:
+                    raw_domains, catalog_counts, printed_ids, meas_batch = await run.io_bound(
+                        collect_fjms_enrichment, sys_ids
+                    )
+                    _process_domain_data(raw_domains)
+                    search_state.has_domain_data = bool(search_state.all_result_domains)
+                    search_state.result_domains = dict(search_state.all_result_domains)
+                    search_state.printed_ids = printed_ids
+                    search_state.catalog_source_counts = catalog_counts
+                    search_state._measurement_cache.update(meas_batch)
+                    _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
+                    _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
+                    _update_domain_filter_btn()
+                    _set_btn_visible(library_filter_btn, bool(search_state.results))
+                    _update_library_btn()
+                except Exception:
+                    logger.exception("SEED-026: FJMS re-enrichment on restore failed (non-fatal)")
+                # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
+                _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+                _update_pgp_filter_btn()
+                _update_pgp_filter_chip()
+                # Phase 999.2 (HIGH-4): use the unified filtered render cascade so the
+                # restored pgp_filter state actually filters results. Dispatch mirrors
+                # _toggle_pgp_filter — pick the right entry point based on active filters.
+                if search_state.exclusion_sources:
+                    _apply_manuscript_exclusions(reset_expansion=False)
+                elif search_state.domain_exclusions and search_state.has_domain_data:
+                    _apply_domain_exclusions(reset_expansion=False)
+                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+                    # SEED-026 (LIBFILTER-01): widened — library-only also routes through filtering helper on restore.
+                    _apply_printed_filter_and_render(search_state.results, reset_expansion=False)
+                else:
+                    # Original behavior: no filters active, raw render preserves pagination.
+                    render_results(search_state.results, page=search_state.current_page)
+
+    # Cat-2: deferred enrichment on restore - results container must be mounted.
+    asyncio.ensure_future(_after_delay(0.2, _deferred_transcription_restore))
+
+    # Phase 55: Deferred refinement chain replay on session restore
+    if search_state.refinement_chain:
+        # Cat-2: deferred chain replay after restore - results render must complete.
+        asyncio.ensure_future(_after_delay(0.3, _deferred_chain_replay))

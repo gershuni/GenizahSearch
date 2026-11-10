@@ -1,0 +1,255 @@
+# Environment Variables Reference
+
+> **This is the single source of truth for every environment variable in
+> GenizahSearch.** It was lifted out of `CLAUDE.md` on 2026-08-26: that file is
+> read into every session, and this block alone was 41% of it. A partial copy
+> also lived in `DEVELOPER_GUIDE.md` and had already drifted from it, so both
+> now point here instead.
+>
+> `CLAUDE.md` keeps only the flags that decide whether a surface is reachable
+> at all, because those change what an agent does. Everything else -- tuning
+> knobs, timeouts, budgets, resilience settings -- is here.
+
+---
+
+## Environment Variables
+
+```
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+GENIZAH_STORAGE_SECRET=<random, 32+ characters>   # web-only, REQUIRED everywhere (production and local dev). Signs the NiceGUI session cookie. web/main.py's startup block (web/session_hardening.py::resolve_storage_secret) refuses to start when it is unset, blank or shorter than 32 characters -- there is no fallback, so set it on the server BEFORE deploying code that needs it. Generate: python -c "import secrets; print(secrets.token_urlsafe(32))". Changing it signs every web user out once and orphans the old .nicegui/storage-user-*.json files (the 90-day startup prune removes them). Never logged or printed.
+POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
+WEB_PUZZLE_ENABLED=true (default: true)
+ATLAS_PREVIEW_ENABLED=false   # web-only (Phase 133, ATLAS-01). Default OFF — gates the Visual Atlas Preview beta: the /atlas page, its /atlas-data/* routes, and the nav link. The flag is necessary but NOT sufficient: web/atlas_assets.py::atlas_preview_available() ANDs it with the baked-asset readiness (manifest + plain .bin loaded at startup from repo-root atlas_data/, OUTSIDE web/static/), so a flag-ON/asset-missing window still hides cleanly. Set to 1/true to enable in the beta env.
+DISCOVERY_ENABLED=false   # web-only (Phase 134, DATA-07). Default OFF at the code level, but **set to 1/true in production since 2026-08-08** — /computed-identifications and the browse-page connections panel are publicly live there (confirmed by commit 04434714; see CHANGELOG.md [Unreleased]). Local/dev checkouts stay OFF unless set explicitly. The flag is necessary but NOT sufficient: web/discovery_assets.py::discovery_available() ANDs it with the discovery.db sidecar's startup-loaded readiness (versioned, fail-closed: exact manifest asset_basename, content-hash match, PRAGMA integrity_check, schema_version reject-incompatible, release-contract row counts, required meta/tables, frozen enum vocab) — a flag-ON/sidecar-missing-or-corrupt window still hides cleanly. Set to 1/true once Phase 135+ ships a surface to gate.
+DISCOVERY_FINDINGS_COUNT_MAX=0   # web-only (Phase 136). Default 0 = OFF: the corpus-wide findings page reports its EXACT total. Above 0, the counting query stops at the cap and the envelope reports total=cap with meta.approximate_total=True — a capped total reported as exact is a correctness defect, not a tuning choice. Findings page ONLY: the connections-panel work-expansion total is exact by contract and deliberately has NO equivalent knob (its approximate-total escape was withdrawn in Phase 136 pre-flight — the honest degradation there is `timeout`, not a truncated number). Read live in shared/discovery_service.py; full rationale in docs/specs/discovery-budgets.md.
+DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES=24   # web-only (Phase 136). The BROWSE-path bounded-concurrency budget, separate from the heavy one (DISCOVERY_MAX_CONCURRENT_QUERIES=4). The two numbers MUST differ (a cold panel load issues 3 reads concurrently plus a fourth, so the heavy cap of 4 would put the second simultaneous visitor into `busy`), and each budget has its OWN ThreadPoolExecutor sized to it -- two semaphores over one pool are two names for one budget. Full rationale, including why the heavy semaphore never applied to the browse path at all: docs/specs/discovery-budgets.md SS2/SS3.
+DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES=2   # web-only (Phase 136.2). The THIRD concurrency budget, for the findings xlsx export, with its OWN ThreadPoolExecutor sized to it (two semaphores over one pool are two names for one budget). Separate from the heavy cap of 4 because an export holds its slot for a whole-corpus walk, not one query: measured 28,635 rows in 52.9 s on the default view. The export is UNCAPPED IN ROWS by owner decision (2026-08-20) and bounded on every other axis instead.
+DISCOVERY_EXPORT_TIMEOUT=300.0   # web-only (Phase 136.2). Whole-build timeout for the export walk. Its honest failure is a 504, NEVER a short file: a truncated workbook is indistinguishable from a small result set once downloaded.
+DISCOVERY_EXPORT_EXCERPT_CHUNK=500   # web-only (Phase 136.2). Ids per `IN (...)` batch in the export's excerpt read, replacing the per-identification read (1 query/row would be 28,635 serialized SQLite round trips on a single-uvicorn-worker box). Same fix shape as the citation-range P1 (4f6e31f4, 10,478 ms -> 97 ms).
+GENIZAH_PUBLIC_BASE_URL=https://genizahsearch.com   # web-only (Phase 136.2). The canonical origin baked into links inside an exported workbook. Deliberately NOT `request.base_url`: that derives from the client-controlled Host header, so a crafted request would put attacker-chosen origins into every link of a file that otherwise looks like ours and carries our provenance sheet — and a downloaded file outlives the request that made it. A non-http(s) value logs a warning and falls back to RELATIVE links (less convenient, never wrong).
+GENIZAH_DISCOVERY_DATA_DIR=/path/to/dir   # dev/CI-only (Phase 136). Overrides the directory web/discovery_assets.py reads the discovery sidecar + manifest.json from (default: repo-root discovery_data/). Read ONCE at import, never per request. Exists because discovery_data/ is gitignored, so the CI `findings-browser-check` job has no sidecar and the findings page would clean-hide: the job materializes the SYNTHETIC fixture sidecar into a temp dir (scripts/ci_materialize_discovery_fixture.py) and points this at it. Widens no trust boundary — it selects WHICH directory is read; the loader still applies its full fail-closed contract (exact manifest asset_basename, content hash, PRAGMA integrity_check, schema_version, `public` audience gate, required tables/columns/meta keys, release-contract row counts, frozen enum vocab). Deliberately NOT used to repoint the repo's real discovery_data/manifest.json, which a test kept in the private repository resolves the real artifact through. Leave unset in production.
+DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT=50   # web-only (Phase 136). Default page size for /computed-identifications, clamped below the page-size max. Read in web/pages/findings.py + shared/discovery_service.py.
+IDENTIFICATION_REVIEWS_ENABLED=true   # web-only (2026-08-13, beta). Default ON — gates the community identification-reviews feature (a reader submits a relation verdict on a computed identification; admins moderate before publication). Writes go only through Supabase SECURITY DEFINER RPCs, never a direct table write. Read live in web/identification_reviews.py::reviews_enabled(). Kill-switch: 0/false/no/off. NOT yet a GSD-planned phase — see docs/OPEN_ISSUES.md and the v9.0.0 roadmap note on Phase 137.
+DISCOVERY_BROWSE_LRU_MAX_ENTRIES=...   # dev/bench-only. Read by scripts/ benchmarking, not by the web app.
+FGP_TRANSCRIPTIONS_ENABLED=true   # shared (both apps): show FGP transcriptions as a distinct, selectable source in the version chooser. Default ON (2026-06-22 go-live) — surfaces wherever the gitignored fgp_data/fgp_transcriptions.db is present; graceful no-op when the DB is absent. Kill-switch: set to 0/false/no/off. Read live in shared/fgp_service.py.
+WEB_FGP_ENABLED=...               # optional web-only override of the above (web/feature_flags.py::web_fgp_enabled); defaults to FGP_TRANSCRIPTIONS_ENABLED (ON). Disable on web only with WEB_FGP_ENABLED=0.
+BLAU_DICTIONARY_ENABLED=true      # shared: Blau's dictionary on /browse (click a word; several selected or typed words are the expression search, in order with a gap of 0-5 words, shared with Friedman's through shared/ja_expression.py; shared/blau_service.py, docs/plans/BLAU_DICTIONARY_PLAN.md). Default ON — but necessary, not sufficient: the companion shows only where blau_data/blau.db is present AND passed the service's checks at startup (schema and normalizer versions, the credit line, the lookup index, the row count, quick_check; a 1.1.0 file also its tokens table, index, count and keying version); otherwise the page is what it was before. A 1.0.0 file (before the tokens table) is served without the expression search: the code goes to the server first, the rebuilt file after it. Kill-switch: 0/false/no/off, read live.
+LANE_DICTIONARY_ENABLED=true      # shared: Lane's Arabic-English Lexicon, its own tab in the /browse dictionary panel beside Blau's (shared/arabic_service.py, docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12). Default ON — but necessary, not sufficient: it shows only where arabic_data/arabic.db is present AND passed the service's checks at startup (schema and normalizer versions, the Perseus credit line, the lookup indexes, the row counts, quick_check). The panel is on the page when Lane or Blau is served; a dictionary not served has no tab. Kill-switch: 0/false/no/off, read live (each lookup asks again).
+FRIEDMAN_DICTIONARY_ENABLED=false # shared: M. A. Friedman's Judeo-Arabic dictionary, its own tab in the /browse dictionary panel, with the expression search (several words in order, a gap of 0-5 allowed between them; shared/friedman_service.py). Default OFF: the sidecar is a typographic candidate (a machine reading of the dictionary's published PDF files; it may contain errors). Necessary, not sufficient: the tab shows only where friedman_data/friedman.db is present AND passed the service's checks (schema, status, normalizer and recovery versions, the credit line, quick_check). 1/true/yes/on, read live.
+GENIZAH_FRIEDMAN_DB_PATH=         # shared: read friedman.db from this file instead of %LOCALAPPDATA%\GenizahSearchPro\data\friedman_data\ or friedman_data/ beside the code (the lookup order of the other sidecars). Dev/CI only.
+GENIZAH_BLAU_DB_PATH=             # shared: read blau.db from this file instead of %LOCALAPPDATA%\GenizahSearchPro\data\blau_data\ or blau_data/ beside the code: a rebuilt candidate (blau_data/blau-1.1.0.db) run beside the served file without replacing it. Dev/CI only.
+CATALOG_TEXT_SEARCH_ENABLED=false  # shared: the catalogue text search (shared/catalog_text_service.py, docs/plans/CATALOGUE_TEXT_SEARCH_PLAN.md). Default OFF until catalog_data/catalog_text.db is on the server; necessary, not sufficient: the search is offered only where the file is present AND passed the service's checks (schema and normalizer versions, required tables, row count). Nothing reads it yet besides the service (PR 1); the surfaces arrive in PR 2. Read live.
+PASSAGE_MULTI_WITNESS_ENABLED=false / SEARCH_API_PASSAGE_MAX_WITNESSES=25   # web-only. Multi-witness passage search; ANDed with passage_available(). NEVER concatenate witnesses here -- the posting budget starves (48% vs 74% fused, and worse than ONE witness). Rejected for method='chunk', where union and concatenation measured identical. Contract: docs/SEARCH_API.md.
+MCP_ENABLED=false   # web-only (docs/plans/MCP_SERVER_PLAN.md, D6). Default OFF. Gates the public MCP server at POST /mcp (web/mcp_server.py), which replaces the GenizahSearch GPT before OpenAI retires custom GPTs on 2026-12-11. Necessary but NOT sufficient: register_mcp_server() also requires the /api/chatgpt facade to be registered, and adds NO route otherwise, so /mcp is a plain 404. Read once at import; changing it needs a restart. /terms, /support and /ai/privacy (web/public_pages.py) do not depend on it.
+OPENAI_APPS_CHALLENGE=   # web-only. The domain-verification value from OpenAI's plugin submission form, served as text/plain at /.well-known/openai-apps-challenge (web/public_pages.py). Unset/empty (the default) answers 404. Read per request. Set it only while submitting or re-verifying.
+AI_CHATGPT_PLUGIN_URL=   # web-only (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md). The public ChatGPT plugin listing URL, set once OpenAI has approved AND it is published. Switches /ai and the homepage AI strip to an "Add to ChatGPT" button, sends /chatgpt to it, and removes the GPT. Only https:// values count (anything else publishes nothing). Unset (the default): the site offers the GPT until 2026-12-11. Read per request; .env changes need a restart.
+AI_CLAUDE_CONNECTOR_URL=   # web-only. The public Claude directory listing URL for the connector, once listed. Adds an "Add to Claude" button to /ai and the homepage AI strip. https:// only. Unset: no Claude button.
+AI_LAUNCH_ANNOUNCE_UNTIL=   # web-only. A date (YYYY-MM-DD): through that day, while a listing is live, the homepage AI strip says "New: GenizahSearch in ..." (owner: four weeks from launch). The header's What's New entry for the listings does not depend on it.
+PASSAGE_PARALLELS_ENABLED=false   # web-only (Phase 145). Gates method='passage' on /api/parallels + the parallels-page method selector. Necessary but NOT sufficient: web/passage_assets.py::passage_available() ANDs it with the passage index's startup-loaded readiness (shared/passage_index.py::open_index is itself fail-closed: manifest, layout/normalizer version, bit budgets, byte order, CSR sanity, declared-vs-actual file sizes). Flag-ON + index-missing/corrupt hides cleanly.
+GENIZAH_PASSAGE_DATA_DIR=/path/to/dir   # dev/CI-only. Overrides the dir web/passage_assets.py opens the passage index from (default: repo-root passage_index/current/, gitignored, multi-GB, machine-local). Read ONCE at import.
+GENIZAH_PRIVATE_DIR=/path/to/GenizahSearch-private   # dev-only (scripts and tests). The private repository's checkout. Unset = the folder GenizahSearch-private beside the MAIN checkout (also from a worktree); scripts/private_repo.py and tests/private_records.py decide it in one place. Tests that need a private record skip without it; scripts that need one stop with a clear message. Leave unset in CI.
+GENIZAH_REMOTE_REPO=/path/on/the/server   # owner PC only. The server checkout the scripts/deploy_*_sidecar.ps1 scripts deploy into (or pass -RemoteRepo). No default, so the server layout is not in the repository.
+DICTA_API_URL=https://...   # optional. Overrides the Dicta completions endpoint that shared/dicta_client.py uses (batch translation scripts, the website's Translate buttons, the desktop's field translation). Unset = the built-in endpoint.
+DICTA_PRIORITY_HEADER=... / DICTA_PRIORITY_KEY=...   # owner PC only, optional. Priority access to the Dicta API for the batch translation scripts (higher rate limits, more workers); both must be set. Never commit their values.
+GENIZAH_FJMS_DB_PATH=/abs/path/fjms_enrichment.db   # dev-only (both apps). An explicit fjms_enrichment.db for shared/fjms_service.py, ahead of its auto-detection (%LOCALAPPDATA%\GenizahSearchPro\data\fist_data\ first, then repo-root fist_data/). Its use: a git worktree under .claude/worktrees/ carries none of the gitignored sidecars, and the FJMS file (~1.5 GB) is the one not worth copying, so a worktree session points this at C:\GenizahSearch\fist_data\fjms_enrichment.db. NEVER bridge a worktree with a junction or symlink instead: `git worktree remove --force` and `rm -rf` walk a junction into the main checkout (2026-11-04, nli_data/ and fgp_data/ emptied; CLAUDE.md "How to work here", scripts/check_worktree_links.ps1). The other sidecars (nli_data, fgp_data, pgp_data, blau_data) have no such variable: copy them under %LOCALAPPDATA%\GenizahSearchPro\data\<dir>\, which every shared/*_service.py checks first. Leave unset in production.
+GENIZAH_RESEARCH_WORKERS=1 / GENIZAH_RESEARCH_PRESTART=1   # web-only. Search workers (web/research_jobs.py): how many searches run at once across ALL visitors (default 1, max 4; the rest wait in one FIFO queue), and whether each slot starts its next worker ahead of the search so it skips the ~6 s catalogue load (default ON; an idle warm worker holds ~400 MB). A Title/Shelfmark lookup of up to 100 manuscripts (web/research_jobs.py INLINE_METADATA_ROWS) runs in the server process, in no worker and in no queue. The other GENIZAH_RESEARCH_* knobs and the trade-offs: docs/search-matching-timeouts.md.
+PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)
+POSTHOG_IP_SALT=xxx (optional - HMAC salt for hashing client IPs; auto-generated if unset, production should set explicitly so hashes survive restarts)
+# FORWARDED_ALLOW_IPS -- do NOT set it, not even to an empty value (uvicorn's own var). Unset = trust only 127.0.0.1 (nginx): uvicorn rewrites request.client to the right-most X-Forwarded-For entry not from a trusted host -- the one nginx appends as $remote_addr -- and every per-IP limiter and the PostHog IP hash key on that. EMPTY (a bare "FORWARDED_ALLOW_IPS=" line in .env, which web/main.py loads) trusts no host at all: request.client stays 127.0.0.1 and the puzzle limiter keys every visitor together. NEVER '*': uvicorn then takes the LEFT-most entry, which the visitor writes. Both pinned by tests/test_api_hardening_behind_cloudflare.py. Behind Cloudflare that appended entry is the visitor only with nginx's realip snippet: docs/guides/DEPLOYMENT_TECHNICAL.md, "Real visitor addresses behind Cloudflare".
+API_TRUSTED_PROXIES=   # must stay EMPTY in this deployment (web/api_hardening.py). Extra LITERAL addresses (comma-separated, no CIDR) skipped when walking X-Forwarded-For; loopback is always trusted. NOT harmless: uvicorn has already resolved request.client to the visitor, so a visitor whose address is listed is skipped again and keyed on the entry to its left, which it wrote itself (XFF "F, V, V" with V listed -> F, for the API limiters and the PostHog hash; pinned by tests/test_api_hardening_behind_cloudflare.py). Never put Cloudflare ranges here -- nginx's realip snippet is where Cloudflare is trusted.
+
+# Search API (Phase 77-83 public HTTP/JSON API over the corpus)
+SEARCH_API_MODE=open                  # open | localhost-only | disabled (flippable per request, no restart)
+SEARCH_API_RATE_LIMIT=120             # per-IP requests/minute; shared ceiling but each endpoint has its own bucket (raised 30->120 in 2026-06 for API research)
+SEARCH_API_POSTHOG_SAMPLE_N=1         # capture every Nth API request to PostHog
+SEARCH_API_BROWSE_TIMEOUT=1.0         # per-source enrichment timeout (PGP/FJMS/NLI), seconds
+SEARCH_API_BROWSE_CORE_TIMEOUT=2.0    # core BrowsePage fetch timeout, seconds
+SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT=45.0  # core budget while the browse map is still loading (GenizahService.is_warm() False); the first resolution after start pays an 18 s cold pickle+repair load, so requests in that window WAIT instead of 504ing; normal budget resumes once warm
+SEARCH_API_CORE_TIMEOUT=30.0          # interactive baseline (exact/title/shelfmark/responsa); runs in executor off the event loop -> 504 core_timeout
+SEARCH_API_VARIANTS_TIMEOUT=60        # /api/search variants-mode core timeout (s); heavy tier
+SEARCH_API_FUZZY_TIMEOUT=110          # /api/search fuzzy-mode core timeout (s); heaviest mode. 110, NOT 300: bounded by the edge proxy, not by the engine -- see the note below
+SEARCH_API_PARALLELS_TIMEOUT=110      # /api/parallels composition core timeout (s). Same 110 s edge bound as fuzzy
+SEARCH_API_HEAVY_CONCURRENCY=2        # max concurrent heavy (variants/fuzzy/parallels method=chunk) requests; over -> 503 heavy_search_busy + Retry-After
+SEARCH_API_INTERACTIVE_CONCURRENCY=2  # max concurrent synchronous NON-heavy /api/search requests (exact/title/shelfmark/responsa); over -> 503 search_busy + Retry-After. Added 2026-11-03: these modes had no budget, so a scraper's searches stacked up in the research queue every visitor shares (GENIZAH_RESEARCH_WORKERS) and reader search p50 doubled on 11-02. Background jobs bypass it (their own admission: two per client, 32 in all).
+SEARCH_API_DAILY_LIMIT=2000           # per-address requests in a trailing 24 h, ONE budget across /api/search, /api/browse and /api/parallels (capabilities/criteria not counted); over -> 429 daily_limit_reached + Retry-After (time until enough of the oldest requests leave the window for the bucket to fall under the CURRENT limit: the oldest one normally, a later one right after you lowered the limit below a bucket's size). 0 disables. Added 2026-11-03: the per-minute buckets stop bursts, not a pull of 8,036 requests in six hours at ~20/min. The over-budget attempt itself is not recorded, so a bucket never exceeds the limit in memory; a request that is admitted and then refused as invalid (400) or busy (503) IS counted, because the check runs before validation and the concurrency budgets. Claude/ChatGPT connectors share egress addresses, so watch `daily_limit_reached` in PostHog (`search_api_request.error_code`) before lowering it.
+SEARCH_API_PASSAGE_TIMEOUT=30         # /api/parallels method='passage' core timeout (s); own ceiling, unrelated to SEARCH_API_PARALLELS_TIMEOUT (Phase 145)
+SEARCH_API_PASSAGE_CONCURRENCY=4      # max concurrent method='passage' requests; its OWN semaphore + ThreadPoolExecutor(max_workers=4), never the default executor -> 503 passage_search_busy + Retry-After
+SEARCH_API_FUZZY_MAX_LIMIT=500        # fuzzy result-cap ceiling (recall over precision; non-fuzzy stays 100)
+SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text; ?text_cap=N override bounded [100, 10000]
+
+# WHY 110 AND NOT 300 on the two heavy timeouts above (changed 2026-09-08).
+# These are SYNCHRONOUS endpoints behind an edge proxy that abandons the
+# origin connection somewhere between a measured 97.0 s success and a
+# measured 125.2 s 524. A 300 s ceiling is therefore undeliverable: the
+# client never receives our documented JSON `core_timeout` 504, it receives
+# the proxy's opaque non-JSON error page. 110 sits above the success and
+# below the giveup, so OUR timeout wins the race.
+#
+# Setting these back to 300 does not buy longer searches -- it only replaces
+# an honest 504 envelope with an opaque proxy error, AND the bundled skill
+# client now stops at 130 s (110 + margin), so the caller would hit its own
+# socket timeout first. Raise them only for a deployment that is NOT behind
+# such a proxy, and raise the client timeout with them.
+#
+# This block is the canonical reference, so it is checked against the code:
+# tests/test_env_vars_doc_matches_code.py fails if a default quoted here
+# disagrees with web/search_api.py. That test exists because this file said
+# 300 for four hours after the code said 110, and env wins over the code
+# default -- so an operator following this guide would have restored the
+# exact bug the change removed.
+
+# Skill-side (cairo-genizah-research skill consumer)
+GENIZAH_API_BASE=https://genizahsearch.com    # overrides --base-url CLI flag (env wins)
+GENIZAH_SKILL_REQ_PER_MIN=96                  # skill self-throttle, leaves 24 rpm headroom under server's 120 rpm
+
+# Web memory remediation (2026-07-08 allocator-ratchet attribution; web-only)
+GENIZAH_MALLOC_TRIM_SECONDS=300       # periodic glibc malloc_trim(0) loop interval (0 disables; Linux-only, web/malloc_trim.py)
+GENIZAH_MALLOC_TRIM_MIN_GROWTH_MB=64  # adaptive: trim only when RssAnon grew this much since the last trim (0 = every tick)
+GENIZAH_STORAGE_RETENTION_DAYS=90     # delete .nicegui storage-user files untouched for N days at startup (0 disables;
+                                       # a browser absent longer is logged out on return — auth_session lives in the file)
+NLI_CACHE_MAX_ENTRIES=20000           # metadata nli_cache LRU bound (code default 75000; prod set 20000 on 2026-07-08)
+IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500  # IIIF manifest cache bound (code default 5000; prod set 1500 on 2026-07-08)
+GENIZAH_GC_FREEZE=1                   # gc.collect(); gc.freeze() ONCE after the startup loaders finish (web/gc_freeze.py), so
+                                       # full collections stop walking the 0.6-0.84 M startup objects on the event loop;
+                                       # 0/false/no/off disables. Frozen objects leave gc.get_objects(): /_internal/objgraph
+                                       # reports gc_freeze_count and takes action=unfreeze / action=refreeze. It pins
+                                       # everything alive then, incl. early visitors' page state (cyclic garbage among
+                                       # it stays until action=unfreeze): ~3 MB per ~1,200-element page open at that
+                                       # moment (measured 2026-10-21), once -- and again at every action=refreeze.
+GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS=180 # freeze anyway after waiting this long for the MetadataManager threads, the FL-ID
+                                       # build and the FJMS prewarm (the log line then names what is still running)
+GENIZAH_GC_FREEZE_POLL_SECONDS=1.0    # how often the wait re-checks those loaders
+
+# Perf watch (2026-07-30 slowness diagnosis; web-only, web/perf_watch.py). Default ON and
+# deliberately quiet — nothing is logged while the app behaves. Added because a 9-second
+# response previously left NO server-side trace: nginx uses the default `combined` log format
+# (no $request_time/$upstream_response_time) and the only in-app timing was /lists-scoped and
+# flag-gated, so origin latency was invisible and had to be inferred from outside.
+GENIZAH_PERF_WATCH=1                  # 0/false disables BOTH signals below
+GENIZAH_SLOW_REQUEST_MS=1500          # log any http request slower than this (all paths, incl. static)
+GENIZAH_LOOP_LAG_MS=300               # log event-loop stalls above this — THE decisive signal: uvicorn
+                                       # runs ONE worker, so sync Supabase/NLI I/O on the loop stalls every
+                                       # concurrent request incl. static files, while burning no CPU (so it
+                                       # is invisible in load average — prod read 0.03 during multi-second TTFBs)
+GENIZAH_LOOP_LAG_INTERVAL=1.0         # lag monitor tick, seconds (floor 0.1)
+GENIZAH_NOT_SCHEDULED_MS=60000        # (2026-08-19) above this, a tick that burned almost no CPU is
+                                       # reported as "monitor NOT SCHEDULED" and kept OUT of max_lag_ms:
+                                       # the process stopped running (laptop asleep, container throttled,
+                                       # Windows console paused by a QuickEdit selection), it was not
+                                       # blocked. A 3,069,031 ms "event loop BLOCKED" reading was a
+                                       # sleeping laptop, and it poisoned the all-time maximum that every
+                                       # other perf line quotes. Each real stall now also names its KIND
+                                       # from the same CPU measurement — GIL-bound Python (a run.io_bound
+                                       # worker counts) vs blocking I/O on the loop.
+GENIZAH_PERF_SUMMARY_SECONDS=300      # periodic counter summary; 0 disables
+
+# User-perceived latency (2026-10-20; web-only, web/ux_timing.py + web/static/js/ux_timing.js).
+# One PostHog event, `ux_timing`, per measured action: a Browse page turn or first page, a
+# search's first visible rows, a Quick View, an add-to-list or a comment -- from the user's
+# click (or the navigation, for a URL-started load) to the next paint, split into
+# server_ms / transport_ms / render_ms, with the page image's load time (img_ms) apart.
+# $web_vitals cannot see these: in-page NiceGUI updates are websocket round trips. Nothing is
+# sent without POSTHOG_API_KEY, and posthog-js keeps its localhost opt-out.
+UX_TIMING_ENABLED=1                   # 0/false turns the browser side off (the head snippet is not served)
+UX_TIMING_SAMPLE_RATE=1.0             # share of page loads that send events (~5k real events/month at 1.0)
+
+# Phase 98 NLI Resilience env knobs (added 2026-05-25)
+NLI_CIRCUIT_THRESHOLD=3               # Consecutive failures to trip the shared circuit breaker
+NLI_CIRCUIT_WINDOW=60                 # Seconds the breaker stays open before auto-recovery probes
+NLI_CONNECT_TIMEOUT=3                 # Connection timeout (seconds) for all NLI/IIIF/Rosetta fetches
+NLI_IIIF_READ_TIMEOUT=5               # Read timeout (seconds) for IIIF manifest JSON fetches
+NLI_MARC_READ_TIMEOUT=3               # Read timeout (seconds) for MARC bib XML fetches
+NLI_IMAGE_READ_TIMEOUT=5              # Read timeout (seconds) for NLI image-bytes fetches
+
+# Existing NLI knob — Phase 98 changed default from 20 -> 1:
+NLI_SEMAPHORE_TIMEOUT=1               # Max seconds to wait for a slot in the 8-slot NLI semaphore
+                                       # (was 20 pre-Phase-98; waiting >1s burns threadpool workers)
+
+# (Other existing NLI knobs unchanged: NLI_CACHE_TTL, NLI_FAIL_CACHE_TTL, NLI_MAX_CONCURRENT_FETCHES)
+
+# NLI image proxy's disk stores (2026-10-21; web-only, web/nli_image_store.py). Both are caches:
+# deleting them is safe, they refill from NLI. Locations are read on every call; unset means
+# under INDEX_DIR, an EMPTY value turns that store off. tests/conftest.py points both at a
+# temporary folder per test.
+NLI_DISK_CACHE_TTL=2592000            # how long a manuscript's NLI image ids are kept, seconds (30 days;
+                                       # 0 turns the store off). Until 2026-10-21 the JSON file this
+                                       # governed held only the last 5 minutes (see the changelog)
+NLI_FL_ID_STORE_FILE=                 # the image-id store, SQLite (default <INDEX_DIR>/nli_fl_ids.db).
+                                       # Manifest lists only: a MARC-fallback list (usually one image)
+                                       # stays in memory for NLI_CACHE_TTL. The old nli_fl_ids_cache.json
+                                       # is not read (it mixes the two) and is safe to delete
+NLI_THUMB_CACHE_DIR=                  # kept thumbnails (default <INDEX_DIR>/nli_thumbs): the IIIF JPEG of
+                                       # a page, written the first time the proxy fetches it, read before
+                                       # the NLI breaker -- so it shows during an outage. Layout:
+                                       # w<width>/<md5(sys_id)[:2]>/<sys_id>_s<suffix>_p<page>.jpg
+NLI_THUMB_CACHE_WIDTHS=300            # widths kept on disk, px, comma-separated (the grids fetch 300; 600 and
+                                       # 2000 stay in memory only, so many widths cannot mean many copies)
+NLI_THUMB_CACHE_MAX_MB=10240          # the folder's size cap (about 26 KB a thumbnail); 0 = no cap. Measured
+                                       # at startup in the background; nothing is written until it is
+NLI_THUMB_CACHE_MIN_FREE_MB=2048      # no thumbnail is written while the disk has less free space than this
+
+# The parsed NLI answers kept on disk (2026-11-03; both apps, shared/nli_metadata_store.py): the MARC
+# record and IIIF manifest of every manuscript MetadataManager fetched, one SQLite file beside the
+# FL-id store. A fresh row answers without asking NLI; an older one is refreshed and, when NLI cannot
+# answer (breaker open, 5xx, timeout, an error page), served marked stale with its date, so /browse
+# keeps its catalogue record and image list through an outage (PostHog: 4,338 breaker opens in the
+# 30 days to 2026-11-03). Only a parse with content is written. A cache: safe to delete, refills.
+NLI_METADATA_STORE_FILE=              # the file (default <INDEX_DIR>/nli_metadata.db); an EMPTY value turns the
+                                       # store off. tests/conftest.py points it at a temporary file per test
+NLI_METADATA_STORE_TTL=2592000        # seconds a row answers in NLI's place (30 days, as NLI_DISK_CACHE_TTL);
+                                       # the manifest memory cache ages with it too. 0 = ask NLI on every call
+                                       # and keep the row for outages only; rows are never dropped for age,
+                                       # since an old row is what an outage is served from
+NLI_METADATA_STORE_MAX_ROWS=200000    # row cap (about 2 KB a row, so 400 MB at most); past it the oldest-fetched
+                                       # rows go, at each write and at web startup. 0 = no cap
+
+# Library image routes (/api/nli_image, nli_image_by_sysid, cambridge/manchester/jts/oxford_image;
+# web-only, web/api.py). Since 2026-10-19 they set no session cookie, so these lifetimes reach
+# Cloudflare as well as browsers -- Cloudflare keeps them only under a Cache Rule for those paths
+# (no file extension). Only 200 image bytes get the lifetime; a 404/error/redirect is no-store.
+IMAGE_HTTP_MAX_AGE=604800             # Cache-Control max-age of image bytes, seconds: a week (owner 2026-10-19; was a fixed 600; 0 = no-store)
+IMAGE_CACHE_MAX_ENTRIES=2048          # in-memory image cache entries over 5 shards (was 512, ~100 per library --
+                                       # less than one Visual Similarity grid); memory is bounded by the next line
+IMAGE_CACHE_MAX_BYTES=268435456       # in-memory image cache byte cap (256 MB, unchanged)
+IMAGE_CACHE_TTL=600                   # in-memory image cache lifetime, seconds (unchanged)
+
+# Reconnect backoff (2026-10-21; web-only, web/reconnect_backoff.py)
+# A restart drops every open tab's socket; when the server is back, each tab's handshake carries
+# a client id the new process never had, NiceGUI refuses it and nicegui.js reloads the page AT
+# ONCE -- every tab inside one 5 s window, each a full page build on the one event loop, and the
+# saturated server's late answers ("timeout") reload them again. nicegui.js cannot be changed
+# (immutable cached URL), so web/static/js/reconnect_backoff.js runs in <head> before socket.io:
+# it delays the reload for a refused handshake or a second timeout by base * 2^n (n =
+# consecutive reloads of that tab, in sessionStorage), jittered x0.5-1.5, and a hidden tab waits
+# until it is viewed. NiceGUI's first timeout (its switch to long polling) passes at once, a
+# refusal is never dropped, and a reconnect cancels a pending timeout reload. The server counts what it refuses: /_internal/memstat
+# `handshakes` (web/framework_patches.py::_patch_handshake_counter; >30 unknown clients in a
+# minute logs one "reload burst" warning). Independent of POSTHOG_API_KEY.
+RECONNECT_BACKOFF_ENABLED=1           # 0/false serves no snippet: NiceGUI reloads at once again
+RECONNECT_BACKOFF_BASE_MS=1500        # first reload wait, ms (doubles per consecutive reload)
+RECONNECT_BACKOFF_CAP_MS=60000        # the exponential's cap, ms; the jitter spreads around it, so the
+                                       # longest wait is 1.5 x this
+RECONNECT_DELAY_MAX_MS=0              # socket.io's reconnectionDelayMax, ms; 0 keeps socket.io's 5000.
+                                       # Keep any value well below NICEGUI_RECONNECT_TIMEOUT (30 s): a
+                                       # retry after it finds the client deleted, and the page reloads
+```
+
+**Operational note (Phase 98 — two PostHog drop counters):** Phase 98 ships with TWO PostHog
+queues — `web/api_hardening.py` keeps its existing queue (for `search_api_request` events) and
+the new `shared/posthog_server.py` queue handles breaker telemetry (`nli_breaker_opened` /
+`nli_breaker_closed`). At deploy time, monitor BOTH `web.api_hardening.get_dropped_event_count()`
+AND `shared.posthog_server.get_dropped_event_count()` — growth in EITHER signals queue saturation.
+The two-queue split is intentional (REVIEWS Issue 5 Option A): refactoring `web/api_hardening`'s
+queue would break 5 existing test monkeypatches that target `web.api_hardening._event_queue`
+directly. A future cleanup plan can unify.
+
+# Telemetry guard (2026-11-03)
+# GENIZAH_TELEMETRY_FORCE=1   # desktop only: deliver telemetry from a run FROM SOURCE
+#   (`python genizah_app.py`). Unset (the default), a non-frozen desktop run blocks every
+#   PostHog delivery path -- queue, crash path, self-test -- even with POSTHOG_API_KEY in
+#   .env, so a developer is not counted as a user or a crash (all 1,157 desktop_crash
+#   events in 30 days came from one dev box). The frozen .exe is unchanged.
+#   pytest never sends: tests/conftest.py blanks POSTHOG_API_KEY for the whole process and
+#   scripts/run_local_tests.py does the same for its child processes; a test that exercises
+#   delivery must install its own fake key. Web is unaffected.

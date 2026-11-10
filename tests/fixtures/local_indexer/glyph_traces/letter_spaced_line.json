@@ -1,0 +1,192 @@
+{
+  "description": "Letter-spaced RTL Hebrew, glyphs emitted in correct reading (== visual RTL) order. De-space recombines words; reorder is a no-op. Word gaps (~16pt) >> 1.8x median intra-letter gap (~8pt). Hand-authored bboxes (PDF points, x left->right).",
+  "expected_despaced": "מלחמת כוש של משה",
+  "expected_reordered": "מלחמת כוש של משה",
+  "lines": [
+    {
+      "bbox": [
+        276.5,
+        40.0,
+        403.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "מ",
+              "bbox": [
+                396.5,
+                40.0,
+                403.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                388.5,
+                40.0,
+                395.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ח",
+              "bbox": [
+                380.5,
+                40.0,
+                387.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "מ",
+              "bbox": [
+                372.5,
+                40.0,
+                379.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                364.5,
+                40.0,
+                371.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 4
+            },
+            {
+              "c": "כ",
+              "bbox": [
+                348.5,
+                40.0,
+                355.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 5
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                340.5,
+                40.0,
+                347.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 6
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                332.5,
+                40.0,
+                339.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 7
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                316.5,
+                40.0,
+                323.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 8
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                308.5,
+                40.0,
+                315.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 9
+            },
+            {
+              "c": "מ",
+              "bbox": [
+                292.5,
+                40.0,
+                299.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 10
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                284.5,
+                40.0,
+                291.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 11
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                276.5,
+                40.0,
+                283.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 12
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

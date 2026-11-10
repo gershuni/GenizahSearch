@@ -1,0 +1,2604 @@
+# -*- coding: utf-8 -*-
+"""NLI metadata fetch, IIIF/MARC enrichment, and persistent caching.
+
+Phase 124: Extracted from genizah_core.py (v8.3.0 God-File Decomposition).
+genizah_core.py retains a permanent same-object re-export shim so all
+existing ``from genizah_core import MetadataManager`` callers continue working.
+"""
+
+import logging
+import os
+import re
+import threading
+from array import array
+import pickle
+import requests
+import xml.etree.ElementTree as ET
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from shared.config import Config
+from shared.nli_circuit_breaker import (
+
+    is_open as _nli_circuit_is_open,
+    record_failure as _nli_record_failure,
+    record_success as _nli_record_success,
+    NLI_CONNECT_TIMEOUT,
+    NLI_IIIF_READ_TIMEOUT,
+    NLI_MARC_READ_TIMEOUT,
+)
+# The parsed MARC / manifest answers kept on disk, read by fetch_marc_data and
+# fetch_iiif_manifest: a fresh copy answers in NLI's place, an old one is served
+# marked stale when NLI cannot answer (the module, not its names, so a test can
+# intercept it).
+from shared import nli_metadata_store as _nli_store
+from shared.codicological import CodicologicalManager
+from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
+from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
+# Credit line for images served from the Bodleian's Genizah Fragments site, in the
+# form its licence requires ("Image provided by [owner]"). Both apps and the web
+# attribution table import this so the wording cannot drift; it is NOT a Creative
+# Commons licence, so never append a CC label to it.
+OXFORD_IMAGE_CREDIT_EN = "Image provided by the Bodleian Libraries, University of Oxford"
+OXFORD_GENIZAH_FRAGMENTS_URL = "https://hebrew.bodleian.ox.ac.uk/"
+
+# NLI's Rosetta "thumbnail" endpoint answers HTTP 200 image/png with a generic
+# 94x73 "no image" placeholder (~1,615 bytes) for FL ids it will not deliver --
+# since 2026-09 that includes every Bodleian-held Ktiv copy (IIIF answers 500,
+# the Rosetta stream 401). A real thumbnail is always larger. Ceiling shared by
+# the desktop loader; web/api.py keeps its own literal (pinned by
+# tests/test_codex_review_333_round8.py) at the same value.
+ROSETTA_PLACEHOLDER_MAX_BYTES = 2000
+
+
+LOGGER = logging.getLogger("genizah." + __name__)
+
+# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW).
+_BRIDGE_IMPORT_WARNED = False
+
+
+def _warn_bridge_import_failed(exc):
+    """Log shelfmark_bridge import failure at WARNING once per process (Gemini LOW)."""
+    global _BRIDGE_IMPORT_WARNED
+    if not _BRIDGE_IMPORT_WARNED:
+        LOGGER.warning("shelfmark_bridge unavailable (degrading to v7.10 behavior): %s", exc)
+        _BRIDGE_IMPORT_WARNED = True
+
+
+# ---------------- Shelfmark search (search_by_meta, field 'shelfmark') ----------------
+#
+# A Shelfmark search used to test every catalogue record against the query, one
+# normalization per record per search: 3-5 s over the 255,723 records, for a lookup
+# that returns one manuscript, and in the web app that cost was paid inside a research
+# worker, behind its queue. The rules are unchanged (_shelfmark_matches is the loop's
+# old `matches` closure, verbatim); what changed is that the catalogue is normalized
+# once into _ShelfmarkSearchIndex, which narrows a query to the records that can match
+# it, and _shelfmark_matches then decides over those. Every rule's matches are among the
+# candidates by construction (see _ShelfmarkSearchIndex.candidates), so the answer is
+# the loop's; tests/test_shelfmark_search_path.py checks that against the loop itself.
+
+_SHELFMARK_TOKEN_SPLIT = re.compile(r'[\s\.\-]+')
+_SHELFMARK_SEARCH_BUILD_LOCK = threading.Lock()
+
+
+def _shelfmark_tokens(text):
+    return [t for t in _SHELFMARK_TOKEN_SPLIT.split(text) if t]
+
+
+def _shelfmark_forms(value, normalize):
+    """The forms of a stored shelfmark the search rules compare:
+    (lower-cased, normalized, normalized without dots, tokens of the lower-cased)."""
+    val_norm = value.lower().strip()
+    val_normalized = normalize(value)
+    return (val_norm, val_normalized, val_normalized.replace('.', ''), _shelfmark_tokens(val_norm))
+
+
+def _shelfmark_query(query, normalize):
+    """The same four forms of the query (``_shelfmark_forms``; the tokens come from the
+    lower-cased query, as the loop split them)."""
+    q_norm = query.lower().strip()
+    q_normalized = normalize(query)
+    return (q_norm, q_normalized, q_normalized.replace('.', ''), _shelfmark_tokens(q_norm))
+
+
+def _shelfmark_matches(forms, query):
+    """Whether a stored shelfmark (its ``_shelfmark_forms``) matches a Shelfmark search
+    (its ``_shelfmark_query``).
+
+    Precise matching, to avoid false positives like 120.2 matching 120.25, with the
+    normalization that lets "ts12.123" or "T-S 12 123" find "T-S 12.123": missing or
+    extra spaces, dashes and dots, any case.
+    """
+    val_norm, val_normalized, val_nodots, val_tokens = forms
+    query_norm, q_normalized, q_nodots, query_tokens = query
+
+    # 1. Exact match (case-insensitive)
+    if val_norm == query_norm:
+        return True
+
+    # 2. Exact normalized match: "ts12.123" matches "T-S 12.123"
+    if val_normalized == q_normalized:
+        return True
+
+    # Dot-agnostic match: "ts12123" matches "ts12.123"
+    # This allows users to type without dots and still find results
+    if val_nodots == q_nodots:
+        return True
+
+    # Normalized prefix match: "ts12" matches "T-S 12.123"
+    # But be careful with numeric boundaries
+    if q_normalized and val_normalized.startswith(q_normalized):
+        next_pos = len(q_normalized)
+        if next_pos < len(val_normalized):
+            next_char = val_normalized[next_pos]
+            # Allow if next char is a dot (e.g., "ts12" -> "ts12.123")
+            # or if it's not a digit (e.g., "ts12" -> "ts12a")
+            if next_char == '.' or not next_char.isdigit():
+                return True
+            # If query ends with digit and value continues with digit,
+            # don't immediately return - fall through to token matching
+            # This allows "T-S NS 12" to match "T-S NS 120.2" via tokens
+        else:
+            return True
+
+    # Also try token-based matching for partial searches
+    if not query_tokens:
+        return False
+
+    # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
+    query_idx = 0
+    val_idx = 0
+
+    while query_idx < len(query_tokens) and val_idx < len(val_tokens):
+        qt = query_tokens[query_idx]
+        vt = val_tokens[val_idx]
+
+        # Check if tokens match
+        if qt == vt:
+            # Exact match - advance both
+            query_idx += 1
+            val_idx += 1
+        elif vt.startswith(qt):
+            # Prefix match
+            # For the LAST query token, allow numeric prefix (e.g., "12" matches "120")
+            # For earlier tokens, be strict to avoid false positives
+            if query_idx == len(query_tokens) - 1:
+                # Last token - allow prefix match even for digits
+                query_idx += 1
+                val_idx += 1
+            elif qt.isdigit() and vt.isdigit():
+                # Not last token and both numeric - be strict
+                if len(vt) > len(qt) and vt[len(qt)].isdigit():
+                    val_idx += 1
+                    continue
+                query_idx += 1
+                val_idx += 1
+            else:
+                query_idx += 1
+                val_idx += 1
+        else:
+            val_idx += 1
+
+    return query_idx == len(query_tokens)
+
+
+def _shelfmark_query_is_degenerate(query):
+    """A query with nothing to narrow by (empty, or only separators): the rules are
+    then decided over every record, as the loop did."""
+    q_norm, q_normalized, _q_nodots, query_tokens = query
+    return not q_norm or not q_normalized or not query_tokens
+
+
+def _prefix_range(keys, prefix):
+    """[lo, hi) of the entries of the sorted list *keys* that start with *prefix*."""
+    from bisect import bisect_left
+    lo = bisect_left(keys, prefix)
+    hi = lo
+    count = len(keys)
+    while hi < count and keys[hi].startswith(prefix):
+        hi += 1
+    return lo, hi
+
+
+class _ShelfmarkSearchIndex:
+    """The catalogue's shelfmarks (csv_bank, field 'shelfmark') normalized once, so a
+    Shelfmark search tests only the records that can match it.
+
+    Three sorted views, one per family of rules in ``_shelfmark_matches``:
+
+    * ``norm_keys``: the normalized shelfmarks. A record matching by normalized
+      equality or by normalized prefix starts with the normalized query.
+    * ``nodot_keys``: the normalized shelfmarks without dots. A record matching
+      dot-agnostically equals the dotless query.
+    * ``token_keys`` / ``token_ids``: every token of the lower-cased shelfmarks. A
+      record matching by tokens, or by exact lower-cased equality (identical tokens),
+      has, for EACH query token, a token starting with it; the query token with the
+      fewest such records narrows the most.
+
+    ``candidates`` is the union of the three, a superset of the records any rule
+    matches; the rules themselves decide over it. Built from one snapshot of the
+    catalogue and tied to it (``bank_id``, ``size``): a reloaded or replaced
+    csv_bank gets a new index.
+    """
+
+    __slots__ = ('bank_id', 'size', 'norm_keys', 'norm_ids', 'nodot_keys', 'nodot_ids',
+                 'token_keys', 'token_ids', 'alternate_hashes')
+
+    def __init__(self, csv_bank, normalize):
+        self.bank_id = id(csv_bank)
+        self.size = len(csv_bank)
+        by_norm = []
+        by_nodot = []
+        by_token = {}
+        alternates = set()
+        for sys_id, data in list(csv_bank.items()):
+            value = data.get('shelfmark', '') if isinstance(data, dict) else ''
+            if not value or not isinstance(value, str):
+                continue
+            _val_norm, val_normalized, val_nodots, val_tokens = _shelfmark_forms(value, normalize)
+            # The record's other call numbers, as the Browse resolver reads them
+            # (``_iter_shelfmark_sources``), for ``MetadataManager.has_shelfmark``
+            # only: hashed, ~300,000 of them in 2.4 MB rather than their strings.
+            for other in data.get('call_numbers_raw') or ():
+                if isinstance(other, str) and other != value:
+                    other_norm = normalize(other)
+                    if other_norm and other_norm != val_normalized:
+                        alternates.add(hash(other_norm))
+            by_norm.append((val_normalized, sys_id))
+            by_nodot.append((val_nodots, sys_id))
+            for token in set(val_tokens):
+                by_token.setdefault(token, []).append(sys_id)
+        by_norm.sort()
+        by_nodot.sort()
+        self.norm_keys = [key for key, _sid in by_norm]
+        self.norm_ids = [sid for _key, sid in by_norm]
+        self.nodot_keys = [key for key, _sid in by_nodot]
+        self.nodot_ids = [sid for _key, sid in by_nodot]
+        self.token_keys = sorted(by_token)
+        self.token_ids = {token: tuple(ids) for token, ids in by_token.items()}
+        self.alternate_hashes = array('q', sorted(alternates))
+
+    def is_for(self, csv_bank):
+        return self.bank_id == id(csv_bank) and self.size == len(csv_bank)
+
+    def candidates(self, query):
+        """The sys_ids a ``_shelfmark_query`` can match (a superset; see the class)."""
+        from bisect import bisect_left, bisect_right
+        _q_norm, q_normalized, q_nodots, query_tokens = query
+        found = set()
+        lo, hi = _prefix_range(self.norm_keys, q_normalized)
+        found.update(self.norm_ids[lo:hi])
+        lo, hi = bisect_left(self.nodot_keys, q_nodots), bisect_right(self.nodot_keys, q_nodots)
+        found.update(self.nodot_ids[lo:hi])
+        best = None
+        for token in query_tokens:
+            lo, hi = _prefix_range(self.token_keys, token)
+            count = sum(len(self.token_ids[key]) for key in self.token_keys[lo:hi])
+            if best is None or count < best[0]:
+                best = (count, lo, hi)
+        if best is not None:
+            for key in self.token_keys[best[1]:best[2]]:
+                found.update(self.token_ids[key])
+        return found
+
+
+_CUDL_LABEL_RE = re.compile(r'^\s*(?:f\.?\s*)?(\d+)\s*([rv])?\b', re.IGNORECASE)
+
+
+def _parse_cudl_label(lbl):
+    """Parse a CUDL canvas label → (folio_num:int|None, folio_side:'r'|'v'|None).
+
+    Convention: a bare numeric label (no 'r'/'v' suffix) is treated as recto
+    ('r'); non-numeric labels ('Binding', 'Cover', etc.) return (None, None).
+    Uppercase side letters ('1R', '1V') are normalized to lowercase.
+
+    Examples:
+        '1'        → (1, 'r')   # bare numeric = recto by convention
+        '1r'       → (1, 'r')
+        '1v'       → (1, 'v')
+        '6R'       → (6, 'r')   # uppercase normalized
+        'f.2v'     → (2, 'v')
+        'f. 2v'    → (2, 'v')
+        'Binding'  → (None, None)
+        ''         → (None, None)
+        None       → (None, None)
+    """
+    if not lbl:
+        return (None, None)
+    m = _CUDL_LABEL_RE.match(str(lbl).strip())
+    if not m:
+        return (None, None)
+    try:
+        folio_num = int(m.group(1))
+    except (TypeError, ValueError):
+        return (None, None)
+    side_raw = m.group(2)
+    side = side_raw.lower() if side_raw else 'r'  # bare numeric → recto
+    return (folio_num, side)
+
+
+# ==============================================================================
+#  NLI CROSSREF SIDECAR (lazy accessor for local image resolution)
+# ==============================================================================
+_nli_crossref_svc = None
+
+def _get_crossref_service():
+    """Lazy accessor for the NLI crossref sidecar service (desktop use)."""
+    global _nli_crossref_svc
+    if _nli_crossref_svc is None:
+        try:
+            from shared.nli_crossref_service import NliCrossrefService
+            _nli_crossref_svc = NliCrossrefService(thread_safe=True)
+        except Exception as e:
+            LOGGER.warning('Failed to initialize NLI crossref service: %s', e)
+    return _nli_crossref_svc
+
+
+# ==============================================================================
+#  FJMS SIDECAR (lazy accessor for bibliography/catalog enrichment)
+# ==============================================================================
+_fjms_svc = None
+
+def _get_fjms_service():
+    """Lazy accessor for the FJMS enrichment sidecar service."""
+    global _fjms_svc
+    if _fjms_svc is None:
+        try:
+            from shared.fjms_service import FjmsService
+            _fjms_svc = FjmsService(thread_safe=True)
+        except Exception as e:
+            LOGGER.warning('Failed to initialize FJMS service: %s', e)
+    return _fjms_svc
+
+
+# ------------------------------------------------------------------------------
+#  Bounded, thread-safe LRU for MetadataManager.nli_cache
+# ------------------------------------------------------------------------------
+# Origin: 2026-06-06 production heap re-attribution. ``self.nli_cache`` was a
+# plain ``dict`` with NO eviction; on the long-running web service it accrued
+# one metadata entry per unique manuscript ever browsed/enriched and never
+# released them (50K+ entries and still climbing on a 3-day-old process). This
+# bounds it to ``NLI_CACHE_MAX_ENTRIES`` with LRU eviction.
+#
+# Why a *locked* wrapper rather than the lock-free ``_bounded_cache_*`` helpers
+# used for the manifest caches: nli_cache is read/written from MULTIPLE threads
+# (the 2-worker ``nli_executor`` pool AND Starlette's sync-route threadpool) and
+# is iterated at genizah_core.py:~5062/~5097. A plain dict's get/set are
+# GIL-atomic, but an OrderedDict's ``move_to_end``/``popitem`` are not, so
+# eviction under concurrency could corrupt ordering or raise. The RLock makes
+# each operation atomic and ``items()``/``keys()``/``values()``/iteration return
+# snapshots so concurrent writes can't raise "mutated during iteration".
+#
+# Pickles as a plain ``dict`` (``__reduce__``) so ``nli_cache.pkl`` keeps its
+# existing on-disk format and stays loadable by the desktop app / older builds.
+_NLI_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('NLI_CACHE_MAX_ENTRIES', '75000')))
+
+
+class _BoundedLRUCache:
+    """Thread-safe, bounded, dict-like LRU.
+
+    Implements only the ``nli_cache`` API surface actually used across both
+    apps: ``in``, ``[]`` (get/set), ``.get()``, ``.items()``, ``.keys()``,
+    ``.values()``, ``len()`` and iteration. ``maxsize <= 0`` disables eviction
+    (unbounded — restores legacy behavior for an escape hatch).
+    """
+
+    __slots__ = ('_data', '_maxsize', '_lock')
+
+    def __init__(self, maxsize=_NLI_CACHE_MAX_ENTRIES, data=None):
+        self._data = OrderedDict()
+        self._maxsize = int(maxsize)
+        self._lock = threading.RLock()
+        if data:
+            with self._lock:
+                for key, value in data.items():
+                    self._data[key] = value
+                self._evict_locked()
+
+    def _evict_locked(self):
+        # Caller must hold self._lock.
+        if self._maxsize > 0:
+            while len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
+
+    def __contains__(self, key):
+        with self._lock:
+            return key in self._data
+
+    def __getitem__(self, key):
+        with self._lock:
+            value = self._data[key]  # raises KeyError like dict
+            self._data.move_to_end(key)
+            return value
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            self._data[key] = value
+            self._data.move_to_end(key)
+            self._evict_locked()
+
+    def get(self, key, default=None):
+        with self._lock:
+            if key not in self._data:
+                return default
+            self._data.move_to_end(key)
+            return self._data[key]
+
+    def merge_fields(self, key, fields, default=None):
+        """Set ``fields`` on the entry stored under ``key`` NOW, as one locked step.
+
+        A copy of the current entry (or of ``default`` when there is none) gets the
+        fields and replaces it. A caller that read an entry, waited on the network and
+        then wrote its copy back could put an older entry over one published meanwhile
+        (enrich_metadata publishes whole entries); here the read and the write cannot be
+        separated by another thread's write.
+        """
+        with self._lock:
+            current = self._data.get(key)
+            entry = dict(current if current is not None else (default or {}))
+            entry.update(fields)
+            self._data[key] = entry
+            self._data.move_to_end(key)
+            self._evict_locked()
+            return entry
+
+    def items(self):
+        with self._lock:
+            return list(self._data.items())
+
+    def keys(self):
+        with self._lock:
+            return list(self._data.keys())
+
+    def values(self):
+        with self._lock:
+            return list(self._data.values())
+
+    def __len__(self):
+        with self._lock:
+            return len(self._data)
+
+    def __iter__(self):
+        with self._lock:
+            return iter(list(self._data.keys()))
+
+    def __reduce__(self):
+        # Serialize as a plain dict: keeps nli_cache.pkl format unchanged and
+        # loadable by older builds / the desktop app.
+        with self._lock:
+            return (dict, (dict(self._data),))
+
+    @property
+    def maxsize(self):
+        return self._maxsize
+
+
+# ==============================================================================
+#  METADATA MANAGER
+# ==============================================================================
+# Per-operation network timeouts (seconds). Named so each remote dependency can
+# be tuned independently rather than sharing one opaque literal.
+MARC_FUTURE_TIMEOUT = 15          # await fetch_marc_data() future result
+NLI_IIIF_FUTURE_TIMEOUT = 15      # await fetch_iiif_manifest() future result
+EXTERNAL_IIIF_HTTP_TIMEOUT = 5    # external IIIF manifest GET (Figgy/CUDL etc.)
+
+
+class _RefusedHopResponse:
+    """What ``MetadataManager._library_get`` returns for a redirect it did not follow.
+
+    A non-success response with no body: every caller treats it as it treats a
+    404 -- no circuit-breaker failure, only the per-sys_id negative cache a 404
+    would set.
+    """
+    status_code = 0
+    ok = False
+    content = b''
+    text = ''
+    headers: dict = {}
+
+    def json(self):
+        raise ValueError('no body: the redirect was not followed')
+
+    def close(self):
+        pass
+
+
+class _ShelfmarkIndex(list):
+    """MetadataManager's shelfmark index, carrying the NLI-cache strings it was built from."""
+
+    __slots__ = ('cached_variants',)
+
+
+class MetadataManager:
+    def _make_session(self):
+        return requests.Session()
+
+    """Handle metadata parsing, remote retrieval, and persistent caching."""
+    # The web app (web/main.py) and its research worker set this: every library
+    # fetch below then follows redirects one checked hop at a time, only to the
+    # library hosts (shared/puzzle_image_service.py::get_with_checked_redirects).
+    # The desktop and the scripts leave it False and fetch as before.
+    checked_library_fetches = False
+    _csv_bank_loaded = False
+    # Entries carry a Cambridge decision (shared/cudl_identity.py::entry_decision_stale).
+    supports_cambridge_decision = True
+
+    def __init__(self, *, checked_library_fetches: bool = False):
+        self.checked_library_fetches = bool(checked_library_fetches)
+        self.meta_map = {}
+        # Bounded LRU (was an unbounded dict — see _BoundedLRUCache above).
+        self.nli_cache = _BoundedLRUCache()
+        self.csv_bank = {}
+        # True once libraries.csv has been read to the end: until then a sys_id missing
+        # from csv_bank may simply not have been reached yet.
+        self._csv_bank_loaded = False
+        # Set when the load of libraries.csv has ended, read or not.
+        self._csv_bank_done = threading.Event()
+        self._shelfmark_index = None
+        # The catalogue normalized for Shelfmark searches (_ShelfmarkSearchIndex), built
+        # on the first search after the load; and the NLI cache's shelfmarks normalized
+        # as they are met ({sys_id: (shelfmark, forms)}), since that cache changes.
+        self._shelfmark_search_index = None
+        self._nli_shelfmark_forms = {}
+        self.nli_executor = ThreadPoolExecutor(max_workers=2)
+        self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
+
+        # Codicological Parts manager (Oxford Neubauer)
+        self.codico_mgr = CodicologicalManager()
+
+        # Ensure index dir exists for caches
+        if not os.path.exists(Config.INDEX_DIR):
+            try:
+                os.makedirs(Config.INDEX_DIR)
+            except Exception as e:
+                LOGGER.error("Failed to create index directory for metadata at %s: %s", Config.INDEX_DIR, e)
+
+        # Load small caches immediately
+        self._load_small_caches()
+
+    def start_background_loading(self):
+        """Start loading heavy metadata resources (CSV, Maps) in background.
+
+        The thread handles are kept so ``background_loading_finished()`` can
+        say when both are done (the web's one-time gc.freeze waits for it).
+        """
+        self._bg_threads = [
+            threading.Thread(target=self._load_heavy_caches_bg, daemon=True),
+            threading.Thread(target=self._build_file_map_background, daemon=True),
+        ]
+        for thread in self._bg_threads:
+            thread.start()
+
+    def background_loading_finished(self):
+        """True once every thread of start_background_loading() has exited.
+
+        True when the loading was never started: there is nothing to wait for.
+        A handle created but not yet started counts as pending (``is_alive()``
+        is False before ``start()`` too).
+        """
+        return all(t.ident is not None and not t.is_alive()
+                   for t in getattr(self, '_bg_threads', ()))
+
+    def _load_small_caches(self):
+        if os.path.exists(Config.CACHE_NLI):
+            try:
+                with open(Config.CACHE_NLI, 'rb') as f:
+                    _loaded = pickle.load(f)
+                # On-disk format is a plain dict; wrap into the bounded LRU.
+                # (Defensive: tolerate a legacy pickled _BoundedLRUCache too.)
+                if isinstance(_loaded, _BoundedLRUCache):
+                    self.nli_cache = _loaded
+                else:
+                    self.nli_cache = _BoundedLRUCache(data=dict(_loaded))
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("Failed to load NLI cache from %s: %s", Config.CACHE_NLI, e)
+        if os.path.exists(Config.CACHE_META):
+            try:
+                with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
+
+    def _load_heavy_caches_bg(self):
+        try:
+            self._load_csv_bank()
+        finally:
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.set()
+        # Load codicological parts after CSV is ready
+        self.codico_mgr.load(csv_bank=self.csv_bank)
+
+    def corpus_sys_ids(self, timeout: float = 30.0) -> frozenset:
+        """Every corpus sys_id of libraries.csv: the universe of the catalogue
+        criteria and of Catalog Browse (docs/plans/CATALOGUE_CRITERIA_PLAN.md,
+        D14, D16). Waits up to ``timeout`` seconds for the background load to
+        read the whole file and never returns a partial list (rule 9): raises
+        FilterUnavailable('corpus_unavailable') when it has not."""
+        if not self._csv_bank_loaded:
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.wait(timeout)
+        if not self._csv_bank_loaded:
+            from shared.fjms_service import FilterUnavailable
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        cached = getattr(self, "_corpus_ids", None)
+        if cached is None or cached[0] != len(self.csv_bank):
+            ids = frozenset(s for s in list(self.csv_bank) if CORPUS_SYS_ID_RE.fullmatch(s))
+            cached = self._corpus_ids = (len(self.csv_bank), ids)
+        return cached[1]
+
+    def _load_csv_bank(self):
+        """Load the massive CSV file into memory for instant lookup."""
+        if not os.path.exists(Config.LIBRARIES_CSV):
+            LOGGER.warning("libraries.csv not found at %s; csv_bank will remain empty", Config.LIBRARIES_CSV)
+            return
+
+        LOGGER.info("Loading libraries.csv from %s", Config.LIBRARIES_CSV)
+
+        import csv
+        try:
+            with open(Config.LIBRARIES_CSV, 'r', encoding='utf-8', errors='replace') as f:
+                reader = csv.reader(f, delimiter=',')
+                next(reader, None) # Skip header
+
+                for row in reader:
+
+                    if not row or len(row) < 3:
+                        continue
+                    # Format: system_number, oxford_part_id, call_numbers, library_code, ..., titles_non_placeholder
+                    raw_sys_id = row[0]
+                    # Phase 85 D-04a: tolerate marker-block lines from scripts/generate_synthetic_rows.py
+                    # (e.g. '# BEGIN SYNTHETIC', '# END SYNTHETIC'). Without this guard, the loader's
+                    # digit-normalization would produce sys_id='' and overwrite previous '' entries.
+                    if raw_sys_id.startswith('#'):
+                        continue
+                    sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
+
+                    # Oxford Part ID (column 1) - for Neubauer catalog
+                    oxford_part_id = row[1].strip() if len(row) > 1 else ""
+
+                    # Call numbers (column 2) can be multiple separated by '|'
+                    # We take the shortest one that looks like a shelfmark, or just the first
+                    raw_shelves = row[2].split('|') if len(row) > 2 else []
+                    shelf = raw_shelves[0].strip() if raw_shelves else ""
+                    # Try to find a nice short shelfmark
+                    for s in raw_shelves:
+                        s = s.strip()
+                        if s and len(s) < len(shelf):
+                            shelf = s
+
+                    # Library code (column 3) - backward compatible with old CSV
+                    library_code = row[3].strip() if len(row) > 3 else ""
+
+                    # Title is column index 7 (0-based) - titles_non_placeholder
+                    # (shifted by 1 due to library_code column insertion)
+                    title = ""
+                    if len(row) > 7:
+                        title = row[7].strip()
+
+                    # Keep all call_number variants for shelfmark resolution and special-library fallbacks.
+                    call_numbers_raw = [s.strip() for s in raw_shelves if s.strip()] or None
+
+                    self.csv_bank[sys_id] = {
+                        'shelfmark': shelf,
+                        'title': title,
+                        'oxford_part_id': oxford_part_id,
+                        'library_code': library_code,
+                        'call_numbers_raw': call_numbers_raw,
+                    }
+            self._csv_bank_loaded = True
+            # CSV data is authoritative for shelfmark browsing; force the normalized index
+            # to rebuild after background loading completes.
+            self._shelfmark_index = None
+            self._shelfmark_search_index = None
+            LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
+
+            # Phase 84: build CUDL alias index for cross-system shelfmark lookups (D-03).
+            try:
+                from shared.shelfmark_bridge import build_alias_index as _build_cudl_alias_index
+                _build_cudl_alias_index(self.csv_bank)
+            except ImportError as e:
+                _warn_bridge_import_failed(e)
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("CUDL alias index build failed (continuing without bridge): %s", e)
+
+            # Stamp has_vs from vs_manifest.txt (lightweight, ~2.5MB, 129K sys_ids)
+            vs_manifest_path = os.path.join(os.path.dirname(Config.LIBRARIES_CSV), 'fist_data', 'vs_manifest.txt')
+            if not os.path.exists(vs_manifest_path):
+                # Try PyInstaller _internal path
+                vs_manifest_path = os.path.join(os.path.dirname(os.path.abspath(Config.LIBRARIES_CSV)), 'fist_data', 'vs_manifest.txt')
+            if os.path.exists(vs_manifest_path):
+                try:
+                    with open(vs_manifest_path, 'r') as vf:
+                        vs_ids = set(line.strip() for line in vf if line.strip())
+                    stamped = 0
+                    for vid in vs_ids:
+                        if vid in self.csv_bank:
+                            self.csv_bank[vid]['has_vs'] = True
+                            stamped += 1
+                    LOGGER.info("Stamped has_vs on %d/%d manuscripts from vs_manifest.txt", stamped, len(vs_ids))
+                except MemoryError:
+                    raise
+                except Exception as e:
+                    LOGGER.warning("Failed to load vs_manifest.txt: %s", e)
+        except MemoryError:
+            raise
+        except Exception as e:
+            LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
+
+    def get_meta_for_id(self, sys_id):
+        # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
+        if sys_id is None:
+            return "Unknown", ""
+        raw_input = str(sys_id) if sys_id is not None else ""
+        sys_id = "".join(ch for ch in raw_input if ch.isdigit())
+
+        if raw_input != sys_id and raw_input:
+             LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw_input, sys_id)
+
+        """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
+        shelf = "Unknown"
+        title = ""
+
+        # 1. Check CSV (Fastest & Most reliable for basic info)
+        if sys_id in self.csv_bank:
+            shelf = self.csv_bank[sys_id]['shelfmark']
+            title = self.csv_bank[sys_id]['title']
+
+        # 2. Check NLI Cache (Fallback/Enrichment)
+        if sys_id in self.nli_cache:
+            m = self.nli_cache[sys_id]
+            cached_shelf = m.get('shelfmark')
+            cached_title = m.get('title')
+
+            # If CSV missed shelfmark, try cache
+            if shelf == "Unknown" or not shelf:
+                if cached_shelf and cached_shelf != "Unknown":
+                    shelf = cached_shelf
+
+            # If CSV missed title, try cache (crucial fix for missing titles)
+            if not title and cached_title:
+                title = cached_title
+
+        return shelf, title
+
+    def get_library_for_id(self, sys_id: str) -> str:
+        """Get library code for a system ID.
+
+        Args:
+            sys_id: The system ID to look up
+
+        Returns:
+            Library code string (e.g., 'CUL', 'JTS') or empty string if not found
+        """
+        if sys_id is None:
+            return ''
+        # Normalize sys_id
+        sys_id = "".join(ch for ch in str(sys_id) if ch.isdigit())
+        entry = self.csv_bank.get(sys_id, {})
+        return entry.get('library_code', '')
+
+    def get_shelfmark_from_header(self, full_header):
+        parsed = self.parse_full_id_components(full_header)
+
+        sys_id = parsed.get('sys_id')
+        if sys_id:
+            shelf, _ = self.get_meta_for_id(sys_id)
+            if shelf and shelf != "Unknown":
+                return shelf
+
+        if sys_id and sys_id in self.nli_cache:
+            return self.nli_cache[sys_id].get('shelfmark', '')
+        return ''
+
+    def cambridge_record_names(self, system_id):
+        """``(names, library_code)`` from libraries.csv, main name first.
+
+        None while libraries.csv is still loading and has not reached the record: a
+        record the catalogue has not read yet is not a record without names.
+        """
+        row = self.csv_bank.get(system_id)
+        if row is None:
+            return ([], '') if self._csv_bank_loaded else None
+        primary = row.get('shelfmark') or ''
+        names = [primary] if primary else []
+        names += [n for n in (row.get('call_numbers_raw') or []) if n and n != primary]
+        return names, row.get('library_code', '') or ''
+
+    def resolve_cambridge(self, system_id, marc_url=None, crossref_svc=None):
+        """The CUDL item this record links to (``shared/cudl_identity.py``).
+
+        Status ``unavailable`` -- no revision, so never cached as final -- while
+        libraries.csv has not reached the record or the crossref sidecar cannot be read.
+        Without the sidecar, a Cambridge record's NLI-catalogue link still stands,
+        unconfirmed: also without a revision, so the next run decides again.
+        """
+        from shared.cudl_identity import CAMBRIDGE_LIBRARY_CODES, resolve_record, unavailable
+        record = self.cambridge_record_names(system_id)
+        if record is None:
+            return unavailable()
+        names, library_code = record
+        if library_code not in CAMBRIDGE_LIBRARY_CODES:
+            # Final without the sidecar: another library's record is never Cambridge's.
+            return resolve_record(names, library_code, lambda _key, _guess: ())
+        if crossref_svc is None:
+            crossref_svc = _get_crossref_service()
+        if crossref_svc is not None and crossref_svc.is_available():
+            return crossref_svc.resolve_cambridge_record(names, library_code, marc_url=marc_url)
+        if not marc_url:
+            return unavailable()
+        res = resolve_record(names, library_code, lambda _key, _guess: (), marc_url=marc_url)
+        res['revision'] = None
+        return res
+
+    def save_caches(self):
+        try:
+            # Persist as a plain dict (snapshot) so the on-disk format is
+            # unchanged and remains loadable by older builds / the desktop app.
+            with open(Config.CACHE_NLI, 'wb') as f: pickle.dump(dict(self.nli_cache.items()), f)
+        except Exception as e:
+            LOGGER.error("Failed to persist NLI cache to %s: %s", Config.CACHE_NLI, e)
+
+    # --- Codicological Parts API (delegates to codico_mgr) ---
+
+    def get_part_for_folio(self, sys_id):
+        """Get the Part ID for a given system ID."""
+        return self.codico_mgr.get_part_for_folio(sys_id)
+
+    def get_folios_for_part(self, part_id):
+        """Get all system IDs (folios) belonging to a Part."""
+        return self.codico_mgr.get_folios_for_part(part_id)
+
+    def get_part_metadata(self, part_id):
+        """Get full metadata for a Part (Oxford Neubauer)."""
+        return self.codico_mgr.get_part_metadata(part_id)
+
+    def get_part_images(self, part_id):
+        """Get all images for a Part."""
+        return self.codico_mgr.get_part_images(part_id)
+
+    def is_part_id(self, identifier):
+        """Check if an identifier is a Part ID."""
+        return self.codico_mgr.is_part_id(identifier)
+
+    def parse_part_identifier(self, identifier):
+        """Parse an identifier that might be a Part. Returns (part_id, is_part)."""
+        return self.codico_mgr.parse_part_identifier(identifier)
+
+    def get_part_autocomplete_list(self):
+        """Get list of Parts for autocomplete."""
+        return self.codico_mgr.part_autocomplete
+
+    def get_meta_with_part(self, sys_id):
+        """
+        Get shelfmark, title, and Part info for a system ID.
+        Returns dict with: shelfmark, title, oxford_part_id, part_metadata
+        """
+        shelf, title = self.get_meta_for_id(sys_id)
+
+        result = {
+            'shelfmark': shelf,
+            'title': title,
+            'oxford_part_id': None,
+            'part_metadata': None,
+        }
+
+        # Get Part info if available
+        part_id = self.get_part_for_folio(sys_id)
+        if part_id:
+            result['oxford_part_id'] = part_id
+            result['part_metadata'] = self.get_part_metadata(part_id)
+
+            # If our title is empty but Part has a title, use it
+            if not title and result['part_metadata']:
+                result['title'] = result['part_metadata'].get('title', '')
+
+        return result
+
+    def _build_file_map_background(self):
+        if self.meta_map: return
+        if not os.path.exists(Config.FILE_V7): return
+        temp_map = {}
+        try:
+            with open(Config.FILE_V7, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.startswith("###"):
+                        uid = self.extract_unique_id(line)
+                        if "xml -" in line:
+                            parts = line.split("xml -")
+                            if len(parts) > 1: temp_map[uid] = parts[1].strip()
+            self.meta_map = temp_map
+            with open(Config.CACHE_META, 'wb') as f: pickle.dump(self.meta_map, f)
+        except Exception as e:
+            LOGGER.warning("Failed to build or save file map cache from %s: %s", Config.FILE_V7, e)
+
+    def extract_unique_id(self, text):
+        """
+        Robust extraction of Unique ID.
+        Instead of expecting a fixed string 'IE_P_FL', we scan for components anywhere.
+        This fixes issues with file paths containing backslashes (e.g. Russia Library).
+        """
+        # First attempt: classic continuous structure
+        match = re.search(r'(IE\d+_P\d+_FL\d+)', text)
+        if match:
+            return match.group(1)
+
+        # Second attempt: components assembly (robust to path breaks)
+        ie = re.search(r'(IE\d+)', text)
+        p = re.search(r'(P\d+)', text)
+        fl = re.search(r'(FL\d+)', text)
+
+        if ie and p and fl:
+            return f"{ie.group(1)}_{p.group(1)}_{fl.group(1)}"
+
+        # Default: System ID (only if all else fails).
+        # CORPUS namespace only -- every caller of this method ingests corpus
+        # transcription files (shared/indexer.py, shared/lab_engine.py); LOCAL
+        # has its own indexer. See shared/sys_id_patterns.py.
+        sys = CORPUS_SYS_ID_RE.search(text)
+        return sys.group(1) if sys else "UNKNOWN"
+
+    def parse_header_smart(self, full_header):
+        # Phase 95 D-13 (Codex P0) — namespace-AGNOSTIC on purpose: this parser
+        # is reached with LOCAL ("My Library", 97-prefix) headers on desktop.
+        # Do NOT narrow to the corpus pattern. See shared/sys_id_patterns.py.
+        sys_match = ANY_SYS_ID_RE.search(full_header)
+        sys_id = sys_match.group(1) if sys_match else None
+        p_num = "Unknown"
+        p_match = re.search(r'_P(\d+)_', full_header)
+        if p_match:
+            p_num = str(int(p_match.group(1)))
+        else:
+            tif_match = re.search(r'[ -_](\d{3,4})\.tif', full_header, re.IGNORECASE)
+            if tif_match: p_num = str(int(tif_match.group(1)))
+        return sys_id, p_num
+
+    def parse_full_id_components(self, full_header):
+        """
+        Parse header into components regardless of order or separators.
+        Fixes display issues for V0.7 paths.
+        """
+        result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
+
+        # 1. System ID (99... or 97... for LOCAL — Phase 95 D-13 Codex P0).
+        # Namespace-AGNOSTIC on purpose; do NOT narrow to the corpus pattern.
+        # See shared/sys_id_patterns.py.
+        sys_match = ANY_SYS_ID_RE.search(full_header)
+        if sys_match:
+            result['sys_id'] = sys_match.group(1)
+
+        # 2. IE ID
+        ie_match = re.search(r'(IE\d+)', full_header)
+        if ie_match:
+            result['ie_id'] = ie_match.group(1)
+        # Phase 95 D-34 — LOCAL full_header has no IE\d+ component; instead uses F\d{4}.
+        if not result.get('ie_id'):
+            f_match = re.search(r'_F(\d{3,5})', full_header)
+            if f_match:
+                result['ie_id'] = f"F{f_match.group(1)}"
+
+        # 3. Page Number (P...)
+        p_match = re.search(r'_?(P\d+)', full_header)
+        if p_match:
+            # Remove P to get clean number
+            raw_p = p_match.group(1) # P0001
+            result['p_num'] = str(int(raw_p[1:]))
+
+        # 4. FL ID
+        fl_match = re.search(r'(FL\d+)', full_header)
+        if fl_match:
+            result['fl_id'] = fl_match.group(1).replace("FL", "")
+
+        return result
+
+    def _library_get(self, session, url, **kwargs):
+        """``session.get(url, **kwargs)``, or its checked-hop form on the web.
+
+        With ``checked_library_fetches`` the first URL and each redirect target
+        must be on a library host; a redirect that is not followed comes back as
+        a ``_RefusedHopResponse`` (a non-success response, handled as a 404).
+        """
+        if not self.checked_library_fetches:
+            return session.get(url, **kwargs)
+        from shared.puzzle_image_service import RedirectNotFollowed, get_with_checked_redirects
+        try:
+            return get_with_checked_redirects(url, session=session, **kwargs)
+        except RedirectNotFollowed as e:
+            LOGGER.warning("Library fetch redirect not followed for %s: %s", str(url)[:80], e)
+            return _RefusedHopResponse()
+
+    def fetch_nli_data(self, system_id):
+        # 1. Check existing cache
+        if system_id in self.nli_cache:
+            return self.nli_cache[system_id]
+
+        # 2. Check CSV Bank (local fetch)
+        if system_id in self.csv_bank:
+            row = self.csv_bank[system_id]
+            meta = {
+                'shelfmark': row['shelfmark'],
+                'title': row['title'],
+                'desc': '',
+                'fl_ids': [],
+                'thumb_url': None,
+                'thumb_checked': True # Mark as checked to prevent repeated image download attempts
+            }
+            self.nli_cache[system_id] = meta
+            return meta
+
+        # 3. Only if necessary (not in cache/CSV) - Network request
+        _, meta = self._fetch_single_worker(system_id)
+        self.nli_cache[system_id] = meta
+        return meta
+
+    # Separate manifest cache keyed by (sys_id, suffix) — does NOT touch nli_cache.
+    # Bounded LRU: crawl traffic can otherwise leave one manifest dict per
+    # requested manuscript in process memory for the lifetime of the service.
+    _iiif_manifest_cache = OrderedDict()
+    _IIIF_MANIFEST_CACHE_MAX = max(0, int(os.environ.get('IIIF_MANIFEST_CACHE_MAX_ENTRIES', '5000')))
+    # 260421 follow-up (L81 lag) — Phase 98 migration: per-sys_id negative
+    # cache lives HERE (per-(sys_id, suffix) for IIIF, per-sys_id for MARC),
+    # but the global "NLI is down" circuit breaker has MOVED to
+    # shared/nli_circuit_breaker.py (a module-level singleton — single source
+    # of truth across web/api.py, shared/puzzle_image_service.py, and
+    # genizah_core.py). The 404 / parse-error paths populate the per-sys_id
+    # caches here; the timeout / 5xx / 429 / connection-error paths call
+    # _nli_record_failure from the shared module.
+    _iiif_manifest_fail_cache: dict = OrderedDict()  # {(sys_id, suffix): timestamp}
+    _marc_fail_cache: dict = OrderedDict()  # {sys_id: timestamp}
+    _NLI_FAIL_TTL = 60  # seconds
+    _NLI_FAIL_CACHE_MAX = max(0, int(os.environ.get('NLI_FAIL_CACHE_MAX_ENTRIES', '20000')))
+
+    @staticmethod
+    def _bounded_cache_get(cache: dict, key):
+        if key not in cache:
+            return None
+        if isinstance(cache, OrderedDict):
+            cache.move_to_end(key)
+        return cache[key]
+
+    @staticmethod
+    def _bounded_cache_set(cache: dict, key, value, max_entries: int) -> None:
+        if max_entries == 0:
+            return
+        cache[key] = value
+        if isinstance(cache, OrderedDict):
+            cache.move_to_end(key)
+        while max_entries and len(cache) > max_entries:
+            if isinstance(cache, OrderedDict):
+                cache.popitem(last=False)
+            else:
+                cache.pop(next(iter(cache)), None)
+
+    def _timestamp_cache_recent(self, cache: dict, key, ttl: float, now: float):
+        ts = cache.get(key)
+        if ts is None:
+            return None
+        if now - ts < ttl:
+            if isinstance(cache, OrderedDict):
+                cache.move_to_end(key)
+            return ts
+        cache.pop(key, None)
+        return None
+
+    def _timestamp_cache_set(self, cache: dict, key, now: float) -> None:
+        self._bounded_cache_set(cache, key, now, self._NLI_FAIL_CACHE_MAX)
+        stale = [
+            cache_key for cache_key, ts in list(cache.items())
+            if now - ts >= self._NLI_FAIL_TTL
+        ]
+        for cache_key in stale:
+            cache.pop(cache_key, None)
+
+    # The manifest memory cache holds (result, fetched_at) and ages with the disk
+    # store's TTL (NLI_METADATA_STORE_TTL): a server that runs past it asks NLI again
+    # instead of serving one manifest for the life of the process, and a TTL of 0
+    # means every call asks (Codex on #470).
+    def _manifest_memory_get(self, cache_key, now: float):
+        entry = self._bounded_cache_get(self._iiif_manifest_cache, cache_key)
+        if entry is None:
+            return None
+        result, fetched_at = entry
+        if now - fetched_at < _nli_store.NLI_METADATA_STORE_TTL:
+            return result
+        self._iiif_manifest_cache.pop(cache_key, None)
+        return None
+
+    def _manifest_memory_set(self, cache_key, result: dict, fetched_at: float) -> None:
+        self._bounded_cache_set(
+            self._iiif_manifest_cache, cache_key, (result, fetched_at), self._IIIF_MANIFEST_CACHE_MAX,
+        )
+
+    def get_runtime_cache_stats(self) -> dict:
+        """Return lightweight cache sizes for the memstat diagnostic endpoint."""
+        return {
+            'nli_cache_entries': len(self.nli_cache),
+            'iiif_manifest_cache_entries': len(self._iiif_manifest_cache),
+            'iiif_manifest_cache_max_entries': self._IIIF_MANIFEST_CACHE_MAX,
+            'iiif_manifest_fail_cache_entries': len(self._iiif_manifest_fail_cache),
+            'marc_fail_cache_entries': len(self._marc_fail_cache),
+            'nli_fail_cache_max_entries': self._NLI_FAIL_CACHE_MAX,
+        }
+
+    def fetch_iiif_manifest(self, system_id, suffix=1):
+        """Fetch and parse IIIF manifest for physical description, attribution, and image labels.
+
+        Args:
+            system_id: NLI system ID
+            suffix: IE suffix for multi-volume manuscripts (1=primary, 2=second IE, etc.)
+        """
+        import time
+        # Phase 85 D-14: synthetic sys_ids have no NLI Alma record — skip the
+        # network call BEFORE issuing it. Saves ~93-2K external requests per
+        # cold cache cycle and prevents NLI 404 access-log pollution.
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        if is_synthetic_sys_id(system_id):
+            return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
+
+        # Check manifest-only cache first (aged with the disk store's TTL)
+        cache_key = (system_id, suffix)
+        now = time.time()
+        cached_manifest = self._manifest_memory_get(cache_key, now)
+        if cached_manifest is not None:
+            return cached_manifest
+
+        # (The URL is built here, within reach of the is_synthetic_sys_id guard above;
+        # tests/test_browse_synthetic.py pins the two together.)
+        url = f"{Config.NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
+        headers = Config.HTTP_HEADERS
+
+        # The on-disk copy of the last good parse (shared/nli_metadata_store.py). A
+        # fresh one (NLI_METADATA_STORE_TTL) answers in NLI's place; an older one is
+        # refreshed below and, when NLI cannot answer now, served marked stale -- so a
+        # breaker window or a 5xx streak no longer empties the page's image list.
+        stored = _nli_store.metadata_store_get('manifest', system_id, suffix, now=now)
+        if stored is not None and stored.fresh:
+            # Into memory with the row's own fetch time, so both expire together.
+            self._manifest_memory_set(cache_key, stored.payload, stored.fetched_at)
+            return stored.payload
+
+        def _unavailable():
+            # NLI's silence, answered with the old copy when there is one. It is NOT put
+            # in the memory cache (which has no TTL): the next call asks NLI again.
+            if stored is not None:
+                return _nli_store.served_stale(stored)
+            return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
+
+        # Phase 98 D-03 + D-13: shared NLI circuit breaker. If NLI has been
+        # failing consistently across ANY call site, skip entirely without
+        # burning another timeout on this sys_id.
+        if _nli_circuit_is_open():
+            return _unavailable()
+
+        # Negative cache: if this sys_id recently timed out, return empty
+        # without re-trying. TTL lets the cache age out so recovery works.
+        fail_ts = self._timestamp_cache_recent(
+            self._iiif_manifest_fail_cache, cache_key, self._NLI_FAIL_TTL, now
+        )
+        if fail_ts is not None:
+            return _unavailable()
+
+        result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
+        try:
+            session = self._make_session()
+            resp = self._library_get(
+                session,
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
+                verify=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+
+                # 1. Physical Description
+                result['physical_desc'] = data.get('attribution', '')
+                attr_val = data.get('attribution')
+                if isinstance(attr_val, str):
+                    result['attribution'] = attr_val
+                elif isinstance(attr_val, list) and attr_val:
+                    result['attribution'] = str(attr_val[0])
+                elif data.get('label'):
+                    result['attribution'] = str(data.get('label'))
+
+                # 2. Canvas Map (FL -> Label)
+                if 'sequences' in data and data['sequences']:
+                    for canvas in data['sequences'][0].get('canvases', []):
+                        label = canvas.get('label', '')
+                        # Extract FL ID from image service ID
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            service_id = service.get('@id', '')
+                            # Extract FL number (e.g. .../FL7734473/...)
+                            fl_match = re.search(r'FL(\d+)', service_id)
+                            if fl_match:
+                                fl_digits = fl_match.group(1)
+                                result['canvas_map'][fl_digits] = label
+
+                if not _nli_store.has_content(result):
+                    # A well-formed body with nothing in it (NLI's JSON error object
+                    # with status 200, a manifest without canvases) is not an answer:
+                    # neither a breaker success nor a failure (D-07), the per-sys_id
+                    # negative cache as for a 404, never the memory cache, and the
+                    # stored copy when there is one (Codex P1 on #470).
+                    LOGGER.warning(f"IIIF manifest for {system_id} (suffix={suffix}) parsed empty")
+                    self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+                    return _unavailable()
+                self._manifest_memory_set(cache_key, result, time.time())
+                self._iiif_manifest_fail_cache.pop(cache_key, None)
+                _nli_record_success(path='fetch_iiif_manifest')
+                # Kept on disk only now, after a parse with content: an error page or
+                # an empty manifest never replaces the last good copy.
+                _nli_store.metadata_store_put('manifest', system_id, suffix, result)
+                return result
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='fetch_iiif_manifest')
+                LOGGER.warning(f"IIIF 429 for {system_id} (suffix={suffix})")
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='fetch_iiif_manifest')
+                LOGGER.warning(f"IIIF {resp.status_code} for {system_id} (suffix={suffix})")
+            # 404 / other 4xx -> per-sys_id negative cache only (D-07);
+            # do NOT increment the breaker.
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            return _unavailable()
+        except requests.exceptions.Timeout as e:
+            LOGGER.warning(f"IIIF fetch timeout for {system_id} (suffix={suffix}): {e}")
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            _nli_record_failure(failure_type='timeout', path='fetch_iiif_manifest')
+            return _unavailable()
+        except requests.exceptions.ConnectionError as e:
+            LOGGER.warning(f"IIIF fetch connection error for {system_id} (suffix={suffix}): {e}")
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            _nli_record_failure(failure_type='connection_error', path='fetch_iiif_manifest')
+            return _unavailable()
+        except Exception as e:
+            # Parse errors / data structure issues — code-level, not upstream.
+            # Per-sys_id negative cache only; do NOT trip the breaker (D-07).
+            LOGGER.warning(f"IIIF parse failed for {system_id} (suffix={suffix}): {e}")
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            return _unavailable()
+
+    def fetch_marc_data(self, system_id):
+        """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
+        import time
+        # Phase 85 D-14: synthetic sys_ids have no NLI MARC record — skip the
+        # network call BEFORE issuing it (parallel to fetch_iiif_manifest guard).
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+
+        result = {
+            'bibliography': [],
+            'notes': [],
+            'english_title': '',
+            'dimensions': '',
+            'people': [],
+            'current_owner': '',
+            'shelfmark_alt': '',
+            'date': '',
+            'subjects': [],
+            'physical_medium': '',
+            'attribution': '',
+            'online_link': None,
+            'external_iiif_link': None
+        }
+        if is_synthetic_sys_id(system_id):
+            return result
+
+        # The on-disk copy of the last good parse (shared/nli_metadata_store.py), as in
+        # fetch_iiif_manifest: fresh -> answered here; old -> refreshed, and served
+        # marked stale when NLI cannot answer now. One row per manuscript (suffix 1).
+        stored = _nli_store.metadata_store_get('marc', system_id, 1)
+        if stored is not None and stored.fresh:
+            return stored.payload
+
+        def _unavailable():
+            return _nli_store.served_stale(stored) if stored is not None else result
+
+        # Use the specific IIIF/MARC endpoint which is more reliable
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
+        headers = Config.HTTP_HEADERS
+
+        # Phase 98 D-03 + D-13: shared NLI circuit breaker + per-sys_id
+        # negative cache (complementary layers). Breaker trips across ALL
+        # sys_ids after THRESHOLD consecutive failures so a dead NLI host
+        # doesn't gate navigation; per-sys_id cache prevents re-trying the
+        # SAME failed sys_id within TTL even when the breaker is closed.
+        if _nli_circuit_is_open():
+            return _unavailable()
+        fail_ts = self._timestamp_cache_recent(
+            self._marc_fail_cache, system_id, self._NLI_FAIL_TTL, time.time()
+        )
+        if fail_ts is not None:
+            return _unavailable()
+
+        try:
+            session = self._make_session()
+            resp = self._library_get(
+                session,
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+            )
+            if resp.status_code == 200:
+                # Remove namespaces to simplify parsing
+                xml_content = re.sub(r'\sxmlns="[^"]+"', '', resp.text, count=1)
+                xml_content = re.sub(r'\sxmlns:marc="[^"]+"', '', xml_content, count=1)
+                xml_content = xml_content.replace('marc:', '') # Bruteforce namespace removal
+
+                root = ET.fromstring(xml_content)
+
+                for df in root.findall(".//datafield"):
+                    tag = df.get('tag')
+
+                    def get_sub(code):
+                        sf = df.find(f"subfield[@code='{code}']")
+                        return sf.text.strip() if sf is not None and sf.text else ""
+
+                    if tag == '581': # Bibliography
+                        val = get_sub('a')
+                        if val: result['bibliography'].append(val)
+
+                    elif tag == '500': # Notes
+                        val = get_sub('a')
+                        if val: result['notes'].append(val)
+
+                    elif tag == '246': # English Title
+                        val_a = get_sub('a')
+                        val_i = get_sub('i')
+                        if "English" in val_i:
+                            result['english_title'] = val_a
+
+                    elif tag == '260' or tag == '264': # Date
+                        val = get_sub('c')
+                        if val: result['date'] = val
+
+                    elif tag == '300': # Dimensions
+                        val_a = get_sub('a') # Extent (pages)
+                        val_c = get_sub('c') # Dimensions
+                        parts = [p for p in [val_a, val_c] if p]
+                        result['dimensions'] = " | ".join(parts)
+
+                    elif tag == '340': # Physical Medium / Condition
+                        val = get_sub('a')
+                        if val: result['physical_medium'] = val
+
+                    elif tag == '650': # Subjects
+                        val = get_sub('a')
+                        if val: result['subjects'].append(val)
+
+                    elif tag == '700': # People / Owners
+                        name = get_sub('a')
+                        role = get_sub('e')
+                        if name:
+                            full = f"{name} ({role})" if role else name
+                            result['people'].append(full)
+
+                    elif tag == '710': # Current Owner (Library Name)
+                        val = get_sub('a')
+                        if val: result['current_owner'] = val
+
+                    elif tag == '856': # Online Link
+                        url = get_sub('u')
+                        label = get_sub('z') or "Online Version"
+                        if url:
+                            result['online_link'] = {'url': url, 'label': label}
+                            # Detect CUDL for External Viewer
+                            if "cudl.lib.cam.ac.uk" in url:
+                                result['external_iiif_link'] = url
+
+                    elif tag == '942': # Alt Shelfmark
+                        val = get_sub('z')
+                        # NLI MARC has multiple 942 datafields: one for the
+                        # owning library (holds the real shelfmark, e.g.
+                        # "Ms. ENA 1052.1") and one for FGP (holds a
+                        # numeric photo ID like "4677401"). Prefer the
+                        # first non-numeric $z so we do not clobber the
+                        # shelfmark with the FGP ID.
+                        if val and not result.get('shelfmark_alt'):
+                            result['shelfmark_alt'] = val
+                        elif val and val.isdigit():
+                            # Numeric $z is an FGP/ARK id, not a shelfmark.
+                            # Skip when we already have a non-numeric one.
+                            prior = result.get('shelfmark_alt', '')
+                            if prior and not prior.isdigit():
+                                pass  # keep the real shelfmark
+                            else:
+                                result['shelfmark_alt'] = val
+                        elif val:
+                            # Non-numeric $z and we already had something.
+                            # Prefer the most-recent non-numeric (unlikely
+                            # to have two real shelfmarks, but if we do,
+                            # the later one usually wins for consistency
+                            # with older behavior).
+                            result['shelfmark_alt'] = val
+
+                    elif tag == '597': # Image credit / attribution
+                        val = get_sub('a')
+                        if val: result['attribution'] = val
+
+                if not _nli_store.has_content(result):
+                    # Well-formed XML with none of the fields read above (an error
+                    # document with status 200): not an answer -- as in
+                    # fetch_iiif_manifest, the negative cache and the stored copy.
+                    LOGGER.warning(f"MARC record for {system_id} parsed empty")
+                    self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+                    return _unavailable()
+                self._marc_fail_cache.pop(system_id, None)
+                _nli_record_success(path='fetch_marc_data')
+                # Kept on disk only now, after a parse with content: an error page or
+                # a record with nothing in it never replaces the last good copy.
+                _nli_store.metadata_store_put('marc', system_id, 1, result)
+                return result
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='fetch_marc_data')
+                LOGGER.warning(f"MARC 429 for {system_id}")
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='fetch_marc_data')
+                LOGGER.warning(f"MARC {resp.status_code} for {system_id}")
+            # 404 / other 4xx -> per-sys_id negative cache only (D-07);
+            # do NOT increment the breaker.
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            return _unavailable()
+        except requests.exceptions.Timeout as e:
+            LOGGER.warning(f"MARC fetch timeout for {system_id}: {e}")
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            _nli_record_failure(failure_type='timeout', path='fetch_marc_data')
+            return _unavailable()
+        except requests.exceptions.ConnectionError as e:
+            LOGGER.warning(f"MARC fetch connection error for {system_id}: {e}")
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            _nli_record_failure(failure_type='connection_error', path='fetch_marc_data')
+            return _unavailable()
+        except Exception as e:
+            # XML parse errors / data structure issues — code-level, not upstream.
+            # Per-sys_id negative cache only; do NOT trip the breaker (D-07).
+            LOGGER.warning(f"MARC parse failed for {system_id}: {e}")
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            return _unavailable()
+
+    def enrich_metadata(self, system_id, suffix=1):
+        """Fetch extended metadata (IIIF/MARC), build Image List, and merge into cache.
+
+        Args:
+            system_id: NLI system ID
+            suffix: IIIF manifest suffix (1=primary IE, 2+=secondary). When suffix != 1,
+                    only the NLI images change; MARC, external images, and metadata stay
+                    the same. The nli_cache is only updated for suffix=1 (primary).
+        """
+        if not system_id: return {}
+
+        # Ensure basic meta exists
+        if system_id not in self.nli_cache:
+            self.fetch_nli_data(system_id)
+
+        # Work on a copy and publish it whole at the end (self.nli_cache[system_id] = ...).
+        # Other threads read this entry while the network calls below run; mutating it in
+        # place showed them a new Cambridge decision beside the old item's images, and the
+        # Puzzle's disk cache saved those pixels under the new item's name.
+        current_meta = dict(self.nli_cache.get(system_id) or {})
+        current_meta['sys_id'] = system_id  # Store for downstream consumers
+        # The catalogue's name is the record's name (get_meta_for_id reads it first too).
+        # An entry first fetched from NLI keeps NLI's 942 shelfmark, which for a renamed
+        # fragment is the OLD name ("Ms. T-S Loan Collection 180" for T-S Misc.36.180).
+        csv_shelfmark = (self.csv_bank.get(system_id) or {}).get('shelfmark')
+        if csv_shelfmark:
+            current_meta['shelfmark'] = csv_shelfmark
+
+        # 1. Submit both NLI network calls concurrently (fetch_marc_data + fetch_iiif_manifest)
+        # These are independent calls; running in parallel halves metadata fetch time.
+        # We avoid 'with' context manager here because its __exit__ calls shutdown(wait=True),
+        # which would block until both futures complete before we can process MARC results.
+        # Instead, we submit both, process MARC first (for external IIIF dependency), then
+        # await IIIF results later — allowing IIIF fetch to overlap with external IIIF logic.
+        _executor = ThreadPoolExecutor(max_workers=2)
+        marc_future = _executor.submit(self.fetch_marc_data, system_id)
+        iiif_future = _executor.submit(self.fetch_iiif_manifest, system_id, suffix)
+        _executor.shutdown(wait=False)  # Don't block; futures continue in background threads
+
+        # Await MARC result first (needed for external IIIF logic below)
+        try:
+            marc_data = marc_future.result(timeout=MARC_FUTURE_TIMEOUT)
+        except Exception:
+            marc_data = {}  # Network/parse failure; proceed with empty metadata
+        current_meta['marc'] = marc_data
+        marc_attribution = marc_data.get('attribution')
+
+        # 2. Determine Image Source (External CUDL vs Fallback NLI)
+        image_list = []
+        external_meta = {}
+
+        # Lists for multiple sources
+        images_nli = []
+        images_ext = []
+
+        # Initialize crossref service once (used for the Cambridge decision and NLI FL IDs)
+        crossref_svc = _get_crossref_service()
+
+        # 2a-cambridge: ONE decision for the record -- its catalogue names, structurally
+        # matched, plus the NLI catalogue's own link (shared/cudl_identity.py). Nothing
+        # else may link a record to CUDL. What an earlier run derived from Cambridge is
+        # dropped first: a corrected or withdrawn link must not survive in the cache.
+        prev_cambridge_label = (current_meta.get('cambridge_resolution') or {}).get('label')
+        was_cambridge = (current_meta.get('external_provider') == 'cambridge'
+                         or 'cudl.lib.cam.ac.uk' in (current_meta.get('external_url') or '').lower())
+        if was_cambridge:
+            for key in ('external_url', 'external_provider', 'cambridge_alignment',
+                        'external_count_mismatch'):
+                current_meta.pop(key, None)
+        cambridge = self.resolve_cambridge(
+            system_id, marc_url=marc_data.get('external_iiif_link'), crossref_svc=crossref_svc,
+        )
+        current_meta['cambridge_resolution'] = cambridge
+        if was_cambridge and (cambridge['status'] != 'match'
+                              or cambridge.get('label') != prev_cambridge_label):
+            current_meta.pop('attribution', None)  # the old item's credit; recomputed below
+        ext_link = None
+        if cambridge['status'] == 'match':
+            ext_link = cambridge['viewer_url']
+            current_meta['external_url'] = ext_link
+            current_meta['external_provider'] = 'cambridge'
+
+        # 2a-manchester: build canvas entries directly from ALL crossref images (each has its own luna_id)
+        if not ext_link and crossref_svc and crossref_svc.is_available():
+            manchester_canvases = crossref_svc.get_manchester_canvases(system_id)
+            if manchester_canvases:
+                images_ext = manchester_canvases
+                current_meta['external_provider'] = 'manchester'
+                current_meta['attribution'] = 'The University of Manchester Library · CC BY-NC-SA 4.0'
+                # Set a synthetic ext_link to prevent JTS/other fallback from running,
+                # but skip fetch_external_iiif_data since we already have canvas entries
+                ext_link = '__manchester_direct__'
+                LOGGER.info(f"Using {len(manchester_canvases)} Manchester LUNA canvases for {system_id}")
+
+        # 2a-jts: if no external link yet, try JTS Figgy manifest via crossref sidecar.
+        # 260421 follow-up (L81): look up by sys_id (single JOIN on
+        # nli_images ↔ jts_dpul) rather than iterating user-facing
+        # call_number variants. The nli_images.Shelfmark column already
+        # stores the canonical bare form ("ENA 1052.1") that jts_dpul
+        # is keyed on, so one query replaces up to 16 variant lookups.
+        if not ext_link and crossref_svc and crossref_svc.is_available():
+            jts_urls = crossref_svc.get_jts_urls_for_sys_id(system_id)
+            if jts_urls and jts_urls.get('manifest_url'):
+                ext_link = jts_urls['manifest_url']
+                current_meta['external_url'] = jts_urls.get('dpul_url') or ext_link
+                current_meta['external_provider'] = 'jts'
+                LOGGER.info(
+                    f"Using JTS Figgy manifest for {system_id} "
+                    f"(nli_images.Shelfmark={jts_urls.get('shelfmark')!r})"
+                )
+
+        # 2a. Fetch External IIIF (Cambridge / JTS — Manchester already resolved above)
+        if ext_link and ext_link != '__manchester_direct__':
+            ext_data = self.fetch_external_iiif_data(ext_link)
+            if ext_data.get('canvases'):
+                images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
+                external_meta = ext_data.get('metadata', {})
+                if not marc_attribution:
+                    current_meta['attribution'] = ext_data.get('attribution')
+
+        # 2a2. Check for Oxford Part images (if no Cambridge images)
+        if not images_ext:
+            part_id = self.get_part_for_folio(system_id)
+            if part_id:
+                current_meta['oxford_part_id'] = part_id
+                part_meta = self.get_part_metadata(part_id)
+                if part_meta:
+                    current_meta['oxford_part_metadata'] = part_meta
+                    if not current_meta.get('title') and part_meta.get('title'):
+                        current_meta['title'] = part_meta['title']
+                    if part_meta.get('direct_link'):
+                        current_meta['external_url'] = part_meta['direct_link']
+
+                part_images = self.get_part_images(part_id)
+                if part_images:
+                    # Convert Oxford Part images to the expected format (include thumb_url)
+                    images_ext = [{
+                        'label': img.get('label', ''),
+                        'url': img.get('full_url', ''),
+                        'thumb_url': img.get('thumb_url', ''),
+                        'folio_num': img.get('folio_num')
+                    } for img in part_images]
+                    current_meta['attribution'] = OXFORD_IMAGE_CREDIT_EN
+                    current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
+
+        # 2b. Fetch NLI IIIF manifest for image FL IDs (crossref FGPImageNumberId != IIIF FL number)
+        # Crossref is used for metadata (folio labels, image count) but NOT for image URLs.
+        crossref_labels = {}
+        if crossref_svc and crossref_svc.is_available():
+            crossref_images = crossref_svc.get_images(system_id)
+            if crossref_images:
+                for img in crossref_images:
+                    name = img.get('image_name', '')
+                    if name:
+                        crossref_labels[name] = name
+
+        # Await NLI IIIF manifest (submitted concurrently with MARC above)
+        try:
+            nli_iiif_data = iiif_future.result(timeout=NLI_IIIF_FUTURE_TIMEOUT)
+        except Exception:
+            nli_iiif_data = {}  # Network/parse failure; proceed with empty metadata
+
+        # What the page is showing when NLI could not answer: the fetch time of the
+        # oldest stored copy served stale above (the web's browse note reads it), and
+        # nothing once both answers are fresh again -- the entry is reused and saved.
+        stale_since = _nli_store.stale_from(marc_data, nli_iiif_data)
+        if stale_since is not None:
+            current_meta['nli_stale_from'] = stale_since
+        else:
+            current_meta.pop('nli_stale_from', None)
+
+        if nli_iiif_data.get('canvas_map'):
+            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            for fl_id, label in sorted_map:
+                url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
+
+        if not current_meta.get('physical_desc'):
+            current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+
+        # `attribution` is the credit for the manuscript's PRIMARY image source
+        # (an external provider when it has one). `attribution_nli` keeps NLI's own
+        # manifest credit no matter which won, so a viewer that falls back to the
+        # NLI image can credit NLI instead of the provider (Codex P2, 2026-09-02).
+        # A refresh whose manifest timed out or came back empty must not erase a
+        # credit an earlier run already cached: enrich_metadata mutates the cached
+        # dict in place and is re-run for cached manuscripts (Codex P2, round 15).
+        _nli_attr = nli_iiif_data.get('attribution', '') or ''
+        if _nli_attr or 'attribution_nli' not in current_meta:
+            current_meta['attribution_nli'] = _nli_attr
+        if marc_attribution:
+            current_meta['attribution'] = marc_attribution
+        elif not current_meta.get('attribution'):
+            current_meta['attribution'] = current_meta['attribution_nli']
+
+        if nli_iiif_data.get('canvas_map'):
+            current_meta['canvas_map'] = nli_iiif_data['canvas_map']
+
+        # Prioritize External if available, but keep both sets.
+        # 260419-cfx / 260421-aln: when both lists are populated, classify CUDL
+        # alignment per (folio_num, side) rather than just length. Misaligned
+        # CUL/Cambridge manuscripts (count or position mismatch) default to
+        # NLI; CUDL stays in images_ext so UI can still offer it as a manual
+        # switch. Non-CUL Cambridge (Mosseri, Gaster, private collections) is
+        # intentionally exempt — those have NLI stubs that 503, so images_ext
+        # must remain primary there (see gui_threads.py / web/pages/puzzle.py).
+        ext_provider = current_meta.get('external_provider', '')
+        lib_code = self.csv_bank.get(system_id, {}).get('library_code', '')
+        cambridge_alignment = None
+        if (
+            images_ext and images_nli
+            and ext_provider == 'cambridge' and lib_code == 'CUL'
+        ):
+            from shared.nli_crossref_service import classify_cambridge_alignment
+            cambridge_alignment = classify_cambridge_alignment(
+                system_id, images_ext, svc=crossref_svc,
+            )
+            current_meta['cambridge_alignment'] = cambridge_alignment
+
+        misaligned = bool(
+            cambridge_alignment and cambridge_alignment.get('verdict') == 'misaligned'
+        )
+        if misaligned:
+            current_meta['images'] = images_nli
+            current_meta['external_count_mismatch'] = True
+        else:
+            current_meta['images'] = images_ext if images_ext else images_nli
+        current_meta['images_nli'] = images_nli
+        current_meta['images_ext'] = images_ext
+        current_meta['external_meta'] = external_meta
+
+        # 3. Enrich with image source info and folio labels (Phase 31: IMG-04)
+        if crossref_svc and crossref_svc.is_available():
+            try:
+                shelfmark = current_meta.get('shelfmark', '')
+                norm_sm = normalize_shelfmark(shelfmark) if shelfmark else ''
+                current_meta['image_source_info'] = crossref_svc.get_image_sources(
+                    system_id, normalized_shelfmark=norm_sm,
+                    cambridge=cambridge['status'] == 'match',
+                )
+                current_meta['folio_images'] = crossref_svc.get_folio_images(system_id)
+
+                # Physical metadata (Phase 32: META-01, META-02)
+                phys_meta = crossref_svc.get_physical_metadata(system_id)
+                if phys_meta:
+                    current_meta['physical_metadata'] = phys_meta
+
+                # Library viewer URL (Phase 32: META-04) -- the CUDL item itself
+                # when the Cambridge decision named one, not a CUDL search.
+                lib_url = crossref_svc.get_library_viewer_url(
+                    system_id,
+                    cambridge_viewer_url=cambridge['viewer_url'] if cambridge['status'] == 'match' else None,
+                )
+                if lib_url:
+                    current_meta['library_viewer_url'] = lib_url
+
+                # Phase 33: Metadata enrichment from NLI crossref
+                # Neubauer-Cowley catalog entry (Oxford manuscripts)
+                catalog_entry = crossref_svc.get_catalog_entry(system_id)
+                if catalog_entry:
+                    current_meta['catalog_entry'] = catalog_entry
+
+                # Collection and storage references
+                coll_storage = crossref_svc.get_collection_storage(system_id)
+                if coll_storage:
+                    current_meta['collection_storage'] = coll_storage
+            except Exception as e:
+                LOGGER.debug(f"Folio enrichment error for {system_id}: {e}")
+
+        # Phase 33: FJMS bibliography and catalog references
+        fjms_svc = _get_fjms_service()
+        if fjms_svc and fjms_svc.is_available():
+            try:
+                bib_entries = fjms_svc.get_bibliography(system_id)
+                if bib_entries:
+                    current_meta['bibliography'] = bib_entries
+
+                cat_refs = fjms_svc.get_catalog_refs(system_id)
+                if cat_refs:
+                    current_meta['catalog_refs'] = cat_refs
+
+                source_names = fjms_svc.get_source_names(system_id)
+                if source_names:
+                    current_meta['source_names'] = source_names
+            except Exception as e:
+                LOGGER.debug(f"FJMS metadata enrichment error for {system_id}: {e}")
+
+        # Update cache precedence (Enrichment overrides basic placeholders)
+        if marc_data.get('english_title') and not current_meta.get('title'):
+            current_meta['title'] = marc_data['english_title']
+
+        if marc_data.get('shelfmark_alt') and (not current_meta.get('shelfmark') or current_meta.get('shelfmark') == 'Unknown'):
+            current_meta['shelfmark'] = marc_data['shelfmark_alt']
+
+        self.nli_cache[system_id] = current_meta
+        return current_meta
+
+    def fetch_volume_manifest(self, system_id, suffix):
+        """Lightweight manifest-only fetch for volume switches (no MARC, no FJMS, no crossref).
+
+        Returns a dict with 'images_nli' list for the requested suffix, suitable for
+        updating ManuscriptViewerWidget without re-running full enrichment.
+        """
+        iiif_data = self.fetch_iiif_manifest(system_id, suffix=suffix)
+        images_nli = []
+        if iiif_data.get('canvas_map'):
+            sorted_map = sorted(iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            for fl_id, label in sorted_map:
+                url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
+        return {'images_nli': images_nli, 'suffix': suffix}
+
+    def fetch_external_iiif_data(self, view_url):
+        """
+        Generic handler to fetch external IIIF data.
+        Currently supports CUDL logic: /view/ -> /iiif/ manifest.
+        Returns: {'attribution': str, 'metadata': dict, 'canvases': [{'label': str, 'url': str}]}
+        """
+        if not view_url: return {}
+
+        # CUDL Conversion Logic
+        manifest_url = view_url
+        if "cudl.lib.cam.ac.uk/view/" in view_url:
+            base = view_url.replace("/view/", "/iiif/")
+            manifest_url = re.sub(r'/\d+$', '', base)
+
+        if manifest_url.startswith("http://"):
+            manifest_url = manifest_url.replace("http://", "https://")
+
+        result = {
+            'attribution': 'External Library',
+            'metadata': {},
+            'canvases': []
+        }
+
+        try:
+            session = self._make_session()
+            # 260421 follow-up (L81 lag): 10s was overkill — Figgy/CUDL
+            # normally respond in <2s. Shorten so a slow external host
+            # does not gate the whole browse navigation.
+            resp = self._library_get(session, manifest_url, timeout=EXTERNAL_IIIF_HTTP_TIMEOUT)
+            if resp.status_code == 200:
+                data = resp.json()
+
+                # Attribution
+                attr = data.get('attribution')
+                if isinstance(attr, str):
+                    result['attribution'] = attr
+                elif isinstance(attr, list) and attr:
+                    result['attribution'] = str(attr[0])
+                elif data.get('label'):
+                    result['attribution'] = str(data.get('label'))
+
+                # Metadata
+                if 'metadata' in data:
+                    import re as _re_meta
+                    for item in data['metadata']:
+                        label = str(item.get('label', '')).lower()
+                        val = str(item.get('value', ''))
+                        if label in ['abstract', 'condition', 'provenance', 'physical description']:
+                            # Strip HTML tags from IIIF manifest values (e.g. <p style='...'> wrappers)
+                            val = _re_meta.sub(r'<[^>]+>', '', val).strip()
+                            result['metadata'][label.title()] = val
+
+                # Canvases (Images with Labels)
+                if 'sequences' in data and data['sequences']:
+                    for idx, canvas in enumerate(data['sequences'][0].get('canvases', [])):
+                        lbl = canvas.get('label', f"Img {idx + 1}")
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            # Try to get the service ID (base URL) for flexible resizing
+                            img_id = service.get('@id') if service else resource.get('@id')
+
+                            if img_id:
+                                # Extract folio_num + folio_side from label for
+                                # proper page indexing. Labels like "1", "1r",
+                                # "1v", "f.2v" → (1,'r'|'v'); "Binding"/"Cover"
+                                # → (None, None). See _parse_cudl_label below.
+                                folio_num, folio_side = _parse_cudl_label(lbl)
+                                result['canvases'].append({
+                                    'label': lbl, 'url': img_id,
+                                    'folio_num': folio_num,
+                                    'folio_side': folio_side,
+                                })
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"External IIIF fetch failed for {view_url}: {e}")
+            return result
+
+    def _fetch_single_worker(self, system_id):
+        # Phase 85 D-14: synthetic sys_ids skip the NLI MARC network call
+        # (no Alma record exists). Returns the default empty meta structure.
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
+        if is_synthetic_sys_id(system_id):
+            # Must return the (system_id, meta) 2-tuple like every other path —
+            # callers unpack it (`_, meta = ...` at fetch_nli_data; `sid, meta =
+            # future.result()` in batch_fetch_shelfmarks). Returning a bare dict
+            # raised "ValueError: too many values to unpack" for any synthetic
+            # sys_id absent from both nli_cache and csv_bank (audit 2026-05-29).
+            return system_id, meta
+
+        # Phase 98 D-22: shared NLI circuit breaker guard. Without this, the
+        # retry loop below (2 attempts * (10s + 1s sleep) = up to 22s of
+        # blocking) re-burns on every navigation when NLI is degraded.
+        # `is_synthetic_sys_id` check is intentionally BEFORE this so synthetic
+        # sys_ids do not consume breaker logic (Phase 85 D-14 invariant).
+        if _nli_circuit_is_open():
+            return system_id, meta
+
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
+
+        headers = Config.HTTP_HEADERS
+
+        import time
+
+        for attempt in range(2):
+            # Phase 98 Codex REVIEW Issue 3: per-iteration breaker recheck.
+            # If the first attempt tripped the breaker, the second retry
+            # must short-circuit immediately rather than burn another timeout.
+            if _nli_circuit_is_open():
+                break
+            try:
+                time.sleep(0.3)
+                session = self._make_session()
+                resp = self._library_get(
+                    session,
+                    url,
+                    headers=headers,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+                )
+
+                if resp.status_code == 200:
+                    try:
+                        root = ET.fromstring(resp.content)
+
+                        # --- 1. Extract Representative FL (907 $d) ---
+                        # This is the "Cover Image" or main representative FL
+                        rep_fl = None
+                        for df in root.findall("marc:datafield[@tag='907']", self.ns):
+                            sf = df.find("marc:subfield[@code='d']", self.ns)
+                            if sf is not None and sf.text:
+                                clean_fl = sf.text.strip()
+                                if clean_fl.startswith("FL"):
+                                    rep_fl = clean_fl
+                                    break
+
+                        # --- 2. Extract Standard Metadata ---
+                        c_942 = None; c_907 = None; c_090 = None; c_avd = None
+                        fl_ids = self._extract_fl_ids(root) # Backup list
+
+                        for df in root.findall('marc:datafield', self.ns):
+                            tag = df.get('tag')
+                            def get_val(code):
+                                sf = df.find(f"marc:subfield[@code='{code}']", self.ns)
+                                return sf.text if sf is not None else None
+
+                            if tag == '942':
+                                val = get_val('z')
+                                if val:
+                                    if not c_942: c_942 = val
+                                    elif val.isdigit(): pass
+                                    else: c_942 = val
+                            elif tag == '907':
+                                val = get_val('e')
+                                if val: c_907 = val
+                            elif tag == '090':
+                                val = get_val('a')
+                                if val and "MSS" not in val: c_090 = val
+                            elif tag == 'AVD':
+                                val = get_val('e')
+                                if val: c_avd = val
+                            elif tag == '245':
+                                val = get_val('a')
+                                if val: meta['title'] = val.rstrip('./,:;')
+
+                        final = c_942 or c_907 or c_090 or c_avd
+                        if final: meta['shelfmark'] = final
+
+                        meta['fl_ids'] = fl_ids
+
+                        # --- 3. Set Thumbnail URL ---
+                        # PRIORITIZE the Representative FL found in 907 $d
+                        if rep_fl:
+                             meta['thumb_url'] = self._resolve_thumbnail([rep_fl])
+                        else:
+                             # Only if missing, fallback to the list
+                             meta['thumb_url'] = self._resolve_thumbnail(fl_ids)
+
+                        meta['thumb_checked'] = True
+                        _nli_record_success(path='_fetch_single_worker')
+                        return system_id, meta
+
+                    except ET.ParseError:
+                        # Parse error — code-level, not upstream. Bail out of
+                        # the retry loop without incrementing the breaker (D-07).
+                        break
+                elif resp.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='_fetch_single_worker')
+                    time.sleep(1)
+                elif 500 <= resp.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='_fetch_single_worker')
+                    time.sleep(1)
+                else:
+                    # 404 / other 4xx — break out, do not touch the breaker.
+                    break
+            except requests.exceptions.Timeout:
+                _nli_record_failure(failure_type='timeout', path='_fetch_single_worker')
+                time.sleep(1)
+            except requests.exceptions.ConnectionError:
+                _nli_record_failure(failure_type='connection_error', path='_fetch_single_worker')
+                time.sleep(1)
+            except Exception:
+                # Non-network error (DNS lookup quirks, etc.) — preserve
+                # existing retry-with-sleep behavior but do NOT touch the
+                # breaker (D-07).
+                time.sleep(1)
+
+        return system_id, meta
+
+    def _extract_fl_ids(self, root):
+        fl_ids = []
+        for df in root.findall("marc:datafield[@tag='907']", self.ns):
+            for sf in df.findall("marc:subfield[@code='d']", self.ns):
+                val = (sf.text or "").strip()
+                if val.startswith("FL"):
+                    fl_ids.append(val)
+        return fl_ids
+
+    def _resolve_thumbnail(self, fl_ids, size=320, session=None):
+        if not fl_ids: return None
+
+        # Ensure it's iterable but treat string as single item list
+        if isinstance(fl_ids, str): fl_ids = [fl_ids]
+
+        for fl_id in fl_ids:
+            if not fl_id: continue
+
+            # Robust extraction of digits
+            raw_str = str(fl_id)
+            digits = re.sub(r"\D", "", raw_str)
+
+            # Basic validation: FL IDs are usually long (e.g. 7+ digits)
+            if not digits or len(digits) < 4: continue
+
+            # Return the URL that worked in debug
+            return f"{Config.NLI_IIIF_BASE}/FL{digits}/full/400,/0/default.jpg"
+
+        return None
+
+    @staticmethod
+    def get_rosetta_fallback_url(fl_id):
+        """Construct a fallback URL for Rosetta stream if IIIF fails.
+        Returns full-resolution image (TIFF) from Rosetta delivery."""
+        if not fl_id: return None
+        raw_str = str(fl_id)
+        digits = re.sub(r"\D", "", raw_str)
+        if not digits: return None
+        return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+
+    def _fetch_fl_ids(self, system_id):
+        # Phase 85 D-14: synthetic sys_ids have no NLI manifest — skip the network call.
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        if is_synthetic_sys_id(system_id):
+            return []
+
+        # Phase 98 D-23: shared NLI circuit breaker guard. `is_synthetic_sys_id`
+        # check is intentionally BEFORE this so synthetic sys_ids do not consume
+        # breaker logic (Phase 85 D-14 invariant).
+        if _nli_circuit_is_open():
+            return []
+
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
+        headers = Config.HTTP_HEADERS
+        try:
+            session = self._make_session()
+            resp = self._library_get(
+                session,
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+                allow_redirects=True,
+            )
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                _nli_record_success(path='_fetch_fl_ids')
+                return self._extract_fl_ids(root)
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='_fetch_fl_ids')
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='_fetch_fl_ids')
+            # 404 / other 4xx -> just return [] without touching the breaker (D-07).
+        except requests.exceptions.Timeout as e:
+            LOGGER.debug('Metadata batch fetch timeout: %s', e)
+            _nli_record_failure(failure_type='timeout', path='_fetch_fl_ids')
+            return []
+        except requests.exceptions.ConnectionError as e:
+            LOGGER.debug('Metadata batch fetch connection error: %s', e)
+            _nli_record_failure(failure_type='connection_error', path='_fetch_fl_ids')
+            return []
+        except Exception as e:
+            LOGGER.debug('Metadata batch fetch failed (non-network): %s', e)
+            return []
+        return []
+
+    def get_thumbnail(self, system_id, size=320):
+        meta = self.nli_cache.get(system_id)
+        if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
+            return meta.get('thumb_url')
+
+        fl_ids = []
+        if meta:
+            fl_ids = meta.get('fl_ids', [])
+        if not fl_ids:
+            fl_ids = self._fetch_fl_ids(system_id)
+
+        thumb_url = self._resolve_thumbnail(fl_ids, size=size)
+
+        # Only the thumbnail fields are written, onto the entry as it is at the moment of
+        # writing, in one locked step (_BoundedLRUCache.merge_fields). enrich_metadata
+        # publishes whole entries: putting back the entry read above -- or a copy taken
+        # one step before the write -- could undo an enrichment published meanwhile, and
+        # with it the record's Cambridge decision and images.
+        fields = {'fl_ids': fl_ids, 'thumb_url': thumb_url, 'thumb_checked': True}
+        base = meta if meta is not None else {'shelfmark': 'Unknown', 'title': '', 'desc': ''}
+        merge = getattr(self.nli_cache, 'merge_fields', None)
+        if callable(merge):
+            merge(system_id, fields, default=base)
+        else:  # a plain dict (tests): one thread
+            entry = dict(self.nli_cache.get(system_id) or base)
+            entry.update(fields)
+            self.nli_cache[system_id] = entry
+        return thumb_url
+
+    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True, check_cancel=None):
+        """
+        Populate metadata cache.
+        use_network=False -> Only loads from local CSV/Cache (Instant).
+        use_network=True  -> Fetches missing items from NLI.
+        """
+        # Step A: Fast fetch from CSV (no network)
+        for sid in system_ids:
+            if check_cancel and check_cancel(): return
+            if sid not in self.nli_cache and sid in self.csv_bank:
+                self.fetch_nli_data(sid) # This fetches from CSV automatically now
+
+        # If only local work requested, stop here
+        if not use_network:
+            return
+
+        # Step B: Identify what is *really* missing
+        to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
+
+        if not to_fetch:
+            if progress_callback:
+                for i, sid in enumerate(system_ids):
+                     progress_callback(i + 1, len(system_ids), sid)
+            return
+
+        # Step C: Network download (only if use_network=True)
+        futures = {self.nli_executor.submit(self._fetch_single_worker, sid): sid for sid in to_fetch}
+        current_progress = len(system_ids) - len(to_fetch)
+
+        for future in as_completed(futures):
+            if check_cancel and check_cancel():
+                # The requests still queued are dropped, not left to run unread on
+                # the shared executor: the request that replaced this one asks for
+                # the ids it did not reach again (Codex review of PR #376). The
+                # ones already running finish unread.
+                for pending in futures:
+                    pending.cancel()
+                break
+            sid, meta = future.result()
+            self.nli_cache[sid] = meta
+            current_progress += 1
+            if progress_callback:
+                progress_callback(current_progress, len(system_ids), sid)
+
+        self.save_caches()
+
+    def search_by_meta(self, query, field):
+        """Search for system IDs where the specified field matches the query.
+
+        Uses precise matching to avoid false positives like 120.2 matching 120.25.
+        For shelfmarks, uses normalization to handle format variations like:
+        - "ts12.123" or "T-S 12 123" matching "T-S 12.123"
+        - Missing/extra spaces, dashes, dots
+        - Case insensitivity
+        """
+        results = set()
+        q_norm = query.lower().strip()
+
+        if field == 'shelfmark':
+            shelfmark_query = _shelfmark_query(query, self._normalize_shelfmark)
+            # 1. The catalogue, through its index (or every record while it loads)
+            results.update(self._shelfmark_search_catalogue(shelfmark_query))
+            # 2. The NLI cache (for items not in CSV or updated)
+            for sys_id, data in self.nli_cache.items():
+                val = data.get(field, '')
+                if val and _shelfmark_matches(self._nli_shelfmark_forms_for(sys_id, val), shelfmark_query):
+                    results.add(sys_id)
+        else:
+            # Other fields (title): substring match
+            # 1. Search in CSV Bank (Fastest) — snapshot to avoid concurrent modification
+            for sys_id, data in list(self.csv_bank.items()):
+                val = data.get(field, '')
+                if val and q_norm in val.lower().strip():
+                    results.add(sys_id)
+
+            # 2. Search in NLI Cache (for items not in CSV or updated)
+            for sys_id, data in self.nli_cache.items():
+                val = data.get(field, '')
+                if val and q_norm in val.lower().strip():
+                    results.add(sys_id)
+
+        # Phase 84: CUDL classmark fallback (NORM-01/02). Zero-regression by construction:
+        # only runs when canonical matching returned no hits.
+        if field == 'shelfmark' and not results:
+            try:
+                from shared.shelfmark_bridge import lookup_cudl
+                hit = lookup_cudl(query)
+                if hit and hit.get('sys_id'):
+                    results.add(hit['sys_id'])
+            except ImportError as e:
+                _warn_bridge_import_failed(e)
+            except Exception as e:
+                LOGGER.debug("Bridge fallback failed for query %r: %s", query, e)
+
+        # Catalogue-form fallback (docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md, row B): only
+        # for a catalogue-shaped query that found nothing, so an ordinary empty search never
+        # builds the shelfmark index (a research worker would pay seconds and ~160 MiB for it).
+        # Exact or catalogue-form records only, never substring options.
+        if field == 'shelfmark' and not results:
+            from shared.catalog_shelfmark import looks_like_catalogue_form
+            if looks_like_catalogue_form(query):
+                try:
+                    answer = self.resolve_catalog_form(query, limit=500)
+                    if answer['sys_id']:
+                        results.add(answer['sys_id'])
+                    results.update(o['sys_id'] for o in answer['options'])
+                except Exception:
+                    LOGGER.warning("Catalogue-form search fallback failed for %r", query, exc_info=True)
+
+        return list(results)
+
+    def _shelfmark_search_catalogue(self, shelfmark_query):
+        """The csv_bank sys_ids whose shelfmark matches a ``_shelfmark_query``.
+
+        Through ``_ShelfmarkSearchIndex`` once libraries.csv is loaded to the end;
+        over every record before that (the web app loads it in the background, and an
+        index of a partial load would be reused), and for a query with nothing to
+        narrow by. Both give the rules' answer; the index only chooses who is tested.
+        """
+        normalize = self._normalize_shelfmark
+        index = None
+        if (self._csv_bank_loaded and self.csv_bank
+                and not _shelfmark_query_is_degenerate(shelfmark_query)):
+            index = self._shelfmark_search_index_for(self.csv_bank)
+        if index is None:
+            return self._shelfmark_scan_catalogue(shelfmark_query)
+        found = set()
+        bank = self.csv_bank
+        for sys_id in index.candidates(shelfmark_query):
+            data = bank.get(sys_id)
+            value = data.get('shelfmark', '') if data else ''
+            if value and _shelfmark_matches(_shelfmark_forms(value, normalize), shelfmark_query):
+                found.add(sys_id)
+        return found
+
+    def _shelfmark_scan_catalogue(self, shelfmark_query):
+        """The rules over every record of csv_bank: the reference the index must agree
+        with, and the path while the catalogue loads."""
+        normalize = self._normalize_shelfmark
+        found = set()
+        for sys_id, data in list(self.csv_bank.items()):
+            value = data.get('shelfmark', '')
+            if value and _shelfmark_matches(_shelfmark_forms(value, normalize), shelfmark_query):
+                found.add(sys_id)
+        return found
+
+    def _shelfmark_search_index_for(self, csv_bank):
+        """The ``_ShelfmarkSearchIndex`` of this csv_bank, built once (a few seconds
+        over the corpus) and replaced when the bank is reloaded or replaced."""
+        index = getattr(self, '_shelfmark_search_index', None)
+        if index is not None and index.is_for(csv_bank):
+            return index
+        with _SHELFMARK_SEARCH_BUILD_LOCK:
+            index = getattr(self, '_shelfmark_search_index', None)
+            if index is not None and index.is_for(csv_bank):
+                return index
+            index = _ShelfmarkSearchIndex(csv_bank, self._normalize_shelfmark)
+            self._shelfmark_search_index = index
+        return index
+
+    def _nli_shelfmark_forms_for(self, sys_id, value):
+        """``_shelfmark_forms`` of an NLI-cache shelfmark, kept from one search to the
+        next while the entry's shelfmark is that string (the cache changes under
+        fetches, so it is not indexed as a whole)."""
+        cache = getattr(self, '_nli_shelfmark_forms', None)
+        if cache is None:
+            cache = self._nli_shelfmark_forms = {}
+        known = cache.get(sys_id)
+        if known is not None and known[0] == value:
+            return known[1]
+        if len(cache) > 2 * len(self.nli_cache) + 1000:
+            # Entries evicted from the NLI cache: drop their forms.
+            live = set(self.nli_cache.keys())
+            for stale in [key for key in cache if key not in live]:
+                del cache[stale]
+        forms = _shelfmark_forms(value, self._normalize_shelfmark)
+        cache[sys_id] = (value, forms)
+        return forms
+
+    def prewarm_shelfmark_search(self, timeout: float = 300.0) -> bool:
+        """Build the Shelfmark search index now (web/main.py, in a background thread
+        at server start), so the first lookup after a restart does not: ~2 s over the
+        corpus. Waits up to *timeout* seconds for libraries.csv to be read to the end;
+        False when it was not."""
+        if not self._csv_bank_loaded:
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.wait(timeout)
+        if not self._csv_bank_loaded or not self.csv_bank:
+            return False
+        self._shelfmark_search_index_for(self.csv_bank)
+        return True
+
+    # ---------------- Shelfmark Resolution Helpers ----------------
+    def _normalize_shelfmark(self, shelfmark: str) -> str:
+        """Normalize shelfmarks using the canonical module-level function."""
+        return normalize_shelfmark(shelfmark)
+
+    def _cached_shelfmarks(self):
+        """A frozen copy of the NLI cache's shelfmark strings: {sys_id: ((shelfmark, alt...), title)}.
+
+        Only strings: a bad cached value never reaches the index or provenance."""
+        frozen = {}
+        for sys_id, data in list(self.nli_cache.items()):
+            found = tuple(v for v in (data.get('shelfmark'), data.get('shelfmark_alt')) if isinstance(v, str) and v)
+            if found:
+                frozen[sys_id] = (found, data.get('title', ''))
+        return frozen
+
+    def _iter_shelfmark_sources(self, cached=None):
+        """Yield shelfmark candidates from CSV bank and cached metadata (``cached``: a
+        ``_cached_shelfmarks()`` copy; the live cache when None)."""
+        # CSV bank
+        for sys_id, data in self.csv_bank.items():
+            title = data.get('title', '')
+            variants = data.get('call_numbers_raw') or [data.get('shelfmark', '')]
+            for shelf in variants:
+                if shelf:
+                    yield sys_id, shelf, title
+        # NLI cache (may contain enriched shelfmarks)
+        for sys_id, (candidates, title) in (cached if cached is not None else self._cached_shelfmarks()).items():
+            for candidate in candidates:
+                yield sys_id, candidate, title
+
+    def _get_shelfmark_index(self):
+        """Build or return cached pre-normalized shelfmark index.
+
+        Returns a list (``_ShelfmarkIndex``) of (sys_id, shelfmark, title, norm_shelf,
+        norm_shelf_no_dots) tuples, already deduplicated by (sys_id, norm_shelf). Its
+        ``cached_variants`` are the NLI-cache strings it was built from: the index entries and the
+        collection provenance (``catalog_shelfmark.in_libraries``) come from one frozen copy and are
+        published by one assignment, so a cache eviction or a concurrent rebuild can never pair
+        these entries with other provenance (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md).
+        """
+        if hasattr(self, '_shelfmark_index') and self._shelfmark_index is not None:
+            # The web app loads libraries.csv in a background thread. If shelfmark search runs
+            # before that finishes, we can cache an empty index and then keep reusing it forever.
+            # Rebuild once csv_bank has data.
+            if self._shelfmark_index or not self.csv_bank:
+                return self._shelfmark_index
+            self._shelfmark_index = None
+
+        if not self.csv_bank:
+            # Fall back to a synchronous load when browse shelfmark search beats the background loader.
+            self._load_csv_bank()
+
+        if self._shelfmark_index is not None:
+            return self._shelfmark_index
+
+        cached = self._cached_shelfmarks()
+        index = _ShelfmarkIndex()
+        index.cached_variants = {sys_id: candidates for sys_id, (candidates, _title) in cached.items()}
+        seen = set()
+        for sys_id, shelf, title in self._iter_shelfmark_sources(cached):
+            norm_shelf = normalize_shelfmark(shelf)
+            if not norm_shelf or (sys_id, norm_shelf) in seen:
+                continue
+            seen.add((sys_id, norm_shelf))
+            index.append((sys_id, shelf, title, norm_shelf, norm_shelf.replace('.', '')))
+
+        self._shelfmark_index = index
+        return index
+
+    def has_shelfmark(self, query) -> bool:
+        """True when ``query`` is a catalogue shelfmark exactly, as ``resolve_system_by_shelfmark``
+        compares them (normalised; with a library name off its front, or whole).
+
+        For the website's go-to boxes (``web/home_query.py``): a rule-based recogniser
+        cannot know every catalogue form (``Mingana 9``, ``P. Mich. Inv. 531``), so what it
+        calls text is looked up here before it is searched. Binary searches of the Shelfmark
+        search index, which the server builds at start (``prewarm_shelfmark_search``): each
+        record's shelfmark (``norm_keys``) and the hashes of its other call numbers
+        (``alternate_hashes``: ``Gaster, Moses Collection Printed series 61``; a hash
+        collision could only send a non-shelfmark to Browse, which then says "No
+        manuscript found"), then the NLI cache's ``shelfmark`` / ``shelfmark_alt`` (as
+        ``resolve_system_by_shelfmark`` reads them; the Shelfmark search's own pass over
+        the cache, with its kept forms). Until the index is built the answer is False --
+        a key press never builds it (seconds of CPU)."""
+        from bisect import bisect_left
+        q = (query or '').strip()
+        if not q:
+            return False
+        bank = self.csv_bank
+        index = getattr(self, '_shelfmark_search_index', None)
+        if index is None or not bank or not index.is_for(bank):
+            return False
+        keys = {self._normalize_shelfmark(q), self._normalize_shelfmark(_strip_library_prefix(q))}
+        keys.discard('')
+        norm_keys = index.norm_keys
+        hashes = index.alternate_hashes
+        for key in keys:
+            i = bisect_left(norm_keys, key)
+            if i < len(norm_keys) and norm_keys[i] == key:
+                return True
+            h = hash(key)
+            j = bisect_left(hashes, h)
+            if j < len(hashes) and hashes[j] == h:
+                return True
+        for sys_id, data in list(self.nli_cache.items()):
+            value = data.get('shelfmark')
+            if isinstance(value, str) and value and self._nli_shelfmark_forms_for(sys_id, value)[1] in keys:
+                return True
+            alt = data.get('shelfmark_alt')
+            if isinstance(alt, str) and alt and self._normalize_shelfmark(alt) in keys:
+                return True
+        return False
+
+    def resolve_system_by_shelfmark(self, query, limit=100):
+        """
+        Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.
+        Returns a dict: {'sys_id': ..., 'options': [...], 'selected_shelfmark': ...}
+        """
+        result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
+        original_query = query  # the catalogue-form fallback below needs the unstripped text
+        named_codes, whole_key, whole_query = frozenset(), None, None
+
+        # Strip known library prefix (code, full name, or common abbreviation)
+        if query:
+            q = query.strip()
+            stripped = _strip_library_prefix(q)
+            if stripped != q:
+                # A prefix that names a library keeps it (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md).
+                from shared.catalog_shelfmark import named_prefix
+                named_codes, whole_key, whole_query = named_prefix(q, stripped)
+            query = stripped
+
+        norm_query = self._normalize_shelfmark(query)
+        if not norm_query:
+            return result
+
+        exact_matches = []
+        partial_matches = []
+
+        def shelf_sort_key(entry):
+            shelf = entry.get('shelfmark', '')
+            title = entry.get('title', '')
+            sid_val = entry.get('sys_id', '')
+            return (natural_sort_key(shelf), natural_sort_key(title), natural_sort_key(sid_val))
+
+        # Dot-agnostic matching only when query has NO dots (e.g. "19234" → "19.234").
+        # When query has dots (e.g. "31.1"), dots are semantically significant — don't strip.
+        query_has_dots = '.' in norm_query
+        norm_query_no_dots = norm_query.replace('.', '') if not query_has_dots else None
+
+        whole_matches = []   # entries storing the whole prefixed input, when the prefix names a library
+        index = self._get_shelfmark_index()
+        for sys_id, shelf, title, norm_shelf, norm_shelf_no_dots in index:
+            entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
+
+            # Standard matching (preserves dots — "tsas31.1" != "tsas3.11")
+            if norm_shelf == norm_query:
+                exact_matches.append(entry)
+            elif norm_query in norm_shelf:
+                partial_matches.append(entry)
+            elif norm_query_no_dots and norm_shelf_no_dots == norm_query_no_dots:
+                # Dot-agnostic match only for dotless queries (e.g. "19234" == "19.234")
+                exact_matches.append(entry)
+            if whole_key and norm_shelf == whole_key:
+                whole_matches.append(entry)
+        key_matches = list(exact_matches)
+
+        # Phase 84 follow-up: bridge resolution as exact match. The legacy
+        # normalize_shelfmark() does NOT collapse CUDL leading zeros or merge
+        # slash/comma/dot variants, so user queries in the canonical/NLI form
+        # (e.g. 'T-S F 8.2') never match libraries.csv rows stored only in CUDL
+        # classmark form (e.g. 'Ms. T-S F 8/002' → norm 'tsf8.002'). When the
+        # bridge resolves the query to a sys_id that's absent from exact_matches,
+        # promote it to exact-match status — that row is the user's intended
+        # target, and ranking it ahead of substring prefix-noise (8.20/8.21/8.22)
+        # gives a single-exact-match path back to the picker-free direct browse.
+        # UAT Test 1 sub-issue 1b: 'T-S F 8.2' resolves to row 990026242400205171.
+        try:
+            from shared.shelfmark_bridge import lookup_cudl
+            bridge_hit = lookup_cudl(query)
+        except ImportError as _e:
+            _warn_bridge_import_failed(_e)
+            bridge_hit = None
+        except Exception:
+            bridge_hit = None
+
+        bridge_entry = None
+        if bridge_hit and bridge_hit.get('sys_id'):
+            _bsid = bridge_hit['sys_id']
+            _bdata = self.csv_bank.get(_bsid, {})
+            bridge_entry = {
+                'sys_id': _bsid,
+                'shelfmark': _bdata.get('shelfmark') or bridge_hit.get('shelfmark', '') or '',
+                'title': _bdata.get('title', ''),
+            }
+            if not any(e.get('sys_id') == _bsid for e in exact_matches):
+                # Insert at front so the dedup-then-single-exact path returns
+                # this row as the resolved sys_id when no canonical exact match
+                # exists.
+                exact_matches.insert(0, bridge_entry)
+
+        # A prefix that names a library, on an input answered exactly: that library's exact
+        # matches plus the records storing the whole input; none of either -> today's answer
+        # (catalog_shelfmark.named_library_exact). Inputs with no exact match go to T2 as before.
+        if named_codes and exact_matches:
+            from shared.catalog_shelfmark import named_library_exact
+            exact_matches = named_library_exact(
+                query, key_matches, bridge_entry, whole_matches, whole_query, named_codes, self.csv_bank,
+                getattr(index, 'cached_variants', None)) or exact_matches
+
+        # Deduplicate exact matches by sys_id (e.g. "T-S AS 31.1" and "Ms. T-S AS 31.1"
+        # are the same manuscript). Keep the shortest shelfmark as most user-friendly.
+        if exact_matches:
+            by_sid = {}
+            for e in exact_matches:
+                sid = e['sys_id']
+                if sid not in by_sid or len(e['shelfmark']) < len(by_sid[sid]['shelfmark']):
+                    by_sid[sid] = e
+            exact_matches = list(by_sid.values())
+
+        if len(exact_matches) == 1:
+            result['sys_id'] = exact_matches[0]['sys_id']
+            result['selected_shelfmark'] = exact_matches[0]['shelfmark']
+            return result
+
+        # If we have exact matches, prefer them over partials
+        if exact_matches:
+            exact_matches.sort(key=shelf_sort_key)
+            result['options'] = exact_matches[:limit]
+            return result
+
+        # Catalogue-form fallback (docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md). Reached only
+        # when nothing above matched exactly, so it never changes an exact answer; it may
+        # replace substring options with the records a catalogue form names.
+        catalog = self._resolve_catalog_t2(index, original_query, limit)
+        if catalog is not None:
+            return catalog
+
+        partial_matches.sort(key=shelf_sort_key)
+        result['options'] = partial_matches[:limit]
+        return result
+
+    def _get_catalog_tables(self, index):
+        """Catalogue-form tables for THIS index list, rebuilt whenever the list object changes
+        (`is`, never `id()`: Python reuses the ids of freed lists). One assignment publishes
+        them; two threads building at once produce the same tables."""
+        tables = getattr(self, '_catalog_tables', None)
+        if tables is None or tables.index is not index:
+            from shared.catalog_shelfmark import CatalogTables
+            tables = CatalogTables(index, self.csv_bank)
+            self._catalog_tables = tables
+        return tables
+
+    def _resolve_catalog_t2(self, index, query, limit):
+        """The T2 answer for `query` as a resolve_system_by_shelfmark result, or None."""
+        if not query or not index:
+            return None
+        try:
+            from shared.catalog_shelfmark import resolve_many
+            tables = self._get_catalog_tables(index)
+            answer = resolve_many([query], tables, self.csv_bank, limit=limit, with_exact=False,
+                                  cached_variants=getattr(index, 'cached_variants', None))[query]
+        except Exception:
+            # A defect here must not take today's substring answer away.
+            LOGGER.warning("Catalogue-form shelfmark fallback failed for %r", query, exc_info=True)
+            return None
+        if not answer['total']:
+            return None
+        return {'sys_id': answer['sys_id'], 'options': answer['options'],
+                'selected_shelfmark': answer['selected_shelfmark']}
+
+    def resolve_catalog_form(self, query, limit=100):
+        """Exact-or-catalogue answer for one input, never substring options.
+
+        What resolve_system_by_shelfmark answers exactly, else the catalogue-form fallback.
+        Returns {'sys_id', 'options', 'selected_shelfmark', 'total', 'tier'}; `total` is the
+        count before the `limit` cut, so a caller can tell one record from one of several.
+        """
+        return self.resolve_catalog_forms([query], limit=limit)[query]
+
+    def resolve_catalog_forms(self, queries, limit=100):
+        """resolve_catalog_form for many inputs with one pass over the index."""
+        from shared.catalog_shelfmark import resolve_many
+        index = self._get_shelfmark_index()
+        if not index:
+            return {q: {'sys_id': None, 'options': [], 'selected_shelfmark': None, 'total': 0, 'tier': None}
+                    for q in queries}
+        return resolve_many(list(queries), self._get_catalog_tables(index), self.csv_bank, limit=limit,
+                            cached_variants=getattr(index, 'cached_variants', None))
+
+    def get_display_data(self, full_header, src_label):
+        sys_id, p_num = self.parse_header_smart(full_header)
+
+        # Use get_meta_for_id which has proper fallback logic (CSV > NLI Cache)
+        shelfmark, title = self.get_meta_for_id(sys_id)
+
+        # Get library code
+        library_code = self.get_library_for_id(sys_id)
+
+        return {
+            'shelfmark': shelfmark or f"ID: {sys_id}",
+            'title': title,
+            'img': p_num,
+            'source': src_label,
+            'id': sys_id,
+            'library_code': library_code,
+        }

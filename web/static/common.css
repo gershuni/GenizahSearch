@@ -1,0 +1,3019 @@
+/* ========================================================================
+   CSS Custom Properties - Theme System
+   ======================================================================== */
+
+:root {
+    /* Primary Colors - Deep Academic Green */
+    --primary-50: #ecfdf5;
+    --primary-100: #d1fae5;
+    --primary-200: #a7f3d0;
+    --primary-300: #6ee7b7;
+    --primary-400: #34d399;
+    --primary-500: #10b981;
+    --primary-600: #059669;
+    --primary-700: #047857;
+    --primary-800: #065f46;
+    --primary-900: #064e3b;
+
+    /* Neutral Colors */
+    --neutral-50: #fafafa;
+    --neutral-100: #f5f5f5;
+    --neutral-200: #e5e5e5;
+    --neutral-300: #d4d4d4;
+    --neutral-400: #a3a3a3;
+    --neutral-500: #737373;
+    --neutral-600: #525252;
+    --neutral-700: #404040;
+    --neutral-800: #262626;
+    --neutral-900: #171717;
+
+    /* Accent Colors */
+    --accent-gold: #d4a574;
+    --accent-amber: #f59e0b;
+    --accent-blue: #3b82f6;
+    --accent-purple: #8b5cf6;
+    --accent-rose: #f43f5e;
+
+    /* Semantic Colors */
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --info: #3b82f6;
+
+    /* Light Theme (Default) */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --bg-tertiary: #f1f5f9;
+    --bg-header: linear-gradient(135deg, #065f46 0%, #047857 50%, #059669 100%);
+    --bg-sidebar: #ffffff;
+    --bg-card: #ffffff;
+    --bg-hover: #f1f5f9;
+    --bg-active: #ecfdf5;
+
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
+    --text-tertiary: #64748b;
+    /* WCAG AA: #475569 (slate-600) passes 4.5:1 on both white (#fff = 7.5:1)
+       and bg-tertiary (#f1f5f9 = 6.98:1). Previous #64748b was 4.34:1 on tertiary -- fail. */
+    --text-muted: #475569;
+    --text-inverse: #ffffff;
+
+    --border-light: #e2e8f0;
+    --border-medium: #cbd5e1;
+    --border-focus: #059669;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+/* ========================================================================
+   Accessibility Focus Styles (P0-C)
+   ======================================================================== */
+
+:focus-visible {
+    outline: 2px solid var(--primary-600) !important;
+    outline-offset: 2px !important;
+}
+
+/* Ensure visible focus on buttons and links */
+button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex="0"]:focus-visible {
+    outline: 2px solid var(--primary-600) !important;
+    outline-offset: 2px !important;
+}
+
+/* Adjust for dark theme */
+[data-theme="dark"] :focus-visible {
+    outline-color: var(--primary-400) !important;
+}
+
+/* ========================================================================
+   Link Color Override — WCAG AA contrast (4.5:1 on white)
+   Quasar default #5898d4 is 3.06:1 on white — fails AA.
+   ======================================================================== */
+a { color: var(--primary-700); }
+[data-theme="dark"] a { color: var(--primary-300); }
+[data-theme="parchment"] a { color: var(--primary-700); }
+/* Preserve explicit inline/class colors (e.g. white text links in headers) */
+a[style*="color"], .text-white a, .citation-link { color: inherit; }
+/* Force nicegui-link anchors that inline --primary-600 to use the AA-compliant
+   --primary-700 token. #059669 on white = 3.76:1 (fail); #047857 = 4.87:1. */
+a.nicegui-link[style*="--primary-600"] { color: var(--primary-700) !important; }
+
+/* ========================================================================
+   Light-theme Quasar badge/button color overrides -- WCAG AA on white cards
+   Quasar defaults fail AA: #5898d4=3.06, #2196f3=3.12, #ffc107=1.63, #e91e63=4.34
+   ======================================================================== */
+/* !important needed — body has inline style="--q-primary: #5898d4" from Quasar's
+   default theme which otherwise beats a plain [data-theme="light"] rule. Per CSS
+   spec, author !important declarations beat author inline-style normal decls. */
+[data-theme="light"], body[data-theme="light"] {
+    --q-primary: #047857 !important;    /* emerald-700, ~5.4:1 on white */
+    --q-secondary: #0f766e !important;  /* teal-700,   ~6.4:1 */
+    --q-accent: #7e22ce !important;     /* purple-700, ~7.2:1 */
+    --q-warning: #a16207 !important;    /* amber-700,  ~4.8:1 (was #f2c037, ~1.6:1) */
+    --q-negative: #be185d !important;   /* pink-700,   ~5.5:1 */
+    --q-info: #1d4ed8 !important;       /* blue-700,   ~7.0:1 (Quasar default #31ccec fails) */
+}
+/* Outlined badges get color from Quasar's text-* utility classes (which use var(--q-*)).
+   Force AA-compliant colors when those utilities appear on light-theme badges/buttons. */
+[data-theme="light"] .text-primary   { color: #047857 !important; }
+[data-theme="light"] .text-secondary { color: #0f766e !important; }
+[data-theme="light"] .text-accent    { color: #7e22ce !important; }
+[data-theme="light"] .text-warning   { color: #a16207 !important; }
+[data-theme="light"] .text-negative  { color: #be185d !important; }
+[data-theme="light"] .text-info      { color: #1d4ed8 !important; }
+[data-theme="light"] .q-badge--outline.text-primary,
+[data-theme="light"] .q-badge--outline.text-secondary,
+[data-theme="light"] .q-badge--outline.text-accent,
+[data-theme="light"] .q-badge--outline.text-warning,
+[data-theme="light"] .q-badge--outline.text-negative,
+[data-theme="light"] .q-badge--outline.text-info {
+    border-color: currentColor !important;
+}
+/* Override outlined badge inline colors (Quasar bakes RGB into style=""). */
+[data-theme="light"] .q-badge[style*="88, 152, 212"],
+[data-theme="light"] .q-badge[style*="#5898d4"] {
+    color: #1d4ed8 !important; border-color: #1d4ed8 !important;  /* blue-700, 7.0:1 */
+}
+[data-theme="light"] .q-badge[style*="33, 150, 243"],
+[data-theme="light"] .q-badge[style*="#2196f3"] {
+    color: #1d4ed8 !important; border-color: #1d4ed8 !important;
+}
+[data-theme="light"] .q-badge[style*="255, 193, 7"],
+[data-theme="light"] .q-badge[style*="#ffc107"] {
+    color: #a16207 !important; border-color: #a16207 !important;  /* amber-700, ~4.8:1 */
+}
+[data-theme="light"] .q-badge[style*="233, 30, 99"],
+[data-theme="light"] .q-badge[style*="#e91e63"] {
+    color: #be185d !important; border-color: #be185d !important;  /* pink-700, ~5.5:1 */
+}
+[data-theme="light"] .q-badge[style*="156, 39, 176"],
+[data-theme="light"] .q-badge[style*="#9c27b0"] {
+    color: #7e22ce !important; border-color: #7e22ce !important;
+}
+/* Quasar named-color utility classes (from props color=blue/amber/pink/etc.)
+   These fail AA on white. Remap to darker shades. */
+[data-theme="light"] .text-blue,
+[data-theme="light"] .q-badge.text-blue { color: #1d4ed8 !important; }
+[data-theme="light"] .text-amber,
+[data-theme="light"] .q-badge.text-amber { color: #a16207 !important; }
+[data-theme="light"] .text-pink,
+[data-theme="light"] .q-badge.text-pink { color: #be185d !important; }
+[data-theme="light"] .text-purple,
+[data-theme="light"] .q-badge.text-purple { color: #7e22ce !important; }
+[data-theme="light"] .text-yellow,
+[data-theme="light"] .q-badge.text-yellow { color: #a16207 !important; }
+[data-theme="light"] .text-cyan,
+[data-theme="light"] .q-badge.text-cyan { color: #0e7490 !important; }
+[data-theme="light"] .text-light-blue,
+[data-theme="light"] .q-badge.text-light-blue { color: #0369a1 !important; }
+[data-theme="light"] .text-red,
+[data-theme="light"] .q-badge.text-red { color: #b91c1c !important; }
+[data-theme="light"] .text-orange,
+[data-theme="light"] .q-badge.text-orange { color: #c2410c !important; }
+[data-theme="light"] .text-teal,
+[data-theme="light"] .q-badge.text-teal { color: #0f766e !important; }
+[data-theme="light"] .text-green,
+[data-theme="light"] .q-badge.text-green { color: #15803d !important; }
+[data-theme="light"] .q-badge--outline.text-blue,
+[data-theme="light"] .q-badge--outline.text-amber,
+[data-theme="light"] .q-badge--outline.text-pink,
+[data-theme="light"] .q-badge--outline.text-purple,
+[data-theme="light"] .q-badge--outline.text-yellow,
+[data-theme="light"] .q-badge--outline.text-cyan,
+[data-theme="light"] .q-badge--outline.text-light-blue,
+[data-theme="light"] .q-badge--outline.text-red,
+[data-theme="light"] .q-badge--outline.text-orange,
+[data-theme="light"] .q-badge--outline.text-teal,
+[data-theme="light"] .q-badge--outline.text-green {
+    border-color: currentColor !important;
+}
+/* Button text with text-primary variant also inherits --q-primary on white */
+[data-theme="light"] .q-btn--flat .text-primary,
+[data-theme="light"] .text-primary {
+    color: #047857 !important;
+}
+
+/* Parchment Theme - Academic & Warm */
+[data-theme="parchment"] {
+    --bg-primary: #fffbf5;
+    --bg-secondary: #fef7ed;
+    --bg-tertiary: #fef3e2;
+    --bg-header: linear-gradient(135deg, #78350f 0%, #92400e 50%, #a16207 100%);
+    --bg-sidebar: #fffbf5;
+    --bg-card: #fffef9;
+    --bg-hover: #fef7ed;
+    --bg-active: #fef3c7;
+
+    --text-primary: #422006;
+    --text-secondary: #78350f;
+    --text-tertiary: #92400e;
+    --text-muted: #a16207;
+
+    --border-light: #fde68a;
+    --border-medium: #fcd34d;
+    --border-focus: #a16207;
+
+    --primary-600: #a16207;
+    --primary-700: #92400e;
+}
+
+/* Dark Theme - Modern & Elegant */
+[data-theme="dark"] {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --bg-header: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+    --bg-sidebar: #1e293b;
+    --bg-card: #1e293b;
+    --bg-hover: #334155;
+    --bg-active: #064e3b;
+
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-tertiary: #cbd5e1;
+    /* WCAG AA: #94a3b8 (slate-400) on #1e293b (slate-800) = 5.6:1; #64748b was 3.07:1 */
+    --text-muted: #94a3b8;
+    --text-inverse: #0f172a;
+
+    /* Lighter primary shades for dark mode -- emerald-400/300 for AA on dark bg.
+       Without this, var(--primary-600)=#059669 inline links fail at 3.88:1 on #1e293b. */
+    --primary-600: #34d399;
+    --primary-700: #6ee7b7;
+
+    --border-light: #334155;
+    --border-medium: #475569;
+    --border-focus: #10b981;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
+}
+
+/* Quasar uses --q-primary/secondary/accent for badges, buttons, etc.
+   In dark mode the defaults (#5898d4 blue, #26a69a teal, #9c27b0 purple) fail
+   AA contrast on dark cards. Override with brighter equivalents (~5:1+). */
+[data-theme="dark"] {
+    --q-primary: #60a5fa;       /* blue-400, ~6.3:1 on #1e293b */
+    --q-secondary: #5eead4;     /* teal-300, ~9.4:1 */
+    --q-accent: #d8b4fe;        /* purple-300, ~7.5:1 */
+}
+[data-theme="dark"] body {
+    --q-primary: #60a5fa;
+    --q-secondary: #5eead4;
+    --q-accent: #d8b4fe;
+}
+/* Quasar badges set color via inline style="color: rgb(...)" matching --q-* tokens.
+   Force-brighten the specific badge variants flagged by Lighthouse on dark theme. */
+[data-theme="dark"] .q-badge[style*="156, 39, 176"],
+[data-theme="dark"] .q-badge[style*="#9c27b0"] { color: #d8b4fe !important; border-color: #d8b4fe !important; }
+[data-theme="dark"] .q-badge[style*="233, 30, 99"],
+[data-theme="dark"] .q-badge[style*="#e91e63"] { color: #f9a8d4 !important; border-color: #f9a8d4 !important; }
+[data-theme="dark"] .q-badge[style*="88, 152, 212"],
+[data-theme="dark"] .q-badge[style*="#5898d4"] { color: #60a5fa !important; border-color: #60a5fa !important; }
+
+/* Dark theme input fixes */
+[data-theme="dark"] .q-field__native,
+[data-theme="dark"] .q-field__input,
+[data-theme="dark"] input,
+[data-theme="dark"] textarea {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-field--outlined .q-field__control {
+    background: var(--bg-tertiary) !important;
+}
+
+[data-theme="dark"] .q-field__label {
+    color: var(--text-tertiary) !important;
+}
+
+[data-theme="dark"] .result-snippet,
+[data-theme="dark"] .transcription-panel,
+[data-theme="dark"] .transcription-content {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-card {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Dark Theme Menu Fixes */
+[data-theme="dark"] .q-menu {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-light) !important;
+}
+
+[data-theme="dark"] .q-item {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-item:hover {
+    background: var(--bg-hover) !important;
+}
+
+[data-theme="dark"] .highlight-match {
+    background: linear-gradient(120deg, #854d0e 0%, #a16207 100%) !important;
+    color: white !important;
+}
+
+[data-theme="dark"] .line-break-sep {
+    color: #aaa !important;
+}
+
+/* Dark Theme Tabs Fixes */
+[data-theme="dark"] .q-tabs,
+[data-theme="dark"] .q-tab-panels {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-tab {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .q-tab--active {
+    color: var(--primary-400) !important;
+}
+
+/* Dark Theme Dialog Fixes */
+[data-theme="dark"] .q-dialog__inner {
+    background: transparent !important;
+}
+
+[data-theme="dark"] .q-dialog .q-card {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Dark Theme Expansion Panel Fixes */
+[data-theme="dark"] .q-expansion-item {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-expansion-item__content {
+    background: var(--bg-secondary) !important;
+}
+
+/* Dark Theme Badge and Chip Fixes */
+[data-theme="dark"] .q-badge {
+    color: white !important;
+}
+
+/* Dark Theme Select/Dropdown Fixes */
+[data-theme="dark"] .q-select .q-field__native,
+[data-theme="dark"] .q-select .q-field__input {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-select__dropdown-icon {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .q-select .q-chip {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Dark theme option/item text in select dropdown */
+[data-theme="dark"] .q-item__label {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-item__label--caption {
+    color: var(--text-tertiary) !important;
+}
+
+/* Fix select popup/virtual scroll in dark mode */
+[data-theme="dark"] .q-virtual-scroll__content {
+    background: var(--bg-card) !important;
+}
+
+[data-theme="dark"] .q-select__dialog {
+    background: var(--bg-card) !important;
+}
+
+/* Dark Theme Checkbox Fixes */
+[data-theme="dark"] .q-checkbox__inner {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .q-checkbox__inner--truthy {
+    color: var(--primary-400) !important;
+}
+
+[data-theme="dark"] .q-checkbox .q-checkbox__label {
+    color: var(--text-primary) !important;
+}
+
+/* R2-10: Candidate table (joins-candidate-table) dark-mode — mirrors q-card/q-menu pattern.
+   Uses CSS vars only (no hardcoded hex) so light/parchment/dark stay consistent. */
+[data-theme="dark"] .joins-candidate-table,
+[data-theme="dark"] .joins-candidate-table .q-table__container,
+[data-theme="dark"] .joins-candidate-table .q-table__card {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table thead tr th {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border-light) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table tbody td {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border-light) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table tbody tr:hover td {
+    background: var(--bg-hover) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table__bottom {
+    background: var(--bg-secondary) !important;
+    color: var(--text-secondary) !important;
+    border-top: 1px solid var(--border-light) !important;
+}
+
+/* Parchment theme input fixes */
+[data-theme="parchment"] .q-field__native,
+[data-theme="parchment"] .q-field__input,
+[data-theme="parchment"] input,
+[data-theme="parchment"] textarea {
+    color: var(--text-primary) !important;
+}
+
+/* Catalog Browse Table - theme-aware (high specificity to override Quasar) */
+.catalog-browse-table .q-table { table-layout: fixed; width: 100% !important; }
+.catalog-browse-table .q-table thead tr th {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    font-weight: 600;
+}
+.catalog-browse-table .q-table tbody tr td {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+.catalog-browse-table .q-table tbody tr:hover td {
+    background: var(--bg-hover) !important;
+}
+.catalog-browse-table .q-table__bottom {
+    background: var(--bg-card) !important;
+    color: var(--text-secondary) !important;
+}
+.catalog-browse-table .catalog-detail-row td {
+    white-space: normal !important;
+}
+
+/* ========================================================================
+   Base Styles
+   ======================================================================== */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+}
+
+/* Hebrew text styling */
+.hebrew-text, [dir="rtl"] {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', 'SBL Hebrew', serif;
+}
+
+/* ========================================================================
+   Header Styles
+   ======================================================================== */
+
+.q-header {
+    background: var(--bg-header) !important;
+    box-shadow: var(--shadow-lg) !important;
+}
+
+.app-header {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-icon {
+    font-size: 2rem;
+    color: white;
+    opacity: 0.95;
+}
+
+.logo-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 0.02em;
+}
+
+.logo-version {
+    font-size: 0.7rem;
+    background: rgba(255,255,255,0.2);
+    padding: 2px 8px;
+    border-radius: 12px;
+    margin-inline-start: 8px;
+}
+
+/* Status indicator */
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.15);
+    padding: 6px 16px;
+    border-radius: 20px;
+    backdrop-filter: blur(8px);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.status-dot.ready { background: #34d399; }
+.status-dot.loading { background: #fbbf24; }
+.status-dot.error { background: #f87171; }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(0.95); }
+}
+
+/* ========================================================================
+   Sidebar Styles
+   ======================================================================== */
+
+.q-drawer {
+    background-color: var(--bg-sidebar) !important;
+    overflow-x: hidden !important;
+}
+
+.q-drawer__content {
+    overflow-x: hidden !important;
+}
+
+/* Use logical properties for drawer borders - works for both LTR and RTL */
+.q-drawer--left {
+    border-right: 1px solid var(--border-light) !important;
+}
+
+.q-drawer--right {
+    border-left: 1px solid var(--border-light) !important;
+}
+
+.sidebar-nav {
+    padding: 16px 0;
+}
+
+.nav-section-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 16px 24px 8px;
+}
+
+/* The main sidebar's content has no padding of its own (NiceGUI gives a drawer 16px a side):
+   the rows and the footer set their own, and the 64px icon rail keeps its width for the icons. */
+.gs-main-drawer.nicegui-drawer { padding: 0 !important; }
+/* The list (web/main.py, owner 2026-11-05): no section titles, rows close together. A
+   NiceGUI column puts 1rem between its children; the rows set their own spacing. */
+.nav-list { gap: 0 !important; padding: 2px 0 8px; align-items: stretch !important; }
+.nav-rail-row { justify-content: flex-end; padding: 2px 8px 2px; }
+/* The sidebar is at the screen's left in both languages, so its button sits at the sidebar's
+   right edge, beside the page, in both: in Hebrew "end" is the left (owner, 2026-11-05). */
+[dir="rtl"] .q-drawer:not(.q-drawer--mini) .nav-rail-row { justify-content: flex-start; }
+.nav-separator { margin: 6px 16px !important; }
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 14px;
+    margin: 1px 8px;
+    border-radius: 8px;
+    font-size: 0.92rem;
+    line-height: 1.25;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.nav-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.nav-item.active {
+    background: var(--bg-active);
+    color: var(--primary-700);
+    font-weight: 600;
+    border-inline-start: 3px solid var(--primary-600);
+}
+
+[data-theme="dark"] .nav-item.active {
+    color: var(--primary-400);
+    border-inline-start-color: var(--primary-400);
+}
+
+.nav-item-icon {
+    font-size: 1.25rem;
+    opacity: 0.85;
+}
+
+.nav-item-badge {
+    margin-inline-start: auto;
+    background: var(--primary-100);
+    color: var(--primary-700);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+[data-theme="dark"] .nav-item-badge {
+    background: var(--primary-900);
+    color: var(--primary-300);
+}
+
+/* The icon rail (Quasar's `mini`, the visitor's choice): icons centred, the labels,
+   badges and footer hidden (`nav-mini-hide`), each icon named by its tooltip, which
+   shows only while the rail is on (NAV_MINI_BODY_CLASS on <body>). Not Quasar's
+   `q-mini-drawer-hide`: Quasar also hides that in the phone's overlay drawer, which is
+   never a rail, and the labels went with it (2026-11-05). */
+.q-drawer--mini .nav-mini-hide { display: none !important; }
+/* The phone's overlay drawer is never a rail: no button to make it one. */
+.q-drawer--mobile .nav-rail-row { display: none; }
+.q-drawer--mini .nav-rail-row { justify-content: center; padding-inline: 0; }
+.q-drawer--mini .nav-item { justify-content: center; padding: 9px 0; margin: 1px 8px; }
+.q-drawer--mini .nav-separator { margin: 6px 12px !important; }
+body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
+
+/* Sidebar Footer. Room under it for the "How to cite" chip, which floats over the
+   sidebar's foot (web/citation_chip.py): the footer can scroll clear of it. */
+.sidebar-footer {
+    padding: 10px 16px 56px;
+    border-top: 1px solid var(--border-light);
+    margin-top: auto;
+}
+
+/* The "How to cite" chip -- replaces the global citation FOOTER (owner,
+   2026-09-04). Small, floating, always visible, bottom-start where the footer
+   band used to be. z-index is set inline at 2000, matching the footer it
+   replaces: above page content, and below Quasar's dialogs at 6000 so a dialog
+   is never covered by a citation chip. */
+.citation-chip-btn.q-btn {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    padding: 2px 12px 2px 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+    font-size: 11px;
+    min-height: 32px;
+    opacity: 0.9;
+    transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+.citation-chip-btn.q-btn:hover,
+.citation-chip-btn.q-btn:focus-visible {
+    opacity: 1;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+.citation-chip-label {
+    font-size: 11px;
+    margin-inline-start: 4px;
+    white-space: nowrap;
+}
+.citation-chip-panel {
+  /* The full 17-author MiDRASH citation (owner, 2026-09-05) takes a site
+     citation from ~3 rendered lines to ~6, and a manuscript page shows TWO
+     citations. Nothing here bounded the panel before -- it relied on Quasar's
+     own default `.q-menu` viewport clamp, which is real but undocumented and
+     untested in this repo. On a short viewport (a phone in landscape, or the
+     chip opened near the foot of a long page) that is the difference between a
+     panel that scrolls and one that runs off the screen.
+
+     The outer `max()` is a FLOOR, and it is not theoretical: measuring this
+     panel in a hidden browser pane returned `innerHeight: 0`, so `70vh`
+     computed to 0px and the clamp collapsed the panel to nothing. Any context
+     where viewport units resolve to zero would otherwise hide the citation
+     entirely -- a bound that can reach 0 is worse than no bound. */
+  max-height: max(12rem, min(70vh, 32rem));
+  overflow-y: auto;
+    background: var(--bg-secondary, #fff);
+}
+/* On a narrow screen the label is the first thing to go -- the quote icon and
+   its aria-label still name the control. Mirrors what the footer did with
+   `.citation-hebrew-label`, which went with it. */
+@media (max-width: 480px) {
+    .citation-chip-label { display: none; }
+    .citation-chip-btn.q-btn { padding: 2px 8px; }
+}
+
+/* Progressive image loading spinner */
+.img-loading-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100px;
+}
+.img-loading-container::before {
+    content: '';
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border-light, #e0e0e0);
+    border-top-color: var(--primary-600, #2563eb);
+    border-radius: 50%;
+    animation: img-spin 0.8s linear infinite;
+    z-index: 0;
+}
+.img-loading-container.img-loaded::before {
+    display: none;
+}
+@keyframes img-spin {
+    to { transform: rotate(360deg); }
+}
+
+.theme-switcher {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    padding: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+}
+
+.theme-btn {
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    opacity: 0.7;
+}
+
+.theme-btn:hover, .theme-btn.active {
+    opacity: 1;
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+/* ========================================================================
+   Card Styles
+   ======================================================================== */
+
+.q-card {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+    border-radius: 12px !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: all 0.2s ease !important;
+}
+
+.q-card:hover {
+    box-shadow: var(--shadow-md) !important;
+}
+
+.card-elevated {
+    box-shadow: var(--shadow-lg) !important;
+}
+
+/* ========================================================================
+   Button Styles
+   ======================================================================== */
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-600), var(--primary-700)) !important;
+    color: white !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    padding: 10px 20px !important;
+    transition: all 0.2s !important;
+    box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3) !important;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(5, 150, 105, 0.4) !important;
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-medium) !important;
+}
+
+.btn-ghost {
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+}
+
+.btn-ghost:hover {
+    background: var(--bg-hover) !important;
+}
+
+/* ========================================================================
+   Input Styles
+   ======================================================================== */
+
+.q-field--outlined .q-field__control {
+    border-color: var(--border-medium) !important;
+    border-radius: 10px !important;
+    background: var(--bg-primary) !important;
+}
+
+.q-field--outlined.q-field--focused .q-field__control {
+    border-color: var(--border-focus) !important;
+    box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15) !important;
+}
+
+.q-field__label {
+    color: var(--text-secondary) !important;
+}
+
+/* ========================================================================
+   Content Area
+   ======================================================================== */
+
+.main-content {
+    background: var(--bg-secondary);
+    min-height: calc(100vh - 64px);
+    padding: 24px;
+}
+
+.content-container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* Page Header */
+.page-header {
+    margin-bottom: 24px;
+}
+
+.page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+}
+
+.page-subtitle {
+    font-size: 1rem;
+    color: var(--text-tertiary);
+    margin: 0;
+}
+
+/* ========================================================================
+   Research-Specific Styles
+   ======================================================================== */
+
+/* Result Cards */
+.result-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.result-card:hover {
+    border-color: var(--primary-300);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.result-shelfmark {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--primary-700);
+}
+
+.result-title {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.result-snippet {
+    font-size: 0.95rem;
+    line-height: 1.8;
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    direction: rtl;
+    text-align: right;
+}
+
+.highlight-match {
+    background: linear-gradient(120deg, #fef08a 0%, #fde047 100%);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.line-break-sep {
+    color: #888;
+    font-weight: bold;
+    padding: 0 2px;
+}
+
+/* Stats Cards */
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+    transition: all 0.3s;
+}
+
+.stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+.stat-value {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--primary-600), var(--primary-800));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: var(--text-tertiary);
+    margin-top: 8px;
+    font-weight: 500;
+}
+
+/* Advanced Options Panel */
+.options-panel {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+/* ========================================================================
+   Scrollbar Styles
+   ======================================================================== */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--neutral-400);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--neutral-500);
+}
+
+/* ========================================================================
+   Responsive Styles
+   ======================================================================== */
+
+@media (max-width: 768px) {
+    .app-header {
+        padding: 0 16px;
+    }
+
+    .main-content {
+        padding: 16px;
+    }
+
+    .page-title {
+        font-size: 1.5rem;
+    }
+
+    .stat-card {
+        padding: 16px;
+    }
+
+    .stat-value {
+        font-size: 1.75rem;
+    }
+}
+
+/* ========================================================================
+   Animation Classes
+   ======================================================================== */
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.slide-in-left {
+    animation: slideInLeft 0.3s ease-out;
+}
+
+@keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+/* ========================================================================
+   Utility Classes
+   ======================================================================== */
+
+.text-gradient {
+    background: linear-gradient(135deg, var(--primary-600), var(--accent-gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.border-gradient {
+    border-image: linear-gradient(135deg, var(--primary-400), var(--accent-gold)) 1;
+}
+
+.glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* ========================================================================
+   Mobile Responsive - Minimal Breakpoints
+   ======================================================================== */
+
+/* Mobile select dialog dark mode fixes */
+[data-theme="dark"] .q-dialog--menu .q-card,
+[data-theme="dark"] .q-select__dialog .q-card {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-dialog--menu .q-item,
+[data-theme="dark"] .q-select__dialog .q-item {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .q-dialog--menu .q-item:hover,
+[data-theme="dark"] .q-select__dialog .q-item:hover,
+[data-theme="dark"] .q-dialog--menu .q-item--active,
+[data-theme="dark"] .q-select__dialog .q-item--active {
+    background: var(--bg-hover) !important;
+}
+
+/* Parchment theme select/dropdown fixes */
+[data-theme="parchment"] .q-menu {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+}
+
+[data-theme="parchment"] .q-item {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="parchment"] .q-item:hover {
+    background: var(--bg-hover) !important;
+}
+
+[data-theme="parchment"] .q-select .q-field__native {
+    color: var(--text-primary) !important;
+}
+
+/* Tablet and below */
+@media (max-width: 768px) {
+    /* Prevent iOS zoom on input focus */
+    input, select, textarea { font-size: 16px !important; }
+
+    /* Touch-friendly targets */
+    button, .clickable, [role="button"] { min-height: 44px; }
+
+    /* Prevent horizontal scroll */
+    body { overflow-x: hidden; }
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+    .app-header { padding: 0 12px; }
+    .main-content { padding: 12px; }
+    .page-title { font-size: 1.5rem; }
+}
+
+/* Small mobile */
+@media (max-width: 480px) {
+    .main-content { padding: 8px; }
+    .page-title { font-size: 1.25rem; }
+
+    /* Dialogs fullscreen. The minimum goes too: lists.py and project_tree.py
+       give their cards min-w-[400px] / min-w-[500px], wider than the screen. */
+    .q-dialog__inner { padding: 0 !important; }
+    .q-dialog .q-card {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        min-width: 0 !important;
+        border-radius: 0 !important;
+    }
+}
+
+/* Utility classes */
+@media (max-width: 640px) {
+    .hide-mobile { display: none !important; }
+}
+@media (min-width: 641px) {
+    .show-mobile-only { display: none !important; }
+}
+
+/* === Page-specific mobile styles === */
+
+/* Home page */
+@media (max-width: 640px) {
+    .tool-card { min-width: 100% !important; }
+    .mini-stat-card { padding: 12px !important; }
+}
+
+/* Search page */
+@media (max-width: 768px) {
+    .filters-grid { grid-template-columns: 1fr !important; }
+}
+
+/* Inline accordion expansion for search results */
+.result-inline-expand {
+    animation: expand-in 0.2s ease-out;
+    border-top: 1px solid var(--border-light);
+    margin-top: 8px;
+    padding-top: 12px;
+}
+@keyframes expand-in {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 500px; }
+}
+/* The expanded result (owner's mockup, 2026-10-22): the full text in the
+   snippet's place, a 150px thumbnail beside it, one line of actions under
+   them. On a phone the thumbnail drops under the text at 56px. */
+.result-inline-expand { border-top: 0 !important; margin-top: 2px !important; padding-top: 0 !important; }
+.result-card.is-expanded .result-snippet { display: none !important; }
+.result-card.is-expanded { border-color: #a7f3d0 !important; box-shadow: 0 2px 10px rgba(4, 120, 87, .10); }
+.expand-row { gap: 12px !important; align-items: stretch; }
+.expand-thumb { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.result-inline-expand .expand-thumb img {
+    width: 150px !important; height: 186px !important; object-fit: contain; border-radius: 6px; background: #1a1a1a;
+}
+.expand-caption { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.result-inline-expand .q-scrollarea { max-height: 220px !important; }
+.result-inline-expand .expand-text {
+    font-size: 15px !important; line-height: 1.75 !important; padding: 8px 12px !important;
+    background: #fffdf5 !important; border: 1px solid #efe9d6;
+}
+[data-theme="dark"] .result-inline-expand .expand-text { background: var(--bg-tertiary) !important; border-color: var(--border-light); }
+.expand-actions { gap: 8px !important; padding-top: 6px; }
+@media (max-width: 640px) {
+    .expand-row { flex-direction: column; }
+    .expand-thumb { flex-direction: row; align-items: center; gap: 8px; order: 2; }
+    .result-inline-expand .expand-thumb img { width: 56px !important; height: 70px !important; }
+    .result-inline-expand .q-scrollarea { max-height: 300px !important; }
+}
+
+/* Collapsible Search Panel */
+.search-panel-container {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.search-panel-expanded,
+.search-panel-collapsed {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.search-panel-collapsed {
+    animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.search-panel-expanded {
+    animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Collapsed panel hover effect */
+.search-panel-collapsed:hover {
+    background: var(--bg-hover) !important;
+}
+
+/* Ensure smooth transition for panel content */
+.search-panel-container .q-card {
+    will-change: transform, opacity;
+}
+
+/* RTL support for collapsed panel */
+[dir="rtl"] .search-panel-collapsed .q-row,
+.hebrew-mode .search-panel-collapsed .q-row {
+    flex-direction: row-reverse;
+}
+
+/* Collapsed panel query text RTL */
+.search-panel-collapsed .truncate {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Mobile adjustments for collapsible search panel */
+@media (max-width: 768px) {
+    .search-panel-expanded {
+        padding: 12px !important;
+    }
+
+    .search-panel-collapsed {
+        padding: 8px 12px !important;
+    }
+
+    /* Stack search elements vertically on very small screens */
+    .search-panel-expanded .flex-wrap {
+        gap: 12px !important;
+    }
+
+    /* Collapse toggle button more visible on mobile */
+    .search-panel-container [class*="expand_less"],
+    .search-panel-container [class*="expand_more"] {
+        font-size: 1.5rem !important;
+    }
+}
+
+@media (max-width: 480px) {
+    /* Very small screens: hide some labels in collapsed view */
+    .search-panel-collapsed .q-badge {
+        display: none !important;
+    }
+
+    /* Full width search button in collapsed mode */
+    .search-panel-collapsed .btn-primary {
+        padding: 4px 12px !important;
+        font-size: 0.75rem !important;
+    }
+}
+
+/* Browse page */
+@media (max-width: 768px) {
+    .browse-container { flex-direction: column !important; }
+    .image-panel, .transcription-panel { width: 100% !important; max-height: 50vh !important; }
+}
+
+/* Header mobile adjustments */
+@media (max-width: 640px) {
+    .app-header { padding: 0 8px !important; }
+    .app-header .status-indicator {
+        padding: 4px 8px !important;
+        font-size: 0.7rem !important;
+    }
+    .app-header .status-indicator .status-text { display: none; }
+    .app-header .auth-buttons { gap: 4px !important; }
+    .app-header .auth-buttons .q-btn {
+        min-width: 32px !important;
+        min-height: 32px !important;
+        padding: 4px !important;
+    }
+    /* Hide help button on mobile (keyboard shortcuts not relevant for touch) */
+    .help-btn-header { display: none !important; }
+    /* Hide logo text on mobile - only show icon */
+    .header-logo-text { display: none !important; }
+}
+
+/* The header's go-to box (web/main.py::render_header_center, 2026-11-04).
+   From 1024px the field sits in the header and the search button is hidden;
+   below, the button shows and the field opens across the whole header bar
+   while the row carries .is-open (set and cleared in the browser). */
+.header-search-input { width: clamp(220px, 24vw, 320px); }
+/* The site's field rules paint every outlined field white; in the header the
+   text and placeholder are white (Quasar "dark"), so the field is see-through. */
+.header-search-input .q-field__control { background: rgba(255, 255, 255, 0.15) !important; }
+.header-search-input .q-field__control:before { border-color: rgba(255, 255, 255, 0.45) !important; }
+.header-search-input input { color: #fff !important; }
+.header-search-input input::placeholder { color: rgba(255, 255, 255, 0.75) !important; opacity: 1; }
+.header-search-close { display: none !important; }
+@media (min-width: 1024px) {
+    .header-search-toggle { display: none !important; }
+}
+@media (max-width: 1023px) {
+    .header-search-field { display: none !important; }
+    .header-search.is-open .header-search-field {
+        display: flex !important;
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        padding: 0 8px;
+        gap: 4px;
+        background: var(--bg-header);
+    }
+    .header-search.is-open .header-search-input { flex: 1 1 auto; width: auto; }
+    .header-search.is-open .header-search-close { display: inline-flex !important; }
+}
+/* Room for the search button on a phone (measured at 375px: without this the
+   groups beside it wrapped to a second line under the 64px bar). */
+@media (max-width: 640px) {
+    .app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }
+    .app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }
+}
+
+/* Ensure logo text doesn't shrink */
+.header-logo-text {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+}
+
+/* Header reveal only on mobile - disable on desktop */
+@media (min-width: 1024px) {
+    .q-header {
+        transform: translateY(0) !important;
+    }
+}
+
+/* Mobile drawer - CSS only, hide on phones/tablets. Up to 1023px since
+   2026-10-22 (the owner's screen-size table): a tablet gets the overlay
+   drawer, so the content keeps the width. The drawer's own breakpoint prop in
+   web/main.py says the same. */
+/* Handles both LTR (left drawer) and RTL (right drawer) modes */
+@media (max-width: 1023px) {
+    .q-drawer--left:not(.q-drawer--on-top) {
+        transform: translateX(-100%) !important;
+    }
+    .q-drawer--right:not(.q-drawer--on-top) {
+        transform: translateX(100%) !important;
+    }
+}
+
+/* Hebrew mode text direction enhancements */
+/* Layout RTL is handled by Quasar natively; these rules enhance text content */
+
+/* Ensure Inputs in Hebrew mode are RTL */
+.hebrew-mode input,
+.hebrew-mode textarea,
+.hebrew-mode .q-field__native,
+.hebrew-mode .q-field__input {
+    direction: rtl !important;
+    text-align: right !important;
+}
+
+/* Content Text (Markdown, Paragraphs, Headings) should be RTL in Hebrew */
+.hebrew-mode .q-markdown,
+.hebrew-mode p,
+.hebrew-mode .text-body1,
+.hebrew-mode .text-body2,
+.hebrew-mode h1,
+.hebrew-mode h2,
+.hebrew-mode h3,
+.hebrew-mode h4,
+.hebrew-mode h5,
+.hebrew-mode h6,
+.hebrew-mode .q-item__label,
+.hebrew-mode .q-field__label {
+    direction: rtl !important;
+    text-align: right !important;
+    width: 100%; /* Ensure headings take full width to allow right alignment */
+}
+
+/* Ensure main content container aligns text children to right by default in Hebrew */
+/* This catches loose text and inline-block elements */
+.hebrew-mode .main-content {
+    text-align: right;
+}
+
+/* Specific overrides for content that must be RTL */
+.hebrew-mode .result-snippet,
+.hebrew-mode .hebrew-text {
+    direction: rtl;
+    text-align: right;
+}
+
+/* ========================================================================
+   Diff Highlighting for Corrections
+   ======================================================================== */
+
+.diff-deleted {
+    background: #fecaca;
+    text-decoration: line-through;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: #991b1b;
+}
+
+.diff-inserted {
+    background: #bbf7d0;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: #166534;
+}
+
+[data-theme="dark"] .diff-deleted {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+
+[data-theme="dark"] .diff-inserted {
+    background: #14532d;
+    color: #bbf7d0;
+}
+
+/* ========================================================================
+   Fullscreen Edit Mode Overlay
+   ======================================================================== */
+
+.fullscreen-edit-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+}
+
+.fullscreen-edit-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+    flex-shrink: 0;
+}
+
+.fullscreen-edit-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.fullscreen-edit-image-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 200px;
+    overflow: hidden;
+}
+
+.fullscreen-image-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px 10px;
+    background: #111;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+
+.fullscreen-image-toolbar .q-btn {
+    color: #aaa !important;
+}
+
+.fullscreen-image-toolbar .q-btn:hover {
+    color: #fff !important;
+}
+
+.fullscreen-edit-image {
+    flex: 1;
+    background: #1a1a1a;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fullscreen-edit-text {
+    flex: 1;
+    background: var(--bg-primary);
+    overflow: hidden;
+    padding: 10px;
+}
+
+.fullscreen-edit-text .q-textarea {
+    height: 100%;
+}
+
+.fullscreen-edit-text textarea {
+    resize: none !important;
+    overflow-y: auto !important;
+}
+
+/* Draggable splitter between image and text */
+.fullscreen-edit-splitter {
+    width: 6px;
+    background: var(--border-light);
+    cursor: col-resize;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+
+.fullscreen-edit-splitter:hover,
+.fullscreen-edit-splitter.dragging {
+    background: var(--q-primary);
+}
+
+/* Fullscreen image should fill and allow pan/zoom */
+.fullscreen-edit-image .zoomable-image {
+    max-width: none;
+    max-height: none;
+    transform-origin: center center;
+}
+
+@media (max-width: 768px) {
+    .fullscreen-edit-content {
+        flex-direction: column;
+    }
+    .fullscreen-edit-image,
+    .fullscreen-edit-text {
+        flex: 1;
+        max-height: 50vh;
+    }
+    .fullscreen-edit-text {
+        border-left: none;
+        border-top: 1px solid var(--border-light);
+    }
+    .fullscreen-edit-splitter {
+        width: 100%;
+        height: 6px;
+        cursor: row-resize;
+    }
+}
+
+/* ========================================================================
+   Page Loading Progress Bar - GitHub/YouTube style
+   ======================================================================== */
+
+.page-loading-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    z-index: 9999;
+    pointer-events: none;
+    background: linear-gradient(90deg,
+        var(--primary-400) 0%,
+        var(--primary-500) 50%,
+        var(--primary-400) 100%);
+    background-size: 200% 100%;
+    transform: translateX(-100%);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.page-loading-bar.active {
+    opacity: 1;
+    animation: loading-progress 1.5s ease-in-out infinite,
+               loading-shimmer 1s linear infinite;
+}
+
+@keyframes loading-progress {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(-30%); }
+    100% { transform: translateX(-10%); }
+}
+
+@keyframes loading-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.page-loading-bar.complete {
+    animation: loading-complete 0.3s ease-out forwards;
+}
+
+@keyframes loading-complete {
+    0% { transform: translateX(-10%); opacity: 1; }
+    100% { transform: translateX(0%); opacity: 0; }
+}
+
+/* ========================================================================
+   Feature Discovery Glow
+   ======================================================================== */
+
+@keyframes feature-glow {
+    0%, 100% { box-shadow: 0 0 4px 1px rgba(16, 185, 129, 0.3); }
+    50% { box-shadow: 0 0 12px 4px rgba(16, 185, 129, 0.6); }
+}
+
+.feature-glow {
+    animation: feature-glow 2s ease-in-out infinite;
+    border-radius: 8px;
+}
+
+.feature-hint {
+    position: absolute;
+    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    background: #065f46;
+    color: white;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    pointer-events: none;
+    animation: feature-hint-fade 4s ease-in-out forwards;
+    z-index: 100;
+}
+
+.feature-hint::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #065f46;
+}
+
+@keyframes feature-hint-fade {
+    0% { opacity: 0; transform: translateX(-50%) translateY(4px); }
+    10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* discovery surfaces — ONE block serving BOTH the browse-page panel and the
+   corpus-wide findings page (Phase 136, plan 136-10, PANEL-01 / PANEL-02 /
+   NOVEL-01). Sources: the validated sketches in
+   .claude/skills/sketch-findings-genizahsearch/references/
+   discovery-panel-layout.md § "CSS Patterns" and findings-page.md
+   § "CSS Patterns".
+
+   ============================ HOW TO USE ============================
+   EVERY rule below is scoped under `.gs-discovery`. The panel's root
+   element and the findings page's root element MUST carry that class, or
+   none of this applies. The scope is not decoration: the sketches use very
+   generic class names (`.row`, `.chip`, `.mode`, `.c`), and this file is a
+   GLOBAL stylesheet loaded beside Quasar — an unscoped `.row` rule here
+   would restyle every NiceGUI page in the app at phone width. The sketch
+   class names are kept EXACTLY as the reference docs record them so those
+   docs stay accurate; only the scope is added.
+
+   ============================ TWO HARD RULES ========================
+   1. EVERY directional property is LOGICAL — `border-inline-start`,
+      `padding-inline-start`, `margin-inline-start`, `text-align: start/end`.
+      Both surfaces render LTR and RTL; physical properties break RTL.
+   2. The relation chip stays VISUALLY NEUTRAL. Colour-coding it by relation
+      kind reintroduces per-tier confidence styling through the back door,
+      which is exactly what D-24 prohibits. There is NO confidence scale on
+      either surface and no per-tier chip rule exists anywhere in this file.
+
+   Phone-first: comparable surfaces on this site run ~68% mobile, so the
+   stacked layout is the base and the wide layout is the media query.
+
+   Contrast: every new text-on-background pair was measured in light,
+   parchment and dark. Three sketch values were CORRECTED because they fail
+   WCAG AA in at least one theme; each correction is noted at its rule.
+   ==================================================================== */
+
+/* ---- panel: the even two-pane grid (the selected variant D layout) ----
+   Mobile stacks page-pane first, then manuscript-pane, with nothing hidden;
+   at >=900px the two panes carry EQUAL weight. */
+.gs-discovery .dpanes { display: block; }
+
+@media (min-width: 900px) {
+    .gs-discovery .dpanes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    /* RTL-safe divider between the panes. */
+    .gs-discovery .dpanes > div + div {
+        border-inline-start: 1px solid var(--border-light);
+        padding-inline-start: 16px;
+    }
+}
+
+/* ---- panel: a bucket that must NOT read as an identification ----
+   D-13e keeps "Also shares text with" as a distinct third disclosure level
+   and requires it be explicitly never presented as an identification:
+   tinted summary, inset inline-start rule, italic qualifier.
+   Contrast — text-primary on bg-tertiary: light 13.35, parchment 13.28,
+   dark 9.45. */
+.gs-discovery .disc.notid > summary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+.gs-discovery .disc.notid .dbody {
+    border-inline-start: 3px solid var(--border-medium);
+    margin-inline-start: 12px;
+    padding-inline-start: 10px;
+}
+/* Contrast — text-secondary on bg-primary: light 7.58, parchment 8.80,
+   dark 12.02. */
+.gs-discovery .disc.notid .dnote {
+    font-style: italic;
+    color: var(--text-secondary);
+    text-align: start;
+}
+
+/* ---- panel: the disclosure arrow, which MUST flip for RTL ---- */
+.gs-discovery .disc > summary {
+    cursor: pointer;
+    list-style: none;
+    text-align: start;
+}
+.gs-discovery .disc > summary::-webkit-details-marker { display: none; }
+.gs-discovery .disc > summary::before {
+    content: '\25B8';                 /* small right-pointing triangle */
+    display: inline-block;
+    margin-inline-end: 6px;
+    transition: transform .15s ease;
+}
+.gs-discovery .disc[open] > summary::before { transform: rotate(90deg); }
+[dir="rtl"] .gs-discovery .disc > summary::before {
+    content: '\25C2';                 /* small left-pointing triangle */
+}
+[dir="rtl"] .gs-discovery .disc[open] > summary::before { transform: rotate(-90deg); }
+
+/* ---- panel: work chips in the manuscript pane ----
+   D-13h requires NAMED works rather than a bare count, so these carry real
+   titles and must stay legible in both states.
+   `.here`  — a work present on THIS folio: solid border + tinted fill.
+   `.gated` — a work reachable only behind the screening toggle.
+
+   CORRECTION to the sketch: `.chip.gated` used `opacity: .7`, which drops
+   the label to 3.50 (light) / 4.03 (parchment) — below the 4.5 AA floor for
+   a real, readable label. Raised to .85: 4.97 / 5.86 / 7.54. The dashed
+   border and the recessed fill still carry the distinction.
+   Contrast — .chip.here text-primary on bg-active: light 13.89,
+   parchment 13.09, dark 8.87. */
+/* ---- the entry control's LAUNCH HIGHLIGHT (owner, 2026-08-07) ----
+   The panel arrives on a browse toolbar already carrying seven controls, every
+   one of them `flat dense` — so the one new surface in the release looked
+   exactly like the six things a reader already knows how to ignore. This gives
+   it a border and a tint until the reader opens it once.
+
+   PRESENTATIONAL ONLY. It marks the CONTROL as new; it says nothing about the
+   matches behind it, and there is no per-tier or per-confidence rule here (D-24
+   forbids confidence styling on this surface, and a "look at this" treatment
+   keyed on findings would be exactly that through the back door).
+
+   `--accent-gold` deliberately, NOT `--primary-600`: the green primary is the
+   site's ACTION colour (Search, Add to Reading Desk), and this is a "notice me",
+   not a call to act. Gold is already the caveat rule's accent on this same
+   surface, so the panel keeps one accent rather than acquiring a second.
+
+   Contrast — .gs-discovery .discovery-panel-entry-new-badge text on
+   bg-tertiary: light 13.35, parchment 13.28, dark 9.45 (the same pair the
+   caveat rule measures, which is why it reuses those two variables). */
+.gs-discovery.discovery-panel-entry-new {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--accent-gold);
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    padding-inline: 4px;
+}
+.gs-discovery .discovery-panel-entry-new-badge {
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--accent-gold);
+    /* Near-black on gold in EVERY theme: --accent-gold is a fixed light value
+       (#d4a574) that does not change per theme, so a theme-following text
+       colour would go white-on-gold in dark and fail AA. Contrast 8.19. */
+    color: #1a1a1a;
+    text-align: start;
+}
+
+.gs-discovery .chip {
+    display: inline-block;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 2px 8px;
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    text-align: start;
+}
+.gs-discovery .chip.here {
+    border-color: var(--primary-600);
+    background: var(--bg-active);
+    color: var(--text-primary);
+    font-weight: 700;
+}
+.gs-discovery .chip.gated {
+    border-style: dashed;
+    border-color: var(--border-medium);
+    opacity: .85;
+}
+
+/* ---- findings page: the novelty switch is FIRST in the filter bar,
+   regardless of DOM order (it is the page's headline axis). ---- */
+.gs-discovery .fg.novgrp { order: -1; }
+
+/* ---- findings page: a filter rendered but BLOCKED on missing data ----
+   Never silently absent: a filter that vanishes is indistinguishable from a
+   filter that never existed. Dimmed + dashed + an amber tag naming the
+   reason. `.fg.blocked` and `.mode.future` are INACTIVE user-interface
+   components, which WCAG 1.4.3 exempts from the contrast minimum; their
+   effective ratios at opacity .55 are 2.59 / 2.87 / 4.45 and that is
+   deliberate — they must read as unavailable. */
+.gs-discovery .fg.blocked { opacity: .55; }
+.gs-discovery .fg.blocked .fchip {
+    cursor: not-allowed;
+    border-style: dashed;
+}
+.gs-discovery .fg.blocked .fchip:hover { border-color: var(--border-medium); }
+
+/* The amber "needs the rebuild" tag.
+   CORRECTION to the sketch: it set `color: var(--text-inverse)` on the amber
+   fill, which is white in light AND parchment — 2.15 against #f59e0b, a
+   clear AA failure. The amber token is theme-INVARIANT (defined only in
+   :root), so a theme-varying foreground token cannot work here; a fixed
+   dark foreground is correct and measures 6.81 in all three themes. */
+.gs-discovery .needs {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    background: var(--accent-amber);
+    color: #1e293b;
+    border-radius: 999px;
+    padding: 1px 6px;
+    margin-inline-start: 6px;
+}
+
+/* ---- both surfaces: the relation chip on a row ----
+   NEUTRAL BY DESIGN. Do NOT add a per-kind colour rule here or anywhere
+   else; see hard rule 2 at the top of this block. The frozen band label
+   rides on the element's `title` attribute, never as visible text.
+   Contrast — text-secondary on bg-secondary: light 7.24, parchment 8.53,
+   dark 9.85. */
+.gs-discovery .rel {
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border-light);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ---- both surfaces: the novelty badge ----
+   Solid presence for a candidate; the `unknown` variant is the fail-closed
+   "not checked" state and reads as muted through WEIGHT and STYLE, not
+   through a colour that fails contrast.
+   CORRECTION to the sketch: `.nov.unknown` used `--text-muted` on
+   bg-tertiary — 4.49 (parchment) and 4.04 (dark), both under AA. Switched
+   to --text-secondary: 6.92 / 8.27 / 6.97, with italic + normal weight
+   carrying the "muted" reading instead.
+   Contrast — .nov primary-700 on bg-active: light 5.21, parchment 6.37,
+   dark 6.38. */
+.gs-discovery .nov {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--primary-600);
+    color: var(--primary-700);
+    background: var(--bg-active);
+}
+.gs-discovery .nov.unknown {
+    border-color: var(--border-medium);
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    font-weight: 400;
+    font-style: italic;
+}
+
+/* ---- both surfaces: the PERMANENT caveat slot ----
+   A designed element between header and body — not fine print, not a
+   warning banner. Gold inline-start rule, RTL-safe.
+   Contrast — text-primary on bg-tertiary: light 13.35, parchment 13.28,
+   dark 9.45. */
+.gs-discovery .phead .caveat {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-inline-start: 3px solid var(--accent-gold);
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    text-align: start;
+}
+[dir="rtl"] .gs-discovery .phead .caveat { border-radius: 6px 0 0 6px; }
+
+/* ---- findings page: the domain facet tree ----
+   Leaf indent and the trailing count both flip for RTL. */
+.gs-discovery .dnode { text-align: start; }
+.gs-discovery .dnode.leaf { padding-inline-start: 22px; }
+.gs-discovery .dnode .c {
+    margin-inline-start: auto;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- findings page: the mode strip ----
+   Phase 137's saved judgments and Phase 138's leads ship VISIBLE but inert
+   and phase-tagged, so those phases add a tab rather than a page. */
+.gs-discovery .mode.future {
+    opacity: .55;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ---- both surfaces: the low-coverage note under a row ----
+   Contrast — text-secondary on bg-primary: light 7.58, parchment 8.80,
+   dark 12.02. */
+.gs-discovery .dnote {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-align: start;
+}
+
+/* ---- findings page: the RESULT ROW's meta line wraps below 700px ----
+
+   Scoped to findings-row anatomy by CLASS, never by descending from the generic
+   NiceGUI row class. The previous rule did the latter and set flex-direction to
+   column, which matched EVERY NiceGUI row element inside the page -- 24 of them,
+   including the pool segment, the result toolbar, the active-filter chips, the
+   launch figures and the pager -- and turned each into a vertical stack on any
+   screen under 700px. On a surface whose sibling atlas page takes ~68% of its
+   traffic from phones, that is the majority experience.
+
+   It also could not have been doing its stated job: the ONE element carrying
+   that class is ROW_CLASS, which is a column element and therefore already
+   vertical, and nothing on either surface carries the side class the rule's
+   second half targeted. So it stacked everything except the thing it named.
+
+   What a narrow screen actually needs is for the row's META LINE -- relation
+   chip, page count, coverage, pool name, actions -- to wrap instead of
+   overflowing, which `flex-wrap` does without destroying any horizontal group.
+   `gap` is set in logical terms so it needs no RTL mirror.
+
+   EVERY SELECTOR STAYS UNDER `.gs-discovery`, even though the `gs-findings-*`
+   class names are already unique enough not to collide. That is a standing rule
+   for this whole block (`tests/test_discovery_display_strings.py::
+   test_discovery_css_block_is_scoped_and_carries_the_required_treatments`), and
+   the reason is that this file is a GLOBAL stylesheet loaded beside Quasar: the
+   guard cannot tell a specific-looking name from a generic one, so it requires
+   the page scope on all of them rather than adjudicating per selector. Ignoring
+   it here would also mean the rule applied on a page that never opted in. */
+@media (max-width: 700px) {
+    .gs-discovery .gs-findings-row-meta {
+        flex-wrap: wrap;
+        row-gap: 4px;
+    }
+    /* The two grouped-row affordances get a full-width target, which is the
+       phone-sized fix the owner asked for on the preview. */
+    .gs-discovery .gs-findings-row-expander,
+    .gs-discovery .gs-findings-row-preview-toggle {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+
+/* ---- findings page: "How to read this page" is BODY TEXT, not a footnote ----
+   Owner, 2026-08-06: "the font of the text inside 'How to read this page' is too
+   small".
+
+   The panel holds the page's honesty-critical prose — the recall disclaimer, the
+   candidacy sub-line, the checked-source list, the staleness warning and the
+   two-bucket rule. All of it inherited `.dnote` (11px), which is the right size
+   for a note sitting BESIDE a row and the wrong size for four paragraphs a reader
+   has deliberately opened in order to read. Prose set at footnote size is prose
+   that gets skipped, which is the same failure the collapse was introduced to
+   fix — the owner's earlier verdict was that this text "read as a draft and
+   therefore got read by nobody".
+
+   Scoped to the panel's own class, so `.dnote` keeps its 11px everywhere else
+   (the row meta line, the facet notes, the launch basis lines). 14px is the
+   site's body size; `line-height` is raised with it because 11px leading under
+   14px text reads as cramped.
+
+   ONE RULE RATHER THAN SIX INLINE OVERRIDES. The size belongs to the container,
+   not to each label in it, and an inline `text-sm` on every child is six places
+   to forget when a seventh line is added. Every property here is
+   direction-neutral — no RTL mirror needed. */
+.gs-discovery .gs-findings-howto .dnote,
+.gs-discovery .gs-findings-howto .gs-findings-novelty-help {
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+/* ---- findings row: text-vs-text disclosure (excerpt-v1, 2026-08-13) ----
+   Two panes, even weight (the validated discovery-panel layout: 1fr/1fr wide,
+   stacking on narrow screens). The highlight `-hl` is ONE rule for every row,
+   pane, relation kind, band and novelty status — a per-anything variant of it
+   is exactly the styling D-24 prohibits (see the hard rules at the top of this
+   block). Every directional property is logical; scroll is confined to each
+   pane's own text box. Tokens only — the parchment/dark themes restyle these
+   through the variables, never through a second rule set. */
+.gs-discovery .gs-findings-row-excerpt-panes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+@media (max-width: 900px) {
+    .gs-discovery .gs-findings-row-excerpt-panes {
+        grid-template-columns: 1fr;
+    }
+    .gs-discovery .gs-findings-row-excerpt-toggle {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+.gs-discovery .gs-findings-row-excerpt-pane {
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    min-width: 0;
+}
+.gs-discovery .gs-findings-row-excerpt-text {
+    margin: 4px 0 0;
+    font-size: 14px;
+    line-height: 1.85;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+.gs-discovery .gs-findings-row-excerpt-ctx {
+    color: var(--text-secondary);
+}
+/* The matched-word mark wears the SITE'S match voice — the same amber
+   gradient as `.highlight-match` on /parallels — because the first cut used
+   --bg-active, which on the light theme is #ecfdf5 on a #f8fafc pane:
+   invisible (owner report, 2026-08-13). Still ONE rule for every row. */
+.gs-discovery .gs-findings-row-excerpt-hl {
+    background: linear-gradient(120deg, #fef08a 0%, #fde047 100%);
+    border-radius: 3px;
+    padding: 0 1px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+[data-theme="dark"] .gs-discovery .gs-findings-row-excerpt-hl {
+    background: linear-gradient(120deg, #854d0e 0%, #a16207 100%);
+    color: white;
+}
+/* JA {...} Hebrew-word marks: content colored, braces removed by the
+   renderer. Language markup carried by the source text -- one rule for every
+   row, so it stays clear of D-24 exactly the way the highlight does. */
+.gs-discovery .gs-findings-row-excerpt-heb {
+    color: var(--primary-700);
+    font-weight: 600;
+}
+.gs-discovery .gs-findings-row-excerpt-attr {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+/* end discovery
+   ------------------------------------------------------------------------
+   The discovery block's CLOSING marker, added 2026-09-04.
+
+   `tests/test_discovery_display_strings.discovery_css_block()` used to slice
+   from the opening `/* discovery` comment to END OF FILE, which was accurate
+   only while discovery happened to be the last thing in this stylesheet. The
+   moment anything was appended below it, those rules were attributed to the
+   discovery block and its "every selector is scoped under .gs-discovery" gate
+   failed on rules that have nothing to do with discovery.
+
+   The gate is right and worth keeping -- the sketch class names it guards
+   (`.row`, `.chip`, `.mode`, `.c`) really are too generic for a global
+   stylesheet loaded beside Quasar. It just needed a bounded block. Anything
+   below this line is OUTSIDE discovery; add new site-wide rules here, not
+   above.
+   ------------------------------------------------------------------------ */
+
+/* ==========================================================================
+   Dismiss controls  (owner, 2026-09-04: "האיקס לסגירה לא ברור")
+   ==========================================================================
+   Every dismiss X on the site was `flat dense size=xs` plus `opacity-50`,
+   which produced a ~20px, half-transparent glyph that readers did not
+   recognise as a button. This gives them a real 36px hit area (above the
+   24px WCAG 2.2 target-size minimum), full opacity, and a ring on hover so
+   the affordance is visible before the pointer arrives. */
+.dismiss-btn.q-btn {
+    min-width: 36px;
+    min-height: 36px;
+    opacity: 0.85;
+    transition: opacity 0.15s ease, background-color 0.15s ease,
+                box-shadow 0.15s ease;
+}
+.dismiss-btn.q-btn:hover,
+.dismiss-btn.q-btn:focus-visible {
+    opacity: 1;
+    background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+    box-shadow: inset 0 0 0 1px var(--border-light, rgba(0, 0, 0, 0.2));
+}
+
+/* "What's New" header button + unread dot.
+   Deliberately NOT `.help-btn-header`, which is display:none under 768px.
+   This site skews mobile; hiding the announcement from most of its readers
+   would be a regression, not a tidy-up. */
+.whats-new-btn-header.q-btn {
+    position: relative;
+}
+.whats-new-dot {
+    position: absolute;
+    top: 6px;
+    inset-inline-end: 6px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   Print / "Save as PDF"
+   ==========================================================================
+   Owner request, 2026-09-04, scoped to the Browse reading view: a scholar
+   wants the transcription on paper (or as a PDF via the browser's own print
+   dialog), not a screenshot of an app.
+
+   Three things have to happen, and only the first is obvious:
+
+   1. The app chrome goes away — header, drawer, footer, dialogs, toasts and
+      every toolbar tagged `.print-hide`.
+   2. Quasar's LAYOUT OFFSETS go away with it. `.q-layout` pads the page by
+      the header/drawer sizes with inline styles, so hiding the header alone
+      leaves a 64px band and a 280px indent on every printed sheet.
+   3. Every `.q-scrollarea` is un-scrolled. The transcription lives inside one
+      with an explicit `calc(60vh - 80px)` height; left as-is, a print stops
+      at whatever happened to be scrolled into view — which is the failure
+      that makes most "print" buttons useless. */
+@media print {
+    .q-header,
+    .q-drawer,
+    .q-drawer-container,
+    .q-drawer__backdrop,
+    .q-footer,
+    .q-dialog,
+    .q-notifications,
+    .q-tooltip,
+    .nicegui-error-popup,
+    .page-loading-bar,
+    /* Every Quasar menu, not just the What's New one. The print options
+       themselves now live in a `ui.menu` hung off the printer button, and a
+       menu left open when the dialog opens would land on the sheet. Menus are
+       transient chrome by definition; none of them belongs on paper. */
+    .q-menu,
+    .print-hide {
+        display: none !important;
+    }
+
+    /* (2) Quasar writes these offsets inline, so they need !important. */
+    .q-layout,
+    .q-page-container,
+    .q-page,
+    .main-content,
+    .nicegui-content {
+        padding: 0 !important;
+        margin: 0 !important;
+        min-height: 0 !important;
+        max-width: none !important;
+    }
+
+    html, body {
+        background: #fff !important;
+        color: #000 !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+
+    /* (3) Un-scroll everything. All four selectors are load-bearing: Quasar
+       nests container/content inside the scroll area and each carries its own
+       height or transform. */
+    .q-scrollarea,
+    .q-scrollarea__container,
+    .q-scrollarea__content {
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        position: static !important;
+        transform: none !important;
+        /* THE one that actually mattered. Quasar sets `contain: strict` on
+           .q-scrollarea, and `strict` includes SIZE containment: the box sizes
+           itself as if it had no contents at all. Measured on /browse with
+           every other property above already applied — the scroll area still
+           computed to 40px (its 20px padding, twice) while the transcription
+           inside it was 2644px, so the sheet printed the padding and threw the
+           text away. Height rules cannot win against size containment; only
+           removing the containment can. */
+        contain: none !important;
+    }
+    .q-scrollarea__thumb,
+    .q-scrollarea__bar {
+        display: none !important;
+    }
+
+    /* Cards print as plain blocks: no shadows, no dark fills, no page-break
+       through the middle of a line of transcription. */
+    .q-card {
+        box-shadow: none !important;
+        border: none !important;
+        background: #fff !important;
+        break-inside: auto;
+    }
+
+    /* Browse: the two panels stack instead of sharing a printed row, and the
+       image is released from its fixed-height pan/zoom container. Without the
+       transform reset the printed image inherits whatever zoom and rotation
+       the reader left on screen. */
+    .viewer-panels {
+        display: block !important;
+        min-height: 0 !important;
+    }
+    .viewer-panels > .q-card {
+        flex: none !important;
+        min-height: 0 !important;
+        width: 100% !important;
+        /* NOT `break-inside: avoid`. The transcription card is several pages
+           long, so a browser cannot honour it and instead starts the card on a
+           fresh sheet -- which left the bottom half of page 1 blank under the
+           plate and pushed the masthead onto page 2. Only the PLATE needs to
+           stay whole, and that is asked for on `.image-container` below. */
+        break-inside: auto;
+    }
+    .image-container {
+        break-inside: avoid;
+        height: auto !important;
+        max-height: 45vh !important;
+        overflow: hidden !important;
+        background: #fff !important;
+    }
+    .image-container img.zoomable-image {
+        transform: none !important;
+        filter: none !important;
+        max-width: 100% !important;
+        max-height: 45vh !important;
+        height: auto !important;
+        width: auto !important;
+        object-fit: contain !important;
+    }
+
+    /* THE HEIGHT CHAIN. Un-scrolling `.q-scrollarea` is not enough on its
+       own: the transcription's ancestors pin it. Measured on /browse before
+       this rule — the scroll area computed to 40px tall while its own content
+       was 2644px, and `document.body.scrollHeight` was 763px, so a print
+       produced ONE page with the text clipped away. Three constraints stack:
+       the panel card's `min-height: 60vh` + `display:flex`, Tailwind's
+       `h-full` on the text container, and the scroll area's inline
+       `calc(60vh - 80px)`. All three have to go. */
+    .viewer-panels .h-full,
+    .viewer-panels .q-card,
+    .viewer-panels .nicegui-column,
+    .viewer-panels .nicegui-row {
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+    }
+    .viewer-panels {
+        display: block !important;
+        height: auto !important;
+    }
+
+    /* The image credit strip stays — the licences require the attribution to
+       travel with the plate — but inverted to black on white. Its dark inline
+       background is overridable because, unlike the header card's gradient, it
+       carries no `!important`. */
+    .browse-image-credit {
+        background: #fff !important;
+        border-top: 1px solid #000 !important;
+        padding: 4px 0 0 0 !important;
+    }
+    .browse-image-credit * {
+        color: #000 !important;
+        font-size: 7.5pt !important;
+    }
+
+    /* The printed sheet needs its own masthead: on screen the folio label and
+       the citation are in chrome that print correctly removes. `.print-only`
+       is display:none everywhere else. */
+    .print-only { display: block !important; }
+
+    a[href]::after { content: none !important; }
+    a { color: #000 !important; text-decoration: none !important; }
+
+    /* Never strand one line of a transcription on a sheet of its own. An
+       all-pages print of T-S Ar.50.74 put a single line number on a third
+       page with nothing beside it. Standard typographic minimum, and it costs
+       nothing when the text happens to fit. */
+    p, div, li {
+        orphans: 2;
+        widows: 2;
+    }
+
+    @page {
+        margin: 14mm 12mm;
+    }
+}
+
+/* Print-sheet furniture is hidden on screen. Kept OUTSIDE the media query so
+   the rule applies whether or not the print block is reached. */
+.print-only { display: none; }
+
+/* /browse while a page loads: the previous content stays under the spinner,
+   dimmed and inert, instead of being rebuilt as a spinner and rebuilt again.
+   (update_content also sets the `inert` attribute: no focus, no keyboard.) */
+.browse-loading { opacity: .5; pointer-events: none; }
+/* The spinner row takes no height, so the content does not jump down while a
+   page loads, and sticks in view when the reader has scrolled down. */
+.browse-loading-row { position: sticky; top: 35vh; height: 0; overflow: visible; z-index: 5; align-items: flex-start;
+    margin-bottom: calc(-1 * var(--nicegui-default-gap, 1rem)); /* the column's gap: no 1rem shift either */ }
+.browse-loading-pill { margin-top: 2rem; padding: .5rem 1.25rem; border-radius: 9999px;
+    background: var(--bg-card, #ffffff); box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }
+
+
+/* ========================================================================
+   Phone layout (owner, 2026-10-22): "more compact on mobile"
+   ========================================================================
+   Below 640px the pages were the desktop layout stacked. Measured at 390x844
+   before this: the English header wrapped out of its 64px bar, /search left
+   300px of the screen to results with the form open and one result card was
+   400px, and /catalog-browse kept a 280px sidebar beside a 60px results
+   column. The classes named here are set in web/main.py, web/auth_state.py,
+   web/pages/search.py, web/pages/search_results.py and
+   web/pages/catalog_browse.py; the /browse rules live in that page's own
+   style block. Nothing here applies above 640px (catalog: 768px). */
+
+/* A button that keeps its name but not its label on a phone. The label stays
+   in the render tree (aria-label and the tooltip name the control); the icon
+   shows on phones only, so wider screens look exactly as they did. */
+@media (max-width: 640px) {
+    .phone-icon-only .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
+    .phone-icon-only .q-btn__content > .q-icon { margin: 0; }
+}
+@media (min-width: 641px) {
+    .phone-icon-only .q-btn__content > .q-icon { display: none; }
+}
+
+/* Header: the row is no-wrap (web/main.py); a long username is cut short. */
+@media (max-width: 640px) {
+    .app-header { gap: 4px; }
+    .app-header > .nicegui-row { min-width: 0; }
+}
+/* Signed in, the header shows the account icon alone (owner, 2026-11-05); the name heads
+   its menu. */
+.auth-account-btn .q-icon { font-size: 1.75rem; }
+.auth-menu-name { padding: 10px 16px 4px; font-weight: 600; color: var(--text-primary); }
+
+/* The card of keyboard shortcuts (web/keyboard_shortcuts.py): "?" or the sidebar. */
+.gs-shortcuts-card { width: min(92vw, 30rem); max-height: 85vh; overflow-y: auto; padding: 16px 20px !important; }
+.gs-shortcuts-section {
+    margin-top: 10px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-muted, #64748b);
+}
+.gs-shortcuts-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; align-items: center; }
+.gs-shortcuts-keys { display: flex; align-items: center; gap: 4px; }
+.gs-kbd {
+    display: inline-block; min-width: 1.7em; padding: 0 6px; text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.6;
+    border: 1px solid var(--border-light, #e2e8f0); border-bottom-width: 2px; border-radius: 5px;
+    background: var(--bg-secondary, #f8fafc); color: var(--text-primary);
+}
+.gs-shortcuts-plus, .gs-shortcuts-word { font-size: 0.8rem; color: var(--text-secondary); }
+.gs-shortcuts-text { font-size: 0.9rem; }
+
+/* Search page */
+@media (max-width: 640px) {
+    /* The page scrolls; the results pane does not. The shell loses its fixed
+       height and the Quasar scroll area is un-scrolled the way this file's
+       print rules do it (all of these are load-bearing, see there). */
+    .search-shell { height: auto !important; min-height: 0 !important; }
+    .results-scroll-area,
+    .results-scroll-area .q-scrollarea__container,
+    .results-scroll-area .q-scrollarea__content {
+        height: auto !important; max-height: none !important; min-height: 0 !important;
+        overflow: visible !important; position: static !important; transform: none !important;
+        contain: none !important;
+    }
+    .results-scroll-area .q-scrollarea__thumb, .results-scroll-area .q-scrollarea__bar { display: none !important; }
+
+    /* The form: the collapse chevron sits in the corner instead of on a row
+       of its own; padding and the Advanced Options gap come down. */
+    .search-panel-expanded { padding: 12px !important; position: relative; }
+    .search-panel-expanded .q-expansion-item { margin-top: 8px !important; }
+
+    /* Results: no reserved pagination row, a tighter list, cards about half
+       as tall. */
+    .pagination-placeholder { display: none !important; }
+    .results-list { padding: 8px !important; gap: 8px !important; }
+    .result-card { padding: 10px 12px !important; }
+    .result-card .q-btn { min-height: 32px !important; }
+    /* The actions sit beside the badges on wide screens; on a phone they
+       drop to a line of their own under the title. */
+    .result-card > .nicegui-row:first-child { flex-wrap: wrap !important; }
+    .result-card .result-head { flex: 1 1 0% !important; min-width: 0; }
+    .result-card .result-actions { margin-top: 0 !important; flex: 1 1 100%; order: 10; opacity: 1; }
+    .result-snippet {
+        padding: 8px 10px !important; line-height: 1.55 !important; margin-top: 8px !important;
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+}
+
+/* Under 1024px the results toolbar is one line: the count and the filter
+   buttons scroll sideways in it, the export icons are a menu
+   (.results-more-btn), and a filter that is not yet available takes no space
+   (.tb-hidden; wider screens reserve its space so nothing shifts). */
+@media (max-width: 1023px) {
+    .results-header { flex-wrap: nowrap !important; padding: 6px 8px !important; gap: 4px !important; }
+    .results-header .q-btn { min-height: 34px !important; }
+    .results-count-group {
+        flex: 1 1 auto; min-width: 0; flex-wrap: nowrap !important; overflow-x: auto; gap: 8px !important;
+        scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    }
+    .results-count-group::-webkit-scrollbar { display: none; }
+    .results-count-group > * { flex-shrink: 0; }
+    .results-count-group .q-btn { white-space: nowrap; }
+    .tb-hidden { display: none !important; }
+    .results-export-group { flex: 0 0 auto; }
+}
+
+/* ========================================================================
+   Wide screens (the owner's screen-size table, 2026-10-22)
+   ======================================================================== */
+@media (min-width: 1440px) {
+    .main-content > .max-w-7xl { max-width: 1600px !important; }
+    .results-list { max-width: 1100px; margin-inline: auto; }
+}
+
+/* ========================================================================
+   Quick view (owner's mockups, 2026-10-22)
+   ======================================================================== */
+
+.adv-scroll .q-scrollarea__content { width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* The info bar is one line on a laptop: shelfmark, title, chips, actions.
+   On a phone it is two: the title line never wraps (the title is cut), the
+   icons and chips share the second. */
+.adv-info-bar > .nicegui-column { padding: 4px 16px !important; gap: 4px !important; }
+@media (min-width: 1024px) {
+    .adv-info-bar > .nicegui-column { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 12px !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:first-child { flex: 1 1 auto; min-width: 0; width: auto !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:last-child { flex: none; }
+}
+@media (max-width: 640px) {
+    .adv-info-bar > .nicegui-column { padding: 4px 8px !important; gap: 2px !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:first-child { flex-wrap: nowrap !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:first-child > .nicegui-row:first-child { flex-wrap: nowrap !important; min-width: 0; }
+    .adv-info-bar .truncate { max-width: 100% !important; }
+}
+/* The actions at the foot keep their buttons and lose their heading and padding. */
+.adv-actions-card { padding: 8px 12px !important; gap: 0 !important; }
+.adv-actions-card h3 { display: none; }
+.adv-actions-card .btn-primary { padding: 6px 12px; }
+/* The image panel: one toolbar row, sliders behind `tune`. */
+.adv-image-head { padding: 4px 8px !important; }
+.adv-image-adjust { display: none !important; }
+.adv-image-adjust.is-open { display: flex !important; }
+/* Transcription type by width, as on /browse. */
+.adv-text-col .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
+@media (min-width: 641px) { .adv-text-col .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
+@media (min-width: 1024px) { .adv-text-col .transcription-text { font-size: 19px !important; line-height: 2 !important; } }
+@media (min-width: 1440px) { .adv-text-col .transcription-text { font-size: 20px !important; max-width: 760px; } }
+/* Tabs exist only on a phone. */
+.adv-tabs { display: none; }
+@media (max-width: 640px) {
+    .adv-tabs { display: flex; position: sticky; top: 0; z-index: 3; background: var(--bg-secondary); }
+    .adv-tab-text .adv-image-col, .adv-tab-text .adv-info { display: none !important; }
+    .adv-tab-image .adv-text-col, .adv-tab-image .adv-info { display: none !important; }
+    .adv-tab-info .adv-text-col, .adv-tab-info .adv-image-col { display: none !important; }
+    .adv-content { padding-inline: 8px !important; }
+    .adv-image-title { display: none; }
+    /* The text panel scrolls with the dialog, not inside it. */
+    .adv-text-col .q-scrollarea,
+    .adv-text-col .q-scrollarea__container,
+    .adv-text-col .q-scrollarea__content {
+        height: auto !important; max-height: none !important; min-height: 0 !important;
+        overflow: visible !important; position: static !important; transform: none !important;
+        contain: none !important;
+    }
+    .adv-text-col .q-scrollarea__thumb, .adv-text-col .q-scrollarea__bar { display: none !important; }
+    .adv-text-col .q-scrollarea .p-6 { padding: 12px !important; }
+}
+
+/* ========================================================================
+   Search at every width (owner's mockups, 2026-10-22)
+   ======================================================================== */
+
+/* The form is one row: the field headings stay in the tree for screen
+   readers, Quasar's own field labels show instead; the two option panels
+   open from buttons in the row, so their expansion headers are hidden. */
+.search-field-label {
+    position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.search-panel-expanded { padding: 12px 16px !important; }
+.search-adv-panel > .q-expansion-item__container > .q-item,
+.search-filters-panel > .q-expansion-item__container > .q-item { display: none; }
+.search-row-btn { height: 36px; }
+.results-header { padding: 6px 12px !important; }
+.density-toggle { gap: 0 !important; }
+.density-toggle .q-btn { min-width: 30px; }
+/* Tablet: the query box shares its line with mode and gap, so the form is two
+   lines, not three. */
+@media (min-width: 641px) and (max-width: 1023px) {
+    .search-main-row > .min-w-80 { min-width: 240px !important; }
+}
+
+/* Result rows. One DOM, two densities on the list: `density-compact` is one
+   header line (shelfmark, badges, the title cut to the width, the actions)
+   over a two-line snippet; `density-comfortable` is the older card. */
+.results-list { gap: 6px !important; padding: 8px 16px !important; }
+.result-card { padding: 8px 12px !important; gap: 4px !important; }
+.result-card .result-head { gap: 6px !important; }
+.result-badges .result-index { order: 99; }
+.result-actions { flex: none; opacity: .45; transition: opacity .15s; }
+.result-card:hover .result-actions,
+.result-card:focus-within .result-actions { opacity: 1; }
+.result-snippet { margin-top: 6px !important; padding: 6px 10px !important; line-height: 1.6 !important; }
+@media (min-width: 641px) {
+    .density-compact .result-head { flex-direction: row; align-items: center; flex-wrap: nowrap; }
+    .density-compact .result-badges { flex: none; flex-wrap: nowrap !important; }
+    .density-compact .result-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; flex-wrap: nowrap !important; }
+    .density-compact .result-title > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .density-compact .result-snippet {
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        padding: 4px 8px !important; line-height: 1.5 !important; margin-top: 2px !important;
+    }
+    .density-comfortable .result-card { padding: 14px 16px !important; }
+    .density-comfortable .result-actions { opacity: 1; }
+}
+
+/* Catalog browse: the sidebar stacks above the results and is hidden until the
+   Filters button (web/pages/catalog_browse.py) opens it; the table keeps its
+   columns and scrolls sideways. */
+@media (max-width: 768px) {
+    .catalog-layout { flex-wrap: wrap !important; }
+    .catalog-sidebar {
+        display: none; width: 100% !important; min-width: 0 !important;
+        padding: 0 0 8px 0 !important; position: static !important;
+    }
+    .catalog-sidebar.is-open { display: flex; }
+    .catalog-sidebar > .q-scrollarea { height: min(60vh, 480px) !important; }
+    .catalog-browse-table .q-table__middle { overflow-x: auto; }
+    .catalog-browse-table table { min-width: 640px; }
+}
+@media (min-width: 769px) {
+    .catalog-filters-toggle { display: none !important; }
+}
+
+/* Joins Lab: under 1024px the anchor pane (image, transcription, known
+   joins) sits above the builder and the candidates, each at the full width.
+   The pane's inline style (web/pages/joins_lab.py) makes it a 380px sticky
+   column with its own scroll; a 390px phone left 10px to the builder, whose
+   controls spilled across the pane while the page scrolled under it (owner's
+   screenshots, 2026-10-22). Only !important reaches an inline style. The
+   transcription keeps a bounded scroll of its own so the builder stays
+   within reach. */
+@media (max-width: 1023px) {
+    .joins-lab-layout { flex-direction: column !important; align-items: stretch !important; }
+    .joins-lab-anchor {
+        position: static !important; width: 100% !important;
+        max-height: none !important; overflow: visible !important;
+    }
+    .joins-lab-work { flex: none !important; width: 100%; padding: 12px 0 !important; }
+}
+@media (max-width: 640px) {
+    .joins-lab-anchor .anchor-transcription-panel { max-height: 45vh; padding: 12px 14px; }
+    .joins-lab-work { padding: 8px 0 !important; }
+    /* The viewer's control bar (the anchor pane and both Compare panes,
+       web/components/anchor_viewer.py) is one row of 32px buttons; the
+       zoom figure goes and the folio counter never wraps. The bar itself
+       still wraps: its two groups need about 290px, which a 360px phone
+       has and a 320px phone has not, where the zoom group takes a second
+       row with each button whole and reachable (Codex on #439: with
+       wrapping off, the trailing buttons were clipped by the hidden body
+       overflow). */
+    .anchor-controls-bar { padding: 4px !important; gap: 2px !important; }
+    .anchor-controls-bar > .nicegui-row { gap: 0 !important; flex-wrap: nowrap !important; }
+    .anchor-controls-bar .q-btn {
+        min-width: 32px !important; min-height: 32px !important; width: 32px; height: 32px; padding: 0 !important;
+    }
+    .anchor-controls-bar .text-sm { white-space: nowrap; padding: 0 2px !important; }
+    .anchor-controls-bar .zoom-level-label { display: none !important; }
+    /* Compare: the two panes stack, anchor above candidate, with 8px padding.
+       The anchor pane loses its inline divider border (a physical side, so
+       the width is zeroed rather than the side named: the findings guard, in
+       a test kept in the private repository, scans this file for physical properties);
+       the candidate pane keeps its verdict border. */
+    .compare-panes > .nicegui-column { flex: 1 1 100% !important; padding: 8px !important; }
+    .compare-panes > .nicegui-column:first-child { border-width: 0 !important; }
+}
+
+/* Compare on a phone (owner, 2026-10-23). The window's job is "anchor vs
+   candidate", and once its panes stack each pane is a head, an image capped
+   at 40vh and the whole transcription, so the candidate's image sat several
+   screens below the anchor's and the two were never on the screen together.
+   Below 641px, and on any screen too short for two images with text under
+   them (a phone on its side), the panes show the two images alone: each head
+   is one row of role + shelfmark (+ badges), the title, details and info rows
+   hide, and the transcriptions hide. The header's "Show text" button
+   (web/components/compare_modal.py) toggles compare-text-shown on the panes
+   row and brings everything back. :not(:fullscreen) leaves the viewer's own
+   fullscreen rule in charge of a fullscreen image. */
+.compare-text-toggle.q-btn { display: none; }
+@media (max-width: 640px), (max-height: 520px) and (orientation: landscape) {
+    .compare-text-toggle { display: inline-flex !important; }
+    .compare-text-toggle.is-on { background: rgba(255, 255, 255, 0.18) !important; }
+    .compare-panes:not(.compare-text-shown) .anchor-transcription-panel,
+    .compare-panes:not(.compare-text-shown) .compare-pane-title,
+    .compare-panes:not(.compare-text-shown) .compare-pane-details,
+    .compare-panes:not(.compare-text-shown) .compare-pane-info { display: none !important; }
+    .compare-panes:not(.compare-text-shown) .compare-pane-head {
+        flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px;
+    }
+    .compare-panes-rtl:not(.compare-text-shown) .compare-pane-head { flex-direction: row-reverse; }
+}
+/* Upright phone: the two images one above the other, each at most 32vh, so
+   both are on the screen with the window header, the two heads, the two
+   control bars and the verdict bar (the sum fits 844px; 31dvh where the
+   browser's own bars take part of the height). */
+@media (max-width: 640px) {
+    .compare-panes:not(.compare-text-shown) .anchor-image-pane:not(:fullscreen) .image-container {
+        max-height: 32vh !important; max-height: 31dvh !important;
+    }
+    /* The header stays one row: the title goes (the window is plainly Compare;
+       the counter and the buttons need the width), the row's 1rem gaps become
+       8px, its side padding 8px, and the icon-only buttons drop the 16px side
+       padding a labelled button has: counter + six buttons, 285px of 390. */
+    .compare-header { gap: 8px !important; padding-inline: 8px !important; }
+    .compare-header-title { display: none !important; }
+    .compare-header .phone-icon-only { padding: 4px 8px !important; min-width: 0 !important; }
+}
+/* A phone on its side (844x390): above 640px the panes are already side by
+   side, two 420px panes, wider than the desktop's 380px anchor pane; each
+   image takes what the height leaves after the window header, the head, the
+   control bar and the verdict bar (200px). */
+@media (max-height: 520px) and (orientation: landscape) {
+    .compare-panes:not(.compare-text-shown) .anchor-image-pane:not(:fullscreen) .image-container {
+        max-height: calc(100vh - 200px) !important; max-height: calc(100dvh - 200px) !important;
+    }
+    /* A phone up to 640px wide on its side (640x360, 568x320) matched the
+       phone block above as well, which stacked the panes, so with the image
+       cap sized for one pane beside the other the two images were taller
+       than the screen together (Codex on #444). Side by side here too, two
+       312px panes (basis 0, as the desktop's flex-1: a 50% basis plus the
+       row's 1rem gap wrapped), and the cap holds. Later in the file than
+       the phone rule, at the same specificity, so this one wins. */
+    .compare-panes > .nicegui-column { flex: 1 1 0% !important; min-width: 0; }
+}
+
+/* Joins Lab anchor strip (owner, 2026-10-23). Under 1024px the anchor pane
+   stacks above the candidates and scrolls away with them; once it has left
+   the screen, this strip keeps the anchor's thumbnail and shelfmark under the
+   header, and a tap scrolls back up. web/static/js/joins_lab_anchor_strip.js
+   sets is-visible from an IntersectionObserver on the pane, copies the pane's
+   image into the thumbnail, and sets under-hidden-header while the header's
+   reveal has hidden it (phones hide the header on scroll down). Fixed, not
+   sticky, so it takes no space in the work column and nothing jumps when it
+   appears; z-index below the drawer (1000). :not(.hidden) leaves
+   set_visibility(False) -- no anchor loaded -- in charge. */
+.joins-lab-anchor-strip { display: none; }
+@media (max-width: 1023px) {
+    .joins-lab-anchor-strip.is-visible:not(.hidden) {
+        display: flex; position: fixed; top: 64px; inset-inline: 0; z-index: 900;
+        min-height: 56px; padding: 6px 12px;
+        background: var(--bg-secondary); border-block-end: 1px solid var(--border-light);
+        box-shadow: var(--shadow-md); cursor: pointer; transition: top 0.3s ease;
+    }
+    .joins-lab-anchor-strip.is-visible.under-hidden-header { top: 0; }
+    .joins-lab-anchor-strip-thumb {
+        height: 44px; width: 60px; flex: none; object-fit: cover;
+        border-radius: 4px; background: #1a1a1a;
+    }
+}
+
+/* Lists: under 769px the splitter stacks, the My Lists tree above the list,
+   each at the full width, the tree with a bounded scroll. The tree is the
+   splitter's 25% panel (web/pages/lists.py): 97px on a 390px phone, its
+   heading wrapped and its three buttons stacked. The shell's fixed height
+   goes so the page scrolls, and the panels lose the splitter's 100% height
+   and its own overflow. */
+@media (max-width: 768px) {
+    .lists-shell { height: auto !important; min-height: 0 !important; }
+    .lists-splitter.q-splitter--vertical { flex-direction: column !important; }
+    .lists-splitter > .q-splitter__panel {
+        width: 100% !important; height: auto !important; flex: none !important; overflow: visible;
+    }
+    .lists-splitter > .q-splitter__before { max-height: 45vh; overflow-y: auto; }
+    .lists-splitter > .q-splitter__separator { display: none !important; }
+    .lists-sidebar { padding: 0 0 8px 0 !important; }
+    .lists-content { padding: 8px 0 !important; scroll-margin-top: 72px; }
+    /* An item card: the action icons are a row under the text. As a column
+       beside it they were one icon per line, and the card 700px tall. */
+    .lists-item-card { padding: 12px !important; }
+    .lists-item-card > .nicegui-row:first-child { flex-wrap: wrap !important; }
+    .lists-item-actions { flex-direction: row !important; flex: 1 1 100%; order: 10; gap: 0 !important; }
+}
+
+/* The Blau dictionary companion on /browse (docs/plans/BLAU_DICTIONARY_PLAN.md
+   §6.2; web/components/blau_panel.py draws it, web/static/js/blau_lookup.js
+   opens it). EVERY rule is scoped under `.gs-blau`, as the discovery block
+   is, because the class names inside are generic.
+   Phone-first: the base is a sheet at the foot of the screen; from 1024px the
+   popover sits beside the clicked word, where the script put it
+   (`--blau-left`, `--blau-top`, `--blau-bottom`, `data-blau-place`). Those
+   three are viewport pixels of the word's own box, so `left`/`top` are
+   deliberately physical; everything inside the panel is logical, since it
+   renders in both UI directions. Colours are the theme variables only, so
+   light, parchment and dark need no rules of their own. */
+.blau-word-hit {
+    background: rgba(5, 150, 105, 0.22);
+    box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.22);
+    border-radius: 3px;
+}
+[data-theme="dark"] .blau-word-hit {
+    background: rgba(52, 211, 153, 0.3);
+    box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.3);
+}
+.gs-blau-popover {
+    position: fixed; z-index: 2500;
+    left: 0; right: 0; bottom: 0; top: auto;
+    max-height: 55vh;
+    display: flex; flex-direction: column;
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-primary, #1e293b);
+    border: 1px solid var(--border-light, #e2e8f0); border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    box-shadow: var(--shadow-xl, 0 -8px 24px rgba(0, 0, 0, 0.18));
+    font-size: 0.9rem;
+}
+@media (min-width: 1024px) {
+    .gs-blau-popover {
+        left: var(--blau-left, 16px); right: auto;
+        top: var(--blau-top, 80px); bottom: auto;
+        width: 440px; max-height: 380px;   /* keep in step with WIDTH/HEIGHT in blau_lookup.js */
+        border-radius: 10px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+        box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
+    }
+    .gs-blau-popover[data-blau-place="above"] { top: auto; bottom: var(--blau-bottom, 80px); }
+}
+@media print { .gs-blau-popover { display: none !important; } }
+.gs-blau .panel-head {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    padding: 8px 12px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+}
+.gs-blau .panel-head .title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted, #64748b);
+}
+.gs-blau .panel-head .word {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.25rem; font-weight: 700;
+}
+.gs-blau .panel-head .blau-close { margin-inline-start: auto; }
+/* The box: the word shown, editable. `plaintext` sets its direction from what
+   is typed, so Hebrew and Arabic read right to left in an English UI too. */
+.gs-blau .panel-head .word-input { flex: 1 1 auto; min-width: 0; }
+.gs-blau .panel-head .word-input input {
+    unicode-bidi: plaintext; text-align: start;
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', 'Noto Naskh Arabic', serif;
+    font-size: 1.15rem; font-weight: 600;
+}
+.gs-blau .panel-head .word-input + .blau-search + .blau-close { margin-inline-start: 0; }
+.gs-blau .type-note { font-size: 0.82rem; color: var(--text-muted, #64748b); padding: 4px 0 8px; }
+/* What the dictionary records, on every panel (owner, 2026-11-04). */
+.gs-blau .disclaimer {
+    font-size: 0.75rem; line-height: 1.4; color: var(--text-muted, #64748b);
+    padding: 2px 0 6px; border-bottom: 1px dashed var(--border-light, #e2e8f0); margin-bottom: 2px;
+}
+.gs-blau .panel-body { overflow-y: auto; padding: 6px 12px 10px; }
+.gs-blau .card { padding: 8px 0; border-bottom: 1px solid var(--border-light, #e2e8f0); }
+.gs-blau .card:last-of-type { border-bottom: 0; }
+.gs-blau .entry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.gs-blau .entry .name {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.3rem; font-weight: 700; line-height: 1.3;
+}
+.gs-blau .entry .name.sub { font-size: 1.15rem; font-weight: 600; }
+.gs-blau .entry .sep { color: var(--text-muted, #64748b); }
+.gs-blau .ar {
+    font-family: 'Noto Naskh Arabic', 'Scheherazade New', 'Amiri', 'Times New Roman', serif;
+    font-size: 1.1rem; color: var(--text-secondary, #475569);
+}
+.gs-blau .entry .page { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+.gs-blau .entry .site { font-size: 0.75rem; margin-inline-start: auto; white-space: nowrap; }
+.gs-blau .via, .gs-blau .matched-key, .gs-blau .see, .gs-blau .looked-for {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; font-size: 0.8rem;
+}
+.gs-blau .via-label, .gs-blau .matched-label, .gs-blau .see-label,
+.gs-blau .looked-label, .gs-blau .examples-label { color: var(--text-muted, #64748b); }
+.gs-blau .sense {
+    padding: 4px 0; padding-inline-start: 10px;
+    border-inline-start: 3px solid transparent;
+}
+.gs-blau .sense.matched { border-inline-start-color: var(--primary-600, #059669); }
+.gs-blau .sense .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.gs-blau .sense .ja {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.1rem; font-weight: 600;
+}
+.gs-blau .binyan, .gs-blau .flag {
+    font-size: 0.68rem; padding: 0 6px; border-radius: 999px; line-height: 1.5;
+}
+.gs-blau .binyan {
+    font-weight: 600; letter-spacing: 0.04em;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
+.gs-blau .flag { background: var(--bg-secondary, #f8fafc); color: var(--text-muted, #64748b); }
+/* The looked-up word has the dot and this entry's spelling does not. */
+.gs-blau .flag.dot-mismatch { border: 1px dashed var(--border-light, #e2e8f0); }
+.gs-blau .gloss { line-height: 1.45; }
+.gs-blau .gloss + .gloss { font-size: 0.82rem; color: var(--text-secondary, #475569); }
+.gs-blau .more { font-size: 0.78rem; }
+.gs-blau .examples { padding-top: 8px; font-size: 0.82rem; }
+.gs-blau .example-links { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.gs-blau .empty { padding: 4px 0 8px; }
+.gs-blau .credit {
+    margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border-light, #e2e8f0);
+    font-size: 0.68rem; line-height: 1.4; color: var(--text-muted, #64748b);
+}
+/* The credit is the link to the dictionary site: muted like the text around
+   it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
+.gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
+.blau-hint { color: var(--text-muted, #64748b); }
+/* The switch's tooltip: what pressing it does, and under it the look-up key (owner, 2026-11-05). */
+.blau-switch-tip .blau-key-hint { margin-top: 3px; font-size: 0.75rem; opacity: 0.85; }
+/* D or M tapped: the next click looks up, and the pointer says so over the text. */
+html.blau-armed [data-blau-pane] { cursor: help; }
+/* The phone's "Look up" chip under selected words (blau_lookup.js places it); under the
+   panel, which opens over it. */
+.blau-chip {
+    position: fixed; z-index: 2400; display: none;
+    padding: 6px 16px; border: 0; border-radius: 999px;
+    background: var(--primary-600, #059669); color: #ffffff;
+    font-size: 0.9rem; font-weight: 600; line-height: 1.4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+/* One tab per dictionary (owner, 2026-11-04; plan D12), between the head and the scrolling
+   body, so a long entry never hides the other tab. A tab with nothing for the word is greyed. */
+.gs-blau .dict-tabs {
+    flex: none; padding-inline: 8px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+    color: var(--text-secondary, #475569);
+}
+/* The tabs start where the reading starts (Quasar centres them by default). */
+.gs-blau .dict-tabs .q-tabs__content { justify-content: flex-start; }
+.gs-blau .dict-tab { min-height: 32px; padding-inline: 12px; font-weight: 600; }
+.gs-blau .dict-tab.q-tab--active { color: var(--primary-600, #059669); }
+.gs-blau .dict-tab.not-found { opacity: 0.5; font-weight: 400; }
+.gs-blau .dict-tab-panels { background: transparent; color: inherit; }
+.gs-blau .dict-tab-panels > .q-panel > .q-tab-panel,
+.gs-blau .dict-tab-panels .q-tab-panel { padding: 0; }
+/* Lane's Lexicon (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12;
+   web/components/lane_panel.py). It reuses the card, entry, sense and credit rules above;
+   these are only what Lane adds: the title, the reading chips, the English text. */
+.gs-blau .lane-section, .gs-blau .lane-none { padding-top: 2px; }
+.gs-blau .lane-title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted, #64748b);
+}
+.gs-blau .lane-readings { padding: 4px 0 2px; }
+.gs-blau .lane-readings .readings-label { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+.gs-blau .lane-readings .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; padding-top: 2px; }
+.gs-blau .lane-chip {
+    font-family: 'Noto Naskh Arabic', 'Scheherazade New', 'Amiri', 'Times New Roman', serif;
+    font-size: 1.05rem; min-height: 0; padding: 0 10px; border-radius: 999px;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
+.gs-blau .lane-chip.active {
+    border-color: var(--primary-600, #059669); color: var(--text-primary, #1e293b); font-weight: 700;
+}
+.gs-blau .lane-root .root-label { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.gs-blau .lane-root .root-name { font-size: 1.3rem; font-weight: 700; }
+.gs-blau .lane-entry .headword { font-size: 1.15rem; font-weight: 600; }
+.gs-blau .lane-entry .page { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+/* Lane's text is English with Arabic inside it: left to right in both UIs. */
+.gs-blau .lane-text { direction: ltr; text-align: start; font-size: 0.85rem; }
+.gs-blau .lane-no-root { font-size: 0.82rem; color: var(--text-muted, #64748b); }
+/* Friedman's dictionary (the private Friedman plan step 3;
+   web/components/friedman_panel.py). It reuses the card, entry, via, matched-key, gloss and
+   credit rules above; these are only what it adds: the title, the candidate status line, the
+   kind of unit, the references, the quotations with their locators, the sub-entries. */
+.gs-blau .friedman-section, .gs-blau .friedman-none { padding-top: 2px; }
+.gs-blau .friedman-title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted, #64748b);
+}
+.gs-blau .friedman-status { font-size: 0.78rem; color: var(--warning-700, #b45309); }
+.gs-blau .friedman-match .kind { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.gs-blau .friedman-match .references { font-size: 0.78rem; color: var(--text-secondary, #475569); }
+.gs-blau .friedman-via { font-size: 0.78rem; }
+.gs-blau .friedman-quote {
+    margin-top: 4px; padding: 2px 8px 2px 0; border-inline-start: 2px solid var(--border-light, #e2e8f0);
+}
+.gs-blau .friedman-quote .ja { font-size: 0.95rem; }
+.gs-blau .friedman-quote .locator { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.gs-blau .friedman-child { margin-top: 6px; }
+.gs-blau .friedman-child .name.sub { font-size: 1rem; }
+.gs-blau .friedman-credit { margin-top: 8px; }
+/* The expression search, in Friedman's tab and Blau's alike (web/components/expression_panel.py):
+   the gap control, the matched words marked in the quotation or the name, the place's label and
+   the typed-word/printed-word pairs. */
+.gs-blau .expr-gap {
+    display: flex; align-items: center; gap: 8px; margin: 4px 0;
+    font-size: 0.78rem; color: var(--text-secondary, #475569);
+}
+.gs-blau .expr-gap .gap-select { min-width: 56px; }
+.gs-blau .expr-gap .gap-select .q-field__control { height: 28px; min-height: 28px; }
+.gs-blau mark.expr-hit { background: rgba(245, 158, 11, 0.35); color: inherit; padding: 0 2px; border-radius: 3px; }
+[data-theme="dark"] .gs-blau mark.expr-hit { background: rgba(245, 158, 11, 0.45); }
+.gs-blau .expr-place { margin-top: 4px; }
+.gs-blau .expr-place .where { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.gs-blau .expr-components {
+    display: flex; flex-wrap: wrap; gap: 4px 10px;
+    font-size: 0.78rem; color: var(--text-secondary, #475569);
+}
+.gs-blau .expr-components .component.stem { font-style: italic; }
+/* Blau's expression hits: the entry's card as a lookup's, each place a name (the headword with
+   its gloss) or a citation (the quote, its translation, the form it illustrates, the locator). */
+.gs-blau .blau-expression .place .form-text { font-size: 0.85rem; }
+.gs-blau .blau-expression .place .under { font-size: 0.78rem; color: var(--text-secondary, #475569); }
+.gs-blau .blau-expression .place .locator { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+/* The reader's switch in the version row (owner, 2026-11-04): the letters עع (blau_panel.GLYPH_SVG)
+   and, from 640px, its label; on a phone the letters alone, in a round button. Highlighted until
+   this visitor first turns it on (.new: "New!" in the label, a dot on a phone), tinted while the
+   lookup is on (.active). Amber for new, so a new switch never looks switched on. */
+.blau-switch.q-btn {
+    color: var(--text-muted, #64748b);
+    min-height: 32px; min-width: 32px; padding: 0 6px;
+    border-radius: 999px; border: 1px solid transparent;
+}
+.blau-switch .q-btn__content { flex-wrap: nowrap; gap: 6px; }
+.blau-switch .blau-switch-glyph { display: inline-flex; line-height: 0; }
+.blau-switch .blau-switch-glyph svg { width: 24px; height: auto; display: block; }
+.blau-switch .blau-switch-label { font-size: 0.8rem; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+.blau-switch.active { color: var(--primary-600, #059669); background: rgba(5, 150, 105, 0.12); }
+.blau-switch.new { color: #92400e; background: #fef3c7; border-color: #f59e0b; }
+[data-theme="dark"] .blau-switch.new { color: #fcd34d; background: rgba(245, 158, 11, 0.16); }
+@media (max-width: 639px) {
+    .blau-switch.q-btn { width: 32px; padding: 0; }
+    .blau-switch .blau-switch-label { display: none; }
+    .blau-switch.new::after {
+        content: ''; position: absolute; top: -2px; inset-inline-end: -2px;
+        width: 9px; height: 9px; border-radius: 50%;
+        background: #f59e0b; box-shadow: 0 0 0 2px var(--bg-primary, #ffffff);
+    }
+}
+@media (min-width: 640px) {
+    .blau-switch.q-btn { padding-block: 0; padding-inline: 8px 12px; border-color: var(--border-light, #e2e8f0); }
+    .blau-switch.active { border-color: transparent; }
+    .blau-switch.new { border-color: #f59e0b; }
+}

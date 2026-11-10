@@ -1,0 +1,359 @@
+# -*- coding: utf-8 -*-
+"""
+Composite Export and Thumbnail Service for Fragment Puzzle.
+
+Provides functions to:
+- Generate auto-suggested titles from fragment shelfmarks
+- Compose full-resolution RGBA composite images from positioned fragments
+- Generate small base64-encoded PNG thumbnails for document listings
+
+Coordinate system (matching both Fabric.js and PyQt):
+- x/y = top-left corner of the unrotated image in canvas space (pixels)
+- scale = display scale factor applied to the ~800px canvas image
+- Rotation pivots around the center of the (scaled, flipped) image
+- PIL.rotate is counter-clockwise, so we negate the angle (apps use clockwise-positive)
+
+Export strategy:
+- A single global resolution multiplier scales ALL positions uniformly
+- Each fragment image is resized to its correct visual size at that resolution
+- This avoids per-fragment coord_scale drift when source images vary in size
+"""
+
+import base64
+import io
+import logging
+import math
+from typing import Callable, List, Optional, Tuple
+
+from PIL import Image, ImageDraw, ImageFont
+
+from shared.puzzle_model import PuzzleFragment
+
+logger = logging.getLogger(__name__)
+
+# Canvas images are loaded at approximately this width for interaction
+CANVAS_IMAGE_WIDTH = 800
+
+
+def auto_suggest_title(fragments: List[PuzzleFragment]) -> str:
+    """Generate a title from unique fragment shelfmarks joined by ' + '.
+
+    Args:
+        fragments: List of PuzzleFragment objects.
+
+    Returns:
+        Title string like 'T-S 12.1 + T-S 13.5', or 'Untitled Join' if no shelfmarks.
+    """
+    seen = []
+    for f in fragments:
+        if f.shelfmark and f.shelfmark not in seen:
+            seen.append(f.shelfmark)
+    return ' + '.join(seen) if seen else 'Untitled Join'
+
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont:
+    """Load Arial (supports Hebrew + Latin) with fallback to default."""
+    try:
+        return ImageFont.truetype('arial.ttf', size)
+    except Exception:
+        try:  # Primary method failed; try fallback
+            return ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', size)
+        except Exception:
+            return ImageFont.load_default()  # Font loading failed; use system default
+
+
+def _measure_text(font: ImageFont.ImageFont, text: str) -> Tuple[int, int]:
+    """Return (width, height) of text rendered with given font."""
+    bb = font.getbbox(text)
+    return bb[2] - bb[0], bb[3] - bb[1]
+
+
+def _wrap_shelfmarks(shelfmarks: str, font: ImageFont.ImageFont, max_width: int) -> List[str]:
+    """Split shelfmarks into multiple lines if too wide, breaking at ' + '."""
+    w, _ = _measure_text(font, shelfmarks)
+    if w <= max_width:
+        return [shelfmarks]
+    parts = shelfmarks.split(' + ')
+    lines = []
+    current = parts[0]
+    for part in parts[1:]:
+        candidate = current + ' + ' + part
+        cw, _ = _measure_text(font, candidate)
+        if cw <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = part
+    lines.append(current)
+    return lines
+
+
+def add_metadata_banner(composite: Image.Image,
+                        fragments: List[PuzzleFragment],
+                        app_variant: str = 'desktop') -> Image.Image:
+    """Add a metadata banner below the composite image.
+
+    Three-row layout:
+      Row 1: Shelfmarks (wraps if needed)
+      Row 2: Created by Dicta Genizah Search Pro (desktop) / Dicta Genizah Search (web)
+      Row 3: www.GenizahSearch.com
+
+    Args:
+        composite: The RGBA composite image from compose_puzzle_export().
+        fragments: List of fragments (for shelfmark extraction).
+        app_variant: 'desktop' or 'web' — controls app name in attribution.
+
+    Returns:
+        New RGBA image with the banner appended below.
+    """
+    total_w = composite.width
+    padding = 14
+    line_gap = 5
+
+    # Scale font sizes proportionally to image width
+    # Base: 18px shelfmark / 14px attr / 12px url at 800px width
+    scale = max(0.6, total_w / 800.0)
+    font_shelfmark = _load_font(int(18 * scale))
+    font_attr = _load_font(int(14 * scale))
+    font_url = _load_font(int(12 * scale))
+    padding = int(padding * scale)
+    line_gap = int(line_gap * scale)
+
+    # Colors
+    banner_color = (240, 240, 240, 255)  # light gray
+    text_color = (80, 80, 80, 255)
+    url_color = (120, 120, 120, 255)
+    sep_color = (210, 210, 210, 255)
+
+    # Build text content
+    shelfmarks = auto_suggest_title(fragments)
+    max_text_w = total_w - padding * 2
+    shelf_lines = _wrap_shelfmarks(shelfmarks, font_shelfmark, max_text_w)
+
+    app_name = 'Dicta Genizah Search' if app_variant == 'web' else 'Dicta Genizah Search Pro'
+    attr_line = f"Created by {app_name}"
+    url_line = "www.GenizahSearch.com"
+
+    # Measure all lines
+    shelf_sizes = [_measure_text(font_shelfmark, sl) for sl in shelf_lines]
+    aw, ah = _measure_text(font_attr, attr_line)
+    uw, uh = _measure_text(font_url, url_line)
+
+    banner_h = padding
+    for _, sh in shelf_sizes:
+        banner_h += sh + line_gap
+    banner_h += ah + line_gap + uh + padding
+
+    # Create result image
+    total_h = composite.height + banner_h
+    result = Image.new('RGBA', (total_w, total_h), (255, 255, 255, 255))
+    result.alpha_composite(composite, dest=(0, 0))
+
+    draw = ImageDraw.Draw(result)
+    banner_top = composite.height
+
+    # Banner background + separator line
+    draw.rectangle([0, banner_top, total_w, total_h], fill=banner_color)
+    draw.line([(0, banner_top), (total_w, banner_top)], fill=sep_color, width=1)
+
+    # Draw lines centered
+    y = banner_top + padding
+    for i, sl in enumerate(shelf_lines):
+        sw = shelf_sizes[i][0]
+        x = (total_w - sw) // 2
+        draw.text((x, y), sl, fill=text_color, font=font_shelfmark)
+        y += shelf_sizes[i][1] + line_gap
+
+    x = (total_w - aw) // 2
+    draw.text((x, y), attr_line, fill=text_color, font=font_attr)
+    y += ah + line_gap
+
+    x = (total_w - uw) // 2
+    draw.text((x, y), url_line, fill=url_color, font=font_url)
+
+    return result
+
+
+def compose_puzzle_export(fragments: List[PuzzleFragment],
+                          image_service,
+                          export_size: int = 3000,
+                          margin: int = 20,
+                          progress_callback: Optional[Callable[[int, int, str], None]] = None,
+                          check_cancel: Optional[Callable[[], bool]] = None) -> Optional[Image.Image]:
+    """Compose full-resolution RGBA PNG from positioned fragments.
+
+    Uses a single global resolution multiplier so all fragment positions
+    and sizes scale uniformly, regardless of per-image source dimensions.
+
+    Args:
+        fragments: List of positioned PuzzleFragment objects.
+        image_service: PuzzleImageService instance with resolve_fragment_image().
+        export_size: Width hint for fetching high-res images (default 3000).
+        margin: Padding in pixels around the auto-cropped result (default 20).
+        progress_callback: Optional callback receiving (current, total, message).
+        check_cancel: Optional callable returning True when the export should abort.
+
+    Returns:
+        PIL RGBA Image with transparent background, or None if no fragments rendered.
+    """
+    if not fragments:
+        return None
+
+    # Global resolution multiplier: scales canvas coords to export coords
+    global_scale = export_size / float(CANVAS_IMAGE_WIDTH)
+
+    # Phase 1: Transform each fragment and compute placement coordinates
+    placed = []  # list of (paste_x, paste_y, rotated_img)
+
+    total = len(fragments)
+    for idx, frag in enumerate(fragments, start=1):
+        if check_cancel and check_cancel():
+            raise InterruptedError("Puzzle export cancelled")
+
+        display_size = CANVAS_IMAGE_WIDTH if frag.processed else export_size
+        if progress_callback:
+            progress_callback(idx - 1, total, f"Loading {frag.shelfmark or frag.fl_id}")
+
+        # For processed fragments, reuse the same canvas-sized processed image that the
+        # researcher already approved visually. This keeps export output faithful to the
+        # on-canvas appearance instead of re-running background removal at a new size.
+        frag_is_cul = bool(frag.shelfmark and frag.shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
+        frag_image_url = getattr(frag, 'image_url', '')
+        img_bytes = image_service.resolve_fragment_image(
+            frag.fl_id, size=display_size,
+            threshold=frag.bg_removal_threshold,
+            processed=frag.processed,
+            is_cul=frag_is_cul,
+            image_url=frag_image_url
+        )
+        if img_bytes is None:
+            logger.warning("compose_puzzle_export: no image for %s, skipping",
+                           frag.fl_id or frag_image_url or frag.shelfmark)
+            continue
+
+        try:
+            export_img = Image.open(io.BytesIO(img_bytes)).convert('RGBA')
+        except Exception as e:
+            logger.warning("compose_puzzle_export: failed to open image for fl_id=%s: %s", frag.fl_id, e)
+            continue
+
+        # Per-fragment image scale: ratio of actual loaded width to canvas width
+        img_scale = export_img.width / float(CANVAS_IMAGE_WIDTH)
+
+        # Apply crop (crop values are in ~800px canvas-pixel space)
+        ct = int(frag.crop_top * img_scale)
+        cb = int(frag.crop_bottom * img_scale)
+        cl = int(frag.crop_left * img_scale)
+        cr = int(frag.crop_right * img_scale)
+        if ct + cb + cl + cr > 0:
+            new_left = cl
+            new_top = ct
+            new_right = max(export_img.width - cr, new_left + 1)
+            new_bottom = max(export_img.height - cb, new_top + 1)
+            export_img = export_img.crop((new_left, new_top, new_right, new_bottom))
+
+        # Target visual size in export space:
+        # On canvas, the image (after crop) is displayed at approximately:
+        #   canvas_visual_w = (cropped_canvas_w) * frag.scale
+        # In export space, we want:
+        #   export_visual_w = canvas_visual_w * global_scale
+        # = (cropped_canvas_w) * frag.scale * global_scale
+        #
+        # cropped_canvas_w = export_img.width / img_scale  (map back to canvas space)
+        cropped_canvas_w = export_img.width / img_scale
+        cropped_canvas_h = export_img.height / img_scale
+        target_w = max(1, int(cropped_canvas_w * frag.scale * global_scale))
+        target_h = max(1, int(cropped_canvas_h * frag.scale * global_scale))
+        scaled_img = export_img.resize((target_w, target_h), Image.LANCZOS)
+
+        # Apply flips
+        if frag.flip_h:
+            scaled_img = scaled_img.transpose(Image.FLIP_LEFT_RIGHT)
+        if frag.flip_v:
+            scaled_img = scaled_img.transpose(Image.FLIP_TOP_BOTTOM)
+
+        # Position: frag.x/y is the local origin (top-left of UNSCALED image) in canvas space.
+        # Both PyQt and Fabric.js apply scale/rotation around the image CENTER, so the
+        # center position = pos + (unscaled_size / 2), regardless of scale.
+        # We compute center in export space, then place the scaled image centered on it.
+        center_x = (frag.x + cropped_canvas_w / 2.0) * global_scale
+        center_y = (frag.y + cropped_canvas_h / 2.0) * global_scale
+
+        # Apply rotation (negate angle: apps use clockwise-positive, PIL uses CCW)
+        if abs(frag.rotation) > 0.01:
+            rotated_img = scaled_img.rotate(
+                -frag.rotation, expand=True,
+                resample=Image.BICUBIC, fillcolor=(0, 0, 0, 0)
+            )
+        else:
+            rotated_img = scaled_img
+
+        # Place rotated image so its center aligns with computed center
+        paste_x = center_x - rotated_img.width / 2.0
+        paste_y = center_y - rotated_img.height / 2.0
+
+        placed.append((paste_x, paste_y, rotated_img))
+        if progress_callback:
+            progress_callback(idx, total, f"Composed {idx}/{total}")
+
+    if not placed:
+        return None
+
+    # Phase 2: Compute bounding box
+    min_x = min(p[0] for p in placed)
+    min_y = min(p[1] for p in placed)
+    max_x = max(p[0] + p[2].width for p in placed)
+    max_y = max(p[1] + p[2].height for p in placed)
+
+    # Canvas size
+    canvas_w = int(math.ceil(max_x - min_x))
+    canvas_h = int(math.ceil(max_y - min_y))
+    if canvas_w <= 0 or canvas_h <= 0:
+        return None
+
+    canvas = Image.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
+
+    # Phase 3: Paste fragments using alpha composite
+    for paste_x, paste_y, img in placed:
+        x = int(round(paste_x - min_x))
+        y = int(round(paste_y - min_y))
+        canvas.alpha_composite(img, dest=(x, y))
+
+    # Phase 4: Auto-crop to content + margin
+    bbox = canvas.getbbox()
+    if bbox is None:
+        return canvas
+
+    left, top, right, bottom = bbox
+    left = max(0, left - margin)
+    top = max(0, top - margin)
+    right = min(canvas_w, right + margin)
+    bottom = min(canvas_h, bottom + margin)
+    canvas = canvas.crop((left, top, right, bottom))
+
+    return canvas
+
+
+def generate_thumbnail(fragments: List[PuzzleFragment],
+                       image_service,
+                       thumb_size: int = 150) -> str:
+    """Generate a small composite thumbnail as base64-encoded PNG.
+
+    Args:
+        fragments: List of positioned PuzzleFragment objects.
+        image_service: PuzzleImageService instance.
+        thumb_size: Maximum dimension in pixels (default 150).
+
+    Returns:
+        Base64-encoded PNG string (no data URI prefix), or empty string on failure.
+    """
+    composite = compose_puzzle_export(fragments, image_service, export_size=400, margin=5)
+    if composite is None:
+        return ''
+
+    # Resize to fit within thumb_size x thumb_size maintaining aspect ratio
+    composite.thumbnail((thumb_size, thumb_size), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    composite.save(buf, format='PNG', optimize=True)
+    return base64.b64encode(buf.getvalue()).decode('ascii')

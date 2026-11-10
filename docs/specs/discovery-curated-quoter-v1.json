@@ -1,0 +1,18 @@
+{
+  "list_version": "quoter-v1",
+  "ruled_date": "2026-08-12",
+  "ruling": "Owner, 2026-08-12 (in-session, recorded in _tmp/OWNER-RULINGS-2026-08-12.md and docs/OPEN_ISSUES.md): BOTH Yalkut works join the curated quoter list. Mechanism: matrix step 4 (docs/specs/discovery-relation-matrix-v1.md) relabels their rows to quotes_this_work (כולל ציטוט) -- rows are never deleted or withheld.",
+  "census_note": "Measured on discovery-v3-PUBLIC 2026-08-12: w001383 carries 35 main-pool rows and w001384 carries 66 -- the matrix spec's '101 main-pool rows' line matches the PAIR'S total, not על נ\"ך alone. A0b re-ratifies counts against the locked population.",
+  "entries": [
+    {
+      "canonical_work_id": "w001383",
+      "title": "ילקוט שמעוני על נ\"ך",
+      "note": "Priced basis: A0c 4/4 false; 0/57 correct in the 1,402 blind grades."
+    },
+    {
+      "canonical_work_id": "w001384",
+      "title": "ילקוט שמעוני על התורה",
+      "note": "Owner's same-anthology ruling; its own measured signal is the too-broad cell (38 of 66 cited rows thin over 952 units)."
+    }
+  ]
+}

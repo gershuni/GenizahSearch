@@ -1,0 +1,306 @@
+# Research search resource policy
+
+Web transcription, lab, and parallels searches run in disposable subprocesses.
+Every job a worker runs -- an interactive search, a completion, a replay, an API
+background job -- stops after `Config.WEB_SEARCH_TIME_LIMIT` (180 s; owner ruling
+2026-09-28) and returns what it had checked: the worker's progress callback raises
+the engine's Stop, the engine returns its verified rows with the cut-off signal
+`interrupted`, the page shows the count as "N+" with "stopped after 3 minutes",
+and the API adds `results_cut_off` (on `/api/search`, and on `/api/parallels` when
+the composition search comes back `partial`). The page counts the limit itself as
+well, so a list the limit cut short shows "N+" even from an engine that did not say
+it was stopped. Every engine does: the text search, the Lab search and Lab
+composition search (fast and deep scan, My Library included) and the composition
+search note `interrupted` when a stop ends them. A part of a search that cannot
+return partial rows reports the limit instead (the page's time-limit message). A
+worker that has not stopped 60 s after its limit (`TIME_LIMIT_GRACE_SECONDS`, stuck
+outside the engine's checks) is killed; the rows a text search had already shown
+are kept, marked "N+" and partial, as Stop keeps them. The limit counts from when
+the job leaves the queue (`started_at`), the worker's loading and its index-lease wait
+included. The steps of a refinement chain run again together
+(restored after a reload, re-evaluated, or completed before Search within) share one
+limit (`web/research_jobs.py::shared_time_limit`): each step gets what the steps
+before it left, and a step started after it is spent stops at once, cut off. The ordinary synchronous API keeps its own HTTP
+deadlines; the desktop has none.
+
+The letter-level (passage) search is checked through `checkpoint`, not its progress
+callback (the desktop passes one that must not be called during a letter-level
+scan): between witnesses, and before each candidate is verified -- where a long
+query spends its time. Stopped, it returns the witnesses searched so far, the last
+one's matches from the candidates it had verified, marked `partial`. Gathering one
+witness's candidates and rendering the rows found have no checkpoint; both are
+bounded (the posting budget, `verify_cap`), and the kill after the grace period
+remains the fallback for them.
+
+The web process owns a FIFO queue. Stop removes a queued request or kills its
+running process; its slot is released after process exit. A crashed worker does
+not take down the server. Workers also exit when their parent server disappears.
+Waiting uses a separate thread pool so it does not occupy the browsing pool.
+Each job carries its own variant and Lab settings: the website defaults
+(`web/variant_preferences.py::WEBSITE_DEFAULTS`) with what its search sent on top
+(the visitor's level, Num Changes and Settings-page preferences; an API job sends
+nothing, so it runs with the defaults). A search never changes the server's
+settings, and later UI changes do not alter jobs that are already queued.
+
+Workers hold shared leases for the LOCAL index directories. My Library atomic
+rebuild/reset operations hold exclusive leases through handle closure, directory
+swap, and reload. Maintenance waits for existing readers; workers starting during
+a swap wait until it finishes and remain cancellable by their supervisor. Leases
+use dedicated SQLite lock files beside the index directories, so they survive
+directory swaps and their OS locks are released if a process exits unexpectedly.
+
+Workers use low scheduling priority, one native compute thread, and (when CPU
+affinity is available) one CPU excluding the first allowed CPU. Before importing
+engines they install an OS allocation limit. The parent also checks resident
+memory and available system/container memory every 100 ms. This reduces resource
+competition; it is not a guarantee against all host overload or storage contention.
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `GENIZAH_RESEARCH_WORKERS` | 1 | Concurrent computations per web process (maximum 4) |
+| `GENIZAH_RESEARCH_QUEUE_SIZE` | 16 | Waiting computations (maximum 64) |
+| `GENIZAH_RESEARCH_MEMORY_MB` | 4096 | Maximum worker allocation and resident-memory allowance |
+| `GENIZAH_WEB_RESERVE_MB` | 1024 | Free memory reserved for website/host activity |
+| `GENIZAH_RESEARCH_RESULT_MB` | 512 | Maximum compressed worker transfer (maximum 512) |
+| `GENIZAH_RESEARCH_PRESTART` | 1 | `0` = start each worker only when its search arrives (see below) |
+
+A worker waits when available memory is too low to start. Its allocation limit
+is reduced at launch if the configured allowance would consume the reserve.
+Memory pressure during a run may stop it with an explicit error. A full queue
+also returns an explicit error. Neither case is reported as a successful empty
+search. Existing expansion, candidate, and result caps still apply; this change
+does not promise exhaustive results beyond the engines' existing limits.
+Transfers use streaming compression, with expanded serialized size bounded by
+the worker's allocation allowance. After the child exits, the server waits for
+free memory covering its reserve plus twice that expanded size before loading
+results. This wait remains cancellable. The size estimate is conservative for
+the current result structures; it is not an OS allocation limit on the web process.
+
+These allowances are **per web process**. Use one serving process for this queue
+design. Multiple server processes multiply capacity and do not share API job
+records; supporting that deployment requires an external queue/result store.
+Start with one worker and measure real broad queries, peak worker memory, queue
+wait, and concurrent browse response times before increasing concurrency.
+
+With one worker, every visitor's text search, Parallels search and API search
+waits in the same FIFO queue: a search starts only when the one before it ends.
+`GENIZAH_RESEARCH_WORKERS=2` (in the server's `.env`, then restart) runs two at
+once. Workers are pinned to one CPU each, never the first: two get separate CPUs
+only with at least three (`nproc`); on two CPUs they share one. Each running
+search may hold up to `GENIZAH_RESEARCH_MEMORY_MB` (the allowance is divided
+among the slots at launch), and each slot keeps a warm worker (below).
+
+### Warm workers (2026-10-05)
+
+Each query still runs in a fresh worker, released with its memory and native
+threads when it ends. But a worker spent ~6 s (measured in a 4-CPU dev container)
+loading the catalogue (`libraries.csv`, the CUDL alias index, the Oxford parts)
+before it could search, on every query -- the likely gap between 19 s on the
+website and 13 s on the desktop for the same search (owner, 2026-10-05). Now each slot starts its next worker as soon as the previous one ends
+(and at server start): it loads the catalogue and waits for its input, which the
+parent hands over by renaming `input.pkl` into its directory. The index itself is
+opened per search, under the index lease. Measured on a synthetic 60,000-page
+index, `אם אין אני לי`: first rows 7.1 s -> 1.1 s, complete 8.4-8.8 s -> 2.6 s.
+
+The cost: an idle worker holds the loaded catalogue, ~400 MB resident, one per
+slot. A slot does not start one when memory is below the admission threshold
+(the reserve plus 128 MB per slot); a search then starts its own worker, as
+before. A warm worker that died while waiting is replaced by a fresh one for the
+search. `GENIZAH_RESEARCH_PRESTART=0` restores the old behaviour. A search
+arriving while its warm worker is still loading waits only for the rest of the load.
+
+### Catalogue lookups (2026-11-03)
+
+A Title or Shelfmark search reads no text index: it is a catalogue lookup
+(`SearchEngine._execute_metadata_search`), a row per manuscript. It used to go
+through the queue like every other search, and so waited for a worker (its
+catalogue load when no warm one was ready) and for whoever was searching: on the
+API, `search_mode=shelfmark` took 10 s or more on most calls over the 14 days to
+2026-11-03, with 56 timeouts. `IsolatedEngine` now resolves the manuscripts of
+such a search in the server process (`SearchEngine.metadata_search_ids`, over
+`MetadataManager`'s indexed catalogue, milliseconds) and runs a lookup of up to
+`INLINE_METADATA_ROWS` (100) manuscripts in the calling thread, in no worker and
+in no queue. A broader search (a volume, `T-S 12`) still goes to a worker, with
+its manuscripts, so the worker skips the catalogue too. Until the server's own
+catalogue has loaded (its first seconds) the worker resolves them, as before.
+
+### Early rows
+
+A text search on the search page asks the worker for its first rows
+(`execute_search(preview_callback=)`, the desktop's streaming): the worker writes
+them to `preview.pkl` as they are found (at most 50 rows, each preview the start
+of the final list), the parent reads it on its 100 ms tick, and the page shows
+them under "Still searching" while the search runs. Offered where the engine
+offers them (no NOT-words, not Responsa, Genizah scope -- the website has no My
+Library) and only when no post-search filter (exclusions, library, printed, PGP,
+domain, measurements, the all-terms view) could hide a row. Stop keeps the rows
+already shown, marked partial. The API does not ask for them.
+
+## Matching in supervised workers
+
+Unbounded matching inside a disposable Linux worker uses Python's original `re`
+matcher after arming `PR_SET_PDEATHSIG` with `SIGKILL` and checking that the parent
+has not changed. This makes parent-death cleanup independent of the worker's
+GIL. If that protection is unavailable or fails, the worker retains the
+GIL-releasing matcher and its watchdog thread. The parent can terminate a live
+worker even if native matching cannot check a cooperative deadline.
+Other matching in the web/desktop process, and explicit
+nested budgets such as result highlighting, retain the interruptible `regex`
+matcher; the exception is a pattern the search engine builds itself, which
+matches with `re` in process under a size cap (next section). Selecting the
+matcher happens for each operation, so a pattern created inside a worker does
+not disable deadlines when used outside that context.
+
+A standalone, low-priority diagnostic on the production index on 2026-09-15
+used `לא יתזוג עליהא`, variants, gap 0, and the saved 30-pair settings. It
+retrieved 920 candidates containing 85.9 million characters. Loading and
+stripping brackets took 1.14 seconds; matching took 28.32 seconds with the
+deployed adapter and 3.60 seconds with the supervised-worker path. Every first
+match span (including absent matches) was identical, with no diagnostic timeouts.
+These are candidate-matching timings, not end-to-end API latency. The earlier
+279-candidate, 514-second logged run could not be identified conclusively with
+this request and must not be presented as this benchmark's baseline.
+
+The search performance log retains `materialize_ms` and adds `doc_load_ms`
+and `candidate_match_ms` for the initial candidate checks. Highlighting,
+metadata formatting, and other per-hit work remain in `materialize_ms`.
+Workers report preparing, checking candidate texts, and saving results through
+the existing progress channel; polling does not start another computation.
+
+### Engine-generated patterns in process (2026-10-12)
+
+The desktop (an in-process QThread search) and Windows research workers matched
+every pattern with `regex`, about 60 times slower than `re` on Extended and Maximum
+prefix trees (a 4-word Maximum query: 0.43 ms a page with `re`, 26-31 ms with
+`regex`). `re` holds the GIL and cannot be interrupted, so it cannot simply replace
+`regex` in the Qt process: a pattern a scholar typed could freeze the window. A
+pattern the engine builds itself from escaped literals has a shape whose cost can
+be bounded, so those match with `re` in process under a size cap. The measurements,
+the rules and the review rounds are in the desktop native-matching plan (kept in the
+private repository).
+
+A pattern is *generated* (`shared/search_regex.py::compile_generated`, called only
+from `shared/search_engine.py`) when `build_regex_pattern` or the Fuzzy typed-word
+site builds it and all of these hold: the word gap is 0; the mode is not Regex and
+there is no Responsa component; each word is a single form or a prefix tree
+(Extended and Maximum); every form is non-empty, at most 64 characters, and made
+only of caseless characters that are neither inserter-class nor separator-class
+characters. So Exact/Literal, Extended and Maximum at gap 0 on plain Hebrew words,
+Fuzzy's typed terms and composition chunks are generated; Basic's multi-form
+alternation, any gap above 0, Latin or quoted forms, Responsa and Regex mode are
+not, and keep the route they had. (The word gap is also capped at 10 in Exact,
+Variants and Fuzzy, `MAX_WORD_GAP`; Responsa and Regex mode have no limit.)
+
+A call on a generated pattern runs on `re` only when all of these hold:
+
+- it is a `search`, `match` or `fullmatch` (`sub` always takes the `regex` route);
+- the subject (`pos` to `endpos`) is at most the pattern's `native_max_chars`:
+  `HOLD_BUDGET_S` (1 s) over its cost per start position, which is summed from the
+  built prefix trees (20 ns a level, 5 ns a sibling tried). A 4-word Maximum query
+  gets about 164,000 characters, a one-word query about 717,000, against an index
+  page at the 99th percentile of 11,000. A pattern whose cap would be under 10,000
+  characters is not generated at all;
+- for a pattern of several words whose subject holds a character that the
+  inserter and separator classes share (today `"`, U+2018-2019 and U+0300-036F,
+  derived from the two classes at first use, not listed by hand), the subject is
+  also within the smaller cap for that case, the cap divided by 2 to the power of
+  (words - 2): such a character can be read two ways at every word boundary, and
+  a failing match retries the combinations (measured 2026-10-12: x0.5 the model at
+  2 words, x1.7 at 4, x4.9 at 6, x15-20 at 8). A 2-word query keeps its whole cap
+  there, a 4-word query a quarter of it, a 9-word query falls to the `regex` route.
+
+Any other call takes the `regex` route, which compiles the `regex` object on its
+first need (the deadline checked before and after) and keeps the per-call timeout.
+An expired budget raises before any work, and the desktop's Stop is honoured
+between calls (`search_regex.cancel_check`), not inside one: the cap is what bounds
+a call, an empirical target of about one second of held GIL on degenerate text,
+not a guarantee across machines.
+
+`GENIZAH_REGEX_TIMEOUT_SECONDS` therefore guards the patterns that are not
+generated (the scholar's own Regex, Responsa, a gap above 0, Basic's multi-form
+alternation, highlighting) and generated patterns on the fallback route (a subject
+over the cap, or over the smaller cap for a subject holding a shared character).
+Linux supervised workers are unchanged:
+`re` for everything, with no cap, no scan and no timer. Windows workers are
+unchanged too: a generated pattern is compiled there as the ordinary eager `regex`
+object, with no timer, because their watchdog is a Python thread that a held GIL
+would starve.
+
+Still on the `regex` route after this change: a gap above 0, Basic's multi-form
+alternation, a query of many words (the cap halves per word beyond the second) on
+the pages (about 13% in a 40,000-page sample, 2026-10-12) that carry a shared
+quote or mark between two letters, documents over a pattern's cap, and the My
+Library composition loop, which checks the time limit per chunk rather than per
+document. The tracker row "Windows: Extended/Maximum patterns match about 60
+times slower with the `regex` module than with `re`" in `docs/OPEN_ISSUES.md`
+follows them.
+
+## Background API
+
+POST `/api/search/jobs` or `/api/parallels/jobs` with the same JSON body as the
+corresponding synchronous endpoint. A 202 response supplies `job_id`, `status_url`,
+and `result_url`. Poll the status URL; retrieve the result when the state is
+`completed` or `failed`. Results preserve the endpoint's response body and status.
+DELETE the status URL to cancel. Pending results return 409.
+
+Mode gates and existing query validation/rate limits remain in force. Records
+are bound to the client IP resolved by the existing trusted-proxy rules, and use
+unguessable IDs. There are at most two active jobs per client IP and 32 retained
+jobs per web process. Shared institutional IPs therefore share the active-job
+allowance. Requests are limited to 64 KiB and API result files to 16 MiB. Finished
+records expire after ten minutes; expired files are removed on subsequent job
+requests. Jobs/results are temporary and do not survive a server restart. Clients
+must use the same server process and client IP to retrieve them.
+
+## Matching and rendering
+
+Query matching uses the pinned `regex` dependency with GIL release, except for
+the patterns the engine builds itself (see "Engine-generated patterns in
+process"), which match with `re` where their size is bounded. In isolated
+workers it has no per-match timer. In-process callers retain the 10-second
+`GENIZAH_REGEX_TIMEOUT_SECONDS` guard on every pattern that is not generated and
+on generated patterns on their two fallback routes, and the optional
+`GENIZAH_SEARCH_BUDGET_SECONDS` total deadline (default 0, meaning none), which
+is checked before every call; a native `re` call already running is not cut short,
+so a budget can be overshot by one such call. Nested explicit deadlines cannot be
+extended. Optional viewer highlighting has its own 0.25-second budget and may
+fall back to escaped plain text without aborting the research search.
+
+Compilation checks the active deadline before and after native compilation and
+between Unicode initialization blocks. Completed blocks are cached, so later
+renders retain progress if a short budget interrupts cold initialization. A
+single native compilation remains non-interruptible in process; research-worker
+isolation and resource limits still apply. A generated pattern compiles with `re`
+alone (about half `regex`'s time on a 4-word Maximum query, 2.4 s against 4.5 s);
+its `regex` object is built only when a call takes the `regex` route. Lab
+snippets fall back to plain text if either compilation or matching exhausts their
+budget.
+
+Windows uses [Job Object memory limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information).
+Linux uses [RLIMIT_DATA](https://man7.org/linux/man-pages/man2/getrlimit.2.html),
+which includes anonymous mmap allocation on Linux 4.7 and newer, plus the parent
+watchdog and cgroup-aware available-memory check. Read-only index mappings are
+not charged as anonymous allocations but their resident pages are watched.
+
+## Rollout and verification
+
+Install updated requirements and restart the service to activate the workers.
+Updating files alone does not replace an already-running search. Validate broad
+Responsa and parallels queries on production-sized data while opening browse
+pages; record both search completion and browse latency. Exercise Stop, queue
+saturation, and memory pressure before raising allowances. Do not remove the
+resource protections simply to make a benchmark pass.
+
+Local tests cover actual subprocess cancellation, FIFO admission, worker crash
+recovery, OS allocation rejection, memory watchdogs, event-loop responsiveness,
+background API lifecycle, and existing search/API behavior. They do not replace
+production-sized load testing or the Windows Python 3.11 render-smoke CI job.
+
+The local corpus smoke check for plain Responsa `ראובן AND שמעון` processed
+8,428 candidates and returned 4,471 results through the subprocess boundary.
+Matching took about 35 seconds; the transfer was 276 MiB compressed / 758 MiB
+expanded. Startup and transfer add time beyond matching. This is one local
+measurement, not a production latency guarantee. It exposed why small fixed
+memory/transfer allowances rejected a legitimate broad query.

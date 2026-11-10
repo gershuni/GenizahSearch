@@ -1,0 +1,707 @@
+"""Test configuration for ensuring project modules are importable."""
+
+import os
+import sys
+import types
+from pathlib import Path
+
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_PATH = str(ROOT_DIR)
+
+if ROOT_PATH not in sys.path:
+    sys.path.insert(0, ROOT_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Headless Qt for CI on Linux without an X server.
+#
+# Many test files import QApplication at module top to instantiate widgets
+# under test. Without an offscreen platform plugin, QApplication() aborts
+# with SIGABRT during pytest collection on Ubuntu CI — which kills the entire
+# test session before any test runs.
+#
+# Setting QT_QPA_PLATFORM=offscreen here (in conftest, which loads before
+# any test file) guarantees every Qt-importing test gets the headless
+# platform. setdefault() means local dev machines with $DISPLAY still use
+# their native plugin, and a user-set QT_QPA_PLATFORM is respected.
+# ---------------------------------------------------------------------------
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+# ---------------------------------------------------------------------------
+# The NLI image proxy's on-disk stores (web/nli_image_store.py): the 30-day
+# FL-id store and the thumbnail folder default to INDEX_DIR, the developer's
+# real data folder. Point both at a temporary folder before anything imports
+# web.api -- init_api_routes() opens the store, and a module-scoped fixture can
+# run it before any per-test fixture -- and give every test its own folder
+# below (`_isolate_nli_image_store`). Set, not setdefault: a test must never
+# read or write the real stores.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# No pytest process may send telemetry to production PostHog. A developer's
+# .env carries a real POSTHOG_API_KEY and web.main's load_dotenv() does not
+# override a variable that is already set (an empty string counts as set).
+# Tests that exercise delivery install their own fake key explicitly.
+# ---------------------------------------------------------------------------
+os.environ["POSTHOG_API_KEY"] = ""
+os.environ.pop("GENIZAH_TELEMETRY_KEY", None)
+os.environ.pop("GENIZAH_TELEMETRY_FORCE", None)
+
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+
+_NLI_IMAGE_STORE_TMP = _tempfile.mkdtemp(prefix="nli_image_store_")
+_atexit.register(_shutil.rmtree, _NLI_IMAGE_STORE_TMP, True)
+os.environ["NLI_FL_ID_STORE_FILE"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_fl_ids.db")
+os.environ["NLI_THUMB_CACHE_DIR"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_thumbs")
+# The same for the parsed MARC / manifest store (shared/nli_metadata_store.py), which
+# MetadataManager reads on the desktop and the web alike.
+os.environ["NLI_METADATA_STORE_FILE"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_metadata.db")
+
+
+# ---------------------------------------------------------------------------
+# Skip Phase 97.3 / 100 / 97.2 desktop tests on CI runners (D-F15).
+#
+# Phase 97.3 (2026-05-26) introduced the FolderWalkWorker QThread + heavily
+# threaded MyLibraryTab tests; Phase 100 (2026-05-27) added PdfImageController
+# + PdfRenderWorker QThread; Phase 97.2 added a Tantivy FailingWriter shim.
+#
+# These tests pass in isolation on local Windows but fail in CI on BOTH
+# Ubuntu (SIGSEGV under offscreen Qt) AND Windows-latest (access violation
+# under headless GitHub Actions runner). When run alongside the full pytest
+# suite, QThread cleanup races with the test teardown — the production
+# desktop app on real user machines doesn't hit this because real Qt event
+# loops on real displays tear workers down cleanly between dialogs.
+#
+# Gating on CI (GITHUB_ACTIONS=true) instead of platform so local devs can
+# still exercise these tests directly via `pytest tests/test_X.py`. CI just
+# skips them at collection time — same set of tests, both runners.
+#
+# Proper fix lands in v7.16 (D-F15 in docs/OPEN_ISSUES.md): audit the
+# FolderWalkWorker + PdfRenderWorker cleanup paths so QThread.quit() + wait()
+# completes deterministically before the parent QWidget destructor runs.
+# ---------------------------------------------------------------------------
+collect_ignore_glob: list[str] = []
+if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+    collect_ignore_glob.extend([
+        "test_my_library_tab*.py",
+        "test_unified_tree_async_populate.py",
+        "test_folder_walk_worker.py",
+        "test_local_optout_persistence.py",
+        "test_recovery_scan_runs_cleanup.py",
+        "test_disk_headroom.py",
+        # Phase 108 Join Lab widget construction smoke tests (QWidget build).
+        "test_join_workbench_construct.py",
+        # Phase 100 PdfImageController + PdfRenderWorker QThread.
+        "test_pdf_image_controller.py",
+        "test_pdf_page_renderer.py",
+        # Phase 97.2 discard_run / Tantivy-failure short-circuit — Linux-only
+        # failure mode but skipping uniformly keeps the conftest simple.
+        "test_phase_97_2_sqlite_vs_tantivy_consistency.py",
+    ])
+
+
+# ---------------------------------------------------------------------------
+# GUI test split (CI Qt-segfault fix).
+#
+# PyQt6 tests that construct a real QApplication and dispatch widget events
+# (sendEvent / processEvents / closeEvent) accumulate process-global Qt state.
+# Run alongside the full suite, they tip over into SIGSEGV (exit 139) on the
+# headless Linux runner after ~3000 prior tests — see the `feedback_full_suite
+# _testing_windows` lesson. QApplication is a process singleton and Qt teardown
+# across thousands of tests is unreliable, so the robust fix is process
+# isolation: the main `tests` CI job runs `-m "not gui"` (bulk suite, one
+# process) and a dedicated `gui-tests` job runs `-m gui` in a FRESH process.
+#
+# Files are auto-marked `gui` below (centralized here, mirroring the
+# collect_ignore_glob list above) so individual test files need no edits and
+# the set is auditable in one place. Add event-dispatching dialog test files
+# here as later telemetry phases (116+) introduce them.
+# ---------------------------------------------------------------------------
+_GUI_TEST_FILES = {
+    "test_catalog_availability_filter.py",
+    "test_composition_printed_filters.py",
+    "test_libfilter_desktop.py",
+    "test_seed022_desktop_badge.py",
+    "test_space_scroll_gui.py",
+    "test_telemetry_consent_ux.py",
+    # Pause/Resume: starts real QThreads and pumps the event loop to observe
+    # queued acknowledgements. The rest of that feature's suite is Qt-free by
+    # design; this file holds only what genuinely needs a live loop (thread
+    # affinity, queued-vs-direct delivery, real wait() timing).
+    "test_pause_integration_qt.py",
+    # The window's list syncs on the list-sync runner: real QMainWindow hosts,
+    # real QTimers holding a question until the screen is free, real dialogs.
+    "test_lists_sync_off_ui_thread.py",
+}
+
+
+# ---------------------------------------------------------------------------
+# Phase 85 (Plan 85-03 + 85-02): pin `scripts` to the root namespace package.
+#
+# Both `C:/Genizahsearch/scripts/` (root, namespace package) and
+# `C:/Genizahsearch/skills/cairo-genizah-research/scripts/__init__.py`
+# (skill, regular package) coexist. When pytest collects tests across both
+# trees in one process, sys.modules['scripts'] can end up bound to whichever
+# was imported first — leading to ImportError ("cannot import name 'X' from
+# 'scripts' ...skills/.../scripts/__init__.py") for callers expecting the
+# root one. Bind the root namespace package up-front so subsequent
+# `from scripts import X` resolves to root scripts/.
+# ---------------------------------------------------------------------------
+def _pin_root_scripts_namespace() -> None:
+    root_scripts = ROOT_DIR / "scripts"
+    if not root_scripts.is_dir():
+        return
+    existing = sys.modules.get("scripts")
+    existing_path = getattr(existing, "__path__", None)
+    # If already bound to a path that does not include root scripts/, replace.
+    if existing is None or str(root_scripts) not in (list(existing_path) if existing_path else []):
+        pkg = types.ModuleType("scripts")
+        pkg.__path__ = [str(root_scripts)]  # type: ignore[attr-defined]
+        pkg.__package__ = "scripts"
+        sys.modules["scripts"] = pkg
+
+
+_pin_root_scripts_namespace()
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 Wave E (Plan 97-05): --run-scale flag for @pytest.mark.scale tests.
+# Scale tests synthesise large corpora (50K+ files) and are excluded by default.
+# Enable with:  pytest tests/test_50k_scale_smoke.py --run-scale -x
+# ---------------------------------------------------------------------------
+def pytest_addoption(parser):
+    group = parser.getgroup("scale")
+    group.addoption(
+        "--run-scale",
+        action="store_true",
+        default=False,
+        help="run @pytest.mark.scale tests (requires large synthesised corpora)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    import pytest as _pytest
+    # Auto-apply the `gui` marker to event-dispatching PyQt6 dialog tests so the
+    # main `tests` CI job can deselect them (-m "not gui") and the dedicated
+    # `gui-tests` job runs them in a fresh process (-m gui). Applied before the
+    # scale early-return so the marker holds regardless of --run-scale.
+    for item in items:
+        if Path(str(item.fspath)).name in _GUI_TEST_FILES:
+            item.add_marker(_pytest.mark.gui)
+        # Auto-apply `render_smoke` to tests under tests/render_smoke/. These enter +
+        # tear down the NiceGUI app lifespan (asyncio.run), which closes the event loop
+        # and deletes the auto-index client — poisoning any later NiceGUI test in the
+        # same process. The main `tests` job deselects them (-m "not render_smoke") and
+        # a dedicated fresh-process job runs them (-m render_smoke).
+        if "render_smoke" in Path(str(item.fspath)).parts:
+            item.add_marker(_pytest.mark.render_smoke)
+        # Auto-apply `atlas_bake` to tests under tests/atlas_bake/ (Phase 133 ATLAS-01).
+        # These require the pinned bake-time deps in requirements-atlas-bake.txt
+        # (networkx/python-louvain/Brotli), NOT installed in the main `tests` job
+        # (requirements-lock.txt only) — the test module itself self-skips there via
+        # `pytest.importorskip`, and this marker additionally lets the main job
+        # deselect them explicitly (-m "not atlas_bake"); a dedicated
+        # `atlas-bake-tests` CI job installs the pinned deps and runs them for real.
+        if "atlas_bake" in Path(str(item.fspath)).parts:
+            item.add_marker(_pytest.mark.atlas_bake)
+    if config.getoption("--run-scale"):
+        return  # run everything including scale tests
+    skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")
+    for item in items:
+        if "scale" in item.keywords:
+            item.add_marker(skip_scale)
+
+
+# ---------------------------------------------------------------------------
+# Skill import bridge: skills/cairo-genizah-research/ (hyphens in dir name)
+# is not directly importable as `skills.cairo_genizah_research`. Register it
+# as a package under the underscore name so test imports work without renaming
+# the directory (Anthropic Skill naming mandates hyphens).
+# ---------------------------------------------------------------------------
+def _register_skill_package() -> None:
+    skill_dir = ROOT_DIR / "skills" / "cairo-genizah-research"
+    if not skill_dir.is_dir():
+        return  # skill not yet scaffolded
+
+    # Ensure top-level `skills` package exists in sys.modules
+    if "skills" not in sys.modules:
+        skills_pkg = types.ModuleType("skills")
+        skills_pkg.__path__ = [str(ROOT_DIR / "skills")]  # type: ignore[attr-defined]
+        skills_pkg.__package__ = "skills"
+        sys.modules["skills"] = skills_pkg
+
+    # Register `skills.cairo_genizah_research` pointing at the hyphenated dir
+    pkg_name = "skills.cairo_genizah_research"
+    if pkg_name not in sys.modules:
+        pkg = types.ModuleType(pkg_name)
+        pkg.__path__ = [str(skill_dir)]  # type: ignore[attr-defined]
+        pkg.__package__ = pkg_name
+        sys.modules[pkg_name] = pkg
+
+    # Register `skills.cairo_genizah_research.scripts`
+    scripts_dir = skill_dir / "scripts"
+    scripts_name = "skills.cairo_genizah_research.scripts"
+    if scripts_name not in sys.modules and scripts_dir.is_dir():
+        scripts_pkg = types.ModuleType(scripts_name)
+        scripts_pkg.__path__ = [str(scripts_dir)]  # type: ignore[attr-defined]
+        scripts_pkg.__package__ = scripts_name
+        sys.modules[scripts_name] = scripts_pkg
+
+
+_register_skill_package()
+
+
+# ---------------------------------------------------------------------------
+# Phase 95 (Plan 95-01 Wave 0): shared fixtures for LOCAL indexer tests.
+# Used by Wave 1-3 plans (02-08).
+# ---------------------------------------------------------------------------
+import itertools
+import os
+from unittest.mock import MagicMock
+
+import pytest
+
+
+@pytest.fixture
+def temp_local_index_dir(tmp_path, monkeypatch):
+    """Isolated LOCAL_INDEX_DIR + LOCAL_LAB_INDEX_DIR for indexer tests (D-14)."""
+    local = tmp_path / "LocalIndex"
+    lab = tmp_path / "LocalLabIndex"
+    local.mkdir()
+    lab.mkdir()
+    # Monkey-patch genizah_core.Config when the indexer reads it.
+    from genizah_core import Config
+    monkeypatch.setattr(Config, "LOCAL_INDEX_DIR", str(local), raising=False)
+    monkeypatch.setattr(Config, "LOCAL_LAB_INDEX_DIR", str(lab), raising=False)
+    return {"local": str(local), "lab": str(lab)}
+
+
+@pytest.fixture
+def mock_supabase_client():
+    """Mock Supabase client for cloud-write gate tests (REQ-9).
+
+    Used by test_local_namespace_no_lists_leak.py and
+    test_local_namespace_no_corrections_leak.py. Any call to
+    .table(...) or .from_(...) on this mock is RECORDED — tests assert
+    call_count == 0 when LOCAL sys_id is passed."""
+    mock = MagicMock(name="supabase_client")
+    mock.table = MagicMock(name="supabase_client.table")
+    mock.from_ = MagicMock(name="supabase_client.from_")
+    return mock
+
+
+@pytest.fixture
+def local_indexer_fixtures_dir():
+    """Path to tests/fixtures/local_indexer/."""
+    return os.path.join(os.path.dirname(__file__), "fixtures", "local_indexer")
+
+
+# ---------------------------------------------------------------------------
+# Phase 98 (Plan 02 Wave 2): autouse fixture for NLI circuit breaker state reset.
+#
+# Module-level state in shared/nli_circuit_breaker.py persists across test
+# functions in the same pytest process. Without this fixture, test A that
+# trips the breaker would pollute test B (and CI green local → red on rerun).
+#
+# See 98-RESEARCH.md Pitfall 6 for the full rationale.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_nli_breaker_state():
+    """Reset shared.nli_circuit_breaker module state before EACH test.
+
+    Runs project-wide because the breaker is imported transitively by web/api.py,
+    genizah_core.py, shared/puzzle_image_service.py — any test touching those
+    paths could inadvertently leave state behind.
+    """
+    try:
+        from shared.nli_circuit_breaker import _reset_for_tests
+        _reset_for_tests()
+    except ImportError:
+        pass  # Defensive: if the module is removed/renamed, don't break the suite
+    yield
+    # After the test, reset again so the next test starts clean even if THIS
+    # test left state behind (e.g., on assertion failure mid-test).
+    try:
+        from shared.nli_circuit_breaker import _reset_for_tests
+        _reset_for_tests()
+    except ImportError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Cross-test NiceGUI/asyncio pollution guard (SEED-006 CI fix).
+#
+# Many tests drive async handlers via asyncio.run(...) (test_auth_callback_resilience,
+# test_anchor_viewer, test_compare_modal, test_joins_lab, test_add_to_list_dialog_*,
+# ...). Two side effects pollute later tests IN THE SAME PROCESS:
+#
+#   (a) asyncio.run() closes its loop and clears the thread's current loop → a later
+#       NiceGUI test that calls asyncio.get_event_loop() raises "There is no current
+#       event loop in thread 'MainThread'" / "Event loop is closed".
+#   (b) Running a NiceGUI handler enters/exits a client context that POPS NiceGUI's
+#       ambient auto-index slot off `nicegui.context.slot_stack` (a plain module-level
+#       list in nicegui 3.8.0, NOT a per-context ContextVar) and never restores it.
+#       Render/builder tests (test_joins_builder*, test_joins_lab_render,
+#       test_joins_lab_options_inline, test_joins_lab_new_search_reset,
+#       test_word_builder_symbols, ...) assert that ambient slot is present (as it is
+#       at a clean import) and fail with an empty slot_stack.
+#
+# All of these PASS in isolation — the failures are pure full-suite ordering pollution
+# that reddens CI's single-process (-m "not gui") job. No pytest-asyncio plugin is
+# installed, so this autouse fixture owns no event-loop contract it could fight with.
+#
+# Fix: before every test, (a) guarantee a fresh OPEN current event loop and (b) restore
+# the captured pristine auto-index slot_stack if a prior test emptied it. Cheap and
+# inert for tests that don't touch asyncio/NiceGUI; restore is skipped when a slot is
+# already active so it never clobbers a test mid-context.
+# ---------------------------------------------------------------------------
+try:
+    from nicegui import context as _ng_context_for_default
+    # Captured at conftest import — before any test can pop it — so the fixture can
+    # re-push the pristine auto-index slot after a polluter clears it.
+    _NICEGUI_DEFAULT_SLOT_STACK = list(_ng_context_for_default.slot_stack)
+except Exception:
+    _NICEGUI_DEFAULT_SLOT_STACK = []
+
+
+@pytest.fixture(autouse=True)
+def _nicegui_loop_and_slot_isolation():
+    import asyncio
+    loop = None
+    try:
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:
+        loop = None
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    if _NICEGUI_DEFAULT_SLOT_STACK:
+        try:
+            from nicegui import context as ng_context
+            if not ng_context.slot_stack:
+                ng_context.slot_stack[:] = _NICEGUI_DEFAULT_SLOT_STACK
+        except Exception:
+            pass
+
+    # (c) Restore `nicegui.core.loop` afterwards. It is a MODULE-LEVEL global
+    # that several tests assign their own running loop to (directly, or via
+    # NiceGUI's lifespan under `asyncio.run`). `asyncio.run` then CLOSES that
+    # loop, but `core.loop` keeps pointing at the corpse -- and
+    # `nicegui.background_tasks.create()` does `core.loop.create_task(...)`
+    # with only an `is not None` assert to protect it. The next test to render
+    # anything therefore dies with `RuntimeError: Event loop is closed`, in a
+    # file that never touched asyncio.
+    #
+    # Concretely: a findings-page test took down tests/test_joins_builder.py
+    # and tests/test_joins_lab_new_search_reset.py this way (8 failures), while
+    # all three passed in isolation. Restoring the PREVIOUS value (rather than
+    # forcing None) is what makes a combined run behave like a solo run.
+    try:
+        from nicegui import core as ng_core
+    except Exception:
+        ng_core = None
+    saved_core_loop = getattr(ng_core, "loop", None) if ng_core is not None else None
+    try:
+        yield
+    finally:
+        if ng_core is not None:
+            ng_core.loop = saved_core_loop
+
+
+# ---------------------------------------------------------------------------
+# Phase 101 D-09 (USER-DEC-3, REVISED per REVIEWS round 2 HIGH #2):
+# autouse fixture insulating tests/test_local_indexer.py from importlib.reload
+# pollution by sibling tests (test_mupdf_warnings_suppressed.py reloads
+# shared.local_indexer in 3 of its tests).
+#
+# THE STALE-ALIAS HAZARD: tests/test_local_indexer.py has module-level aliases:
+#   from shared.local_indexer import LocalIndexer, EncodingError, extract_txt
+# After a sibling test reloads shared.local_indexer, the module's __dict__ is
+# rebuilt with NEW class/function objects, but the names in
+# test_local_indexer.py's namespace still point to the OLD objects. The
+# specific failure mode (Codex round-2): old `extract_txt` (closed over old
+# globals) raises the NEW EncodingError, while `pytest.raises(EncodingError)`
+# at the test site still references the OLD class -- so pytest sees "DID NOT
+# RAISE expected exception".
+#
+# THE FIX IS TWO STEPS -- reloading the module is NOT ENOUGH:
+#   1. importlib.reload(shared.local_indexer)
+#   2. Rebind the imported names in the test module's namespace to the
+#      freshly-reloaded objects via request.module.<name>.
+#
+# Scoped to tests/test_local_indexer.py by request.node.fspath check so the
+# rest of the suite is unaffected.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _refresh_local_indexer_for_local_indexer_tests(request):
+    """D-09 fix: reload shared.local_indexer AND rebind its imported aliases
+    in the test module's namespace before each test in tests/test_local_indexer.py.
+
+    SEED-006: the reload above (and test_mupdf_warnings_suppressed.py's reloads)
+    rebuild shared.local_indexer.__dict__ with NEW class objects and LEAVE the
+    module in that reloaded state. tests/test_local_schema_rebuild_deferral.py
+    imports identity-sensitive names (LocalIndexerError, LocalIndexer, ...) at
+    collection time and runs AFTER test_local_indexer.py in the same process
+    (alphabetical order), so its aliases go stale: a method on the live (reloaded)
+    module raises the NEW LocalIndexerError via module-global lookup, while the
+    test's `pytest.raises(LocalIndexerError)` still references the OLD class ->
+    "DID NOT RAISE". Rebind that file's aliases to the LIVE module objects before
+    each of its tests (rebind only -- no extra reload needed) so identity stays
+    consistent regardless of any prior sibling reload. Platform-independent bug;
+    without this the SEED-006 deferral tests fail on CI too.
+    """
+    fspath = str(request.node.fspath)
+    if 'test_local_indexer.py' in fspath:
+        import importlib
+        import shared.local_indexer
+        importlib.reload(shared.local_indexer)
+        # Rebind the names test_local_indexer.py imports at module level so
+        # `pytest.raises(EncodingError)` etc. reference the SAME objects the
+        # reloaded module's functions now raise / construct.
+        _imported_names = ('LocalIndexer', 'EncodingError', 'extract_txt')
+        for _name in _imported_names:
+            if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
+                setattr(request.module, _name, getattr(shared.local_indexer, _name))
+    elif 'test_local_schema_rebuild_deferral.py' in fspath:
+        import shared.local_indexer
+        _deferral_names = (
+            'LocalIndexer', 'LocalIndexerError', 'local_db_path_for',
+            'migrate_legacy_local_db', '_compute_schema_marker',
+            '_read_schema_marker', '_write_schema_marker', 'build_local_schema',
+        )
+        for _name in _deferral_names:
+            if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
+                setattr(request.module, _name, getattr(shared.local_indexer, _name))
+    else:
+        # Every other module that imported names from shared.local_indexer at
+        # collection has the same stale-alias hazard once a sibling reloaded
+        # it: test_phase_97_2_sqlite_vs_tantivy_consistency.py's
+        # `pytest.raises(LocalIndexerError)` let the NEW class through when a
+        # chunk ran test_local_indexer.py first (PR #419, 2026-10-20). Which
+        # files share a process follows the chunk plan, so rebind any stale
+        # alias rather than listing files.
+        live = sys.modules.get('shared.local_indexer')
+        if live is not None:
+            for _name, _value in list(vars(request.module).items()):
+                try:
+                    if getattr(_value, '__module__', None) != 'shared.local_indexer':
+                        continue
+                except Exception:  # an object whose attribute access raises
+                    continue
+                _current = getattr(live, _name, _value)
+                if _current is not _value:
+                    setattr(request.module, _name, _current)
+    yield
+
+
+# ---------------------------------------------------------------------------
+# Headless safety net: never let a modal QMessageBox.exec() hang the suite.
+#
+# The My Library confirm dialogs (remove-folder, Re-index All, the large-folder
+# ceiling warning) build a QMessageBox and call ``mb.exec()`` — switched from the
+# static ``QMessageBox.question(...)`` by the 2026-06 localize-buttons change
+# (commit 6d75ac58). With no display, a real ``exec()`` BLOCKS FOREVER and hangs
+# the whole pytest job (observed as a 30-min CI hang on test_local_ceiling_*).
+#
+# Default ``QMessageBox.exec`` to a non-destructive Cancel so no test can hang on
+# a modal. Tests that need a specific result (or want to capture the dialog text)
+# patch ``QMessageBox.exec`` themselves — their patch wins inside the test body.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _no_blocking_modal_exec(monkeypatch):
+    try:
+        from PyQt6.QtWidgets import QMessageBox
+    except Exception:
+        return  # Qt not available in this environment — nothing to guard
+    monkeypatch.setattr(
+        QMessageBox,
+        "exec",
+        lambda self: QMessageBox.StandardButton.Cancel,
+        raising=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Personal-state isolation: session.json, config.pkl and lang.pkl.
+#
+# Config resolves INDEX_DIR to the developer's real data folder whenever one
+# exists (CI has none), so a test that reaches a real `_save_session`,
+# `save_app_config` or `save_language` overwrote that developer's own files --
+# and New saves session.json synchronously. Point the three files at a fresh,
+# empty folder for every test so a local run behaves like CI.
+#
+# INDEX_DIR itself is left alone: the index and caches under it are read,
+# not personal state. ListsManager.LISTS_FILE (bound at class definition) and
+# the search-history file are not covered; a test that writes them patches
+# them itself. Requesting `monkeypatch` keeps undo order right: a test's own
+# patch of one of these attributes is undone before this one. One mkdir per
+# test under a session-wide root (`tmp_path_factory.mktemp` per test would
+# rescan the base temp folder every time).
+# ---------------------------------------------------------------------------
+_PERSONAL_STATE_SEQ = itertools.count()
+
+
+@pytest.fixture(scope="session")
+def _personal_state_root(tmp_path_factory):
+    return tmp_path_factory.mktemp("personal_state")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_personal_state_files(monkeypatch, _personal_state_root):
+    from shared.config import Config
+    folder = _personal_state_root / str(next(_PERSONAL_STATE_SEQ))
+    folder.mkdir()
+    monkeypatch.setattr(Config, "SESSION_FILE", str(folder / "session.json"))
+    monkeypatch.setattr(Config, "CONFIG_FILE", str(folder / "config.pkl"))
+    monkeypatch.setattr(Config, "LANGUAGE_FILE", str(folder / "lang.pkl"))
+
+
+# Each test its own FL-id store and thumbnail folder (created only if written):
+# a thumbnail one test fetched must not answer another test's request.
+_NLI_IMAGE_STORE_SEQ = itertools.count()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_nli_image_store(monkeypatch):
+    folder = os.path.join(_NLI_IMAGE_STORE_TMP, str(next(_NLI_IMAGE_STORE_SEQ)))
+    monkeypatch.setenv("NLI_FL_ID_STORE_FILE", os.path.join(folder, "nli_fl_ids.db"))
+    monkeypatch.setenv("NLI_THUMB_CACHE_DIR", os.path.join(folder, "nli_thumbs"))
+    monkeypatch.setenv("NLI_METADATA_STORE_FILE", os.path.join(folder, "nli_metadata.db"))
+
+
+# ---------------------------------------------------------------------------
+# Phase 113 (Plan 01): crash-LOCAL reset fixture (NOT global autouse — REVIEWS MEDIUM-5).
+#
+# This fixture is NON-autouse and OPT-IN.  Crash test files request it via a
+# small module-level autouse wrapper:
+#
+#   @pytest.fixture(autouse=True)
+#   def _use(crash_telemetry_state): yield
+#
+# This keeps the reset local to each crash test module without adding a second
+# project-wide autouse that would break unrelated config tests.
+#
+# What it does:
+# - Replaces load_app_config / save_app_config with an in-memory dict on both
+#   genizah_core AND desktop.telemetry (so config.pkl is never touched)
+# - Resets shared.posthog_server state via _reset_for_tests()
+# - Replaces _event_queue with a fresh per-test queue (10 000-slot cap)
+# - Resets desktop.telemetry state via _reset_for_tests() then re-runs
+#   _load_consent_state() against the empty in-memory config
+# - Teardown resets both modules so no state leaks to the next test
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def crash_telemetry_state(monkeypatch):
+    """Crash-test-LOCAL state reset (non-global, opt-in). See Phase 113 Plan 01."""
+    import queue as _queue
+
+    fake_config: dict = {}
+
+    def fake_load_app_config():
+        return dict(fake_config)
+
+    def fake_save_app_config(new_data: dict):
+        fake_config.update(new_data)
+
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'load_app_config', fake_load_app_config)
+    monkeypatch.setattr(genizah_core, 'save_app_config', fake_save_app_config)
+
+    import desktop.telemetry as _tel
+    monkeypatch.setattr(_tel, 'load_app_config', fake_load_app_config)
+    monkeypatch.setattr(_tel, 'save_app_config', fake_save_app_config)
+
+    import shared.posthog_server as _ph
+    _ph._reset_for_tests()
+    fresh_q: _queue.Queue = _queue.Queue(maxsize=10000)
+    monkeypatch.setattr(_ph, '_event_queue', fresh_q)
+
+    # Crash tests install their own fake key and assert delivery; a non-frozen
+    # test process would otherwise be blocked (GENIZAH_TELEMETRY_FORCE).
+    monkeypatch.setenv('GENIZAH_TELEMETRY_FORCE', '1')
+    _tel._reset_for_tests()
+    _tel._load_consent_state()
+
+    yield fake_config
+
+    _tel._reset_for_tests()
+    _ph._reset_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# NOTE (PR #324): a `_drain_qt_deferred_deletions` teardown fixture lived here
+# briefly -- it quiesced QTimers/QThreads and drained the posted-event queue
+# after each gui test. Removed on measurement: with the QApplication keeper
+# below plus one-process-per-file isolation (scripts/run_gui_tests.py), the
+# full per-file matrix ran 29 files with ZERO crashes without it -- while its
+# own processEvents() call was the thing dispatching stale queued signal
+# emissions into deleted widgets (measured: it CAUSED the
+# test_local_ceiling_enforcement.py crash it was meant to prevent). Do not
+# reintroduce event-queue draining in teardown; fix widget/worker lifetimes
+# in the desktop code instead.
+# The QApplication KEEPER (PR #324 per-file gui isolation, root cause).
+#
+# At least eight desktop test files carry this fixture shape:
+#
+#     @pytest.fixture(autouse=True)
+#     def _ensure_app():
+#         if QApplication.instance() is None:
+#             QApplication(sys.argv)          # <-- no reference kept
+#
+# The QApplication is a local temporary: the moment the fixture returns,
+# CPython's refcount hits zero, PyQt6 destroys the C++ application, and
+# `QApplication.instance()` is None again BY THE TIME THE TEST BODY RUNS.
+# The first QPixmap/QWidget after that hits Qt's fatal "must construct a
+# QGuiApplication" -- abort(), exit -6 on Linux and 0xC0000409 on Windows,
+# with no Python traceback at all.
+#
+# The bug was latent for as long as these files ran inside one big mixed
+# process: some EARLIER file always held a module-global app, so
+# `instance() is None` was False and the broken branch never executed.
+# Per-file gui processes removed the donor app and exposed it -- measured:
+# test_join_workbench_rotate.py and test_local_ceiling_enforcement.py abort
+# when run alone, on both platforms, at the first pixmap.
+#
+# Fix at the class level, not per file: before any gui-marked test, create
+# the application ourselves and KEEP the reference for the life of the
+# process. Every file fixture then finds a live instance and its unreferenced
+# branch becomes unreachable. Ordering does not matter: if this runs first,
+# the file fixture is a no-op; if the file fixture somehow ran first, its app
+# is already dead by now, instance() is None, and we create a kept one.
+_QT_APP_KEEPER: list = []
+
+
+@pytest.fixture(autouse=True)
+def _gui_app_keeper(request):
+    if "gui" in request.keywords:
+        try:
+            from PyQt6.QtWidgets import QApplication
+        except Exception:
+            pass
+        else:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication(sys.argv or ["pytest"])
+            if app not in _QT_APP_KEEPER:
+                _QT_APP_KEEPER.append(app)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_api_daily_budget():
+    """2026-11-03: the public API's per-address daily budget is a module
+    singleton (web.search_api._daily_budget, default 2,000 a day). A chunk of
+    API test files in one process could spend it, so clear it around every
+    test -- without importing web.search_api for tests that never load it."""
+    mod = sys.modules.get('web.search_api')
+    if mod is not None:
+        mod._daily_budget.reset_for_tests()
+    yield
+    mod = sys.modules.get('web.search_api')
+    if mod is not None:
+        mod._daily_budget.reset_for_tests()
+

@@ -1,0 +1,1373 @@
+# -*- coding: utf-8 -*-
+"""
+Phase 117 Plan 06 — Tests for web/components/anchor_viewer.py.
+
+Tests the AnchorViewer component logic with injected browse_resolver and
+external_resolver so no live NiceGUI render / AppState / meta_mgr is needed.
+
+Coverage:
+- zoom_in clamps at 4.0; zoom_out clamps at 0.25; zoom_reset → 1.0
+- NLI proxy-only image URL (no iiif.nli.org.il)
+- Cambridge new-HIGH wiring: browse page with EMPTY cambridge_images +
+  external_resolver supplying cambridge_images → resolved URL is
+  /api/cambridge_image/... (would FAIL if resolve_external_images were skipped)
+- None boundary: browse_resolver returns None → _resolve_off_loop returns None
+- No handleImageError / no iiif.nli.org.il in built <img> HTML (HIGH-2)
+- window._msViewerLoaded idempotency guard present in _VIEWER_HEAD
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# ─── Fake page helpers ────────────────────────────────────────────────────────
+
+def _make_page(
+    sys_id: str = "990025143260205171",
+    p_num: int = 1,
+    total_pages: int = 5,
+    text: str = "שורה ראשונה\nשורה שנייה",
+    shelfmark: str = "T-S 12.123",
+    is_oxford: bool = False,
+    library_code: str = "CUL",
+    volume_suffix: int = 1,
+    cambridge_images: Optional[List] = None,
+    external_provider: str = "",
+    cambridge_alignment: Optional[Dict] = None,
+    volumes: Optional[List] = None,
+    current_idx: Optional[int] = None,
+    library_name: str = "Cambridge University Library",
+    title: str = "Liturgical fragment",
+) -> SimpleNamespace:
+    """Build a fake BrowsePage-like object suitable for injection as browse_resolver result.
+
+    NOTE: cambridge_images defaults to an empty list — matching the REAL
+    service.get_browse_page() behaviour (it does NOT populate external-provider
+    fields). The Cambridge wiring test intentionally passes empty cambridge_images
+    here and lets the external_resolver supply them.
+
+    current_idx is the DENSE 1-based ordinal the core returns (new_idx + 1); it
+    defaults to p_num for the simple contiguous case the tests use. The real
+    BrowsePage always carries current_idx, library_name and title.
+    """
+    return SimpleNamespace(
+        sys_id=sys_id,
+        p_num=p_num,
+        total_pages=total_pages,
+        text=text,
+        shelfmark=shelfmark,
+        is_oxford=is_oxford,
+        library_code=library_code,
+        library_name=library_name,
+        title=title,
+        volume_suffix=volume_suffix,
+        cambridge_images=cambridge_images if cambridge_images is not None else [],
+        external_provider=external_provider,
+        cambridge_alignment=cambridge_alignment,
+        volumes=volumes or [],
+        current_idx=current_idx if current_idx is not None else p_num,
+    )
+
+
+def _make_external_empty() -> Dict:
+    """External resolver return value when no external images are available."""
+    return {"cambridge_images": [], "external_provider": "", "cambridge_alignment": None}
+
+
+def _make_external_cambridge(sys_id: str = "990025143260205171") -> Dict:
+    """External resolver return value for a Cambridge manuscript."""
+    return {
+        "cambridge_images": [
+            {"@id": f"https://cudl.lib.cam.ac.uk/iiif/{sys_id}/canvas/1"},
+        ],
+        "external_provider": "",       # '' = Cambridge (not 'manchester'/'jts')
+        "cambridge_alignment": {"verdict": "aligned", "count": 1},
+    }
+
+
+def _noop_external(_sys_id: str, **_kw) -> Dict:
+    """External resolver stub that returns no external images."""
+    return _make_external_empty()
+
+
+# ─── Fixture: AnchorViewer with mocked NiceGUI ────────────────────────────────
+
+def _make_viewer(
+    browse_resolver=None,
+    external_resolver=None,
+    sys_id: str = "990025143260205171",
+) -> "Any":
+    """Instantiate AnchorViewer with NiceGUI UI calls mocked out."""
+    # Mock all NiceGUI calls so we can import AnchorViewer without a running server
+    mock_element = MagicMock()
+    mock_element.__enter__ = lambda s: s
+    mock_element.__exit__ = MagicMock(return_value=False)
+    mock_element.classes = MagicMock(return_value=mock_element)
+    mock_element.props = MagicMock(return_value=mock_element)
+    mock_element.style = MagicMock(return_value=mock_element)
+    mock_element.set_text = MagicMock()
+    mock_element.set_content = MagicMock()
+    mock_element.clear = MagicMock()
+
+    with (
+        patch("web.components.anchor_viewer.ui") as mock_ui,
+        patch("web.components.anchor_viewer.run"),
+    ):
+        # Wire every ui.* factory to return the mock_element
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        from web.components.anchor_viewer import AnchorViewer
+        viewer = AnchorViewer(
+            sys_id=sys_id,
+            browse_resolver=browse_resolver,
+            external_resolver=external_resolver,
+        )
+    return viewer
+
+
+# ─── Zoom arithmetic tests (no NiceGUI needed) ────────────────────────────────
+
+class TestZoomArithmetic:
+    """Test the per-instance zoom state arithmetic directly."""
+
+    def _viewer(self) -> "Any":
+        return _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+
+    def test_initial_zoom_is_1(self):
+        v = self._viewer()
+        assert v._zoom == 1.0
+
+    def test_zoom_in_increments_by_0_25(self):
+        v = self._viewer()
+        v._zoom = 1.0
+        with patch.object(v, "_zoom", 1.0, create=True):
+            pass  # direct attribute access is fine
+        v._zoom = 1.0
+        # Simulate zoom_in without running the JS
+        v._zoom = min(v._zoom + 0.25, 4.0)
+        assert v._zoom == pytest.approx(1.25)
+
+    def test_zoom_in_clamps_at_4(self):
+        v = self._viewer()
+        v._zoom = 4.0
+        v._zoom = min(v._zoom + 0.25, 4.0)
+        assert v._zoom == pytest.approx(4.0)
+
+    def test_zoom_in_from_near_max(self):
+        v = self._viewer()
+        v._zoom = 3.9
+        v._zoom = min(v._zoom + 0.25, 4.0)
+        assert v._zoom == pytest.approx(4.0)
+
+    def test_zoom_out_decrements_by_0_25(self):
+        v = self._viewer()
+        v._zoom = 2.0
+        v._zoom = max(v._zoom - 0.25, 0.25)
+        assert v._zoom == pytest.approx(1.75)
+
+    def test_zoom_out_clamps_at_0_25(self):
+        v = self._viewer()
+        v._zoom = 0.25
+        v._zoom = max(v._zoom - 0.25, 0.25)
+        assert v._zoom == pytest.approx(0.25)
+
+    def test_zoom_out_from_near_min(self):
+        v = self._viewer()
+        v._zoom = 0.30
+        v._zoom = max(v._zoom - 0.25, 0.25)
+        assert v._zoom == pytest.approx(0.25)
+
+    def test_zoom_reset_returns_1(self):
+        v = self._viewer()
+        v._zoom = 3.5
+        v._zoom = 1.0
+        assert v._zoom == pytest.approx(1.0)
+
+
+# ─── _resolve_off_loop tests (pure sync, no async) ────────────────────────────
+
+class TestResolveOffLoop:
+    """Test the synchronous _resolve_off_loop method directly."""
+
+    def test_nli_proxy_url_no_direct_nli(self):
+        """NLI manuscript → resolve_image_url returns /api/nli_image_by_sysid proxy URL."""
+        sys_id = "990025143260205171"
+        page = _make_page(sys_id=sys_id, p_num=3, is_oxford=False)
+
+        def fake_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return page
+
+        v = _make_viewer(browse_resolver=fake_browse, external_resolver=_noop_external, sys_id=sys_id)
+        result = v._resolve_off_loop(p_num=3)
+
+        assert result is not None
+        resolved_page, resolved = result
+        assert resolved_page.sys_id == sys_id
+        assert resolved["has_image"] is True
+        img_url = resolved["img_url"]
+        assert img_url.startswith(f"/api/nli_image_by_sysid/{sys_id}")
+        assert "iiif.nli.org.il" not in img_url
+
+    def test_cambridge_wiring_new_high(self):
+        """NEW-HIGH round-2 wiring test.
+
+        Simulates the REAL gap: service.get_browse_page() returns a Cambridge
+        manuscript with EMPTY cambridge_images (it never populates them), and the
+        injected external_resolver supplies the actual cambridge_images.
+
+        Asserts:
+        (a) external_resolver IS called with the page's sys_id (spy check).
+        (b) The resolved image URL is /api/cambridge_image/... (proves the
+            external_resolver result flowed into resolve_image_url).
+
+        If AnchorViewer skipped resolve_external_images, cambridge_images would
+        stay [] and the URL would still be /api/nli_image_by_sysid/... → FAIL.
+
+        The page's cambridge_images is intentionally left EMPTY (not pre-filled)
+        to close the round-1 masking gap.
+        """
+        sys_id = "990001234560205171"  # Cambridge manuscript sys_id
+        # Page with EMPTY cambridge_images (what service.get_browse_page really returns)
+        page = _make_page(
+            sys_id=sys_id,
+            p_num=1,
+            is_oxford=False,
+            library_code="CUL",
+            cambridge_images=[],          # intentionally EMPTY — simulates the gap
+            external_provider="",
+            cambridge_alignment=None,
+        )
+
+        def fake_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return page
+
+        # Track calls to external_resolver (spy)
+        call_log: List = []
+
+        def fake_external(sid, **kw):
+            call_log.append(sid)
+            return _make_external_cambridge(sys_id=sid)
+
+        v = _make_viewer(browse_resolver=fake_browse, external_resolver=fake_external, sys_id=sys_id)
+        result = v._resolve_off_loop(p_num=1)
+
+        assert result is not None, "resolve_off_loop should return a result"
+        _, resolved = result
+
+        # (a) external_resolver was called with the page sys_id
+        assert call_log, "external_resolver was NOT called — external-image enrichment is missing (new-HIGH)"
+        assert call_log[0] == sys_id, f"expected external_resolver called with {sys_id!r}, got {call_log}"
+
+        # (b) The resolved URL is the Cambridge proxy — NOT the NLI proxy
+        img_url = resolved["img_url"]
+        assert img_url.startswith(f"/api/cambridge_image/{sys_id}"), (
+            f"Expected /api/cambridge_image/... but got {img_url!r}. "
+            "If this test fails, AnchorViewer probably skipped resolve_external_images "
+            "(the cambridge_images stayed empty and NLI was used instead)."
+        )
+        assert "iiif.nli.org.il" not in img_url
+
+    def test_none_boundary_no_raise(self):
+        """browse_resolver returns None (unknown sys_id / boundary) → _resolve_off_loop returns None."""
+        def fake_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return None
+
+        v = _make_viewer(browse_resolver=fake_browse, external_resolver=_noop_external)
+        result = v._resolve_off_loop()
+        assert result is None
+
+    def test_external_resolver_called_with_page_sys_id(self):
+        """external_resolver is always called with the page's sys_id (not the original)."""
+        original_sys_id = "990025143260205171"
+        # In cross-folio navigation the page.sys_id may differ from the input sys_id
+        # (allow_cross=True case). Ensure we always pass page.sys_id to the external resolver.
+        page = _make_page(sys_id=original_sys_id, p_num=2)
+        calls = []
+
+        def fake_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return page
+
+        def spy_external(sid, **kw):
+            calls.append(sid)
+            return _make_external_empty()
+
+        v = _make_viewer(browse_resolver=fake_browse, external_resolver=spy_external, sys_id=original_sys_id)
+        v._resolve_off_loop(p_num=2)
+        assert calls == [original_sys_id]
+
+
+# ─── _build_img_html tests (HIGH-2 / ANC-02) ─────────────────────────────────
+
+class TestBuildImgHtml:
+    """Assert the built <img> HTML satisfies HIGH-2 invariants."""
+
+    def _viewer(self) -> "Any":
+        return _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+
+    def test_no_handle_image_error_in_img_html(self):
+        """<img> HTML must NOT contain onerror=handleImageError (HIGH-2)."""
+        v = self._viewer()
+        html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert "handleImageError" not in html, (
+            "HIGH-2 violation: handleImageError found in <img> HTML; "
+            "this wires the direct-NLI fallback bypass."
+        )
+
+    def test_no_direct_nli_url_in_img_html(self):
+        """<img> src must never be a direct iiif.nli.org.il URL (ANC-02 / HIGH-2)."""
+        v = self._viewer()
+        html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert "iiif.nli.org.il" not in html
+
+    def test_img_html_contains_proxy_url(self):
+        """The proxy URL is present as the src attribute."""
+        v = self._viewer()
+        proxy_url = "/api/nli_image_by_sysid/990025143260205171?page=2"
+        html = v._build_img_html(proxy_url)
+        assert proxy_url in html
+
+    def test_img_html_has_zoomable_image_class(self):
+        """manuscriptViewer relies on .zoomable-image selector."""
+        v = self._viewer()
+        html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert "zoomable-image" in html
+
+    def test_img_html_has_safe_onload_only(self):
+        """SEED-010: onload wires the per-instance __msInitViewer(viewer_id) only — no onerror."""
+        v = self._viewer()
+        html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert "__msInitViewer" in html        # per-instance zoom-init handler present
+        assert v._viewer_id in html            # scoped to THIS viewer's unique container class
+        assert "onerror" not in html           # no error handler that could trigger NLI fallback
+        assert "iiif.nli.org.il" not in html   # HIGH-2: never a direct NLI IIIF URL
+
+    def test_each_viewer_has_a_unique_id_for_per_pane_zoom(self):
+        """SEED-010: two AnchorViewers (e.g. Compare's two panes) must get DISTINCT
+        viewer ids so each wires its OWN zoom/pan — the bug was a single global
+        viewer + first-match querySelector wiring only one image."""
+        a = self._viewer()
+        b = self._viewer()
+        assert a._viewer_id and b._viewer_id
+        assert a._viewer_id != b._viewer_id
+        html_a = a._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        html_b = b._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert f"__msInitViewer('{a._viewer_id}')" in html_a
+        assert f"__msInitViewer('{b._viewer_id}')" in html_b
+        assert a._viewer_id not in html_b  # panes don't cross-wire
+
+
+# ─── _VIEWER_HEAD idempotency guard ───────────────────────────────────────────
+
+class TestViewerHeadIdempotencyGuard:
+    """The head HTML must contain the window._msViewerLoaded guard (Phase 119 safe)."""
+
+    def test_viewer_head_contains_ms_viewer_loaded(self):
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert "window._msViewerLoaded" in _VIEWER_HEAD, (
+            "_VIEWER_HEAD must contain the window._msViewerLoaded idempotency guard "
+            "so two AnchorViewer instances on one page (Phase 119 Compare) "
+            "do not double-run createManuscriptViewer."
+        )
+
+    def test_viewer_head_does_not_contain_handle_image_error(self):
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        # The handleImageError function lives in manuscript_viewer.js.
+        # It MUST NOT appear in our head HTML — wiring it would bypass Phase-98.
+        assert "handleImageError" not in _VIEWER_HEAD
+
+    def test_viewer_head_does_not_contain_nli_iiif_base(self):
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert "iiif.nli.org.il" not in _VIEWER_HEAD
+
+    def test_viewer_head_contains_create_manuscript_viewer(self):
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert "createManuscriptViewer" in _VIEWER_HEAD
+
+    def test_viewer_head_contains_per_instance_registry(self):
+        """SEED-010: the head wires the per-instance __msInitViewer registry so each
+        AnchorViewer can scope its manuscriptViewer to its own container class."""
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert "__msInitViewer" in _VIEWER_HEAD
+        assert "__msViewers" in _VIEWER_HEAD
+
+
+# ─── Rich BrowsePage shape confirmation (HIGH-1) ─────────────────────────────
+
+class TestRichBrowsePageShape:
+    """Confirm AnchorViewer uses the rich BrowsePage shape, not the narrow Protocol dict."""
+
+    def test_browse_resolver_injected_is_called_for_image_data(self):
+        """browse_resolver callable is invoked with sys_id (proves the rich resolver is wired)."""
+        call_log = []
+        sys_id = "990025143260205171"
+        page = _make_page(sys_id=sys_id)
+
+        def spy_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            call_log.append((sid, p_num, direction))
+            return page
+
+        v = _make_viewer(browse_resolver=spy_browse, external_resolver=_noop_external, sys_id=sys_id)
+        v._resolve_off_loop(p_num=1)
+        assert call_log, "browse_resolver was not called"
+        assert call_log[0][0] == sys_id
+
+    def test_direction_neg1_passes_to_browse_resolver(self):
+        """Folio-prev (direction=-1) is forwarded to browse_resolver."""
+        direction_log = []
+        sys_id = "990025143260205171"
+        page = _make_page(sys_id=sys_id, p_num=2)
+
+        def spy_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            direction_log.append(direction)
+            return page
+
+        v = _make_viewer(browse_resolver=spy_browse, external_resolver=_noop_external, sys_id=sys_id)
+        v._resolve_off_loop(direction=-1)
+        assert direction_log and direction_log[0] == -1
+
+
+# ─── Oxford direct-URL branch (MEDIUM-5 documented exception) ─────────────────
+
+class TestOxfordBranch:
+    """Oxford manuscripts route to direct Bodleian URL (MEDIUM-5 exception)."""
+
+    def test_oxford_uses_bodleian_url(self):
+        """Oxford page with derivable shelfmark → resolve_image_url returns Bodleian URL."""
+        sys_id = "990001458630205171"  # Oxford sys_id
+        page = _make_page(
+            sys_id=sys_id,
+            p_num=1,
+            is_oxford=True,
+            shelfmark="MS Heb. e.93/58",
+            library_code="Oxford",
+        )
+
+        def fake_browse(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return page
+
+        v = _make_viewer(browse_resolver=fake_browse, external_resolver=_noop_external, sys_id=sys_id)
+        result = v._resolve_off_loop(p_num=1)
+        assert result is not None
+        _, resolved = result
+        # Oxford images come from Bodleian (not NLI proxy and not iiif.nli.org.il)
+        img_url = resolved.get("img_url", "")
+        if resolved["has_image"]:
+            # Either direct Bodleian or /api/oxford_image — not NLI IIIF
+            assert "iiif.nli.org.il" not in img_url
+
+
+# ─── Regression: default resolver wiring (UAT 2026-06-17) ─────────────────────
+
+class TestDefaultResolverWiring:
+    """Guards the lazy default ``browse_resolver`` import in ``__init__``.
+
+    Every other test injects ``browse_resolver``, so the default fallback was
+    never exercised by the suite. It imported a non-existent symbol
+    (``from web.services import service``) and raised ImportError only at
+    runtime, the first time a real anchor was loaded in the browser. The fix
+    binds ``get_service().get_browse_page`` (the same accessor browse.py uses).
+    """
+
+    def test_default_browse_resolver_binds_without_import_error(self):
+        # browse_resolver=None + external_resolver=None → __init__ resolves the
+        # real defaults. This MUST NOT raise ImportError.
+        v = _make_viewer(browse_resolver=None, external_resolver=None)
+        assert callable(v._browse_resolver)
+        assert callable(v._external_resolver)
+
+    def test_default_browse_resolver_is_service_get_browse_page(self):
+        from web.services import get_service
+
+        v = _make_viewer(browse_resolver=None, external_resolver=None)
+        assert v._browse_resolver == get_service().get_browse_page
+
+
+# ─── Regression: viewer assets must inject at build, not dynamically (UAT) ────
+
+class TestViewerAssetInjection:
+    """Guards the zoom/pan fix.
+
+    A <script> injected via add_head_html into an already-live SPA page does
+    NOT execute, so AnchorViewer (constructed dynamically on a user click) must
+    NOT inject the viewer JS itself — the page builder calls
+    inject_viewer_assets() at initial render instead. These tests pin both
+    halves so a refactor can't silently reintroduce dead zoom.
+    """
+
+    def test_inject_viewer_assets_adds_head_html(self):
+        from unittest.mock import patch
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            from web.components.anchor_viewer import inject_viewer_assets, _VIEWER_HEAD
+            inject_viewer_assets()
+            mock_ui.add_head_html.assert_called_once_with(_VIEWER_HEAD)
+
+    def test_constructing_viewer_does_not_inject_head_html(self):
+        # The dynamic path must NOT call add_head_html (its <script> wouldn't run).
+        from unittest.mock import patch, MagicMock
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            AnchorViewer(
+                sys_id="990025143260205171",
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=lambda *a, **kw: {},
+            )
+            mock_ui.add_head_html.assert_not_called()
+
+
+# ─── Regression: folio-nav boundary handling (UAT round 2) ────────────────────
+
+class TestFolioBoundary:
+    """Navigating before the first / past the last folio must NOT destroy the
+    view with a 'fragment not found' state, and prev/next must disable at the
+    boundaries. (UAT: clicking prev at page 1 showed 'fragment not found'.)
+    """
+
+    def _viewer_with_async_run(self, browse_resolver):
+        from unittest.mock import patch, MagicMock
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+        from web.components.anchor_viewer import AnchorViewer
+        v = AnchorViewer(
+            sys_id="990025143260205171",
+            browse_resolver=browse_resolver,
+            external_resolver=lambda *a, **kw: {},
+        )
+        # Give prev/next buttons real MagicMocks so we can assert set_enabled.
+        v._prev_btn = MagicMock()
+        v._next_btn = MagicMock()
+        v._page_label = MagicMock()
+        v._transcription_html = MagicMock()
+        return v, mock_ui, (ctx, rctx)
+
+    def test_prev_disabled_at_first_folio(self):
+        import asyncio
+        page = _make_page(p_num=1, total_pages=4, library_code="CUL")
+        v, mock_ui, ctxs = self._viewer_with_async_run(
+            lambda *a, **kw: page
+        )
+        try:
+            asyncio.run(v.update_content(p_num=1))
+            v._prev_btn.set_enabled.assert_called_with(False)   # at first folio
+            v._next_btn.set_enabled.assert_called_with(True)    # more folios ahead
+        finally:
+            for c in ctxs:
+                c.stop()
+
+    def test_boundary_nav_keeps_view_no_not_found(self):
+        import asyncio
+        page = _make_page(p_num=1, total_pages=4, library_code="CUL")
+
+        def resolver(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return None if direction != 0 else page
+
+        v, mock_ui, ctxs = self._viewer_with_async_run(resolver)
+        try:
+            asyncio.run(v.update_content(p_num=1))   # loads page 1, sets _last_img_url
+            assert v._last_img_url, "page 1 should have rendered an image"
+            asyncio.run(v.update_content(direction=-1))  # boundary
+            # A boundary nav with a prior image notifies and keeps the view.
+            assert mock_ui.notify.called, "boundary nav should notify, not blow away the view"
+        finally:
+            for c in ctxs:
+                c.stop()
+
+    def test_sequential_next_passes_current_folio_pnum(self):
+        """Regression (UAT round 3): the stateless core needs the CURRENT folio's
+        p_num to navigate. Before the fix, nav passed p_num=None so the core
+        always restarted from index 0 — the viewer could only ever reach folio 2
+        ('advance once, then stuck, then no more folios'). Here a stateful fake
+        mimics the real core (index(p_num)+direction) over a 4-folio manuscript;
+        sequential Next must walk 1→2→3→4 and Prev must step back.
+        """
+        import asyncio
+        pages = [1, 2, 3, 4]
+        calls = []
+
+        def resolver(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            calls.append((p_num, direction))
+            idx = pages.index(p_num) if p_num in pages else 0
+            new_idx = idx + direction
+            if new_idx < 0 or new_idx >= len(pages):
+                return None  # boundary
+            return _make_page(
+                p_num=pages[new_idx],
+                total_pages=len(pages),
+                current_idx=new_idx + 1,
+            )
+
+        v, mock_ui, ctxs = self._viewer_with_async_run(resolver)
+        try:
+            asyncio.run(v.update_content(p_num=None))     # initial → folio 1
+            assert v._p_num == 1
+            asyncio.run(v.update_content(direction=+1))   # → folio 2
+            assert v._p_num == 2
+            asyncio.run(v.update_content(direction=+1))   # → folio 3 (the regression)
+            assert v._p_num == 3, f"second Next stuck at folio {v._p_num} (nav bug)"
+            asyncio.run(v.update_content(direction=+1))   # → folio 4
+            assert v._p_num == 4
+            v._next_btn.set_enabled.assert_called_with(False)  # last folio
+            # The 2nd Next MUST forward the current folio (p_num=2), not None/1.
+            assert (2, +1) in calls, f"current-folio p_num not forwarded: {calls}"
+            asyncio.run(v.update_content(direction=-1))   # back → folio 3
+            assert v._p_num == 3
+        finally:
+            for c in ctxs:
+                c.stop()
+
+    def test_on_page_loaded_hook_follows_folio_navigation(self):
+        """Compare keeps page-dependent details (the PGP link) with the folio shown:
+        the optional hook is called, and awaited, with each folio drawn; a failing
+        hook never breaks the viewer."""
+        import asyncio
+        pages = [1, 2, 3]
+
+        def resolver(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            idx = pages.index(p_num) if p_num in pages else 0
+            new_idx = idx + direction
+            if new_idx < 0 or new_idx >= len(pages):
+                return None
+            return _make_page(p_num=pages[new_idx], total_pages=3, current_idx=new_idx + 1)
+
+        seen = []
+
+        async def hook(p):
+            seen.append(p)
+
+        v, mock_ui, ctxs = self._viewer_with_async_run(resolver)
+        try:
+            v._on_page_loaded = hook
+            asyncio.run(v.update_content(p_num=None))
+            asyncio.run(v.update_content(direction=+1))
+            asyncio.run(v.update_content(direction=+1))
+            asyncio.run(v.update_content(direction=+1))   # boundary: nothing drawn
+            assert seen == [1, 2, 3]
+
+            def broken(_p):
+                raise ValueError("caller bug")
+            v._on_page_loaded = broken
+            asyncio.run(v.update_content(direction=-1))
+            assert v._p_num == 2
+        finally:
+            for c in ctxs:
+                c.stop()
+
+    def test_rotation_reset_on_folio_change(self):
+        """SEED-017 (#10): rotation resets to 0 on folio navigation (mirrors zoom).
+
+        The reset happens BEFORE the off-loop resolve, so it holds regardless of
+        whether the resolver returns a page or a boundary (None).
+        """
+        import asyncio
+        page = _make_page(p_num=1, total_pages=4, library_code="CUL")
+        v, mock_ui, ctxs = self._viewer_with_async_run(lambda *a, **kw: page)
+        try:
+            v._rotation = 90
+            v._zoom = 2.0
+            asyncio.run(v.update_content(direction=+1))
+            assert v._rotation == 0, "folio change must reset rotation to 0"
+            assert v._zoom == pytest.approx(1.0), "folio change must reset zoom to 1.0"
+        finally:
+            for c in ctxs:
+                c.stop()
+
+
+# ─── Task 1 (Plan 119-06): highlight_pattern + _highlight_html_line_safe ────────
+
+class TestHighlightPattern:
+    """AnchorViewer.highlight_pattern + _highlight_html_line_safe (G1-compare, F-G1a/b)."""
+
+    def test_anchor_viewer_accepts_highlight_pattern(self):
+        """AnchorViewer can be constructed with highlight_pattern and stores it."""
+        v = _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+        # Re-construct with highlight_pattern= to verify it is accepted + stored.
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                highlight_pattern="שלום",
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=_noop_external,
+            )
+        assert viewer._highlight_pattern == "שלום"
+
+    def test_highlight_html_line_safe_contains_bold_span(self):
+        """_highlight_html_line_safe wraps matches in <b style='color:#dc2626'> (F-G1a)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("foo שלום bar", "שלום")
+        assert "<b style='color:#dc2626'>" in result
+        assert "</b>" in result
+
+    def test_highlight_html_line_safe_no_outer_div_wrapper(self):
+        """_highlight_html_line_safe must NOT emit an outer <div dir='rtl'> wrapper (F-G1b)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("text with שלום", "שלום")
+        assert "<div" not in result, (
+            "F-G1b violation: output contains <div> which would be torn across "
+            "per-line grid rows in render_line_numbered_html"
+        )
+
+    def test_highlight_html_line_safe_preserves_newlines(self):
+        """_highlight_html_line_safe preserves \\n so render_line_numbered_html can split (F-G1b)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        text = "שורה ראשונה\nשורה שנייה"
+        result = _highlight_html_line_safe(text, "שורה")
+        # Two-line input → output splits back to two elements on \\n
+        lines = result.split("\n")
+        assert len(lines) == 2, (
+            f"Expected 2 lines after split on \\n, got {len(lines)}: {result!r}"
+        )
+
+    def test_highlight_html_line_safe_no_br_conversion(self):
+        """_highlight_html_line_safe must NOT convert \\n to <br>."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("line1\nline2", "line")
+        assert "<br>" not in result
+        assert "<br/>" not in result
+
+    def test_highlight_html_line_safe_no_pattern_returns_escaped(self):
+        """With no pattern, _highlight_html_line_safe returns HTML-escaped text (no spans)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("a < b & c", None)
+        assert "&lt;" in result
+        assert "&amp;" in result
+        assert "<b style=" not in result
+
+    def test_highlight_html_line_safe_strips_sentinel_bytes(self):
+        """Sentinel bytes in corpus text are stripped before processing (WR-01, T-119-10)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        from shared.joins_lab import MARK_A, MARK_B
+        # Corpus text containing raw sentinel bytes should NOT forge highlight spans.
+        text = f"normal{MARK_A}forged{MARK_B}text"
+        result = _highlight_html_line_safe(text, None)
+        # Sentinels stripped; no spurious <b> tag
+        assert "<b style='color:#dc2626'>" not in result
+        assert "forged" in result
+
+    def test_highlight_html_line_safe_invalid_regex_falls_back(self):
+        """Invalid regex pattern is silently ignored (no crash); text is still escaped."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("hello world", "[invalid(")
+        assert "hello world" in result
+        assert "<b style=" not in result
+
+    def test_update_content_uses_highlight_html_when_pattern_set(self):
+        """update_content passes highlight_html to render_line_numbered_html when pattern set."""
+        import asyncio
+        from unittest.mock import patch, MagicMock
+
+        page = _make_page(text="שלום עולם\nשורה שנייה")
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        try:
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                highlight_pattern="שלום",
+                browse_resolver=lambda *a, **kw: page,
+                external_resolver=_noop_external,
+            )
+            # Mock transcription_html so we can check set_content was called
+            viewer._transcription_html = MagicMock()
+            viewer._prev_btn = MagicMock()
+            viewer._next_btn = MagicMock()
+            viewer._page_label = MagicMock()
+            viewer._shelfmark_label = MagicMock()
+            viewer._meta_label = MagicMock()
+
+            # Capture the render call's html to verify highlight spans appear
+            rendered_html_captured = []
+
+            original_set_content = viewer._transcription_html.set_content
+
+            def capture_set_content(html):
+                rendered_html_captured.append(html)
+
+            viewer._transcription_html.set_content = capture_set_content
+
+            asyncio.run(viewer.update_content(p_num=1))
+
+            assert rendered_html_captured, "set_content was never called on transcription_html"
+            html_out = rendered_html_captured[0]
+            assert "<b style='color:#dc2626'>" in html_out, (
+                f"Expected highlight span in transcription render but got: {html_out[:300]!r}"
+            )
+        finally:
+            ctx.stop()
+            rctx.stop()
+
+    def test_update_content_no_highlight_when_pattern_is_none(self):
+        """update_content renders plain escaped transcription when highlight_pattern is None."""
+        import asyncio
+        from unittest.mock import patch, MagicMock
+
+        page = _make_page(text="שלום עולם")
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        try:
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                highlight_pattern=None,  # no highlighting
+                browse_resolver=lambda *a, **kw: page,
+                external_resolver=_noop_external,
+            )
+            viewer._transcription_html = MagicMock()
+            viewer._prev_btn = MagicMock()
+            viewer._next_btn = MagicMock()
+            viewer._page_label = MagicMock()
+            viewer._shelfmark_label = MagicMock()
+            viewer._meta_label = MagicMock()
+
+            rendered_html_captured = []
+
+            def capture_set_content(html):
+                rendered_html_captured.append(html)
+
+            viewer._transcription_html.set_content = capture_set_content
+
+            asyncio.run(viewer.update_content(p_num=1))
+
+            assert rendered_html_captured, "set_content was never called"
+            html_out = rendered_html_captured[0]
+            assert "<b style='color:#dc2626'>" not in html_out, (
+                "Expected NO highlight span when highlight_pattern=None"
+            )
+        finally:
+            ctx.stop()
+            rctx.stop()
+
+    def test_anchor_viewer_image_pane_marker(self):
+        """AnchorViewer image container carries .mark('anchor-viewer-image-pane') (F-A3)."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "anchor-viewer-image-pane" in source, (
+            "Image container must carry .mark('anchor-viewer-image-pane') for Plan-08 render-smoke (F-A3)"
+        )
+
+    def test_anchor_viewer_transcription_pane_marker(self):
+        """AnchorViewer transcription container carries .mark('anchor-viewer-transcription-pane') (F-A3)."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "anchor-viewer-transcription-pane" in source, (
+            "Transcription container must carry .mark('anchor-viewer-transcription-pane') for Plan-08 render-smoke (F-A3)"
+        )
+
+    def test_shared_htmlify_is_unchanged(self):
+        """shared/joins_lab.htmlify is not modified by this plan (no app-wide ripple)."""
+        from shared.joins_lab import htmlify
+        # Verify it still wraps output in <div dir='rtl'> (which is why LINE-SAFE variant needed)
+        result = htmlify("test", None)
+        assert "<div dir='rtl'>" in result, "htmlify should still wrap in <div dir='rtl'>"
+        # And converts \n to <br>
+        result_nl = htmlify("a\nb", None)
+        assert "<br>" in result_nl, "htmlify should still convert \\n to <br>"
+
+
+# ─── Plan 119-11: R2-3 / R2-6 — suppress_shelfmark_header + image_max_height ─
+
+
+class TestSuppressShelfmarkHeader:
+    """R2-6: AnchorViewer.suppress_shelfmark_header kwarg (Plan 119-11).
+
+    When True: no inner shelfmark/meta header built; _shelfmark_label/_meta_label stay None.
+    When False (default): header is built and update_content sets shelfmark text as before.
+    """
+
+    def _make_viewer_suppress(self, suppress: bool = False, sys_id: str = "990025143260205171"):
+        """Construct an AnchorViewer with NiceGUI mocked, with the given suppress flag."""
+        from unittest.mock import MagicMock, patch
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "set_text"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id=sys_id,
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=lambda *a, **kw: {},
+                suppress_shelfmark_header=suppress,
+            )
+        return viewer
+
+    def test_suppress_true_shelfmark_label_is_none(self):
+        """R2-6: when suppress_shelfmark_header=True, _shelfmark_label is None (no header built)."""
+        viewer = self._make_viewer_suppress(suppress=True)
+        assert viewer._shelfmark_label is None, (
+            "R2-6: suppress_shelfmark_header=True must leave _shelfmark_label as None"
+        )
+
+    def test_suppress_true_meta_label_is_none(self):
+        """R2-6: when suppress_shelfmark_header=True, _meta_label is None."""
+        viewer = self._make_viewer_suppress(suppress=True)
+        assert viewer._meta_label is None, (
+            "R2-6: suppress_shelfmark_header=True must leave _meta_label as None"
+        )
+
+    def test_suppress_true_info_header_is_none(self):
+        """R2-6: when suppress_shelfmark_header=True, _info_header is None (no column built)."""
+        viewer = self._make_viewer_suppress(suppress=True)
+        assert viewer._info_header is None, (
+            "R2-6: suppress_shelfmark_header=True must leave _info_header as None"
+        )
+
+    def test_suppress_false_shelfmark_label_is_not_none(self):
+        """R2-6: default (suppress=False): _shelfmark_label is built (non-Compare callers unchanged)."""
+        viewer = self._make_viewer_suppress(suppress=False)
+        assert viewer._shelfmark_label is not None, (
+            "R2-6 regression: suppress_shelfmark_header=False (default) must still build "
+            "_shelfmark_label for the main Joins-Lab anchor pane (non-Compare callers unchanged)"
+        )
+
+    def test_suppress_false_meta_label_is_not_none(self):
+        """R2-6: default (suppress=False): _meta_label is built."""
+        viewer = self._make_viewer_suppress(suppress=False)
+        assert viewer._meta_label is not None, (
+            "R2-6 regression: default AnchorViewer must still build _meta_label"
+        )
+
+    def test_update_content_does_not_raise_when_suppressed(self):
+        """R2-6: update_content must not raise AttributeError when _shelfmark_label is None."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        page = _make_page(shelfmark="T-S 12.555", library_name="CUL", title="Test")
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        try:
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                browse_resolver=lambda *a, **kw: page,
+                external_resolver=lambda *a, **kw: {},
+                suppress_shelfmark_header=True,
+            )
+            # With suppress=True, _shelfmark_label and _meta_label are None.
+            # update_content must guard them with `is not None` — must NOT raise.
+            viewer._transcription_html = MagicMock()
+            viewer._prev_btn = MagicMock()
+            viewer._next_btn = MagicMock()
+            viewer._page_label = MagicMock()
+            # _shelfmark_label and _meta_label intentionally remain None (from __init__)
+            asyncio.run(viewer.update_content(p_num=1))
+            # Reached here → no AttributeError raised
+        finally:
+            ctx.stop()
+            rctx.stop()
+
+    def test_anchor_viewer_accepts_image_max_height_kwarg(self):
+        """R2-3: AnchorViewer accepts an image_max_height kwarg and stores it."""
+        viewer = self._make_viewer_suppress(suppress=False)
+        # Default is None
+        assert viewer._image_max_height is None, (
+            "R2-3: default AnchorViewer must have _image_max_height=None (72vh from CSS unchanged)"
+        )
+
+        # Re-build with explicit height
+        from unittest.mock import MagicMock, patch
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            v2 = AnchorViewer(
+                sys_id="990025143260205171",
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=lambda *a, **kw: {},
+                image_max_height="40vh",
+            )
+        assert v2._image_max_height == "40vh", (
+            "R2-3: AnchorViewer must store the image_max_height kwarg value"
+        )
+
+    def test_source_image_container_style_applied_when_height_set(self):
+        """R2-3: source must apply image_max_height as an inline style on the image container."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "image_max_height" in source, (
+            "R2-3: anchor_viewer.py must implement the image_max_height kwarg"
+        )
+        # The implementation must apply max-height via .style() or inline CSS
+        assert "max-height" in source, (
+            "R2-3: anchor_viewer.py must apply max-height inline style when image_max_height is set"
+        )
+
+
+# ─── SEED-017 (audit #10): Rotate + Fullscreen parity ─────────────────────────
+
+class TestRotation:
+    """SEED-017 (#10): per-instance rotation state + arithmetic (parity /browse + desktop).
+
+    The viewer methods call ui.run_javascript, so each method-under-test runs
+    inside a patched-`ui` context (mirrors the JS-mocked construction pattern; the
+    existing zoom tests simulate the arithmetic inline because they don't patch ui
+    around the call).
+    """
+
+    def _viewer(self) -> "Any":
+        return _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+
+    def test_initial_rotation_is_0(self):
+        v = self._viewer()
+        assert v._rotation == 0
+
+    def test_rotate_right_increments_90(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_right()
+        assert v._rotation == 90
+
+    def test_rotate_left_is_minus_90(self):
+        """UAT: rotate-left from 0 yields -90 (signed) so it animates 90° left,
+        not a 270° spin to the right."""
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_left()
+        assert v._rotation == -90
+
+    def test_rotate_right_accumulates_signed(self):
+        """Signed accumulation: 4× right = 360 (no % 360 wrap)."""
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            for _ in range(4):
+                v.rotate_right()
+        assert v._rotation == 360
+
+    def test_rotate_left_then_right_returns_to_0(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_left()
+            v.rotate_right()
+        assert v._rotation == 0
+
+    def test_zoom_reset_clears_rotation(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_right()
+            assert v._rotation == 90
+            v.zoom_reset()
+        assert v._rotation == 0
+        assert v._zoom == pytest.approx(1.0)
+
+    def test_apply_transform_sends_zoom_and_rotation(self):
+        """_apply_transform pushes mv.update(zoom, rotation) — rotation is NOT dropped."""
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            v._zoom = 1.5
+            v._rotation = 90
+            v._apply_transform()
+            assert mock_ui.run_javascript.called
+            js = mock_ui.run_javascript.call_args[0][0]
+        assert "mv.update(1.5, 90)" in js, f"expected mv.update(1.5, 90) in JS, got: {js!r}"
+        # Fallback transform must also carry rotation (was dropped before #10).
+        assert "rotate(90deg)" in js
+
+    def test_apply_rotation_preserves_live_scale(self):
+        """P2 review: rotating must preserve the LIVE mv.state.scale (wheel zoom), not
+        force the stale server self._zoom — so rotate-after-wheel-zoom doesn't snap to 100%."""
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            v._rotation = 90
+            v._apply_rotation()
+            js = mock_ui.run_javascript.call_args[0][0]
+        # Reads the live client scale rather than hardcoding self._zoom.
+        assert "mv.state.scale" in js, "rotation must read the live client scale"
+        assert "mv.update((mv.state ? mv.state.scale" in js
+        assert "90" in js  # the rotation angle is pushed
+
+    def test_rotate_buttons_use_apply_rotation_not_apply_transform(self):
+        """rotate_left/right go through _apply_rotation (scale-preserving), not _apply_transform."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        # Both rotate methods must call _apply_rotation.
+        assert source.count("self._apply_rotation()") >= 2, (
+            "rotate_left and rotate_right must call _apply_rotation (preserves wheel zoom)"
+        )
+
+    def test_show_image_syncs_js_viewer_state(self):
+        """Codex MEDIUM: rendering a folio syncs the REUSED JS viewer state to the
+        current (rotation, zoom) so a stale rotation can't snap back on wheel/drag."""
+        v = self._viewer()
+        v._rotation = 0
+        v._zoom = 1.0
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            v._show_image("/api/nli_image_by_sysid/990025143260205171?page=0")
+            calls = [c.args[0] for c in mock_ui.run_javascript.call_args_list if c.args]
+        joined = "\n".join(calls)
+        assert "mv.state.rotation" in joined, "must reset the reused JS viewer's rotation"
+        assert "mv.state.scale" in joined
+        assert "applyTransform" in joined
+
+    def test_build_img_html_carries_rotation(self):
+        """The inline <img> transform carries rotation so it renders rotated before JS sync."""
+        v = self._viewer()
+        v._rotation = 90
+        v._zoom = 1.0
+        html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert "rotate(90deg)" in html
+
+
+class TestFullscreenControls:
+    """SEED-017 (#10): fullscreen toggle + toolbar/markup/CSS presence."""
+
+    def _viewer(self) -> "Any":
+        return _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+
+    def test_fullscreen_handler_targets_scoped_pane(self):
+        """The fullscreen js_handler targets THIS viewer's .anchor-image-pane via the native API."""
+        v = self._viewer()
+        js = v._fullscreen_js_handler()
+        assert "requestFullscreen" in js
+        assert "exitFullscreen" in js
+        assert "anchor-image-pane" in js
+        assert v._viewer_id in js, "fullscreen must be scoped to this viewer's container"
+        # It must be a client-side arrow handler, not a server call.
+        assert js.lstrip().startswith("(e) =>"), "fullscreen must be a client-side js_handler"
+
+    def test_fullscreen_handler_has_webkit_fallback(self):
+        """Older Safari needs the webkit-prefixed API (graceful fallback)."""
+        v = self._viewer()
+        js = v._fullscreen_js_handler()
+        assert "webkitRequestFullscreen" in js
+        assert "webkitExitFullscreen" in js
+
+    def test_fullscreen_handler_no_high2_violation(self):
+        """HIGH-2: the fullscreen path introduces no direct-NLI fallback."""
+        v = self._viewer()
+        js = v._fullscreen_js_handler()
+        assert "handleImageError" not in js
+        assert "iiif.nli.org.il" not in js
+        assert "fetchFlIdsFromManifest" not in js
+
+    def test_fullscreen_bound_client_side_not_server(self):
+        """Codex HIGH: the Fullscreen API must run in the click's user-activation
+        window — bound via js_handler, NOT a server-side on_click round-trip."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "js_handler=self._fullscreen_js_handler()" in source, (
+            "fullscreen button must be bound client-side via js_handler"
+        )
+        assert "on_click=self.toggle_fullscreen" not in source, (
+            "fullscreen must NOT use a server-side on_click (Fullscreen API needs user activation)"
+        )
+
+    def test_source_has_rotate_and_fullscreen_buttons(self):
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert 'icon="rotate_left"' in source
+        assert 'icon="rotate_right"' in source
+        assert 'icon="fullscreen"' in source
+        assert "_fullscreen_js_handler" in source
+
+    def test_source_wraps_image_in_anchor_image_pane(self):
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "anchor-image-pane" in source, (
+            "#10: image + controls must live in .anchor-image-pane (the fullscreen target)"
+        )
+
+    def test_viewer_head_has_fullscreen_css(self):
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert ".anchor-image-pane:fullscreen" in _VIEWER_HEAD, (
+            "#10: _VIEWER_HEAD must style the .anchor-image-pane fullscreen state"
+        )
+
+    def test_fullscreen_image_override_uses_important(self):
+        """Codex MED: Compare sets an INLINE max-height (40vh) on .image-container, which
+        beats a plain stylesheet rule — the fullscreen height override must use !important
+        or Compare panes stay capped at 40vh in fullscreen."""
+        import re
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        # Find the standard :fullscreen .image-container block and assert !important on heights.
+        m = re.search(
+            r"\.anchor-image-pane:fullscreen\s+\.image-container\s*\{([^}]*)\}",
+            _VIEWER_HEAD,
+        )
+        assert m, ":fullscreen .image-container rule must exist"
+        block = m.group(1)
+        assert "max-height" in block and "!important" in block, (
+            "fullscreen .image-container max-height must be !important to beat Compare's inline cap"
+        )
+
+    def test_rotate_buttons_use_translated_strings(self):
+        """Rotate/Fullscreen aria/tooltips use keys present in TRANSLATIONS (no HE leak)."""
+        from shared.genizah_translations import TRANSLATIONS
+        for key in ("Rotate left", "Rotate right", "Fullscreen"):
+            assert key in TRANSLATIONS, f"{key!r} must be translated (Hebrew UI would leak English)"

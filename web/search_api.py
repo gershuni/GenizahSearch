@@ -1,0 +1,3191 @@
+"""Phase 78: POST /api/search.
+
+Concern #2 fix (78-REVIEWS.md): init_search_api does NOT install global
+exception handlers. The endpoint wraps its own body in try/except and calls
+web.api_hardening._build_envelope_response from inside the except clause.
+Legacy /api/* routes are unaffected.
+
+Concern #6: Responsa downgrade warnings come from a thread-local meta channel
+(genizah_core._consume_last_responsa_downgrade) so they survive empty results.
+
+Concern #10 / R2-#2: init_search_api is idempotent — second call on the same
+app is a no-op. The idempotency marker lives on `target_app.state.search_api_initialized`
+(per-app, GC-safe), NOT a module-global set (which suffered id(app) GC reuse
+hazard).
+
+Concern #12: The endpoint catches PydanticValidationError inside its body so
+the finally-block PostHog capture fires `invalid_request` events for
+structural errors. Concern #2 forbids global exception handlers, so capturing
+inside the handler is the only way to keep observability for those errors.
+
+R2-#1: SearchEngine.execute_search clears the thread-local downgrade signal
+on entry, and so do IsolatedEngine before each job and _run_search_sync before
+the search, on the wait thread the search runs on (website searches share those
+threads and never read the signal) — no stale-signal leak across requests.
+
+Stateless contract (D-20): handler MUST NOT read any of the forbidden
+session-scoped surfaces (last results, current search query, storage user,
+or request cookies).
+"""
+
+import asyncio
+import logging
+import os
+import re as _re
+import time
+from dataclasses import dataclass
+from typing import Literal, Optional, List, TYPE_CHECKING, get_args
+
+if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
+
+from nicegui import app
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError, model_validator
+
+from web.state import state
+from web.criteria_models import CriteriaModel
+from web.api_hardening import (
+    RateLimiter,
+    DailyBudget,
+    enforce_mode_gate,
+    _resolve_rate_limit_key,
+    api_channel,
+    capture_api_event,
+    _build_envelope_response,
+    wrap_endpoint,  # Phase 79 R-PR-03: now reused for browse_endpoint.
+)
+# Concern #3: APIError from neutral location.
+from shared.api_errors import APIError
+from shared.catalog_criteria import clean_criteria, criteria_with_legacy_keys, legacy_conflicts
+from shared.responsa import _MAX_GAP_TOKEN
+from shared.search_engine import MAX_WORD_GAP
+from shared.responsa_match import ResponsaQueryRefused
+from shared.search_regex import SearchBudgetExceeded, search_budget
+from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
+from web.variant_preferences import default_search
+from web.pages.search_state import engine_mode
+# Phase 79 imports.
+from shared.browse_service import (
+    fetch_browse_bundle,
+    _read_timeout,
+    DEFAULT_BROWSE_TIMEOUT,
+    DEFAULT_BROWSE_CORE_TIMEOUT,
+    DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT,
+)
+# SEED-016 #3: the browse core-fetch provider is injected by the caller (here),
+# inverting the former shared/ -> web/ import. web.services is the web layer's
+# own dependency, so importing it from web/search_api.py respects layering.
+from web.services import get_service
+from shared.search_serializer import serialize_browse_payload, serialize_parallels_payload
+# Phase 80 imports.
+from shared.parallels_service import fetch_parallels_results, ParallelsResultBundle
+from shared.passage_fusion import MAX_WITNESS_CHARS
+
+logger = logging.getLogger(__name__)
+
+
+# Module-level RateLimiter; Phases 79/80 import this same instance.
+_rate_limiter = RateLimiter(default_limit=120)
+
+# Phase 79 D-18: SEPARATE per-IP bucket from /api/search.
+# Same SEARCH_API_RATE_LIMIT env-var ceiling -- RateLimiter._current_limit() reads
+# the env on every check(). A client doing search-once + browse-N-times does NOT
+# exhaust the search bucket. (R-10: aggregate per-IP allowance is roughly 2x the
+# ceiling -- captured as monitoring obligation, no contract change in v7.10.)
+_browse_rate_limiter = RateLimiter(default_limit=120)
+
+# Phase 80 D-05: SEPARATE per-IP bucket from /api/search and /api/browse.
+# Same SEARCH_API_RATE_LIMIT env-var ceiling — RateLimiter._current_limit()
+# reads the env on every check(). A client doing search-once + browse-N-times
+# + parallels-once does NOT exhaust the search or browse buckets. Independence
+# is verified by tests/test_parallels_api.py::test_parallels_rate_limit_independence.
+_parallels_rate_limiter = RateLimiter(default_limit=120)
+
+# D3 (2026-09-08): SEPARATE per-IP bucket from search/browse/parallels, same
+# pattern as every prior addition above -- a client hammering /api/capabilities
+# to poll for a flag flip must not be able to exhaust (or be starved by) any
+# of the three heavier buckets, and vice versa.
+_capabilities_rate_limiter = RateLimiter(default_limit=120)
+
+# GET /api/criteria (catalogue criteria, PR 2): its own bucket, as above.
+_criteria_rate_limiter = RateLimiter(default_limit=120)
+
+# 2026-11-03 (scrape limits): ONE trailing-24 h budget per address, shared by
+# /api/search, /api/browse and /api/parallels -- unlike the per-minute buckets
+# above, which are per endpoint. A sustained pull that stays under every
+# per-minute bucket (8,036 requests in six hours on 11-02, ~20/min) is what
+# this bounds. Checked AFTER the per-minute limiter, so a rate-refused request
+# spends no daily budget. Capabilities and criteria are not counted.
+_daily_budget = DailyBudget(default_limit=2000)
+
+
+# ---------------------------------------------------------------------------
+# Concern #6 — re-export downgrade reader for monkeypatchability.
+# ---------------------------------------------------------------------------
+
+def _consume_last_responsa_downgrade() -> Optional[str]:
+    """Concern #6: read-and-clear the thread-local downgrade signal.
+
+    Re-exported here so tests can monkeypatch
+    `web.search_api._consume_last_responsa_downgrade`. Defers to the actual
+    implementation in genizah_core.
+    """
+    from genizah_core import _consume_last_responsa_downgrade as _impl
+    return _impl()
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models (D-05, D-15).
+# ---------------------------------------------------------------------------
+
+class FiltersModel(BaseModel):
+    """D-15 hybrid: lists for categorical filters, scalars for date bounds."""
+    model_config = ConfigDict(extra='forbid')
+
+    domains: Optional[List[str]] = Field(
+        default=None,
+        description="FJMS domain labels (e.g. 'Halakha', 'Piyyut'). Unknown values -> 400 unresolvable_filter_value.",
+    )
+    authors: Optional[List[str]] = Field(
+        default=None,
+        description="FJMS genizah_persons author names. Unknown values -> 400 unresolvable_filter_value.",
+    )
+    works: Optional[List[str]] = Field(
+        default=None,
+        description="FJMS genizah_titles work names. Unknown values -> 400 unresolvable_filter_value.",
+    )
+    library: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Library codes (e.g. 'CUL', 'JTS', 'Oxford'). Applied as an inclusion or "
+            "exclusion filter depending on library_filter_mode (default: inclusion). "
+            "Results are restricted to manuscripts in (or NOT in) these libraries, "
+            "intersected with any other filters BEFORE the result cap. Unknown codes "
+            "-> 400 unresolvable_filter_value. SEED-026."
+        ),
+    )
+    library_filter_mode: Optional[Literal['include', 'exclude']] = Field(
+        default=None,
+        description=(
+            "How the library list is applied. "
+            "'include' (the effective default when omitted): restrict results to "
+            "manuscripts in the given libraries — today's behavior. "
+            "'exclude': restrict results to manuscripts NOT in the given libraries "
+            "(complement, intersected into restrict_sys_ids pre-search). "
+            "Omitting this field is equivalent to 'include'. "
+            "Invalid values -> 400 invalid_request."
+        ),
+    )
+    materials: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Writing material as the catalogue records it (e.g. 'Paper', 'Vellum', "
+            "'Papyrus'); any one matches. Read as criteria.material with source "
+            "'catalogue'; sending both -> 400 invalid_combination. Unknown values -> 400 "
+            "unresolvable_filter_value."
+        ),
+    )
+    date_from: Optional[int] = Field(
+        default=None,
+        description=(
+            "Lower bound (year CE) of the period of copy: a manuscript matches when a "
+            "catalogue record's copy-date span overlaps date_from..date_to. Read as "
+            "criteria.period; sending both -> 400 invalid_combination."
+        ),
+    )
+    date_to: Optional[int] = Field(
+        default=None,
+        description="Upper bound (year CE) of the period of copy; see date_from.",
+    )
+    criteria: Optional[CriteriaModel] = Field(
+        default=None,
+        description=(
+            "Manuscript features (the website's 'Manuscript features' panel): one entry per "
+            "criterion, ANDed with each other and with the other filters. Keys, values and "
+            "counts: GET /api/criteria. Malformed -> 400 invalid_request; a value the "
+            "catalogue does not record -> 400 unresolvable_filter_value."
+        ),
+    )
+
+    @model_validator(mode='after')
+    def _check_criteria(self):
+        """Strict cleaning (whole-number bounds, a source only where the
+        criterion has two) and no older key beside the criterion it is read
+        as (§6.4: no silent precedence)."""
+        if self.criteria is None:
+            return self
+        raw = self.criteria.model_dump(exclude_none=True)
+        try:
+            clean_criteria(raw)
+        except ValueError as exc:
+            raise APIError('invalid_request', f'filters.{exc}', http_status=400) from None
+        # On the keys as sent: an entry that cleans to nothing ({"period": {}})
+        # still says which of the two the caller meant.
+        for old, key in legacy_conflicts(self.model_dump(exclude_none=True)):
+            raise APIError(
+                'invalid_combination',
+                f"filters.{old} and filters.criteria.{key} both set: {old} is read as "
+                f"criteria.{key}, so send one of them",
+                http_status=400,
+            )
+        return self
+
+
+class ResponsaOptions(BaseModel):
+    """Phase 81A D-02 — Responsa-only options. Field names mirror the desktop
+    UI checkboxes exactly (genizah_app.py:15788-15797).
+
+    D-03: extra='forbid' — extended/maximum variant tiers, variant_mode, and
+    any other field name are rejected. D-11: variants is a plain bool; the
+    internal variant_mode is derived server-side ('variants' if True else 'exact').
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    variants: bool = Field(
+        default=False,
+        description="Enable morphological variant expansion for Responsa mode.",
+    )
+    ja: bool = Field(
+        default=False,
+        description="Enable Judeo-Arabic expansion for Responsa mode.",
+    )
+    flex_spacing: bool = Field(
+        default=False,
+        description="Allow flexible spacing between terms in Responsa mode.",
+    )
+    bidirectional: bool = Field(
+        default=False,
+        description="Enable bidirectional (RTL+LTR) matching in Responsa mode.",
+    )
+
+
+# Modes whose word gap is not capped at MAX_WORD_GAP: Responsa's [N] tokens take any gap
+# and always run on the interruptible matcher.
+_GAP_UNLIMITED_MODES = ('responsa',)
+
+
+class SearchRequest(BaseModel):
+    """Phase 81A — UI-aligned search_mode + Responsa-only options.
+
+    Replaces the Phase 78 `mode` field with `search_mode` (D-01, D-13). Old
+    `mode` field is hard-rejected by extra='forbid' — see search_endpoint for
+    the 400 invalid_request envelope with the explicit `unknown field 'mode'`
+    message.
+
+    Validation matrix (81A-CONTEXT.md):
+    - Any non-responsa search_mode + non-None responsa_options → 400 invalid_combination
+    - search_mode in {'title', 'shelfmark'} + non-zero gap → 400 invalid_combination
+    - any search_mode but 'responsa' + gap > MAX_WORD_GAP (10) → 400 invalid_combination
+    - limit must be in [1, 100] (Pydantic Field constraint → 400 invalid_request via Phase 78 envelope wrapper)
+    - regex is intentionally NOT in the enum (D-09; deferred to v7.11)
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    query: str = Field(
+        ...,
+        description="Search query string. Max 1000 chars after stripping. Empty after strip -> 400 query_required.",
+    )
+    search_mode: Literal['exact', 'variants', 'variants_extended',
+                         'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
+        ...,
+        description="Search mode: 'exact' (the words as typed, as whole words, with no spelling variation: the website's Exact; a word inside a longer one, such as a prefixed form, is not matched (until 2026-10-21 some were); for prefixed forms use 'responsa' with #word), 'variants' (letter-confusion spellings: the 30 most frequent pairs, one change per word; the website's Basic level), 'variants_extended' (the website's Extended level: 70 pairs, up to two changes per word; background jobs only, POST /api/search/jobs), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
+    )
+    responsa_options: Optional[ResponsaOptions] = Field(
+        default=None,
+        description="Responsa expansion flags. Valid only when search_mode='responsa'; rejected otherwise with 400 invalid_combination.",
+    )
+    # No `le`: a Pydantic bound would reject responsa too (its [N] tokens take any gap),
+    # and the limit that does apply is per mode -- see _check_gap_limit.
+    gap: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            f"Gap between terms (words). Must be 0 when search_mode is 'title' or 'shelfmark'. "
+            f"At most {MAX_WORD_GAP} for 'exact', 'variants', 'variants_extended' and 'fuzzy': a larger "
+            f"value is rejected with 400 invalid_combination, never clamped. 'responsa' has no limit."
+        ),
+    )
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=2000,  # Hard max — per-mode ceiling enforced in handler (fuzzy: FUZZY_HARD_MAX=2000; others: MAX_LIMIT=100)
+        description=(
+            "Max results to return. For non-fuzzy modes bounded [1, 100]. "
+            "For fuzzy mode, may be up to SEARCH_API_FUZZY_MAX_LIMIT (default 500, "
+            "hard max 2000). Default 50 (fuzzy with no explicit limit applies a "
+            "wider recall-oriented default)."
+        ),
+    )
+    filters: Optional[FiltersModel] = Field(
+        default=None,
+        description="Optional domain/author/work/material/date filter. Unknown values fail-closed with 400.",
+    )
+
+    @model_validator(mode='after')
+    def _check_responsa_options_coupling(self):
+        if self.search_mode != 'responsa' and self.responsa_options is not None:
+            raise APIError(
+                'invalid_combination',
+                f"responsa_options is only valid when search_mode='responsa' "
+                f"(got search_mode={self.search_mode!r})",
+                http_status=400,
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _check_gap_metadata_coupling(self):
+        if self.search_mode in ('title', 'shelfmark') and self.gap and self.gap != 0:
+            raise APIError(
+                'invalid_combination',
+                f"gap has no effect with metadata-only search modes "
+                f"(search_mode={self.search_mode!r}, gap={self.gap})",
+                http_status=400,
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _check_gap_limit(self):
+        # Desktop native matching plan 3.6 (owner ruling 2026-10-12): the engine rejects a
+        # word gap over MAX_WORD_GAP in every mode but Responsa and Regex
+        # (shared/search_engine.py::_validate_word_gap), so say so at the door with a 400
+        # rather than as a failed job. Regex is not an API search_mode (D-09); if it is
+        # ever added, list it in _GAP_UNLIMITED_MODES -- a new mode is capped until it is.
+        # re's own repeat-count ceiling applies to every mode, Responsa included: the
+        # engine refuses it, which here would be a 500 or a failed job (Codex, #395).
+        if self.gap > _MAX_GAP_TOKEN:
+            raise APIError(
+                'invalid_request',
+                f"gap is at most {_MAX_GAP_TOKEN} (got gap={self.gap})",
+                http_status=400,
+            )
+        if self.search_mode not in _GAP_UNLIMITED_MODES and self.gap > MAX_WORD_GAP:
+            raise APIError(
+                'invalid_combination',
+                f"gap is at most {MAX_WORD_GAP} when search_mode is {self.search_mode!r} "
+                f"(got gap={self.gap}); search_mode='responsa' has no limit",
+                http_status=400,
+            )
+        return self
+
+
+# Constants (D-07, D-08, D-09).
+QUERY_LENGTH_CAP = 1000
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 100  # 81A D-06 — lowered from 200 (also enforced via Pydantic Field(le=100))
+
+# 81A — translate API search_mode → internal mode value space consumed by
+# SearchEngine.execute_search (shared/search_engine.py). For non-Responsa text
+# searches the internal `mode` selects the variant tier passed to
+# VariantManager.get_variants: 'exact' → no variant expansion, 'variants' → the
+# 30 most frequent letter-confusion pairs, 'variants_extended' → 70. Every API job runs with the website defaults
+# (web.variant_preferences.WEBSITE_DEFAULTS, via api_engine; the variant levels and
+# fuzzy with default_search's pairs and x1-x3 on top), so an API result never
+# depends on what a website visitor chose.
+_SEARCH_MODE_TO_INTERNAL = {
+    'exact':     'exact',
+    'variants':  'variants',
+    # The website's Extended level: its own engine mode, run with
+    # web.variant_preferences.default_search's pairs and x1-x3 (search page). Maximum
+    # is held: on the real index it overran the worker time limit (2026-10-11).
+    'variants_extended': 'variants_extended',
+    'responsa':  'Responsa',
+    'title':     'Title',
+    'shelfmark': 'Shelfmark',
+    'fuzzy':     'fuzzy',
+}
+
+# Core-search wall-clock timeout (2026-06): execute_search runs in a thread-pool
+# worker wrapped in asyncio.wait_for, so a slow query (especially the
+# 'fuzzy'/variants_maximum tier) returns a 504 'core_timeout' instead of pinning
+# the event loop for its full duration. Re-read per request via _read_timeout so
+# prod can flip SEARCH_API_CORE_TIMEOUT without a restart.
+DEFAULT_SEARCH_CORE_TIMEOUT = 30.0
+
+# P9X per-mode timeout ladder: heavy modes get their own ceiling env knobs.
+# All are re-read per request (via _read_timeout inside helper functions).
+#
+# 2026-09-08 (external MCP-server incident, D1): DEFAULT_FUZZY_TIMEOUT and
+# DEFAULT_PARALLELS_TIMEOUT dropped from 300.0 to 110.0. The ceiling here is
+# bounded by the edge proxy's origin-response budget, NOT by how long the
+# engine may usefully run -- a synchronous endpoint that promises 300s to the
+# CLIENT is lying if the proxy in front of it gives up first. Measured from
+# outside on 2026-09-08: a chunk-mode /api/parallels request succeeded at
+# 97.0s, and a fuzzy /api/search request got an opaque proxy 524 (not our
+# JSON envelope) at 125.2s. 110.0 sits above the observed 97s success (so no
+# currently-succeeding request starts failing) and below the observed 125.2s
+# edge give-up point, so the timeout the client sees is OURS -- a documented
+# JSON `core_timeout`/`parallels_timeout` 504 -- instead of the proxy's opaque
+# non-JSON error page. SEARCH_API_FUZZY_TIMEOUT / SEARCH_API_PARALLELS_TIMEOUT
+# still override per-deployment, so a deployment behind no proxy (or a proxy
+# with a longer budget) can raise these back up.
+DEFAULT_VARIANTS_TIMEOUT = 60.0
+DEFAULT_FUZZY_TIMEOUT = 110.0
+DEFAULT_PARALLELS_TIMEOUT = 110.0
+DEFAULT_HEAVY_CONCURRENCY = 2
+# 2026-11-03: synchronous non-heavy /api/search requests (exact, title,
+# shelfmark, responsa, basic variants are heavy) had NO concurrency budget, so
+# a scraper's searches stacked up in the research queue every website visitor
+# shares (web/research_jobs.py: GENIZAH_RESEARCH_WORKERS slots, one FIFO).
+# Reader search p50 server time was 2.7 s on 2026-11-02 against 1.0-1.3 s on
+# quiet days. This budget caps how many API searches can sit in that queue at
+# once; over it, 503 search_busy at once instead of a 30 s wait for a 504.
+DEFAULT_INTERACTIVE_CONCURRENCY = 2
+# Modes whose variant settings differ from the website defaults every job starts
+# from (web.variant_preferences.default_search): bound per search.
+VARIANT_SETTINGS_MODES = frozenset({'variants_extended', 'fuzzy'})
+# The website's Extended level outlasts any synchronous request: measured on the real
+# index (2026-10-11), common phrases ran to the three-minute worker limit, and each
+# timed-out request kept a worker the website shares busy for up to a minute more. It
+# runs only as a background job (/api/search/jobs and the MCP/GPT facade's jobs); owner
+# decision 2026-10-11 (docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md). Maximum, and the
+# levels in chunk parallels, are not offered at all (same plan: they overran the limit).
+BACKGROUND_JOB_MODES = frozenset({'variants_extended'})
+
+
+def _require_background_job(request, mode, endpoint):
+    """Refuse a synchronous request for a background-only mode, naming the job route."""
+    if mode in BACKGROUND_JOB_MODES and not request.scope.get('research_job'):
+        raise APIError(
+            'background_job_required',
+            f"{mode} runs longer than a synchronous request can wait. Submit the same body to "
+            f"POST /api{endpoint}/jobs, then poll its status_url; the result is at its result_url.",
+            http_status=400,
+        )
+HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
+
+# Phase 145 (passage-matching parallels search): its OWN ceiling, separate
+# from DEFAULT_PARALLELS_TIMEOUT -- the passage engine's cost model (postings
+# admitted, candidate sort, verification, mmap page faults, plus a bounded
+# per-render re-normalization for the rendered rows) is unrelated to the
+# chunk path's sliding-window Tantivy fan-out, so tuning one must never
+# retune the other. Re-read per request via _read_timeout, same as every
+# other SEARCH_API_*_TIMEOUT knob.
+DEFAULT_PASSAGE_TIMEOUT = 30.0
+
+# P9X fuzzy result-cap ceiling.  MAX_LIMIT stays 100 for non-fuzzy modes.
+DEFAULT_FUZZY_MAX_LIMIT = 500
+FUZZY_HARD_MAX = 2000      # absolute cap so payload stays sane
+
+
+def _resolve_search_timeout(search_mode: str) -> tuple:
+    """Return (ceiling_seconds, env_var_name) for the given search_mode.
+
+    Re-reads the env on every call (no caching) so prod can flip timeouts
+    without a restart. responsa and interactive modes use the baseline knob.
+    (The Extended and Maximum levels never run synchronously: BACKGROUND_JOB_MODES.)
+    """
+    if search_mode == 'variants':
+        return (
+            _read_timeout('SEARCH_API_VARIANTS_TIMEOUT', DEFAULT_VARIANTS_TIMEOUT),
+            'SEARCH_API_VARIANTS_TIMEOUT',
+        )
+    if search_mode == 'fuzzy':
+        return (
+            _read_timeout('SEARCH_API_FUZZY_TIMEOUT', DEFAULT_FUZZY_TIMEOUT),
+            'SEARCH_API_FUZZY_TIMEOUT',
+        )
+    # exact, title, shelfmark, responsa — all use the interactive baseline.
+    return (
+        _read_timeout('SEARCH_API_CORE_TIMEOUT', DEFAULT_SEARCH_CORE_TIMEOUT),
+        'SEARCH_API_CORE_TIMEOUT',
+    )
+
+
+def _resolve_parallels_timeout() -> float:
+    """Return the parallels ceiling (re-read per request)."""
+    return _read_timeout('SEARCH_API_PARALLELS_TIMEOUT', DEFAULT_PARALLELS_TIMEOUT)
+
+
+def _resolve_passage_timeout() -> float:
+    """Return the passage-matching ceiling (re-read per request, Phase 145)."""
+    return _read_timeout('SEARCH_API_PASSAGE_TIMEOUT', DEFAULT_PASSAGE_TIMEOUT)
+
+
+def _resolve_fjms_filters_sync(filters_dict: dict, meta_mgr=None) -> Optional[set]:
+    """Validate ``filters_dict`` and resolve it to a restrict set. BLOCKING.
+
+    The catalogue criteria (PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md):
+    ``materials`` and ``date_from``/``date_to`` are read as criteria (Material
+    from the catalogue; Period of copy, span overlap), and the corpus list of
+    ``meta_mgr`` is the universe, so "not recorded" and "all except" reach the
+    uncatalogued manuscripts as on the website (D14). Without a metadata
+    manager any criterion raises FilterUnavailable('corpus_unavailable').
+
+    Both steps read the FJMS SQLite sidecar (a date filter can take seconds),
+    so the async endpoints must not call them inline: uvicorn runs a single
+    worker, and a call on the event loop stalls every other request. Await
+    this through ``loop.run_in_executor`` instead, like
+    ``_intersect_library_filter`` below. The FJMS singleton is
+    ``thread_safe=True`` (per-thread connections), so a worker is safe.
+
+    Raises ``shared.api_errors.APIError`` from ``validate_filter_values``
+    unchanged; it re-raises at the ``await``, so the endpoints' 400/503 paths
+    are the same as before. ``shared.fjms_service.FilterUnavailable`` from the
+    lookup also re-raises at the ``await``; the endpoints turn it into 503
+    ``filter_unavailable`` there (see ``_filter_unavailable_error``). Do not
+    catch it here.
+
+    Late-binds ``shared.fjms_service`` at CALL time so test fixtures can
+    monkeypatch ``validate_filter_values`` / ``get_filter_sys_ids``.
+    """
+    from shared import fjms_service as _fjms_module
+    universe = getattr(meta_mgr, 'corpus_sys_ids', None)
+    criteria = criteria_with_legacy_keys(filters_dict)
+    if criteria and universe is None:
+        # The API answers criteria over the corpus only, as GET /api/criteria
+        # lists them: never catalogue-wide (no metadata manager yet).
+        raise _fjms_module.FilterUnavailable('corpus_unavailable',
+                                             'the list of all manuscripts is not loaded yet')
+    _fjms_module.validate_filter_values(filters_dict, universe=universe)
+    return _fjms_module.get_filter_sys_ids(
+        domains=filters_dict.get('domains'),
+        authors=filters_dict.get('authors'),
+        works=filters_dict.get('works'),
+        criteria=criteria,
+        universe=universe,
+    )
+
+
+def _filter_unavailable_error(exc) -> APIError:
+    """503 ``filter_unavailable``: filters that validated but could not be
+    applied (#17). No Retry-After: there is no honest retry time for a
+    missing sidecar or a failed lookup."""
+    return APIError(
+        'filter_unavailable',
+        'The manuscript filters could not be applied right now '
+        f'({getattr(exc, "reason", "query_failed")}); the request was not run '
+        'without them. Retry later, or send the request without filters.',
+        http_status=503,
+    )
+
+
+async def _resolve_fjms_filters(filters_dict: dict, meta_mgr=None) -> Optional[set]:
+    """Await ``_resolve_fjms_filters_sync`` off the event loop; a lookup that
+    could not run becomes 503 ``filter_unavailable`` (#17), never a 200 with
+    zero results or with the filters silently ignored."""
+    from shared.fjms_service import FilterUnavailable
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, _resolve_fjms_filters_sync, filters_dict, meta_mgr)
+    except FilterUnavailable as exc:
+        raise _filter_unavailable_error(exc) from exc
+
+
+async def _intersect_library_filter(restrict_sys_ids, filters_dict, meta_mgr):
+    """SEED-026 (API library filter): if ``filters_dict`` carries a ``library`` list,
+    intersect the resolved library sys_id set into ``restrict_sys_ids``.
+
+    Applies an inclusion OR exclusion filter depending on ``library_filter_mode``:
+      - ``'include'`` (or omitted/None): restrict to manuscripts IN the given
+        libraries — today's behavior (``resolve_library_sys_ids``).
+      - ``'exclude'``: restrict to manuscripts NOT in the given libraries
+        (``resolve_library_complement_sys_ids`` — single-pass complement).
+
+    Both paths run off the event loop via ``run_in_executor`` (csv_bank ~255K rows).
+    Returns the updated restrict set:
+      - no library filter -> ``restrict_sys_ids`` unchanged (may be None);
+        also covers exclude+empty-library short-circuit (no filter applied);
+      - library only -> the resolved library sys_id set;
+      - library + other filters -> the intersection (which the caller short-circuits
+        to 0 results if empty).
+
+    Late-binds resolve helpers through the module attribute so test fixtures can
+    monkeypatch ``shared.fjms_service.resolve_library_sys_ids`` and
+    ``shared.fjms_service.resolve_library_complement_sys_ids``.
+    Library codes are validated upstream by ``validate_filter_values`` (unknown -> 400),
+    so by here every code is a known LIBRARY_CODES key.
+    """
+    libs = (filters_dict or {}).get('library')
+    if not libs:
+        return restrict_sys_ids
+    mode = (filters_dict or {}).get('library_filter_mode') or 'include'
+    from shared import fjms_service as _fjms_module
+    loop = asyncio.get_running_loop()
+    if mode == 'exclude':
+        lib_ids = await loop.run_in_executor(
+            None, _fjms_module.resolve_library_complement_sys_ids, libs, meta_mgr
+        )
+    else:
+        lib_ids = await loop.run_in_executor(
+            None, _fjms_module.resolve_library_sys_ids, libs, meta_mgr
+        )
+    if restrict_sys_ids is None:
+        return lib_ids
+    return restrict_sys_ids & lib_ids
+
+
+def _resolve_fuzzy_max_limit() -> int:
+    """Return the fuzzy result-cap ceiling (re-read per request, no import caching)."""
+    raw = os.environ.get('SEARCH_API_FUZZY_MAX_LIMIT')
+    if raw:
+        try:
+            val = int(raw)
+            return max(1, min(val, FUZZY_HARD_MAX))
+        except (ValueError, TypeError):
+            pass
+    return min(DEFAULT_FUZZY_MAX_LIMIT, FUZZY_HARD_MAX)
+
+
+class _SemaphoreBudget:
+    """Generic bounded-concurrency budget: a rebuildable asyncio.Semaphore,
+    re-read from its own env var on every acquire, fail-fast 503 when no
+    slot is free.
+
+    Parameterized entirely by subclass class attributes (`_env_var`,
+    `_default_capacity`, `_busy_code`, `_busy_message`) -- this used to be
+    two near-identical copies (`_HeavySemaphoreState` /
+    `_PassageSemaphoreState`, ~40 lines each); code review flagged the
+    duplication (Phase 145 adversarial review, finding #7). `_HeavySemaphoreState`
+    is now a THIN alias subclass with zero behavior change -- its existing
+    tests (which reach into `.sem` / `._capacity` / `.reset()` directly, e.g.
+    tests/test_search_api_v2.py asserting `_HeavySemaphoreState._capacity`
+    across a rebuild) still pass unmodified, because those attributes and
+    that method are exactly what this base class provides under the same
+    names.
+
+    All accesses are on the event-loop thread (the semaphore is an asyncio
+    primitive), so no thread lock is needed around the rebuild.
+    """
+    _env_var: str = ''
+    _default_capacity: int = 1
+    _busy_code: str = 'busy'
+    _busy_message: str = 'concurrency limit reached; retry shortly'
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Per-subclass mutable state -- each budget (heavy, passage, ...)
+        # gets its OWN semaphore/capacity, never shared across subclasses.
+        cls.sem = asyncio.Semaphore(cls._default_capacity)
+        cls._capacity = cls._default_capacity
+
+    @classmethod
+    def _rebuild_possible(cls) -> bool:
+        """True when the semaphore is fully idle, so a resize may happen now.
+
+        A resize while any slot is held would strand that slot, so
+        ``acquire()`` refuses it. "Fully idle" means the counter is back at
+        capacity; asyncio exposes no public API for that, so the internal
+        counter is read defensively -- if the attribute is ever renamed or
+        removed this returns False, the rebuild is skipped, and the gate keeps
+        working at its current capacity (fail-safe, never raises).
+
+        Shared with ``effective_capacity()`` on purpose: what we ADVERTISE and
+        what we ENFORCE must be decided by the same predicate, or they drift
+        apart exactly the way this endpoint exists to prevent.
+        """
+        return getattr(cls.sem, '_value', None) == cls._capacity
+
+    @classmethod
+    def effective_capacity(cls) -> int:
+        """The capacity the NEXT acquire() will actually enforce.
+
+        Three-way distinction, and /api/capabilities needs the third:
+
+        - ``_capacity``          what the live semaphore was last BUILT with.
+        - ``resolve_capacity()`` what the environment currently ASKS for.
+        - this                   what the gate will enforce for the next
+                                 request, which is the only one a client can
+                                 act on.
+
+        They differ in both directions, and reporting either of the first two
+        was a real defect (both found by Codex on PR #336):
+
+        - Before the first acquire, ``_capacity`` is the import-time default
+          even though env asked for something else -- so a process serving no
+          heavy request under-reported forever.
+        - Raise the capacity while a slot is held and ``resolve_capacity()``
+          over-reports: the rebuild is blocked until idle, so a one-slot
+          semaphore with its slot occupied would advertise four while the very
+          next request still got 503 busy.
+
+        Resolves to the desired value when a rebuild will happen (or is
+        unnecessary), and to the built value while a rebuild is blocked --
+        i.e. never advertises more than the gate can currently enforce.
+        """
+        desired = cls.resolve_capacity()
+        if desired == cls._capacity or cls._rebuild_possible():
+            return desired
+        return cls._capacity
+
+    @classmethod
+    def resolve_capacity(cls) -> int:
+        """The capacity this budget WOULD use for a request arriving now.
+
+        Distinct from ``cls._capacity``, which is the capacity the live
+        semaphore was last built with. Those differ until the first
+        ``acquire()`` after an env change rebuilds it -- and they differ for
+        the whole life of a process that never serves a heavy request.
+
+        ``acquire()`` calls this too, deliberately: /api/capabilities must
+        report what the gate will actually enforce, and the only way to keep
+        that true under later edits is for both to run the SAME parse rather
+        than two copies that agree today. Reported by capabilities (Codex
+        review of PR #336, P2): with SEARCH_API_HEAVY_CONCURRENCY=1 the
+        endpoint advertised 2, then the first heavy request rebuilt the
+        semaphore to 1 and a second concurrent request got 503.
+        """
+        raw = os.environ.get(cls._env_var) if cls._env_var else None
+        if raw:
+            try:
+                return max(1, int(raw))
+            except (ValueError, TypeError):
+                pass
+        return cls._default_capacity
+
+    @classmethod
+    def reset(cls, capacity: int) -> None:
+        """Rebuild the semaphore to the given capacity. Only safe to call
+        when the semaphore is fully idle (tests use this directly)."""
+        cls.sem = asyncio.Semaphore(capacity)
+        cls._capacity = capacity
+
+    @classmethod
+    async def acquire(cls):
+        """Acquire one slot. Re-reads this budget's own env var on every
+        call; rebuilds the semaphore if the configured size changed AND it
+        is currently fully idle.
+
+        Returns:
+            A zero-argument callable that releases the slot. Callers MUST
+            invoke this in a ``finally`` block so a timeout/exception cannot
+            strand a slot.
+
+        Raises:
+            APIError(cls._busy_code, ..., 503): if no slot is available
+                right now (non-blocking acquire failed).
+        """
+        desired = cls.resolve_capacity()
+
+        # Rebuild only when the size changed AND fully idle (no held slots);
+        # if partially held, keep the current semaphore so we never strand a
+        # held slot. "Fully idle" means the counter is back at capacity;
+        # asyncio exposes no public API for that, so the internal counter is
+        # read defensively via getattr -- if the attribute is ever
+        # renamed/removed, current_value is None, the rebuild is skipped, and
+        # the gate keeps working at the old capacity (fail-safe, never raises).
+        if desired != cls._capacity and cls._rebuild_possible():
+            cls.reset(desired)
+
+        sem = cls.sem
+        # Non-blocking acquire via the public API. On a single-threaded event
+        # loop, sem.locked() (True iff no slot is free) followed by
+        # sem.acquire() cannot race: when not locked, acquire() decrements the
+        # counter and returns WITHOUT awaiting a Future, so the loop never
+        # switches between the check and the acquire. We do NOT use
+        # asyncio.wait_for(sem.acquire(), timeout=0): in Python 3.11 that
+        # always raises TimeoutError before the coroutine runs a single step,
+        # regardless of slot availability.
+        if sem.locked():
+            raise APIError(
+                cls._busy_code,
+                cls._busy_message,
+                http_status=503,
+                headers={'Retry-After': '5'},
+            )
+        await sem.acquire()
+
+        def _release():
+            sem.release()
+
+        return _release
+
+
+class _HeavySemaphoreState(_SemaphoreBudget):
+    """The pre-existing heavy-mode budget (variants/fuzzy/parallels
+    method='chunk') -- unchanged behavior, thin alias over _SemaphoreBudget."""
+    _env_var = 'SEARCH_API_HEAVY_CONCURRENCY'
+    _default_capacity = DEFAULT_HEAVY_CONCURRENCY
+    _busy_code = 'heavy_search_busy'
+    _busy_message = 'heavy search concurrency limit reached; retry shortly'
+
+
+async def _acquire_heavy_slot():
+    """Thin alias -- see _SemaphoreBudget.acquire / _HeavySemaphoreState."""
+    return await _HeavySemaphoreState.acquire()
+
+
+class _InteractiveSemaphoreState(_SemaphoreBudget):
+    """The synchronous interactive-mode budget (every /api/search mode that is
+    not heavy: exact, title, shelfmark, responsa), 2026-11-03. Same machinery
+    as the heavy budget; its own semaphore, so a scraper's exact searches and
+    a researcher's fuzzy search never contend for the same slots. Background
+    jobs (web/research_api.py) bypass it, as they bypass the heavy budget:
+    they have their own admission control (two per client, 32 in all)."""
+    _env_var = 'SEARCH_API_INTERACTIVE_CONCURRENCY'
+    _default_capacity = DEFAULT_INTERACTIVE_CONCURRENCY
+    _busy_code = 'search_busy'
+    _busy_message = (
+        'interactive search concurrency limit reached; retry shortly, '
+        'or submit the search as a background job'
+    )
+
+
+async def _acquire_interactive_slot():
+    """Thin alias -- see _SemaphoreBudget.acquire / _InteractiveSemaphoreState."""
+    return await _InteractiveSemaphoreState.acquire()
+
+
+# ---------------------------------------------------------------------------
+# Phase 145 -- passage-matching parallels search's OWN bounded budget.
+#
+# The two-budgets lesson (docs/specs/discovery-budgets.md SS2/SS3, learned the
+# hard way in shared/discovery_service.py): a semaphore alone is not a budget
+# if every semaphore's work still dispatches into the SAME (default,
+# unconfigured) run_in_executor pool -- 24 browse jobs (or here, passage
+# jobs) can occupy or queue ahead of every worker while the heavy semaphore
+# still reports capacity. So passage gets its OWN ThreadPoolExecutor,
+# max_workers == its own semaphore's capacity (a small budget: capacity 4),
+# never the default executor the chunk path (method='chunk', via
+# fetch_parallels_results's `executor=None` default) uses today.
+DEFAULT_PASSAGE_CONCURRENCY = 4
+
+
+class _PassageSemaphoreState(_SemaphoreBudget):
+    """Same semaphore machinery as _HeavySemaphoreState (inherited), plus its
+    OWN ThreadPoolExecutor (the heavy budget has none -- it dispatches into
+    the default run_in_executor pool; passage must not repeat that gap)."""
+    _env_var = 'SEARCH_API_PASSAGE_CONCURRENCY'
+    _default_capacity = DEFAULT_PASSAGE_CONCURRENCY
+    _busy_code = 'passage_search_busy'
+    _busy_message = 'passage-matching search concurrency limit reached; retry shortly'
+    _executor: Optional['ThreadPoolExecutor'] = None
+
+    @classmethod
+    def reset(cls, capacity: int) -> None:
+        """Rebuild the semaphore (via the base class) AND retire the
+        executor -- only safe under the same idle guard the base class's
+        `acquire` already applies before calling this."""
+        super().reset(capacity)
+        if cls._executor is not None:
+            cls._executor.shutdown(wait=False)
+            cls._executor = None
+
+    @classmethod
+    def executor(cls) -> 'ThreadPoolExecutor':
+        """This budget's OWN threadpool, max_workers == its capacity.
+
+        Built lazily -- a process that never serves a passage request pays
+        no threads. Called between `acquire()` and `run_in_executor` (via
+        shared.parallels_service.fetch_parallels_results's `executor` kwarg),
+        mirroring shared/discovery_service.py::_executor_for exactly.
+        """
+        if cls._executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+            cls._executor = ThreadPoolExecutor(
+                max_workers=max(1, int(cls._capacity)),
+                thread_name_prefix='passage-search',
+            )
+        return cls._executor
+
+
+async def _acquire_passage_slot():
+    """Thin alias -- see _SemaphoreBudget.acquire / _PassageSemaphoreState."""
+    return await _PassageSemaphoreState.acquire()
+
+
+def _passage_executor() -> 'ThreadPoolExecutor':
+    """Thin alias -- see _PassageSemaphoreState.executor."""
+    return _PassageSemaphoreState.executor()
+
+
+async def run_through_passage_budget(make_awaitable):
+    """Acquire the passage-matching budget slot, THEN create the work, await
+    it with the passage timeout ceiling (SEARCH_API_PASSAGE_TIMEOUT), and
+    release the slot via a done-callback. This is the ONE function that owns
+    the semaphore/timeout/release discipline for passage-matching -- both
+    this endpoint's own passage branch AND web/pages/parallels.py's direct
+    call path now go through it (Codex review finding #15: the page
+    previously bypassed the budget entirely via NiceGUI's generic
+    run.io_bound, with no semaphore, no dedicated executor and no timeout
+    ceiling at all, so concurrent GUI users could overwhelm the
+    single-worker host's thread pool and the passage index's mmap with no
+    bound whatsoever).
+
+    `make_awaitable` is a ZERO-ARGUMENT CALLABLE returning the awaitable to
+    run. It is a factory rather than an already-built awaitable on purpose,
+    and the reason is a real defect this signature replaces (adversarial
+    review round 2). The old signature took the awaitable itself, so every
+    caller had to construct the work BEFORE admission control could reject
+    it. For a coroutine that was merely wasteful -- a coroutine object does
+    not execute until `ensure_future`, though an un-awaited one does emit a
+    RuntimeWarning on the 503 path. For `loop.run_in_executor` it was a
+    genuine load-shedding hole: that call SUBMITS to the pool immediately
+    and returns an already-running Future, so a caller told
+    `passage_search_busy` had already queued its search. The rejection shed
+    no load at all -- it only removed the client that was waiting for the
+    answer. Under a burst the executor kept every surplus job, which is the
+    same shape as the discovery-service backlog CLAUDE.md records
+    ("run_in_executor threads are not cancellable, so a timed-out read keeps
+    its threadpool worker").
+
+    Building the work here, after the permit is in hand, makes that class of
+    bug structurally impossible for every present and future caller instead
+    of correcting one call site.
+
+    Still deliberately agnostic to WHAT the factory returns (a coroutine, or
+    a Future from `loop.run_in_executor`) so each caller supplies whichever
+    shape fits its own work -- this endpoint has an async coroutine
+    (`fetch_parallels_results`, which does its OWN run_in_executor dispatch
+    internally via its `executor` kwarg); the page has a plain sync
+    callable and wraps it via `run_passage_search` below. Either way there
+    is exactly ONE execution budget for passage-matching, not one per
+    surface (repeating the two-budgets lesson -- docs/specs/discovery-
+    budgets.md SS2/SS3 -- would have meant a second, separate accidental
+    budget here).
+
+    Must be awaited from the caller's OWN event-loop coroutine -- never from
+    inside a NiceGUI run.io_bound body. Callers are responsible for keeping
+    ALL ui.*/safe_user_* interaction on their own side of this await; this
+    function performs neither itself (repo memory: NiceGUI background
+    execution loses context -- ui.* calls made from a raw executor thread
+    RAISE, and safe_user_* reads silently degrade to {}).
+
+    Returns:
+        The awaited value on success.
+    Raises:
+        TypeError: `make_awaitable` is not callable. Raised BEFORE the slot
+            is acquired, so a caller that passes an already-built awaitable
+            (the pre-round-2 shape) fails loudly and strands no permit.
+        APIError('passage_search_busy', ..., 503): no slot is free right now.
+            The factory is NOT invoked, so no work is created or dispatched.
+        APIError('core_timeout', ..., 504): did not finish within the
+            timeout ceiling (the slot/executor worker keep running the
+            search to completion regardless -- run_in_executor cannot
+            cancel a thread; the done-callback is the sole releaser).
+        Any other exception the factory or its awaitable raises, unchanged.
+    """
+    if not callable(make_awaitable):
+        raise TypeError(
+            'run_through_passage_budget expects a zero-argument callable '
+            'returning an awaitable, not an already-built awaitable -- work '
+            'must be created AFTER the budget slot is acquired, never before '
+            f'(got {type(make_awaitable).__name__})'
+        )
+    ceiling = _resolve_passage_timeout()
+    release = await _acquire_passage_slot()
+    try:
+        # Only now, holding the permit, is the work allowed to exist.
+        task = asyncio.ensure_future(make_awaitable())
+        task.add_done_callback(lambda _t, _r=release: _r())
+        release = None  # ownership -> done-callback
+        _done, pending = await asyncio.wait({task}, timeout=ceiling)
+        if task in pending:
+            logger.warning('passage-matching core_timeout after %ss', ceiling)
+            raise APIError(
+                'core_timeout',
+                f'passage-matching search did not complete within {ceiling}s; '
+                f'try a shorter text',
+                http_status=504,
+            )
+        return task.result()
+    finally:
+        if release is not None:
+            release()
+
+
+async def run_passage_search(sync_fn, *args, **kwargs):
+    """Convenience wrapper for a plain SYNC passage-matching callable (what
+    web/pages/parallels.py has -- PassageSearcher.search_composition_logic
+    is not a coroutine): dispatches it onto the passage-dedicated
+    ThreadPoolExecutor and routes it through run_through_passage_budget, so
+    the page gets the identical semaphore, executor and timeout this
+    endpoint's own passage branch uses.
+
+    The executor dispatch happens inside the factory, so it runs only once a
+    budget slot is held. Submitting first (the pre-round-2 shape) meant a
+    caller rejected with `passage_search_busy` had already queued its search
+    on the pool -- see run_through_passage_budget's docstring.
+    """
+    from functools import partial
+    loop = asyncio.get_event_loop()
+    call = partial(sync_fn, *args, **kwargs)
+    return await run_through_passage_budget(
+        lambda: loop.run_in_executor(_passage_executor(), call)
+    )
+
+
+# Phase 79 D-11 / R-08 -- transcription char cap.
+DEFAULT_BROWSE_TEXT_CAP = 4000
+MIN_BROWSE_TEXT_CAP = 100
+MAX_BROWSE_TEXT_CAP = 10000
+
+# Phase 80 D-06 — composition text length cap. Composition body can legitimately
+# be much longer than a search query (whole piyutim, parts of liturgy). Cap at
+# 20000 chars (~3000 Hebrew words) after .strip(). Above cap → 400
+# 'composition_too_long'. Empty after .strip() → 400 'composition_required'.
+COMPOSITION_LENGTH_CAP = 20000
+# The per-WITNESS ceiling is the same number, but it has ONE definition, in
+# shared/passage_fusion.py (imported at the top of this module), so the page
+# enforces exactly what the API does -- the page had no cap at all until a
+# review found it.
+
+# The chunk-only knobs' defaults, named ONCE.
+#
+# `method='passage'` rejects any non-default value of these rather than
+# ignoring it silently, and that check used to compare against bare literals
+# (`if req.chunk_size != 5:`) with no link to the Field defaults below. The two
+# were therefore free to drift: changing a default would have started
+# rejecting every passage caller who simply omitted the field, with an error
+# message telling them to omit it. Both sides now read the same name.
+def _resolve_effective_max_witnesses() -> int:
+    """The largest witness count the handler would actually accept.
+
+    Two independent gates reject a witness list, and the CONFIGURED cap is
+    only the first. The parallels handler also refuses on projected cost --
+    ``len(witnesses) * PASSAGE_SECONDS_PER_WITNESS > passage ceiling`` ->
+    400 ``too_many_witnesses`` -- so a deployment that lowers
+    ``SEARCH_API_PASSAGE_TIMEOUT`` silently lowers the real cap without
+    touching ``SEARCH_API_PASSAGE_MAX_WITNESSES``.
+
+    At defaults the projection binds nothing (30 / 0.75 = 40, above the cap
+    of 25), which is exactly why this went unnoticed. At a 10s ceiling the
+    real cap is 13 while the configured cap still reads 25 -- and
+    /api/capabilities advertising 25 there would be the endpoint promising
+    something the very next request is rejected for. Found by the Codex
+    review of PR #336.
+
+    Returns the configured cap when no ceiling is set, and never a negative
+    number. Zero is a truthful answer: with a ceiling under
+    PASSAGE_SECONDS_PER_WITNESS, no witness list can be served at all.
+    """
+    configured = _resolve_max_witnesses()
+    ceiling = _resolve_passage_timeout()
+    if not ceiling or PASSAGE_SECONDS_PER_WITNESS <= 0:
+        return configured
+    # The handler accepts while projected <= ceiling, so the largest
+    # admissible count is floor(ceiling / seconds-per-witness).
+    affordable = int(ceiling // PASSAGE_SECONDS_PER_WITNESS)
+    return max(0, min(configured, affordable))
+
+
+def _resolve_max_witnesses() -> int:
+    """Ceiling on witnesses per request (SEARCH_API_PASSAGE_MAX_WITNESSES).
+
+    25, not twelve. The flagship case is a seventeen-witness Birkat Hamazon
+    set pasted from a file, and a cap of twelve would reject the very
+    workflow the feature was built for.
+
+    The witness cap -- NOT a raised timeout -- is the control on cost, and
+    that is deliberate. `run_through_passage_budget`'s own docstring records
+    why: on timeout "the slot/executor worker keep running the search to
+    completion regardless -- run_in_executor cannot cancel a thread". A
+    longer ceiling therefore holds permits until the work really finishes, so
+    four long requests occupy all four slots long after their clients got
+    504s, and a retrying client compounds it. Keeping each unit of work short
+    is the fix. The API's depth is fixed at 'normal' (~0.7 s/witness), so 25
+    witnesses is ~18 s -- already inside the existing 30 s ceiling. If
+    measurement ever shows that estimate optimistic, LOWER THE CAP; never
+    raise the ceiling.
+    """
+    raw = os.environ.get('SEARCH_API_PASSAGE_MAX_WITNESSES', '').strip()
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return 25
+
+
+# Measured wall-clock for ONE witness at the API's fixed depth ('normal',
+# ~0.7s). Used only to refuse a witness list that could not finish inside the
+# passage ceiling -- so the cap and the ceiling stay provably consistent
+# rather than consistent by comment.
+PASSAGE_SECONDS_PER_WITNESS = 0.75
+
+PARALLELS_CHUNK_SIZE_DEFAULT = 5
+PARALLELS_MODE_DEFAULT = 'exact'
+PARALLELS_BOUNDARY_MODE_DEFAULT = 'full'
+
+
+# ---------------------------------------------------------------------------
+# Phase 79 -- BrowseRequest model + NormalizedLocator + locator helpers.
+# ---------------------------------------------------------------------------
+
+
+class BrowseRequest(BaseModel):
+    """Phase 79 D-21 -- query-param model for GET /api/browse.
+
+    `sys_id` is REQUIRED (D-01). At least one of (uid, p_num, fl_id) must
+    be supplied (D-03). FastAPI does not auto-bind GET query params to a
+    Pydantic model when the route handler takes a Request object directly,
+    so the handler constructs `BrowseRequest(**dict(request.query_params))`
+    inside the body -- the wrap_endpoint decorator catches PydanticValidationError.
+    """
+    model_config = ConfigDict(extra='forbid')
+    sys_id: str = Field(
+        ...,
+        description="Manuscript system_number (unique ID from /api/search result locator.sys_id).",
+    )
+    uid: Optional[str] = Field(
+        default=None,
+        description="Preferred locator: 'IE{N}_P{M}_FL{K}' format from /api/search result uid field. Uniquely resolves page.",
+    )
+    p_num: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="1-based page number (alternative to uid). Combine with optional volume_ie.",
+    )
+    volume_ie: Optional[str] = Field(
+        default=None,
+        description="IE identifier string (e.g. 'IE12345') for multi-IE manuscripts. Ignored for single-IE manuscripts.",
+    )
+    fl_id: Optional[str] = Field(
+        default=None,
+        description="Fragment/leaf identifier (e.g. 'T-S 12.123.1r'). Alternative to p_num.",
+    )
+    text_cap: Optional[int] = Field(
+        default=None,
+        description="Override transcription text cap in chars. Bounded [100, 10000]. Default: env SEARCH_API_BROWSE_TEXT_CAP (4000).",
+    )
+
+
+class WitnessInput(BaseModel):
+    """One witness of the work being searched for.
+
+    Exactly one of `text` / `raw_header` must be supplied.
+
+    `raw_header` is the value carried on EVERY result row -- the page header
+    Tantivy stores verbatim, e.g. `990001234560205171_IE12345_P00001_FL678`.
+    It is named for what it resolves, deliberately: a field advertised as
+    "a manuscript" would take a sys_id, and a sys_id spans many pages, so
+    callers would get unexplained unresolved witnesses. Promoting a whole
+    MANUSCRIPT is a page-level affordance that fetches every page's text and
+    sends it as `text`.
+
+    A `raw_header` that does not resolve is SKIPPED and reported in
+    `warnings` as `witness_ref_unresolved`, never fatal -- rejecting a
+    seventeen-witness request over one stale reference wastes the sixteen the
+    caller can still have. The request fails (400 `witnesses_required`) only
+    when NOT ONE entry resolves.
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    text: Optional[str] = Field(
+        default=None,
+        description="The witness text, pasted verbatim. Max 20000 chars.",
+    )
+    raw_header: Optional[str] = Field(
+        default=None,
+        description="A page header as carried on every result row, resolved "
+                    "server-side to that page's text. Keeps recursive "
+                    "requests small.",
+    )
+    label: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Display label. Echoed back; never used for matching.",
+    )
+
+    @model_validator(mode='after')
+    def _exactly_one_source(self):
+        has_text = bool((self.text or '').strip())
+        has_ref = bool((self.raw_header or '').strip())
+        if has_text == has_ref:
+            raise ValueError(
+                'each witness needs exactly one of text / raw_header'
+                + (' (both were supplied)' if has_text else ' (neither was)')
+            )
+        return self
+
+
+class ParallelsRequest(BaseModel):
+    """Phase 80 D-01 — POST /api/parallels request body.
+
+    Field semantics:
+    - `text` is the composition source. Maps to `full_text` arg of
+      search_composition_logic. Stripped before length validation; empty
+      → 'composition_required', > COMPOSITION_LENGTH_CAP → 'composition_too_long'
+      (both 400).
+    - `chunk_size`: integer in [2, 20]; UI default is 5.
+    - `mode`: locked enum 'exact' | 'variants' | 'fuzzy' (D-02). Lab Engine
+      path is OUT OF SCOPE for v7.10.
+    - `max_freq`: optional float >= 1, a DOCUMENT COUNT (not a ratio): when
+      set, a chunk matching more than `max_freq` documents is treated as too
+      common and its hits are diverted out of results[]. When None, no
+      high-freq filtering — all hits in results[], filtered: [].
+      The engine tests `len(hits) > max_freq` directly
+      (shared/search_engine.py::search_composition_logic), so a fractional
+      value would suppress every chunk that matches anything; `ge=1` rejects
+      that instead of returning a silently empty result set. This field was
+      documented as a 0.0-1.0 ratio until 2026-08-24; the description was
+      wrong, never the code.
+      Its EFFECTIVE RANGE is [1, 50). The per-chunk Tantivy retrieval is
+      hard-capped at 50 hits (`self.searcher.search(query, 50)`), so
+      `len(hits)` never exceeds 50 and any `max_freq >= 50` is inert —
+      identical to None. The value is therefore not a corpus frequency at
+      all: it counts hits within a truncated top-50, and cannot distinguish
+      a chunk present in 51 manuscripts from one present in 5,000.
+    - `boundary_mode`: only boundary knob exposed in v7.10 (D-03). Other 4
+      core knobs use existing defaults.
+    - `filters`: reuse Phase 78 FiltersModel verbatim.
+    - `method` (Phase 145): 'chunk' (default) | 'passage'. 'chunk' is the
+      pre-Phase-145 sliding-window Tantivy engine, byte-for-byte unchanged.
+      'passage' is the character-level passage-matching engine
+      (shared/passage_parallels.py); it requires PASSAGE_PARALLELS_ENABLED
+      AND a loaded passage index (web/passage_assets.py::passage_available()),
+      else 503 'passage_unavailable'. It is Genizah-only by construction
+      (the passage index holds no Local-corpus records); requesting it with
+      `filters.library` including 'LOCAL' in include mode is rejected with
+      400 'passage_scope_unsupported' rather than silently degrading to an
+      empty result that would look identical to "no matches found". Passage
+      matching has no equivalent for `chunk_size`, `mode` or `max_freq`
+      (no sliding-window chunk, no morphological-variant matching, no
+      per-chunk frequency signal) or for `boundary_mode` values other than
+      'full' (no cross-paragraph/token-boundary concept) -- a non-default
+      value of any of these together with method='passage' is rejected with
+      400 'passage_option_unsupported' rather than silently ignored, and the
+      response envelope echoes the EFFECTIVE passage policy (`request.
+      passage_policy`) in place of these now-inapplicable knobs.
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    text: Optional[str] = Field(
+        default=None,
+        description="Composition text to search for parallels. Max 20000 chars after "
+                    "stripping. Omit it only when supplying `witnesses` instead.",
+    )
+    chunk_size: int = Field(
+        default=PARALLELS_CHUNK_SIZE_DEFAULT,
+        ge=2,
+        le=20,
+        description="Number of words per chunk for sliding-window matching. Default 5. "
+                    "A text with fewer words is searched as one chunk of all its words, "
+                    "and the response carries a `text_shorter_than_chunk_size` warning.",
+    )
+    mode: Literal['exact', 'variants', 'fuzzy'] = Field(
+        default=PARALLELS_MODE_DEFAULT,
+        description="Matching mode for each chunk: 'exact' (the words as typed, no spelling variation), 'variants' (the 30 most frequent letter-confusion pairs, one change per word: the website's Basic level), 'fuzzy' (approximate).",
+    )
+    max_freq: Optional[float] = Field(
+        default=None,
+        ge=1,
+        description="High-frequency cutoff as a DOCUMENT COUNT, not a ratio: a chunk matching more than max_freq documents is treated as too common and diverted out of 'results'. None disables high-freq filtering. Values below 1 are rejected — the engine tests `len(hits) > max_freq`, so 0.05 would discard every chunk that matches anything at all. IMPORTANT: the engine retrieves at most 50 hits per chunk, so any max_freq >= 50 can never fire and behaves exactly like None.",
+    )
+    boundary_mode: Literal['full', 'boundary', 'combined'] = Field(
+        default=PARALLELS_BOUNDARY_MODE_DEFAULT,
+        description="Chunk boundary strategy: 'full' (any position), 'boundary' (text boundary-aligned), 'combined' (prefer boundaries).",
+    )
+    filters: Optional[FiltersModel] = Field(
+        default=None,
+        description="Optional domain/author/work/material/date filter (same as /api/search).",
+    )
+    method: Literal['chunk', 'passage'] = Field(
+        default='chunk',
+        description="Matching engine: 'chunk' (default, sliding-window token/Tantivy) or "
+                    "'passage' (character-level passage matching, Genizah-only, beta).",
+    )
+    witnesses: Optional[List[WitnessInput]] = Field(
+        default=None,
+        description="Multi-witness passage search (method='passage' only): several "
+                    "witnesses of ONE work, each searched SEPARATELY and merged by "
+                    "Reciprocal Rank Fusion. Mutually exclusive with `text`. Never "
+                    "concatenate witnesses into `text` yourself -- the passage engine "
+                    "spends a per-query posting budget, so one long joined query "
+                    "starves (measured 59% of a reachable census against 85% fused).",
+    )
+    sort: Optional[Literal['fused', 'best_match', 'witness_count']] = Field(
+        default=None,
+        description="Group ordering for a multi-witness search: 'fused' (default, "
+                    "combined rank-fusion score), 'best_match' (the single strongest "
+                    "match in each manuscript), or 'witness_count' (how many distinct "
+                    "witnesses point at it). Requires `witnesses`.",
+    )
+
+    @model_validator(mode='after')
+    def _text_or_witnesses(self):
+        """`text` stopped being an unconditionally required field when
+        `witnesses` arrived, but a request carrying NEITHER is still
+        malformed rather than empty.
+
+        Enforced here, at the model, so that a body with no `text` and no
+        `witnesses` keeps returning exactly what it always did -- 400
+        `invalid_request` from the ValidationError mapper, pinned by
+        tests/test_parallels_api.py::test_parallels_missing_text. The
+        OPPOSITE case (both supplied) is deliberately NOT handled here: it
+        gets its own specific `witnesses_and_text_conflict` code in the
+        handler, which a generic ValidationError could not express.
+        """
+        if self.text is None and not self.witnesses:
+            raise ValueError('one of text / witnesses is required')
+        return self
+
+
+@dataclass(frozen=True)
+class NormalizedLocator:
+    """Phase 79 R-PR-04 -- output of _validate_locator(req).
+
+    The handler passes `effective_*` fields to fetch_browse_bundle.
+    When the request supplied `uid`, the effective fields are derived
+    from parsing the uid (IE{N}_P{M}_FL{K}). When uid was absent, the
+    effective fields mirror the request fields directly.
+    """
+    sys_id: str
+    requested_uid: Optional[str]            # original uid string, for D-03b post-resolution check
+    effective_p_num: Optional[int]
+    effective_volume_ie: Optional[str]
+    effective_fl_id: Optional[str]
+    text_cap: Optional[int]
+
+
+_UID_PATTERN = _re.compile(r'^(IE\d+)_(P\d+)_(FL\d+)$')
+
+
+def _parse_uid(uid: str) -> Optional[dict]:
+    """Parse uid='IE{N}_P{M}_FL{K}' into components.
+
+    Returns dict with keys 'volume_ie' (str e.g. 'IE12345'), 'p_num' (int,
+    1-based) and 'fl_id' (str e.g. 'FL999'), or None if the uid does not
+    match the expected shape.
+    """
+    if not uid or not isinstance(uid, str):
+        return None
+    m = _UID_PATTERN.match(uid.strip())
+    if not m:
+        return None
+    ie_part, p_part, fl_part = m.group(1), m.group(2), m.group(3)
+    try:
+        p_num_val = int(p_part[1:])  # strip 'P' prefix
+    except ValueError:
+        return None
+    if p_num_val < 1:
+        return None
+    return {'volume_ie': ie_part, 'p_num': p_num_val, 'fl_id': fl_part}
+
+
+def _validate_locator(req: 'BrowseRequest') -> 'NormalizedLocator':
+    """D-03 / R-02 / D-03b -- strict locator semantics. R-PR-04 update: returns
+    a NormalizedLocator with effective_* fields derived from uid when present.
+
+    Rules:
+    - sys_id always required (Pydantic enforces; this is documentation).
+    - At least one of (uid, p_num, fl_id) must be supplied. None -> 400.
+    - p_num must be int >= 1.
+    - text_cap, when supplied, must be int in [MIN_BROWSE_TEXT_CAP, MAX_BROWSE_TEXT_CAP].
+    - If uid AND any of (volume_ie, p_num, fl_id) supplied AND parsed
+      components disagree -> 400 `locator_conflict`.
+    - When uid is supplied: effective_p_num / effective_volume_ie /
+      effective_fl_id are derived from parsing the uid.
+    - When uid is absent: effective_* fields mirror the request fields.
+    """
+    if not (req.uid or req.p_num is not None or req.fl_id):
+        raise APIError(
+            'invalid_request',
+            'locator missing: provide uid, p_num, or fl_id alongside sys_id',
+            http_status=400,
+        )
+    if req.p_num is not None and req.p_num < 1:
+        raise APIError(
+            'invalid_request',
+            f'p_num must be >= 1 (got {req.p_num})',
+            http_status=400,
+        )
+    if req.text_cap is not None and not (
+        MIN_BROWSE_TEXT_CAP <= req.text_cap <= MAX_BROWSE_TEXT_CAP
+    ):
+        raise APIError(
+            'invalid_request',
+            f'text_cap must be in [{MIN_BROWSE_TEXT_CAP}, {MAX_BROWSE_TEXT_CAP}] '
+            f'(got {req.text_cap})',
+            http_status=400,
+        )
+
+    # uid path: parse + check conflicts + derive effective fields.
+    if req.uid:
+        parsed = _parse_uid(req.uid)
+        if parsed is None:
+            raise APIError(
+                'locator_conflict',
+                f'uid is malformed (expected IE{{N}}_P{{M}}_FL{{K}}; got {req.uid!r})',
+                http_status=400,
+            )
+        # R-02 conflict detection.
+        if req.volume_ie is not None and req.volume_ie != parsed['volume_ie']:
+            raise APIError(
+                'locator_conflict',
+                f'uid implies volume_ie={parsed["volume_ie"]!r} but request '
+                f'supplied volume_ie={req.volume_ie!r}',
+                http_status=400,
+            )
+        if req.p_num is not None and req.p_num != parsed['p_num']:
+            raise APIError(
+                'locator_conflict',
+                f'uid implies p_num={parsed["p_num"]} but request supplied '
+                f'p_num={req.p_num}',
+                http_status=400,
+            )
+        if req.fl_id is not None and req.fl_id != parsed['fl_id']:
+            raise APIError(
+                'locator_conflict',
+                f'uid implies fl_id={parsed["fl_id"]!r} but request supplied '
+                f'fl_id={req.fl_id!r}',
+                http_status=400,
+            )
+        # Effective fields derived from uid (R-PR-04).
+        return NormalizedLocator(
+            sys_id=req.sys_id,
+            requested_uid=req.uid,
+            effective_p_num=parsed['p_num'],
+            effective_volume_ie=parsed['volume_ie'],
+            effective_fl_id=parsed['fl_id'],
+            text_cap=req.text_cap,
+        )
+
+    # No uid: effective fields mirror request fields.
+    return NormalizedLocator(
+        sys_id=req.sys_id,
+        requested_uid=None,
+        effective_p_num=req.p_num,
+        effective_volume_ie=req.volume_ie,
+        effective_fl_id=req.fl_id,
+        text_cap=req.text_cap,
+    )
+
+
+def _resolve_text_cap(requested: Optional[int]) -> int:
+    """R-08 priority: ?text_cap > env > DEFAULT_BROWSE_TEXT_CAP. Caller has
+    already validated bounds via _validate_locator.
+    """
+    if requested is not None:
+        return requested
+    raw = os.environ.get('SEARCH_API_BROWSE_TEXT_CAP')
+    if raw:
+        try:
+            v = int(raw)
+            return max(MIN_BROWSE_TEXT_CAP, min(MAX_BROWSE_TEXT_CAP, v))
+        except (ValueError, TypeError):
+            pass
+    return DEFAULT_BROWSE_TEXT_CAP
+
+
+# ---------------------------------------------------------------------------
+# Phase 83 -- OpenAPI metadata helpers (Codex HIGH concern #2).
+#
+# Background: the route handlers below use FastAPI's raw `Request` argument
+# and parse Pydantic models manually inside the body (search_api.py rationale
+# at the original lines 444-448). FastAPI therefore cannot infer the request
+# body / query params / response schemas from the handler signature -- without
+# explicit OpenAPI metadata the spec at /api/openapi.json renders empty
+# requestBody objects and Swagger UI displays buttonless endpoints.
+#
+# Solution per Codex's "typed wrapper" suggestion (Option B): keep handler
+# bodies/signatures byte-identical and declare OpenAPI metadata explicitly via
+# `openapi_extra=` on each route decorator. The metadata is built from each
+# Pydantic model's `model_json_schema()`. This changes the spec only -- not
+# the runtime parsing path -- so Phase 78/79/80/81A behavior is preserved.
+# ---------------------------------------------------------------------------
+
+def _inline_schema_refs(schema: dict) -> dict:
+    """Inline local Pydantic ``$defs`` references for route-level OpenAPI extras.
+
+    FastAPI only hoists schemas into top-level ``components`` when it owns the
+    Pydantic body parameter. These endpoints parse raw ``Request`` objects and
+    attach request schemas via ``openapi_extra``, so any generated references to
+    ``#/components/schemas/...`` would point at a missing top-level section.
+    Keeping the requestBody schema self-contained avoids Swagger UI resolver
+    errors while preserving the runtime request contract.
+    """
+    defs = schema.get("$defs") or {}
+
+    def resolve(node):
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            marker = "#/$defs/"
+            if ref.startswith(marker):
+                name = ref[len(marker):]
+                target = defs.get(name)
+                if isinstance(target, dict):
+                    merged = {k: v for k, v in node.items() if k != "$ref"}
+                    resolved = resolve(target)
+                    if merged:
+                        resolved = {**resolved, **resolve(merged)}
+                    return resolved
+        return {
+            key: resolve(value)
+            for key, value in node.items()
+            if key != "$defs"
+        }
+
+    return resolve(schema)
+
+
+def _openapi_request_body(model_cls) -> dict:
+    """Build an OpenAPI requestBody object from a Pydantic model.
+
+    Used for POST /search and POST /parallels.
+    """
+    schema = _inline_schema_refs(
+        model_cls.model_json_schema(ref_template="#/$defs/{model}")
+    )
+    return {
+        "required": True,
+        "content": {
+            "application/json": {"schema": schema},
+        },
+    }
+
+
+def _openapi_query_parameters(model_cls) -> list:
+    """Build OpenAPI 'parameters' (in: query) list from a Pydantic model.
+
+    Used for GET /browse which takes query params, not a body.
+    """
+    schema = model_cls.model_json_schema(ref_template="#/components/schemas/{model}")
+    props = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    params = []
+    for name, prop_schema in props.items():
+        params.append({
+            "name": name,
+            "in": "query",
+            "required": name in required,
+            "description": prop_schema.get("description", ""),
+            "schema": {k: v for k, v in prop_schema.items() if k != "description"},
+        })
+    return params
+
+
+_ENVELOPE_SUCCESS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string", "example": "1.0"},
+        "request": {"type": "object", "description": "Echo of validated request input."},
+    },
+    "required": ["schema_version", "request"],
+    "additionalProperties": True,
+}
+_ENVELOPE_ERROR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "error": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "ERROR_CODES key (see shared/api_errors.py)."},
+                "message": {"type": "string", "description": "Human-readable, sanitized."},
+            },
+            "required": ["code", "message"],
+        },
+    },
+    "required": ["error"],
+}
+
+
+def _openapi_responses_for(success_summary: str) -> dict:
+    return {
+        "200": {
+            "description": success_summary,
+            "content": {"application/json": {"schema": _ENVELOPE_SUCCESS_SCHEMA}},
+        },
+        "400": {
+            "description": "Validation error (e.g. invalid_request, query_required, invalid_combination, unresolvable_filter_value).",
+            "content": {"application/json": {"schema": _ENVELOPE_ERROR_SCHEMA}},
+        },
+        "429": {
+            "description": "Rate limit exceeded (rate_limited).",
+            "content": {"application/json": {"schema": _ENVELOPE_ERROR_SCHEMA}},
+        },
+        "503": {
+            "description": "Mode-gate disabled or upstream service unavailable.",
+            "content": {"application/json": {"schema": _ENVELOPE_ERROR_SCHEMA}},
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Idempotent registrar (Concern #10 / R2-#2).
+# ---------------------------------------------------------------------------
+
+def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '/api') -> None:
+    """Register Phase 78 search-helper routes onto target_app.
+
+    Concern #10 / R2-#2: idempotent. Re-calling on the same app is a no-op.
+    The idempotency marker lives on `target_app.state.search_api_initialized`
+    (per-app, GC-safe). Module-global set[int] would suffer id(app) GC reuse
+    plus accumulate indefinitely across tests.
+
+    Concern #2: does NOT install global exception handlers. Envelope
+    rewriting happens INSIDE the endpoint via `_build_envelope_response`.
+
+    Args:
+        app_override: When None, registers onto the NiceGUI singleton. When a
+                      bare FastAPI app is passed, registers onto that instead.
+        path_prefix: Route prefix prepended to '/search', '/browse',
+                     '/parallels'. Default '/api' preserves backward compatibility
+                     with tests that hit '/api/search' on a bare app. Pass ''
+                     when mounting the sub-app at '/api' in production -- the
+                     mount provides the prefix.
+    """
+    target_app = app_override if app_override is not None else app
+
+    # R2-#2: app-bound idempotency marker (was Concern #10's module-global set
+    # in round 1).
+    if getattr(target_app.state, 'search_api_initialized', False):
+        logger.debug(
+            "init_search_api(): app %r already initialized; skipping",
+            target_app,
+        )
+        return
+    target_app.state.search_api_initialized = True
+
+    # CRITICAL: Concern #2 — NO global exception handler is installed on
+    # target_app. Envelope rewriting happens INSIDE the endpoint via
+    # _build_envelope_response, called from per-endpoint try/except branches.
+
+    @target_app.post(
+        f'{path_prefix}/search',
+        summary="Search Cairo Geniza manuscripts (keyword / Responsa / title / shelfmark).",
+        tags=["search"],
+        openapi_extra={
+            "requestBody": _openapi_request_body(SearchRequest),
+            "responses": _openapi_responses_for("Ranked search results envelope."),
+        },
+    )
+    async def search_endpoint(request: Request):
+        """POST /api/search — Phase 78 hardened search endpoint.
+
+        Concern #2: parses + validates Pydantic input INSIDE the body so we can
+        catch RequestValidationError / PydanticValidationError locally and
+        route them through `_build_envelope_response`. If we used FastAPI's
+        standard `req: SearchRequest` parameter, Pydantic errors would bubble
+        to the FastAPI handler chain — which would either hit FastAPI's
+        default 422 handler (legacy behavior — fine) OR a globally-installed
+        handler (which Concern #2 explicitly forbids).
+        """
+        t0 = time.monotonic()
+        endpoint_name = 'search'
+        client_ip = _resolve_rate_limit_key(request)
+        channel = api_channel(request)
+        status_code = 200
+        error_code: Optional[str] = None
+        result_count: Optional[int] = None
+        validated_mode: Optional[str] = None
+        # 81A D-08 + Codex MEDIUM-3 — provisional PostHog capture state.
+        # Populated from the raw body BEFORE Pydantic construction so
+        # `invalid_combination` rejections (raised by @model_validator AFTER
+        # search_mode parsed but DURING cross-field validation) retain the
+        # offending mode value in telemetry. Overwritten with the validated
+        # value after successful Pydantic construction.
+        posthog_search_mode_value: Optional[str] = None
+        posthog_responsa_options_count: int = 0
+        # Phase 85 SYNTH-06 / D-14 — populated AFTER serialization with
+        # `any(item['is_synthetic'] for item in envelope['results'])`. None on
+        # error paths (pre-serialization rejection) so PostHog event reflects
+        # structural unavailability, not a False signal.
+        posthog_is_synthetic: Optional[bool] = None
+
+        try:
+            # 0. Parse body and validate via Pydantic explicitly so we own
+            #    the error path.
+            try:
+                body = await request.json()
+            except Exception as exc:
+                raise APIError(
+                    'invalid_request',
+                    f'request body must be valid JSON: {exc}',
+                    http_status=400,
+                )
+            # 81A D-08 + Codex MEDIUM-3 — provisional capture from raw body
+            # BEFORE Pydantic construction. Structural rejections (missing
+            # field, wrong type, unknown enum value) leave this as None;
+            # cross-field rejections preserve it. Gate on the allowed enum
+            # set so unknown values (e.g. 'regex', 'NOT_A_MODE') are treated
+            # as structurally invalid and stay None per D-08.
+            if isinstance(body, dict):
+                _raw_search_mode = body.get('search_mode')
+                if isinstance(_raw_search_mode, str) and _raw_search_mode in _SEARCH_MODE_TO_INTERNAL:
+                    posthog_search_mode_value = _raw_search_mode
+                # responsa_options_count stays 0 provisionally — only computed
+                # after Pydantic confirms the responsa_options field shape.
+            try:
+                if isinstance(body, dict):
+                    req = SearchRequest(**body)
+                else:
+                    req = SearchRequest.model_validate(body)
+            except PydanticValidationError as exc:
+                # Concern #12: pin status_code/error_code so the finally block
+                # fires the PostHog event with correct labels. Re-raise so
+                # the outer except branch builds the envelope.
+                status_code = 400
+                error_code = 'invalid_request'
+                # 81A D-13: when the rejected field is the old `mode`, surface the
+                # cutover hint explicitly so skill authors copy-pasting old payloads
+                # see the migration path.
+                for err in exc.errors():
+                    if err.get('type') == 'extra_forbidden' and err.get('loc') == ('mode',):
+                        raise APIError(
+                            'invalid_request',
+                            "unknown field 'mode' — use search_mode instead",
+                            http_status=400,
+                        )
+                raise
+
+            validated_mode = req.search_mode
+            # 81A D-08 — overwrite the provisional PostHog values with the
+            # validated parse. Identical content for valid `search_mode`
+            # strings, but explicit overwrite documents the contract and
+            # gives us a single site to compute responsa_options_count from
+            # the parsed Pydantic model.
+            posthog_search_mode_value = req.search_mode
+            if req.search_mode == 'responsa' and req.responsa_options is not None:
+                _opts = req.responsa_options
+                posthog_responsa_options_count = sum([
+                    bool(_opts.variants),
+                    bool(_opts.ja),
+                    bool(_opts.flex_spacing),
+                    bool(_opts.bidirectional),
+                ])
+            else:
+                # responsa_options omitted → defaults all-False → count 0;
+                # non-responsa modes → count 0 by definition (D-08).
+                posthog_responsa_options_count = 0
+
+            # 1. Mode gate (D-02, D-03, D-04).
+            enforce_mode_gate(request)
+            _require_background_job(request, req.search_mode, '/search')
+
+            # 2. Rate limit check (D-01 sliding window). Key is the trusted
+            #    real client IP per Concern #1. On limit hit, RateLimiter.check
+            #    raises APIError(rate_limited, http_status=429, headers={'Retry-After': N})
+            #    which the outer except APIError branch routes through
+            #    _build_envelope_response (preserves the Retry-After header).
+            _rate_limiter.check(client_ip)
+            # 2b. Trailing-24 h budget for this address (shared with browse and
+            #    parallels). After the per-minute check on purpose.
+            _daily_budget.check(client_ip)
+
+            # 3. Query post-validation.
+            query = (req.query or '').strip()
+            if not query:
+                raise APIError(
+                    'query_required',
+                    'query is required and cannot be empty',
+                    http_status=400,
+                )
+            if len(query) > QUERY_LENGTH_CAP:
+                raise APIError(
+                    'query_too_long',
+                    f'query exceeds cap (max {QUERY_LENGTH_CAP} chars; '
+                    f'submitted {len(query)})',
+                    http_status=400,
+                )
+            if req.limit <= 0:
+                raise APIError(
+                    'invalid_request',
+                    f'limit must be positive (submitted {req.limit})',
+                    http_status=400,
+                )
+            # P9X: fuzzy has a separate (higher) ceiling; all other modes keep MAX_LIMIT=100.
+            effective_max = (
+                _resolve_fuzzy_max_limit() if req.search_mode == 'fuzzy' else MAX_LIMIT
+            )
+            if req.limit > effective_max:
+                raise APIError(
+                    'limit_too_high',
+                    f'limit exceeds max for search_mode={req.search_mode!r} '
+                    f'(max {effective_max}; submitted {req.limit})',
+                    http_status=400,
+                )
+
+            # 4. Filter resolution (API-07, D-17).
+            restrict_sys_ids: Optional[set] = None
+            filters_dict: Optional[dict] = None
+            short_circuit_empty = False
+
+            if req.filters is not None:
+                filters_dict = req.filters.model_dump(exclude_none=True)
+                # Concern #3: validate_filter_values raises APIError from
+                # shared.api_errors; it re-raises here, at the await.
+                # Off the event loop: both FJMS steps are blocking SQLite
+                # reads (see _resolve_fjms_filters_sync, which late-binds
+                # shared.fjms_service for test fixtures). A lookup that could
+                # not run is 503 filter_unavailable (#17); the engine is
+                # never called.
+                restrict_sys_ids = await _resolve_fjms_filters(filters_dict, state.meta_mgr)
+                # SEED-026: intersect the library filter BEFORE the result cap.
+                restrict_sys_ids = await _intersect_library_filter(
+                    restrict_sys_ids, filters_dict, state.meta_mgr
+                )
+                if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
+                    short_circuit_empty = True
+
+            # 5. Build responsa_options if responsa search_mode (per req.responsa_options).
+            responsa_options = None
+            if req.search_mode == 'responsa':
+                # Default: all-False ResponsaOptions when client omitted the field.
+                opts = req.responsa_options or ResponsaOptions()
+                # D-11: derive internal variant_mode from the boolean flag exactly as
+                # the desktop UI does (genizah_app.py:15796).
+                responsa_options = {
+                    'responsa_mode': True,
+                    'variants': opts.variants,
+                    'ja': opts.ja,
+                    'flex_spacing': opts.flex_spacing,
+                    'bidirectional': opts.bidirectional,
+                    'variant_mode': 'variants' if opts.variants else 'exact',
+                }
+
+            # 6. Statelessness check (D-20). Forbidden reads — none below.
+
+            # 7. Execute search OR short-circuit on empty intersection.
+            #
+            # execute_search runs in a thread-pool worker with a cooperative
+            # computation budget. asyncio.wait separately bounds the HTTP
+            # response; it cannot stop native work or a running thread.
+            #
+            # R2-#1 / 81A thread-local note: execute_search sets the responsa
+            # downgrade signals on the THREAD it runs on. We consume them INSIDE
+            # the worker closure (same thread) and hand them back — reading the
+            # thread-locals on the event-loop thread after the executor hop would
+            # see an empty (wrong-thread) signal.
+            downgrade_msg = None
+            cascade_meta = None
+            search_cutoff = {}
+            if short_circuit_empty:
+                results = []
+                total = 0
+            else:
+                # 2026-10-21 (owner decision): 'exact' runs the website's Exact, the
+                # engine's whole-word 'literal' (web.pages.search_state.engine_mode).
+                # Only here: the table, and so the response's `mode`, still say 'exact'.
+                internal_mode = engine_mode(_SEARCH_MODE_TO_INTERNAL[req.search_mode])
+
+                # Resolve before dispatch so the worker also enforces this
+                # deadline; the HTTP wait alone cannot stop a worker thread.
+                core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
+                background_job = request.scope.get('research_job')
+                worker_searcher = api_engine(state.searcher, request, core_timeout)
+                if req.search_mode in VARIANT_SETTINGS_MODES:
+                    # The website's pairs and x1-x3 for this level (fuzzy: x2). Bound
+                    # AFTER api_engine, which builds a fresh wrapper without them.
+                    internal_mode, level_settings = default_search(internal_mode)
+                    worker_searcher = with_request_settings(worker_searcher, **level_settings)
+                if background_job:
+                    core_timeout = None
+
+                def _run_search_sync():
+                    from shared.search_engine import consume_last_search_cutoff
+                    from genizah_core import (
+                        _consume_last_responsa_downgrade_meta as _consume_meta_inner,
+                    )
+                    # This wait thread also runs website searches, which never read
+                    # the downgrade signals: drop any left here, whatever the engine.
+                    consume_last_search_cutoff()
+                    _consume_last_responsa_downgrade()
+                    _consume_meta_inner()
+                    with search_budget(core_timeout if core_timeout is not None else 0):
+                        res = worker_searcher.execute_search(
+                            query_str=query,
+                            mode=internal_mode,
+                            gap=req.gap,
+                            progress_callback=None,
+                            exclude_words=None,
+                            responsa_options=responsa_options,
+                            restrict_sys_ids=restrict_sys_ids,
+                            text_position=None,
+                        ) or []
+                    # D8: whether the search reached its candidate limit (same thread).
+                    return (res, _consume_last_responsa_downgrade(), _consume_meta_inner(),
+                            consume_last_search_cutoff())
+
+                loop = asyncio.get_event_loop()
+
+                # Concurrency gate. Heavy modes (variants/fuzzy) take a heavy
+                # slot (P9X); every other synchronous mode takes an interactive
+                # slot (2026-11-03), so the API can never stack more than
+                # SEARCH_API_INTERACTIVE_CONCURRENCY searches in the research
+                # queue readers share. Background jobs bypass both: they have
+                # their own admission control (web/research_api.py).
+                _slot_release = None
+                if not background_job:
+                    if req.search_mode in HEAVY_SEARCH_MODES:
+                        _slot_release = await _acquire_heavy_slot()
+                    else:
+                        _slot_release = await _acquire_interactive_slot()
+                try:
+                    # The slot must stay held for the WORKER's TRUE
+                    # lifetime, not merely until the awaiter returns.
+                    # run_in_executor cannot cancel a running thread, so on a
+                    # timeout the search keeps occupying a threadpool worker.
+                    # We use asyncio.wait (which, unlike wait_for, does NOT
+                    # cancel the future on timeout) and release the slot from
+                    # the future's done-callback — so the budget is freed only
+                    # when the thread actually finishes. Releasing in a plain
+                    # finally would recycle the slot while a timed-out search
+                    # still runs, re-admitting heavy work past the budget and
+                    # defeating the saturation guard (the NLI-hang lesson).
+                    _search_fut = loop.run_in_executor(wait_executor(), _run_search_sync)
+                    # A worker can raise its budget exception after the HTTP
+                    # timeout/client disconnect. Retrieve it even when there is
+                    # no awaiter left; result() below still propagates failures.
+                    _search_fut.add_done_callback(
+                        lambda future: None if future.cancelled() else future.exception()
+                    )
+                    if _slot_release is not None:
+                        _search_fut.add_done_callback(
+                            lambda _f, _r=_slot_release: _r()
+                        )
+                        _slot_release = None  # ownership -> done-callback
+                    _done, _pending = await asyncio.wait(
+                        {_search_fut}, timeout=core_timeout,
+                    )
+                    if _search_fut in _pending:
+                        logger.warning(
+                            'search core_timeout after %ss (search_mode=%s, env=%s)',
+                            core_timeout, req.search_mode, timeout_env,
+                        )
+                        raise APIError(
+                            'core_timeout',
+                            f'search did not complete within {core_timeout}s '
+                            f'(search_mode={req.search_mode}); '
+                            f'try a narrower query or a faster search_mode',
+                            http_status=504,
+                        )
+                    try:
+                        results, downgrade_msg, cascade_meta, search_cutoff = _search_fut.result()
+                    except ResearchJobError as exc:
+                        raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
+                    except ResponsaQueryRefused as exc:
+                        # A star shape not searched yet, or a query over the guard's
+                        # limit: the caller's query, answered with its code (a 400),
+                        # never a 500 or an empty list.
+                        raise APIError(exc.code, str(exc), http_status=400) from exc
+                    except SearchBudgetExceeded as exc:
+                        raise APIError(
+                            'core_timeout',
+                            'search exceeded its computation budget; '
+                            'try a narrower query or a faster search_mode',
+                            http_status=504,
+                        ) from exc
+                finally:
+                    # Safety net: only fires if a slot was acquired but never
+                    # handed to a done-callback (e.g. executor dispatch failed).
+                    if _slot_release is not None:
+                        _slot_release()
+                total = len(results)
+
+            # 8. Cap results.
+            # P9X: for fuzzy, if the client did NOT supply `limit` (Pydantic
+            # filled the default of 50), widen to a recall-oriented default so
+            # an agent that just sets search_mode=fuzzy gets wider recall.
+            # Detect "limit not supplied" by checking the raw body dict.
+            _fuzzy_recall_default = 250  # wider default when client omits limit
+            if (
+                req.search_mode == 'fuzzy'
+                and isinstance(body, dict)
+                and 'limit' not in body
+            ):
+                effective_limit = min(_resolve_fuzzy_max_limit(), _fuzzy_recall_default)
+            else:
+                effective_limit = req.limit
+            results = results[:effective_limit]
+            result_count = len(results)
+
+            # 8a. R2-#1 / 81A: downgrade_msg + cascade_meta were captured inside
+            # the executor worker above (where execute_search set the
+            # thread-locals); the short-circuit branch leaves them None.
+
+            # 9. Lift cascade-downgrade warning.
+            #    R2-#1 + Concern #6: read the thread-local meta channel FIRST
+            #    (resilient to empty results). _run_search_sync clears it before
+            #    the search, so an older signal on its thread cannot reach here.
+            warnings_list: list = []
+            if (search_cutoff or {}).get('capped') or (search_cutoff or {}).get('interrupted'):
+                # The engine read its 50,000-candidate limit, or a background job
+                # reached the website's time limit: `total` counts the matches it
+                # checked, and more may exist.
+                warnings_list.append('results_cut_off')
+            if downgrade_msg:
+                warnings_list.append(f'query_downgraded: {downgrade_msg}')
+            elif results:
+                # Legacy fallback path — only fires if thread-local was unset.
+                first = results[0]
+                rw = first.pop('responsa_warning', None)
+                if rw:
+                    warnings_list.append(f'query_downgraded: {rw}')
+            # Strip any per-row markers regardless so result rows are clean.
+            if results:
+                results[0].pop('responsa_warning', None)
+                results[0].pop('responsa_expanded_count', None)
+                results[0].pop('responsa_pattern_count', None)
+
+            # 81A D-04/D-05/D-06 — build request echo for the response envelope.
+            # search_mode is ECHOED VERBATIM (never silently downgraded — D-04).
+            # responsa_options_effective reflects the cascade outcome (e.g.
+            # request.ja=true + cascade disable → effective.ja=false). For
+            # non-Responsa modes both responsa_options and
+            # responsa_options_effective are None (D-05).
+            if req.search_mode == 'responsa':
+                opts_dict = (req.responsa_options or ResponsaOptions()).model_dump()
+                if cascade_meta is not None:
+                    # cascade_meta is shaped {variants, ja, flex_spacing, bidirectional}
+                    effective_dict = cascade_meta
+                else:
+                    # No cascade fired — effective == requested.
+                    effective_dict = dict(opts_dict)
+            else:
+                opts_dict = None
+                effective_dict = None
+
+            request_echo = {
+                'search_mode': req.search_mode,
+                'responsa_options': opts_dict,
+                'responsa_options_effective': effective_dict,
+                'gap': req.gap,
+                'limit': req.limit,
+                # P9X: reflect the actual effective limit applied (fuzzy may have
+                # a wider cap, or a widened recall default when limit was omitted).
+                'limit_effective': effective_limit if req.search_mode == 'fuzzy' else min(req.limit, MAX_LIMIT),
+                'filters': filters_dict,
+            }
+
+            # 10. Serialize (D-24).
+            from shared.search_serializer import serialize_search_payload
+            envelope = serialize_search_payload(
+                results,
+                meta_mgr=state.meta_mgr,
+                query=query,
+                mode=_SEARCH_MODE_TO_INTERNAL[req.search_mode],
+                gap=req.gap if req.gap else None,
+                filters=filters_dict,
+                warnings=warnings_list,
+                total=total,
+                request_echo=request_echo,
+            )
+            # Phase 85 SYNTH-06 / D-14 — derive captured_state['is_synthetic']
+            # from response items. True iff at least one result row is a
+            # synthetic libraries.csv entry (helper module decides). The
+            # property is uniformly shaped per Plan 05 (None for parallels;
+            # resolved bool for search/browse).
+            try:
+                _items = envelope.get('results', []) or []
+                if _items:
+                    posthog_is_synthetic = any(
+                        bool(it.get('is_synthetic')) for it in _items
+                    )
+                else:
+                    posthog_is_synthetic = False
+            except Exception:
+                posthog_is_synthetic = None
+            return envelope
+
+        except APIError as exc:
+            status_code = exc.http_status
+            error_code = exc.code
+            return _build_envelope_response(request, exc)
+        except (RequestValidationError, PydanticValidationError) as exc:
+            # Concern #2 + #12: per-endpoint Pydantic-error envelope; the
+            # finally block fires the PostHog event with these labels.
+            status_code = 400
+            error_code = 'invalid_request'
+            return _build_envelope_response(request, exc)
+        except Exception:
+            logger.exception('search_endpoint unhandled exception')
+            status_code = 500
+            error_code = 'internal_error'
+            err = APIError('internal_error', 'Internal error', http_status=500)
+            return _build_envelope_response(request, err)
+        finally:
+            # 11. PostHog event capture (HARDEN-05). Once per request, success
+            #     or error. Concern #12: this fires for Pydantic-caught errors
+            #     too because we caught them in the body and pinned
+            #     status_code/error_code above.
+            try:
+                elapsed = time.monotonic() - t0
+                capture_api_event(
+                    endpoint=endpoint_name,
+                    mode=validated_mode,
+                    latency_seconds=elapsed,
+                    result_count=result_count,
+                    status_code=status_code,
+                    error_code=error_code,
+                    client_ip=client_ip,
+                    # 81A D-08 — observability of new contract. Provisional
+                    # values (captured pre-Pydantic) survive the cross-field
+                    # `invalid_combination` rejection path (Codex MEDIUM-3);
+                    # structural rejections leave them as None / 0.
+                    search_mode_value=posthog_search_mode_value,
+                    responsa_options_count=posthog_responsa_options_count,
+                    # Phase 85 SYNTH-06 / D-14 — derived from response items
+                    # after serialization. None on error paths (no envelope).
+                    is_synthetic=posthog_is_synthetic,
+                    channel=channel,
+                )
+            except Exception:
+                logger.warning(
+                    'capture_api_event failed in finally block',
+                )
+            # 12. R2-#1: defensive thread-local drain. If execute_search
+            #     raised after setting _LAST_RESPONSA_DOWNGRADE but before
+            #     step 8a's consume call, that stale signal must NOT leak to
+            #     the next request on this worker thread. Calling consume here
+            #     is a no-op when the success path already drained it.
+            #     NOTE: this runs on the event-loop thread, not the wait thread
+            #     the search ran on; the drain that matters is in _run_search_sync.
+            try:
+                _consume_last_responsa_downgrade()
+            except Exception:
+                logger.warning(
+                    'thread-local downgrade drain failed in finally',
+                )
+            # 81A — symmetric defensive drain for the structured-meta channel
+            # so a setter without a matching consumer (e.g. exception between
+            # set-site and step 8a's consume) cannot leak meta into the next
+            # request on this worker thread.
+            try:
+                from genizah_core import _consume_last_responsa_downgrade_meta as _drain_meta
+                _drain_meta()
+            except Exception:
+                logger.warning(
+                    'thread-local downgrade-meta drain failed in finally',
+                )
+
+    @target_app.get(
+        f'{path_prefix}/browse',
+        summary="Drill down to a single manuscript page (text + metadata + image).",
+        tags=["browse"],
+        openapi_extra={
+            "parameters": _openapi_query_parameters(BrowseRequest),
+            "responses": _openapi_responses_for("Manuscript page envelope."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='browse')
+    async def browse_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/browse -- Phase 79 drill-down endpoint.
+
+        R-PR-03: decorated with @wrap_endpoint(endpoint_name='browse') from
+        web/api_hardening.py. The decorator owns try/except/finally + envelope
+        rewriting + capture_api_event. The handler body holds ONLY business
+        logic -- no hand-rolled boilerplate.
+
+        captured_state contract (set by handler, read by decorator's finally):
+        - 'mode': None for browse (no mode field)
+        - 'result_count': 1 on success, None on error/early-return paths
+
+        Statelessness D-22: handler MUST NOT touch any per-session/refinement
+        surfaces (last results, current query, browser-storage user dict, or
+        request cookies).
+        """
+        # Browse has no mode; pin to None so PostHog event has the right shape.
+        captured_state['mode'] = None
+        # 81A D-08 — browse has no search_mode and no responsa options;
+        # pin explicitly so PostHog events from /api/browse carry the
+        # uniform property shape (search_mode_value=None, count=0).
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+
+        # 0. Parse query params + Pydantic validation. The decorator catches
+        #    PydanticValidationError; we just construct the model.
+        params = dict(request.query_params)
+        # Coerce known int fields explicitly -- bad casts surface as APIError
+        # 'invalid_request' which the decorator converts to a 400 envelope.
+        for k in ('p_num', 'text_cap'):
+            if k in params and params[k] != '':
+                try:
+                    params[k] = int(params[k])
+                except ValueError:
+                    raise APIError(
+                        'invalid_request',
+                        f'{k} must be an integer (got {params[k]!r})',
+                        http_status=400,
+                    )
+        req = BrowseRequest(**params)
+
+        # 1. Mode gate (D-04 disabled / D-03 localhost-only -- same as search).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit (D-18 -- DIFFERENT instance from search bucket), then
+        #    the trailing-24 h budget this address shares with search and
+        #    parallels (2026-11-03: 7,459 browse calls from one address in six
+        #    hours passed the per-minute bucket almost throughout).
+        client_ip = _resolve_rate_limit_key(request)
+        _browse_rate_limiter.check(client_ip)
+        _daily_budget.check(client_ip)
+
+        # 3. Locator validation + normalization (D-01 / D-03 / R-02 / R-PR-04).
+        loc = _validate_locator(req)
+
+        # 4. Resolve effective text_cap (R-08 priority).
+        effective_text_cap = _resolve_text_cap(loc.text_cap)
+
+        # 5. Enrichment fan-out (Plan 02). Pass NORMALIZED fields -- fetch_browse_bundle
+        #    does NOT accept uid (R-PR-04). Core fetch is also timed (R-01).
+        #    fetch_browse_bundle raises APIError('core_timeout', 504) on
+        #    core timeout; otherwise returns a bundle (page may be None).
+        bundle, warnings_list = await fetch_browse_bundle(
+            service=get_service(),  # SEED-016 #3: inject the browse-page provider.
+            sys_id=loc.sys_id,
+            p_num=loc.effective_p_num,
+            volume_ie=loc.effective_volume_ie,
+            fl_id=loc.effective_fl_id,
+        )
+
+        # 6. Core resolution failure -> 404 (D-16).
+        if bundle.page is None:
+            raise APIError(
+                'manuscript_page_not_found',
+                f'no page for sys_id={loc.sys_id!r} '
+                f'p_num={loc.effective_p_num} volume_ie={loc.effective_volume_ie!r} '
+                f'fl_id={loc.effective_fl_id!r}',
+                http_status=404,
+            )
+
+        # 7. R-03 / D-03b -- post-resolution uid verification.
+        #    Compare the resolved BrowsePage.uid to the ORIGINAL requested uid
+        #    (not the effective fields -- those agree by construction in
+        #    _validate_locator). This catches the case where sys_id from
+        #    manuscript A is paired with uid from manuscript B.
+        if loc.requested_uid:
+            resolved_uid = getattr(bundle.page, 'uid', None) or ''
+            if resolved_uid and resolved_uid != loc.requested_uid:
+                raise APIError(
+                    'manuscript_page_not_found',
+                    f'uid resolved to different page (requested {loc.requested_uid!r}, '
+                    f'resolved {resolved_uid!r}); check sys_id + uid pair',
+                    http_status=404,
+                )
+
+        # 8. D-04 -- multi-IE without volume_ie defaulted; surface a warning.
+        if (
+            loc.requested_uid is None
+            and loc.effective_fl_id is None
+            and loc.effective_volume_ie is None
+            and getattr(bundle.page, 'volume_ie', None)
+            and len(getattr(bundle.page, 'volumes', []) or []) > 1
+        ):
+            warnings_list.append({
+                'code': 'volume_ie_defaulted',
+                'volume_ie': bundle.page.volume_ie,
+            })
+
+        # 9. Statelessness check (D-22). Forbidden reads -- none below.
+        #    Verified by grep at acceptance time.
+
+        # 10. Serialize via sibling serializer (D-26). R-PR-09: no
+        #     locator-echo parameters (those were dropped from the signature).
+        envelope = serialize_browse_payload(
+            page=bundle.page,
+            pgp=bundle.pgp,
+            fjms=bundle.fjms,
+            nli=bundle.nli,
+            text_cap=effective_text_cap,
+            warnings=warnings_list,
+        )
+
+        # 11. Tell the decorator's finally block what to log to PostHog.
+        captured_state['result_count'] = 1
+        # Phase 85 SYNTH-06 / D-14 — populate is_synthetic from the resolved
+        # sys_id (NOT the requested locator: a uid-keyed lookup may resolve to
+        # a different sys_id; the resolved page is the authoritative answer).
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        captured_state['is_synthetic'] = is_synthetic_sys_id(
+            getattr(bundle.page, 'sys_id', None)
+        )
+
+        return envelope
+
+    @target_app.post(
+        f'{path_prefix}/parallels',
+        summary="Find composition parallels via sliding-window chunk matching.",
+        tags=["parallels"],
+        openapi_extra={
+            "requestBody": _openapi_request_body(ParallelsRequest),
+            "responses": _openapi_responses_for("Ranked parallel-witness groups envelope."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='parallels')
+    async def parallels_endpoint(request: Request, *, captured_state: dict):
+        """POST /api/parallels — Phase 80 composition/parallels endpoint.
+
+        R-PR-03 precedent (Phase 79): decorated with @wrap_endpoint(endpoint_name='parallels').
+        The decorator owns try/except/finally + envelope rewriting + capture_api_event.
+        Handler body holds ONLY business logic.
+
+        captured_state contract (set by handler, read by decorator's finally):
+        - 'mode': req.mode for the PostHog event (D-09 — parallels-specific
+          mode value space; same property key as /api/search disambiguated by
+          endpoint='parallels').
+        - 'result_count': len(bundle.main_results) on success.
+
+        Statelessness D-20: handler MUST NOT touch the per-session export
+        state (web.export_state) or app.storage / request.cookies -- handlers
+        are stateless and respond purely from request body + corpus indexes.
+        Historical note: pre-Phase-88, the rule named the AppState singleton
+        mirror fields (deleted in Phase 88 STATE-01) which Phase 88 removed;
+        the rule now reads against the per-session payload helper surface
+        instead.
+        """
+        # 0. Manual JSON parse so malformed JSON flows through wrap_endpoint
+        #    envelope instead of FastAPI's 422 default. FastAPI body injection
+        #    is intentionally NOT used here (would bypass envelope shape).
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise APIError(
+                'invalid_request',
+                f'request body must be valid JSON: {exc}',
+                http_status=400,
+            )
+        if isinstance(body, dict):
+            req = ParallelsRequest(**body)
+        else:
+            req = ParallelsRequest.model_validate(body)
+
+        # PostHog mode property (D-09) — parallels-specific value space.
+        captured_state['mode'] = req.mode
+        # 81A D-08 — parallels does NOT consume search_mode / responsa_options;
+        # pin explicitly so PostHog events from /api/parallels carry the
+        # uniform property shape (search_mode_value=None, count=0).
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+        # Phase 85 SYNTH-06 / D-14 (REVIEWS-MODE Codex HIGH) —
+        # /api/parallels takes `text`, NOT `sys_id`, so there is no canonical
+        # seed sys_id to tag with is_synthetic. Synthetic rows have no Tantivy
+        # chunks, so they are naturally absent from main_results regardless of
+        # the seed text. We INTENTIONALLY leave captured_state['is_synthetic']
+        # at its wrap_endpoint default of None for /api/parallels events.
+        # Future analytics needing this signal can derive it from the response
+        # payload's per-item is_synthetic field (set by shared serializer).
+
+        # 1. Mode gate (same as search/browse).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit (D-05 — DIFFERENT instance from search and browse buckets),
+        #    then the trailing-24 h budget shared with search and browse.
+        client_ip = _resolve_rate_limit_key(request)
+        _parallels_rate_limiter.check(client_ip)
+        _daily_budget.check(client_ip)
+
+        # 3. Composition text validation (D-06), or the witness list that
+        #    replaces it.
+        text = (req.text or '').strip()
+        witnesses_in = list(req.witnesses or [])
+
+        if witnesses_in and text:
+            # Never silently pick one: the query the caller believes ran
+            # would differ from the one that did. (This is the case the
+            # model-level validator deliberately leaves alone, so it can
+            # carry its own code instead of a generic invalid_request.)
+            raise APIError(
+                'witnesses_and_text_conflict',
+                'send EITHER text OR witnesses, not both. To search a work '
+                'with several of its witnesses, put every one of them in '
+                'witnesses[] -- including the text you would have sent as '
+                '`text`.',
+                http_status=400,
+            )
+
+        if not witnesses_in:
+            if not text:
+                raise APIError(
+                    'composition_required',
+                    'text is required and cannot be empty after stripping whitespace',
+                    http_status=400,
+                )
+            if len(text) > COMPOSITION_LENGTH_CAP:
+                raise APIError(
+                    'composition_too_long',
+                    f'text exceeds cap (max {COMPOSITION_LENGTH_CAP} chars; '
+                    f'submitted {len(text)})',
+                    http_status=400,
+                )
+        else:
+            # The chunk engine needs no fusion: it decomposes a query into
+            # independent per-chunk lookups with no shared budget, so
+            # concatenating witnesses there returns the IDENTICAL manuscript
+            # set as searching them separately (measured -- 392 both ways,
+            # empty difference in both directions) at LOWER cost. Rejecting
+            # rather than quietly accepting keeps that finding legible.
+            if req.method != 'passage':
+                raise APIError(
+                    'witnesses_require_passage_method',
+                    "witnesses[] requires method='passage'. The chunk engine "
+                    "has no per-query budget to starve, so joining witnesses "
+                    "into `text` there is equivalent to searching them "
+                    "separately and costs less.",
+                    http_status=400,
+                )
+            from web.passage_assets import (
+                passage_multi_witness_available as _multi_available)
+            if not _multi_available():
+                raise APIError(
+                    'passage_multi_witness_unavailable',
+                    'multi-witness passage search is not available on this '
+                    'deployment',
+                    http_status=503,
+                )
+            _max_witnesses = _resolve_max_witnesses()
+            if len(witnesses_in) > _max_witnesses:
+                raise APIError(
+                    'too_many_witnesses',
+                    f'at most {_max_witnesses} witnesses per request '
+                    f'(submitted {len(witnesses_in)})',
+                    http_status=400,
+                )
+            # Projected cost, checked BEFORE any budget slot is acquired.
+            # The cap, not the ceiling, is the control here: on timeout the
+            # permit is held until the executor thread really finishes
+            # (run_in_executor cannot cancel a thread -- see
+            # run_through_passage_budget), so raising the ceiling would let
+            # timed-out requests occupy every slot. This assertion keeps the
+            # two numbers provably consistent instead of consistent by
+            # comment: if a deployment raises the witness cap past what the
+            # ceiling can serve, requests are refused up front rather than
+            # 504-ing with their permits still held.
+            _ceiling = None if request.scope.get('research_job') else _resolve_passage_timeout()
+            _projected = len(witnesses_in) * PASSAGE_SECONDS_PER_WITNESS
+            if _ceiling and _projected > _ceiling:
+                raise APIError(
+                    'too_many_witnesses',
+                    f'{len(witnesses_in)} witnesses would need about '
+                    f'{_projected:.0f}s, past the '
+                    f'{_ceiling:.0f}s passage ceiling. Send fewer witnesses.',
+                    http_status=400,
+                )
+            for _i, _w in enumerate(witnesses_in):
+                _wt = (_w.text or '').strip()
+                if _wt and len(_wt) > MAX_WITNESS_CHARS:
+                    raise APIError(
+                        'witness_too_long',
+                        f'witness {_i + 1} exceeds cap (max '
+                        f'{MAX_WITNESS_CHARS} chars; submitted '
+                        f'{len(_wt)})',
+                        http_status=400,
+                    )
+                # A witness given as `raw_header` is NOT length-checked here:
+                # its text does not exist yet. The cap is re-applied after
+                # resolution, inside the searcher, where an over-cap page is
+                # skipped and reported rather than truncated.
+
+        if req.sort and not witnesses_in:
+            raise APIError(
+                'sort_requires_multi_witness',
+                f"sort={req.sort!r} orders groups by facts only a "
+                f"multi-witness search produces. Omit it, or send "
+                f"witnesses[].",
+                http_status=400,
+            )
+
+        # 4. Filter resolution (API-07, D-15/D-17 inherited from Phase 78).
+        #    Late-binding via the module attribute so test fixtures can
+        #    monkeypatch shared.fjms_service.{validate_filter_values, get_filter_sys_ids}.
+        restrict_sys_ids: Optional[set] = None
+        filters_dict: Optional[dict] = None
+        short_circuit_empty = False
+
+        if req.filters is not None:
+            filters_dict = req.filters.model_dump(exclude_none=True)
+            # Off the event loop (blocking FJMS SQLite reads); an APIError from
+            # validation re-raises at the await, and a lookup that could not
+            # run is 503 filter_unavailable (#17).
+            restrict_sys_ids = await _resolve_fjms_filters(filters_dict, state.meta_mgr)
+            # SEED-026: intersect the library filter BEFORE the result cap (parity
+            # with /api/search; otherwise filters.library would be silently ignored).
+            restrict_sys_ids = await _intersect_library_filter(
+                restrict_sys_ids, filters_dict, state.meta_mgr
+            )
+            if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
+                short_circuit_empty = True
+
+        # 4b. Phase 145 -- method='passage' validation. Both checks are
+        #     structural (not a preference), so both are 400/503, never a
+        #     silent fallback to the chunk engine or an empty-looking result:
+        #
+        #     - passage_available() False (flag off, or the index never
+        #       loaded/failed validation at startup) -> 503
+        #       'passage_unavailable'. This is the SAME predicate the method
+        #       selector on web/pages/parallels.py hides behind; a caller
+        #       that bypasses the UI and posts method='passage' directly
+        #       gets an explicit "not ready" rather than the request being
+        #       silently downgraded to 'chunk'.
+        #     - filters.library including 'LOCAL' in include mode -> 400
+        #       'passage_scope_unsupported'. The passage index is built ONLY
+        #       from the Genizah transcription corpus (docs/specs/passage-
+        #       matching-algorithm.md); it holds zero Local-corpus records
+        #       by construction, structurally unlike LOCAL/ALL corpus_scope
+        #       on the desktop composition search (Phase 146), which really
+        #       does route to a different index. 'LOCAL' is the one
+        #       library/local scope value this API's `filters.library`
+        #       actually accepts (shared/browse_map_utils.py::LIBRARY_CODES
+        #       carries a 'LOCAL' entry for My-Library provenance) that the
+        #       passage index cannot cover -- everything else `filters`
+        #       exposes (domains/authors/works/materials/dates/other
+        #       libraries) is a plain sys_id restriction fully inside the
+        #       Genizah corpus passage already covers, so it needs no
+        #       special-casing here. `library_filter_mode='exclude'` with
+        #       'LOCAL' listed is fine (excluding a corpus passage never had
+        #       is a no-op, not a request for it).
+        #     - `boundary_mode != 'full'` -> 400 'passage_option_unsupported'
+        #       (adversarial review finding #2). PassageSearcher has no
+        #       cross-paragraph/token-boundary concept over a letter stream
+        #       and raises ValueError for this itself (defense in depth for
+        #       ANY caller, not just this endpoint); silently degrading
+        #       'boundary'/'combined' to 'full' would be exactly the silent-
+        #       degradation failure mode this project's fail-closed posture
+        #       exists to prevent, so it is rejected here BEFORE a slot is
+        #       ever acquired.
+        if req.method == 'passage':
+            from web.passage_assets import passage_available as _passage_available
+            if not _passage_available():
+                raise APIError(
+                    'passage_unavailable',
+                    "method='passage' is not available on this deployment "
+                    "(disabled, or the passage index is not loaded)",
+                    http_status=503,
+                )
+            _lib_mode = (filters_dict or {}).get('library_filter_mode') or 'include'
+            _lib_codes = (filters_dict or {}).get('library') or []
+            if _lib_mode == 'include' and 'LOCAL' in _lib_codes:
+                raise APIError(
+                    'passage_scope_unsupported',
+                    "method='passage' cannot serve filters.library=['LOCAL'] "
+                    "(include mode): the passage index holds no Local-corpus "
+                    "records. Use method='chunk', or drop 'LOCAL' from "
+                    "filters.library.",
+                    http_status=400,
+                )
+            if req.boundary_mode != PARALLELS_BOUNDARY_MODE_DEFAULT:
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' only supports boundary_mode='full' "
+                    f"(got {req.boundary_mode!r}); passage-matching has no "
+                    f"cross-paragraph/token-boundary concept over a letter "
+                    f"stream. Use method='chunk' for boundary-aware search.",
+                    http_status=400,
+                )
+            # Codex review finding #13(a): chunk_size/mode/max_freq are
+            # likewise inert for passage -- there is no sliding-window
+            # chunk (chunk_size), no morphological-variant matching
+            # (mode: 'variants'/'fuzzy' are a Tantivy-term-expansion
+            # concept), and no per-chunk frequency signal (max_freq).
+            # Accepting a non-default value silently would let a client
+            # believe it changed the search when it did not -- the same
+            # silent-degradation failure mode boundary_mode was fixed for
+            # above. Only the request's OWN declared defaults pass; a
+            # client that wants those knobs must use method='chunk'.
+            if req.chunk_size != PARALLELS_CHUNK_SIZE_DEFAULT:
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' does not use chunk_size (got "
+                    f"{req.chunk_size}; passage matches character spans, not "
+                    f"sliding word windows). Omit it, or use method='chunk'.",
+                    http_status=400,
+                )
+            if req.mode != PARALLELS_MODE_DEFAULT:
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' does not use mode (got {req.mode!r}; "
+                    f"passage's character-level Levenshtein matching has no "
+                    f"morphological-variant concept). Omit it, or use "
+                    f"method='chunk'.",
+                    http_status=400,
+                )
+            if req.max_freq is not None:
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' does not use max_freq (got "
+                    f"{req.max_freq}; passage has no per-chunk frequency "
+                    f"signal, so it never routes rows to filtered[] on "
+                    f"that basis). Omit it, or use method='chunk'.",
+                    http_status=400,
+                )
+
+        # 5. Statelessness check (D-20). Forbidden reads — none below.
+
+        # 6. Execute via service layer OR short-circuit on empty intersection.
+        warnings_list: list = []
+        # Codex review finding #13(b): the EFFECTIVE passage policy (never
+        # populated for method='chunk'), used to replace the ignored chunk
+        # knobs in the envelope below rather than echoing them as if they
+        # had done anything.
+        passage_policy_echo: Optional[dict] = None
+        if short_circuit_empty:
+            bundle = ParallelsResultBundle(
+                main_results=[],
+                filtered_results=[],
+                boundary_options={
+                    'boundary_mode': req.boundary_mode,
+                    'boundary_delimiter': '\n',
+                    'boundary_boost': 1.5,
+                    'min_boundary_matches': 0,
+                    'min_delimiter_distance': 3,
+                },
+                truncated_to_200=False,
+            )
+            if req.method != 'passage':
+                # No search ran, but the text's fit to the chunk size is known
+                # without one: the same warnings a search would have given.
+                from shared.composition_windows import standard_notices
+                bundle.composition_notices = standard_notices(text, req.chunk_size, req.boundary_mode)
+        elif req.method == 'passage':
+            # Phase 145: passage's OWN bounded budget (semaphore capacity 4 +
+            # its own dedicated ThreadPoolExecutor), never the chunk path's
+            # heavy semaphore/default-executor pair -- the two-budgets
+            # lesson (docs/specs/discovery-budgets.md SS2/SS3). Routed
+            # through run_through_passage_budget, the SAME function
+            # web/pages/parallels.py's direct call path uses (Codex review
+            # finding #15) -- exactly one execution budget for passage-
+            # matching, not one per surface.
+            # Local imports, like every other passage import in this
+            # module: shared.passage_parallels pulls in numpy and the index
+            # reader, and a flag-OFF deployment must pay nothing for a
+            # feature it does not serve (Codex review finding #14).
+            from shared.passage_parallels import NoWitnessesResolved
+            from web.passage_assets import get_passage_searcher
+            _pg_searcher = get_passage_searcher(state.searcher)
+            if _pg_searcher is None:
+                # Availability was already checked in step 4b; a flip
+                # between that check and here (index unloaded mid-request)
+                # is the only way to reach this, and it must fail the
+                # same way, not fall back to chunk silently.
+                raise APIError(
+                    'passage_unavailable',
+                    "method='passage' became unavailable while the "
+                    "request was in flight",
+                    http_status=503,
+                )
+            # The REAL knobs that drove this search (finding #13(b)) --
+            # policy_id is a content hash over every field, so this also
+            # doubles as a stable identifier of exactly which policy
+            # produced the result, for anyone reproducing a query later.
+            passage_policy_echo = _pg_searcher.policy.as_dict()
+            # Ids are assigned HERE, positionally, and are what every
+            # witness_ids on a row and in the envelope refers to. The caller
+            # never supplies one: a client-chosen id would have to be
+            # validated and de-duplicated, and buys nothing the position does
+            # not already give.
+            witness_payload = [
+                {'id': 'w{0}'.format(_i + 1),
+                 'label': (_w.label or '').strip(),
+                 'text': _w.text,
+                 'raw_header': _w.raw_header}
+                for _i, _w in enumerate(witnesses_in)
+            ] or None
+            _pg_searcher = api_engine(_pg_searcher, request, _resolve_passage_timeout())
+
+            async def passage_budget(factory):
+                if request.scope.get('research_job'):
+                    return await factory()
+                return await run_through_passage_budget(factory)
+
+            try:
+                # A factory, not a coroutine: the work is built only after a
+                # budget slot is held. Passing the coroutine directly also
+                # left it un-awaited (RuntimeWarning) on the 503 path.
+                bundle = await passage_budget(
+                    lambda: fetch_parallels_results(
+                        searcher=_pg_searcher,
+                        meta_mgr=state.meta_mgr,
+                        text=text,
+                        chunk_size=req.chunk_size,
+                        mode=req.mode,
+                        max_freq=req.max_freq,
+                        boundary_mode=req.boundary_mode,
+                        restrict_sys_ids=restrict_sys_ids,
+                        executor=wait_executor(),
+                        witnesses=witness_payload,
+                        witness_text_cap=MAX_WITNESS_CHARS,
+                    )
+                )
+            except ResearchJobError as exc:
+                raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
+            except NoWitnessesResolved as exc:
+                # Caught BEFORE the ValueError branch below -- it is a
+                # ValueError subclass, and mapping it to
+                # passage_option_unsupported would tell the caller their
+                # OPTIONS were wrong when their REFERENCES were.
+                _unresolved = (exc.report or {}).get('unresolved') or []
+                _detail = ', '.join(
+                    '{0}: {1}'.format(w.get('id'), w.get('reason'))
+                    for w in _unresolved[:10])
+                raise APIError(
+                    'witnesses_required',
+                    'no witness resolved to searchable text (' + _detail + ')',
+                    http_status=400,
+                ) from exc
+            except ValueError as exc:
+                # Defense in depth: step 4b already rejects boundary_mode !=
+                # 'full' before a slot is acquired, so PassageSearcher's own
+                # ValueError (raised for the same reason) should never
+                # actually fire through this endpoint -- but if some future
+                # caller reaches this branch without going through step 4b,
+                # map it to the SAME stable 400 rather than an uncaught 500.
+                raise APIError(
+                    'passage_option_unsupported', str(exc), http_status=400,
+                ) from exc
+        else:
+            # P9X: parallels are always heavy — gate on the concurrency budget
+            # and wrap the fetch in a timeout. As with /api/search, the slot is
+            # held for the work's TRUE lifetime: asyncio.wait does not cancel
+            # the task on timeout, and the slot is released from the task's
+            # done-callback, so a timed-out composition keeps its budget until
+            # it actually finishes (releasing early would re-admit heavy work
+            # past the budget — the NLI-hang lesson). The done-callback is the
+            # SOLE releaser; it fires on success, exception, or post-timeout
+            # completion, so no finally release is needed.
+            parallels_ceiling = None if request.scope.get('research_job') else _resolve_parallels_timeout()
+            # The parallels page's engine mode, pairs and x1-x3 for this mode (fuzzy at
+            # x2). Bound AFTER api_engine, which builds a fresh wrapper without them.
+            chunk_engine_mode, chunk_settings = default_search(req.mode, composition=True)
+            _par_release = (lambda: None) if request.scope.get('research_job') else await _acquire_heavy_slot()
+            try:
+                _par_task = asyncio.ensure_future(
+                    fetch_parallels_results(
+                        # SEED-016 #3: inject the SearchEngine + MetadataManager
+                        # singletons (was read off web.state inside shared/).
+                        searcher=with_request_settings(
+                            api_engine(state.searcher, request, parallels_ceiling), **chunk_settings),
+                        meta_mgr=state.meta_mgr,
+                        text=text,
+                        chunk_size=req.chunk_size,
+                        mode=chunk_engine_mode,
+                        max_freq=req.max_freq,
+                        boundary_mode=req.boundary_mode,
+                        restrict_sys_ids=restrict_sys_ids,
+                        worker_timeout=parallels_ceiling,
+                        executor=wait_executor(),
+                    )
+                )
+                # Hand the slot to the task's done-callback (sole releaser): it
+                # fires on success, exception, or post-timeout completion, so the
+                # budget is held for the task's TRUE lifetime.
+                _par_task.add_done_callback(lambda _t, _r=_par_release: _r())
+                _par_task.add_done_callback(
+                    lambda task: None if task.cancelled() else task.exception()
+                )
+                _par_release = None  # ownership -> done-callback
+                _done, _pending = await asyncio.wait(
+                    {_par_task}, timeout=parallels_ceiling,
+                )
+                if _par_task in _pending:
+                    logger.warning(
+                        'parallels core_timeout after %ss', parallels_ceiling,
+                    )
+                    raise APIError(
+                        'core_timeout',
+                        f'parallels did not complete within {parallels_ceiling}s; '
+                        f'try a shorter text or smaller chunk_size',
+                        http_status=504,
+                    )
+                try:
+                    bundle = _par_task.result()
+                except ResearchJobError as exc:
+                    raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
+                except SearchBudgetExceeded as exc:
+                    raise APIError(
+                        'core_timeout',
+                        'parallels search exceeded its computation budget; '
+                        'try a shorter text or a faster mode',
+                        http_status=504,
+                    ) from exc
+            finally:
+                # Safety net: only fires if the slot was acquired but never handed
+                # to the done-callback (e.g. ensure_future raised before transfer).
+                if _par_release is not None:
+                    _par_release()
+
+        # 7. Surface group-cap warning (D-07).
+        if bundle.truncated_to_200:
+            warnings_list.append('truncated_to_200')
+        # The search stopped before it finished -- a background job reached the
+        # website's time limit -- and returned what it had found: more parallels
+        # may exist. Same code and meaning as /api/search's.
+        if bundle.partial:
+            warnings_list.append('results_cut_off')
+        # Codex review finding #16(b): a row dropped because its display-text
+        # lookup failed is counted, never silently blank -- surfaced here so
+        # the count is never lost between the searcher and the client (this
+        # repo's rule: no silent truncation, every exclusion counted). 0 for
+        # the chunk path always (see ParallelsResultBundle's docstring).
+        if bundle.dropped_text_lookup_failures:
+            warnings_list.append({
+                'code': 'passage_text_lookup_failed',
+                'count': bundle.dropped_text_lookup_failures,
+            })
+        # PR #324 round 3: a capped passage search must SAY so. Only the two
+        # states that actually truncate the RESULT SET warn -- postings
+        # exclusion is routine budget behaviour on any long query and lives
+        # in the report echo below, not in a warning that would fire on
+        # nearly every request.
+        _rep = bundle.passage_report
+        if _rep and (_rep.get('candidates_truncated')
+                     or _rep.get('verify_truncated')):
+            warnings_list.append({
+                'code': 'passage_results_truncated',
+                'candidates_truncated': bool(_rep.get('candidates_truncated')),
+                'verify_truncated': bool(_rep.get('verify_truncated')),
+                # Self-describing (owner ruling 2026-08-23, the over-warning
+                # fix): candidates are verified strongest-evidence-first, so
+                # "checked N of M" is what happened -- measured on Dror
+                # Yikra, a firing where uncapped verification of all 26,164
+                # candidates changed nothing. Consumers should present this
+                # as information, not alarm; the GUI does.
+                'verified': int(_rep.get('verified') or 0),
+                'candidates': int(_rep.get('candidates') or 0),
+            })
+        # Chunk method: the text did not fit the requested settings (searched
+        # as one shorter chunk, chunk size raised, min chunk matches lowered,
+        # or not searched at all). The request echo keeps what was asked;
+        # each warning carries what was used.
+        warnings_list.extend(dict(n) for n in bundle.composition_notices)
+        if bundle.duplicate_photography_demoted:
+            warnings_list.append({
+                'code': 'duplicate_photography_demoted',
+                'count': bundle.duplicate_photography_demoted,
+            })
+        # A witness that could not be resolved was SKIPPED, and skipping
+        # without saying so is the silent-content-loss failure this repo
+        # treats as a defect -- the caller asked for seventeen searches and
+        # got sixteen.
+        if witnesses_in and not bundle.multi_witness:
+            # The echo below still reports what was ASKED for -- that is what
+            # an echo is -- so without this the response claims an ordering it
+            # does not have. One witness resolving short-circuits before any
+            # fusion, and `fused` / `witness_count` are facts fusion produces.
+            #
+            # Keyed on the EFFECTIVE sort, not on `req.sort`. Omitting the
+            # field does not mean "no ordering was claimed": the echo fills it
+            # in as `fused` either way, so a caller who never sent `sort` was
+            # told the response was fusion-ordered, with no warning, while the
+            # array was ordered by score. The default is the commonest case,
+            # which made it the commonest way to receive that claim.
+            warnings_list.append({
+                'code': 'sort_not_applied',
+                'sort': req.sort or 'fused',
+                'requested': req.sort,
+                'reason': 'fewer than two witnesses resolved',
+            })
+        _unresolved_w = (bundle.witness_report or {}).get('unresolved') or []
+        if _unresolved_w:
+            warnings_list.append({
+                'code': 'witness_ref_unresolved',
+                'count': len(_unresolved_w),
+                'witnesses': [{'id': w.get('id'), 'label': w.get('label'),
+                               'reason': w.get('reason')}
+                              for w in _unresolved_w],
+            })
+        # Reported separately from the above: a duplicate RESOLVED, it was
+        # simply the same text twice, and filing it under
+        # `witness_ref_unresolved` would send the caller looking for a stale
+        # shelfmark that does not exist.
+        _dupe_w = (bundle.witness_report or {}).get('duplicates') or []
+        if _dupe_w:
+            warnings_list.append({
+                'code': 'witness_duplicate_skipped',
+                'count': len(_dupe_w),
+                'witnesses': [{'id': w.get('id'), 'label': w.get('label'),
+                               'duplicate_of': w.get('duplicate_of')}
+                              for w in _dupe_w],
+            })
+
+        # 81A D-07 — request echo for /api/parallels. Field name `mode` is
+        # PRESERVED here (NOT renamed to search_mode); the rename is deferred
+        # to v7.11. ParallelsRequest at web/search_api.py has no `gap` field
+        # and no `responsa_options` (parallels never used Responsa), so the
+        # echo has EXACTLY 7 keys for method='chunk' (byte-for-byte
+        # unchanged): mode, chunk_size, max_freq, boundary_options,
+        # limit_effective, filters, method. limit_effective is the
+        # post-cap ROW count -- len(bundle.main_results), the raw
+        # chunk-hit rows behind the <=200 kept groups (D-07: the cap
+        # itself is surfaced via warnings_list). It is NOT the group
+        # count: that is the envelope's count/total, and this number is
+        # normally LARGER (a live response returns limit_effective=183
+        # with count=108). This comment said "post-truncation group
+        # count" until 2026-09-08, and docs/SEARCH_API.md had copied the
+        # error verbatim.
+        #
+        # Codex review finding #13(b): for method='passage', mode/chunk_size/
+        # max_freq/boundary_options describe knobs the passage engine never
+        # reads (step 4b above already rejects any non-default value of the
+        # first three; boundary_mode is rejected too), so echoing them back
+        # would read as "these were applied" when they were not -- nulled
+        # out, with two added keys -- passage_policy, carrying the knobs that
+        # ACTUALLY drove the search, and passage_report beside it. Both
+        # are present ONLY for method='passage' (dict keys, not merely
+        # None values), so the pre-existing 7-key shape is untouched for
+        # method='chunk'. They are added TOGETHER, which makes passage
+        # mode 9 keys and never 8 -- these comments said "8th key" and
+        # "8-key passage shape" until 2026-09-08.
+        _is_passage = req.method == 'passage'
+        echo_mode = None if _is_passage else req.mode
+        echo_chunk_size = None if _is_passage else req.chunk_size
+        echo_max_freq = None if _is_passage else req.max_freq
+        echo_boundary_options = None if _is_passage else bundle.boundary_options
+        parallels_echo = {
+            'mode': echo_mode,
+            'chunk_size': echo_chunk_size,
+            'max_freq': echo_max_freq,
+            'boundary_options': echo_boundary_options,
+            'method': req.method,
+            'limit_effective': len(bundle.main_results),
+            'filters': filters_dict,
+        }
+        if _is_passage:
+            parallels_echo['passage_policy'] = passage_policy_echo
+            # The full budget/truncation report (QueryReport.as_dict()), for
+            # evaluation consumers who need postings/candidates/verify
+            # accounting rather than just the truncated-or-not warning.
+            parallels_echo['passage_report'] = bundle.passage_report
+        # Present ONLY when witnesses were sent, so both the 9-key passage
+        # shape and the 7-key chunk shape stay untouched for every request
+        # that does not use the feature. Counts and LABELS only -- a witness's
+        # text is never echoed: it can be 20,000 characters, the caller
+        # already has it, and 25 of them would dominate the response.
+        if witnesses_in:
+            _wrep = bundle.witness_report or {}
+            parallels_echo['witnesses'] = {
+                'requested': _wrep.get('requested', len(witnesses_in)),
+                'searched': _wrep.get('searched', 0),
+                'labels': [{'id': w.get('id'), 'label': w.get('label'),
+                            'kind': w.get('kind'),
+                            'resolved': w.get('resolved')}
+                           for w in (_wrep.get('witnesses') or [])],
+            }
+            parallels_echo['sort'] = req.sort or 'fused'
+
+        # 8. Serialize — Phase 77 D-14 SOLE producer of envelope shape.
+        envelope = serialize_parallels_payload(
+            bundle.main_results,
+            bundle.filtered_results,
+            meta_mgr=state.meta_mgr,
+            source_text=text,
+            chunk_size=echo_chunk_size,
+            mode=echo_mode,
+            max_freq=echo_max_freq,
+            boundary_options=echo_boundary_options,
+            warnings=warnings_list,
+            request_echo=parallels_echo,
+            # ORDER the groups by the key the rows were selected by -- but
+            # never let it reach aggregate_score/sort_score/score, which
+            # stay matched letters on every path. Conflating the two turned
+            # the public `score` into ~0.03 on multi-witness responses
+            # (review finding).
+            order_key='fusion_score' if bundle.multi_witness else None,
+            sort=(req.sort or 'fused') if bundle.multi_witness else None,
+            with_witness_fusion=bundle.multi_witness,
+        )
+
+        # 9. Tell the decorator's finally block what to log to PostHog.
+        captured_state['result_count'] = len(bundle.main_results)
+
+        return envelope
+
+    # -----------------------------------------------------------------------
+    # D3 (2026-09-08): GET /api/capabilities -- cheap self-description.
+    #
+    # Background (do not relitigate -- see the incident record this shipped
+    # with): an external client inferred from our docs alone that
+    # search_mode='fuzzy', method='passage', witnesses[] and sort did not
+    # exist. All four are real and, for the passage pair, ON in production;
+    # nothing published let a caller confirm that without spending a heavy
+    # request and reading a 503. This endpoint is the fix: call it ONCE,
+    # branch on the result, never probe by firing a real search/parallels
+    # request and inspecting the failure.
+    # -----------------------------------------------------------------------
+    @target_app.get(
+        f'{path_prefix}/capabilities',
+        summary="Discover which flag-gated features are live on this deployment.",
+        tags=["capabilities"],
+        openapi_extra={
+            "responses": _openapi_responses_for("Capability/limit/timeout envelope."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='capabilities')
+    async def capabilities_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/capabilities -- no index load, no database, no search.
+
+        D4 (fail-closed posture, non-negotiable): this endpoint must NEVER
+        advertise a feature whose own gate is closed. `parallels.methods`
+        drops 'passage' entirely -- not merely marks it unavailable -- when
+        `passage_available()` is False, and `parallels.sorts` is `[]`
+        whenever multi-witness is off, mirroring the 400
+        'sort_requires_multi_witness' /api/parallels itself raises for
+        `sort` without `witnesses[]`. Advertising a closed gate would be
+        worse than not having this endpoint: a caller would build against a
+        feature that immediately 503s.
+
+        captured_state: pinned explicitly (mode/search_mode_value/
+        responsa_options_count/result_count) for the same reason browse and
+        parallels pin them -- a uniform PostHog event shape -- even though
+        wrap_endpoint's own defaults already agree for a fixed-shape
+        descriptor endpoint that has no mode and produces no result set.
+        """
+        captured_state['mode'] = None
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+        captured_state['result_count'] = None
+
+        # 1. Mode gate (D-02/D-03/D-04 -- identical to every other endpoint;
+        #    SEARCH_API_MODE='disabled' -> 503, 'localhost-only' -> 403 for
+        #    non-loopback callers).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit -- this endpoint's OWN bucket (see _capabilities_rate_limiter
+        #    above), independent of search/browse/parallels.
+        client_ip = _resolve_rate_limit_key(request)
+        _capabilities_rate_limiter.check(client_ip)
+
+        # 3. Feature gates, imported INSIDE the handler -- same convention as
+        #    the passage gate a few hundred lines up in this file -- so
+        #    import order at module-load time can never make registering
+        #    this route fail.
+        from web.passage_assets import passage_available as _passage_available
+        from web.passage_assets import (
+            passage_multi_witness_available as _passage_multi_witness_available)
+        from version import APP_VERSION as _app_version
+
+        _passage_on = _passage_available()
+        # passage_multi_witness_available() already ANDs its own flag with
+        # passage_available() internally (web/passage_assets.py) -- no need
+        # to AND it again here.
+        _multi_witness_on = _passage_multi_witness_available()
+
+        return {
+            'schema_version': 1,
+            'request': {},
+            'api_version': _app_version,
+            'endpoints': [
+                '/api/search', '/api/browse', '/api/parallels', '/api/capabilities',
+                '/api/criteria',
+            ],
+            # Derived from the real mode enum (not a literal list) -- dict
+            # insertion order is preserved, and _SEARCH_MODE_TO_INTERNAL's
+            # own definition order already matches the documented contract.
+            'search_modes': list(_SEARCH_MODE_TO_INTERNAL.keys()),
+            # search_mode values only POST /api/search/jobs accepts (2026-10-11).
+            'background_job_modes': sorted(BACKGROUND_JOB_MODES),
+            'features': {
+                'passage': _passage_on,
+                'passage_multi_witness': _multi_witness_on,
+            },
+            'parallels': {
+                'methods': ['chunk', 'passage'] if _passage_on else ['chunk'],
+                # The `mode` values method='chunk' accepts, read off the request
+                # model so this list cannot drift from what validation allows.
+                'chunk_modes': list(get_args(ParallelsRequest.model_fields['mode'].annotation)),
+                'multi_witness': _multi_witness_on,
+                # EFFECTIVE, not configured -- see
+                # _resolve_effective_max_witnesses(): a lowered passage
+                # ceiling caps witnesses below SEARCH_API_PASSAGE_MAX_WITNESSES.
+                'max_witnesses': _resolve_effective_max_witnesses(),
+                # The per-witness LENGTH cap (a separate 400,
+                # `witness_too_long`, independent of count). Reported for
+                # the same reason as everything else here: it is a hard
+                # rejection a client cannot predict, and finding it by
+                # being rejected is what this endpoint exists to avoid.
+                'max_witness_chars': MAX_WITNESS_CHARS,
+                # [] rather than a lie: advertising sorts that 400 without
+                # witnesses[] would be worse than omitting them (D4).
+                'sorts': (
+                    ['fused', 'best_match', 'witness_count']
+                    if _multi_witness_on else []
+                ),
+            },
+            'limits': {
+                'search_requests_per_minute': _rate_limiter._current_limit(),
+                'browse_requests_per_minute': _browse_rate_limiter._current_limit(),
+                'parallels_requests_per_minute': _parallels_rate_limiter._current_limit(),
+                'capabilities_requests_per_minute': _capabilities_rate_limiter._current_limit(),
+                'criteria_requests_per_minute': _criteria_rate_limiter._current_limit(),
+                # effective_capacity(), which is neither _capacity (what the
+                # semaphore was BUILT with -- lags env) nor resolve_capacity()
+                # (what env ASKS for -- over-reports while a rebuild is blocked
+                # by a held slot). It is what the next request will actually
+                # face. See effective_capacity()'s docstring.
+                'heavy_concurrency': _HeavySemaphoreState.effective_capacity(),
+                'passage_concurrency': _PassageSemaphoreState.effective_capacity(),
+                # 2026-11-03 scrape limits: same live resolvers the handlers use.
+                'interactive_concurrency': _InteractiveSemaphoreState.effective_capacity(),
+                'daily_requests_per_address': _daily_budget._current_limit(),
+            },
+            # Every value re-read from the same live resolvers the other
+            # three endpoints use per request -- never a literal here, so
+            # this cannot drift the way the stale (v7.10)/300s header (P1)
+            # did.
+            'timeouts': {
+                'search_core': _resolve_search_timeout('exact')[0],
+                'variants': _resolve_search_timeout('variants')[0],
+                'fuzzy': _resolve_search_timeout('fuzzy')[0],
+                'parallels': _resolve_parallels_timeout(),
+                'passage': _resolve_passage_timeout(),
+                'browse': _read_timeout('SEARCH_API_BROWSE_TIMEOUT', DEFAULT_BROWSE_TIMEOUT),
+                'browse_core': _read_timeout(
+                    'SEARCH_API_BROWSE_CORE_TIMEOUT', DEFAULT_BROWSE_CORE_TIMEOUT,
+                ),
+                # A COLD provider does not use browse_core at all:
+                # shared/browse_service.py::_fetch_core substitutes
+                # SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT while
+                # is_warm() is False, so a fresh deployment can
+                # legitimately spend this long on a browse. Reported
+                # separately rather than folded into browse_core: a
+                # client sizing a socket timeout needs the larger of the
+                # two, but a client reasoning about steady state needs
+                # the smaller. Collapsing them would lie to one of them.
+                # (Codex review of PR #336, P2.)
+                'browse_core_warmup': _read_timeout(
+                    'SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT',
+                    DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT),
+            },
+        }
+
+    # -----------------------------------------------------------------------
+    # GET /api/criteria -- the values filters.criteria accepts (PR 2 of
+    # docs/plans/CATALOGUE_CRITERIA_PLAN.md, §6.4), so a caller discovers them
+    # instead of guessing: every section and criterion of the website's
+    # "Manuscript features" panel, with corpus counts. Built from the FJMS
+    # sidecar once per process (FjmsService.criteria_vocabulary caches it).
+    # -----------------------------------------------------------------------
+    @target_app.get(
+        f'{path_prefix}/criteria',
+        summary="List the manuscript features (catalogue criteria) filters.criteria accepts.",
+        tags=["criteria"],
+        openapi_extra={
+            "responses": _openapi_responses_for("Sections, criteria, values and corpus counts."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='criteria')
+    async def criteria_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/criteria -- reads the FJMS sidecar off the event loop.
+        Fails closed: a vocabulary that cannot be read (no sidecar, the corpus
+        list not loaded yet, a failed query) is 503
+        ``filter_vocabulary_unavailable``, never a partial list."""
+        captured_state['mode'] = None
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+        captured_state['result_count'] = None
+
+        enforce_mode_gate(request)
+        client_ip = _resolve_rate_limit_key(request)
+        _criteria_rate_limiter.check(client_ip)
+
+        from shared import fjms_service as _fjms_module
+        from shared.fjms_service import FilterUnavailable
+        universe = getattr(state.meta_mgr, 'corpus_sys_ids', None)
+        loop = asyncio.get_running_loop()
+        try:
+            vocabulary = await loop.run_in_executor(
+                None, _fjms_module.get_fjms_service(thread_safe=True).criteria_vocabulary,
+                universe)
+        except FilterUnavailable as exc:
+            raise APIError(
+                'filter_vocabulary_unavailable',
+                'The manuscript features could not be listed right now '
+                f'({exc.reason}). Retry later.',
+                http_status=503,
+            ) from exc
+        return {'schema_version': 1, 'request': {}, **vocabulary}
+
+    from web.research_api import register_research_api
+    register_research_api(target_app, path_prefix, search_endpoint, parallels_endpoint)
+
+    logger.info(
+        "Search API routes initialized: POST /api/search, GET /api/browse, "
+        "POST /api/parallels, GET /api/capabilities, GET /api/criteria"
+    )

@@ -1,0 +1,3849 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+GenizahSearch Web Application - Professional Research Interface
+
+A modern, high-quality web interface for Cairo Genizah manuscript research.
+Designed with academic researchers in mind, providing powerful search tools
+with an intuitive, accessible interface.
+
+Run with: python -m web.main (from project root)
+"""
+
+import asyncio
+import logging
+import os
+import re as _re
+import sys
+
+# Load environment variables first (for Supabase configuration)
+from dotenv import load_dotenv
+load_dotenv()
+
+# Ensure we can import from project root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from nicegui import ui, app, run
+from web.framework_patches import apply_all_patches
+from web.crawler_visibility import (
+    should_block_archive_request,
+    should_block_seo_tool_request,
+    should_mark_noindex,
+)
+from web.safe_storage import ensure_session_uuid, safe_user_get, safe_user_set, safe_user_pop
+from web.auth_state import GlobalAuthState
+from web.perf_watch import SlowRequestTimingMiddleware, start_event_loop_lag_monitor
+apply_all_patches()
+
+
+# ---------------------------------------------------------------------------
+# Phase 92.2 D-VER-01: ASGI middleware — canonical total_wall_clock_ms source
+#
+# _ListsPerfRouteTimingMiddleware times the /lists request from entry to
+# http.response.body with more_body=False (the ASGI body-flush boundary).
+# This is the canonical D-VER-02 wall-clock source: "request received →
+# response body flushed." Previous plan-revision wrapped only
+# render_lists_sidebar() which missed create_layout(), render_list_content(),
+# and the actual flush time (Reviews MUST-FIX 4).
+#
+# Dormant unless GS_LISTS_PERF_INSTRUMENTATION=1 (checks _INSTRUMENTATION_ENABLED
+# from web.supabase_client AFTER the path check — zero overhead for non-/lists
+# paths in production).
+#
+# Mounted via app.add_middleware() AFTER apply_all_patches() so NiceGUI's
+# framework patches are in place first.
+# ---------------------------------------------------------------------------
+
+class _ListsPerfRouteTimingMiddleware:
+    """ASGI middleware: time /lists requests and emit structured perf log."""
+
+    def __init__(self, asgi_app):
+        self.asgi_app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') != 'http' or scope.get('path') != '/lists':
+            await self.asgi_app(scope, receive, send)
+            return
+
+        from web.supabase_client import (
+            _INSTRUMENTATION_ENABLED,
+            _inst_reset,
+            _inst_set_request_id,
+            _inst_snapshot,
+        )
+
+        if not _INSTRUMENTATION_ENABLED:
+            await self.asgi_app(scope, receive, send)
+            return
+
+        import json as _json
+        import time as _time
+        import uuid as _uuid
+
+        _inst_reset()
+        # Reviews Round-2 MEDIUM-3: per-request correlation ID. Short
+        # (12-hex-char prefix of a UUID4) disambiguates concurrent /lists
+        # requests. Set the ContextVar so downstream emitters
+        # (lists_sidebar_decomposition, lists_task_probe) can read it via
+        # `_inst_request_id.get()` and Task 3 + Plan 02 Task 9 can pair
+        # log lines by `request_id` instead of fragile timestamp proximity.
+        request_id = _uuid.uuid4().hex[:12]
+        _inst_set_request_id(request_id)
+        started = _time.perf_counter()
+        status_code = None
+        response_bytes = 0
+
+        async def send_wrapper(message):
+            nonlocal status_code, response_bytes
+            if message.get('type') == 'http.response.start':
+                status_code = message.get('status')
+            elif message.get('type') == 'http.response.body':
+                body = message.get('body') or b''
+                response_bytes += len(body)
+                if not message.get('more_body', False):
+                    elapsed_ms = (_time.perf_counter() - started) * 1000.0
+                    record = {
+                        'phase': '92.2',
+                        'event': 'lists_perf_baseline',
+                        'source': 'asgi_request_body_flush',
+                        'request_id': request_id,  # Reviews Round-2 MEDIUM-3
+                        'request': {'path': '/lists', 'method': scope.get('method')},
+                        'response': {
+                            'status_code': status_code,
+                            'response_bytes': response_bytes,
+                            'body_flushed': True,
+                        },
+                        'totals': {
+                            'total_wall_clock_ms': elapsed_ms,
+                            **_inst_snapshot(),
+                        },
+                    }
+                    print(
+                        'lists_perf_baseline=' + _json.dumps(record, sort_keys=True),
+                        flush=True,
+                    )
+            await send(message)
+
+        try:
+            await self.asgi_app(scope, receive, send_wrapper)
+        except Exception:
+            elapsed_ms = (_time.perf_counter() - started) * 1000.0
+            record = {
+                'phase': '92.2',
+                'event': 'lists_perf_baseline',
+                'source': 'asgi_request_exception',
+                'request_id': request_id,  # Reviews Round-2 MEDIUM-3
+                'request': {'path': '/lists', 'method': scope.get('method')},
+                'response': {'body_flushed': False},
+                'totals': {'total_wall_clock_ms': elapsed_ms, **_inst_snapshot()},
+            }
+            print(
+                'lists_perf_baseline=' + _json.dumps(record, sort_keys=True),
+                flush=True,
+            )
+            raise
+
+
+app.add_middleware(_ListsPerfRouteTimingMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Middleware: inject font-display: swap into NiceGUI's bundled fonts.css
+# ---------------------------------------------------------------------------
+from starlette.responses import Response as _StarletteResponse
+
+@app.middleware('http')
+async def _inject_font_display_swap(request, call_next):
+    """Add ``font-display: swap`` to NiceGUI's fonts.css for faster text paint.
+
+    Without this, text is invisible during font load (~1200 ms on slow connections).
+    The middleware only processes the single fonts.css request; all other requests
+    pass through with zero overhead beyond a string comparison on the path.
+    """
+    response = await call_next(request)
+    if '/static/fonts.css' not in str(request.url.path):
+        return response
+    # Only rewrite 200 responses with a body. For 304/206/4xx/5xx we must pass
+    # the original response through untouched: a 304 has no body to mutate, and
+    # returning 200 with our CSS would break HTTP cache semantics. (Reported by
+    # Codex code review, 2026-04-13.)
+    if response.status_code != 200:
+        return response
+    body = b''
+    async for chunk in response.body_iterator:
+        body += chunk if isinstance(chunk, bytes) else chunk.encode()
+    text = body.decode('utf-8')
+    # NiceGUI 3.6+ ships fonts.css with `font-display: block` on a handful
+    # of @font-face blocks, and **no** font-display at all on the rest
+    # (~40 icon fonts). Block keeps text invisible up to 3 s; missing
+    # declarations also default to block in most browsers. Fix both:
+    # 1) Replace every explicit `block` with `swap`.
+    # 2) Inject `font-display: swap;` into any @font-face block that
+    #    still lacks one after step 1. Uses a regex with a per-block
+    #    check so we don't double-insert.
+    text = text.replace('font-display: block', 'font-display: swap')
+    def _ensure_swap(match: '_re.Match[str]') -> str:
+        block = match.group(0)
+        return block if 'font-display' in block else (
+            block.replace('@font-face {', '@font-face {\n  font-display: swap;', 1)
+        )
+    text = _re.sub(r'@font-face\s*\{[^}]*\}', _ensure_swap, text)
+    # Drop cache validators that describe the pre-mutation payload — keeping
+    # them would let clients revalidate and then apply our rewritten CSS under
+    # the upstream ETag/Last-Modified, poisoning conditional GETs. Also drop
+    # content-length (stale after rewrite) and content-encoding (body is now
+    # plaintext).
+    stale = {'content-length', 'etag', 'last-modified', 'content-encoding'}
+    headers = {
+        k: v for k, v in response.headers.items()
+        if k.lower() not in stale
+    }
+    return _StarletteResponse(
+        content=text,
+        status_code=200,
+        media_type='text/css',
+        headers=headers,
+    )
+
+
+@app.middleware('http')
+async def _mark_non_document_paths_noindex(request, call_next):
+    """Keep implementation-detail URLs out of search and archive indexes."""
+    path = str(request.url.path)
+    # Defense-in-depth behind the nginx UA block (2026-07-08): SEO-tool
+    # crawlers get a cheap 403 before any page render; robots.txt stays
+    # reachable so they can read their Disallow group (a 4xx robots.txt
+    # means "allow all" per RFC 9309 and they would keep probing forever).
+    if should_block_seo_tool_request(path, request.headers.get('user-agent')):
+        return _StarletteResponse(
+            content='Forbidden',
+            status_code=403,
+            media_type='text/plain',
+        )
+    if should_block_archive_request(path, request.headers.get('user-agent')):
+        return _StarletteResponse(
+            content='Not Found',
+            status_code=404,
+            media_type='text/plain',
+            headers={'X-Robots-Tag': 'noindex, noarchive'},
+        )
+    response = await call_next(request)
+    if should_mark_noindex(path):
+        response.headers.setdefault('X-Robots-Tag', 'noindex, noarchive')
+    return response
+
+
+# Always-on (unless GENIZAH_PERF_WATCH=0) per-request timing for EVERY http path,
+# including static files and mounted sub-apps. See web/perf_watch.py for why this
+# exists: before it, a 9-second response left no server-side trace at all.
+#
+# REGISTERED LAST ON PURPOSE — do not move it up next to the other
+# `add_middleware` calls. Starlette prepends each registration to
+# `user_middleware` and wraps in reverse, so the LAST one registered ends up
+# OUTERMOST. Registered earlier, it sat *inside* the two `@app.middleware('http')`
+# decorators above, and `_mark_non_document_paths_noindex` can short-circuit a
+# request with a 403/404 before calling through — so blocked crawler and archive
+# requests were never timed, contradicting the all-paths claim. Anything added
+# after this line will again wrap outside it.
+app.add_middleware(SlowRequestTimingMiddleware)
+
+
+# NOTE: Tried to defer quasar.unimportant.prod.css via a media-print preload
+# rewrite, but NiceGUI 3.6 emits it as an `@import` inside an inline <style>
+# with CSS layers (layer(quasar)) rather than a <link rel="stylesheet"> tag,
+# so a simple link rewrite was a no-op and moving it out of the layer would
+# disturb cascade order. Leaving the font-display middleware as the sole
+# CSS-level perf fix for now.
+
+
+# ---------------------------------------------------------------------------
+# Debug endpoint: /_internal/memstat — diagnostic RssAnon/VmRSS probe
+# Added 2026-04-19 for leak-investigation baseline tracking post-v7.9.0 deploy.
+# Gated by MEMSTAT_SECRET header; returns 503 if the env var is unset.
+# ---------------------------------------------------------------------------
+from fastapi import Header, HTTPException
+from fastapi.responses import JSONResponse
+import time as _memstat_time
+from nicegui.client import Client as _NiceGUIClient
+from web.storage_diagnostics import summarize_nicegui_storage
+
+_MEMSTAT_SECRET = os.environ.get('MEMSTAT_SECRET', '').strip()
+
+
+@app.get('/_internal/memstat')
+def _memstat_endpoint(x_memstat_secret: str = Header(default='')):
+    if not _MEMSTAT_SECRET:
+        raise HTTPException(status_code=503, detail='memstat disabled (MEMSTAT_SECRET unset)')
+    if x_memstat_secret != _MEMSTAT_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    stats: dict = {}
+    try:
+        with open('/proc/self/status', 'r') as f:
+            for line in f:
+                for key in ('VmRSS', 'VmData', 'VmSize', 'RssAnon', 'RssFile'):
+                    if line.startswith(key + ':'):
+                        stats[key + '_kb'] = int(line.split(':', 1)[1].strip().split()[0])
+                        break
+    except FileNotFoundError:
+        raise HTTPException(status_code=501, detail='/proc not available (non-Linux)')
+    stats['pid'] = os.getpid()
+    stats['timestamp_utc'] = _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime())
+    stats['version'] = None  # filled below
+    try:
+        from version import APP_VERSION as _v
+        stats['version'] = _v
+    except Exception:
+        pass
+    try:
+        stats.update(summarize_nicegui_storage(app.storage, _NiceGUIClient.instances.values()))
+    except Exception:
+        stats['nicegui_storage_summary_error'] = True
+    try:
+        from web.api import get_runtime_cache_stats as _get_runtime_cache_stats
+        stats['runtime_caches'] = _get_runtime_cache_stats()
+    except Exception:
+        stats['runtime_caches_error'] = True
+    try:
+        from web.state import state as _runtime_state
+        meta_mgr = getattr(_runtime_state, 'meta_mgr', None)
+        if meta_mgr and hasattr(meta_mgr, 'get_runtime_cache_stats'):
+            stats['metadata_runtime_caches'] = meta_mgr.get_runtime_cache_stats()
+    except Exception:
+        stats['metadata_runtime_caches_error'] = True
+    return JSONResponse(stats)
+
+
+# ---------------------------------------------------------------------------
+# Debug endpoint: /_internal/objgraph — concrete-class heap attribution
+# Added 2026-05-19 after the field-strip fix (commit ed6f89c4) bounded
+# app.storage.user export payloads but RSS kept climbing — the leak is
+# in the Python heap, not in storage. objgraph names the leaking classes.
+# Gated by the same MEMSTAT_SECRET header as /_internal/memstat.
+# ---------------------------------------------------------------------------
+import gc as _gc
+
+_objgraph_baseline_taken = False
+
+
+@app.get('/_internal/objgraph')
+def _objgraph_endpoint(
+    x_memstat_secret: str = Header(default=''),
+    limit: int = 30,
+    action: str = 'stats',
+    target_class: str = 'ObservableDict',
+    sample: int = 3,
+    max_depth: int = 8,
+):
+    """Snapshot-and-diff heap attribution by Python class.
+
+    Actions (query param ?action=...):
+      - 'stats' (default): returns most_common_types + growth_since_last_call.
+        First call takes a baseline. This is the original endpoint behavior.
+      - 'backrefs': for `sample` instances of `target_class` (default
+        ObservableDict), walk gc.get_referrers up to `max_depth` and return
+        a string-summary chain to root. Used to attribute orphan objects to
+        their retention path (added 2026-05-19 for a framework-retention leak
+        investigation).
+
+    objgraph.growth() shows new+grown types since baseline. most_common_types
+    shows the current top-N classes by instance count.
+    """
+    global _objgraph_baseline_taken
+    if not _MEMSTAT_SECRET:
+        raise HTTPException(status_code=503, detail='objgraph disabled (MEMSTAT_SECRET unset)')
+    if x_memstat_secret != _MEMSTAT_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    try:
+        import objgraph
+    except ImportError:
+        raise HTTPException(status_code=503, detail='objgraph not installed (pip install objgraph)')
+    limit = max(1, min(int(limit), 200))
+    sample = max(1, min(int(sample), 20))
+    max_depth = max(1, min(int(max_depth), 20))
+    _gc.collect()
+
+    if action in ('unfreeze', 'refreeze'):
+        # The startup objects were moved to the permanent generation by
+        # web/gc_freeze.py; gc.get_objects() and gc.get_referrers() skip that
+        # generation, so stats/backrefs cannot see them until unfrozen.
+        from web.gc_freeze import refreeze_for_diagnostics, unfreeze_for_diagnostics
+        moved = unfreeze_for_diagnostics() if action == 'unfreeze' else refreeze_for_diagnostics()
+        return JSONResponse({
+            'pid': os.getpid(),
+            'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+            'action': action,
+            'objects_moved': moved,
+            'gc_freeze_count': _gc.get_freeze_count(),
+            'note': (
+                'unfreeze: the frozen startup objects are visible to stats/backrefs again, '
+                'and every full collection walks them again (the 0.25-0.53 s stalls) until '
+                'action=refreeze, which gc.collect()s and freezes everything alive now.'
+            ),
+        })
+
+    if action == 'backrefs':
+        # Find instances of target_class and walk referrers up to root.
+        instances = objgraph.by_type(target_class)
+        total_count = len(instances)
+        # Take a small evenly-spaced sample so we don't always get the newest.
+        if total_count == 0:
+            return JSONResponse({
+                'pid': os.getpid(),
+                'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+                'action': 'backrefs',
+                'target_class': target_class,
+                'total_count': 0,
+                'gc_freeze_count': _gc.get_freeze_count(),
+                'samples': [],
+                'note': (
+                    f'no instances of {target_class} found among the unfrozen objects '
+                    f'(gc_freeze_count startup objects are invisible here; action=unfreeze first)'
+                ),
+            })
+        step = max(1, total_count // sample)
+        sampled = [instances[i * step] for i in range(sample) if i * step < total_count]
+        samples_out = []
+        for idx, obj in enumerate(sampled):
+            chain = _walk_referrers(obj, max_depth=max_depth)
+            samples_out.append({
+                'sample_index': idx,
+                'instance_id': id(obj),
+                'instance_repr': _safe_repr(obj, 200),
+                'instance_size_keys': len(obj) if hasattr(obj, '__len__') else None,
+                'chain': chain,
+            })
+        # Free the strong refs we just created.
+        del instances, sampled
+        _gc.collect()
+        return JSONResponse({
+            'pid': os.getpid(),
+            'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+            'action': 'backrefs',
+            'target_class': target_class,
+            'total_count': total_count,
+            'sample_count': len(samples_out),
+            'max_depth': max_depth,
+            'gc_freeze_count': _gc.get_freeze_count(),
+            'samples': samples_out,
+            'note': (
+                'Each sample shows gc.get_referrers walk up to max_depth. '
+                'A chain ending at a NiceGUI Storage / app.storage internal '
+                'dict identifies the retention root. A short chain ending '
+                'at a frame, function, or generator suggests a live closure. '
+                'The gc_freeze_count startup objects (web/gc_freeze.py) are NOT '
+                'returned by gc.get_referrers(), so a chain truncates at a frozen '
+                'hop: action=unfreeze first, action=refreeze after.'
+            ),
+        })
+
+    # Default action: stats (original behavior)
+    most_common = objgraph.most_common_types(limit=limit)
+    if _objgraph_baseline_taken:
+        growth = objgraph.growth(limit=limit, peak_stats={})
+    else:
+        objgraph.growth(limit=limit, peak_stats={})  # prime the internal baseline
+        growth = []
+        _objgraph_baseline_taken = True
+    return JSONResponse({
+        'pid': os.getpid(),
+        'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+        'action': 'stats',
+        'baseline_was_taken_this_call': not bool(growth) and _objgraph_baseline_taken,
+        'gc_freeze_count': _gc.get_freeze_count(),
+        'most_common_types': [{'class': c, 'count': n} for c, n in most_common],
+        'growth_since_last_call': [{'class': c, 'count': n, 'delta': d} for c, n, d in growth],
+        'note': (
+            'most_common_types = absolute instance counts. '
+            'growth_since_last_call = delta since previous /_internal/objgraph call '
+            '(or empty if this is the first call after process start). '
+            'Use action=backrefs&target_class=ObservableDict to trace retention path. '
+            'The gc_freeze_count startup objects (web/gc_freeze.py) are NOT in '
+            'gc.get_objects(), so most_common_types, growth and by_type count '
+            'post-freeze objects only: action=unfreeze to see them, action=refreeze after.'
+        ),
+    })
+
+
+def _safe_repr(obj, max_chars: int) -> str:
+    """Return a bounded repr() that won't blow up on huge dicts."""
+    try:
+        cls_name = type(obj).__name__
+        if hasattr(obj, '__len__'):
+            try:
+                size_hint = f' len={len(obj)}'
+            except Exception:
+                size_hint = ''
+        else:
+            size_hint = ''
+        # Try to extract a tiny preview key for dicts.
+        preview = ''
+        if isinstance(obj, dict) and obj:
+            try:
+                keys = list(obj.keys())[:3]
+                preview = f' keys={keys!r}'
+            except Exception:
+                pass
+        s = f'<{cls_name}{size_hint}{preview}>'
+        return s[:max_chars]
+    except Exception:
+        return f'<{type(obj).__name__} repr-failed>'
+
+
+def _walk_referrers(obj, max_depth: int) -> list:
+    """Walk gc.get_referrers up to max_depth hops, returning a list of
+    string descriptions of intermediate objects.
+
+    Each entry is a dict {depth, type, repr, is_frame, is_module}. The walk
+    stops early if it hits a module, frame, or NiceGUI Storage instance.
+    Visited ids tracked to avoid cycles.
+    """
+    chain = []
+    visited = {id(obj)}
+    current_frontier = [obj]
+    for depth in range(1, max_depth + 1):
+        next_frontier = []
+        for cur in current_frontier:
+            refs = _gc.get_referrers(cur)
+            for ref in refs:
+                rid = id(ref)
+                if rid in visited:
+                    continue
+                visited.add(rid)
+                cls_name = type(ref).__name__
+                # Skip internal noise refs: the chain list itself, current_frontier list, our local frames.
+                if cls_name == 'frame' and getattr(ref, 'f_code', None) is not None:
+                    code = ref.f_code
+                    if code.co_filename and 'main.py' in code.co_filename and code.co_name in ('_walk_referrers', '_objgraph_endpoint'):
+                        continue
+                if cls_name == 'list' and ref is current_frontier:
+                    continue
+                if cls_name == 'list' and ref is chain:
+                    continue
+                entry = {
+                    'depth': depth,
+                    'type': cls_name,
+                    'repr': _safe_repr(ref, 200),
+                    'is_frame': cls_name == 'frame',
+                    'is_module': cls_name == 'module',
+                }
+                # Special anchors: identify NiceGUI internals as roots.
+                if cls_name == 'dict':
+                    # Try to detect if this is the _users dict, _tabs dict, etc.
+                    try:
+                        from nicegui import app as _nicegui_app
+                        storage = getattr(_nicegui_app, 'storage', None)
+                        if storage is not None:
+                            if ref is getattr(storage, '_users', None):
+                                entry['anchor'] = 'storage._users'
+                            elif ref is getattr(storage, '_tabs', None):
+                                entry['anchor'] = 'storage._tabs'
+                    except Exception:
+                        pass
+                chain.append(entry)
+                # Stop walking further from a frame, module, or anchored dict.
+                if entry.get('is_frame') or entry.get('is_module') or entry.get('anchor'):
+                    continue
+                next_frontier.append(ref)
+                # Cap fan-out per level to bound memory.
+                if len(chain) >= 200:
+                    return chain
+        if not next_frontier:
+            break
+        current_frontier = next_frontier
+    return chain
+
+
+# ---------------------------------------------------------------------------
+# Debug endpoint: /_internal/tracemalloc — allocator-level heap attribution
+# Added 2026-05-19 (same context as /_internal/objgraph). Where objgraph
+# tells us WHICH CLASSES are growing, tracemalloc tells us WHICH FILE:LINE
+# allocated the bytes. Both complement each other.
+# Gated by the same MEMSTAT_SECRET header.
+#
+# SAFETY: tracemalloc.start(N) slows the entire process by ~N× because every
+# Python allocation must record an N-frame call stack. depth=25 is enough to
+# wedge a busy NiceGUI service (observed 2026-05-19 — accept queue backed up
+# to 134 connections). This endpoint therefore:
+#   - NEVER auto-starts tracemalloc. Explicit ?action=start is required.
+#   - Defaults depth to 1 (just the immediate allocation frame) when started.
+#   - Hard-caps depth at 5 to prevent another wedge.
+#   - Provides ?action=stop so tracing can be disabled without a restart.
+# ---------------------------------------------------------------------------
+import tracemalloc as _tracemalloc
+
+_tracemalloc_previous_snapshot = None
+
+
+@app.get('/_internal/tracemalloc')
+def _tracemalloc_endpoint(
+    x_memstat_secret: str = Header(default=''),
+    limit: int = 30,
+    group_by: str = 'lineno',
+    action: str = 'snapshot',
+    depth: int = 1,
+):
+    """Allocator attribution by file:line. Explicit start/stop semantics.
+
+    Actions (query param ?action=...):
+      - 'snapshot' (default): take snapshot + diff vs previous. Returns
+        408-style 'not started' message if tracing isn't on.
+      - 'start': begin tracing at the given depth (default 1, max 5).
+        Returns immediately; snapshot data won't be useful until ~60s of
+        traffic has flowed. The user MUST call 'stop' when done — leaving
+        tracing on indefinitely slows the process.
+      - 'stop': halt tracing and clear the stored baseline. Returns the
+        last snapshot diff before stopping.
+      - 'status': report whether tracing is on and how many traces exist.
+
+    group_by: 'lineno' (default) for file:line granularity, 'filename'
+    for file-level, 'traceback' for full call stack.
+    """
+    global _tracemalloc_previous_snapshot
+    if not _MEMSTAT_SECRET:
+        raise HTTPException(status_code=503, detail='tracemalloc disabled (MEMSTAT_SECRET unset)')
+    if x_memstat_secret != _MEMSTAT_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    if group_by not in ('lineno', 'filename', 'traceback'):
+        raise HTTPException(status_code=400, detail='group_by must be lineno|filename|traceback')
+    if action not in ('snapshot', 'start', 'stop', 'status'):
+        raise HTTPException(status_code=400, detail='action must be snapshot|start|stop|status')
+    limit = max(1, min(int(limit), 200))
+    depth = max(1, min(int(depth), 5))  # HARD CAP — depth >5 risks wedging the event loop
+    now_utc = _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime())
+
+    if action == 'status':
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'is_tracing': _tracemalloc.is_tracing(),
+            'traceback_limit': _tracemalloc.get_traceback_limit() if _tracemalloc.is_tracing() else 0,
+            'traced_memory_bytes': list(_tracemalloc.get_traced_memory()) if _tracemalloc.is_tracing() else [0, 0],
+            'has_baseline_snapshot': _tracemalloc_previous_snapshot is not None,
+        })
+
+    if action == 'start':
+        if _tracemalloc.is_tracing():
+            return JSONResponse({
+                'pid': os.getpid(), 'timestamp_utc': now_utc,
+                'note': f'tracemalloc already running at depth={_tracemalloc.get_traceback_limit()}',
+                'is_tracing': True,
+            })
+        _tracemalloc.start(depth)
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'note': f'tracemalloc started at depth={depth}. Let traffic flow for 60+ seconds, then call ?action=snapshot. Call ?action=stop when done.',
+            'is_tracing': True,
+            'traceback_limit': depth,
+        })
+
+    if action == 'stop':
+        if not _tracemalloc.is_tracing():
+            return JSONResponse({
+                'pid': os.getpid(), 'timestamp_utc': now_utc,
+                'note': 'tracemalloc was not running',
+                'is_tracing': False,
+            })
+        # Take a final snapshot before stopping so the caller gets the last delta
+        final_diff = []
+        try:
+            _gc.collect()
+            final = _tracemalloc.take_snapshot()
+            final = final.filter_traces((
+                _tracemalloc.Filter(False, '<frozen importlib._bootstrap>'),
+                _tracemalloc.Filter(False, '<frozen importlib._bootstrap_external>'),
+                _tracemalloc.Filter(False, '<unknown>'),
+            ))
+            if _tracemalloc_previous_snapshot is not None:
+                final_diff = final.compare_to(_tracemalloc_previous_snapshot, group_by)[:limit]
+        except Exception:
+            pass
+        _tracemalloc.stop()
+        _tracemalloc_previous_snapshot = None
+
+        def _fmt_final(s):
+            return {
+                'file': str(s.traceback[0].filename) if s.traceback else '?',
+                'line': s.traceback[0].lineno if s.traceback else 0,
+                'size_bytes': s.size, 'size_diff_bytes': s.size_diff,
+                'count': s.count, 'count_diff': s.count_diff,
+            }
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'note': 'tracemalloc stopped. Baseline cleared.',
+            'is_tracing': False,
+            'final_diff_before_stop': [_fmt_final(s) for s in final_diff],
+        })
+
+    # action == 'snapshot' (default)
+    if not _tracemalloc.is_tracing():
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'note': 'tracemalloc is NOT running. Call /_internal/tracemalloc?action=start&depth=1 first. WARNING: tracing slows the process — keep depth low (1-3) and call ?action=stop when done.',
+            'is_tracing': False,
+            'top_allocators': [],
+            'growth_since_last_call': [],
+        })
+    _gc.collect()
+    snapshot = _tracemalloc.take_snapshot()
+    snapshot = snapshot.filter_traces((
+        _tracemalloc.Filter(False, '<frozen importlib._bootstrap>'),
+        _tracemalloc.Filter(False, '<frozen importlib._bootstrap_external>'),
+        _tracemalloc.Filter(False, '<unknown>'),
+    ))
+    top = snapshot.statistics(group_by)[:limit]
+    diff = []
+    if _tracemalloc_previous_snapshot is not None:
+        diff = snapshot.compare_to(_tracemalloc_previous_snapshot, group_by)[:limit]
+    _tracemalloc_previous_snapshot = snapshot
+
+    def _fmt_stat(s):
+        return {
+            'file': str(s.traceback[0].filename) if s.traceback else '?',
+            'line': s.traceback[0].lineno if s.traceback else 0,
+            'size_bytes': s.size,
+            'count': s.count,
+        }
+
+    def _fmt_diff(s):
+        return {
+            'file': str(s.traceback[0].filename) if s.traceback else '?',
+            'line': s.traceback[0].lineno if s.traceback else 0,
+            'size_bytes': s.size,
+            'size_diff_bytes': s.size_diff,
+            'count': s.count,
+            'count_diff': s.count_diff,
+        }
+
+    return JSONResponse({
+        'pid': os.getpid(),
+        'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+        'group_by': group_by,
+        'top_allocators': [_fmt_stat(s) for s in top],
+        'growth_since_last_call': [_fmt_diff(s) for s in diff],
+        'note': (
+            'top_allocators = current top allocators by absolute size. '
+            'growth_since_last_call = delta since previous /_internal/tracemalloc call. '
+            'Both filter out frozen importlib bootstrap noise.'
+        ),
+    })
+
+
+logger = logging.getLogger(__name__)
+from web.state import state
+from web.api import init_api_routes
+from web.search_api import init_search_api
+from web.translations import tr, set_language, get_language, visitor_language
+from web.citation_chip import render_citation_chip
+from web.home_query import catalogue_has_shelfmark, home_query_target  # the header's go-to box routes as the homepage box does
+from web.feature_flags import WEB_PUZZLE_ENABLED
+from web.atlas_assets import (
+    load_atlas_state,
+    atlas_preview_available,
+    atlas_bin_name,
+    atlas_plain_bytes,
+    atlas_br_bytes,
+    atlas_manifest_bytes,
+    atlas_manifest_etag,
+)
+from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
+from web.passage_assets import load_passage_state, passage_available  # Phase 145: passage-matching parallels search
+from web.start_content import demo_url, load_start_content  # the /start page's own prepared parallels demo, reused by the What's New toast
+from web.ai_listings import (current as ai_listings_current, page_description as ai_page_description,  # the live AI listings
+                             whats_new_suffix as ai_whats_new_suffix)  # (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md)
+from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
+    discovery_methods_noindex,
+    get_all_band_precision,
+    get_band_claim_counts,
+)
+from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
+
+# App configuration
+APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
+from version import APP_VERSION
+# Pinned, NOT APP_VERSION (2026-08-20). The desktop release line moved to 8.6.0
+# while this still describes the 9.0.0 WEB features, and the seen-check is a
+# STRING equality against the per-user 'whats_new_dismissed' value -- so
+# following a desktop bump would light the unread dot again for every web
+# reader who had already read it. Bump by hand when the web What's New
+# content itself changes.
+# Names the CONTENT wave, not a release: the seen flag is stored per browser
+# as this exact string, so it must change whenever the announcement does, and
+# "9.0.0" was already spent on the 2026-08-16 web release.
+WHATS_NEW_VERSION = "9.15.0-friedman"
+# The What's New entry for each combination of live AI listings (web/ai_listings.py).
+AI_LAUNCH_WHATS_NEW = {
+    ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
+    ('ChatGPT',): "New: GenizahSearch in ChatGPT - ask about the manuscripts in your own words, from the AI tools page.",
+    ('Claude',): "New: GenizahSearch in Claude - ask about the manuscripts in your own words, from the AI tools page.",
+}
+APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
+
+# Initialize API routes (Image Proxy, Export)
+init_api_routes()
+
+# Phase 83: OpenAPI sub-mount (D-07).
+# NiceGUI ships app.docs_url=None, app.openapi_url=None -- FastAPI auto-docs are
+# DISABLED on the NiceGUI singleton and cannot be enabled post-construction.
+# Solution: build a dedicated sub-app with docs enabled and mount it at /api.
+# Routes registered at path_prefix='' become /search, /browse, /parallels on
+# the sub-app; after mount at /api they are accessible at /api/search etc.
+# /api/docs and /api/openapi.json are built-in FastAPI routes on the sub-app --
+# they are NOT wrapped by @wrap_endpoint and are therefore excluded from the
+# rate limiter (D-07 requirement).
+#
+# servers=[{"url": "/api"}] (Codex MEDIUM): the sub-app's path keys in the
+# OpenAPI spec are /search, /browse, /parallels. The servers entry tells
+# OpenAPI consumers (Swagger UI, generated SDKs) that the operational base
+# URL is /api, so they invoke /api/search at runtime.
+#
+# version=APP_VERSION (Codex MEDIUM): pulled from version.py source-of-truth
+# rather than hard-coding "7.10.0" so future bumps don't go stale.
+from fastapi import FastAPI as _SearchHelperFastAPI
+from version import APP_VERSION as _APP_VERSION
+
+_search_helper_app = _SearchHelperFastAPI(
+    title="GenizahSearch Search-Helper API",
+    version=_APP_VERSION,
+    description=(
+        "Public research-automation API for the Cairo Genizah corpus. "
+        "Three endpoints: keyword/Responsa search, manuscript drill-down, "
+        "and composition-parallels detection. "
+        "Full reference: "
+        "https://github.com/gershuni/GenizahSearch/blob/master-main/docs/SEARCH_API.md"
+    ),
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    redoc_url="/redoc",
+    servers=[{"url": "/api", "description": "Public deployment"}],
+)
+init_search_api(app_override=_search_helper_app, path_prefix="")
+from web.chatgpt_api import register_chatgpt_api
+register_chatgpt_api(_search_helper_app)
+app.on_shutdown(_search_helper_app.state.shutdown_chatgpt_jobs)
+app.on_shutdown(_search_helper_app.state.shutdown_research_api_jobs)
+app.mount("/api", _search_helper_app)
+# Public MCP server (docs/plans/MCP_SERVER_PLAN.md): exact POST /mcp, registered
+# before the page routes below; no route at all unless MCP_ENABLED and the facade.
+from web.mcp_server import register_mcp_server
+register_mcp_server(app, _search_helper_app)
+# The pages the AI-directory listings link to: /terms, /support, /ai/privacy, and
+# OpenAI's domain-verification file (served only when OPENAI_APPS_CHALLENGE is set).
+from web.public_pages import register_public_pages
+register_public_pages(app)
+
+# Serve static files for SEO images
+STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
+app.add_static_files('/static', STATIC_DIR)
+
+# Phase 133 (ATLAS-01): load the baked Visual Atlas Preview asset ONCE at
+# startup from repo-root atlas_data/ (web.atlas_assets.ATLAS_DATA_DIR), which is
+# deliberately OUTSIDE STATIC_DIR (HIGH-1) so the asset is NEVER reachable via
+# the public /static mount above. It is served ONLY through the flag+readiness-
+# gated /atlas-data/* routes registered below. Fail-closed: a missing/broken
+# asset just leaves atlas_preview_available() False and the beta hides cleanly.
+load_atlas_state()
+
+# Phase 134 (DATA-07/DATA-08): load + fully validate the discovery.db sidecar
+# ONCE at startup from repo-root discovery_data/ (web.discovery_assets.
+# DISCOVERY_DATA_DIR), deliberately OUTSIDE STATIC_DIR -- the sidecar is NEVER
+# reachable via the public /static mount and, this phase, is not served by any
+# route at all (NO discovery UI ships in Phase 134). Fail-closed, mirroring the
+# atlas load above: a missing/corrupt/incompatible sidecar just leaves
+# discovery_available() False and every future discovery surface hides
+# cleanly; the rest of the app is completely untouched.
+load_discovery_state()
+
+# Phase 145: load + validate the passage-matching index ONCE at startup from
+# repo-root passage_index/current/ (web.passage_assets.PASSAGE_DATA_DIR),
+# deliberately OUTSIDE STATIC_DIR. Fail-closed, mirroring the two loads
+# above (the atlas one and the one right before this comment): a
+# missing/corrupt/incompatible index just leaves passage_available() False
+# and the parallels page's method selector plus POST /api/parallels's
+# method='passage' branch hide/reject cleanly.
+load_passage_state()
+
+
+def _negotiate_encoding(accept_encoding_header: str, have_br: bool, have_plain: bool):
+    """Phase 133 (ATLAS-01, MEDIUM-3/MEDIUM-4): pick the response encoding for
+    the atlas asset route by parsing Accept-Encoding tokens AND q-values over
+    br, identity, and the wildcard ``*``, then selecting the representation
+    with the HIGHEST non-zero effective q-value (RFC 9110 §12.5.3) rather than
+    always preferring br whenever it is merely acceptable — a client that sends
+    e.g. ``br;q=0.1, identity;q=1`` is expressing a STRONG preference for
+    identity, and previously got br anyway.
+
+    Returns ``'br'`` (serve Brotli), ``'identity'`` (serve plain), or ``None``
+    (no acceptable representation -> the caller returns a REACHABLE 406). This
+    honors ``br;q=0`` (fall back to plain), ``identity;q=0`` / ``*;q=0`` (refuse
+    plain -> 406 when br is also unavailable), a bare ``*`` (br via wildcard),
+    and weighted preferences like ``br;q=0.1, identity;q=1`` (-> identity). A
+    request with no Accept-Encoding header gets plain (identity is
+    default-acceptable), never br. Ties (equal non-zero q, or a bare wildcard
+    offering both equally) prefer br.
+    """
+    q: dict[str, float] = {}
+    for part in (accept_encoding_header or '').split(','):
+        part = part.strip()
+        if not part:
+            continue
+        toks = part.split(';')
+        coding = toks[0].strip().lower()
+        qval = 1.0
+        for extra in toks[1:]:
+            extra = extra.strip().lower()
+            if extra.startswith('q='):
+                try:
+                    qval = float(extra[2:])
+                except ValueError:
+                    qval = 0.0
+        if coding:
+            q[coding] = qval
+    star = q.get('*')
+
+    def _effective_quality(coding: str) -> float:
+        # Explicit token wins; else fall back to a wildcard's q-value; else the
+        # RFC 9110 default -- identity is always acceptable unless explicitly
+        # excluded, but NO other coding (br included) has that default-accept
+        # rule, so an unlisted/no-wildcard br is simply not acceptable (0.0).
+        if coding in q:
+            return q[coding]
+        if star is not None:
+            return star
+        return 1.0 if coding == 'identity' else 0.0
+
+    br_q = _effective_quality('br') if have_br else 0.0
+    identity_q = _effective_quality('identity') if have_plain else 0.0
+
+    if br_q <= 0 and identity_q <= 0:
+        return None
+    # Highest non-zero q wins; a tie (incl. both offered equally via a bare
+    # wildcard) prefers br for the bandwidth saving.
+    if br_q >= identity_q and br_q > 0:
+        return 'br'
+    if identity_q > 0:
+        return 'identity'
+    return None
+
+
+def _register_atlas_data_routes(target_app):
+    """Register the two Visual Atlas Preview data routes onto ``target_app``.
+
+    Called with the real NiceGUI ``app`` below; tests register the SAME routes
+    onto a bare FastAPI so they can exercise the negotiation/cache behavior
+    without the full NiceGUI startup. Both routes are gated on the single
+    ``atlas_preview_available()`` predicate and return 404 while the flag is OFF
+    or the asset is not loaded (HIGH-1: the asset is NEVER reachable then, and
+    no ``/static/atlas/*`` URL exists).
+    """
+
+    @target_app.get('/atlas-data/manifest.json')
+    def atlas_manifest_route(if_none_match: str = Header(default='')):
+        # The manifest is the MUTABLE pointer to the content-hashed asset:
+        # no-cache + must-revalidate + ETag (NOT immutable), so after a rebake a
+        # client revalidates and picks up the new asset_basename instead of
+        # requesting a stale old hash that would 404 (T-133-05).
+        if not atlas_preview_available():
+            return _StarletteResponse(status_code=404)
+        etag = atlas_manifest_etag()
+        headers = {
+            'Cache-Control': 'no-cache, must-revalidate',
+            'Vary': 'Accept-Encoding',
+        }
+        if etag:
+            headers['ETag'] = etag
+        if if_none_match and etag and if_none_match == etag:
+            return _StarletteResponse(status_code=304, headers=headers)
+        return _StarletteResponse(
+            content=atlas_manifest_bytes(),
+            media_type='application/json',
+            headers=headers,
+        )
+
+    @target_app.get('/atlas-data/{asset_name}')
+    def atlas_asset_route(asset_name: str, accept_encoding: str = Header(default='')):
+        # Content-hashed asset: immutable 1-year cache is safe because the
+        # filename changes on any payload byte change (MEDIUM-4).
+        if not atlas_preview_available():
+            return _StarletteResponse(status_code=404)
+        # Path-traversal mitigation (T-133-04): the untrusted segment ONLY ever
+        # gates a whitelist comparison against the pre-loaded in-memory bin name;
+        # it is never used to build a filesystem path.
+        if asset_name != atlas_bin_name():
+            return _StarletteResponse(status_code=404)
+        choice = _negotiate_encoding(
+            accept_encoding,
+            have_br=atlas_br_bytes() is not None,
+            have_plain=atlas_plain_bytes() is not None,
+        )
+        immutable_cache = 'public, max-age=31536000, immutable'
+        if choice == 'br':
+            return _StarletteResponse(
+                content=atlas_br_bytes(),
+                media_type='application/octet-stream',
+                headers={
+                    'Content-Encoding': 'br',
+                    'Vary': 'Accept-Encoding',
+                    'Cache-Control': immutable_cache,
+                },
+            )
+        if choice == 'identity':
+            return _StarletteResponse(
+                content=atlas_plain_bytes(),
+                media_type='application/octet-stream',
+                headers={
+                    'Vary': 'Accept-Encoding',
+                    'Cache-Control': immutable_cache,
+                },
+            )
+        # No acceptable representation (e.g. identity;q=0 / *;q=0 with no br) ->
+        # a REACHABLE 406, never an invalid/empty 200 (T-133-14).
+        return _StarletteResponse(status_code=406, headers={'Vary': 'Accept-Encoding'})
+
+
+_register_atlas_data_routes(app)
+
+# ============================================================================
+# Website Metadata - SEO & Social Sharing
+# ============================================================================
+
+_SITE_URL = 'https://genizahsearch.com'
+_DEFAULT_TITLE = 'Dicta Genizah Search — Cairo Genizah Transcriptions'
+_DEFAULT_DESCRIPTION = 'חיפוש בכתבי יד מהגניזה הקהירית — תעתיקים, תמונות ומטא-דאטה ל-255,000 קטעי גניזת קהיר. Search Cairo Genizah manuscripts: transcriptions, images & metadata.'
+_DEFAULT_KEYWORDS = 'Cairo Genizah, Genizah manuscripts, Genizah transcriptions, Genizah images, Genizah metadata, browse Cairo Genizah, Cairo Genizah search, Jewish manuscripts, Dicta Genizah Search, MiDRASH transcriptions, גניזה קהירית, חיפוש בגניזה הקהירית, כתבי יד גניזת קהיר, תעתיקים, עיון בגניזה'
+
+
+def page_meta(
+    path: str = '/',
+    title: str = _DEFAULT_TITLE,
+    description: str = _DEFAULT_DESCRIPTION,
+    og_type: str = 'website',
+    noindex: bool = False,
+    needs_iiif: bool = False,
+) -> str:
+    """Build per-page meta tags with correct canonical, OG, and Twitter metadata."""
+    import html as _html
+    _t = _html.escape(title)
+    _d = _html.escape(description)
+    url = f'{_SITE_URL}{path}'
+    robots = '<meta name="robots" content="noindex, noarchive, follow">\n' if noindex else ''
+    return f'''
+<!-- Meta Tags -->
+{robots}<meta name="description" content="{_d}">
+<meta name="keywords" content="{_DEFAULT_KEYWORDS}">
+<meta name="author" content="Dicta Genizah Search">
+<meta name="theme-color" content="#059669">
+<meta http-equiv="content-language" content="he, en"><!-- Preconnect hints -->
+{'<link rel="preconnect" href="https://iiif.nli.org.il">' if needs_iiif else ''}
+<link rel="dns-prefetch" href="https://cudl.lib.cam.ac.uk">
+<link rel="dns-prefetch" href="https://eu.i.posthog.com">
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<!-- Open Graph -->
+<meta property="og:type" content="{og_type}">
+<meta property="og:url" content="{url}">
+<meta property="og:title" content="{_t}">
+<meta property="og:description" content="{_d}">
+<meta property="og:image" content="{_SITE_URL}/static/og-image.png">
+<meta property="og:locale" content="he_IL">
+<meta property="og:site_name" content="Dicta Genizah Search">
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:url" content="{url}">
+<meta name="twitter:title" content="{_t}">
+<meta name="twitter:description" content="{_d}">
+<meta name="twitter:image" content="{_SITE_URL}/static/og-image.png">
+<!-- Canonical URL -->
+<link rel="canonical" href="{url}">
+'''
+
+# Google Analytics
+ANALYTICS_SCRIPT = '''
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-LXT1PTKG3E"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-LXT1PTKG3E');
+</script>
+'''
+
+# PostHog Analytics (real-user monitoring + session recordings)
+_posthog_key = os.environ.get('POSTHOG_API_KEY', '')
+POSTHOG_SCRIPT = f'''
+<!-- PostHog Analytics -->
+<script>
+    !function(t,e){{var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){{function g(t,e){{var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){{var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}},u.people.toString=function(){{return u.toString(1)+".people (stub)"}},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url lib get_property getSessionProperty sessionRecording startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_config __request_queue".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])}},e.__SV=1)}}(document,window.posthog||[]);
+    // Defer PostHog init past first paint (events are queued by the stub loader above)
+    function _phInit() {{
+        posthog.init('{_posthog_key}', {{
+            api_host: 'https://eu.i.posthog.com',
+            person_profiles: 'identified_only',
+            autocapture: true,
+            capture_pageview: true,
+            capture_pageleave: true,
+            session_recording: {{
+                maskAllInputs: true,
+                maskTextSelector: 'input, textarea'
+            }},
+            // Filter out localhost / dev traffic
+            opt_out_capturing_by_default: ['localhost', '127.0.0.1'].includes(location.hostname),
+        }});
+        // Web<->desktop separation on the SHARED PostHog project (id 134161): stamp every
+        // web event with platform=web (super-property, persisted), symmetric with the desktop
+        // app's platform=desktop. Lets a single `platform` breakdown read "web vs desktop"
+        // instead of "(not set) vs desktop". Applies to all events incl. autocapture/$pageview.
+        posthog.register({{platform: 'web'}});
+    }}
+    if (window.requestIdleCallback) {{ requestIdleCallback(_phInit); }}
+    else {{ setTimeout(_phInit, 2000); }}
+</script>
+''' if _posthog_key else ''
+
+# User-perceived latency of page turns, searches, Quick View and saves (ux_timing).
+from web.ux_timing import head_html as _ux_timing_head_html  # noqa: E402
+POSTHOG_SCRIPT += _ux_timing_head_html()
+
+# Reconnect backoff: a restart must not reload every open tab at once (web/reconnect_backoff.py).
+# Shared, so every page -- /privacy-extension and /reset-hints included -- gets it before socket.io.
+from web.reconnect_backoff import head_html as _reconnect_backoff_head_html  # noqa: E402
+ui.add_head_html(_reconnect_backoff_head_html(), shared=True)
+
+
+# posthog_capture moved to web/analytics.py to avoid circular imports
+from web.analytics import posthog_capture  # noqa: F401 — re-export
+
+
+# ============================================================================
+# Password Recovery Fragment Interceptor (debug session
+# password-reset-link-dead-end, 2026-07-28)
+# ============================================================================
+# Root cause: Supabase's `reset_password_for_email` (used by BOTH the
+# desktop app and the new web "Forgot password?" link -- see
+# supabase_client.request_password_reset) never registers a PKCE
+# code_challenge, so Supabase always redirects the recovery link to the
+# Site URL (confirmed bare `https://genizahsearch.com` via the 2026-07-28
+# dashboard read-back) with session tokens in the URL FRAGMENT
+# (`#access_token=...&refresh_token=...&type=recovery`), or -- for an
+# expired/consumed/invalid token -- an error fragment
+# (`#error=access_denied&error_code=otp_expired&...`). NiceGUI is
+# server-rendered and never sees URL fragments on its own; only
+# client-side JS can read `window.location.hash`.
+#
+# This script is added as the FIRST inline <script> in `dashboard_page()`'s
+# <head> (before ANALYTICS_SCRIPT / POSTHOG_SCRIPT, both defined above and
+# emitted later in the same <head>) specifically so the fragment is read
+# and the address bar scrubbed via `history.replaceState` SYNCHRONOUSLY,
+# before Google Analytics' gtag or PostHog's session-recording/pageview
+# capture (both deferred/async) can ever observe `location.href` with the
+# tokens or error details still attached. The extracted payload is stashed
+# in a transient `window.__genizahRecovery` global -- never the URL, never
+# a query string, never logged -- and is read exactly once via
+# `ui.run_javascript` (the existing NiceGUI websocket channel, not a new
+# HTTP request) by `_render_password_recovery_handler` below, which
+# deletes it immediately after reading.
+_RECOVERY_FRAGMENT_INTERCEPT_SCRIPT = '''
+<script>
+(function() {
+    try {
+        var hash = window.location.hash;
+        if (!hash || hash.length < 2) { return; }
+        var params = new URLSearchParams(hash.substring(1));
+        var isRecovery = params.get('type') === 'recovery' && !!params.get('access_token');
+        var hasError = !!params.get('error');
+        if (!isRecovery && !hasError) { return; }
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        if (isRecovery) {
+            window.__genizahRecovery = {
+                kind: 'recovery',
+                access_token: params.get('access_token'),
+                refresh_token: params.get('refresh_token') || ''
+            };
+        } else {
+            window.__genizahRecovery = {
+                kind: 'error',
+                error_code: params.get('error_code') || ''
+            };
+        }
+    } catch (e) { /* malformed fragment -- treat as an ordinary homepage load */ }
+})();
+</script>
+'''
+
+# One-shot read-and-clear: returns the payload stashed above (or null for an
+# ordinary homepage load with no recovery-shaped fragment), then deletes it
+# so a page reload / reconnect cannot replay a stale payload.
+_RECOVERY_PAYLOAD_READ_JS = (
+    "(function(){ var r = window.__genizahRecovery || null; "
+    "try { delete window.__genizahRecovery; } catch (e) { window.__genizahRecovery = undefined; } "
+    "return r; })()"
+)
+
+
+async def _complete_password_recovery_session(access_token: str, refresh_token: str) -> dict:
+    """Establish the recovery session and persist it via safe_storage.
+
+    Factored out of the `/` page's recovery-fragment handler (mirrors the
+    Phase 91 AUTHW-02 `_oauth_complete_login` extraction) so the
+    session-establishment + multi-write atomicity logic is unit-testable
+    without a NiceGUI render harness. Reuses `set_session_from_url()`
+    (`web/supabase_client.py`) -- the ONLY call site the Phase 90 D-15
+    static AST guard (`tests/test_no_set_session_outside_oauth.py`)
+    allowlists for `set_session`, already anticipated for exactly this
+    scenario but with zero callers before this fix.
+
+    Returns:
+        {'success': True, 'user': ..., 'profile': ...} on success, or
+        {'error': 'reason_code'} on failure -- reason_code is one of
+        session_exchange_failed / no_user_returned / no_session_returned /
+        session_storage_unavailable / auth_state_storage_unavailable.
+    """
+    from web.supabase_client import get_profile, set_session_from_url
+
+    result = set_session_from_url(access_token, refresh_token)
+    if 'error' in result:
+        posthog_capture('password_recovery_failed', {'error_code': 'session_exchange_failed'})
+        return {'error': 'session_exchange_failed'}
+
+    user = result.get('user')
+    if not user:
+        posthog_capture('password_recovery_failed', {'error_code': 'no_user_returned'})
+        return {'error': 'no_user_returned'}
+
+    session = result.get('session')
+    if not session:
+        posthog_capture('password_recovery_failed', {'error_code': 'no_session_returned'})
+        return {'error': 'no_session_returned'}
+
+    if not safe_user_set('auth_session', {
+        'access_token': session.get('access_token'),
+        'refresh_token': session.get('refresh_token'),
+    }):
+        posthog_capture('password_recovery_failed', {'error_code': 'session_storage_unavailable'})
+        return {'error': 'session_storage_unavailable'}
+
+    profile = get_profile(user['id'])
+    if not GlobalAuthState.set_auth(user, profile):
+        # DEFENSIVE 3-key cleanup -- same pattern as _oauth_complete_login.
+        safe_user_pop('auth_session', None)
+        safe_user_pop('auth_user', None)
+        safe_user_pop('auth_profile', None)
+        posthog_capture('password_recovery_failed', {'error_code': 'auth_state_storage_unavailable'})
+        return {'error': 'auth_state_storage_unavailable'}
+
+    # Codex review 2026-07-28 HIGH-2: the browser-side payload was already
+    # read-and-DELETED (and the fragment scrubbed) before we got here, so
+    # until this flag exists there is NO durable record that a recovery is
+    # in progress. If the tab reloads or the websocket drops between the JS
+    # read and the dialog opening, the user lands on a plain homepage with
+    # the fragment gone AND their single-use email link already spent --
+    # i.e. exactly the silent dead end this whole fix exists to remove.
+    # This flag is a plain non-secret boolean (never a token); it lets any
+    # subsequent `/` render re-offer the set-password dialog, because at
+    # this point the recovery SESSION is already established server-side
+    # and no further token exchange is needed. Cleared on success or on an
+    # explicit user cancel (see _render_password_recovery_handler) so it
+    # cannot nag forever.
+    safe_user_set('password_recovery_pending', True)
+
+    posthog_capture('password_recovery_started', {})
+    return {'success': True, 'user': user, 'profile': profile}
+
+
+async def _handle_recovery_payload(payload, open_set_password_dialog, open_error_dialog) -> None:
+    """Classify the JS-extracted recovery payload and dispatch the right UI.
+
+    `open_set_password_dialog` / `open_error_dialog` are plain zero-arg
+    callables (in production the lazy `_open_set_password` / `_open_error`
+    wrappers, which build the dialogs on first demand; in tests, simple
+    counters) so this dispatch logic is unit-testable without building
+    real NiceGUI dialogs.
+
+    NOTE: this function is what makes the lazy build pay off -- it returns
+    WITHOUT invoking either callable for an ordinary homepage load, so no
+    dialog is ever constructed on the overwhelming majority of `/` renders.
+
+    Handles THREE cases:
+      - payload is None / not a dict -> ordinary homepage load, no-op.
+      - payload['kind'] == 'error' -> the recovery link was expired,
+        already consumed, or otherwise invalid (Supabase's own
+        `#error=access_denied&error_code=otp_expired&...` fragment). This
+        is a REQUIRED case (recovery tokens are single-use), not an edge
+        case -- shows the expired-link dialog with a path back to
+        request a fresh link.
+      - payload['kind'] == 'recovery' -> valid single-use token; establish
+        the session via `_complete_password_recovery_session` and show the
+        set-new-password dialog on success, or the same expired-link
+        dialog if session establishment itself fails.
+    """
+    if not payload or not isinstance(payload, dict):
+        return
+    kind = payload.get('kind')
+    if kind == 'error':
+        posthog_capture('password_recovery_failed', {
+            'error_code': str(payload.get('error_code', ''))[:100],
+        })
+        open_error_dialog()
+        return
+    if kind != 'recovery':
+        return
+    access_token = payload.get('access_token')
+    refresh_token = payload.get('refresh_token', '') or ''
+    if not access_token:
+        return
+    result = await _complete_password_recovery_session(access_token, refresh_token)
+    if 'error' in result:
+        open_error_dialog()
+        return
+    open_set_password_dialog()
+
+
+def _render_password_recovery_handler():
+    """Schedule the one-shot recovery-fragment check on `/` and build the
+    recovery dialogs LAZILY, only once a recovery fragment is confirmed
+    present. See `_RECOVERY_FRAGMENT_INTERCEPT_SCRIPT` above for the full
+    root-cause writeup. Must be called from within the page's
+    `with content:` slot (mirrors every other dialog built in this module)
+    so the anchor container has a valid parent slot.
+
+    Why lazy: `/` is the highest-traffic route on the site and is hit
+    relentlessly by crawlers, while a recovery fragment is present on a
+    vanishingly small fraction of loads. Building three dialogs (with
+    inputs, buttons and their event handlers) eagerly on every homepage
+    render is pure waste, and this site has a documented history of RSS
+    pressure driven by bot traffic on `/` (see the 2026-07-08 allocator-
+    ratchet remediation). Eagerly we create exactly ONE hidden anchor
+    `<div>`; everything else is deferred behind the JS check, so an
+    ordinary homepage load costs a single `ui.run_javascript` round-trip
+    over the already-open websocket and nothing more.
+    """
+    # Anchor container: captured so the deferred build has a valid parent
+    # slot inside an async task (the codebase's established pattern for
+    # async element creation -- cf. `content_container` in web/pages/browse.py).
+    # display:none keeps it from consuming a flex gap in the page column;
+    # Quasar portals dialog content to <body> on open, so a hidden parent
+    # does not affect the dialogs themselves.
+    anchor = ui.element('div').style('display: none;')
+
+    # ROOT CAUSE of the 2026-07-28 live failure (found via prod [pwreset] logs):
+    # NiceGUI keys its slot stack PER asyncio TASK. `asyncio.ensure_future`
+    # below starts a NEW task whose slot stack is empty, so ANY `ui.context.*`
+    # lookup from inside it raises
+    #   RuntimeError('The current slot cannot be determined because the slot
+    #                 stack for this task is empty.')
+    # `ui.run_javascript` is `ui.context.client.run_javascript(...)` under the
+    # hood, so the probe raised this on EVERY homepage load and the original
+    # `except Exception -> logger.debug` swallowed it. The recovery flow could
+    # therefore never fire -- for a real link exactly as for a fake one, which
+    # is why this looked like a Supabase wire-format problem and was not.
+    #
+    # Fix: bind the Client HERE, at render time, where the slot stack is
+    # populated, and use that object directly in the task -- never
+    # `ui.context.*` / the `ui.run_javascript` module-level shim. This is the
+    # same capture idiom already used by web/pages/home.py::create_page,
+    # web/pages/browse.py (refs.page_client) and web/pages/search.py.
+    page_client = ui.context.client
+
+    # Memo so a build is done at most once per page even if both branches
+    # somehow fire; holds the two dialogs the payload handler can open.
+    _built: dict = {}
+
+    def _build_dialogs() -> dict:
+        """Construct the recovery dialogs on first demand. Returns {} if the
+        client/container is already torn down (visitor navigated away while
+        the fragment check was in flight)."""
+        if _built:
+            return _built
+
+        # Same teardown guard as browse.py's update_content(): accessing
+        # .client on a dead session returns the deleted object rather than
+        # raising, so the deletion flags must be checked explicitly.
+        try:
+            _client = anchor.client
+        except (RuntimeError, AttributeError) as exc:
+            logger.warning("[pwreset] _build_dialogs bailed — no client: %r", exc)
+            return {}
+        if anchor.is_deleted or getattr(_client, '_deleted', False):
+            logger.warning(
+                "[pwreset] _build_dialogs bailed — torn down (anchor.is_deleted=%s "
+                "client._deleted=%s)",
+                anchor.is_deleted, getattr(_client, '_deleted', None),
+            )
+            return {}
+
+        from web.auth_state import create_forgot_password_dialog
+
+        with anchor:
+            forgot_dialog = create_forgot_password_dialog()
+
+            set_password_dialog = ui.dialog().props('persistent')
+            with set_password_dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
+                ui.label(tr('Set a new password')).classes('text-lg font-bold')
+                new_pw = ui.input(tr('New Password'), password=True, password_toggle_button=True).classes('w-full').props('outlined').style('direction: ltr;')
+                confirm_pw = ui.input(tr('Confirm New Password'), password=True, password_toggle_button=True).classes('w-full').props('outlined').style('direction: ltr;')
+                set_pw_error = ui.label('').classes('text-red-500 text-sm hidden')
+
+                async def handle_set_password():
+                    set_pw_error.classes('hidden', remove='visible')
+                    if not new_pw.value:
+                        set_pw_error.text = tr('Please enter new password')
+                        set_pw_error.classes('visible', remove='hidden')
+                        return
+                    if new_pw.value != confirm_pw.value:
+                        set_pw_error.text = tr('Passwords do not match')
+                        set_pw_error.classes('visible', remove='hidden')
+                        return
+                    if len(new_pw.value) < 8:
+                        set_pw_error.text = tr('Password must be at least 8 characters')
+                        set_pw_error.classes('visible', remove='hidden')
+                        return
+                    from web.supabase_client import change_password as supabase_change_password
+                    # Codex review 2026-07-28 BLOCKER-1: read the token HERE,
+                    # on the NiceGUI event-loop thread where the UI context
+                    # (and therefore app.storage.user) actually exists, and
+                    # hand it to the worker. Letting change_password() do its
+                    # own safe_user_get() inside run.io_bound silently yielded
+                    # {} -> 'Not logged in' on EVERY attempt, because
+                    # loop.run_in_executor does not propagate contextvars.
+                    auth_session = safe_user_get('auth_session') or {}
+                    access_token = auth_session.get('access_token')
+                    if not access_token:
+                        # Recovery session lost (storage pruned / server
+                        # restart). The email link is single-use, so send them
+                        # for a fresh one rather than failing opaquely.
+                        safe_user_pop('password_recovery_pending', None)
+                        set_password_dialog.close()
+                        _open_error()
+                        return
+                    result = await run.io_bound(
+                        supabase_change_password, new_pw.value, access_token,
+                    )
+                    if result is None:
+                        return  # cancelled or app stopping
+                    if result.get('success'):
+                        # Recovery is complete -- retire the pending flag so
+                        # later `/` visits stop re-offering the dialog.
+                        safe_user_pop('password_recovery_pending', None)
+                        posthog_capture('password_recovery_completed', {})
+                        set_password_dialog.close()
+                        ui.notify(tr('Password changed successfully'), type='positive')
+                        await asyncio.sleep(0.3)
+                        ui.navigate.reload()
+                    else:
+                        # Codex review 2026-07-28 MEDIUM-4: NEVER surface the
+                        # raw Supabase/httpx error text -- it is English-only
+                        # (leaks into the Hebrew UI, violating the i18n
+                        # invariant) and exposes backend operational detail.
+                        # Show a translated message; keep the detail in logs.
+                        logger.warning(
+                            "password recovery: change_password failed: %s",
+                            result.get('error'),
+                        )
+                        set_pw_error.text = tr('Failed to change password')
+                        set_pw_error.classes('visible', remove='hidden')
+
+                def _cancel_set_password():
+                    # An explicit user cancel is the one non-success case that
+                    # clears the pending flag -- otherwise the dialog would
+                    # reappear on every homepage visit indefinitely.
+                    safe_user_pop('password_recovery_pending', None)
+                    set_password_dialog.close()
+
+                with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                    ui.button(tr('Cancel'), on_click=_cancel_set_password).props('flat')
+                    ui.button(tr('Set Password'), on_click=handle_set_password).props('color=primary')
+                confirm_pw.on('keydown.enter', handle_set_password)
+
+            error_dialog = ui.dialog()
+            with error_dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
+                ui.icon('error_outline').classes('text-3xl').style('color: #ef4444;')
+                ui.label(tr('This password reset link has expired or was already used.')).classes('text-base')
+
+                def _open_forgot():
+                    error_dialog.close()
+                    forgot_dialog.open()
+
+                with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                    ui.button(tr('Cancel'), on_click=error_dialog.close).props('flat')
+                    ui.button(tr('Forgot password?'), on_click=_open_forgot).props('color=primary')
+
+        _built['set_password'] = set_password_dialog
+        _built['error'] = error_dialog
+        return _built
+
+    # Lazy open-callables. `_handle_recovery_payload` only invokes one of
+    # these AFTER it has classified a non-empty recovery payload, so an
+    # ordinary homepage load never triggers a build. Keeping the
+    # zero-arg-callable contract also keeps that function unit-testable
+    # without a NiceGUI render harness (tests pass plain counters).
+    def _open_set_password() -> None:
+        dialogs = _build_dialogs()
+        if dialogs:
+            logger.info("[pwreset] opening set-password dialog")
+            dialogs['set_password'].open()
+        else:
+            # Silent no-op here was undiagnosable in production. See the
+            # WARNING inside _build_dialogs for the reason it bailed.
+            logger.warning("[pwreset] set-password dialog NOT opened — build returned {}")
+
+    def _open_error() -> None:
+        dialogs = _build_dialogs()
+        if dialogs:
+            logger.info("[pwreset] opening expired-link dialog")
+            dialogs['error'].open()
+        else:
+            logger.warning("[pwreset] expired-link dialog NOT opened — build returned {}")
+
+    # Codex review 2026-07-28 HIGH-2 (resume path): a recovery that already
+    # established its session but never finished the password change is
+    # re-offered here, WITHOUT needing the fragment or the (single-use, now
+    # spent) email link again. Covers the reload / websocket-drop / >5s
+    # run_javascript-timeout window in which the browser-side payload has
+    # already been read-and-deleted but the dialog never appeared. Runs on
+    # the event-loop thread during page render, so the storage read is valid.
+    if safe_user_get('password_recovery_pending'):
+        _open_set_password()
+        return  # the fragment is long gone on a resume; skip the JS probe
+
+    async def _deferred_check():
+        # Observability (2026-07-28 reopen): the original `except Exception ->
+        # logger.debug` made a production failure leave NO trace at the default
+        # INFO level, which is exactly why the first live failure could not be
+        # diagnosed from the logs. Never swallow this path silently again.
+        # Tokens are NEVER logged -- only the payload's shape.
+        # `page_client`, NOT ui.context.* -- see the root-cause note above.
+        try:
+            await page_client.connected(timeout=10.0)
+        except Exception as exc:
+            logger.warning("[pwreset] client never connected, probe skipped: %r", exc)
+            return
+        try:
+            payload = await page_client.run_javascript(
+                _RECOVERY_PAYLOAD_READ_JS, timeout=10.0,
+            )
+        except Exception as exc:
+            logger.warning("[pwreset] fragment probe FAILED: %r", exc, exc_info=True)
+            return
+        if payload is None:
+            logger.info("[pwreset] probe returned None (ordinary load, no fragment)")
+        elif isinstance(payload, dict):
+            logger.info(
+                "[pwreset] probe returned kind=%r has_access_token=%s error_code=%r",
+                payload.get('kind'),
+                bool(payload.get('access_token')),
+                payload.get('error_code'),
+            )
+        else:
+            logger.warning("[pwreset] probe returned unexpected type %s: %r",
+                           type(payload).__name__, payload)
+        # The dispatch itself was previously OUTSIDE any try/except, so an
+        # exception in the session exchange or dialog construction became an
+        # unhandled asyncio task exception -- invisible, and indistinguishable
+        # from "nothing happened". This is a prime suspect for the 2026-07-28
+        # live failure, so it gets its own guard and a loud log.
+        try:
+            # Inside the page: this task has none, and the dispatch's PostHog
+            # events and posthog.identify go out through ui.run_javascript.
+            with page_client:
+                await _handle_recovery_payload(payload, _open_set_password, _open_error)
+        except Exception as exc:
+            logger.warning("[pwreset] dispatch FAILED: %r", exc, exc_info=True)
+
+    asyncio.ensure_future(_deferred_check())
+
+
+# ============================================================================
+# Modern Theme System - Professional Research UI
+# ============================================================================
+
+# Cache-buster: the stylesheet URL carries a content hash, so a deploy (or a
+# dev-server restart) that changes common.css is picked up on the next normal
+# page load instead of waiting out the browser's heuristic cache. Root cause of
+# the 2026-08-13 invisible-highlight report: the bare URL kept serving CSS from
+# before the rule existed. Computed ONCE at import — the file does not change
+# under a running server.
+def _common_css_version() -> str:
+    import hashlib
+    try:
+        with open(os.path.join(STATIC_DIR, 'common.css'), 'rb') as f:
+            return hashlib.md5(f.read()).hexdigest()[:10]
+    except OSError:
+        return APP_VERSION
+
+
+COMMON_STYLES = f'<link rel="stylesheet" href="/static/common.css?v={_common_css_version()}">'
+
+
+def _resolve_ui_language() -> str:
+    """Return the persisted UI language so layout and bootstrap agree on first render.
+
+    A visitor with no saved choice gets their browser's language: Hebrew if
+    the browser's first choice is Hebrew, English otherwise -- the same rule
+    ``get_language()`` applies to a request (``translations.visitor_language``).
+    Until 2026-10-20 ``get_language()`` was one process-wide value, last set
+    by whichever visitor's page rendered before this one, and falling back to
+    it showed every new visitor the previous visitor's language.
+
+    The page HTML therefore depends on ``Accept-Language`` as well as the
+    session cookie. If page HTML is ever made cacheable (the Set-Cookie
+    BYPASS issue), the cache must vary on it.
+    """
+    return visitor_language(safe_user_get('ui_language'))
+
+
+# ============================================================================
+# Layout Components
+# ============================================================================
+
+# The sidebar's icon rail (owner, 2026-11-05): the visitor's choice, the class on <body> while
+# it is collapsed, and the class of the tooltips that name each icon there (common.css shows
+# them only while the body has the class: in the full sidebar the label is beside the icon).
+NAV_MINI_KEY = 'drawer_mini'
+NAV_MINI_BODY_CLASS = 'gs-nav-mini'
+NAV_MINI_TIP_CLASS = 'nav-mini-tip'
+
+# The header's go-to box (render_header_center). Below 1024px the box is closed behind a search button. Opening and closing
+# only toggle a class on the header row (common.css draws the field across the
+# header while it is set) and move the focus, so they run in the browser.
+_HEADER_SEARCH_OPEN_JS = (
+    "(e) => { const s = e.target.closest('.header-search'); if (!s) return;"
+    " s.classList.add('is-open'); const i = s.querySelector('input');"
+    " if (i) setTimeout(() => i.focus(), 0); }"
+)
+_HEADER_SEARCH_CLOSE_JS = (
+    "(e) => { const s = e.target.closest('.header-search'); if (!s) return;"
+    " s.classList.remove('is-open'); const b = s.querySelector('.header-search-toggle');"
+    " if (b && b.offsetParent) b.focus(); }"
+)
+
+
+def create_layout():
+    """Create the main application layout with modern Header and Sidebar."""
+    # Phase 87 FOUND-01 (B1 in 87-REVIEWS.md): mint _session_uuid on first
+    # page render of every session. ensure_session_uuid() is idempotent and
+    # returns False harmlessly on prune-race. Downstream code (Phases 88+)
+    # can rely on _session_uuid being present in storage after this point.
+    ensure_session_uuid()
+
+    resolved_lang = _resolve_ui_language()
+    set_language(resolved_lang)
+
+    current_page = safe_user_get('current_page', '/')
+    rtl_mode = resolved_lang == 'he'
+
+    # Page loading progress bar element (CSS in COMMON_STYLES)
+    ui.html('<div class="page-loading-bar" id="pageLoadingBar"></div>', sanitize=False)
+    ui.add_head_html('''<script>
+(function() {
+    function showLoadingBar() {
+        var bar = document.getElementById('pageLoadingBar');
+        if (bar) {
+            bar.classList.remove('complete');
+            bar.classList.add('active');
+        }
+    }
+    function hideLoadingBar() {
+        var bar = document.getElementById('pageLoadingBar');
+        if (bar) {
+            bar.classList.remove('active');
+            bar.classList.add('complete');
+        }
+    }
+
+    // Expose globally so Python can call via ui.run_javascript
+    window.__showLoadingBar = showLoadingBar;
+    window.__hideLoadingBar = hideLoadingBar;
+
+    // 1. Trigger on <a href> clicks (original behavior)
+    document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[href]');
+        if (!link) return;
+        var href = link.getAttribute('href');
+        if (href && href.startsWith('/') && !href.startsWith('//') && !link.target) {
+            showLoadingBar();
+        }
+    });
+
+    // 2. Trigger on Enter key in text inputs (search/shelfmark navigation) -- except in
+    //    a box inside [data-no-loading-bar]: its Enter does its work in the page (the
+    //    /search query, with its own progress bar; the Blau dictionary box), no page
+    //    loads, and the bar ran on for the 15-second fallback after every query
+    //    (owner, 2026-11-04).
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+            if (e.target.closest && e.target.closest('[data-no-loading-bar]')) return;
+            var skipTypes = ['submit', 'button', 'checkbox', 'radio', 'file'];
+            if (skipTypes.indexOf(e.target.type) === -1) {
+                showLoadingBar();
+            }
+        }
+    });
+
+    // 3. KEY FIX: Trigger on beforeunload - catches ALL navigation methods
+    // This fires when ui.navigate.to() sets window.location, when <a> links navigate,
+    // when the user uses back/forward, etc. It's the universal navigation event.
+    window.addEventListener('beforeunload', function() {
+        showLoadingBar();
+    });
+
+    // 4. Hide on page load (new page finished rendering)
+    window.addEventListener('load', hideLoadingBar);
+
+    // 5. Fallback: hide after 15 seconds if page didn't navigate
+    // (for Enter key searches that update in-page instead of navigating)
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            setTimeout(hideLoadingBar, 15000);
+        }
+    });
+})();
+</script>''')
+
+    # Reference dictionary to store UI elements accessible across function scopes
+    refs = {}
+
+    # === "What's New" — the DATA, resolved before the header is built ===
+    #
+    # Moved above `render_header_right` on 2026-09-04. It used to be computed
+    # further down, next to a fixed-position toast; the toast is gone (owner:
+    # the homepage showed FOUR overlays at once and the news was one of them),
+    # and what replaced it is a header button that has to exist by the time the
+    # header renders. The gating, the wording and the suppression rule are
+    # UNCHANGED — only where the result is drawn.
+    #
+    # v9.0.0 announces the two beta research surfaces, so they are resolved BEFORE
+    # the control is built rather than inside it. Three conditions, each load-bearing:
+    #
+    # 1. Each surface is gated on the SAME availability predicate as its own route
+    #    and nav entry (never a bare flag) — advertising one that clean-hides would
+    #    send the reader to a 404.
+    # 2. If NEITHER is reachable there is nothing to announce, and the control must
+    #    not render a heading followed by no links. A dev or flag-OFF environment
+    #    sees no button at all.
+    # 3. It SUPPRESSES ITSELF on the pages that already feature these
+    #    surfaces — `/help` documents both with their own anchors and `/parallels`
+    #    IS the feature. Repeating them there is duplication a reader reads as a
+    #    bug, and it is what made `/start`'s "exactly one /atlas href" render-smoke
+    #    guard fail: the guard was right, the second link was mine.
+    #
+    #    `/` is NOT suppressed (owner, 2026-08-16). The announcement's whole point
+    #    is the reader ARRIVING at the site, and that arrival is normally the
+    #    homepage; a homepage suppression meant the one visitor it was written for
+    #    never saw it.
+    #
+    # REPLACED 2026-08-26 (owner). This listed the introduction, the atlas and
+    # the identifications; all three shipped on 2026-08-16, all three keep their
+    # own nav entry, and none of them is the news any more. The news is the
+    # parallels search, so it carries that and nothing else.
+    #
+    # Both entries lead to `/parallels`, unlike the old list where every name led
+    # somewhere different. They are two distinct features on one page, and naming
+    # them separately is what makes the second one discoverable at all.
+    #
+    # WATCH THE LENGTH HERE. These are owner-worded (2026-08-26) and they are
+    # sentences, not names. If the panel has to shrink, shorten the text; do not
+    # introduce a third entry.
+    # /whats-new is every version's news itself (2026-11-05).
+    _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help', '/whats-new')
+
+    # Both entries land on a PREFILLED search rather than an empty form
+    # (owner, 2026-08-26). A reader who has just been told a new search
+    # method exists and is then shown a blank textarea has to go and find
+    # something to paste into it before the announcement means anything.
+    #
+    # The text comes from `/start`'s own prepared demo -- the Deror Yikra
+    # stanzas -- rather than a copy of it. That file is schema-validated and
+    # the URL is rebuilt from typed fields by `demo_url` (deliberately, so
+    # the JSON can never become an open-redirect), and one source of truth
+    # means the announcement cannot drift from the Start page.
+    #
+    # Failure here must not take the shell down with it: `load_start_content`
+    # raises on a malformed content file, and `/start` degrades to a fallback
+    # page when it does. This control is on EVERY page, so it degrades to the
+    # bare form instead.
+    _parallels_demo_target = '/parallels'
+    try:
+        _demo = (load_start_content().get('demos') or {}).get('parallels') or {}
+        if _demo.get('enabled'):
+            _parallels_demo_target = demo_url('parallels', _demo)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    _new_surfaces = []
+    # v9.7.0 (2026-10-18): the 9.6.1 and 9.6.0 search entries and the
+    # multi-witness entry were dropped with the release texts (owner), so the
+    # list is the new entry (inserted first, below), the AI one and this one.
+    # v9.8.0 (2026-10-19): the 9.8.0 entry goes in above the 9.7.0 one.
+    if passage_available():
+        _new_surfaces.append(
+            (tr("Letter-level parallels search — faster and more precise"),
+             _parallels_demo_target))
+
+    # v9.2.0, and it is UNGATED -- the owner's decision, and the only honest
+    # shape for it: the print view and the citation button are on for every
+    # reader on every deployment, so there is no flag to hang it on.
+    #
+    # WHAT THAT COSTS, stated because it undoes something deliberate.
+    # `tests/render_smoke/test_whats_new_banner.py` records that while this
+    # list opened with an unconditionally-registered entry the
+    # `bool(_new_surfaces)` guard below "was a formality", and that gating
+    # every entry is what made it load-bearing. This entry makes it a formality
+    # again: the list can no longer be empty by any route a reader can reach.
+    #
+    # So the guard was not left untested, it was given a different thing to
+    # prove. The substantive half of the old property -- do not advertise a
+    # GATED surface whose flag is off -- is still real and still tested; what
+    # is gone is only the "nothing at all to announce" case, which no longer
+    # occurs. See the two rewritten tests in that file.
+    # v9.2.1 (2026-09-18): the GPT is live for every reader, so this entry is
+    # ungated too, and it points at the page that explains all three ways in.
+    # 2026-10-11 (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md): once the ChatGPT plugin or
+    # the Claude connector is live (a production setting), the newest entry names it
+    # and the GPT entry goes; the GPT entry also goes when OpenAI retires GPTs.
+    _ai = ai_listings_current()
+    if _ai.live:
+        _new_surfaces.insert(0, (tr(AI_LAUNCH_WHATS_NEW[tuple(n for n, _ in _ai.live)]), '/ai'))
+    elif _ai.gpt_available:
+        _new_surfaces.append(
+            (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
+                "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
+    # v9.9.0 (2026-10-23), ungated, both in the owner's own Hebrew: the phone layout
+    # of the Joins Lab and Personal Lists, then the Responsa stars on top.
+    _new_surfaces.insert(0, (tr("The Joins Lab and Personal Lists now fit a phone: Compare shows "
+                                "the anchor and the candidate together, and the anchor stays in "
+                                "view while you scroll"), '/joins-lab'))
+    _new_surfaces.insert(0, (tr("Better wildcard search in Responsa style (the * operator): "
+                                "the site now finds fuller results"), '/search'))
+    # v9.11.0 (2026-10-28), ungated like the FGP transcriptions themselves: the
+    # owner-approved line, leading to Browse, where the version chooser shows them.
+    _new_surfaces.insert(0, (tr("New: about 14,600 more Friedberg Genizah Project transcriptions, "
+                                "and cleaner text in about 27,800 more."), '/browse'))
+    # v9.11.1 (2026-10-30), ungated: the owner's own Hebrew line, above the FGP one.
+    _new_surfaces.insert(0, (tr("New: corrected and added links to the Cambridge Digital Library (CUDL)"),
+                             '/browse'))
+    # v9.13.0 (2026-11-01), ungated: the Manuscript features, leading to Browse by
+    # Identification. The 9.8.0 Joins Lab entry went to make room (owner).
+    _new_surfaces.insert(0, (tr("New: find manuscripts by their features — script, region, period, "
+                                "vocalization, lines, size, material and more — with the Manuscript "
+                                "features button, on Browse by Identification and in Search only in..."),
+                             '/catalog-browse'))
+    # v9.14.0 (2026-11-05), the owner-approved line, leading to Browse. Gated on a dictionary
+    # being served: the sidecars are deployed after the code, and the panel is not there before.
+    from web.keyboard_shortcuts import dictionaries_served as _dictionaries_served
+    from web.keyboard_shortcuts import served_dictionaries as _served_dictionaries
+    if _dictionaries_served():
+        _new_surfaces.insert(0, (tr("New: Judeo-Arabic dictionaries! On the manuscript page, press the "
+                                    "dictionaries button (עع) at the bottom of the text pane; clicking a "
+                                    "word then shows its entry in Blau's dictionary and in Lane's Lexicon"),
+                                 '/browse'))
+    # v9.15.0 (2026-11-08), the owner-approved line. Gated on Friedman's dictionary being served:
+    # its sidecar and switch go to the server after the code.
+    if _served_dictionaries().get('friedman'):
+        _new_surfaces.insert(0, (tr("New: Friedman's Judeo-Arabic dictionary, beside Blau's, and expression "
+                                    "search: select several words on the manuscript page to find them "
+                                    "together in both dictionaries"),
+                                 '/browse'))
+
+    _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
+    # Each listing launch lights the unread dot again (whats_new_suffix).
+    _whats_new_key = WHATS_NEW_VERSION + ai_whats_new_suffix()
+    _whats_new_unseen = safe_user_get('whats_new_dismissed') != _whats_new_key
+
+    # === Modular Header Rendering Functions ===
+    # These allow us to reverse DOM order for RTL without using CSS order or row-reverse
+
+    def render_header_left():
+        """Render left section: Menu button + Logo"""
+        with ui.row().classes('items-center gap-4') as section:
+            refs['menu_btn'] = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
+
+            # Logo - compact 2-line layout
+            with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
+                ui.icon('auto_stories').classes('text-2xl text-white opacity-90')
+                # Hide text on xs screens to prevent crowding; show on sm+
+                with ui.column().classes('header-logo-text justify-center').style('gap: 2px;'):
+                    ui.label('Dicta Genizah Search').classes('font-bold text-white tracking-wide').style('font-size: 15px; line-height: 1;')
+                    ui.label('אתר הגניזה מבית דיקטה').classes('text-white/60').style('font-size: 11px; line-height: 1;')
+        return section
+
+    def render_header_center():
+        """Render center section: the go-to box (2026-11-04).
+
+        The homepage box's routing (``web/home_query.py::home_query_target``):
+        a sys_id or a shelfmark opens Browse, anything else is searched. It
+        replaces the old "Quick search..." box, which ran every input as text
+        and was hidden below 768px. On every page, ``/`` and ``/search`` too
+        (owner, 2026-11-04: it is how a reader jumps to any manuscript from
+        anywhere). From 1024px the field sits in the header; below, a
+        search button opens it across the header (``header-search`` rules in
+        common.css). Opening and closing are client-side: no round trip.
+        """
+        with ui.row(wrap=False).classes('items-center header-search') as section:
+            async def _go():
+                # Off the loop: a Latin string with a digit is looked up in the
+                # catalogue (MetadataManager.has_shelfmark) before it is searched.
+                target = await run.io_bound(home_query_target, header_box.value, catalogue_has_shelfmark)
+                if target:
+                    ui.navigate.to(target)
+
+            with ui.row(wrap=False).classes('items-center header-search-field'):
+                header_box = ui.input(
+                    placeholder=tr('Search text or go to a shelfmark...')
+                ).props(
+                    f'dark dense outlined rounded aria-label="{tr("Search")}"'
+                ).classes('header-search-input').on('keydown.enter', _go).on(
+                    'keydown.esc', js_handler=_HEADER_SEARCH_CLOSE_JS
+                ).mark('header-search')
+                ui.button(icon='close').props(
+                    f'flat round dense text-color=white aria-label="{tr("Close")}"'
+                ).classes('header-search-close').on('click', js_handler=_HEADER_SEARCH_CLOSE_JS)
+            ui.button(icon='search').props(
+                f'flat round text-color=white aria-label="{tr("Search")}"'
+            ).tooltip(tr('Search')).classes('header-search-toggle').on(
+                'click', js_handler=_HEADER_SEARCH_OPEN_JS
+            ).mark('header-search-toggle')
+        return section
+
+    def render_header_right():
+        """Render right section: Status + Auth + Help"""
+        with ui.row().classes('items-center gap-2 sm:gap-4') as section:
+            # Status Indicator with continuous heartbeat monitoring
+            with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
+                status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
+                status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
+
+                # Track connection state for reconnection detection
+                connection_state = {'was_connected': False, 'check_count': 0, 'timer': None}
+
+                async def update_status():
+                    """Heartbeat: check server readiness and update dot color."""
+                    try:
+                        if status_dot.is_deleted or status_text.is_deleted:
+                            return False
+                        if state.is_ready():
+                            status_dot.classes('bg-green-400', remove='bg-yellow-400 animate-pulse')
+                            status_text.text = tr('Ready')
+                            connection_state['was_connected'] = True
+                        elif not connection_state['was_connected']:
+                            status_dot.classes('bg-yellow-400 animate-pulse', remove='bg-green-400')
+                            status_text.text = tr('Loading...')
+                    except RuntimeError:
+                        return False
+                    return True
+
+                # Run heartbeat every 10 seconds to monitor connection health
+                # Use asyncio to avoid parent_slot RuntimeError on navigation
+                async def _connection_heartbeat_loop():
+                    await asyncio.sleep(2.0)
+                    while True:
+                        try:
+                            if not await update_status():
+                                break
+                        except RuntimeError:
+                            break  # Element deleted — stop loop
+                        except Exception:
+                            pass  # Transient failure — keep retrying
+                        await asyncio.sleep(10.0)
+                connection_state['timer'] = asyncio.ensure_future(_connection_heartbeat_loop())
+
+            # Auth Buttons (Login/Register or User Menu)
+            with ui.row().classes('auth-buttons'):
+                from web.auth_state import create_auth_buttons
+                create_auth_buttons()
+
+            # Language Toggle
+            # Switch from the language THIS page was rendered in, captured here
+            # (Codex review of #378: two open pages can differ).
+            def toggle_lang():
+                new_lang = 'en' if resolved_lang == 'he' else 'he'
+                safe_user_set('ui_language', new_lang)
+                ui.navigate.reload()
+
+            lang_label = "EN" if resolved_lang == 'he' else "\u05E2\u05D1"
+            ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
+
+            # "What's New" — a header button with an unread dot, NOT a toast.
+            #
+            # This used to be a fixed-position card over the page. On a first
+            # visit the homepage stacked FOUR overlays at once (this, the OCR
+            # caveat, the citation footer, and a blocking citation modal), which
+            # is the "עומס / too many popups" the owner reported on 2026-09-04.
+            # A header button costs no page area, never covers the hero, and —
+            # unlike the toast — the news stays REACHABLE after it is read
+            # instead of being destroyed by a 30-second timer.
+            #
+            # It keeps its own class rather than `help-btn-header`, which is
+            # `display:none` under 768px: this site skews mobile, and hiding the
+            # announcement from most of its readers is not a tidy-up.
+            #
+            # The `whats-new-banner` mark stays on the panel. It is the handle
+            # the render-smoke suite keys its presence/absence assertions to, and
+            # that contract (gating, suppression, prefilled links, translation)
+            # is unchanged by moving where the panel is drawn.
+            if _show_whats_new:
+                with ui.button(icon='new_releases').props(
+                    f'flat round text-color=white aria-label="{tr("New Features!")}"'
+                ).tooltip(tr('New Features!')).classes('whats-new-btn-header') as _whats_new_btn:
+                    if _whats_new_unseen:
+                        # Quasar badge, floating: a dot, not a count.
+                        ui.element('div').props('id=whats-new-dot').classes(
+                            'whats-new-dot'
+                        )
+
+                    with ui.menu().props('auto-close').classes(
+                        'whats-new-menu'
+                    ).mark('whats-new-banner') as _whats_new_menu:
+                        with ui.column().classes('px-5 py-4 gap-0').style(
+                            f'max-width: min(92vw, 26rem); '
+                            f'direction: {"rtl" if rtl_mode else "ltr"};'
+                        ):
+                            with ui.element('div').classes(
+                                'flex items-center justify-center gap-2'
+                            ):
+                                ui.icon('new_releases').classes('text-xl').style('color: #10b981;')
+                                ui.label(tr("New Features!")).classes(
+                                    'text-base font-bold'
+                                ).style('color: var(--text-primary);')
+                            # Claim-free, as on the homepage cards. No precision
+                            # figure, no interval, no count, no accuracy rate.
+                            for _surface_name, _surface_route in _new_surfaces:
+                                ui.link(_surface_name, _surface_route).classes(
+                                    'text-sm font-semibold text-primary hover:underline'
+                                ).style('display: block; margin-top: 10px; line-height: 1.5; '
+                                        'text-align: center; text-wrap: balance;')
+                            # Every version's news, on its own page (2026-11-05).
+                            ui.link(tr("What's New in every version"), '/whats-new').classes(
+                                'text-sm text-secondary hover:underline'
+                            ).style('display: block; margin-top: 14px; text-align: center;').mark(
+                                'whats-new-all-versions')
+
+                # Mutable, because `_whats_new_unseen` is captured by value and
+                # both handlers below fire on every open. Without it the button
+                # wrote the same storage key on every click for the rest of the
+                # session.
+                _whats_new_pending = {'unseen': _whats_new_unseen}
+
+                def _mark_whats_new_seen():
+                    """Opening the panel clears the dot — the button remains.
+
+                    The old toast persisted this from a close button AND from a
+                    30s timer, and the timer had to be careful not to record
+                    "seen" for a reader who had navigated away. There is no timer
+                    now: the flag is written only when the reader actually opens
+                    the panel.
+                    """
+                    if not _whats_new_pending['unseen']:
+                        return
+                    _whats_new_pending['unseen'] = False
+                    safe_user_set('whats_new_dismissed', _whats_new_key)
+                    ui.run_javascript(
+                        'document.getElementById("whats-new-dot")?.remove();')
+
+                _whats_new_menu.on('show', lambda: _mark_whats_new_seen())
+                _whats_new_btn.on('click', lambda: _mark_whats_new_seen())
+
+            # Help Button (hidden on mobile via CSS)
+            ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props(f'flat round text-color=white aria-label="{tr("Help")}"').tooltip(tr('Help')).classes('help-btn-header')
+        return section
+
+    # === Build Header with correct DOM order ===
+    # reveal: hide header on scroll down, show on scroll up (mobile-friendly)
+    # No vertical padding, inline: `q-py-none` loses to the header's own 16px
+    # (measured 2026-11-05), and the 64px row below then sat 16px low -- the
+    # 40px go-to box hung over the page under the header (owner's screenshot).
+    with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style(
+            'height: 64px; padding-top: 0; padding-bottom: 0;'):
+        # wrap=False: a NiceGUI row wraps by default, and this one sits in a
+        # 64px header. In the English UI at 390px (Hebrew at 360px) the auth
+        # group no longer fit beside the logo, wrapped to a second line and
+        # rendered OUTSIDE the header, as grey text over the page (owner's
+        # phone screenshots, 2026-10-22). `phone-icon-only` (common.css) on
+        # Login and Register makes the groups fit; no-wrap makes the failure
+        # mode clipping rather than a ghost row.
+        with ui.row(wrap=False).classes('w-full h-full items-center justify-between px-6 app-header'):
+            if rtl_mode:
+                # RTL: Render Right -> Center -> Left for correct tab order
+                render_header_right()
+                render_header_center()
+                render_header_left()
+            else:
+                # LTR: Normal order Left -> Center -> Right
+                render_header_left()
+                render_header_center()
+                render_header_right()
+
+    # Sidebar (Drawer)
+    #
+    # The initial state is decided CLIENT-SIDE by Quasar's own layout, never by
+    # a round-trip to the browser and back.
+    #
+    # It used to mount OPEN and retract afterwards: the old code slept 500ms,
+    # then asked the client for `window.innerWidth`, then closed the drawer if
+    # that came back under 768. So every mobile page load put a full-screen
+    # `q-drawer__backdrop` over the content and swallowed taps underneath it
+    # until the answer arrived. Worse, that ran under `asyncio.ensure_future`,
+    # which empties NiceGUI's slot stack, so the `ui.run_javascript` call could
+    # raise and be swallowed by the bare `except` — leaving the drawer open
+    # indefinitely rather than for half a second.
+    #
+    # `show-if-above` is Quasar's answer to exactly this: mount CLOSED and let
+    # the layout open it when the viewport is wider than `breakpoint`. No
+    # sleep, no round-trip, and nothing covering the page below the breakpoint.
+    drawer_open = safe_user_get('drawer_open', True)
+
+    # Set drawer side based on RTL mode - Quasar will handle page padding correctly
+    drawer_side = 'right' if rtl_mode else 'left'
+    # breakpoint=1023 (was 768, 2026-10-22): a tablet gets the overlay drawer
+    # and keeps the width for the page; the sidebar stays open from 1024px.
+    main_drawer = (
+        ui.drawer(side=drawer_side, value=False, bordered=True)
+        .classes('shadow-xl gs-main-drawer')
+        .props('width=256 mini-width=64 breakpoint=1023')
+    )
+    if drawer_open:
+        # Only when the reader has not explicitly closed it. An explicit close
+        # is a preference and must survive on desktop too, so `show-if-above`
+        # is withheld in that case rather than overriding them every load.
+        main_drawer.props('show-if-above')
+
+    # The card of keyboard shortcuts (web/keyboard_shortcuts.py): "?" on any page
+    # dispatches its event on this hidden element, and the sidebar's "Keyboard
+    # shortcuts" calls the same function. Built on first use, once per page.
+    # The key script is loaded HERE, with the trigger, not shared: the few routes
+    # without this layout (/privacy-extension, /reset-hints, /auth/callback) have
+    # neither the card nor a search box, so there "?" and "/" are the browser's
+    # (Codex, PR #484).
+    from web.keyboard_shortcuts import SHORTCUT_EVENT, TRIGGER_CLASS, build_card
+    from web.keyboard_shortcuts import head_html as _shortcuts_head_html
+    ui.add_head_html(_shortcuts_head_html())
+    shortcuts_trigger = ui.element('div').classes(f'{TRIGGER_CLASS} hidden')
+    _shortcuts_card = {'dialog': None}
+
+    def open_shortcuts_card():
+        dialog = _shortcuts_card['dialog']
+        if dialog is None or dialog.is_deleted:
+            with shortcuts_trigger:
+                dialog = _shortcuts_card['dialog'] = build_card(rtl_mode)
+        dialog.open()
+
+    shortcuts_trigger.on(SHORTCUT_EVENT, lambda _e: open_shortcuts_card())
+
+    # Content Area
+    content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
+    # Add ID for skip link target
+    content_col.props('id=main-content')
+
+    def toggle_drawer():
+        """Toggle drawer and save state."""
+        main_drawer.toggle()
+        safe_user_set('drawer_open', not safe_user_get('drawer_open', True))
+
+    def nav_to(path):
+        """Navigate to path. Drawer auto-hides on mobile via breakpoint=1023."""
+        ui.navigate.to(path)
+
+    # Connect menu button to toggle function (using refs dictionary)
+    if 'menu_btn' in refs:
+        refs['menu_btn'].on('click', toggle_drawer)
+
+    # The sidebar (owner, 2026-11-05): no section titles, denser rows, and an icon rail
+    # (Quasar's `mini`) the reader can collapse it to, remembered per visitor like
+    # `drawer_open`. Below the drawer's breakpoint it is the overlay drawer, where
+    # Quasar ignores `mini`. The order is the readers' (PostHog, 30 days to
+    # 2026-11-05): the pages people work in first, by how many readers opened them
+    # from the sidebar and at all, then the pages that explain the site.
+    drawer_mini = bool(safe_user_get(NAV_MINI_KEY, False))
+    if drawer_mini:
+        main_drawer.props('mini')
+        ui.query('body').classes(add=NAV_MINI_BODY_CLASS)
+    # The sidebar sits at the screen's LEFT edge in both languages (Quasar flips the
+    # Hebrew page's right-side drawer), so collapsing points left in both: the owner's
+    # screenshot (2026-11-05) showed `chevron_right` drawn as is, not mirrored, in Hebrew.
+    _collapse_icon = 'chevron_left'
+    _expand_icon = 'chevron_right'
+
+    def _nav_row(icon, label, badge=None, *, active=False, on_click=None, mark=None):
+        # A page is a link; "Keyboard shortcuts" (marked) opens the card, a button.
+        is_button = mark is not None
+        row = ui.row(wrap=False).classes(f'nav-item {"active" if active else ""}').props(
+            'role=button tabindex=0' if is_button else 'role=link tabindex=0')
+        # The row's own name: in the icon rail the label is hidden, and with it the name a
+        # screen reader announced (Codex, PR #484). The badge (Beta) stays visible text.
+        row.props['aria-label'] = label
+        if on_click is not None:
+            row.on('click', on_click).on('keydown.enter', on_click)
+            if is_button:
+                # A button answers Space too; without .prevent the page scrolls (Codex, PR #484).
+                row.on('keydown.space.prevent', on_click)
+        if mark:
+            row.mark(mark)
+        with row:
+            ui.icon(icon).classes('nav-item-icon')
+            ui.label(label).classes('nav-item-label nav-mini-hide')
+            if badge:
+                ui.label(badge).classes('nav-item-badge nav-mini-hide')
+            # Only in the rail, where the label is hidden (common.css, NAV_MINI_BODY_CLASS).
+            ui.tooltip(label).classes(NAV_MINI_TIP_CLASS).props('anchor="center end" self="center start"')
+        return row
+
+    with main_drawer:
+        with ui.column().classes('h-full w-full no-wrap'):
+            with ui.column().classes('flex-grow w-full items-stretch nav-list'):
+                with ui.row(wrap=False).classes('nav-rail-row w-full'):
+                    nav_rail_btn = ui.button(
+                        icon=_expand_icon if drawer_mini else _collapse_icon,
+                    ).props('flat round dense size=sm').classes('nav-rail-btn').mark('nav-rail-toggle')
+                    _rail_label = tr('Expand menu') if drawer_mini else tr('Collapse menu')
+                    nav_rail_btn.props(f'aria-label="{_rail_label}"')
+                    with nav_rail_btn:
+                        nav_rail_tip = ui.tooltip(_rail_label)
+
+                def toggle_rail():
+                    mini = not bool(safe_user_get(NAV_MINI_KEY, False))
+                    safe_user_set(NAV_MINI_KEY, mini)
+                    if mini:
+                        main_drawer.props('mini')
+                        ui.query('body').classes(add=NAV_MINI_BODY_CLASS)
+                    else:
+                        main_drawer.props(remove='mini')
+                        ui.query('body').classes(remove=NAV_MINI_BODY_CLASS)
+                    label = tr('Expand menu') if mini else tr('Collapse menu')
+                    nav_rail_btn.props(f'icon={_expand_icon if mini else _collapse_icon} aria-label="{label}"')
+                    nav_rail_tip.text = label
+
+                nav_rail_btn.on_click(toggle_rail)
+
+                nav_items = [
+                    ('/', 'home', tr('Home'), None),
+                    ('/search', 'search', tr('Search'), None),
+                    ('/browse', 'menu_book', tr('Browse by Shelfmark'), None),
+                    ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
+                    ('/catalog-browse', 'category', tr('Browse by Identification'), None),
+                    ('/joins-lab', 'join_inner', tr('Joins Lab'), None),
+                ]
+                # Phase 136 (NOVEL-01/PANEL-02, plan 136-16): the corpus-wide
+                # "Computed Identifications" findings page. Gated on the SAME
+                # discovery_available() predicate as its route (the flag ANDed
+                # with the sidecar's startup-loaded readiness, never the flag
+                # alone) so a flag-ON/sidecar-missing window never advertises a
+                # link to a page that clean-hides. In the unavailable state the
+                # entry is NOT RENDERED AT ALL — never rendered-and-disabled.
+                # NOTE: the '/discoveries' entry below is the PRE-EXISTING
+                # Supabase Community page and is unrelated to this work; the nav
+                # label here survived a three-way naming constraint (see the
+                # tr() block in genizah_translations.py).
+                if discovery_available():
+                    nav_items.append((
+                        '/computed-identifications',
+                        'travel_explore',
+                        tr('Computed Identifications'),
+                        tr('Beta'),
+                    ))
+                # Phase 133 (ATLAS-01, MEDIUM-6): gate on the SAME availability
+                # predicate as the /atlas route + data routes (NOT just the flag)
+                # so a flag-ON/asset-missing window never advertises a broken
+                # link. "The Genizah Atlas" / "Beta" — never "Discoveries"
+                # (Pitfall #8: the /discoveries nav item is unrelated).
+                if atlas_preview_available():
+                    nav_items.append(('/atlas', 'hub', tr('The Genizah Atlas'), tr('Beta')))
+                if WEB_PUZZLE_ENABLED:
+                    nav_items.append(('/puzzle', 'extension', tr('Fragment Puzzle'), None))
+                nav_items += [
+                    ('/discoveries', 'lightbulb', tr('Community'), None),
+                    ('/lists', 'star', tr('My Lists'), None),
+                ]
+
+                for path, icon, label, badge in nav_items:
+                    _nav_row(icon, label, badge, active=current_page == path,
+                             on_click=lambda p=path: nav_to(p))
+
+                ui.separator().classes('nav-separator')
+
+                tool_items = [
+                    ('/start', 'explore', tr('Start Here'), None),
+                    ('/about', 'info', tr('About the Genizah'), None),
+                    ('/ai', 'smart_toy', 'כלי AI' if get_language() == 'he' else 'AI tools', None),
+                    ('/help', 'help_center', tr('Help Center'), None),
+                    ('/download', 'download', tr('Download App'), None),
+                    ('/settings', 'settings', tr('Settings'), None),
+                ]
+
+                for path, icon, label, badge in tool_items:
+                    _nav_row(icon, label, badge, active=current_page == path,
+                             on_click=lambda p=path: nav_to(p))
+                # Not a page: the card of keyboard shortcuts ("?" opens it too).
+                _nav_row('keyboard', tr('Keyboard shortcuts'), on_click=lambda: open_shortcuts_card(),
+                         mark='nav-shortcuts')
+
+            # Footer Section
+            with ui.column().classes('sidebar-footer gap-2 nav-mini-hide'):
+                # Translation Toggle (show/hide machine translations)
+                show_translations = safe_user_get('show_translations', False)
+
+                def toggle_translations():
+                    current = safe_user_get('show_translations', False)
+                    safe_user_set('show_translations', not current)
+                    ui.navigate.reload()
+
+                trans_icon = 'g_translate' if show_translations else 'translate'
+                trans_label = tr('Translations ON') if show_translations else tr('Translations OFF')
+                trans_opacity = 'opacity-100' if show_translations else 'opacity-60'
+                with ui.row().classes(f'w-full items-center justify-center gap-2 cursor-pointer {trans_opacity} hover:opacity-100').props(
+                    'role=button tabindex=0'
+                ).on('click', toggle_translations).on('keydown.enter', toggle_translations).on('keydown.space', toggle_translations):
+                    ui.icon(trans_icon).classes('text-lg').style(
+                        'color: var(--primary-600);' if show_translations else ''
+                    )
+                    ui.label(trans_label).classes('text-xs font-medium')
+                    if show_translations:
+                        ui.icon('check_circle').classes('text-xs').style('color: var(--primary-600);')
+                if show_translations:
+                    ui.label(
+                        tr('Translations are machine-generated scholarly aids and may contain errors. Always verify against the original text.')
+                    ).classes('text-xs px-2').style(
+                        'color: var(--text-tertiary); font-style: italic; line-height: 1.3; opacity: 0.8;'
+                    )
+
+                # Theme Switcher
+                with ui.row().classes('theme-switcher w-full'):
+                    def set_theme(theme_name):
+                        safe_user_set('theme', theme_name)
+                        ui.run_javascript(f'''
+                            document.documentElement.setAttribute("data-theme", "{theme_name}");
+                            document.body.setAttribute("data-theme", "{theme_name}");
+                            document.querySelectorAll(".theme-btn").forEach(btn => btn.classList.remove("active"));
+                            document.querySelector(".theme-btn-{theme_name}").classList.add("active");
+                        ''')
+
+                    current_theme = safe_user_get('theme', 'light')
+
+                    with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props(f'flat round size=sm aria-label="{tr("Light theme")}"').classes(f'theme-btn theme-btn-light {"active" if current_theme == "light" else ""}'): pass
+                    with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props(f'flat round size=sm aria-label="{tr("Parchment theme")}"').classes(f'theme-btn theme-btn-parchment {"active" if current_theme == "parchment" else ""}'): pass
+                    with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props(f'flat round size=sm aria-label="{tr("Dark theme")}"').classes(f'theme-btn theme-btn-dark {"active" if current_theme == "dark" else ""}'): pass
+
+                # Version Info (hidden - using "formerly" in settings instead)
+                # ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
+
+                # Accessibility Link
+                with ui.row().classes('w-full justify-center mt-2'):
+                    ui.link(tr('Accessibility Statement'), '/accessibility').classes('text-xs opacity-70 hover:opacity-100').style('text-decoration: none; color: inherit;')
+
+                # Creator Credit
+                ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
+
+    # The sticky citation FOOTER lived here until 2026-09-04. It is replaced by
+    # the always-visible "How to cite" chip (`web/citation_chip.py`), on the
+    # owner's instruction.
+    #
+    # What went with it, deliberately: a full-width band on every page, a 10
+    # second auto-collapse timer, a blocking head <script> that read two storage
+    # keys before first paint to decide between a full and a compact form, and
+    # two dismiss buttons with different lifetimes (one permanent, one
+    # per-session). `localStorage['citation_footer_dismissed']` and
+    # `sessionStorage['citation_footer_off']` are now written and read by
+    # nothing; a returning reader's stored values are inert residue, which is the
+    # same disposition already accepted for `citation_reminder_seen` below.
+    #
+    # What the chip does that the footer could not: name the transcription
+    # actually on screen. The footer carried ONE hardcoded MiDRASH citation, so
+    # on a page showing a Princeton or Friedberg edition it credited the wrong
+    # people -- the same defect the printed sheet had, fixed the same way, from
+    # the same `shared/transcription_credits` decision.
+    #
+    # NOTE the honesty trade the owner accepted: the MiDRASH citation was
+    # previously visible on every page without interaction and is now one click
+    # away. The CC-BY-4.0 obligation the /help page states binds PUBLICATION,
+    # not on-screen display, and the chip carries the copy button that was the
+    # footer's real use.
+    render_citation_chip(lang=resolved_lang)
+
+    # REMOVED 2026-09-04 (owner): the one-time citation reminder MODAL.
+    #
+    # It opened `persistent` over every page on a first visit and had to be
+    # clicked away before anything else could be touched — on the homepage it
+    # was the fourth simultaneous overlay, and it said what the citation strip
+    # three rows below it already said. Its reasoning (the grant/funding
+    # argument, which that strip never carried) moved verbatim to
+    # `/about#citing-midrash`, and the CHIP's panel links there -- the footer
+    # that was originally going to carry that link was removed in the same
+    # session, so for a while nothing pointed at the anchor at all. The
+    # requirement, the full citation and the copy button are all in the chip.
+    #
+    # `localStorage['citation_reminder_seen']` is now unread. Left alone
+    # deliberately: nothing breaks by its presence, and a test kept in the
+    # private repository seeds it in a Playwright init script so that
+    # the modal's backdrop could not intercept its clicks. That seed is now a
+    # no-op rather than a lie, so removing it is not urgent.
+
+    return content_col
+
+
+# ============================================================================
+# Page Routes
+# ============================================================================
+
+def apply_theme_immediately():
+    """Add script to apply theme before page renders to prevent flash."""
+    current_theme = safe_user_get('theme', 'light')
+    current_lang = _resolve_ui_language()
+    bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
+
+    # Use proper direction based on language (RTL for Hebrew, LTR for English)
+    dir_attr = 'rtl' if current_lang == 'he' else 'ltr'
+
+    # Add Hebrew-specific class if needed
+    body_class_script = 'document.body.classList.add("hebrew-mode");' if current_lang == 'he' else 'document.body.classList.remove("hebrew-mode");'
+
+    # Use immediate inline script that runs before any rendering
+    return f'''<style>
+        /* Pre-set theme to prevent flash - must be first */
+        html, body {{
+            background-color: {bg_color} !important;
+        }}
+        html[data-theme="dark"], body[data-theme="dark"] {{
+            background-color: #0f172a !important;
+        }}
+        html[data-theme="parchment"], body[data-theme="parchment"] {{
+            background-color: #fffbf5 !important;
+        }}
+        html[data-theme="light"], body[data-theme="light"] {{
+            background-color: #f8fafc !important;
+        }}
+    </style>
+    <script>
+        (function() {{
+            var theme = "{current_theme}";
+            var lang = "{current_lang}";
+            var dir = "{dir_attr}";
+            var isRtl = (dir === "rtl");
+
+            // Apply to html immediately (before DOM ready)
+            document.documentElement.setAttribute("data-theme", theme);
+            document.documentElement.lang = lang;
+            document.documentElement.dir = dir;
+
+            // Apply theme function
+            var applyTheme = function() {{
+                document.documentElement.setAttribute("data-theme", theme);
+                document.documentElement.lang = lang;
+                document.documentElement.dir = dir;
+                if (document.body) {{
+                    document.body.setAttribute("data-theme", theme);
+                    if (lang === 'he') {{
+                        document.body.classList.add("hebrew-mode");
+                    }} else {{
+                        document.body.classList.remove("hebrew-mode");
+                    }}
+                }}
+            }};
+
+            // Activate Quasar layout direction as soon as Quasar is available.
+            // On first cold load Quasar may appear after DOMContentLoaded, so
+            // a single attempt can miss and leave the drawer on the wrong side.
+            var activateQuasarLayout = function() {{
+                if (typeof Quasar === 'undefined' || !Quasar.lang || !Quasar.lang.set) {{
+                    return false;
+                }}
+
+                if (isRtl) {{
+                    // Try to use Hebrew language pack first, fallback to generic RTL
+                    if (Quasar.lang.he) {{
+                        Quasar.lang.set(Quasar.lang.he);
+                    }} else {{
+                        Quasar.lang.set({{ isoName: 'he', rtl: true }});
+                    }}
+                }} else {{
+                    // Use full lang pack so isoName is set (otherwise html lang becomes "undefined")
+                    if (Quasar.lang['en-US']) {{
+                        Quasar.lang.set(Quasar.lang['en-US']);
+                    }} else {{
+                        Quasar.lang.set({{ isoName: 'en', rtl: false }});
+                    }}
+                }}
+                // Belt-and-braces: ensure html lang is never the literal string "undefined"
+                if (document.documentElement.lang === 'undefined' || !document.documentElement.lang) {{
+                    document.documentElement.lang = lang || 'en';
+                }}
+
+                document.documentElement.setAttribute("data-quasar-rtl-ready", "true");
+                if (document.body) {{
+                    document.body.setAttribute("data-quasar-rtl-ready", "true");
+                }}
+                return true;
+            }};
+
+            var scheduleQuasarActivation = function() {{
+                if (activateQuasarLayout()) {{
+                    return;
+                }}
+
+                var attempts = 0;
+                var maxAttempts = 40;
+                var retryDelayMs = 50;
+
+                var retry = function() {{
+                    attempts += 1;
+                    if (!activateQuasarLayout() && attempts < maxAttempts) {{
+                        window.setTimeout(retry, retryDelayMs);
+                    }}
+                }};
+
+                window.setTimeout(retry, retryDelayMs);
+            }};
+
+            // Execute immediately
+            applyTheme();
+
+            // Backup for body element when it exists
+            if (document.readyState === 'loading') {{
+                document.addEventListener('DOMContentLoaded', function() {{
+                    applyTheme();
+                    scheduleQuasarActivation();
+                }});
+            }} else {{
+                scheduleQuasarActivation();
+            }}
+
+            window.addEventListener('load', function() {{
+                applyTheme();
+                scheduleQuasarActivation();
+            }}, {{ once: true }});
+        }})();
+    </script>'''
+
+# How long NiceGUI waits for an ASYNC page builder before it answers (its default
+# is 3 s). A sync page building in another tab blocks the one event loop, so a
+# stall elsewhere could push these past 3 s: on NiceGUI 3.8 the page was then
+# served with a deleted client and the browser reload-looped; on 3.18 the visitor
+# gets a 500 page, after /auth/callback has already signed them in. Sync pages
+# are not affected. tests/test_async_page_response_timeout.py
+ASYNC_PAGE_RESPONSE_TIMEOUT = 20.0
+
+@ui.page('/', title='Dicta Genizah Search | חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה')
+def dashboard_page():
+    safe_user_set('current_page', '/')
+    current_theme = safe_user_get('theme', 'light')
+    # MUST be the first add_head_html call on this route (see the constant's
+    # docstring above) -- scrubs a Supabase password-recovery fragment from
+    # the address bar before ANALYTICS_SCRIPT / POSTHOG_SCRIPT (added later
+    # in this same <head>) can ever observe it.
+    ui.add_head_html(_RECOVERY_FRAGMENT_INTERCEPT_SCRIPT)
+    ui.add_head_html(page_meta('/'))
+    # Structured data: WebSite schema for homepage
+    ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Dicta Genizah Search",
+        "alternateName": "חיפוש בגניזה הקהירית",
+        "url": "https://genizahsearch.com",
+        "description": "חיפוש מלא בכתבי יד מהגניזה הקהירית — טקסטים, תמונות, קטלוג ומטא-דאטה מ-255,000 קטעי גניזת קהיר.",
+        "inLanguage": ["he", "en"],
+        "publisher": {
+            "@type": "Organization",
+            "name": "Dicta — The Israel Center for Text Analysis",
+            "url": "https://dicta.org.il"
+        }
+    }
+    </script>
+    ''')
+    # Structured data: Organization schema
+    ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Dicta Genizah Search",
+        "alternateName": "חיפוש בגניזה הקהירית — דיקטה",
+        "url": "https://genizahsearch.com",
+        "logo": "https://genizahsearch.com/static/og-image.png",
+        "parentOrganization": {
+            "@type": "Organization",
+            "name": "Dicta — The Israel Center for Text Analysis",
+            "url": "https://dicta.org.il"
+        }
+    }
+    </script>
+    ''')
+    # Structured data: FAQPage — curated Q&As eligible for Google rich snippets.
+    # The visible FAQ accordion on /home is lang-gated 2026-05-21; emit the
+    # matching language's Q&A payload so the JSON-LD stays byte-aligned to the
+    # visible page text (Google's rich-result requirement).
+    _faq_lang = _resolve_ui_language()
+    if _faq_lang == 'he':
+        ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "inLanguage": "he",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "מהי גניזת קהיר?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "גניזת קהיר היא אוסף של מאות אלפי קטעי כתבי יד יהודיים שהתגלה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה). האוסף משתרע מן המאה השמינית ועד המאה התשע-עשרה וכולל תנ׳ך, תלמוד, ספרות חז׳ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד — בעברית, בארמית ובערבית-יהודית."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מה מציע אתר הגניזה של דיקטה?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "מרכז מחקר עם תעתיקים אוטומטיים, תמונות באיכות גבוהה ומידע קטלוגי ל-255,000 קטעי גניזה. ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים, לזהות מקבילות לטקסטים ידועים, למצוא צירופים חדשים בין קטעים, ולשתף תגליות עם קהילת החוקרים."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מהיכן באים התעתיקים?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "התעתיקים מופקים אוטומטית על ידי פרויקט MiDRASH (בתמיכת האיחוד האירופי) — מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, מקורב לחילופים חופשיים, וחיפוש בסגנון פרויקט השו׳ת או ביטוי רגולרי לשליטה מדויקת יותר."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מהיכן באים התמונות והמידע הקטלוגי?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "תמונות באיכות גבוהה מגיעות מאתר כתיב של הספרייה הלאומית של ישראל ומספריות ברחבי העולם. המידע הקטלוגי נשאב ממקורות מגוונים, בראשם פרויקט הגניזה של פרידברג (FGP), אתר כתיב, פרויקט הגניזה של פרינסטון (PGP), וספריות קמברידג', אוקספורד, מנצ'סטר, בית המדרש לרבנים באמריקה (JTS) ועוד."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "האם השימוש באתר הגניזה של דיקטה חופשי?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. השימוש בתעתיקים שבפרויקט זה מחייב ציטוט של פרסום MiDRASH הנזכר לעיל (https://doi.org/10.5281/zenodo.17734473) ברישיון CC BY 4.0. התמונות מסופקות על ידי הספריות המקוריות וכפופות לרישיון הרלוונטי."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מי יצר את האתר?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "האתר נוצר על ידי הלל גרשוני, בתמיכת דיקטה. ניתן ליצור עמו קשר בכתובת gershuni@gmail.com."
+                }
+            }
+        ]
+    }
+    </script>
+    ''')
+    else:
+        ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "inLanguage": "en",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What is the Cairo Genizah?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The Cairo Genizah is a collection of hundreds of thousands of Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 8th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, documentary materials, letters, science, magic, and more — in Hebrew, Aramaic, and Judeo-Arabic."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What does Dicta Genizah Search provide?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "A research hub with automatic transcriptions, high-resolution manuscript images, and catalog metadata for 255,000 Cairo Genizah fragments. Users can run full-text search across the corpus, browse fragments alongside their images, identify parallels to known texts, find new joins between fragments, and share discoveries with the research community."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Where do the transcriptions come from?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The transcriptions are produced automatically by the MiDRASH Project (supported by the European Union) — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, they contain many reading errors. We recommend using advanced search modes: Variants for common letter swaps, Fuzzy for free substitutions, and Responsa-style or regular-expression search for finer control."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Where do the images and metadata come from?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "High-resolution images come from the National Library of Israel's “Ktiv” website and from libraries around the world. Catalog metadata is drawn from diverse sources — chief among them the Friedberg Genizah Project (FGP), the “Ktiv” website, the Princeton Geniza Project (PGP), and the libraries of Cambridge, Oxford, Manchester, the Jewish Theological Seminary (JTS), and others."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is Dicta Genizah Search free to use?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. Using the transcriptions in this project requires citing the above-mentioned MiDRASH publication (https://doi.org/10.5281/zenodo.17734473) under the CC BY 4.0 License. The images are provided by the original libraries and are subject to the relevant license."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Who created this website?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The website was created by Hillel Gershuni, with the support of Dicta. Feel free to contact him at gershuni@gmail.com."
+                }
+            }
+        ]
+    }
+    </script>
+    ''')
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages import home
+        if hasattr(home, 'create_page'):
+            home.create_page()
+        # Password-reset-link-dead-end fix: check for + consume a Supabase
+        # recovery fragment on every homepage load (cheap no-op when absent).
+        _render_password_recovery_handler()
+
+
+@app.get('/chatgpt', include_in_schema=False)
+def chatgpt_redirect():
+    # The ChatGPT plugin listing once it is live, else the GPT until it retires,
+    # else the AI page (web/ai_listings.py).
+    from fastapi.responses import RedirectResponse
+    from web.ai_listings import chatgpt_target
+    return RedirectResponse(chatgpt_target(), status_code=307)
+
+
+@ui.page('/ai', title='AI tools | כלי AI — Dicta Genizah Search')
+def ai_tools_route():
+    safe_user_set('current_page', '/ai')
+    ui.add_head_html(page_meta(
+        '/ai',
+        title='AI tools | כלי AI — Dicta Genizah Search',
+        description=ai_page_description(),
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    content = create_layout()
+    with content:
+        from web.pages.ai_tools import create_ai_page
+        create_ai_page()
+
+
+@ui.page('/whats-new', title="What's New | מה חדש — Dicta Genizah Search")
+def whats_new_route():
+    """What's New in every version (shared/whats_new_history.py; owner, 2026-11-05)."""
+    safe_user_set('current_page', '/whats-new')
+    ui.add_head_html(page_meta(
+        '/whats-new',
+        title="What's New | מה חדש — Dicta Genizah Search",
+        description="What's new in every version of Dicta Genizah Search, the website and the desktop app.",
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    content = create_layout()
+    with content:
+        from web.pages.whats_new import create_whats_new_page
+        create_whats_new_page()
+
+
+@ui.page('/start', title='Start Here | התחילו כאן — Dicta Genizah Search')
+def start_page_route():
+    """Guided launchpad for visitors who do not yet have a search query."""
+    safe_user_set('current_page', '/start')
+    ui.add_head_html(page_meta(
+        '/start',
+        title='Start Here | התחילו כאן — Dicta Genizah Search',
+        description=(
+            'A guided introduction to the Cairo Genizah, prepared searches, '
+            'selected manuscripts, and research tools.'
+        ),
+        needs_iiif=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.start import create_start_page
+        create_start_page()
+
+@ui.page('/search', title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search')
+def search_page_route(
+    q: str = None, tag: str = None,
+    mode: str = None, variants: int = None,
+    ja: int = None, flex_spaces: int = None,
+    bidirectional: int = None, domain: str = None,
+    from_browse: int = None,
+    vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
+    run: str = None,
+):
+    safe_user_set('current_page', '/search')
+    ui.add_head_html(page_meta(
+        '/search',
+        title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search',
+        description='Search across 500,000+ Cairo Genizah manuscript fragments with variant-aware full-text search, Responsa syntax, and domain filters.',
+        noindex=True,  # search result pages should not be indexed
+        needs_iiif=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.search import create_search_page
+        create_search_page(
+            initial_query=q, initial_tag=tag,
+            initial_mode=mode, initial_variants=variants,
+            initial_ja=ja, initial_flex_spaces=flex_spaces,
+            initial_bidirectional=bidirectional, initial_domain=domain,
+            from_browse=from_browse,
+            vs_src=vs_src, vs_mode=vs_mode, vs_browse=vs_browse,
+            initial_run=run,
+        )
+
+@ui.page('/parallels', title='Textual Parallels | Dicta Genizah Search')
+def parallels_page_route(text: str = None):
+    safe_user_set('current_page', '/parallels')
+    ui.add_head_html(page_meta(
+        '/parallels',
+        title='Textual Parallels | Dicta Genizah Search',
+        description='Find textual parallels and intertextual connections across Cairo Genizah manuscripts. Paste text to discover matching fragments.',
+        noindex=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.parallels import create_parallels_page
+        create_parallels_page(initial_text=text)
+
+@ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None, computed: str = None):
+    # R2-1 discovery-review iframe: ?embed=1 renders a bare viewer (no nav shell,
+    # no snapshot write, no current_page write) so it can be framed inside the
+    # standalone discovery-review deck without stomping normal browse state.
+    _embed = (embed or '').strip().lower() in ('1', 'true', 'yes', 'on')
+    # Guided-tour deep links may ask the existing computed-identifications panel
+    # to start open. Keep the request inert unless the authoritative discovery
+    # readiness gate passes; normal /browse visits retain their current state.
+    _open_computed = (
+        (computed or '').strip().lower() in ('1', 'true', 'yes', 'on')
+        and discovery_available()
+    )
+    if not _embed:
+        safe_user_set('current_page', '/browse')
+    # Dynamic metadata for manuscript pages when sys_id is provided
+    if sys_id:
+        # Resolve the real shelfmark from csv_bank when the URL only has sys_id
+        _shelfmark_display = shelfmark
+        if not _shelfmark_display:
+            try:
+                _row = state.meta_mgr.csv_bank.get(sys_id) if state.meta_mgr else None
+                _shelfmark_display = _row.get('shelfmark', sys_id) if _row else sys_id
+            except Exception:
+                _shelfmark_display = sys_id  # Shelfmark lookup failed; use raw identifier
+        _browse_title = f'{_shelfmark_display} | Dicta Genizah Search'
+        ui.page_title(_browse_title)
+        ui.add_head_html(page_meta(
+            f'/browse?sys_id={sys_id}',
+            title=f'{_shelfmark_display} | Dicta Genizah Search',
+            description=f'View Cairo Genizah manuscript {_shelfmark_display} — images, transcription, catalog, bibliography, and scholarly metadata. צפייה בכתב יד {_shelfmark_display} מגניזת קהיר.',
+            needs_iiif=True,
+        ))
+        # Structured data: BreadcrumbList for manuscript pages
+        _safe_shelfmark = _shelfmark_display.replace('"', '&quot;').replace('<', '&lt;')
+        ui.add_head_html(f'''
+        <script type="application/ld+json">
+        {{
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {{
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://genizahsearch.com/"
+                }},
+                {{
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Browse",
+                    "item": "https://genizahsearch.com/browse"
+                }},
+                {{
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": "{_safe_shelfmark}",
+                    "item": "https://genizahsearch.com/browse?sys_id={sys_id}"
+                }}
+            ]
+        }}
+        </script>
+        ''')
+        # Structured data: Manuscript (CreativeWork subtype) — per-page rich data
+        # so individual fragments can surface in Knowledge Graph / SERPs.
+        import json as _json
+        _library_code = ''
+        _library_name = ''
+        try:
+            if _row:
+                _library_code = (_row.get('library_code') or '').strip()
+                if _library_code:
+                    from genizah_core import get_library_display as _glib
+                    _library_name = _glib(_library_code, short=False) or _library_code
+        except Exception:
+            _library_name = ''  # Library lookup failed; omit holdingArchive
+        _ms_url = f'https://genizahsearch.com/browse?sys_id={sys_id}'
+        _ms_data = {
+            "@context": "https://schema.org",
+            "@type": "Manuscript",
+            "name": _shelfmark_display,
+            "identifier": sys_id,
+            "url": _ms_url,
+            "isPartOf": {
+                "@type": "Collection",
+                "name": "Cairo Genizah",
+            },
+            "about": "Cairo Genizah manuscript fragment",
+            "inLanguage": ["he", "arc", "jrb"],
+        }
+        if _library_name:
+            _ms_data["holdingArchive"] = {
+                "@type": "ArchiveOrganization",
+                "name": _library_name,
+            }
+        # Escape '<' so a shelfmark containing '</script' can't break out of the
+        # surrounding <script> tag (JSON spec allows literal '<' inside strings).
+        _ms_json = _json.dumps(_ms_data, ensure_ascii=False, indent=2).replace('<', r'<')
+        ui.add_head_html(
+            '<script type="application/ld+json">\n'
+            + _ms_json
+            + '\n</script>'
+        )
+    else:
+        ui.add_head_html(page_meta(
+            '/browse',
+            title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search',
+            description='Browse Cairo Genizah manuscripts — high-resolution images, transcriptions, scholarly metadata, and catalog data from FJMS and PGP. עיון בכתבי יד מגניזת קהיר.',
+            needs_iiif=True,
+        ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    # If shelfmark param looks like a sys_id (starts with 99, all digits), use it directly
+    if not sys_id and shelfmark and shelfmark.strip().isdigit() and shelfmark.strip().startswith('99'):
+        sys_id = shelfmark.strip()
+
+    content = ui.column().classes('w-full items-stretch').style('padding:0;margin:0') if _embed else create_layout()
+    with content:
+        from web.pages.browse import create_browse_page
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed, open_computed=_open_computed)
+
+@ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
+def joins_lab_page_route(
+    sys_id: str = None,
+    shelfmark: str = None,
+    fl_id: str = None,
+    page: int = None,
+    volume_ie: str = None,
+    state: str = None,
+):
+    """Joins Lab vertical spine page route.
+
+    FND-08 URL contract:
+      - sys_id:     Primary anchor identifier (Alma system number, e.g. '990001234').
+                    When present, the page loads this manuscript as the anchor directly.
+      - shelfmark:  Human-readable shelfmark (e.g. 'T-S 12.123').  Resolved to sys_id
+                    when sys_id is absent; sys_id wins if both are present.
+      - fl_id:      Optional folio/leaf identifier (e.g. 'T-S 12.123.1r') — forwarded
+                    to AnchorViewer for precise folio selection.
+      - page:       Optional 1-based page/image number hint — forwarded to AnchorViewer.
+      - volume_ie:  Optional volume IE identifier for multi-volume manuscripts.
+
+      - state:      Optional shared-link screen (web/joins_lab_link.py, owner
+                    decision 2026-10-19): the builder inputs, options, Visual
+                    Similarity, filter, view, grid page, the Compare pair and,
+                    only when the sender chose to include them, the sender's
+                    marks. The page re-runs the search from it, and keeps the
+                    address bar on the current screen (marks left out).
+
+    Results and images are never in the URL. The visitor's own working state
+    stays device-local (safe_storage, keyed by NiceGUI session cookie); marks
+    that come with a link are shown for that visit and never saved.
+    """
+    safe_user_set('current_page', '/joins-lab')
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    content = create_layout()
+    with content:
+        from web.pages.joins_lab import create_joins_lab_page
+        create_joins_lab_page(
+            initial_sys_id=sys_id,
+            initial_shelfmark=shelfmark,
+            initial_fl_id=fl_id,
+            initial_page=page,
+            initial_volume_ie=volume_ie,
+            initial_share_state=state,
+        )
+
+
+@ui.page('/catalog-browse', title='Catalog Browse | עיון בקטלוג — Dicta Genizah Search')
+def catalog_browse_page_route(
+    domain: str = None, author: str = None, work: str = None, page: int = None,
+    text_all: str = None, text_any: str = None, text_not: str = None,
+):
+    safe_user_set('current_page', '/catalog-browse')
+    _catalog_parts = [p for p in [domain, author, work] if p]
+    if _catalog_parts:
+        _catalog_label = ' / '.join(_catalog_parts)
+        _catalog_title = f'{_catalog_label} — Catalog | Dicta Genizah Search'
+        ui.page_title(_catalog_title)
+        # Build canonical with active filters so metadata matches the indexed URL
+        from urllib.parse import urlencode
+        _filter_params = {k: v for k, v in [('domain', domain), ('author', author), ('work', work)] if v}
+        _catalog_qs = '?' + urlencode(_filter_params) if _filter_params else ''
+        ui.add_head_html(page_meta(
+            f'/catalog-browse{_catalog_qs}',
+            title=_catalog_title,
+            description=f'Browse Cairo Genizah manuscripts classified as {_catalog_label}. Faceted catalog with domain, author, and work filters.',
+        ))
+    else:
+        ui.add_head_html(page_meta(
+            '/catalog-browse',
+            title='Catalog Browse | עיון בקטלוג — Dicta Genizah Search',
+            description='Browse 255,000+ Cairo Genizah manuscripts by domain, author, and work. Catalog based on Friedberg Genizah data. עיון בקטלוג הגניזה.',
+        ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.catalog_browse import create_catalog_browse_page, criteria_from_address
+        # One parameter per catalogue criterion (D8), read from the registry.
+        _request = getattr(ui.context.client, 'request', None)
+        _criteria, _dropped = criteria_from_address(
+            _request.query_params if _request is not None else {})
+        create_catalog_browse_page(
+            initial_domain=domain,
+            initial_author=author,
+            initial_work=work,
+            initial_page=page,
+            initial_text_all=text_all,
+            initial_text_any=text_any,
+            initial_text_not=text_not,
+            initial_criteria=_criteria,
+            address_problems=_dropped,
+        )
+
+@ui.page('/lists', title='My Lists | הרשימות שלי — Dicta Genizah Search')
+def lists_page_route():
+    safe_user_set('current_page', '/lists')
+    ui.add_head_html(page_meta('/lists', noindex=True))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.lists import create_lists_page
+        create_lists_page()
+
+@ui.page('/puzzle', title='Fragment Puzzle | Dicta Genizah Search')
+def puzzle_page_route(add: str = None, doc: str = None):
+    safe_user_set('current_page', '/puzzle')
+    ui.add_head_html(page_meta(
+        '/puzzle',
+        title='Fragment Puzzle | Dicta Genizah Search',
+        description='Visually arrange and join Cairo Genizah manuscript fragments. Background removal, zoom, rotate, and composite export for scholarly joins.',
+        needs_iiif=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        if not WEB_PUZZLE_ENABLED:
+            is_hebrew = get_language() == 'he'
+            with ui.column().classes('w-full max-w-3xl mx-auto p-6'):
+                with ui.card().classes('w-full p-8'):
+                    ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
+                    ui.label('פאזל הקטעים אינו זמין כרגע' if is_hebrew else 'Fragment Puzzle is temporarily unavailable').classes(
+                        'text-2xl font-bold mb-2'
+                    )
+                    ui.label(
+                        'הפיצ׳ר הוסתר זמנית עד לייצוב תשתית התמונות והעיבוד.'
+                        if is_hebrew else
+                        'The feature is temporarily hidden while the image-processing path is being stabilized.'
+                    ).classes('text-base').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 mt-4'):
+                        ui.button(
+                            'חזרה לעיון בכתב יד' if is_hebrew else 'Go to Browse',
+                            on_click=lambda: ui.navigate.to('/browse'),
+                        ).props('color=primary')
+                        ui.button(
+                            'עמוד הבית' if is_hebrew else 'Home',
+                            on_click=lambda: ui.navigate.to('/'),
+                        ).props('flat')
+            return
+        from web.pages.puzzle import create_puzzle_page
+        create_puzzle_page(initial_add=add, initial_doc=doc)
+
+@ui.page('/atlas', title='The Visual Genizah Atlas | אטלס הגניזה החזותי — Dicta Genizah Search')
+def atlas_page_route():
+    """Phase 133 (ATLAS-01): the Visual Atlas Preview beta page.
+
+    Gated on the single authoritative atlas_preview_available() predicate (flag
+    ON *and* the baked asset loaded). When unavailable — flag OFF (default) OR
+    the asset is not loaded — the page clean-hides with a "temporarily
+    unavailable" card and NEVER delegates to create_atlas_page (D-12/D-13).
+    noindex until the REL-01 gate (D-16).
+    """
+    safe_user_set('current_page', '/atlas')
+    ui.add_head_html(page_meta(
+        '/atlas',
+        title='The Visual Genizah Atlas | אטלס הגניזה החזותי — Dicta Genizah Search',
+        description='A claim-free preview of the Cairo Genizah connections atlas — an algorithmically laid-out overview of textual connections across the connected corpus.',
+        noindex=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        # Clean-hide gate: gated on atlas_preview_available() (the shared
+        # predicate), NOT os.path.exists — so a flag-ON/asset-not-loaded window
+        # shows the unavailable card instead of broken chrome over a 404ing
+        # fetch. Early return means create_atlas_page is unreachable when
+        # unavailable.
+        if not atlas_preview_available():
+            is_hebrew = get_language() == 'he'
+            with ui.column().classes('w-full max-w-3xl mx-auto p-6'):
+                with ui.card().classes('w-full p-8'):
+                    ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
+                    ui.label(
+                        'אטלס הגניזה אינו זמין כרגע' if is_hebrew
+                        else 'The Genizah Atlas is temporarily unavailable'
+                    ).classes('text-2xl font-bold mb-2')
+                    ui.label(
+                        'תצוגת התצוגה המקדימה תופיע כאן ברגע שהיא תהיה מוכנה.'
+                        if is_hebrew else
+                        'The preview will appear here as soon as it is ready.'
+                    ).classes('text-base').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 mt-4'):
+                        ui.button(
+                            'עמוד הבית' if is_hebrew else 'Home',
+                            on_click=lambda: ui.navigate.to('/'),
+                        ).props('flat')
+            return
+        from web.pages.atlas import create_atlas_page
+        create_atlas_page()
+
+@ui.page('/computed-identifications', title='Computed Identifications | זיהויים מחושבים — Dicta Genizah Search',
+         response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
+async def findings_page_route():
+    """Phase 136 (NOVEL-01/PANEL-02, plan 136-16): the corpus-wide findings page.
+
+    Gated on the single authoritative discovery_available() predicate — the
+    DISCOVERY_ENABLED flag ANDed with the sidecar's startup-loaded, fail-closed
+    readiness. When unavailable — flag OFF (default) OR the sidecar is absent,
+    corrupt, incompatible or private-audience — the page clean-hides with an
+    availability card and NEVER delegates to create_findings_page; the heavy
+    page module is not even IMPORTED on that path (the import is deferred into
+    the available branch).
+
+    noindex until the Phase-139 REL-01 release gate: the pre-release surface
+    must not be crawled (T-136-16-02).
+
+    The nav entry is gated on the SAME predicate in create_layout(), so the link
+    and the page can never disagree.
+    """
+    safe_user_set('current_page', '/computed-identifications')
+    ui.add_head_html(page_meta(
+        '/computed-identifications',
+        title='Computed Identifications | זיהויים מחושבים — Dicta Genizah Search',
+        description=tr(
+            'Computed identifications across the Cairo Genizah corpus, produced by text matching. '
+            'Every row is an algorithmic match, not a reviewed identification.'
+        ),
+        noindex=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        # Clean-hide gate. Early return means create_findings_page is
+        # unreachable — and web.pages.findings is never imported — whenever the
+        # availability predicate is False.
+        if not discovery_available():
+            is_hebrew = get_language() == 'he'
+            with ui.column().classes('w-full max-w-3xl mx-auto p-6'):
+                with ui.card().classes('w-full p-8'):
+                    ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
+                    ui.label(
+                        tr('Computed Identifications is not available right now')
+                    ).classes('text-2xl font-bold mb-2')
+                    ui.label(
+                        tr('This page will return as soon as the data is ready.')
+                    ).classes('text-base').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 mt-4'):
+                        ui.button(
+                            'עמוד הבית' if is_hebrew else 'Home',
+                            on_click=lambda: ui.navigate.to('/'),
+                        ).props('flat')
+            return
+        from web.pages.findings import create_findings_page
+        await create_findings_page()
+
+@ui.page('/privacy-extension', title='GenizahSearch Image Helper — Privacy Policy')
+def privacy_extension_route():
+    """Privacy policy for the GenizahSearch Image Helper browser extension."""
+    ui.add_head_html(page_meta(
+        '/privacy-extension',
+        title='GenizahSearch Image Helper — Privacy Policy',
+        description='Privacy policy for the GenizahSearch Image Helper browser extension. No personal data is collected or transmitted.',
+    ))
+    with ui.column().classes('w-full max-w-3xl mx-auto p-8'):
+        ui.label('GenizahSearch Image Helper — Privacy Policy').classes('text-2xl font-bold mb-4')
+        ui.label('Last updated: March 18, 2026').classes('text-sm text-gray-500 mb-6')
+        for title, text in [
+            ('What this extension does',
+             'The GenizahSearch Image Helper fetches manuscript fragment images from the National Library of Israel (NLI) '
+             'IIIF image service (iiif.nli.org.il) through your browser. These images are sent to genizahsearch.com for '
+             'background removal processing, enabling the Fragment Puzzle feature.'),
+            ('Data collection',
+             'This extension does NOT collect, store, or transmit any personal data. It does not track browsing history, '
+             'keystrokes, location, or any other user information.'),
+            ('What data is transmitted',
+             'Only manuscript image data fetched from iiif.nli.org.il is transmitted to genizahsearch.com for processing. '
+             'No personal information is included in these requests.'),
+            ('Third parties',
+             'No data is sold, shared, or transferred to any third party. Image data is sent only to genizahsearch.com '
+             '(operated by Dicta, the Israel Center for Text Analysis) for processing.'),
+            ('Permissions',
+             'The extension requires access to iiif.nli.org.il to fetch manuscript images, and to genizahsearch.com '
+             'to communicate with the web application. No other sites are accessed.'),
+            ('Contact',
+             'For questions about this privacy policy, contact us at genizahsearch.com.'),
+        ]:
+            ui.label(title).classes('text-lg font-semibold mt-4 mb-1')
+            ui.label(text).classes('text-sm leading-relaxed')
+
+@ui.page('/reset-hints')
+def reset_hints_route():
+    """Hidden utility route to reset all feature discovery hints."""
+    ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
+    # The dictionaries switch is new again only while the lookup is off (blau_panel.switch_is_new).
+    from web.components.blau_panel import SEEN_KEY as dictionaries_seen
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen', dictionaries_seen):
+        safe_user_pop(key, None)
+    ui.navigate.to('/')
+
+@ui.page('/settings', title='Settings | הגדרות — Dicta Genizah Search')
+def settings_page_route():
+    safe_user_set('current_page', '/settings')
+    ui.add_head_html(page_meta('/settings', noindex=True))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.settings import create_settings_page
+        create_settings_page()
+
+@ui.page('/help', title='Help | Dicta Genizah Search', response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
+async def help_page_route():
+    safe_user_set('current_page', '/help')
+    # noindex the /help page ONLY while the pre-release discovery methods section
+    # is shown (discovery_available AND NOT DISCOVERY_PUBLIC_RELEASED); flips to
+    # indexed at the Phase-139 REL-01 gate (Codex #18). False (indexed) when
+    # discovery is unavailable — the section is absent, nothing to hide.
+    ui.add_head_html(page_meta(
+        '/help',
+        title='Help | Dicta Genizah Search',
+        description='User guide for Dicta Genizah Search: full-text search, Responsa syntax, catalog browsing, manuscript viewer, fragment puzzle, and research tools.',
+        noindex=discovery_methods_noindex(),
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    # Read the band-precision rows + the runtime display-deduplicated per-band
+    # claim counts through the supported fail-open wrappers (empty when discovery
+    # is unavailable, so the flag-gated section simply never renders).
+    precision = await get_all_band_precision()
+    band_counts = await get_band_claim_counts()
+
+    content = create_layout()
+    with content:
+        from web.pages.help import create_help_page
+        create_help_page(precision=precision, band_counts=band_counts)
+
+@ui.page('/corrections', title='Corrections | תיקונים — Dicta Genizah Search',
+         response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
+async def corrections_page_route():
+    safe_user_set('current_page', '/corrections')
+    ui.add_head_html(page_meta('/corrections', noindex=True))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.corrections import create_corrections_page
+        await create_corrections_page()
+
+@ui.page('/discoveries', title='Discoveries Center | Dicta Genizah Search')
+def discoveries_page_route():
+    safe_user_set('current_page', '/discoveries')
+    ui.add_head_html(page_meta(
+        '/discoveries',
+        title='Discoveries Center | Dicta Genizah Search',
+        description='Community-published Cairo Genizah discoveries: fragment joins, new identifications, and scholarly findings shared by researchers.',
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.discoveries import create_discoveries_page
+        create_discoveries_page()
+
+@ui.page('/admin', title='Admin — Dicta Genizah Search', response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
+async def admin_page_route():
+    safe_user_set('current_page', '/admin')
+    ui.add_head_html(page_meta('/admin', noindex=True))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.admin import create_admin_page
+        await create_admin_page()
+
+@ui.page('/profile', title='Profile | פרופיל — Dicta Genizah Search',
+         response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
+async def profile_page_route():
+    safe_user_set('current_page', '/profile')
+    ui.add_head_html(page_meta('/profile', noindex=True))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.profile import create_profile_page
+        await create_profile_page()
+
+@ui.page('/accessibility', title='Accessibility | Dicta Genizah Search')
+def accessibility_page_route():
+    safe_user_set('current_page', '/accessibility')
+    ui.add_head_html(page_meta(
+        '/accessibility',
+        title='Accessibility | Dicta Genizah Search',
+        description='Accessibility statement for Dicta Genizah Search. Keyboard navigation, screen reader support, and accommodations for researchers.',
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.accessibility import create_accessibility_page
+        create_accessibility_page()
+
+
+@ui.page('/about', title='About the Cairo Genizah | על גניזת קהיר — Dicta Genizah Search')
+def about_page_route():
+    safe_user_set('current_page', '/about')
+    ui.add_head_html(page_meta(
+        '/about',
+        title='About the Cairo Genizah | על גניזת קהיר — Dicta Genizah Search',
+        description='The Cairo Genizah: over 350,000 medieval manuscript fragments from the Ben Ezra Synagogue in Cairo, spanning 1,000 years of Jewish life. Search the transcriptions for the first time.',
+        og_type='article',
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.about import create_about_page
+        create_about_page()
+
+
+@ui.page('/download', title='Download Desktop App | Dicta Genizah Search')
+def download_page_route():
+    safe_user_set('current_page', '/download')
+    ui.add_head_html(page_meta(
+        '/download',
+        title='Download Desktop App | Dicta Genizah Search',
+        description='Download the Dicta Genizah Search Pro desktop application for Windows. Full offline search across Cairo Genizah manuscripts.',
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.download import create_download_page
+        create_download_page()
+
+
+async def _oauth_complete_login(user, profile, session, status_label, show_error_fn):
+    """OAuth complete-login helper (factored out of auth_callback_route in
+    Phase 91 AUTHW-02 / D-06 + pattern-mapper finding 1).
+
+    Multi-write rollback discipline: every safe_user_set is checked. On
+    partial-write failure, roll back any successful writes (DEFENSIVELY
+    across all 3 auth keys at the caller level per Revision MUST-2 — Codex
+    HIGH catch in 91-REVIEWS.md) and surface a user-visible error via
+    show_error_fn so the user doesn't reload into a half-logged-in state.
+    The OAuth code has already been consumed by exchange_code_for_session
+    so there is no auto-retry path -- the user must restart the OAuth flow
+    from the login button.
+
+    NEW-M1 wording note: this helper performs DEFENSIVE 3-key cleanup
+    (auth_session + auth_user + auth_profile). set_auth itself performs
+    SYMMETRIC 2-key rollback (USER_KEY + PROFILE_KEY). The two layers
+    overlap on user/profile so that set_auth's own SYMMETRIC rollback
+    failing during a prune race is covered by the outer DEFENSIVE cleanup.
+
+    Args:
+        user: Supabase user dict (must contain 'id', 'email').
+        profile: Profile dict from get_profile(user['id']); may be None.
+        session: Session dict with 'access_token' + 'refresh_token'; may be None.
+        status_label: NiceGUI label widget bound to the "Completing login..."
+            text. Mutated to "Login successful! Redirecting..." on happy path.
+        show_error_fn: Callable taking a message string. In production this
+            is the auth_callback_route's `show_error` closure (audited per
+            Revision MUST-4 -- encapsulates spinner hide, status_label hide,
+            error_label show, home_btn show, AND posthog_capture('login_failed', ...)
+            emission). All UI-recovery state lives inside show_error_fn, so
+            this helper is intentionally UI-agnostic beyond status_label.
+    """
+    # D-06: session token write FIRST (no user-visible side-effect yet).
+    if session:
+        if not safe_user_set('auth_session', {
+            'access_token': session.get('access_token'),
+            'refresh_token': session.get('refresh_token'),
+        }):
+            posthog_capture('login_failed', {
+                'reason': 'session_storage_unavailable',
+                'method': 'google_oauth',
+            })
+            show_error_fn('Session storage unavailable. Please try again.')
+            return
+    # User + profile next (use set_auth's built-in SYMMETRIC 2-key rollback;
+    # Revision MUST-2 ensures auth_user AND auth_profile are popped on
+    # any partial-write failure inside set_auth).
+    if not GlobalAuthState.set_auth(user, profile):
+        # DEFENSIVE 3-key cleanup at the CALLER level (Revision MUST-2):
+        # set_auth's own SYMMETRIC 2-key rollback should have handled
+        # user/profile, but we also pop all 3 keys defensively in case
+        # set_auth's internal rollback also failed (prune race during
+        # rollback). Best-effort -- safe_user_pop returns the default
+        # on any failure including no-such-key.
+        safe_user_pop('auth_session', None)
+        safe_user_pop('auth_user', None)
+        safe_user_pop('auth_profile', None)
+        posthog_capture('login_failed', {
+            'reason': 'auth_state_storage_unavailable',
+            'method': 'google_oauth',
+        })
+        show_error_fn('Session storage unavailable. Please try again.')
+        return
+    posthog_capture('login_success', {'method': 'google_oauth'})
+    status_label.text = 'Login successful! Redirecting...'
+    await asyncio.sleep(0.5)
+    ui.navigate.to('/')
+
+
+@ui.page('/auth/callback', response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
+async def auth_callback_route(code: str = None, error: str = None, error_description: str = None):
+    """
+    OAuth callback handler.
+    Supabase redirects here after Google login with ?code= parameter (PKCE flow).
+    Also handles ?error= / ?error_description= from cancelled or failed OAuth attempts.
+    """
+    ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before OAuth atomic writes / telemetry
+    from web.supabase_client import get_profile, exchange_code_for_session
+    # Phase 91 NEW-H1: GlobalAuthState now imported at module top so the
+    # factored _oauth_complete_login helper can resolve it; the previous
+    # local-scope import here is removed (ruff F401 — would be unused).
+
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    ui.add_head_html(POSTHOG_SCRIPT)
+
+    with ui.column().classes('w-full h-screen items-center justify-center'):
+        spinner = ui.spinner(size='xl')
+        status_label = ui.label('Completing login...').classes('text-lg mt-4')
+        error_label = ui.label('').classes('text-red-500 mt-4 hidden')
+        home_btn = ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2 hidden')
+
+    async def complete_login(user, profile, session=None):
+        """Inner thin-shim around the module-level _oauth_complete_login helper.
+
+        Phase 91 AUTHW-02 + pattern-mapper finding 1: extraction makes the
+        multi-write atomicity logic unit-testable (AUTHW-05 T-A/T-B/T-E)
+        without spinning up the full NiceGUI page-render harness.
+        """
+        await _oauth_complete_login(user, profile, session, status_label, show_error)
+
+    def show_error(message):
+        """Display error and show home button."""
+        posthog_capture('login_failed', {'reason': str(message)[:100], 'method': 'google_oauth'})
+        spinner.set_visibility(False)
+        status_label.set_visibility(False)
+        error_label.text = message
+        error_label.classes(remove='hidden')
+        home_btn.classes(remove='hidden')
+
+    try:
+        # Handle OAuth error params (e.g., user cancelled consent, provider error)
+        if error or error_description:
+            error_msg = error_description or error
+            logger.warning(f"OAuth callback error from provider: {error_msg}")
+            show_error(f'Authentication failed: {error_msg}')
+            return
+
+        # PKCE flow - code in query parameter
+        if code:
+            # SECURITY (Codex review 2026-07-29, HIGH latent): never log the
+            # exchange result or the code itself. `result['session']` carries a
+            # LIVE access_token + refresh_token (see supabase_client.
+            # _session_to_dict), so the previous `logger.info(f"Code exchange
+            # result: {result}")` would have written usable OAuth credentials
+            # into journald the moment anyone raised web.main to INFO -- which
+            # the pending logging cleanup was about to do. Log shape only.
+            logger.info("OAuth callback: exchanging authorization code")
+            result = exchange_code_for_session(code)
+            logger.info(
+                "OAuth code exchange finished: ok=%s has_user=%s",
+                'error' not in result, bool(result.get('user')),
+            )
+
+            if 'error' in result:
+                show_error(result['error'])
+                return
+
+            user = result.get('user')
+            if user:
+                profile = get_profile(user['id'])
+                await complete_login(user, profile, session=result.get('session'))
+            else:
+                show_error('Login failed - no user returned')
+            return
+
+        # No code or error parameter -- redirect home
+        logger.info("OAuth callback: no code or error params, redirecting home")
+        ui.navigate.to('/')
+
+    except Exception as e:
+        logger.exception(f"OAuth callback error: {e}")
+        spinner.set_visibility(False)
+        status_label.set_visibility(False)
+        error_label.text = f'Error: {str(e)}'
+        error_label.classes(remove='hidden')
+        home_btn.classes(remove='hidden')
+
+
+# ============================================================================
+# Startup Logic
+# ============================================================================
+
+async def compact_export_storage_on_startup():
+    """Shrink legacy oversized export payloads before users reconnect.
+
+    Also deletes storage-user files whose mtime is older than
+    GENIZAH_STORAGE_RETENTION_DAYS (default 90; 0 disables) — one-visit
+    anonymous/bot session files otherwise accumulate forever (53K files on
+    prod as of 2026-07-08). Runs at startup, before clients connect.
+    """
+    def _compact_sync():
+        from web.export_state import (
+            compact_nicegui_export_storage,
+            storage_retention_days_from_env,
+        )
+        return compact_nicegui_export_storage(
+            app.storage,
+            retention_days=storage_retention_days_from_env(),
+        )
+
+    try:
+        summary = await run.io_bound(_compact_sync)
+        if (
+            summary.get('loaded_users_compacted')
+            or summary.get('files_compacted')
+            or summary.get('files_deleted')
+            or summary.get('errors')
+        ):
+            print(f"[init] Export storage compaction: {summary}", flush=True)
+    except Exception as e:
+        print(f"[init] Export storage compaction failed (non-fatal): {e}", flush=True)
+
+
+async def start_malloc_trim_on_startup():
+    """Start the periodic glibc malloc_trim(0) loop (see web/malloc_trim.py)."""
+    try:
+        from web.malloc_trim import start_malloc_trim_from_env
+        start_malloc_trim_from_env()
+    except Exception as e:
+        print(f"[init] malloc_trim startup failed (non-fatal): {e}", flush=True)
+
+
+async def start_perf_watch_on_startup():
+    """Start the event-loop lag monitor (see web/perf_watch.py).
+
+    Must run as a startup hook rather than at import time: it needs the running
+    event loop that it measures.
+    """
+    try:
+        start_event_loop_lag_monitor()
+    except Exception as e:
+        print(f"[init] perf watch startup failed (non-fatal): {e}", flush=True)
+
+
+async def initialize_engine():
+    """Heavy initialization running in a separate thread via run.io_bound."""
+    print("[init] Starting background initialization...")
+
+    def _init_sync():
+        try:
+            # 1. Metadata
+            print("[init] 1/6 MetadataManager...", flush=True)
+            # The web's library fetches (manifests, MARC) check every redirect hop.
+            state.meta_mgr = MetadataManager(checked_library_fetches=True)
+            print("[init] 2/6 ListsManager...", flush=True)
+            state.lists_mgr = ListsManager(state.meta_mgr)
+
+            # 2. Lab Settings & Engine
+            print("[init] 3/6 LabEngine...", flush=True)
+            state.lab_engine = LabEngine(state.meta_mgr, None)
+
+            # 3. Variants (depends on Lab Settings)
+            state.var_mgr = VariantManager(settings=state.lab_engine.settings)
+
+            # 4. Search Engine & Indexer
+            print("[init] 4/6 SearchEngine...", flush=True)
+            state.searcher = SearchEngine(state.meta_mgr, state.var_mgr)
+            print("[init] 5/6 Indexer...", flush=True)
+            state.indexer = Indexer(state.meta_mgr)
+
+            # 5. Start background loading
+            state.meta_mgr.start_background_loading()
+
+            # Only heavy entry points leave this process. Browsing, metadata,
+            # and result formatting retain their existing engine interfaces.
+            from web.research_jobs import IsolatedEngine, get_queue
+            state.searcher = IsolatedEngine(state.searcher, 'search')
+            state.lab_engine = IsolatedEngine(state.lab_engine, 'lab')
+            # Start the worker slots now: each starts its first worker, which
+            # loads the catalogue before the first search arrives.
+            get_queue()
+
+            print("[init] Engine initialization complete (searcher ready).", flush=True)
+
+            return True
+        except Exception as e:
+            print(f"[init] Engine init FAILED: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return False
+
+    init_ok = await run.io_bound(_init_sync)
+
+    async def _prewarm_fjms_background():
+        """Run FJMS browse cache pre-warm after readiness, off the startup critical path."""
+        def _prewarm_sync():
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms = get_fjms_service(thread_safe=True)
+                if fjms.is_available():
+                    fjms.pre_warm_caches()
+                    print("[init] FJMS caches pre-warmed (background).", flush=True)
+            except Exception as e:
+                print(f"[init] FJMS cache pre-warm failed (non-fatal): {e}", flush=True)
+                return
+            # The Manuscript features panel's values and counts, so the first
+            # visitor after a restart does not wait for them (v9.13.0).
+            try:
+                from web.components.criteria_panel import prewarm_criteria
+                if fjms.is_available() and prewarm_criteria(fjms, getattr(state, 'meta_mgr', None)):
+                    print("[init] Manuscript features counts pre-warmed (background).", flush=True)
+            except Exception as e:
+                print(f"[init] Manuscript features pre-warm failed (non-fatal): {e}", flush=True)
+
+        await run.io_bound(_prewarm_sync)
+
+    async def _prewarm_shelfmark_search_background():
+        """The catalogue's index for Shelfmark searches (MetadataManager), off the
+        startup critical path: web/research_jobs.py resolves a Title/Shelfmark
+        search's manuscripts in THIS process, so the first lookup after a restart
+        would otherwise build it (~2 s over the corpus)."""
+        def _prewarm_sync():
+            try:
+                meta_mgr = getattr(state, 'meta_mgr', None)
+                if meta_mgr is not None and meta_mgr.prewarm_shelfmark_search():
+                    print("[init] Shelfmark search index pre-warmed (background).", flush=True)
+            except Exception as e:
+                print(f"[init] Shelfmark search index pre-warm failed (non-fatal): {e}", flush=True)
+
+        await run.io_bound(_prewarm_sync)
+
+    if init_ok:
+        prewarm = asyncio.create_task(_prewarm_fjms_background(), name='fjms-prewarm')
+        shelfmark_prewarm = asyncio.create_task(_prewarm_shelfmark_search_background(),
+                                                name='shelfmark-search-prewarm')
+        # One gc.collect(); gc.freeze() once the loaders that keep allocating
+        # after _init_sync (MetadataManager threads, FL-ID build, these prewarms)
+        # are done -- see web/gc_freeze.py. Scheduled from HERE, not as another
+        # app.on_startup handler: NiceGUI runs those concurrently, so none of
+        # them can run "after" this one.
+        from web.gc_freeze import freeze_after_loaders
+        asyncio.create_task(
+            freeze_after_loaders(state, extra_tasks=(prewarm, shelfmark_prewarm)),
+            name='gc-freeze-after-loaders',
+        )
+
+async def open_blau_sidecar_on_startup():
+    """Open and check the Blau dictionary sidecar, and the Arabic (Lane) sidecar shown in its panel,
+    once each, off the loop.
+
+    ``shared.blau_service.get_blau_service`` opens ``blau_data/blau.db``
+    read-only and runs its checks (schema, normalizer, credit line,
+    ``quick_check``) on first use; doing that here keeps the first /browse
+    render from paying for it on the event loop. Fail-closed: an absent or
+    rejected sidecar leaves the service unavailable and /browse without the
+    companion; nothing here can stop the app.
+    """
+    from shared.blau_service import get_blau_service
+    try:
+        service = await run.io_bound(get_blau_service)
+        if service is not None and not service.is_ready():
+            print(f"[init] Blau dictionary not served: {service.unavailable_reason}", flush=True)
+    except Exception as e:
+        print(f"[init] Blau dictionary sidecar check failed (non-fatal): {e}", flush=True)
+    # Lane's Lexicon (shared/arabic_service.py) sits in Blau's panel: open its 74 MB sidecar here
+    # too, so its quick_check and table loads never run inside the first /browse render (Codex on #480).
+    from shared.arabic_service import get_arabic_service
+    try:
+        lane = await run.io_bound(get_arabic_service)
+        if lane is not None and not lane.is_ready():
+            print(f"[init] Lane's Lexicon not served: {lane.unavailable_reason}", flush=True)
+    except Exception as e:
+        print(f"[init] Lane sidecar check failed (non-fatal): {e}", flush=True)
+    # Friedman's dictionary (shared/friedman_service.py; the private Friedman plan step 3):
+    # the same panel, a third tab, off unless FRIEDMAN_DICTIONARY_ENABLED is set (a candidate sidecar).
+    from shared.friedman_service import get_friedman_service
+    try:
+        friedman = await run.io_bound(get_friedman_service)
+        if friedman is not None and not friedman.is_ready():
+            print(f"[init] Friedman's dictionary not served: {friedman.unavailable_reason}", flush=True)
+    except Exception as e:
+        print(f"[init] Friedman sidecar check failed (non-fatal): {e}", flush=True)
+
+
+app.on_startup(compact_export_storage_on_startup)
+app.on_startup(start_malloc_trim_on_startup)
+app.on_startup(start_perf_watch_on_startup)
+app.on_startup(open_blau_sidecar_on_startup)
+app.on_startup(initialize_engine)
+
+
+async def stop_research_workers():
+    from web.research_jobs import shutdown_research
+    await asyncio.to_thread(shutdown_research)
+
+
+app.on_shutdown(stop_research_workers)
+
+def _find_free_port(start_port: int, max_attempts: int = 10) -> int:
+    """Find a free port starting from start_port. Returns the first available port."""
+    import socket
+    for offset in range(max_attempts):
+        port = start_port + offset
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', port))
+                return port
+        except OSError:
+            if offset == 0:
+                print(f"  Port {port} is busy, trying next...")
+    return start_port  # Fall through — let uvicorn report the error
+
+
+if __name__ in {'__main__', '__mp_main__'}:
+    # Hardening, checked here and never at import time (tests and scripts import
+    # this module without the variable): the storage secret comes from the
+    # environment (GENIZAH_STORAGE_SECRET, required -- no fallback), and the web
+    # app refuses to start unless session id validation is installed.
+    from web.session_hardening import require_session_id_validation, resolve_storage_secret
+    storage_secret = resolve_storage_secret()
+    require_session_id_validation()
+
+    # Production settings via environment variables
+    reload_enabled = os.environ.get('NICEGUI_RELOAD', 'true').lower() == 'true'
+    show_browser = os.environ.get('NICEGUI_SHOW', 'true').lower() == 'true'
+
+    # In dev mode, auto-find a free port if the default is busy.
+    # In production (reload=false), use the configured port strictly.
+    run_port = _find_free_port(APP_PORT) if reload_enabled else APP_PORT
+
+    print(f"\n{'='*60}")
+    print(f"  Dicta Genizah Search v{APP_VERSION}")
+    print(f"  Starting on port {run_port}...")
+    print(f"{'='*60}\n")
+
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
+
+    # Reconnect timeout (seconds) - how long client waits before giving up reconnection
+    # Higher value = more patient reconnection attempts under load
+    reconnect_timeout = int(os.environ.get('NICEGUI_RECONNECT_TIMEOUT', '30'))
+
+    ui.run(
+        title=APP_TITLE,
+        port=run_port,
+        reload=reload_enabled,
+        show=show_browser,
+        storage_secret=storage_secret,
+        favicon=favicon_path,
+        reconnect_timeout=reconnect_timeout,
+    )

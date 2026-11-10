@@ -1,0 +1,364 @@
+# GenizahSearch - Claude Context
+
+> This file provides context for AI assistants working on the GenizahSearch project.
+
+## How to work here
+
+**Start with `powershell -File scripts/init.ps1`.** It prints repo state,
+the tracker's newest entry, recent `_tmp/` working notes, and every gate's exit code. Run it
+instead of reading documentation to re-orient.
+
+**When the owner is asking a question, describing a problem, or thinking out loud, the
+deliverable is your assessment — not a change.** Lead with the outcome: the first sentence
+answers "what happened". Then stop.
+
+**Before reporting progress, check each claim against a tool result from this session.**
+Report only what you can point at evidence for, and say plainly when something is unverified.
+"Tests pass" requires a test run in this session, not an inference from the diff.
+
+**Write shell commands to a `.ps1` file and run the file** rather than composing long inline
+commands. This is PowerShell 5.1: no `&&`, no ternary, and here-strings passed inline to a
+native command get mangled. Use `git commit -F <file>` for commit messages.
+
+**Keep the always-loaded files small.** `CLAUDE.md` and `docs/OPEN_ISSUES.md` are read every
+session, so their size is a recurring cost; `scripts/check_docs.py` fails the build if either
+passes its ceiling. When a ceiling is hit, split closed content into `docs/archive/` (private
+repository) — never raise the number.
+
+**A worktree never links to the main checkout's data.** Sessions run in
+`.claude/worktrees/<name>`, which has none of the gitignored sidecars (`nli_data/`, `fgp_data/`,
+`pgp_data/`, `fist_data/`, `blau_data/`). Never bridge that with a junction or symlink into
+`C:\GenizahSearch`: `git worktree remove --force` and `rm -rf` walk a junction as a directory, and
+on 2026-11-04 that emptied the main checkout's `nli_data/` and `fgp_data/`. A session that needs a
+sidecar copies it under `%LOCALAPPDATA%\GenizahSearchPro\data\<dir>\` (the path every
+`shared/*_service.py` checks first) or points the service's env var at the main checkout's file
+where one exists (`GENIZAH_FJMS_DB_PATH`; `docs/guides/ENV_VARS.md`). `scripts/init.ps1` warns on
+any reparse point in a worktree; remove one with `cmd /c rmdir <link>`, never recursively.
+
+**Effort is routed, not pinned.** Sessions run at `high`. Raise with `/effort xhigh` for the
+calls where being wrong costs the owner grading hours — sample design and weighting, threshold
+selection, the precedence matrix, relation-label taxonomy, anything that decides what a public
+claim asserts. Drop to `/effort medium` for plumbing: deck builders, schema batches, harness
+scaffolding, mechanical edits. Say which tier you are on when it is not the default.
+Subagents run on Sonnet 5 (`CLAUDE_CODE_SUBAGENT_MODEL`).
+
+## Project Overview
+
+GenizahSearch is a collaborative research platform for the Cairo Genizah, featuring:
+- **Web Application** (NiceGUI) - https://genizahsearch.com
+- **Desktop Application** (PyQt6) - Windows executable
+- **Supabase Backend** - Cloud database for user data
+
+## Architecture
+
+Two applications over one shared core: the NiceGUI web app (`web/`, with FastAPI serving
+`/api/*`) and the PyQt6 desktop app (`genizah_app.py` + `desktop/`), sharing `shared/`. Read-only
+reference data comes from Tantivy indexes and SQLite sidecars (`pgp.db`, `fjms_enrichment.db`,
+`nli_crossref.db`, `fgp_transcriptions.db`; `joins.db` holds saved joins); Supabase (PostgreSQL)
+holds the community data (auth, lists, corrections, comments, discoveries) and the PGP reference
+tables that `pgp.db` is exported from. The full picture --
+components by subsystem, the dependency rules and the tests that enforce them, who owns which
+state, and a decision for every top-level directory and root file -- is
+[`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
+
+The **standalone** backend service (the separate `genizah-backend` process on port 8000, with its own database and routers) was removed in January 2026. All read-only reference data is now served from local SQLite sidecars. Supabase is retained only for community features (auth, corrections, lists, comments).
+
+> **Note:** FastAPI itself is still live and load-bearing — NiceGUI's `app` *is* a FastAPI instance, and `/api/*` routes (image proxies, exports, and the public Search API) are registered as FastAPI routes (`web/api.py::init_api_routes`) plus a dedicated `FastAPI()` sub-app mounted at `/api` in `web/main.py`. "Removed" refers only to the standalone backend process, not the framework.
+
+## Key Files
+
+Where code and data live is documented once, in
+[`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md) (components by subsystem with the
+load-bearing modules named) and [`docs/architecture/DATA_LIFECYCLE.md`](docs/architecture/DATA_LIFECYCLE.md)
+(one row per data artifact: producer, consumers, where its location is decided). Binding
+decisions are one page each under [`docs/decisions/`](docs/decisions/README.md); the symbol-level
+index is `docs/CODE_INDEX.md`. The short version: `web/main.py` and `genizah_app.py` are the entry
+points; `shared/` is what both apps share and `genizah_core.py` is a permanent facade over it; the
+`shared/*_service.py` modules own the SQLite sidecars; `web/safe_storage.py` is the chokepoint for
+per-user web state; `shared/discovery_relation_matrix.py` is the only source of a rendered relation.
+
+## Common Tasks
+
+### Running the Web App
+```bash
+python -m web.main
+```
+Opens on port 8081 by default (`GENIZAH_PORT`); in dev it takes the next free port above it.
+
+### Running the Desktop App
+```bash
+python genizah_app.py
+```
+
+## Important Conventions
+
+1. **Hebrew RTL** - Many strings are in Hebrew, text is right-to-left
+2. **Shelfmarks** - Manuscript identifiers like "T-S 12.123", "MS Heb c 57"
+3. **sys_id** - Internal unique identifier for manuscripts
+4. **fl_id** - Fragment/leaf identifier (e.g., "T-S 12.123.1r" for recto)
+5. **library_code** - Abbreviated library identifier (e.g., "CUL", "JTS", "Oxford")
+6. **Supabase Data API grants** - Every migration/provisioning script that creates a `public` table intended for `supabase-js`/PostgREST/GraphQL access must include explicit `GRANT` statements for the needed roles, in addition to RLS and policies. This is required for new projects from 2026-05-30 and existing projects from 2026-10-30.
+
+## Data Files
+
+### libraries.csv
+Master metadata file for ~255,000 manuscript records.
+
+**Structure:**
+```csv
+system_number,oxford_part_id,call_numbers,library_code,,,,titles_non_placeholder
+```
+
+| Column | Index | Description |
+|--------|-------|-------------|
+| system_number | 0 | Unique sys_id |
+| oxford_part_id | 1 | Oxford part identifier (optional) |
+| call_numbers | 2 | Pipe-separated shelfmark variants |
+| library_code | 3 | Library abbreviation (CUL, JTS, etc.) |
+| titles_non_placeholder | 7 | Hebrew title |
+
+**Library Codes:** CUL (~128K), JTS (~30K), RNL (~17K), Oxford (~13K), Manchester (~12K), BL (~8K), AIU, Mosseri, Gaster, Halper, NLI, and others (see `genizah_core.LIBRARY_CODES`).
+
+### joins.db (SQLite sidecar)
+Stores saved puzzle/join documents in `joins_data/`.
+- `join_documents` - Document records (id, title, notes, fragments_json, thumbnail_b64)
+- `join_document_fragments` - Fragment index for reverse lookups (doc_id, fl_id, sys_id)
+
+## Documentation
+
+See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
+- `docs/architecture/` - where code and data live (OVERVIEW.md, DATA_LIFECYCLE.md) -- authoritative
+- `docs/decisions/` - the binding decisions, one page each
+- `docs/guides/` - Developer guides
+- `docs/specs/` - Technical specifications
+- `CHANGELOG.md` - Full release history
+
+Implementation plans (`docs/plans/`) and historical documents (`docs/archive/`) are kept in the
+private repository.
+
+## The private repository
+
+Planning records, operations guides and research notes live in a separate private repository,
+checked out beside this one at `C:\GenizahSearch-private` with the same relative paths. Tests
+find it through `GENIZAH_PRIVATE_DIR` or that sibling folder, and skip when it is absent. Never
+copy its contents, people's names, machine paths, server details or owner quotes into this public
+repository. Write planning notes there, never here.
+
+## Code Style
+
+- Python 3.11
+- NiceGUI for web UI
+- PyQt6 for desktop UI
+- Type hints encouraged
+- Hebrew comments are acceptable
+
+## Environment Variables
+
+**Full reference: [`docs/guides/ENV_VARS.md`](docs/guides/ENV_VARS.md)** — every var, its
+default, and the reasoning behind the non-obvious ones. Read it before changing any of them.
+
+Only the vars that change **what you do** are repeated here: the flags that decide whether a
+surface exists at all. Every one is **necessary but NOT sufficient** — each is ANDed with a
+fail-closed readiness check on its data, so a flag-ON/asset-missing window still hides cleanly.
+Never treat a flag alone as proof a feature is live.
+
+| Flag | Default | Gates | ANDed with |
+|---|---|---|---|
+| `DISCOVERY_ENABLED` | `false` — **but ON in production since 2026-08-08** | `/computed-identifications`, the browse connections panel | `web/discovery_assets.py::discovery_available()` |
+| `ATLAS_PREVIEW_ENABLED` | `false` | `/atlas` + its data routes and nav link | `web/atlas_assets.py::atlas_preview_available()` |
+| `PASSAGE_PARALLELS_ENABLED` | `false` | `method='passage'` on `/api/parallels` + the method selector | `web/passage_assets.py::passage_available()` |
+| `PASSAGE_MULTI_WITNESS_ENABLED` | `false` | the Witnesses panel + `witnesses[]` on the API | `passage_available()` |
+| `IDENTIFICATION_REVIEWS_ENABLED` | `true` | community identification reviews (beta) | — |
+| `FGP_TRANSCRIPTIONS_ENABLED` | `true` | FGP transcriptions as a version-chooser source | presence of `fgp_data/` |
+| `BLAU_DICTIONARY_ENABLED` | `true` | Blau's dictionary on `/browse` (click a word; several words are the expression search, once the 1.1.0 sidecar with its `tokens` table is deployed) | `shared/blau_service.py::BlauService.is_ready()` -- `blau_data/blau.db` present and checked |
+| `LANE_DICTIONARY_ENABLED` | `true` | Lane's Lexicon, its own tab in the dictionary panel | `shared/arabic_service.py::ArabicService.is_ready()` -- `arabic_data/arabic.db` present and checked |
+| `FRIEDMAN_DICTIONARY_ENABLED` | `false` — turned ON in production with v9.15.0 (owner, after the sidecar) | Friedman's Judeo-Arabic dictionary, its own tab, with the expression search (a machine reading; the tab and Help say it may contain errors) | `shared/friedman_service.py::FriedmanService.is_available()` -- `friedman_data/friedman.db` present and checked |
+| `WEB_PUZZLE_ENABLED` | `true` | the web Fragment Puzzle page | — |
+| `MCP_ENABLED` | `false` | the public MCP server at `POST /mcp` (replaces the GPT; `integrations/mcp/README.md`) | the `/api/chatgpt` facade being registered |
+| `SEARCH_API_MODE` | `open` | the public API (`open`/`localhost-only`/`disabled`) | — |
+
+Four more you will hit directly while working:
+
+- `GENIZAH_STORAGE_SECRET` — **required** to run the web app anywhere (32+ characters, no
+  fallback); `python -m web.main` exits at startup without it. On the server it must be set
+  BEFORE deploying; changing it signs every web user out once.
+
+- `GENIZAH_DISCOVERY_DATA_DIR` / `GENIZAH_PASSAGE_DATA_DIR` — dev/CI only, read ONCE at import.
+  They select *which* directory is read; the loader still applies its full fail-closed contract.
+  Leave unset in production.
+
+## Testing
+
+```bash
+python scripts/run_local_tests.py
+```
+
+**Do not run the whole suite as one `pytest tests/` process.** Measured
+2026-09-09: it was killed after 2h35m unfinished, holding 91.6 GB of private
+commit on a 63 GB machine and spending its time paging (45% of ONE core out of
+24). Nothing in this suite frees what it allocates, so the fix is bounded
+process lifetime: `run_local_tests.py` splits the same selection into balanced
+chunks of <=30 files across 4 disposable processes, using CI's own marker
+expression. `-j N` changes the lane count; `--dry-run` prints the plan.
+
+`pytest tests/some_file.py` for a single file is of course still fine.
+
+One check is deliberately NOT in any routine run: the full verification of
+`discovery-v5-REVIEW.db` (3.45 GB, 519,382 rows) used to cost 57 minutes per
+run and is now behind `GENIZAH_VERIFY_REAL_ARTIFACT=1` plus its own script,
+kept in the private repository, which FAILS rather than skips on missing
+data. It is registered to run nightly (scheduler also kept in the private
+repository), and run with `--expect-rows` before promoting any rebuilt artifact.
+
+## Common Issues
+
+1. **Search not working** - Check if Tantivy index exists in `Genizah_Index/`
+2. **User data not syncing** - Check Supabase connection and credentials
+3. **Images not loading** - NLI/Cambridge IIIF APIs may be down
+
+## Documentation Maintenance (Important!)
+
+**AI agents working on this codebase should keep documentation updated.**
+
+### Open Issues Tracker (REQUIRED)
+
+**`docs/OPEN_ISSUES.md`** lists every open defect, one line each, by priority and area, under a
+stable ID (`GS-12`). Rebuilt 2026-10-25: the full text of each row is in `docs/ISSUE_DETAILS.md`,
+and what is not a defect (deferred, debt, test gaps, ideas, owner tasks) is in `docs/BACKLOG.md`.
+**Grep those two by ID; never read them whole.**
+
+1. **At session start:** read the "Last Updated" line, the Summary and your area's rows.
+2. **New defect:** a fragment in `docs/open_issues.d/` (see its README), never a row in the
+   tracker: rows conflict across open PRs. `scripts/collect_open_issues.py --apply` gives it an ID.
+3. **Fixed:** set the row's status to `✅ Fixed (YYYY-MM-DD, <sha>)`, then run
+   `python scripts/archive_closed_issues.py --apply`: it moves the row and its details to
+   `docs/archive/OPEN_ISSUES_ARCHIVE.md` in the private repository (~530 KB, grep only) and regenerates the counts.
+4. **Never hand-edit a count:** the Summary is generated; `tests/test_open_issues_fragments.py`
+   fails when it drifts, and `collect_open_issues.py --apply` repairs it. Cite issues by ID, never
+   by line. Never re-run `scripts/split_open_issues.ps1 -Apply`: it rebuilds the archive from scratch.
+
+### When to Update Docs
+
+| If you change... | Update these docs |
+|------------------|-------------------|
+| Architecture/infrastructure | `CLAUDE.md`, `docs/architecture/OVERVIEW.md` (server steps: the deployment guide in the private repository) |
+| Supabase schema (tables, RLS) | `docs/guides/SUPABASE_GUIDE.md` |
+| Web app pages/components | `docs/CODE_INDEX.md` |
+| Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
+| Major features | a `changelog.d/` file, never `CHANGELOG.md` itself (see its README); `README.md` |
+| **App version** | Run `python scripts/bump_version.py X.Y.Z` |
+
+### Version Bumping (REQUIRED for releases)
+
+Run the automated script — it updates all version files at once:
+```bash
+python scripts/bump_version.py 6.3.0          # apply changes
+python scripts/bump_version.py 6.3.0 --dry-run # preview only
+```
+
+**Files updated automatically:** `version.py` (source of truth), `version_info.txt` (Windows EXE metadata), `CompileScriptGenizah.iss` (Inno Setup), `README.md` (header line).
+
+**Manual steps after running the script:**
+1. `python scripts/collect_changelog.py --apply` (folds `changelog.d/` in), then `CHANGELOG.md` — add `## [X.Y.Z]` section; `python scripts/collect_open_issues.py --apply` (folds `docs/open_issues.d/` in)
+2. `CLAUDE.md` "Recently Changed" — add one-line entry
+3. `README.md` "What's New" section — update feature description
+
+### Before Finishing a Session
+
+```bash
+python scripts/check_docs.py
+```
+
+Fix any reported issues before committing.
+
+### Outdated Terms to Avoid
+
+- standalone `backend server` / `genizah-backend` service - Removed in Jan 2026 (NOTE: FastAPI the framework is still live — it serves `/api/*`; only the separate backend process was removed)
+- `DATABASE_URL` - Replaced by `SUPABASE_URL`
+- `port 8000` - Backend port no longer used
+
+## Recently Changed
+
+**One line per release. Full release notes live in [`CHANGELOG.md`](CHANGELOG.md)** — every
+version below is a `## [X.Y.Z]` section there. Do not re-expand this list; it is loaded into
+every session's context.
+
+### Facts that outlive their release (keep these here)
+
+- **v9.0.0 is CLOSED.** Its planning record and exit audit are in the private repository; read the
+  audit there before planning discovery, passage-matching or REL-01 work.
+- **Where code lives.** Search / metadata / variants / responsa / engines are in `shared/*.py`,
+  not `genizah_core.py` (which is a 755-line facade re-exporting 27 names). Desktop dialogs,
+  widgets, and update-UI are in `desktop/*.py`. **Grep `shared/` and `desktop/`**, not just the
+  old god-files. (v8.3.0 decomposition) Layout, ownership and the guard tests:
+  [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
+- **The root alias stubs are GONE; the old names no longer resolve.** Twelve root modules moved in
+  September 2026: `gui_threads`, `corrections_ui`, `corrections_client`,
+  `supabase_corrections_client`, `filter_text_dialog`, `list_filter_dialog`, `column_filter_dialog`
+  to `desktop/`; `sefaria_utils`, `pgp_tag_translations`, `unified_variants`, `lists_sync` to
+  `shared/`; and the dev-server CLI to `scripts/server.py`. Each left a four-line stub at the old
+  path while consumers were rewritten; Round 2 deleted all eleven (2026-09-21), and with them those
+  basenames' exemption in `tests/test_dependencies_declared.py`. The same day
+  `genizah_translations` moved to `shared/` with no stub. **Import `desktop.<name>` /
+  `shared.<name>`** -- `import gui_threads` and `import genizah_translations` are now ImportErrors;
+  `TRANSLATIONS` also still comes off the `genizah_core` facade.
+  `tests/test_no_root_alias_stubs.py` fails any tracked file that still names one, which matters
+  because two rewritten sites sit inside `except ImportError` (`desktop/join_workbench.py` ->
+  `desktop.gui_threads`; `desktop/corrections_client.py` -> `desktop.supabase_corrections_client`)
+  and would degrade a feature silently rather than raise.
+- **LOCAL extractor is at `extraction_format_version` 3.** Libraries indexed before that need a
+  manual **Re-index All**; there is no auto-flip (bulk re-extraction must never run from
+  `__init__` or the UI thread).
+- **`97` is the LOCAL "My Library" namespace, never a corpus prefix.** Corpus sys_ids are
+  all `99` (255,723/255,723 in `libraries.csv`). Import from `shared/sys_id_patterns.py`:
+  `CORPUS_SYS_ID_RE`, or `ANY_SYS_ID_RE` only where a LOCAL header can arrive. A lint
+  fails CI on a hand-rolled one.
+- **Web is not continuous-deploy.** Deploy DBs/assets first (`scp`), then push code.
+- **Still open:** the `Set-Cookie`-on-every-response Cloudflare BYPASS for ordinary page requests —
+  see `docs/OPEN_ISSUES.md`. Partially mitigated 2026-08-13 (`ab064ff9`): static/immutable assets now
+  bypass the session-cookie middleware and are cacheable; page HTML, APIs and auth are unchanged.
+- **The discovery beta is LIVE in production** (`DISCOVERY_ENABLED=1` since 2026-08-08). A planning
+  note in the private repository that says the flag must not be flipped is historical.
+
+### Releases
+
+PR numbers and commit ids below (9.15.0 and earlier) refer to the earlier, non-public repository.
+
+- **v9.15.0 — Friedman's dictionary and expression search (2026-11-08)** — PRs #486-#489 (web-only, no installer, no GitHub Release): Friedman's tab beside Blau's (`shared/friedman_service.py`, `friedman_data/friedman.db`), the expression search in both (`shared/ja_expression.py`, Blau sidecar 1.1.0 `tokens`); CODE FIRST, then `deploy_blau_sidecar.ps1 -Tokens 242503`, `deploy_friedman_sidecar.ps1`, `FRIEDMAN_DICTIONARY_ENABLED=1`. Web `WHATS_NEW_VERSION` "9.15.0-friedman" (shown once Friedman is served). (web)
+- **v9.14.0 — Dictionaries and search improvements (2026-11-05)** — PRs #463-#485: Judeo-Arabic dictionaries on /browse (Blau `blau_data/blau.db`, Lane `arabic_data/arabic.db`, deployed after the code by `scripts/deploy_{blau,arabic}_sidecar.ps1`), look-up key (D/M tapped, Alt+click, phone chip, Esc; `web/static/js/blau_lookup.js`), header go-to box, desktop Go to + "Did you mean", shelfmark lookups at once, NLI records on disk; What's New in every version (`shared/whats_new_data.py`, `/whats-new`, desktop `VersionHistoryDialog`); sidebar icon rail, `?` card (`web/keyboard_shortcuts.py`), one Sign in, Help corrections; deploy scripts use the `genizah-prod` SSH alias. Web `WHATS_NEW_VERSION` "9.14.0-dictionaries"; no desktop What's New. (both)
+- **v9.13.1 — Manuscript features in the Joins Lab (2026-11-03)** — PRs #461 #462: the Joins Lab filter dialogs open the Manuscript features window over the candidates (`CriteriaControl(within=)`, `CriteriaMatchWorker`), per manuscript, replacing its Material/Width/"Has dimensions"; web warms the counts at start (`prewarm_criteria`, `FjmsService._build_once`). Desktop What's New: sixth 9.13.0 bullet, content version kept; no web What's New. (both)
+- **v9.13.0 — Find manuscripts by features (2026-11-02)** — PRs #457-#460 (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`): one "Manuscript features" panel (`shared/catalog_criteria.py` registry; web `web/components/criteria_panel.py`, desktop `CriteriaDialog`) on Browse by Identification and "Search only in...", Browse by Identification over the whole corpus (255,723, catalogued first), post-search filters on the panel's rules; API `filters.criteria` + `GET /api/criteria`, MCP `list_manuscript_features`; FJMS sidecar 5.1.0 (`scripts/migrate_fjms_criteria.py`; server copy first). Desktop What's New 9.13.0; web `WHATS_NEW_VERSION` "9.13.0-features". (both)
+- **v9.12.1 — Keyboard shortcuts, round two (2026-10-30)** — Ctrl+A fixed (`CheckBoxHeader.isChecked` is a FIELD); back to Search / Composition lands in its results (`_land_in_results`, clicks `_land_after_click`), Ctrl+R (`_focus_results_view`: tree rows under a collapsed group do not show); `LayoutProofShortcuts` ignores popups; What's New stays 9.12.0, bullet 3 fixed. No PR. (desktop)
+- **v9.12.0 — Keyboard shortcuts (2026-10-30)** — desktop: the cursor in the search box from launch (`_focus_on_launch`; `_refocus_after_restore` selects restored words unless the user typed/moved meanwhile), Ctrl+1..7 open a tab with the cursor in its box (`_open_section`), a search with results ends in the results (`_focus_results_after_search`; `_focus_at_search_start` / `_deferred_search_focus`), Ctrl+E = Ctrl+F, Ctrl+O = Ctrl+G; result lists: Space ticks, Enter opens, Ctrl+Enter Browse (`_results_table_key`); viewer Ctrl+arrows mirrored in Hebrew (`ResultDialog._install_shortcuts`); card `desktop/shortcuts_dialog.py` (Ctrl+/, ⌨ beside A−); web: the Parallels Word export marks the matched words (GS-21, #456). Desktop What's New 9.12.0; no web What's New. (both)
+- **v9.11.1 — Cambridge links fixed (2026-10-30)** — PRs #453-#455: one CUDL item per record, by its label's letters and numbers against the catalogue names (`shared/cudl_identity.py`, `MetadataManager.resolve_cambridge`, `RESOLVER_REVISION`), every surface in both apps follows it; 1,916 records gain a link, 15 corrected, sidecar unchanged; web Quick View version chooser and page counts without automatic text (`web/page_count.py`), link searches start at once. Desktop dialog bullet added, `WHATS_NEW_CONTENT_VERSION` stays 9.11.0 (owner); web `WHATS_NEW_VERSION` "9.11.1-cudl". (both)
+- **v9.11.0 — FGP transcriptions from FGP's own files (2026-10-29)** — the FGP sidecar rebuilt by gates 1-4 (`docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md`): `fgp_data/fgp_transcriptions.db` v2.0.0, 59,062 rows (web swap = owner, `scripts/deploy_fgp_sidecar.ps1 -Rows 59062`); 14,578 new rows, 27,849 from FGP's Word/line files, letters re-read from the PDF fonts' glyph names on 1,779 (`scripts/fgp_glyph_reread.py`, rules §9), the Yerushalmi team's markings `[ ]` `֯` `⟦ ⟧` `\ /` `⸤ ⸥` (rules §10). Today's June sidecar is kept as `fgp_data/fgp_transcriptions.pre_9110.db`: gates 3-4 rerun with `--fgp-db` it (`refuse_candidate_as_today`). Also the Genuzot marks legend, web editions on pages without automatic text, Joins Lab show/hide filters (#450). Desktop What's New 9.11.0; web `WHATS_NEW_VERSION` "9.11.0-fgp". (both)
+- **v9.10.0 — Desktop UI improvements (2026-10-25)** — PRs #447 #448: desktop menu layouts (Settings > Menu: tabs at the top, the default, or a side menu, `desktop/widgets/side_nav.py`, `nav_layout` in config.pkl), ☰ at the window's edge, Go to Ctrl+G with recent manuscripts (`shared/quick_open.py`), saved searches (☆, `pinned` in `search_history.json`), startup tips (`desktop/startup_tips.py`, 55 owner-approved), result-list text size, Ctrl+1..9 / F1 / Ctrl+, / Ctrl+F (physical-key fallback `LayoutProofShortcuts`), account menu, window geometry kept; web: public-name aliases + one-time name question (`web/public_name.py`, `migrations/profiles_public_aliases.sql`), admin Users tab emails (`admin_list_user_emails()`) and a real Delete User (`admin_delete_user()`), Responsa numbered notes translated (`tr_engine_message`). Desktop What's New 9.10.0; no web What's New. (both)
+- **v9.9.0 — True wildcards in Responsa (2026-10-23)** — PRs #432–#446 (plan
+  `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md`): Responsa `*` = any letters, none included, anywhere in a
+  word, as often as typed (`shared/responsa_match.py`, one compiler per index; gate
+  `scripts/verify_responsa_wildcards.py` against `Transcriptions.txt`); every Responsa word whole, `#word#`
+  all 600 forms, bracketed words found, excluded words per page; `Config.RESPONSA_PAGE_LIMIT` 150,000,
+  `RESPONSA_STAR_AGGREGATE_LIMIT` 2,000. **Index format 2** (`tantivy_db/seams/` K=30, `content_rev`,
+  `index_format.json` written last; `SearchEngine.index_format_status()`): page-break matches of every
+  multi-word search from the seams, leading stars from the reversed field; a format-1 index keeps today's
+  routes. Server rebuild = owner (the deployment guide in the private repository, "Rebuild the main
+  index in format 2"). Desktop: rebuild beside + swap (`shared/index_swap.py`, `recover_index_dirs` at start),
+  main-window progress line (`desktop/index_rebuild_bar.py`), one-time offer with "Rebuild when I exit".
+  Web: Back restores a run (`web/search_runs.py`); Joins Lab and Personal Lists on a phone. Desktop:
+  match-centred Snippet/Context cells. Desktop What's New 9.9.0; web `WHATS_NEW_VERSION`
+  "9.9.0-wildcards". (both)
+- **v9.8.3 — A compact layout at every width (2026-10-22)** — PR #434 (web-only, no installer, no GitHub Release): one stylesheet with breakpoints at 640, 1023 and 1440. Phone: the page scrolls, the search form folds to a strip when a search starts, the browse image sets its own height, icon-only header buttons; laptop: the search form is one row (Advanced Options / "Search only in..." as buttons with a count badge), compact result rows by default remembered per visitor (`search_density`), an expanded result with the full text beside a thumbnail, a one-line quick view with the catalog details collapsed at the foot (three tabs on a phone), the drawer overlays up to 1023; the viewer takes pinch-zoom and one-finger pan (`web/static/manuscript_viewer.js`). Five Codex rounds, nine fixes, each pinned in `tests/test_phone_layout_rules.py`. No What's New (owner): the change is visible. (web)
+- **v9.8.2 — Downloads and thumbnails (2026-10-22)** — PRs #426-#430: desktop Excel/Word/text downloads write the page the row shows (Snippet marks line breaks ` ‖ `, Full Text a space), and the Source column shows whenever a result is V0.7 (it needed `AllGenizah_OLD.txt` beside the exe); web NLI thumbnails kept on disk (`web/nli_image_store.py`, `<INDEX_DIR>/nli_thumbs/`, 10 GB cap) and the FL-id cache really keeps 30 days (`nli_fl_ids.db`; the old JSON is no longer read); web saves off the event loop (`run.io_bound(..., client=)`), /browse keeps the page under the spinner, one `gc.freeze()` after the startup loaders (`web/gc_freeze.py`, `GENIZAH_GC_FREEZE=0` turns it off), reconnect backoff after a restart (`web/static/js/reconnect_backoff.js`); Responsa true-wildcard plan + Phase 0 numbers; new tracker rows as `docs/open_issues.d/` fragments. No What's New: `WHATS_NEW_CONTENT_VERSION` stays 9.8.0. (both)
+- **v9.8.1 — Reliability and sign-up (2026-10-21)** — PRs #418-#425: web on NiceGUI 3.18 / Starlette 1.9 (`deploy.sh` installs with `-c requirements-lock.txt`); sign-up under email confirmation on both apps (typed fields in sign-up metadata, written by `handle_new_user`; usernames never the email, `migrations/profiles_no_email_username.sql` applied 10-21); API/MCP/ChatGPT `exact` = whole words (engine `literal`, responses still say `exact`); worker threads get the visitor's language (`web.translations.in_visitor_language`); `ux_timing` PostHog event (`UX_TIMING_*`); Puzzle auto-save + crops; desktop own corrections by account id, quit waits <=2 s, `crash_log.txt` in the data folder, Excel "N+"; append-preservation deploy gate (`scripts/verify_append_preservation.py`). No desktop or web What's New (owner, 2026-10-21): `WHATS_NEW_CONTENT_VERSION` stays 9.8.0, `WHATS_NEW_VERSION` stays "9.8.0-joins-lab". (both)
+- **v9.8.0 — Joins Lab upgrades (2026-10-19)** — PRs #403-#416: Joins Lab sort/filter by library and domain (web: in the results toolbar, "More filters…" for the rest), Small/Medium/Large card sizes and a fuller Compare window (copy, one details line, Ktiv/library/PGP links; `shared/fragment_details.py`) in both apps; web-only: Copy Link that reopens the screen (`web/joins_lab_link.py`), Browse in a new tab, homepage box opens shelfmarks/sys_ids (`web/home_query.py`), Browse button icons, Visual Similarity thumbnail sizes, week-long cacheable image routes (`IMAGE_HTTP_MAX_AGE`); CI shards + `changelog.d/`. Desktop What's New 9.8.0; web `WHATS_NEW_VERSION` "9.8.0-joins-lab". (both)
+- **v9.7.0 — Conditions in Composition Search, and letter-level search in My Library (2026-10-19)** — PRs #397-#402: desktop letter-level Composition Search takes up to four "must / must not appear" texts on the same image, an adjacent image or the same manuscript, from one "Filter texts" menu, with the 40-letter own-text rule (`shared/compound_query.py`; plan `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`); letter-level search for My Library from Yehudah Seewald's prototype (one lifecycle, two slots: `desktop/passage_lifecycle.py`, `desktop/passage_local.py`); NLI-catalogue-form shelfmarks on every input, only after the exact stage (`shared/catalog_shelfmark.py`), and a named library prefix scopes the exact answer (#402); web Visual Similarity thumbnails, with filters that apply; desktop letter-level keeps every manuscript; own photograph over a shared reel copy; Hebrew Word exports flush right; Qt buttons in Hebrew. Desktop What's New 9.7.0; web `WHATS_NEW_VERSION` "9.7.0-shelfmarks". (both)
+- **v9.6.2 — Faster Extended and Maximum on the desktop; GenizahSearch in ChatGPT (2026-10-12)** — PRs #395 #396: engine-built gap-0 patterns match with stdlib `re` in process (`shared/search_regex.py::compile_generated`, eligibility and cost model in `shared/search_engine.py::build_regex_pattern`; plan `docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md`), ~60x per page with identical results; `MAX_WORD_GAP = 10` for Exact/Variants/Fuzzy at `execute_search` entry (Responsa/Regex unlimited; API/MCP 400); the job route answers a model-validator rejection with its code, not a 500; the letter-level Variant slider is hidden. The ChatGPT app is published: `AI_CHATGPT_PLUGIN_URL` set in prod `.env`. Desktop What's New 9.6.2. (both)
+- **v9.6.1 — Faster Extended and Maximum (2026-10-11)** — PRs #389-#394: Extended/Maximum regex as per-length prefix trees (`shared/search_engine.py::_variant_alternation`; Basic's pattern unchanged), progress ticks by time (`_PROGRESS_TICK_SECONDS`), lazy composition chunk plans, so website searches stop at the 3-minute limit; MCP server + chunk search and Extended in the API (jobs only; Maximum held), AI listings by setting (`web/ai_listings.py`), interrupted-step fixes. Desktop What's New 9.6.1. (both)
+- **v9.6.0 — Search fixes (2026-10-07)** — PRs #377 #378 #380 #383-#387: Regex prefilter built only from what the pattern requires (`shared/regex_prefilter.py`), "N+" exactly when a list is cut; Num Changes ×1-×3 per level with one canonical spelling order (desktop Extended/Maximum now ×2: slower); short composition texts searched, Lab end window and Min. chunk matches cap; `FilterUnavailable` -> search blocked / API 503, Line Height hidden; web: streaming first rows + pre-started workers, per-visitor variant/Lab settings (`web/variant_preferences.py`), browser-language default, "N+" + search-within completes the chain, 3-minute limit (`Config.WEB_SEARCH_TIME_LIMIT`). No desktop What's New (`WHATS_NEW_CONTENT_VERSION` stays 9.5.0). (both)
+- **v9.5.0 — Faster, complete search (2026-10-04)** — PR #375 + #376, with #373's exit fix in the installer: the desktop shows the first rows while a search runs (`SearchThread.preview_signal`); Exact/Variants several times faster; search-within and Parallels filters restrict IN the query at any size (`_restriction_query`); a cut-off list shows "N+" and search-within / all-terms complete the step first (`shared/refinement.py::complete_chain`, `ChainCompletionThread`); whole words in Exact (desktop `literal` only -- web/API `exact` deferred), Variants and Fuzzy; Fuzzy = near spellings (`_near_spellings`); position checks every occurrence; a replaced shelfmark fetch hands on the rows it did not reach. Nightly real-index gate `scripts/verify_search_combinations.py`. Public texts: speed first, fuller results said positively, no loss figures (owner). (both)
+- **v9.4.0 — Data integrity (2026-09-28)** — the 2026-09-25 improvement sweep's round 2 (#367 #368 #370 #371): lists/settings/language saved atomically with backup recovery (`shared/atomic_io.py`), one desktop copy per data folder (`desktop/single_instance.py`), New keeps `session.json`, exclusions hold until New; list sync rebuilt — a cloud row per list membership (new `list_items.page` column), keyset paging, differing notes kept both, a one-at-a-time runner off the UI thread (`desktop/lists_sync_runner.py`, uploads on a copy), desktop removals and moves sent, website removals offered in a prompt; the gate is the seeded scenario harness `tests/list_sync_scenarios.py`; Fragment Puzzle asks before dropping work and Joins Lab keeps running QThreads. Web: /lists edit/remove/page fixes deployed WITH the installer. (both)
+- **v9.3.0 — Fresh PGP data, small screens, and urgent fixes (2026-09-24)** — installer ships the 2026-09-22 PGP refresh (36,642 docs; IIIF-linked fragments 57.5% -> 87.0%; the file predates #358's `meta.source_revision` stamp, which only the web deploy reads); layout for low resolution / 300% scaling (`desktop/widgets/overflow_row.py`: shrink to icons, then a More menu; `ColumnFitter` fits result columns with no horizontal scroll; viewer fits the screen and goes compact when it must); open/copy on genizahsearch.com + A−/A+ in the viewer and Browse; the Composition viewer follows the result filters (#360); fixes: xlsx Library/Shelfmark swap, flat-view filtered marker, viewer title bar off-screen (#361), Joins Lab other-side search (#359), and letter-level lost on restart (#363 — the index loads BEFORE the session restore, so a parked choice was never applied; no one-time reset, owner). (desktop)
+- **v9.2.1 — Viewer window, Local-search hint, honest Oxford images (2026-09-17)** — the Manuscript Viewer is an unparented non-modal window (it was an owned modal dialog, which is why minimizing it buried the whole app); zero-result LOCAL searches offer the Genizah corpus; chunk controls re-enable after letter-level; Composition Search now really opens on letter-level when its index exists (the autosaved method was being read as a choice); Oxford failure strip translated with the Bodleian link everywhere and the Rosetta placeholder rejected. Seven Codex rounds, eleven extra defects. The tag also carries the web-side work merged from the cloud and deployed the same day: the GenizahSearch GPT + `/ai` page, isolated research workers with background API jobs, regex bounding (#338–#342). README trimmed to a normal README on 2026-09-18 (old What's New sections kept in the private repository). (both)
+**Older releases: the one-liners for v9.2.0, v9.1.0, v8.6.0 and v9.0.0 moved to an archive file (private repository) on 2026-11-04, when this file hit its ceiling; v8.5.2 and older (SEED-006 back to v7.7.x) are in [`CHANGELOG.md`](CHANGELOG.md) only.**
+They were one-line duplicates of sections that file already carries in full, and nothing
+in them changes how you work today. If you need one, grep the changelog for its version.

@@ -1,0 +1,3157 @@
+# -*- coding: utf-8 -*-
+"""The discovery panel's display model (Phase 136, plan 136-15, PANEL-01/02).
+
+Every fixture here is named after the REAL case it protects, because every one
+of these display rules was found by looking at real data rather than by
+reasoning:
+
+* ``two_titles_duplicate``      -- the mockup's real page showed the SAME work
+  twice under two titles (``w000190`` / ``w001382``, 921 row-pairs corpus-wide).
+* ``verse_chain_generic_group`` -- a prayer book whose page-6 verse-chain pulled
+  in one halakhic work TWICE (two titles, one canonical work) plus an unrelated
+  midrashic collection, all on byte-identical offsets 0-555.
+* ``two_granularity_rashi``     -- T-S Misc. 12.31.14: ``w000171`` and
+  ``w001281`` on the identical span 0-962, the SAME commentary at two
+  catalogued granularities.
+* ``sixty_six_letter_liturgical`` -- a siddur whose liturgical matches are 66
+  matched letters each, below the ratified 150-letter floor.
+* ``two_human_confirmed_rows``  -- Moss. V,374: two rows a human confirmed,
+  treated differently because routing dropped one of them.
+* ``curated_w000176_liturgy``   -- ruling R's curated display title.
+
+The envelope fixtures are built from the EXACT live four-key shape; a fixture
+that invented a row shape would prove nothing about the code that will run.
+"""
+
+from __future__ import annotations
+
+import ast
+import dataclasses
+import io
+import pathlib
+import re
+import traceback
+
+import pytest
+
+import scripts.discovery_ids as ids
+import shared.discovery_display_strings as ds
+import shared.discovery_grouping as grouping
+import shared.discovery_panel_model as pm
+from shared.discovery_band_labels import band_label
+from shared.discovery_main_pool import (
+    REASON_INSUFFICIENT_LENGTH,
+    REASON_MAIN_FULL_COVERAGE,
+    REASON_MAIN_HUMAN_CONFIRMED,
+    REASON_MAIN_MULTIFOLIO,
+    SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS,
+    bucket_label,
+)
+from shared.discovery_surface_projection import (
+    FORBIDDEN_SURFACE_FIELDS,
+    SURFACE_CLAIM_FIELDS,
+    SURFACE_RELATED_PAGE_FIELDS,
+    SURFACE_WORK_SUMMARY_FIELDS,
+    is_forbidden_surface_field,
+    make_envelope,
+)
+# The FIVE independent detectors of the ONE shared discovery-surface honesty
+# gate (plan 136-02), reused rather than re-implemented so the rule can drift in
+# exactly one place. Asserting at the MODEL level is cheaper than rendering and
+# catches a violation earlier.
+from tests.render_smoke.discovery_honesty_gate import (  # noqa: E402
+    DiscoveryHonestyViolation,
+    _find_bracketed_intervals,
+    _find_prohibited_phrases,
+    _find_raw_vocab_keys,
+    _find_review_badges,
+    _find_unqualified_percentages,
+)
+from tests.private_records import private_path  # noqa: E402
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+MODEL_PATH = REPO_ROOT / "shared" / "discovery_panel_model.py"
+# The decision record is kept in the private repository. It is resolved inside
+# the test that reads it (tests/private_records.py), which skips where that
+# checkout is absent; both of its historical locations are tried.
+GATE1_DECISIONS = "136-read-surfaces-connections-panel-work-witnesses/136-GATE1-DECISIONS.md"
+
+LANGS = ("en", "he")
+
+# The raw recorded title of the ONE curated work (ruling R). The curation
+# exists because this bare title tells a reader "Maimonides' halakhic book"
+# over pages the owner ruled are mostly liturgy.
+W000176_RAW_TITLE = "משנה תורה, ספר אהבה"
+
+
+def _model_source() -> str:
+    return io.open(MODEL_PATH, encoding="utf-8").read()
+
+
+# ---------------------------------------------------------------------------
+# Fixture builders -- the EXACT live row/envelope shapes.
+# ---------------------------------------------------------------------------
+
+
+def claim_row(**overrides):
+    """One `surface_safe_claim` row: EVERY allowlisted key, missing as None."""
+    row = {field: None for field in SURFACE_CLAIM_FIELDS}
+    row.update({
+        "page_id": "page-1",
+        "sys_id": "990051079570205171",
+        "claim_id": "claim-1",
+        "evidence_id": "ev-1",
+        "work_id": "w000001",
+        "canonical_work_id": "w000001",
+        "display_work_id": "w000001",
+        "neutral_title": "Some Recorded Work",
+        "author": None,
+        "genre": None,
+        "title_missing": False,
+        # C-track step 3b, narrowed to ONE field by step 3d: the matrix output,
+        # capped at member grain. The stored `relation_kind` left this surface
+        # with step 3d, which retired its last consumer (the expansion query's
+        # anchor now travels as the capped relation).
+        "rendered_relation": ids.RENDERED_RELATION_DIRECT_WITNESS,
+        "evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        "confidence_band": ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
+        "band_label": band_label(
+            ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+            ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
+        ),
+        "band_rank": 0,
+        "coverage_ppm": 680000,
+        "coverage_status": "measured",
+        "main_pool": True,
+        "main_pool_reason": REASON_MAIN_FULL_COVERAGE,
+        "identification_id": "ident-1",
+        "identification_page_count": 1,
+        "novelty_status": "not_checked",
+        "novelty_source_label": None,
+        "matched_letters": 500,
+        "span_start": 0,
+        "span_end": 500,
+        "n_spans": 1,
+        "eligibility_basis": "shipped",
+        "restored_by_human_confirmation": False,
+        "low_coverage_marker": False,
+        "adjudication_status": ids.ADJUDICATION_STATUS_UNREVIEWED,
+        "routing_status": ids.ROUTING_STATUS_SHIPPED,
+        "routing_reason": None,
+        "measurement_status": "measured_pass",
+        "default_eligible": True,
+    })
+    row.update(overrides)
+    assert set(row) == set(SURFACE_CLAIM_FIELDS), "fixture drifted from the live allowlist"
+    return row
+
+
+def work_summary_row(**overrides):
+    """One `surface_safe_work_summary` row: EVERY allowlisted key."""
+    row = {field: None for field in SURFACE_WORK_SUMMARY_FIELDS}
+    row.update({
+        "canonical_work_id": "w000001",
+        "display_work_id": "w000001",
+        "neutral_title": "Some Recorded Work",
+        "author": None,
+        "genre": None,
+        "title_missing": False,
+        "page_count": 5,
+        "best_band_rank": 0,
+        "gated": False,
+        "main_pool": True,
+        "rendered_relation": ids.RENDERED_RELATION_DIRECT_WITNESS,
+    })
+    row.update(overrides)
+    assert set(row) == set(SURFACE_WORK_SUMMARY_FIELDS)
+    return row
+
+
+def related_page_row(**overrides):
+    """One `surface_safe_related_page` row: EVERY allowlisted key."""
+    row = {field: None for field in SURFACE_RELATED_PAGE_FIELDS}
+    row.update({
+        "related_page_id": "page-99",
+        # The manuscript this page belongs to, as the joined query supplies it.
+        "sys_id": "990051079570205172",
+        "library_code": "CUL",
+        "shelfmark_display": "T-S 12.999",
+        "page_number": 3,
+        "display_missing": False,
+        "evidence_id": "ev-99",
+        "evidence_source": ids.EVIDENCE_SOURCE_PROPAGATED,
+        "confidence_band": ids.CONFIDENCE_BAND_NOT_EVALUATED,
+        "band_rank": 6,
+        "evidence_row_count": 3,
+    })
+    row.update(overrides)
+    assert set(row) == set(SURFACE_RELATED_PAGE_FIELDS)
+    return row
+
+
+def envelope(status="ok", items=(), total=None, meta=None):
+    """A literal four-key envelope -- deliberately NOT built through
+    `make_envelope`, so the fixture pins the live SHAPE independently of the
+    producer. A separate test asserts the two agree."""
+    item_list = list(items)
+    if status != "ok":
+        return {"status": status, "items": [], "total": 0, "meta": dict(meta or {"reason": "query_timeout"})}
+    return {
+        "status": "ok",
+        "items": item_list,
+        "total": len(item_list) if total is None else int(total),
+        "meta": dict(meta or {}),
+    }
+
+
+def claims_envelope(items=(), total=None, status="ok", meta=None):
+    return envelope(status, items, total,
+                    meta if meta is not None else ({"page_id": "page-1", "include_review": False}
+                                                   if status == "ok" else None))
+
+
+def page_ids_envelope(items=("page-1", "page-2"), total=None, status="ok",
+                      resolved=True, truncated=False, meta=None):
+    if meta is None and status == "ok":
+        meta = {"sys_id": "990051079570205171", "resolved": resolved,
+                "truncated": truncated, "volume_ie": None}
+    return envelope(status, items, total, meta)
+
+
+def works_envelope(items=(), total=None, status="ok", page_scope_resolved=True, meta=None):
+    if meta is None and status == "ok":
+        # TWO live `ok` shapes, not one with a flag: the unresolved-page-scope
+        # branch returns before it has anything to report a language ABOUT, so
+        # it carries no `lang`. A fixture that invented one would hide exactly
+        # the per-branch drift the shape table exists to catch.
+        meta = ({"page_scope_resolved": True, "lang": "en"} if page_scope_resolved
+                else {"page_scope_resolved": False})
+    return envelope(status, items, total, meta)
+
+
+def related_count_envelope(total=0, status="ok", meta=None):
+    if meta is None and status == "ok":
+        meta = {"unit": "distinct_opposite_pages"}
+    return envelope(status, (), total, meta)
+
+
+def related_rows_envelope(items=(), total=None, status="ok", meta=None):
+    if meta is None and status == "ok":
+        meta = {"unit": "distinct_opposite_pages"}
+    return envelope(status, items, total, meta)
+
+
+def bundle(claim_items=(), lang="en", show_more=False, **overrides):
+    """The default four-eager-envelope bundle, related ROWS left NOT REQUESTED."""
+    kwargs = {
+        "claims": claims_envelope(claim_items),
+        "page_ids": page_ids_envelope(),
+        "manuscript_works": works_envelope(),
+        "related_count": related_count_envelope(),
+        "lang": lang,
+        "show_more": show_more,
+    }
+    kwargs.update(overrides)
+    return pm.PanelServiceBundle(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# The named real-case fixtures.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_titles_duplicate():
+    """The SAME work recorded twice under two titles on one page (D-13a).
+
+    `w000190` carries a title from one identity source, `w001382` the other;
+    `canonical_work_id` already records the merge, but claims key on
+    `(page_id, work_id)` so dedup never saw them as one."""
+    return [
+        claim_row(claim_id="claim-a", evidence_id="ev-a", work_id="w000190",
+                  canonical_work_id="w001382", display_work_id="w001382",
+                  neutral_title="The Canonical Title", span_start=0, span_end=500),
+        claim_row(claim_id="claim-b", evidence_id="ev-b", work_id="w001382",
+                  canonical_work_id="w001382", display_work_id="w001382",
+                  neutral_title="The Canonical Title", span_start=0, span_end=500),
+    ]
+
+
+@pytest.fixture
+def verse_chain_generic_group():
+    """The prayer book's page-6 verse-chain: one halakhic work claimed TWICE
+    under two titles plus an unrelated midrashic collection, all on the
+    byte-identical span 0-555 (D-13d, the owner's own case)."""
+    return [
+        claim_row(claim_id="claim-tur-a", evidence_id="ev-tur-a", work_id="w000300",
+                  canonical_work_id="w000300", display_work_id="w000300",
+                  neutral_title="Tur, first recorded title", author="יעקב בן אשר",
+                  span_start=0, span_end=555, matched_letters=420),
+        claim_row(claim_id="claim-tur-b", evidence_id="ev-tur-b", work_id="w000301",
+                  canonical_work_id="w000300", display_work_id="w000300",
+                  neutral_title="Tur, second recorded title", author="יעקב בן אשר",
+                  span_start=0, span_end=555, matched_letters=420),
+        claim_row(claim_id="claim-yalkut", evidence_id="ev-yalkut", work_id="w000400",
+                  canonical_work_id="w000400", display_work_id="w000400",
+                  neutral_title="Yalkut on the Prophets", author="שמעוני",
+                  span_start=0, span_end=555, matched_letters=420),
+    ]
+
+
+@pytest.fixture
+def two_granularity_rashi():
+    """T-S Misc. 12.31.14: the SAME commentary at two catalogued granularities
+    on the identical span 0-962, PLUS a genuinely separate identification on
+    another span.
+
+    The pair collapses like a duplicate (D-13d's ratified rule) and STAYS an
+    identification; together with the separate row the page therefore renders
+    TWO identifications and no generic group -- which is the defect the flaw
+    note describes, where that manuscript rendered one where it should render
+    two."""
+    author = "שלמה בן יצחק (רש\"י)"
+    return [
+        claim_row(claim_id="claim-rashi-torah", evidence_id="ev-rashi-a",
+                  work_id="w000171", canonical_work_id="w000171",
+                  display_work_id="w000171", neutral_title="רש\"י על התורה",
+                  author=author, span_start=0, span_end=962, matched_letters=800),
+        claim_row(claim_id="claim-rashi-gen", evidence_id="ev-rashi-b",
+                  work_id="w001281", canonical_work_id="w001281",
+                  display_work_id="w001281", neutral_title="רש\"י על בראשית",
+                  author=author, span_start=0, span_end=962, matched_letters=800),
+        claim_row(claim_id="claim-other", evidence_id="ev-other", work_id="w000500",
+                  canonical_work_id="w000500", display_work_id="w000500",
+                  neutral_title="A genuinely separate work", author="מחבר אחר",
+                  span_start=1200, span_end=2000, matched_letters=700),
+    ]
+
+
+@pytest.fixture
+def sixty_six_letter_liturgical():
+    """A siddur's liturgical matches, 66 matched letters each -- below the
+    ratified short-evidence floor, on DISTINCT spans (so the identical-span
+    rule is not what decides them). They are GATED, never deleted."""
+    return [
+        claim_row(claim_id="claim-lit-%d" % i, evidence_id="ev-lit-%d" % i,
+                  work_id="w0006%02d" % i, canonical_work_id="w0006%02d" % i,
+                  display_work_id="w0006%02d" % i,
+                  neutral_title="Liturgical piece %d" % i,
+                  span_start=100 * i, span_end=100 * i + 66,
+                  matched_letters=66, coverage_ppm=20000,
+                  main_pool=False, main_pool_reason=REASON_INSUFFICIENT_LENGTH)
+        for i in range(1, 5)
+    ]
+
+
+@pytest.fixture
+def two_human_confirmed_rows():
+    """Moss. V,374: two rows a human confirmed on one manuscript. Routing
+    demoted one of them (`review_only` / `low_coverage`), and the query used to
+    drop it before the predicate meant to protect it ever ran (D-13g).
+
+    Behavioral, NOT count-derived: the population figures for this class are
+    artifact-specific and are recorded in the summary, never asserted here."""
+    return [
+        claim_row(claim_id="claim-esther", evidence_id="ev-esther", work_id="w000700",
+                  canonical_work_id="w000700", display_work_id="w000700",
+                  neutral_title="רש\"י על אסתר", span_start=0, span_end=400,
+                  adjudication_status=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+                  routing_status=ids.ROUTING_STATUS_SHIPPED,
+                  main_pool=True, main_pool_reason=REASON_MAIN_HUMAN_CONFIRMED,
+                  restored_by_human_confirmation=False, low_coverage_marker=False),
+        claim_row(claim_id="claim-eicha", evidence_id="ev-eicha", work_id="w000701",
+                  canonical_work_id="w000701", display_work_id="w000701",
+                  neutral_title="רש\"י על איכה", span_start=600, span_end=700,
+                  matched_letters=90, coverage_ppm=40000,
+                  adjudication_status=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+                  routing_status=ids.ROUTING_STATUS_REVIEW_ONLY,
+                  routing_reason=ids.ROUTING_REASON_LOW_COVERAGE,
+                  main_pool=True, main_pool_reason=REASON_MAIN_HUMAN_CONFIRMED,
+                  restored_by_human_confirmation=True, low_coverage_marker=True),
+    ]
+
+
+@pytest.fixture
+def curated_w000176_liturgy():
+    """Ruling R: the 10th most-claimed work in the corpus, whose bare recorded
+    title names a halakhic book over pages that are mostly liturgy."""
+    return [
+        claim_row(claim_id="claim-176", evidence_id="ev-176", work_id="w000176",
+                  canonical_work_id="w000176", display_work_id="w000176",
+                  neutral_title=W000176_RAW_TITLE, span_start=0, span_end=300),
+    ]
+
+
+# ===========================================================================
+# Task 1 -- the input bundle contract
+# ===========================================================================
+
+
+@pytest.mark.parametrize("field_name", pm.ENVELOPE_FIELDS)
+@pytest.mark.parametrize("bad_value", [
+    pytest.param([], id="bare-empty-list"),
+    pytest.param([{"page_id": "page-1"}], id="bare-row-list"),
+    pytest.param({"status": "ok", "items": [], "total": 0}, id="three-key-dict"),
+    pytest.param({"status": "ok", "items": [], "total": 0, "meta": {}, "extra": 1}, id="five-key-dict"),
+    pytest.param({"status": "degraded", "items": [], "total": 0, "meta": {}}, id="status-outside-vocabulary"),
+    pytest.param("ok", id="bare-string"),
+])
+def test_bundle_rejects_anything_that_is_not_a_four_key_envelope(field_name, bad_value):
+    """A list cannot say whether it is empty because the manuscript is empty or
+    because the service failed -- which is the whole reason this type exists."""
+    with pytest.raises(ValueError) as exc:
+        bundle(**{field_name: bad_value})
+    assert field_name in str(exc.value)
+
+
+@pytest.mark.parametrize("field_name", pm.ENVELOPE_FIELDS)
+def test_a_four_key_envelope_is_accepted_on_every_one_of_the_five_fields(field_name):
+    made = bundle(**{field_name: envelope("ok", (), 0, {})})
+    assert getattr(made, field_name)["status"] == "ok"
+
+
+@pytest.mark.parametrize("field_name", pm.EAGER_ENVELOPE_FIELDS)
+def test_none_is_rejected_on_every_eager_envelope_field(field_name):
+    """A bundle that accepted `None` everywhere would let a real outage be
+    dropped on the floor as "nobody asked for this"."""
+    with pytest.raises(ValueError) as exc:
+        bundle(**{field_name: None})
+    assert field_name in str(exc.value)
+
+
+def test_none_is_accepted_only_on_the_lazy_related_rows_field():
+    made = bundle(**{pm.LAZY_ENVELOPE_FIELD: None})
+    assert getattr(made, pm.LAZY_ENVELOPE_FIELD) is None
+    assert pm.LAZY_ENVELOPE_FIELD not in pm.EAGER_ENVELOPE_FIELDS
+    assert set(pm.ENVELOPE_FIELDS) == set(pm.EAGER_ENVELOPE_FIELDS) | {pm.LAZY_ENVELOPE_FIELD}
+
+
+def test_related_rows_default_is_not_requested():
+    made = bundle()
+    assert getattr(made, pm.LAZY_ENVELOPE_FIELD) is None
+
+
+def test_bundle_fixture_key_sets_equal_the_live_envelope_shape():
+    made = bundle(related_rows=related_rows_envelope([related_page_row()]))
+    for field_name in pm.ENVELOPE_FIELDS:
+        env = getattr(made, field_name)
+        assert set(env) == set(pm.ENVELOPE_KEYS) == {"status", "items", "total", "meta"}
+        assert frozenset(env["meta"]) in pm.LIVE_OK_META_SHAPES[field_name], field_name
+
+
+def test_every_declared_meta_shape_is_reachable_from_a_fixture():
+    """The shape table is a claim about the producer, so an entry no fixture can
+    build is an entry nothing exercises."""
+    unresolved = works_envelope([], 0, page_scope_resolved=False)
+    assert frozenset(unresolved["meta"]) == frozenset({"page_scope_resolved"})
+    resolved = works_envelope([], 0, page_scope_resolved=True)
+    assert frozenset(resolved["meta"]) == frozenset({"page_scope_resolved", "lang"})
+    assert {frozenset(unresolved["meta"]), frozenset(resolved["meta"])} == \
+        set(pm.LIVE_OK_META_SHAPES["manuscript_works"])
+
+
+def test_make_envelope_agrees_with_the_literal_fixture_shape():
+    """The fixtures are literals on purpose; this is what pins them to the
+    producer, so a drifted service shape fails HERE and not in a renderer."""
+    produced = make_envelope("ok", [], 0, {"page_id": "page-1", "include_review": False})
+    assert set(produced) == set(pm.ENVELOPE_KEYS)
+
+
+# --- the live meta-key sets, read out of the producing code itself ---------
+
+_LIVE_META_SOURCES = {
+    "claims": ("shared/discovery_service.py", "get_claims_for_page_enveloped"),
+    "page_ids": ("web/discovery.py", "get_manuscript_page_ids"),
+    "manuscript_works": ("shared/discovery_service.py", "get_manuscript_works_enveloped"),
+    "related_count": ("shared/discovery_service.py", "get_related_page_count_enveloped"),
+    "related_rows": ("shared/discovery_service.py", "get_related_pages_enveloped"),
+}
+
+
+def _ok_meta_key_sets_from_source(rel_path, func_name):
+    """The `meta=` key set of EVERY `ok`-status `make_envelope(...)` call inside
+    `func_name`, as a LIST -- one entry per call site, never a union.
+
+    Unioning them is what let a branch violate the declared shape while the
+    union matched (code review 2B, finding 5). Parsed, never imported --
+    reading `web/discovery.py` must not drag NiceGUI into this suite.
+    """
+    tree = ast.parse(io.open(REPO_ROOT / rel_path, encoding="utf-8").read())
+    target = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            target = node
+            break
+    assert target is not None, "%s::%s not found" % (rel_path, func_name)
+    per_call = []
+    for node in ast.walk(target):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "id", None) != "make_envelope":
+            continue
+        first = node.args[0] if node.args else None
+        if not (isinstance(first, ast.Name) and first.id == "STATUS_OK"):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "meta" and isinstance(kw.value, ast.Dict):
+                per_call.append(frozenset(
+                    k.value for k in kw.value.keys if isinstance(k, ast.Constant)))
+    return per_call
+
+
+@pytest.mark.parametrize("field_name", pm.ENVELOPE_FIELDS)
+def test_every_producing_branch_matches_a_declared_meta_shape(field_name):
+    rel_path, func_name = _LIVE_META_SOURCES[field_name]
+    per_call = _ok_meta_key_sets_from_source(rel_path, func_name)
+    declared = set(pm.LIVE_OK_META_SHAPES[field_name])
+
+    assert len(per_call) > 0, "no ok-status make_envelope call found in %s" % func_name
+    for index, keys in enumerate(per_call):
+        assert keys in declared, (
+            "%s::%s success branch #%d emits %s, which is not one of the declared "
+            "shapes %s" % (rel_path, func_name, index, sorted(keys),
+                           [sorted(shape) for shape in declared]))
+    # ... and the other direction, so a shape nobody produces cannot sit in the
+    # table as cover for a branch that has drifted away from it.
+    assert set(per_call) == declared
+
+
+def test_the_declared_meta_shapes_are_per_branch_and_not_a_union():
+    """The specific regression: `manuscript_works` has TWO ok branches, and a
+    union of their keys equals the larger one -- so a union-based check passes
+    while the smaller branch matches no declared shape at all."""
+    per_call = _ok_meta_key_sets_from_source(*_LIVE_META_SOURCES["manuscript_works"])
+    assert len(per_call) == 2
+    assert len(set(per_call)) == 2, "the two branches must emit DIFFERENT shapes"
+    union = frozenset().union(*per_call)
+    assert union == max(per_call, key=len), (
+        "the union collapses onto the LARGER branch -- which is precisely why a "
+        "union-based check could not see the smaller one violating the shape")
+    assert min(per_call, key=len) != union
+    assert "lang" in union and any("lang" not in keys for keys in per_call)
+
+
+# ===========================================================================
+# Task 1 -- the not-requested state is its own state
+# ===========================================================================
+
+
+def test_not_requested_is_distinct_from_ok_zero_and_from_an_outage():
+    """An implementation that fabricated an `ok` zero for the unfetched section
+    would make two of these three identical."""
+    rows = [claim_row()]
+    not_requested = pm.build_panel_rows(bundle(rows)).related_pages
+    genuinely_empty = pm.build_panel_rows(
+        bundle(rows, related_rows=related_rows_envelope([], 0))).related_pages
+    outage = pm.build_panel_rows(
+        bundle(rows, related_rows=related_rows_envelope(status="timeout"))).related_pages
+
+    assert not_requested["rows_state"] == pm.ROWS_NOT_REQUESTED
+    assert genuinely_empty["rows_state"] == pm.ROWS_EMPTY
+    assert outage["rows_state"] == pm.ROWS_OUTAGE
+
+    states = [not_requested["rows_state"], genuinely_empty["rows_state"], outage["rows_state"]]
+    assert len(set(states)) == 3
+    for a, b in ((not_requested, genuinely_empty), (not_requested, outage), (genuinely_empty, outage)):
+        assert a != b
+
+
+# ===========================================================================
+# Task 1 -- the ten behaviors
+# ===========================================================================
+
+
+def test_two_titles_duplicate_collapses_to_one_row_with_the_canonical_title(two_titles_duplicate):
+    model = pm.build_panel_rows(bundle(two_titles_duplicate))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1
+    assert rows[0]["work_id"] == "w001382"
+    assert rows[0]["work_title"] == ds.display_work_title("w001382", "The Canonical Title", "en")
+    assert len(model.generic_groups) == 0
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_curated_w000176_title_is_the_curated_string_and_never_the_raw_one(
+        curated_w000176_liturgy, lang):
+    model = pm.build_panel_rows(bundle(curated_w000176_liturgy, lang=lang))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1
+    expected = ds.display_work_title("w000176", W000176_RAW_TITLE, lang)
+    assert rows[0]["work_title"] == expected
+    assert expected != W000176_RAW_TITLE
+
+    for path, value in _walk_strings(model.as_dict()):
+        assert W000176_RAW_TITLE != value, path
+        # The Hebrew curated label legitimately CONTAINS the recorded title as
+        # its first half. Strip every occurrence of the CURATED string and the
+        # raw title must be gone -- so the only route it ever took to a display
+        # field was through `display_work_title`.
+        residue = value.replace(expected, "")
+        assert W000176_RAW_TITLE not in residue, path
+
+
+def test_an_uncurated_work_title_passes_through_unchanged():
+    model = pm.build_panel_rows(bundle([claim_row(neutral_title="An Uncurated Work")]))
+    rows = list(pm.iter_rows(model))
+    assert rows[0]["work_title"] == "An Uncurated Work"
+
+
+def test_verse_chain_group_leaves_the_identifications_bucket(verse_chain_generic_group):
+    model = pm.build_panel_rows(bundle(verse_chain_generic_group))
+    assert list(pm.iter_rows(model)) == []
+    assert len(model.generic_groups) == 1
+    group = model.generic_groups[0]
+    assert group["span_start"] == 0 and group["span_end"] == 555
+    assert group["matched_letters"] == 420
+    # Two DISTINCT works survive the canonical collapse, not three claims.
+    assert group["work_count"] == 2
+    assert len(group["works"]) == 2
+    assert group["note"] == ds.not_an_identification_note("en")
+
+
+def test_two_granularity_rashi_pair_stays_an_identification(two_granularity_rashi):
+    model = pm.build_panel_rows(bundle(two_granularity_rashi))
+    rows = list(pm.iter_rows(model))
+    assert len(model.generic_groups) == 0
+    assert len(rows) == 2
+    lead = [r for r in rows if r["span_start"] == 0][0]
+    assert lead["granularity_subline"]
+    assert len(lead["nested"]) == 1
+    other_title = lead["nested"][0]["work_title"]
+    assert lead["granularity_subline"] == ds.granularity_subline(other_title, "en")
+
+
+def test_locus_subline_is_separate_from_the_alternate_granularity_line(
+    two_granularity_rashi,
+):
+    rows = list(pm.iter_rows(pm.build_panel_rows(bundle([
+        {**row, "locus_label": "פרק א"} for row in two_granularity_rashi
+    ]))))
+    lead = [row for row in rows if row["span_start"] == 0][0]
+    assert lead["locus_subline"] == "↳ פרק א"
+    assert lead["granularity_subline"]
+    assert lead["locus_subline"] != lead["granularity_subline"]
+
+
+def test_missing_locus_label_omits_the_line_for_rollback_assets():
+    row = list(pm.iter_rows(pm.build_panel_rows(bundle([claim_row(locus_label=None)]))))[0]
+    assert "locus_subline" not in row
+
+
+def test_lead_attribution_nests_competing_attributions_deterministically():
+    """One passage produces one row; the others nest, in the shared total
+    order -- `lead_attribution`, never a fresh tie-break."""
+    author = "שלמה בן יצחק (רש\"י)"
+    members = [
+        claim_row(claim_id="c-%s" % suffix, evidence_id="ev-%s" % suffix,
+                  work_id=wid, canonical_work_id=wid, display_work_id=wid,
+                  neutral_title=title, author=author, span_start=0, span_end=962)
+        for suffix, wid, title in (
+            ("c", "w001283", "רש\"י על ויקרא"),
+            ("a", "w000171", "רש\"י על התורה"),
+            ("b", "w001281", "רש\"י על בראשית"),
+        )
+    ]
+    model = pm.build_panel_rows(bundle(members))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1
+    expected_lead, expected_rest = grouping.lead_attribution(members)
+    assert rows[0]["claim_id"] == expected_lead["claim_id"]
+    assert [n["work_id"] for n in rows[0]["nested"]] == [
+        r["display_work_id"] for r in expected_rest]
+
+
+def test_identifications_sort_by_numeric_offset_never_lexicographically():
+    """20 before 100. Under `str(offset)` the passage at 100 came first, and a
+    page's rows arrived in an order no reader could explain.
+
+    The work ids are chosen so that a fall-through to the id would ALSO put the
+    100-row first -- so this passes only if the numeric offset decides.
+    """
+    rows = [
+        claim_row(claim_id="claim-at-100", evidence_id="ev-100",
+                  work_id="w000001", canonical_work_id="w000001",
+                  display_work_id="w000001", neutral_title="At one hundred",
+                  span_start=100, span_end=180),
+        claim_row(claim_id="claim-at-20", evidence_id="ev-20",
+                  work_id="w000002", canonical_work_id="w000002",
+                  display_work_id="w000002", neutral_title="At twenty",
+                  span_start=20, span_end=90),
+    ]
+    emitted = list(pm.iter_rows(pm.build_panel_rows(bundle(rows))))
+    assert [row["span_start"] for row in emitted] == [20, 100]
+    assert [row["claim_id"] for row in emitted] == ["claim-at-20", "claim-at-100"]
+
+
+def test_a_row_with_no_offset_sorts_last_behind_an_explicit_sentinel():
+    """Never first, and never a comparison against `None`."""
+    rows = [
+        claim_row(claim_id="claim-none", evidence_id="ev-none", work_id="w000001",
+                  canonical_work_id="w000001", display_work_id="w000001",
+                  neutral_title="No offsets", span_start=None, span_end=None),
+        claim_row(claim_id="claim-900", evidence_id="ev-900", work_id="w000002",
+                  canonical_work_id="w000002", display_work_id="w000002",
+                  neutral_title="At nine hundred", span_start=900, span_end=980),
+    ]
+    emitted = list(pm.iter_rows(pm.build_panel_rows(bundle(rows))))
+    assert [row["claim_id"] for row in emitted] == ["claim-900", "claim-none"]
+
+
+def test_sixty_six_letter_rows_are_gated_not_deleted(sixty_six_letter_liturgical):
+    assert 66 < SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS
+    model = pm.build_panel_rows(bundle(sixty_six_letter_liturgical))
+    default_rows = [r for r in pm.iter_rows(model)
+                    if r["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS]
+    gated_rows = [r for r in pm.iter_rows(model)
+                  if r["disclosure_level"] == pm.LEVEL_MORE_MATCHES]
+    assert default_rows == []
+    assert len(gated_rows) == 4
+    assert all(r["gated"] for r in gated_rows)
+
+    opened = pm.build_panel_rows(bundle(sixty_six_letter_liturgical, show_more=True))
+    more = [lvl for lvl in opened.disclosure_levels if lvl["key"] == pm.LEVEL_MORE_MATCHES][0]
+    assert more["visible"] is True
+    assert len(more["rows"]) == 4
+
+
+def test_short_evidence_row_kept_by_multi_folio_agreement_stays_in_the_default_level():
+    """D-13c's carve-out: the floor never applies to an identification already
+    main via multi-folio agreement."""
+    model = pm.build_panel_rows(bundle([
+        claim_row(matched_letters=66, main_pool=True,
+                  main_pool_reason=REASON_MAIN_MULTIFOLIO,
+                  identification_page_count=3),
+    ]))
+    rows = list(pm.iter_rows(model))
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+
+
+def test_two_human_confirmed_rows_both_show_by_default_with_a_coverage_note(
+        two_human_confirmed_rows):
+    model = pm.build_panel_rows(bundle(two_human_confirmed_rows))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 2
+    assert all(r["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS for r in rows)
+
+    demoted = [r for r in rows if r["claim_id"] == "claim-eicha"][0]
+    assert demoted["low_coverage_note"] == ds.low_coverage_note("en")
+    assert demoted["bucket"] is not None
+    assert demoted["main_pool_reason"] is not None
+
+    # D-13f: no review marker of ANY shape on the two rows most likely to grow
+    # one. Checked against the closed emitted schema, not by looking for the
+    # substring "badge" in the top-level keys -- which an `expert_reviewed=True`
+    # boolean passes without noticing.
+    assert_emitted_schema(model)
+
+
+# ---------------------------------------------------------------------------
+# D-13g eligibility -- the four-value truth table, written out INDEPENDENTLY of
+# the predicate under test. Reading the expectation out of
+# `_is_default_surface_eligible` (or out of the row's own derived fields) would
+# make the table agree with any implementation, including a wrong one.
+# ---------------------------------------------------------------------------
+
+_SHIPPED = ids.ROUTING_STATUS_SHIPPED
+_REVIEW_ONLY = ids.ROUTING_STATUS_REVIEW_ONLY
+_CONFIRMED = ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
+_UNREVIEWED = ids.ADJUDICATION_STATUS_UNREVIEWED
+
+#: `(routing_status, adjudication_status) -> eligible on the DEFAULT surface`.
+#: Hand-written from D-13g's sentence, not derived from the module.
+_D13G_TRUTH_TABLE = {
+    (_SHIPPED, _CONFIRMED): True,
+    (_SHIPPED, _UNREVIEWED): True,
+    (_REVIEW_ONLY, _CONFIRMED): True,
+    (_REVIEW_ONLY, _UNREVIEWED): False,
+}
+
+
+def _eligibility_row(routing_status, adjudication_status, **overrides):
+    """One claim whose derived confirmation fields are CONSISTENT with the two
+    limbs -- so the truth table tests eligibility and nothing else."""
+    restored = adjudication_status == _CONFIRMED and routing_status != _SHIPPED
+    fields = {
+        "routing_status": routing_status,
+        "adjudication_status": adjudication_status,
+        "restored_by_human_confirmation": restored,
+        "main_pool_reason": (REASON_MAIN_HUMAN_CONFIRMED if restored
+                             else REASON_MAIN_FULL_COVERAGE),
+    }
+    fields.update(overrides)
+    return claim_row(**fields)
+
+
+@pytest.mark.parametrize("routing_status,adjudication_status", sorted(_D13G_TRUTH_TABLE))
+def test_d13g_eligibility_truth_table_on_the_default_surface(
+        routing_status, adjudication_status):
+    """All FOUR combinations. The one that fails both limbs is REFUSED, never
+    silently dropped: a row disappearing between two layers that each assumed
+    the other had decided is the exact bug D-13g exists to fix."""
+    eligible = _D13G_TRUTH_TABLE[(routing_status, adjudication_status)]
+    rows = [_eligibility_row(routing_status, adjudication_status)]
+
+    if not eligible:
+        with pytest.raises(ValueError) as exc:
+            pm.build_panel_rows(bundle(rows))
+        assert "claim_ineligible_for_default_surface" in str(exc.value)
+        return
+
+    model = pm.build_panel_rows(bundle(rows))
+    emitted = list(pm.iter_rows(model))
+    assert len(emitted) == 1
+    assert emitted[0]["claim_id"] == "claim-1"
+
+
+@pytest.mark.parametrize("routing_status,adjudication_status", sorted(_D13G_TRUTH_TABLE))
+def test_d13g_only_the_explicit_confirmation_limb_reaches_the_default_level(
+        routing_status, adjudication_status):
+    """The DEFAULT level, again from the table rather than from the model: a
+    row is unconditionally in it when a human confirmed it, and otherwise only
+    when it earns its way there."""
+    if not _D13G_TRUTH_TABLE[(routing_status, adjudication_status)]:
+        pytest.skip("refused by the eligibility gate -- covered by the table test above")
+    # Short evidence + outside the main pool: everything EXCEPT confirmation
+    # says "gate this row".
+    rows = [_eligibility_row(routing_status, adjudication_status,
+                             matched_letters=66, coverage_ppm=20000,
+                             main_pool=False, default_eligible=False)]
+    if adjudication_status != _CONFIRMED:
+        rows[0]["main_pool_reason"] = REASON_INSUFFICIENT_LENGTH
+    emitted = list(pm.iter_rows(pm.build_panel_rows(bundle(rows))))[0]
+    expected = pm.LEVEL_IDENTIFICATIONS if adjudication_status == _CONFIRMED \
+        else pm.LEVEL_MORE_MATCHES
+    assert emitted["disclosure_level"] == expected
+
+
+@pytest.mark.parametrize("marker_field,marker_value", [
+    ("restored_by_human_confirmation", True),
+    ("main_pool_reason", REASON_MAIN_HUMAN_CONFIRMED),
+])
+def test_a_derived_confirmation_marker_is_never_a_substitute_for_the_limb(
+        marker_field, marker_value):
+    """Both markers are DERIVED from `adjudication_status`. A row that carries
+    one without it is asserting a human record that does not exist -- which
+    used to promote it into the default level."""
+    row = _eligibility_row(_REVIEW_ONLY, _UNREVIEWED, **{marker_field: marker_value})
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([row]))
+    message = str(exc.value)
+    # The eligibility gate speaks first here, which is correct -- but the
+    # inconsistency must be refused on its OWN even when the row IS eligible.
+    assert "claim_ineligible_for_default_surface" in message
+
+    eligible_but_inconsistent = _eligibility_row(
+        _SHIPPED, _UNREVIEWED, **{marker_field: marker_value})
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([eligible_but_inconsistent]))
+    assert "claim_derived_confirmation_inconsistent" in str(exc.value)
+    assert marker_field in str(exc.value)
+
+
+def test_a_confirmed_row_whose_restored_flag_is_missing_is_refused():
+    """The other direction of the same equality: the query derives
+    `restored_by_human_confirmation` as `not shipped AND human_confirmed`, so a
+    demoted confirmed row that does NOT carry it is a producer that has drifted
+    from its own definition -- and it is the row that would silently lose its
+    coverage note."""
+    row = _eligibility_row(_REVIEW_ONLY, _CONFIRMED, restored_by_human_confirmation=False)
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([row]))
+    assert "claim_derived_confirmation_inconsistent" in str(exc.value)
+
+
+def test_the_review_opt_in_population_is_admitted_but_never_defaults():
+    """`meta.include_review` is the producer's record of WHICH population it
+    returned. Under the opt-in read a row failing both limbs is legitimate --
+    and it still may not reach the default level."""
+    ineligible = _eligibility_row(_REVIEW_ONLY, _UNREVIEWED,
+                                  main_pool_reason=REASON_INSUFFICIENT_LENGTH)
+    opted_in = claims_envelope([ineligible],
+                               meta={"page_id": "page-1", "include_review": True})
+    model = pm.build_panel_rows(bundle(claims=opted_in))
+    emitted = list(pm.iter_rows(model))
+    assert len(emitted) == 1
+    assert emitted[0]["disclosure_level"] == pm.LEVEL_MORE_MATCHES
+    assert emitted[0]["gated"] is True
+
+    # Even a row the OTHER signals would promote stays gated: eligibility is
+    # decided before any of them is read.
+    promoted_looking = _eligibility_row(
+        _REVIEW_ONLY, _UNREVIEWED, main_pool=True,
+        main_pool_reason=REASON_MAIN_FULL_COVERAGE, default_eligible=True)
+    model = pm.build_panel_rows(bundle(claims=claims_envelope(
+        [promoted_looking], meta={"page_id": "page-1", "include_review": True})))
+    assert list(pm.iter_rows(model))[0]["disclosure_level"] == pm.LEVEL_MORE_MATCHES
+
+
+@pytest.mark.parametrize("field_name", ["routing_status", "adjudication_status"])
+def test_a_status_outside_the_frozen_vocabulary_is_refused_not_silently_ineligible(
+        field_name):
+    """Without this the two-limb test is not total: an out-of-vocabulary status
+    satisfies neither limb and neither its negation."""
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([claim_row(**{field_name: None})]))
+    assert "claim_vocabulary_outside_closed_set" in str(exc.value)
+    assert field_name in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# D-13g x the LOSSY grouping steps (code review 2B, finding 4).
+#
+# Each control is a PAIR: the same shape with the confirmation removed, to
+# establish that the row really does take the lossy path being tested, then the
+# confirmed variant. Without the pair, a test asserting "the confirmed row is
+# emitted" can pass on a fixture that was never grouped at all.
+# ---------------------------------------------------------------------------
+
+
+def _confirmed(**overrides):
+    """A row a human confirmed AND routing demoted -- the D-13g case, with the
+    derived fields consistent."""
+    fields = {
+        "adjudication_status": _CONFIRMED,
+        "routing_status": _REVIEW_ONLY,
+        "routing_reason": ids.ROUTING_REASON_LOW_COVERAGE,
+        "restored_by_human_confirmation": True,
+        "low_coverage_marker": True,
+        "main_pool": True,
+        "main_pool_reason": REASON_MAIN_HUMAN_CONFIRMED,
+    }
+    fields.update(overrides)
+    return claim_row(**fields)
+
+
+def _confirmed_plus_duplicate(confirm=True):
+    """The SAME canonical work claimed twice; the confirmed one is NOT the
+    anchor, so D-13a's own winner rule would discard it."""
+    maker = _confirmed if confirm else claim_row
+    return [
+        claim_row(claim_id="claim-anchor", evidence_id="ev-anchor",
+                  work_id="w000700", canonical_work_id="w000700",
+                  display_work_id="w000700", neutral_title="The canonical title",
+                  span_start=0, span_end=500),
+        maker(claim_id="claim-confirmed", evidence_id="ev-confirmed",
+              work_id="w000701", canonical_work_id="w000700",
+              display_work_id="w000700", neutral_title="The canonical title",
+              span_start=0, span_end=500, matched_letters=90, coverage_ppm=40000),
+    ]
+
+
+def test_a_confirmed_row_wins_the_canonical_collapse_it_would_have_lost():
+    unconfirmed = pm.build_panel_rows(bundle(_confirmed_plus_duplicate(confirm=False)))
+    survivor = list(pm.iter_rows(unconfirmed))
+    assert len(survivor) == 1
+    assert survivor[0]["claim_id"] == "claim-anchor", (
+        "the fixture must be one D-13a's rule resolves AGAINST the second row")
+
+    model = pm.build_panel_rows(bundle(_confirmed_plus_duplicate()))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1, "still ONE row per canonical work -- D-13a is intact"
+    assert rows[0]["claim_id"] == "claim-confirmed"
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+    # its claim identity AND its coverage note travelled with it
+    assert rows[0]["low_coverage_note"] == ds.low_coverage_note("en")
+
+
+def _confirmed_plus_granularity(confirm=True):
+    """The same commentary at two catalogued granularities on one span, with the
+    weaker-banded member confirmed -- so lead attribution would nest it."""
+    author = "שלמה בן יצחק (רש\"י)"
+    maker = _confirmed if confirm else claim_row
+    return [
+        claim_row(claim_id="claim-torah", evidence_id="ev-a", work_id="w000171",
+                  canonical_work_id="w000171", display_work_id="w000171",
+                  neutral_title="רש\"י על התורה", author=author,
+                  span_start=0, span_end=962, matched_letters=800),
+        maker(claim_id="claim-genesis", evidence_id="ev-b", work_id="w001281",
+              canonical_work_id="w001281", display_work_id="w001281",
+              neutral_title="רש\"י על בראשית", author=author,
+              span_start=0, span_end=962, matched_letters=90, coverage_ppm=40000,
+              confidence_band=ids.CONFIDENCE_BAND_SCREENING_RB, band_rank=4),
+    ]
+
+
+def test_a_confirmed_row_leads_its_granularity_group_instead_of_nesting():
+    unconfirmed = pm.build_panel_rows(bundle(_confirmed_plus_granularity(confirm=False)))
+    rows = list(pm.iter_rows(unconfirmed))
+    assert len(rows) == 1 and len(rows[0]["nested"]) == 1
+    assert rows[0]["nested"][0]["work_id"] == "w001281", (
+        "the fixture must be one where the row to be confirmed NESTS")
+
+    model = pm.build_panel_rows(bundle(_confirmed_plus_granularity()))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1, "the ratified nesting survives -- one row, not two"
+    assert rows[0]["claim_id"] == "claim-genesis"
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+    assert rows[0]["low_coverage_note"] == ds.low_coverage_note("en")
+    assert [n["work_id"] for n in rows[0]["nested"]] == ["w000171"]
+    assert rows[0]["granularity_subline"]
+
+
+def test_two_confirmed_rows_in_one_granularity_group_are_both_emitted():
+    """A nested row is emitted as a work id, a title and a subline. That is not
+    "emitted in the default set", so the second confirmation is lifted out."""
+    rows = _confirmed_plus_granularity()
+    rows[0] = _confirmed(**{k: v for k, v in rows[0].items()
+                            if k not in {"adjudication_status", "routing_status",
+                                         "routing_reason",
+                                         "restored_by_human_confirmation",
+                                         "low_coverage_marker", "main_pool",
+                                         "main_pool_reason"}})
+    model = pm.build_panel_rows(bundle(rows))
+    emitted = list(pm.iter_rows(model))
+    assert sorted(r["claim_id"] for r in emitted) == ["claim-genesis", "claim-torah"]
+    assert all(r["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS for r in emitted)
+    assert all(len(r["nested"]) == 0 for r in emitted)
+
+
+def _confirmed_plus_generic(confirm=True, members=3):
+    """Genuinely different works on one byte-identical span (no shared author,
+    so D-13d's predicate says generic shared text), one of them confirmed."""
+    maker = _confirmed if confirm else claim_row
+    rows = [
+        claim_row(claim_id="claim-generic-%d" % i, evidence_id="ev-generic-%d" % i,
+                  work_id="w0003%02d" % i, canonical_work_id="w0003%02d" % i,
+                  display_work_id="w0003%02d" % i, neutral_title="Work %d" % i,
+                  author="מחבר %d" % i, span_start=0, span_end=555,
+                  matched_letters=420)
+        for i in range(1, members)
+    ]
+    rows.append(maker(
+        claim_id="claim-confirmed", evidence_id="ev-confirmed", work_id="w000399",
+        canonical_work_id="w000399", display_work_id="w000399",
+        neutral_title="A confirmed work", author="מחבר אחר",
+        span_start=0, span_end=555, matched_letters=90, coverage_ppm=40000))
+    return rows
+
+
+def test_a_confirmed_row_is_lifted_out_of_a_generic_group_and_the_rest_stay():
+    unconfirmed = pm.build_panel_rows(bundle(_confirmed_plus_generic(confirm=False)))
+    assert list(pm.iter_rows(unconfirmed)) == []
+    assert len(unconfirmed.generic_groups) == 1
+    assert unconfirmed.generic_groups[0]["work_count"] == 3, (
+        "the fixture must be one where the row to be confirmed DISAPPEARS")
+
+    model = pm.build_panel_rows(bundle(_confirmed_plus_generic()))
+    rows = list(pm.iter_rows(model))
+    assert [r["claim_id"] for r in rows] == ["claim-confirmed"]
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+    assert rows[0]["low_coverage_note"] == ds.low_coverage_note("en")
+    # the passage is still generic for everyone else
+    assert len(model.generic_groups) == 1
+    assert model.generic_groups[0]["work_count"] == 2
+    assert "w000399" not in [w["work_id"] for w in model.generic_groups[0]["works"]]
+
+
+def test_a_generic_group_left_with_one_member_stops_being_a_group():
+    """D-13d's own precondition is >=2 works on one span."""
+    model = pm.build_panel_rows(bundle(_confirmed_plus_generic(members=2)))
+    assert model.generic_groups == ()
+    assert sorted(r["claim_id"] for r in pm.iter_rows(model)) == [
+        "claim-confirmed", "claim-generic-1"]
+
+
+def test_direct_family_row_carries_coverage_and_a_propagated_row_carries_none():
+    direct = pm.build_panel_rows(bundle([claim_row()]))
+    propagated = pm.build_panel_rows(bundle([
+        claim_row(evidence_source=ids.EVIDENCE_SOURCE_PROPAGATED,
+                  confidence_band=ids.CONFIDENCE_BAND_CORROBORATED,
+                  band_label=band_label(ids.EVIDENCE_SOURCE_PROPAGATED,
+                                        ids.CONFIDENCE_BAND_CORROBORATED),
+                  band_rank=2, coverage_ppm=None, matched_letters=None),
+    ]))
+    direct_row = list(pm.iter_rows(direct))[0]
+    propagated_row = list(pm.iter_rows(propagated))[0]
+
+    assert direct_row["coverage_ppm"] == 680000
+    assert direct_row["coverage_label"] == ds.coverage_label("en")
+    assert "68%" in direct_row["headline"]
+
+    assert "coverage_ppm" not in propagated_row
+    assert "coverage_label" not in propagated_row
+    assert "%" not in propagated_row["headline"]
+
+
+# ---------------------------------------------------------------------------
+# C-track step 3b: the panel's claim rows render the MATRIX output, capped at
+# member grain (matrix spec §3.2), and every display decision on the row reads
+# that ONE field.
+# ---------------------------------------------------------------------------
+
+
+def test_the_row_chip_and_headline_follow_the_rendered_relation_not_the_stored_one():
+    """A row the matrix demoted says so, in both places a reader reads it.
+
+    The fixture keeps `relation_kind` at `direct_witness` on purpose: this is a
+    row the build stored as a direct witness and the matrix demoted, which is
+    the entire population C-track exists for. If either string still came from
+    the stored column this assertion fails.
+    """
+    model = pm.build_panel_rows(bundle([
+        claim_row(rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["relation_chip"] == ds.relation_chip(
+        ids.RENDERED_RELATION_SHARED_TEXT, "en")
+    assert row["headline"] == ds.row_headline(
+        "Some Recorded Work", 680000, ids.RENDERED_RELATION_SHARED_TEXT, "en",
+        evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT)
+    assert row["relation_code"] == ds.filter_code(ids.CLAIM_TYPE_SHARED_TEXT)
+
+
+def test_a_demoted_row_loses_its_coverage_percentage_with_its_chip():
+    """D-08a's gate reads the SAME field the chip does.
+
+    The failure this pins is a row whose chip says "Shares text with this work"
+    while the line beside it still advertises "68% of page" -- two answers to
+    one question, which is exactly what one field prevents.
+    """
+    for demoted in (ids.RENDERED_RELATION_SHARED_TEXT,
+                    ids.RENDERED_RELATION_QUOTES_THIS_WORK,
+                    ids.RENDERED_RELATION_UNCERTAIN):
+        model = pm.build_panel_rows(bundle([claim_row(rendered_relation=demoted)]))
+        row = list(pm.iter_rows(model))[0]
+        assert "coverage_ppm" not in row, demoted
+        assert "coverage_label" not in row, demoted
+        assert "%" not in row["headline"], demoted
+
+
+def test_a_fail_closed_row_asserts_nothing_and_carries_no_filter_code():
+    """`uncertain` renders "Needs review", a headline that is the work title
+    alone, and NO relation code -- there is no fourth filter code, and inventing
+    one would put the fail-closed state into a reader-facing filter set nobody
+    has ruled on."""
+    model = pm.build_panel_rows(bundle([
+        claim_row(rendered_relation=ids.RENDERED_RELATION_UNCERTAIN)]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["relation_chip"] == ds.relation_chip(
+        ids.RENDERED_RELATION_UNCERTAIN, "en")
+    assert row["headline"] == "Some Recorded Work"
+    assert "relation_code" not in row
+
+
+def test_the_anchor_travels_as_its_CAPPED_relation_not_its_stored_claim_type():
+    """⟨REPLACES a step-3b test that pinned the opposite.⟩
+
+    Step 3b kept the stored `relation_kind` on this surface for exactly one
+    consumer: `_anchor_identity` turned it into the expansion query's
+    `anchor_claim_type`. Step 3d retired that consumer — the expansion pane
+    renders the anchor's CAPPED relation as a chip and compares it against the
+    carrier's own capped relation — so the descriptor carries
+    `anchor_rendered_relation` and the stored type is gone from the surface
+    entirely.
+
+    The fixture is the case that distinguishes the two designs: a row the build
+    stored as `direct_witness` and the matrix demoted. Under the old design the
+    descriptor carried `direct_witness`; under this one it carries `shared_text`,
+    which is what the pane will show.
+    """
+    model = pm.build_panel_rows(bundle([
+        claim_row(rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["expansion"]["anchor_rendered_relation"] == (
+        ids.RENDERED_RELATION_SHARED_TEXT)
+    assert "anchor_claim_type" not in row["expansion"], (
+        "the stored claim type is gone from this surface -- a field with no "
+        "consumer is a field a renderer eventually prints")
+
+
+def test_a_generic_group_member_chip_follows_the_rendered_relation_too():
+    """A group member is a claim row like any other. It was the SECOND consumer
+    of the stored column and the easy one to miss -- the group leaves the
+    identifications bucket, which changes where the row is shown, not what it
+    may say."""
+    members = _confirmed_plus_generic(members=3)
+    for row in members:
+        row["rendered_relation"] = ids.RENDERED_RELATION_UNCERTAIN
+    model = pm.build_panel_rows(bundle(members))
+    assert model.generic_groups != ()
+    chips = {work["relation_chip"]
+             for group in model.generic_groups for work in group["works"]}
+    assert chips == {ds.relation_chip(ids.RENDERED_RELATION_UNCERTAIN, "en")}
+
+
+def test_a_claim_row_without_a_rendered_relation_is_refused():
+    """It is a REQUIRED vocabulary, not an anchor-optional one: every row hands
+    this value to `relation_chip` and `row_headline` unconditionally, so an
+    absent value would reach a lookup that raises while quoting it.
+
+    ⟨AMENDED 2026-08-12 -- C-track step 3d⟩ The refusal CODE changed, and the
+    change is correct rather than incidental. Step 3d made this field part of the
+    anchor identity (`_anchor_identity` reads it instead of the stored
+    `relation_kind`), and `_validate_claim_row` runs the anchor's ALL-OR-NONE
+    contract FIRST by design -- so an absent value is now reported as a partial
+    anchor, which additionally NAMES the missing field, rather than as a
+    vocabulary miss. Both are loud refusals of the same row; this asserts the one
+    that actually speaks. A present-but-foreign value still goes through the
+    vocabulary check (the test below).
+    """
+    with pytest.raises(pm.PanelContractError) as excinfo:
+        pm.build_panel_rows(bundle([claim_row(rendered_relation=None)]))
+    assert "claim_anchor_identity_partial" in str(excinfo.value)
+    assert "anchor_rendered_relation" in str(excinfo.value)
+
+
+def test_a_claim_row_whose_rendered_relation_is_foreign_is_refused():
+    with pytest.raises(pm.PanelContractError):
+        pm.build_panel_rows(bundle([claim_row(rendered_relation="bogus")]))
+
+
+def test_every_row_carries_the_relation_chip_and_the_band_label_as_a_tooltip_only():
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["relation_chip"] == ds.relation_chip(ids.CLAIM_TYPE_DIRECT_WITNESS, "en")
+    assert row["band_tooltip"] == ds.relation_tooltip(
+        ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC, "en")
+    # The band string is a TOOLTIP value and nothing else: no other emitted
+    # field may repeat it.
+    repeats = [path for path, value in _walk_strings(model.as_dict())
+               if value == row["band_tooltip"] and not path.endswith("band_tooltip")]
+    assert repeats == []
+
+
+# ===========================================================================
+# Task 1 -- order of operations
+# ===========================================================================
+
+
+def test_collapse_runs_before_the_generic_pull_out(two_titles_duplicate, two_granularity_rashi):
+    """Pulling out generic groups BEFORE collapsing duplicates is exactly the
+    mistake that cost one manuscript a correct identification: the duplicate
+    pair sits on one span, so a generic-first pipeline sees an identical-span
+    group its own predicate cannot decide and files the identification away as
+    generic shared text."""
+    duplicate_model = pm.build_panel_rows(bundle(two_titles_duplicate))
+    assert len(list(pm.iter_rows(duplicate_model))) == 1
+    assert duplicate_model.generic_groups == ()
+
+    rashi_model = pm.build_panel_rows(bundle(two_granularity_rashi))
+    assert rashi_model.generic_groups == ()
+
+    # `rindex`, not `index`: the first occurrence of each marker is its own
+    # constant definition (all four sit together), so only the LAST occurrence
+    # -- the use site inside the pipeline -- says anything about ordering.
+    source = _model_source()
+    order = [source.rindex(marker) for marker in (
+        pm.STEP_COLLAPSE_DUPLICATES,
+        pm.STEP_SEPARATE_GENERIC_GROUPS,
+        pm.STEP_LEAD_ATTRIBUTION,
+        pm.STEP_GATE_SHORT_EVIDENCE,
+    )]
+    assert order == sorted(order), "the named steps are out of order in the source"
+
+
+# ===========================================================================
+# Task 1 -- module-level greps
+# ===========================================================================
+
+
+def test_module_imports_nothing_from_nicegui_and_executes_no_query():
+    source = _model_source()
+    assert "nicegui" not in source.lower()
+    for banned in ("sqlite3", "execute(", "cursor", "import web", "from web"):
+        assert banned not in source, banned
+
+
+def test_module_defines_no_human_review_badge_field():
+    """The source half of D-13f, using the SHARED forbidden vocabulary rather
+    than a few spellings typed here -- so a key the projection layer already
+    knows is forbidden cannot appear in this module just because nobody thought
+    to add it to a local list."""
+    source = _model_source()
+    # NAMES, not prose: every identifier and every identifier-shaped string
+    # constant the module contains, run through the shared predicate. A
+    # substring scan over the whole file cannot do this -- "ci" is inside
+    # "reader-facing" -- and a hand-typed list of three spellings is what let
+    # `expert_reviewed` be a live possibility.
+    tree = ast.parse(source)
+    identifiers = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", node.value):
+                identifiers.add(node.value)
+        elif isinstance(node, ast.Name):
+            identifiers.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            identifiers.add(node.attr)
+        elif isinstance(node, ast.arg):
+            identifiers.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            identifiers.add(node.name)
+    assert sorted(name for name in identifiers if is_forbidden_surface_field(name)) == []
+    assert "review_overlay" in FORBIDDEN_SURFACE_FIELDS   # the predicate is the real one
+
+    for label in ("Expert-reviewed", "נבדק בידי מומחה", "review_badge"):
+        assert label not in source, label
+    # ... and the emitted-shape half is `assert_emitted_schema`, which is what
+    # catches a marker that is neither a known key nor a known string.
+    assert is_forbidden_surface_field("estimated_precision")
+
+
+def test_raw_recorded_title_is_read_at_exactly_one_call_site():
+    """A model that formats the recorded title directly silently opts out of
+    ruling R's curation."""
+    source = _model_source()
+    reads = re.findall(r'\[["\']neutral_title["\']\]|\.get\(["\']neutral_title["\']', source)
+    assert len(reads) == 1, "expected exactly one raw title read, found %d" % len(reads)
+    line = [ln for ln in source.splitlines()
+            if re.search(r'\[["\']neutral_title["\']\]|\.get\(["\']neutral_title["\']', ln)][0]
+    start = source.splitlines().index(line)
+    window = "\n".join(source.splitlines()[max(0, start - 6):start + 6])
+    assert "display_work_title" in window
+
+
+# ---------------------------------------------------------------------------
+# Shared walker used by several tests above.
+# ---------------------------------------------------------------------------
+
+
+def _walk_strings(node, path="model"):
+    """Yield `(path, value)` for every STRING leaf reachable in `node`."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk_strings(value, "%s.%s" % (path, key))
+    elif isinstance(node, (list, tuple)):
+        for index, value in enumerate(node):
+            yield from _walk_strings(value, "%s[%d]" % (path, index))
+    elif isinstance(node, str):
+        yield path, node
+
+
+# ===========================================================================
+# Task 2 -- status arbitration
+# ===========================================================================
+
+_PAGE_ID_ENVELOPE_STATES = {
+    "ok_resolved": lambda: page_ids_envelope(resolved=True, truncated=False),
+    "ok_unresolved": lambda: page_ids_envelope(items=(), total=0, resolved=False),
+    "ok_truncated": lambda: page_ids_envelope(resolved=True, truncated=True),
+    "outage": lambda: page_ids_envelope(status="unavailable"),
+}
+
+_EXPECTED_SCOPE_STATE = {
+    "ok_resolved": pm.SCOPE_RESOLVED,
+    "ok_unresolved": pm.SCOPE_UNRESOLVED,
+    "ok_truncated": pm.SCOPE_TRUNCATED,
+    "outage": pm.SCOPE_OUTAGE,
+}
+
+
+#: `(claims status, page-scope state) -> (panel status, the hide rule may
+#: apply, the pane may report manuscript facts)`.
+#:
+#: WRITTEN OUT, all sixteen, from D-13's own sentences -- never read from
+#: `ARBITRATION_TABLE`, and not derived by a formula either. Reading the
+#: expectation from the table production uses makes the two agree by
+#: construction: flip a cell and both change together (code review 2B, finding
+#: 7). The three sentences this table encodes:
+#:
+#:   * the PANEL's status is the claims envelope's own status, never invented
+#:     from a section's;
+#:   * the entry control's hide-on-zero rule may apply only when NOTHING the
+#:     panel would show came back as an outage -- an outage is never a zero,
+#:     and that binds the PAGE-SCOPE read too. A claims zero is a fact about
+#:     this page; the panel's other pane is about the whole MANUSCRIPT, so
+#:     hiding on `("ok", SCOPE_OUTAGE)` says "this manuscript has nothing" on
+#:     the strength of a query that failed -- and takes the only retry with it
+#:     (code review round 12, finding 2). SCOPE_UNRESOLVED is NOT an outage: it
+#:     is a fact about the manuscript, so the hide rule still applies there;
+#:   * the pane may report facts ABOUT the manuscript only when the page scope
+#:     resolved (or resolved and truncated); otherwise anything it said would
+#:     be our own plumbing failure wearing the manuscript's name.
+_INDEPENDENT_ARBITRATION_MATRIX = {
+    ("ok", pm.SCOPE_RESOLVED): ("ok", True, True),
+    ("ok", pm.SCOPE_TRUNCATED): ("ok", True, True),
+    ("ok", pm.SCOPE_UNRESOLVED): ("ok", True, False),
+    ("ok", pm.SCOPE_OUTAGE): ("ok", False, False),
+    ("unavailable", pm.SCOPE_RESOLVED): ("unavailable", False, True),
+    ("unavailable", pm.SCOPE_TRUNCATED): ("unavailable", False, True),
+    ("unavailable", pm.SCOPE_UNRESOLVED): ("unavailable", False, False),
+    ("unavailable", pm.SCOPE_OUTAGE): ("unavailable", False, False),
+    ("timeout", pm.SCOPE_RESOLVED): ("timeout", False, True),
+    ("timeout", pm.SCOPE_TRUNCATED): ("timeout", False, True),
+    ("timeout", pm.SCOPE_UNRESOLVED): ("timeout", False, False),
+    ("timeout", pm.SCOPE_OUTAGE): ("timeout", False, False),
+    ("busy", pm.SCOPE_RESOLVED): ("busy", False, True),
+    ("busy", pm.SCOPE_TRUNCATED): ("busy", False, True),
+    ("busy", pm.SCOPE_UNRESOLVED): ("busy", False, False),
+    ("busy", pm.SCOPE_OUTAGE): ("busy", False, False),
+}
+
+
+def assert_table_matches_the_independent_matrix():
+    assert set(pm.ARBITRATION_TABLE) == set(_INDEPENDENT_ARBITRATION_MATRIX)
+    for key in sorted(_INDEPENDENT_ARBITRATION_MATRIX):
+        panel_status, hide_may_apply, reports_facts = _INDEPENDENT_ARBITRATION_MATRIX[key]
+        outcome = pm.ARBITRATION_TABLE[key]
+        assert (outcome.panel_status, outcome.panel_hidden_on_zero,
+                outcome.scope_state, outcome.pane_reports_manuscript_facts) == \
+            (panel_status, hide_may_apply, key[1], reports_facts), key
+
+
+def assert_arbitration_behavior(claims_status, page_id_state):
+    claims = claims_envelope([claim_row()]) if claims_status == "ok" \
+        else claims_envelope(status=claims_status)
+    made = bundle(claims=claims, page_ids=_PAGE_ID_ENVELOPE_STATES[page_id_state]())
+    model = pm.build_panel_rows(made)
+
+    expected_scope = _EXPECTED_SCOPE_STATE[page_id_state]
+    panel_status, hide_may_apply, reports_facts = \
+        _INDEPENDENT_ARBITRATION_MATRIX[(claims_status, expected_scope)]
+
+    assert model.panel_status == panel_status
+    assert model.manuscript_pane["scope_state"] == expected_scope
+
+    # BOTH directions. The earlier version asserted the pane only when it was
+    # forbidden to speak, so flipping a cell to True removed its only pane
+    # assertion instead of failing it.
+    if reports_facts:
+        assert model.manuscript_pane["state"] != pm.PANE_UNRESOLVED
+        assert model.manuscript_pane["state"] in {
+            pm.PANE_POPULATED, pm.PANE_EMPTY, pm.PANE_OUTAGE}
+    else:
+        assert model.manuscript_pane["state"] == pm.PANE_UNRESOLVED
+        assert "total" not in model.manuscript_pane
+        assert "works" not in model.manuscript_pane
+
+    # The hide rule may apply only where the matrix says so.
+    if not hide_may_apply:
+        assert model.entry_control["hidden"] is False
+
+
+@pytest.mark.parametrize("claims_status", sorted(pm.SURFACE_STATUSES_ORDERED))
+@pytest.mark.parametrize("page_id_state", sorted(_PAGE_ID_ENVELOPE_STATES))
+def test_arbitration_cross_product_of_claim_status_and_page_scope(claims_status, page_id_state):
+    """All SIXTEEN combinations, against an INDEPENDENTLY written matrix.
+
+    Not a spot check: the states that were never enumerated are exactly the
+    ones that shipped wrong.
+    """
+    assert_arbitration_behavior(claims_status, page_id_state)
+
+
+def test_the_model_table_agrees_with_the_independent_matrix():
+    assert_table_matches_the_independent_matrix()
+
+
+def test_positive_control_a_flipped_arbitration_cell(monkeypatch):
+    """The control the cross-product could not have while it read its
+    expectation from the table under test."""
+    key = ("ok", pm.SCOPE_RESOLVED)
+    monkeypatch.setitem(
+        pm.ARBITRATION_TABLE, key,
+        dataclasses.replace(pm.ARBITRATION_TABLE[key],
+                            pane_reports_manuscript_facts=False))
+    with pytest.raises(AssertionError):
+        assert_table_matches_the_independent_matrix()
+    with pytest.raises(AssertionError):
+        assert_arbitration_behavior("ok", "ok_resolved")
+
+
+def test_positive_control_a_flipped_hide_rule(monkeypatch):
+    key = ("timeout", pm.SCOPE_RESOLVED)
+    monkeypatch.setitem(
+        pm.ARBITRATION_TABLE, key,
+        dataclasses.replace(pm.ARBITRATION_TABLE[key], panel_hidden_on_zero=True))
+    with pytest.raises(AssertionError):
+        assert_table_matches_the_independent_matrix()
+
+
+def test_the_arbitration_table_is_total_over_the_cross_product():
+    expected = {(status, scope)
+                for status in pm.SURFACE_STATUSES_ORDERED
+                for scope in pm.SCOPE_STATES}
+    assert set(pm.ARBITRATION_TABLE) == expected
+    assert len(expected) == 16
+    assert len(_INDEPENDENT_ARBITRATION_MATRIX) == 16
+
+
+@pytest.mark.parametrize("status,total,hidden", [
+    ("ok", 0, True),
+    ("ok", 3, False),
+    ("unavailable", 0, False),
+    ("timeout", 0, False),
+    ("busy", 0, False),
+])
+def test_entry_control_is_hidden_only_on_a_successful_zero(status, total, hidden):
+    """Only ~17% of manuscripts carry shipped claims, so hiding on a TRUE zero
+    is right -- which is precisely why the zero has to be a true zero."""
+    claims = claims_envelope([claim_row()] * total if status == "ok" else (), total,
+                             status=status)
+    model = pm.build_panel_rows(bundle(claims=claims))
+    assert model.entry_control["hidden"] is hidden
+
+
+def test_a_true_page_zero_plus_a_page_scope_OUTAGE_keeps_the_control_visible():
+    """The state above with the SCOPE read failing instead of the claims read.
+
+    The claims zero is honest about THIS PAGE. The panel's other pane is about
+    the whole manuscript and its scope read did not come back, so hiding here
+    says "this manuscript has nothing" on the strength of a query that failed --
+    and, because the entry control is the only way to open the panel, it takes
+    the only retry with it (code review round 12, finding 2).
+    """
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        page_ids=page_ids_envelope(status="timeout"),
+    ))
+    assert model.manuscript_pane["scope_state"] == pm.SCOPE_OUTAGE
+    assert model.entry_control["hidden"] is False
+    pane = model.manuscript_pane
+    assert pane["state"] == pm.PANE_UNRESOLVED
+    # ...and the failure is RECOVERABLE, so it carries the retry copy.
+    assert pane["service_state"]["message"] == ds.service_state_message("timeout", "en")
+    assert pane["service_state"]["retry"] == ds.retry_label("en")
+
+
+def test_an_UNRESOLVABLE_scope_carries_no_retry_because_a_retry_cannot_help():
+    """The other half of the pair. An unresolved page scope is a FACT about the
+    manuscript, not a failed query -- offering a retry there is a control that
+    cannot work, and a true page zero may still hide the panel."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        page_ids=page_ids_envelope(items=(), total=0, resolved=False),
+    ))
+    assert model.manuscript_pane["scope_state"] == pm.SCOPE_UNRESOLVED
+    assert model.manuscript_pane["state"] == pm.PANE_UNRESOLVED
+    assert "service_state" not in model.manuscript_pane
+    assert model.entry_control["hidden"] is True
+
+
+# ---------------------------------------------------------------------------
+# A CLAIM-LESS FOLIO OF A CLAIM-RICH MANUSCRIPT.
+#
+# The measured case: RNL Ms. Evr. Antonin A 1 (990000895680205171) carries 483
+# claims across 396 of its 492 pages and none at all on page 1. Under the bare
+# hide-on-zero rule its page 1 rendered no control, no chip and no hint --
+# byte-identical to a manuscript the corpus knows nothing about.
+#
+# The four tests below are the four cells that decide it, and only the first
+# changes behaviour: the manuscript read must be BOTH permitted to speak
+# (`pane_reports_manuscript_facts`) and actually `ok` and non-empty.
+# ---------------------------------------------------------------------------
+
+def test_a_claim_less_folio_of_a_claim_rich_manuscript_keeps_the_control_visible():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        manuscript_works=works_envelope([work_summary_row()], 1),
+    ))
+    entry = model.entry_control
+    assert entry["hidden"] is False, (
+        "a folio with a true zero hid the control while the manuscript-level "
+        "read reported identifications elsewhere -- the reader is shown the "
+        "same surface as a manuscript the corpus knows nothing about")
+    assert entry["manuscript_elsewhere_only"] is True
+    # ...and NOT as a page count. The only number available here is this page's
+    # zero, and the control must never carry it.
+    assert entry["count"] is None
+    # The status is still the CLAIMS envelope's own -- nothing was invented.
+    assert entry["status"] == "ok"
+    assert entry["degraded_status"] is None
+    # Opening the panel lands on the pane that carries the rows.
+    assert model.lead_with_manuscript_pane is True
+    assert model.manuscript_pane["state"] == pm.PANE_POPULATED
+
+
+def test_a_true_zero_with_a_manuscript_level_ZERO_still_hides():
+    """The common case, and the one the hide rule is right about: most folios
+    genuinely have nothing, and so does their manuscript."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        manuscript_works=works_envelope((), 0),
+    ))
+    assert model.entry_control["hidden"] is True
+    assert model.entry_control["manuscript_elsewhere_only"] is False
+    assert model.entry_control["count"] == 0
+    assert model.lead_with_manuscript_pane is False
+
+
+@pytest.mark.parametrize("status", ["unavailable", "timeout", "busy"])
+def test_a_true_zero_with_a_manuscript_level_OUTAGE_follows_the_OLD_rule(status):
+    """An outage is not evidence of a manuscript with content, any more than it
+    is evidence of one without. The new branch must not fire on it -- today's
+    behaviour, unchanged."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        manuscript_works=works_envelope(status=status),
+    ))
+    assert model.entry_control["manuscript_elsewhere_only"] is False
+    assert model.entry_control["hidden"] is True
+    assert model.manuscript_pane["state"] == pm.PANE_OUTAGE
+
+
+@pytest.mark.parametrize("page_ids_kwargs,works_kwargs", [
+    ({"items": (), "total": 0, "resolved": False}, {}),
+    ({}, {"page_scope_resolved": False}),
+])
+def test_an_UNRESOLVED_page_scope_never_triggers_the_new_branch(
+        page_ids_kwargs, works_kwargs):
+    """`pane_reports_manuscript_facts` is the single predicate for "the pane may
+    report facts about the manuscript", and the new branch REUSES it rather than
+    inventing a second rule. Where the scope did not resolve, a non-empty works
+    envelope is our own plumbing wearing the manuscript's name."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        page_ids=page_ids_envelope(**page_ids_kwargs),
+        manuscript_works=works_envelope([work_summary_row()], 1, **works_kwargs),
+    ))
+    assert model.manuscript_pane["scope_state"] == pm.SCOPE_UNRESOLVED
+    assert model.entry_control["manuscript_elsewhere_only"] is False
+    assert model.entry_control["hidden"] is True
+    assert model.lead_with_manuscript_pane is False
+
+
+@pytest.mark.parametrize("claims_status", sorted(pm.SURFACE_STATUSES_ORDERED))
+@pytest.mark.parametrize("page_id_state", sorted(_PAGE_ID_ENVELOPE_STATES))
+@pytest.mark.parametrize("works_total", [0, 2])
+@pytest.mark.parametrize("claims_total", [0, 1])
+def test_no_other_arbitration_row_changed(
+        claims_status, page_id_state, works_total, claims_total):
+    """The whole cross-product against the rule as it stood BEFORE this change,
+    with the ONE named exception written out.
+
+    Restating the old formula here is deliberate: an assertion that re-derived
+    the hide rule from the shipped code would agree with it by construction and
+    could never catch a row that moved. `claims_total` is parametrised because
+    the hide rule only ever engages on a ZERO -- a fixture pinned to one claim
+    would assert sixty-four cells and exercise the rule in none of them.
+    """
+    claims = claims_envelope([claim_row()] * claims_total, claims_total) \
+        if claims_status == "ok" else claims_envelope(status=claims_status)
+    works = works_envelope([work_summary_row()] * works_total, works_total)
+    model = pm.build_panel_rows(bundle(
+        claims=claims,
+        page_ids=_PAGE_ID_ENVELOPE_STATES[page_id_state](),
+        manuscript_works=works,
+    ))
+    scope = _EXPECTED_SCOPE_STATE[page_id_state]
+    _status, hide_may_apply, reports_facts = \
+        _INDEPENDENT_ARBITRATION_MATRIX[(claims_status, scope)]
+    claims_is_a_true_zero = claims_status == "ok" and claims["total"] == 0
+    old_rule_hidden = hide_may_apply and claims_is_a_true_zero
+    # The ONE exception, stated independently of the implementation.
+    the_new_state = old_rule_hidden and reports_facts and works_total > 0
+
+    assert model.entry_control["manuscript_elsewhere_only"] is the_new_state
+    assert model.entry_control["hidden"] is (old_rule_hidden and not the_new_state)
+
+
+def test_the_zero_claims_fixture_really_is_a_zero():
+    """The control on the control: every assertion above rests on
+    `claims_envelope([claim_row()])` being non-zero and `claims_envelope((), 0)`
+    being a true `ok` zero, and a fixture that quietly stopped being either
+    would make the cross-product above pass while testing one cell."""
+    assert claims_envelope((), 0)["total"] == 0
+    assert claims_envelope((), 0)["status"] == "ok"
+    assert claims_envelope([claim_row()])["total"] == 1
+
+
+def test_a_works_outage_leaves_the_panel_visible_and_the_pane_unavailable():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(status="timeout"),
+    ))
+    assert model.entry_control["hidden"] is False
+    assert model.panel_status == "ok"
+    pane = model.manuscript_pane
+    assert pane["state"] == pm.PANE_OUTAGE
+    assert pane["service_state"]["message"] == ds.service_state_message("timeout", "en")
+    assert pane["service_state"]["retry"] == ds.retry_label("en")
+    assert "total" not in pane and "works" not in pane
+
+
+def test_page_scope_not_resolved_is_its_own_state_and_never_an_empty_result():
+    """An unresolved scope is a statement about OUR plumbing; rendering it as
+    "this manuscript has nothing elsewhere" attributes our failure to the
+    manuscript."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope([], 0, page_scope_resolved=False),
+    ))
+    pane = model.manuscript_pane
+    assert pane["scope_state"] == pm.SCOPE_UNRESOLVED
+    assert pane["state"] == pm.PANE_UNRESOLVED
+    assert pane["state"] != pm.PANE_EMPTY
+    assert "total" not in pane
+    assert "works" not in pane
+    assert pm.PANE_EMPTY not in [value for _, value in _walk_strings(pane, "pane")]
+
+
+def test_a_truncated_page_scope_is_flagged_and_its_total_is_labelled():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        page_ids=page_ids_envelope(resolved=True, truncated=True),
+        manuscript_works=works_envelope([work_summary_row()], 1),
+    ))
+    pane = model.manuscript_pane
+    assert pane["scope_state"] == pm.SCOPE_TRUNCATED
+    assert pane["partial_scope"] is True
+    assert pane["total_covers_resolved_pages_only"] is True
+
+
+def test_an_untruncated_scope_is_not_flagged_as_partial():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope([work_summary_row()], 1),
+    ))
+    assert model.manuscript_pane["partial_scope"] is False
+    assert model.manuscript_pane["total_covers_resolved_pages_only"] is False
+
+
+def test_no_truthiness_test_on_an_envelope_item_list_survives_in_the_module():
+    """`if not items:` cannot tell an outage from a zero -- which is the exact
+    failure the envelope exists to name."""
+    source = _model_source()
+    forbidden = (
+        r"if\s+not\s+items\b",
+        r"if\s+not\s+rows\b",
+        r"if\s+items\s*:",
+        r"if\s+rows\s*:",
+        r"if\s+not\s+\w*\[[\"']items[\"']\]",
+        r"if\s+\w*\[[\"']items[\"']\]\s*:",
+    )
+    for pattern in forbidden:
+        assert not re.search(pattern, source), pattern
+    assert "is_outage(" in source
+    assert 'status") == STATUS_OK' in source or "status\") == STATUS_OK" in source
+
+
+# ===========================================================================
+# Task 2 -- the disclosure model
+# ===========================================================================
+
+
+def _ratified_disclosure_level_count():
+    """Read the ratified number out of the decision record, never a literal.
+
+    TWO amendments decide it now, both dated 2026-08-13, and both are read
+    here -- retiring EITHER one silently should fail this test rather than
+    quietly reviving the old four-level shape.
+
+    D-13e's own amendment sentence fixes the count directly: the panel
+    collapses to a base number of sections (the old middle "Also shares text
+    with" level's content -- the generic groups, the related-pages block, the
+    never-an-identification note -- merges into the gated "more matches"
+    level rather than staying a level of its own).
+
+    Ruling F's own amendment separately RETIRES the default-hidden posture
+    that used to add a fourth level on top of that base: a catalogue-divergent
+    claim is no longer routed to a level of its own, so the base count IS the
+    final count now, with no `+ 1`."""
+    record = private_path(".planning/phases/" + GATE1_DECISIONS,
+                          ".planning/milestones/v9.0.0-phases/" + GATE1_DECISIONS)
+    text = io.open(record, encoding="utf-8").read()
+
+    collapse = re.search(
+        r"AMENDED 2026-08-13, owner ruling, direct session⟩ The panel "
+        r"collapses to (\w+) sections", text)
+    assert collapse is not None, (
+        "D-13e's 2026-08-13 amendment collapsing the panel to two sections "
+        "is no longer in the decision record")
+    base = {"two": 2, "three": 3, "four": 4}[collapse.group(1).lower()]
+
+    ruling_f_retraction = re.search(
+        r"AMENDED 2026-08-13, owner ruling, direct session \(beta-launch day\)"
+        r"[\s\S]{0,150}?default-hidden POSTURE is retired",
+        text)
+    assert ruling_f_retraction is not None, (
+        "ruling F's 2026-08-13 retraction of the default-hidden posture is no "
+        "longer in the decision record -- the panel's fourth disclosure level "
+        "may be ratified again")
+    return base
+
+
+def test_the_emitted_disclosure_level_count_equals_the_ratified_number():
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    assert [lvl["key"] for lvl in model.disclosure_levels] == list(pm.DISCLOSURE_LEVEL_KEYS)
+    assert len(model.disclosure_levels) == _ratified_disclosure_level_count()
+    assert len(pm.DISCLOSURE_LEVEL_KEYS) == _ratified_disclosure_level_count()
+
+
+def test_the_more_matches_level_carries_the_old_middle_levels_merged_content():
+    """D-13e's 2026-08-13 amendment: the old middle "Also shares text with"
+    level is retired as a level of its own, but its display content -- the
+    never-an-identification note -- merges unchanged into `LEVEL_MORE_MATCHES`.
+    That level's rows are real (if screened) identifications, so unlike the
+    retired middle level it is marked `is_identifications: True`; the note is
+    what still tells a reader the GENERIC content bundled alongside those rows
+    is not one."""
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    more_matches = [lvl for lvl in model.disclosure_levels
+                     if lvl["key"] == pm.LEVEL_MORE_MATCHES][0]
+    assert more_matches["is_identifications"] is True
+    assert more_matches["note"] == ds.not_an_identification_note("en")
+    assert more_matches["default_visible"] is False
+
+
+def test_the_default_level_holds_only_main_pool_identifications_and_nothing_is_deleted():
+    rows = [
+        claim_row(claim_id="claim-main", evidence_id="ev-main", span_start=0, span_end=500),
+        claim_row(claim_id="claim-more", evidence_id="ev-more", work_id="w000002",
+                  canonical_work_id="w000002", display_work_id="w000002",
+                  span_start=800, span_end=900, main_pool=False,
+                  main_pool_reason=REASON_INSUFFICIENT_LENGTH, matched_letters=90),
+    ]
+    model = pm.build_panel_rows(bundle(rows))
+    default_level = model.disclosure_levels[0]
+    gated_level = [lvl for lvl in model.disclosure_levels
+                   if lvl["key"] == pm.LEVEL_MORE_MATCHES][0]
+
+    assert [r["claim_id"] for r in default_level["rows"]] == ["claim-main"]
+    assert all(r["in_main_pool"] is True for r in default_level["rows"])
+    assert [r["claim_id"] for r in gated_level["rows"]] == ["claim-more"]
+    assert len(list(pm.iter_rows(model))) == 2
+
+
+# ===========================================================================
+# Task 2 -- the manuscript pane
+# ===========================================================================
+
+
+def test_manuscript_pane_names_its_works_with_page_counts_in_a_deterministic_order():
+    """A bare count was rejected for a measured reason: manuscript-level
+    coherence is what makes a single claim judgeable."""
+    works = [
+        work_summary_row(canonical_work_id="w000801", display_work_id="w000801",
+                         neutral_title="Rashi on Lamentations", page_count=1,
+                         best_band_rank=1),
+        work_summary_row(canonical_work_id="w000800", display_work_id="w000800",
+                         neutral_title="Rashi on Song of Songs", page_count=5,
+                         best_band_rank=0),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 2),
+    ))
+    pane = model.manuscript_pane
+    assert pane["state"] == pm.PANE_POPULATED
+    assert pane["header"] == ds.section_header(ds.SECTION_IN_THIS_MANUSCRIPT, "en")
+    assert [w["work_id"] for w in pane["works"]] == ["w000800", "w000801"]
+    assert [w["page_count"] for w in pane["works"]] == [5, 1]
+    # Deterministic over input order: the reversed input emits the same order.
+    reversed_model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(list(reversed(works)), 2),
+    ))
+    assert [w["work_id"] for w in reversed_model.manuscript_pane["works"]] == \
+        ["w000800", "w000801"]
+    # Reader aid ONLY: it must never feed band assignment or routing.
+    assert pane["reader_aid_only"] is True
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_every_manuscript_pane_chip_title_routes_through_display_work_title(lang):
+    works = [
+        work_summary_row(canonical_work_id="w000176", display_work_id="w000176",
+                         neutral_title=W000176_RAW_TITLE, page_count=3),
+        work_summary_row(canonical_work_id="w000900", display_work_id="w000900",
+                         neutral_title="An Uncurated Work", page_count=1,
+                         best_band_rank=1),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 2), lang=lang,
+    ))
+    titles = {w["work_id"]: w["work_title"] for w in model.manuscript_pane["works"]}
+    assert titles["w000176"] == ds.display_work_title("w000176", W000176_RAW_TITLE, lang)
+    assert titles["w000176"] != W000176_RAW_TITLE
+    assert titles["w000900"] == "An Uncurated Work"
+
+
+def test_a_gated_work_is_emitted_with_its_flag_rather_than_omitted():
+    """On the mockup's teaching case the five folios that made the anchor
+    judgeable were ALL behind the screening gate; filtering them out removes
+    exactly the context this pane exists to supply."""
+    works = [
+        work_summary_row(canonical_work_id="w000801", display_work_id="w000801",
+                         neutral_title="Reachable only behind the gate",
+                         gated=True, main_pool=False, page_count=5),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 1),
+    ))
+    emitted = model.manuscript_pane["works"]
+    assert len(emitted) == 1
+    assert emitted[0]["gated"] is True
+    assert emitted[0]["in_main_pool"] is False
+
+
+def test_a_work_with_no_title_carries_the_explicit_missing_title_marker():
+    works = [work_summary_row(neutral_title=None, title_missing=True)]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 1),
+    ))
+    emitted = model.manuscript_pane["works"][0]
+    assert emitted["title_missing"] is True
+    assert emitted["work_title"] == ds.missing_title("en")
+
+
+def test_manuscript_pane_paginates_on_the_envelope_total_never_on_the_item_count():
+    """One sampled manuscript has 61 works elsewhere; the page carries six."""
+    works = [work_summary_row(canonical_work_id="w0009%02d" % i,
+                              display_work_id="w0009%02d" % i,
+                              neutral_title="Work %d" % i, page_count=1,
+                              best_band_rank=i)
+             for i in range(6)]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 61),
+    ))
+    pane = model.manuscript_pane
+    assert pane["total"] == 61
+    assert pane["total"] != len(works)
+    assert pane["paginated"] is True
+    assert pane["page_threshold"] == pm.MANUSCRIPT_PANE_PAGE_THRESHOLD
+
+    small = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works[:2], 2),
+    ))
+    assert small.manuscript_pane["paginated"] is False
+
+
+def test_a_resolved_scope_with_no_works_is_a_genuine_empty_not_an_unresolved_one():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope([], 0, page_scope_resolved=True),
+    ))
+    assert model.manuscript_pane["state"] == pm.PANE_EMPTY
+    assert model.manuscript_pane["total"] == 0
+
+
+def test_a_pane_work_claimed_on_the_current_page_carries_the_on_this_page_marker():
+    """Renamed 2026-08-13 (owner ruling): the pane lists ALL works in the
+    manuscript, including ones the OPEN page itself claims -- "Elsewhere in
+    this manuscript" asserted something false whenever a work's pages include
+    the current folio. `on_this_page` is always present; `this_page_marker` is
+    ABSENT (not None, not empty) unless it is True, matching the file's other
+    conditional fields."""
+    on_page_claim = claim_row(work_id="w000750", canonical_work_id="w000750",
+                              display_work_id="w000750")
+    works = [
+        work_summary_row(canonical_work_id="w000750", display_work_id="w000750",
+                         neutral_title="Claimed on this very page", page_count=1,
+                         best_band_rank=0),
+        work_summary_row(canonical_work_id="w000751", display_work_id="w000751",
+                         neutral_title="Only elsewhere in the manuscript",
+                         page_count=4, best_band_rank=1),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([on_page_claim]),
+        manuscript_works=works_envelope(works, 2),
+    ))
+    chips = {w["work_id"]: w for w in model.manuscript_pane["works"]}
+
+    on_page = chips["w000750"]
+    assert on_page["on_this_page"] is True
+    assert on_page["this_page_marker"] == ds.this_page_marker("en")
+
+    elsewhere = chips["w000751"]
+    assert elsewhere["on_this_page"] is False
+    assert "this_page_marker" not in elsewhere
+
+
+def test_the_on_this_page_marker_is_never_manufactured_from_a_failed_claims_read():
+    """A claims-envelope outage is not evidence this page claims nothing, so it
+    must not manufacture the marker either way -- empty, exactly like a true
+    `ok` zero, never a guess in either direction."""
+    works = [work_summary_row(canonical_work_id="w000750", display_work_id="w000750",
+                              neutral_title="Present regardless", page_count=1)]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope(status="timeout"),
+        manuscript_works=works_envelope(works, 1),
+    ))
+    chip = model.manuscript_pane["works"][0]
+    assert chip["on_this_page"] is False
+    assert "this_page_marker" not in chip
+
+
+# ===========================================================================
+# Task 2 -- the related-pages section
+# ===========================================================================
+
+
+def test_related_pages_shows_a_distinct_opposite_page_count_and_no_rows_by_default():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        related_count=related_count_envelope(total=37),
+    ))
+    section = model.related_pages
+    assert section["header"] == ds.section_header(ds.SECTION_PAGES_MATCHING_THIS_PAGE, "en")
+    assert section["count"] == 37
+    assert section["count_unit"] == "distinct_opposite_pages"
+    assert section["label"] == ds.related_pages_label("en")
+    assert section["count_line"] == ds.related_pages_count_line(37, "en")
+    assert section["rows_state"] == pm.ROWS_NOT_REQUESTED
+    assert "rows" not in section
+
+
+def test_the_header_count_survives_when_the_rows_read_fails():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        related_count=related_count_envelope(total=37),
+        related_rows=related_rows_envelope(status="busy"),
+    ))
+    section = model.related_pages
+    assert section["count"] == 37
+    assert section["rows_state"] == pm.ROWS_OUTAGE
+    assert section["service_state"]["retry"] == ds.retry_label("en")
+
+
+def test_a_count_outage_never_fabricates_a_zero():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        related_count=related_count_envelope(status="unavailable"),
+    ))
+    section = model.related_pages
+    assert section["count"] is None
+    assert section["count_state"] == pm.ROWS_OUTAGE
+    assert "count_line" not in section
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("not_requested", pm.ROWS_NOT_REQUESTED),
+    ("populated", pm.ROWS_POPULATED),
+    ("empty", pm.ROWS_EMPTY),
+    ("outage", pm.ROWS_OUTAGE),
+])
+def test_the_four_related_row_states_are_distinct(case, expected):
+    """The failure this catches is the one that would let the panel tell a
+    reader "no related pages" about a query that was never issued."""
+    inputs = {
+        "not_requested": None,
+        "populated": related_rows_envelope([related_page_row()], 1),
+        "empty": related_rows_envelope([], 0),
+        "outage": related_rows_envelope(status="unavailable"),
+    }
+    made = bundle([claim_row()], related_rows=inputs[case])
+    section = pm.build_panel_rows(made).related_pages
+    assert section["rows_state"] == expected
+
+    emitted = {}
+    for name, value in inputs.items():
+        emitted[name] = pm.build_panel_rows(
+            bundle([claim_row()], related_rows=value)).related_pages
+    names = sorted(emitted)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            assert emitted[a] != emitted[b], (a, b)
+    assert len({e["rows_state"] for e in emitted.values()}) == 4
+
+
+def test_opening_the_toggle_installs_the_rows_without_touching_the_other_envelopes():
+    base = bundle([claim_row()], related_count=related_count_envelope(total=2))
+    opened = base.with_related_rows(related_rows_envelope([related_page_row()], 2))
+    section = pm.build_panel_rows(opened).related_pages
+    assert section["rows_state"] == pm.ROWS_POPULATED
+    # The row NAMES ITS MANUSCRIPT and does not carry the composite page id at
+    # all -- a renderer cannot print a field it was never given.
+    assert section["rows"][0]["shelfmark_display"] == "T-S 12.999"
+    assert section["rows"][0]["library_code"] == "CUL"
+    assert "related_page_id" not in section["rows"][0]
+    assert section["count"] == 2
+    for field_name in pm.EAGER_ENVELOPE_FIELDS:
+        assert getattr(opened, field_name) == getattr(base, field_name)
+
+
+# ===========================================================================
+# Task 2 -- the per-work expansion descriptor
+# ===========================================================================
+
+
+def test_every_identification_row_carries_a_lazy_expansion_descriptor():
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    row = list(pm.iter_rows(model))[0]
+    descriptor = row["expansion"]
+    assert descriptor["work_id"] == "w000001"
+    assert descriptor["anchor_sys_id"] == "990051079570205171"
+    assert descriptor["anchor_rendered_relation"] == ids.RENDERED_RELATION_DIRECT_WITNESS
+    assert descriptor["anchor_evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+    assert descriptor["anchor_confidence_band"] == \
+        ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
+    assert descriptor["page_size"] == pm.EXPANSION_PAGE_SIZE
+    assert descriptor["loaded"] is False
+    # Nothing is fetched with the panel: the heaviest work has thousands of
+    # claim rows and the median manuscript carries one work.
+    assert "rows" not in descriptor and "items" not in descriptor
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_identity_raises_naming_present_and_missing_fields(dropped):
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([claim_row(**{dropped: None})]))
+    message = str(exc.value)
+    assert "anchor" in message
+    assert "missing" in message.lower() and "present" in message.lower()
+
+
+# --- ... and on every row that is NOT the eventual lead --------------------
+#
+# The standalone case above is the ONLY one an anchor checked inside
+# `_identification_row` ever reaches. Each control below first asserts, on the
+# INTACT fixture, that the row it is about to break really does take the path
+# it claims -- otherwise a passing test proves nothing about that path.
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_inside_a_generic_group_is_refused(
+        dropped, verse_chain_generic_group):
+    """A generic group's members leave the identifications bucket entirely, so
+    NONE of them is ever composed as an identification row -- but every one of
+    them reaches a display-string lookup inside `_generic_group`."""
+    intact = pm.build_panel_rows(bundle(verse_chain_generic_group))
+    assert len(intact.generic_groups) == 1
+    assert list(pm.iter_rows(intact)) == []
+
+    rows = [dict(row) for row in verse_chain_generic_group]
+    rows[-1][dropped] = None
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle(rows))
+    assert "claim_anchor_identity_partial" in str(exc.value)
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_on_a_nested_granularity_row_is_refused(
+        dropped, two_granularity_rashi):
+    """The nested row is emitted as a work id, a title and a subline -- it never
+    passes through `_identification_row`, so an anchor checked only there is an
+    anchor never checked on it."""
+    intact = pm.build_panel_rows(bundle(two_granularity_rashi))
+    lead = [row for row in pm.iter_rows(intact) if row["span_start"] == 0][0]
+    assert len(lead["nested"]) == 1
+    nested_work_id = lead["nested"][0]["work_id"]
+
+    rows = [dict(row) for row in two_granularity_rashi]
+    target = [row for row in rows if row["display_work_id"] == nested_work_id][0]
+    target[dropped] = None
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle(rows))
+    assert "claim_anchor_identity_partial" in str(exc.value)
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_on_a_row_the_collapse_discards_is_refused(
+        dropped, two_titles_duplicate):
+    """The furthest case: D-13a's collapse DROPS the losing duplicate from view,
+    so a validation that runs after it never sees that row at all."""
+    intact = pm.build_panel_rows(bundle(two_titles_duplicate))
+    assert len(list(pm.iter_rows(intact))) == 1
+
+    rows = [dict(row) for row in two_titles_duplicate]
+    discarded = [row for row in rows
+                 if row["work_id"] != row["canonical_work_id"]][0]
+    discarded[dropped] = None
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle(rows))
+    assert "claim_anchor_identity_partial" in str(exc.value)
+
+
+# ===========================================================================
+# Error paths never quote what they refused (code review 2B, finding 1).
+#
+# The threat is not that a refusal is unhelpful -- it is that a caller doing
+# `logger.exception(...)` around this model publishes a row the model was
+# handed, and a discovery row may carry text from a non-public source.
+#
+# Every control below seeds the SAME sentinel into the value the branch is
+# refusing, and asserts three things: the refusal arrived, it came from ITS OWN
+# branch (so it cannot pass by failing earlier), and the sentinel appears
+# nowhere a caller could publish -- including the CHAINED traceback, which is
+# where a `raise ... from` would put the original message complete with the
+# value that `int()` or a library lookup quoted.
+# ===========================================================================
+
+#: Stands in for non-public content. Distinctive enough that a substring
+#: search cannot miss it, and it is not a real corpus name.
+SENTINEL = "SOURCE-SENTINEL-9f2c-NEVER-LOG-THIS"
+
+
+def _publishable_text(exc):
+    """Everything a caller could reasonably print about `exc`.
+
+    `traceback.format_exception` is what `logger.exception` calls, and it
+    follows `__cause__` / `__context__` -- so this catches the leak that
+    survives a message edit: a value-quoting library exception re-raised
+    WITHOUT severing the chain.
+    """
+    return "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    ) + repr(exc) + str(exc)
+
+
+def assert_refusal_withholds(code, call):
+    """`call()` must refuse from the `code` branch without quoting the sentinel."""
+    try:
+        call()
+    except Exception as exc:  # noqa: BLE001 -- the point is to inspect whatever escaped
+        published = _publishable_text(exc)
+        assert SENTINEL not in published, (
+            "the refusal published the very content it refused (%s)" % code)
+        assert code in str(exc), (
+            "expected the %r branch, got: %s" % (code, exc))
+        if exc.__context__ is not None:
+            assert exc.__suppress_context__ is True, (
+                "the chain was not severed, so a formatted traceback can still "
+                "reach the original message")
+        assert exc.__cause__ is None
+        return exc
+    raise AssertionError("expected a refusal from %r, nothing was raised" % code)
+
+
+def _sentinel_envelope(**overrides):
+    envelope_dict = {"status": "ok", "items": [], "total": 0, "meta": {}}
+    envelope_dict.update(overrides)
+    return envelope_dict
+
+
+def test_a_caller_supplied_envelope_key_is_counted_never_named():
+    assert_refusal_withholds(
+        "envelope_key_set_mismatch",
+        lambda: bundle(claims=_sentinel_envelope(**{SENTINEL: 1})),
+    )
+
+
+def test_a_caller_supplied_status_is_withheld():
+    assert_refusal_withholds(
+        "envelope_status_outside_vocabulary",
+        lambda: bundle(claims=_sentinel_envelope(status=SENTINEL)),
+    )
+
+
+@pytest.mark.parametrize("field_name", [
+    "routing_status", "adjudication_status", "rendered_relation",
+    "evidence_source", "confidence_band",
+])
+def test_an_out_of_vocabulary_claim_value_is_withheld(field_name):
+    """`relation_chip`, `filter_code`, `row_headline` and `band_label` all
+    format the offending value into their own refusals. They are right to --
+    their input domain is our vocabulary, not artifact content -- which makes
+    it this model's job never to hand them a value it has not checked."""
+    assert_refusal_withholds(
+        "claim_vocabulary_outside_closed_set",
+        lambda: pm.build_panel_rows(bundle([claim_row(**{field_name: SENTINEL})])),
+    )
+
+
+def test_an_ineligible_claim_is_refused_without_quoting_the_row():
+    row = _eligibility_row(_REVIEW_ONLY, _UNREVIEWED, neutral_title=SENTINEL)
+    assert_refusal_withholds(
+        "claim_ineligible_for_default_surface",
+        lambda: pm.build_panel_rows(bundle([row])),
+    )
+
+
+def test_an_inconsistent_derived_marker_is_refused_without_quoting_the_row():
+    row = _eligibility_row(_SHIPPED, _UNREVIEWED, neutral_title=SENTINEL,
+                           restored_by_human_confirmation=True)
+    assert_refusal_withholds(
+        "claim_derived_confirmation_inconsistent",
+        lambda: pm.build_panel_rows(bundle([row])),
+    )
+
+
+def test_a_partial_anchor_does_not_name_the_claim_it_came_from():
+    row = claim_row(sys_id=None, claim_id=SENTINEL)
+    assert_refusal_withholds(
+        "claim_anchor_identity_partial",
+        lambda: pm.build_panel_rows(bundle([row])),
+    )
+
+
+@pytest.mark.parametrize("case", [
+    "matched_letters", "span_start", "band_rank", "claims_total",
+    "related_count_total", "works_total", "page_count",
+])
+def test_a_non_numeric_field_is_refused_without_letting_int_quote_it(case):
+    """`int('<raw value>')` names its input, and there is no f-string here for
+    an auditor to find. This is the path that survived the first fix on the
+    sidecar loader (code review 2A, finding 1)."""
+    made = {
+        "matched_letters": lambda: bundle([claim_row(matched_letters=SENTINEL)]),
+        "span_start": lambda: bundle([claim_row(span_start=SENTINEL)]),
+        "band_rank": lambda: bundle([claim_row(band_rank=SENTINEL)]),
+        "claims_total": lambda: bundle(claims=_sentinel_envelope(
+            items=[claim_row()], total=SENTINEL,
+            meta={"page_id": "page-1", "include_review": False})),
+        "related_count_total": lambda: bundle(
+            [claim_row()], related_count=_sentinel_envelope(
+                total=SENTINEL, meta={"unit": "distinct_opposite_pages"})),
+        "works_total": lambda: bundle(
+            [claim_row()], manuscript_works=_sentinel_envelope(
+                items=[work_summary_row()], total=SENTINEL,
+                meta={"page_scope_resolved": True, "lang": "en"})),
+        "page_count": lambda: bundle(
+            [claim_row()], manuscript_works=works_envelope(
+                [work_summary_row(page_count=SENTINEL),
+                 work_summary_row(canonical_work_id="w000999",
+                                  display_work_id="w000999")], 2)),
+    }[case]
+    assert_refusal_withholds(
+        "field_not_an_integer", lambda: pm.build_panel_rows(made()))
+
+
+def test_an_unaudited_raise_leaves_carrying_only_its_type_name(monkeypatch):
+    """The control that makes this a TYPE contract rather than a list of
+    audited sites: a raise nobody here wrote, from a module nobody here
+    audited, must still not publish what it was looking at."""
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("relation_chip exploded on " + SENTINEL)
+
+    monkeypatch.setattr(pm.ds, "relation_chip", _boom)
+    exc = assert_refusal_withholds(
+        "model_internal_refusal",
+        lambda: pm.build_panel_rows(bundle([claim_row()])),
+    )
+    assert "RuntimeError" in str(exc)
+
+
+def test_the_module_raises_only_its_own_refusal_type():
+    """A `raise ValueError(...)` added later would be caught by the boundary and
+    reduced -- but reduced means its message is LOST, and a refusal this module
+    wrote deserves to be read. The tree walk keeps the two honest."""
+    tree = ast.parse(_model_source())
+    raised = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            name = getattr(node.exc.func, "id", None) or getattr(node.exc.func, "attr", None)
+            raised.add(name)
+    assert raised <= {
+        "PanelContractError",   # every deliberate refusal
+        "_reduce_to_type",      # ... which is what this factory returns, too
+        "RuntimeError",         # the import-time arbitration totality guard
+        "KeyError",             # `_level`, on one of THIS module's constants
+    }, sorted(raised)
+    assert "ValueError" not in raised
+    # And the factory really does produce the refusal type -- otherwise the
+    # allowance above would be a hole rather than an exemption.
+    assert isinstance(pm._reduce_to_type(RuntimeError("x"), "testing"),
+                      pm.PanelContractError)
+
+
+def test_no_literal_bucket_name_is_defined_in_the_module():
+    """Bucket names come from `bucket_label`; a second spelling here is how the
+    three surfaces start disagreeing."""
+    source = _model_source().lower()
+    for label in ("main pool", "more matches", "מאגר עיקרי", "התאמות נוספות"):
+        assert label.lower() not in source, label
+    assert "bucket_label" in _model_source()
+
+
+# ===========================================================================
+# Task 3 -- model-level honesty invariants, with one positive control per
+# property.
+#
+# Asserting at the MODEL level is cheaper than rendering and catches a
+# violation earlier; the DETECTORS are the shared gate's own five, imported
+# rather than re-implemented, so the rule can drift in exactly one place.
+# ===========================================================================
+
+
+#: `(detector name, callable(text, lang) -> [violation, ...])`. The five are
+#: INDEPENDENT, which is why each positive control below seeds exactly one
+#: property: a control seeding two at once can go red on either while the other
+#: stays completely untested.
+_HONESTY_DETECTORS = (
+    ("percentage", lambda text, lang: _find_unqualified_percentages(text, lang)),
+    ("interval", lambda text, lang: _find_bracketed_intervals(text)),
+    ("review-marker", lambda text, lang: _find_review_badges(text)),
+    ("prohibited-wording", lambda text, lang: _find_prohibited_phrases(text)),
+)
+
+_RAW_VOCAB_DETECTOR = "raw-vocabulary"
+
+
+def _leaf_field(path):
+    return path.rsplit(".", 1)[-1]
+
+
+def assert_model_honesty(model):
+    """Every emitted STRING field of `model`, checked FIELD BY FIELD.
+
+    Scoped per field on purpose: a model-wide substring search can pass for the
+    wrong reason -- the findings sketch had exactly that failure, where a header
+    assertion passed while the header was wrong because unrelated prose
+    contained the phrase it grepped for.
+
+    The qualified matched-letter coverage ("... 68% of page (matched letters)")
+    is the ONE permitted percentage, and it is recognised as such by the shared
+    detector's own qualifier window rather than by an exception listed here.
+    Raw stored vocabulary is checked on every field EXCEPT the ones the model
+    declares as machine vocabulary -- values that feed a later query or a
+    renderer branch and are never rendered as text.
+    """
+    lang = model.lang
+    violations = []
+    for path, value in _walk_strings(model.as_dict()):
+        for name, detector in _HONESTY_DETECTORS:
+            for hit in detector(value, lang):
+                violations.append("%s: %s [%s]" % (path, hit, name))
+        if _leaf_field(path) not in pm.MACHINE_VOCABULARY_FIELDS:
+            for hit in _find_raw_vocab_keys(value):
+                violations.append("%s: %s [%s]" % (path, hit, _RAW_VOCAB_DETECTOR))
+    if violations:
+        raise DiscoveryHonestyViolation(
+            "panel model (lang=%r): " % lang + "; ".join(violations))
+
+
+# ---------------------------------------------------------------------------
+# The CLOSED emitted schema (code review 2B, finding 6).
+#
+# The honesty walker above visits STRING LEAVES. An emitted `expert_reviewed`
+# boolean, or a key named after a review state, is invisible to it -- and D-13f
+# says no human-review marker may be emitted AT ALL, which is a statement about
+# the shape of the object, not about its prose.
+#
+# So this table is hand-written from the ratified display contract, not derived
+# from the model: every object the model emits, by its path, with the keys it
+# may carry and the TYPES those keys may hold. A field added to the model
+# without a decision behind it fails here, which is the point -- the previous
+# guard looked for the substring "badge" in top-level row keys and would have
+# passed `expert_reviewed=True` without noticing.
+# ---------------------------------------------------------------------------
+
+_STR = (str,)
+_BOOL = (bool,)
+_OPT_STR = (str, type(None))
+_OPT_INT = (int, type(None))
+
+_EMITTED_SCHEMA = {
+    "model": {
+        "lang": _STR, "show_more": _BOOL,
+        "panel_status": _STR, "caveat": _STR,
+        "bucket_rule_sentence": _STR, "entry_control": (dict,),
+        "service_state": (dict,), "manuscript_pane": (dict,),
+        "disclosure_levels": (tuple,), "lead_with_manuscript_pane": _BOOL,
+    },
+    "model.entry_control": {
+        # `degraded` is separate from `status` on purpose: `status` is the
+        # CLAIMS envelope's, and a page-scope outage leaves it `ok`.
+        # `manuscript_elsewhere_only` is separate from BOTH: it is a true page
+        # zero standing beside a non-empty manuscript read, which is neither an
+        # outage nor a manuscript with nothing on it.
+        "hidden": _BOOL, "status": _OPT_STR, "count": _OPT_INT,
+        "degraded_status": _OPT_STR, "manuscript_elsewhere_only": _BOOL,
+    },
+    "model.service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.manuscript_pane": {
+        "header": _STR, "scope_state": _STR, "partial_scope": _BOOL,
+        "reader_aid_only": _BOOL, "state": _STR, "service_state": (dict,),
+        "total": _OPT_INT, "total_covers_resolved_pages_only": _BOOL,
+        "page_threshold": (int,), "paginated": _BOOL, "works": (tuple,),
+    },
+    "model.manuscript_pane.service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.manuscript_pane.works[]": {
+        "work_id": _OPT_STR, "work_title": _STR, "title_missing": _BOOL,
+        "page_count": _OPT_INT, "gated": _BOOL, "in_main_pool": _BOOL,
+        "bucket": _STR, "relation_chip": _STR,
+        # ⟨ADDED 2026-08-13, owner ruling⟩ the pane lists ALL works in the
+        # manuscript, including ones the OPEN page itself claims; this flag
+        # (always present) is what lets the renderer say "includes this page"
+        # instead of implying "elsewhere" (the header renamed for the same
+        # reason -- see `model.manuscript_pane`). `this_page_marker` follows
+        # the file's absent-not-None convention: present ONLY when True.
+        "on_this_page": _BOOL, "this_page_marker": _STR,
+    },
+    "model.disclosure_levels[]": {
+        "key": _STR, "label": _STR, "is_identifications": _BOOL,
+        "default_visible": _BOOL, "visible": _BOOL, "note": _STR,
+        # Owner ruling, 2026-08-13 (amending ruling F): the fourth level's
+        # per-level WARNING is gone along with the level -- the caveat now
+        # travels ON the row as `catalogue_divergent` / `divergence_chip`
+        # (below), so no level anywhere carries a `warning` key any more.
+        "rows": (tuple,), "generic_groups": (tuple,), "related_pages": (dict,),
+    },
+    "model.disclosure_levels[].rows[]": {
+        "kind": _STR, "claim_id": _OPT_STR, "page_id": _OPT_STR,
+        # ⟨ADDED 2026-08-13 -- excerpt-v1⟩ what the row's text-vs-text
+        # disclosure fetches by. An identity key carried verbatim from the
+        # projected claim row, so the row on screen and the excerpt fetched
+        # can never be two different identifications.
+        "identification_id": _OPT_STR,
+        "sys_id": _OPT_STR, "work_id": _OPT_STR, "work_title": _STR,
+        "title_missing": _BOOL, "headline": _STR, "relation_chip": _STR,
+        "relation_code": _STR, "band_tooltip": _STR, "in_main_pool": _BOOL,
+        "bucket": _STR, "main_pool_reason": _OPT_STR, "disclosure_level": _STR,
+        "gated": _BOOL, "span_start": _OPT_INT, "span_end": _OPT_INT,
+        "matched_letters": _OPT_INT, "nested": (tuple,), "expansion": (dict,),
+        "coverage_ppm": _OPT_INT, "coverage_label": _STR,
+        "low_coverage_note": _STR, "granularity_subline": _STR,
+        # Owner ruling, 2026-08-13 (amending ruling F): divergence is a PER-ROW
+        # marker now, not a routing axis. `catalogue_divergent` is always
+        # present (True/False, see `_REQUIRED_ROW_KEYS`); `divergence_chip`
+        # follows the file's absent-not-None convention and is emitted ONLY
+        # when True.
+        "catalogue_divergent": _BOOL, "divergence_chip": _STR,
+    },
+    "model.disclosure_levels[].rows[].nested[]": {
+        "work_id": _OPT_STR, "work_title": _STR, "title_missing": _BOOL,
+        "subline": _STR,
+    },
+    "model.disclosure_levels[].rows[].expansion": {
+        "work_id": _OPT_STR, "heading": _STR, "page_size": (int,),
+        # ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ Was `anchor_claim_type`. The
+        # descriptor carries the anchor's CAPPED rendered relation, because that
+        # is what the pane's anchor chip shows and what `relations_differ`
+        # compares against the carrier's own capped relation.
+        "loaded": _BOOL, "anchor_sys_id": _STR, "anchor_rendered_relation": _STR,
+        "anchor_evidence_source": _STR, "anchor_confidence_band": _STR,
+    },
+    "model.disclosure_levels[].generic_groups[]": {
+        "kind": _STR, "span_start": (int,), "span_end": (int,),
+        "matched_letters": _OPT_INT, "work_count": (int,), "works": (tuple,),
+        "note": _STR,
+    },
+    "model.disclosure_levels[].generic_groups[].works[]": {
+        "work_id": _OPT_STR, "work_title": _STR, "title_missing": _BOOL,
+        "relation_chip": _STR,
+    },
+    "model.disclosure_levels[].related_pages": {
+        "header": _STR, "label": _STR, "count": _OPT_INT, "count_state": _STR,
+        "count_unit": _OPT_STR, "count_line": _STR,
+        "count_service_state": (dict,), "rows_state": _STR, "rows": (tuple,),
+        "service_state": (dict,),
+    },
+    "model.disclosure_levels[].related_pages.count_service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.disclosure_levels[].related_pages.service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    # THE COMPOSITE `related_page_id` IS DELIBERATELY ABSENT (2026-08-05). The
+    # row carried it and the panel printed it, so a scholarly surface showed an
+    # internal identifier where a shelfmark belongs. Leaving it out of the
+    # emitted row is what makes the fix structural: a renderer cannot print a
+    # field it was never given, and this table is where that would be noticed
+    # if it were added back.
+    "model.disclosure_levels[].related_pages.rows[]": {
+        "sys_id": _OPT_STR, "library_code": _OPT_STR,
+        "shelfmark_display": _OPT_STR, "page_number": _OPT_INT,
+        # ⟨ADDED 2026-08-12⟩ Part of the row's LINK address, not an assertion:
+        # folio numbers are per-volume, so a link needs sys_id AND volume. The
+        # production side shipped it in 3238194c ("the panel's two link sites
+        # now open the folio, through one builder"), which updated
+        # `SURFACE_RELATED_PAGE_FIELDS` and the honesty gate's
+        # `READER_TEXT_FIELDS` but never THIS table -- so the gate has been RED
+        # since, on all five scenarios in both languages. That is the cost of a
+        # hand-maintained closed schema, and also the point of one: it is the
+        # only structure that would have noticed a field appearing.
+        "volume_ie": _OPT_STR,
+        "display_missing": _BOOL, "evidence_row_count": _OPT_INT,
+    },
+}
+
+#: Keys that must be present on every identification row -- the object a reader
+#: acts on, and the one whose silent shrinkage would be hardest to notice.
+_REQUIRED_ROW_KEYS = frozenset({
+    "kind", "claim_id", "identification_id", "work_id", "work_title",
+    "headline", "relation_chip", "band_tooltip", "in_main_pool", "bucket",
+    "disclosure_level", "gated", "nested", "expansion",
+    # ⟨ADDED 2026-08-13, owner ruling⟩ always present (True/False) -- unlike
+    # `divergence_chip`, which is conditional and therefore NOT in this set.
+    "catalogue_divergent",
+})
+
+#: A key NAME that asserts human review, in any spelling anyone has reached for.
+#: The closed schema above already refuses an unknown key; this exists so the
+#: FAILURE names the property, and so the rule is visibly checked rather than
+#: incidentally enforced.
+_REVIEW_MARKER_KEY_RE = re.compile(
+    r"review|verified|badge|expert|adjudicat|confirmed", re.IGNORECASE)
+
+
+def _normalize_path(path):
+    """`model.disclosure_levels[2].rows[0]` -> `model.disclosure_levels[].rows[]`."""
+    return re.sub(r"\[\d+\]", "[]", path)
+
+
+def _walk_objects(node, path="model"):
+    """`(normalized path, mapping)` for every dict reachable in `node`."""
+    if isinstance(node, dict):
+        yield _normalize_path(path), node
+        for key, value in node.items():
+            yield from _walk_objects(value, "%s.%s" % (path, key))
+    elif isinstance(node, (list, tuple)):
+        for index, value in enumerate(node):
+            yield from _walk_objects(value, "%s[%d]" % (path, index))
+
+
+def assert_emitted_schema(model):
+    """Every emitted object, against the closed schema -- keys AND value types.
+
+    Recursive on purpose: a review marker does not have to be a string, and it
+    does not have to be at the top level of a row.
+    """
+    violations = []
+    for path, obj in _walk_objects(model.as_dict()):
+        allowed = _EMITTED_SCHEMA.get(path)
+        if allowed is None:
+            violations.append("%s: no declared shape for this object" % path)
+            continue
+        for key, value in obj.items():
+            if _REVIEW_MARKER_KEY_RE.search(str(key)):
+                violations.append(
+                    "%s.%s: key asserts a review state, which D-13f forbids "
+                    "emitting at all" % (path, key))
+                continue
+            if key not in allowed:
+                violations.append("%s.%s: key is outside the closed schema" % (path, key))
+                continue
+            if not isinstance(value, allowed[key]):
+                violations.append(
+                    "%s.%s: %s is not one of the declared types %s"
+                    % (path, key, type(value).__name__,
+                       [t.__name__ for t in allowed[key]]))
+        if path == "model.disclosure_levels[].rows[]":
+            missing = _REQUIRED_ROW_KEYS - set(obj)
+            if missing:
+                violations.append(
+                    "%s: required key(s) %s absent" % (path, sorted(missing)))
+    if violations:
+        raise DiscoveryHonestyViolation(
+            "panel model emitted shape: " + "; ".join(violations))
+
+
+def _iter_bucket_bearing(made, model):
+    """`(path, emitted object, the SOURCE row it came from)`.
+
+    The source lookup is what makes this a membership check rather than a
+    self-consistency check: an emitted row is matched back to the claim it was
+    built from by `claim_id`, and a pane chip to its work summary by the
+    display work id.
+    """
+    source_claims = {row["claim_id"]: row for row in made.claims["items"]}
+    source_works = {
+        (row.get("display_work_id") or row.get("canonical_work_id")): row
+        for row in made.manuscript_works["items"]
+    }
+    for index, row in enumerate(pm.iter_rows(model)):
+        source = source_claims.get(row["claim_id"])
+        assert source is not None, (
+            "model.rows[%d] has no source claim -- the emitted claim_id is not "
+            "in the envelope it was built from" % index)
+        yield "model.rows[%d]" % index, row, source
+    for index, chip in enumerate(model.manuscript_pane.get("works", ())):
+        source = source_works.get(chip["work_id"])
+        assert source is not None, (
+            "model.manuscript_pane.works[%d] has no source work summary" % index)
+        yield "model.manuscript_pane.works[%d]" % index, chip, source
+
+
+def assert_bucket_membership(made, model):
+    """Every emitted MEMBERSHIP equals the source envelope's own materialized
+    `main_pool` decision, and every emitted label equals what
+    `shared.discovery_main_pool` says about that membership.
+
+    Both halves, and the first one is the one that was missing: deriving the
+    expected label from the emitted `in_main_pool` only ever proved the row
+    agreed with itself, so an implementation that computed membership wrongly
+    and labelled it consistently passed (code review 2B, finding 8). The
+    materialized decision is A-1's -- taken at build time, never recomputed on
+    a surface -- so the surface's only correct behaviour is to carry it.
+    """
+    for path, row, source in _iter_bucket_bearing(made, model):
+        # The producer coerces this column to a real bool or None
+        # (`_present_claim_row`, `get_manuscript_works_enveloped`), which is
+        # what makes an identity test against True safe on a SQLite 1/0 column.
+        assert source["main_pool"] is None or isinstance(source["main_pool"], bool), (
+            "%s: the source main_pool is neither a bool nor None, so no identity "
+            "test on it can be trusted" % path)
+        expected_membership = source["main_pool"] is True
+        if row["in_main_pool"] is not expected_membership:
+            raise AssertionError(
+                "%s.in_main_pool: %r disagrees with the source envelope's "
+                "materialized main_pool, which says %r"
+                % (path, row["in_main_pool"], expected_membership))
+        expected_label = bucket_label(expected_membership, model.lang)
+        if row["bucket"] != expected_label:
+            raise AssertionError(
+                "%s.bucket: %r disagrees with the shared rule, which says %r"
+                % (path, row["bucket"], expected_label))
+
+
+def kitchen_sink_bundle(lang="en", **overrides):
+    """One bundle exercising every emitted branch: a default row, a gated
+    short-evidence row, a routing-demoted human-confirmed row, a granularity
+    pair, a generic identical-span group, the curated work, a propagated row,
+    a populated manuscript pane (curated + gated + title-less) and populated
+    related-page rows."""
+    rashi_author = "שלמה בן יצחק (רש\"י)"
+    claims = [
+        claim_row(claim_id="claim-main", evidence_id="ev-main", span_start=0, span_end=500),
+        claim_row(claim_id="claim-short", evidence_id="ev-short", work_id="w000002",
+                  canonical_work_id="w000002", display_work_id="w000002",
+                  neutral_title="A short liturgical piece", span_start=600, span_end=666,
+                  matched_letters=66, coverage_ppm=20000, main_pool=False,
+                  main_pool_reason=REASON_INSUFFICIENT_LENGTH),
+        claim_row(claim_id="claim-eicha", evidence_id="ev-eicha", work_id="w000701",
+                  canonical_work_id="w000701", display_work_id="w000701",
+                  neutral_title="רש\"י על איכה", span_start=700, span_end=800,
+                  matched_letters=90, coverage_ppm=40000,
+                  adjudication_status=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+                  routing_status=ids.ROUTING_STATUS_REVIEW_ONLY,
+                  routing_reason=ids.ROUTING_REASON_LOW_COVERAGE,
+                  main_pool_reason=REASON_MAIN_HUMAN_CONFIRMED,
+                  restored_by_human_confirmation=True, low_coverage_marker=True),
+        claim_row(claim_id="claim-rashi-torah", evidence_id="ev-rashi-a",
+                  work_id="w000171", canonical_work_id="w000171",
+                  display_work_id="w000171", neutral_title="רש\"י על התורה",
+                  author=rashi_author, span_start=900, span_end=1862),
+        claim_row(claim_id="claim-rashi-gen", evidence_id="ev-rashi-b",
+                  work_id="w001281", canonical_work_id="w001281",
+                  display_work_id="w001281", neutral_title="רש\"י על בראשית",
+                  author=rashi_author, span_start=900, span_end=1862),
+        claim_row(claim_id="claim-generic-a", evidence_id="ev-generic-a",
+                  work_id="w000300", canonical_work_id="w000300",
+                  display_work_id="w000300", neutral_title="One work",
+                  author="מחבר א", span_start=2000, span_end=2555),
+        claim_row(claim_id="claim-generic-b", evidence_id="ev-generic-b",
+                  work_id="w000400", canonical_work_id="w000400",
+                  display_work_id="w000400", neutral_title="Another work",
+                  author="מחבר ב", span_start=2000, span_end=2555,
+                  rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT),
+        claim_row(claim_id="claim-176", evidence_id="ev-176", work_id="w000176",
+                  canonical_work_id="w000176", display_work_id="w000176",
+                  neutral_title=W000176_RAW_TITLE, span_start=3000, span_end=3300,
+                  rendered_relation=ids.RENDERED_RELATION_QUOTES_THIS_WORK),
+        claim_row(claim_id="claim-prop", evidence_id="ev-prop", work_id="w000900",
+                  canonical_work_id="w000900", display_work_id="w000900",
+                  neutral_title="A propagated carrier", span_start=3400, span_end=3500,
+                  evidence_source=ids.EVIDENCE_SOURCE_PROPAGATED,
+                  confidence_band=ids.CONFIDENCE_BAND_CORROBORATED,
+                  band_label=band_label(ids.EVIDENCE_SOURCE_PROPAGATED,
+                                        ids.CONFIDENCE_BAND_CORROBORATED),
+                  band_rank=2, coverage_ppm=None, matched_letters=None),
+    ]
+    works = [
+        work_summary_row(canonical_work_id="w000176", display_work_id="w000176",
+                         neutral_title=W000176_RAW_TITLE, page_count=3),
+        work_summary_row(canonical_work_id="w000801", display_work_id="w000801",
+                         neutral_title="Behind the screening gate", page_count=5,
+                         best_band_rank=3, gated=True, main_pool=False),
+        work_summary_row(canonical_work_id="w000802", display_work_id="w000802",
+                         neutral_title=None, title_missing=True, page_count=1,
+                         best_band_rank=4),
+    ]
+    kwargs = {
+        "claims": claims_envelope(claims),
+        "manuscript_works": works_envelope(works, 61),
+        "related_count": related_count_envelope(total=12),
+        "related_rows": related_rows_envelope([related_page_row()], 12),
+        "lang": lang,
+        "show_more": True,
+    }
+    kwargs.update(overrides)
+    return bundle(**kwargs)
+
+
+def _honesty_cases(lang):
+    """The kitchen sink plus every service-state branch, so the sweep sees the
+    outage copy, the unresolved pane and all four related-row states too.
+
+    `(bundle, model)` pairs, not bare models: the bucket check compares what was
+    EMITTED against what the SOURCE envelope decided, and a model alone cannot
+    answer the second half.
+    """
+    bundles = {
+        "kitchen_sink": kitchen_sink_bundle(lang),
+        "claims_outage": kitchen_sink_bundle(
+            lang, claims=claims_envelope(status="timeout")),
+        "works_outage": kitchen_sink_bundle(
+            lang, manuscript_works=works_envelope(status="unavailable")),
+        "unresolved_scope": kitchen_sink_bundle(
+            lang, page_ids=page_ids_envelope(items=(), total=0, resolved=False)),
+        "related_not_requested": kitchen_sink_bundle(lang, related_rows=None),
+        "related_empty": kitchen_sink_bundle(
+            lang, related_rows=related_rows_envelope([], 0)),
+        "related_outage": kitchen_sink_bundle(
+            lang, related_rows=related_rows_envelope(status="busy")),
+        "count_outage": kitchen_sink_bundle(
+            lang, related_count=related_count_envelope(status="unavailable")),
+    }
+    return {name: (made, pm.build_panel_rows(made)) for name, made in bundles.items()}
+
+
+_HONESTY_CASE_NAMES = sorted(_honesty_cases("en"))
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("case", _HONESTY_CASE_NAMES)
+def test_the_emitted_model_carries_no_dishonest_field_in_either_language(case, lang):
+    _made, model = _honesty_cases(lang)[case]
+    assert_model_honesty(model)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("case", _HONESTY_CASE_NAMES)
+def test_every_emitted_bucket_equals_the_source_envelope_decision(case, lang):
+    made, model = _honesty_cases(lang)[case]
+    assert_bucket_membership(made, model)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("case", _HONESTY_CASE_NAMES)
+def test_the_emitted_shape_is_closed_in_either_language(case, lang):
+    _made, model = _honesty_cases(lang)[case]
+    assert_emitted_schema(model)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_qualified_coverage_passes_and_a_bare_percentage_fails(lang):
+    """The ONE permitted percentage, and the reason it is permitted: the
+    matched-letter qualifier travels with it."""
+    model = pm.build_panel_rows(bundle([claim_row()], lang=lang))
+    row = list(pm.iter_rows(model))[0]
+    assert "68%" in row["headline"]
+    assert_model_honesty(model)          # qualified -> passes
+
+    row["headline"] = "68%"              # bare -> fails
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    assert "unqualified percentage" in str(exc.value)
+
+
+# --- POSITIVE CONTROLS: one mutation per property -------------------------
+#
+# Each seeds exactly ONE violation and asserts the SPECIFIC failure -- the
+# detector that fired AND the field it fired on -- never merely that the suite
+# went red. The counts each control raised are recorded in the plan summary.
+
+
+def _sole_violation(exc):
+    """The message must name one property and one field, not a scattergun."""
+    message = str(exc.value)
+    fired = [name for name, _ in _HONESTY_DETECTORS if "[%s]" % name in message]
+    fired += [_RAW_VOCAB_DETECTOR] if "[%s]" % _RAW_VOCAB_DETECTOR in message else []
+    return message, fired
+
+
+def test_positive_control_a_precision_figure_in_a_row_field():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = list(pm.iter_rows(model))[0]
+    row["headline"] = "Matches a work · estimated precision 94.2%"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["percentage"], fired
+    assert "unqualified percentage '94.2%'" in message
+    assert ".headline:" in message
+
+
+def test_positive_control_a_stored_vocabulary_key_in_a_manuscript_pane_chip():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    model.manuscript_pane["works"][0]["relation_chip"] = ids.CLAIM_TYPE_DIRECT_WITNESS
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == [_RAW_VOCAB_DETECTOR], fired
+    assert "raw stored vocabulary key 'direct_witness'" in message
+    assert ".relation_chip:" in message
+
+
+def test_positive_control_a_human_review_marker_in_a_row_field():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = [r for r in pm.iter_rows(model) if "low_coverage_note" in r][0]
+    row["low_coverage_note"] = "Expert-reviewed ✓"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["review-marker"], fired
+    assert "human-review badge" in message
+    assert ".low_coverage_note:" in message
+
+
+def test_positive_control_a_boolean_review_marker_on_a_row():
+    """The control the previous guard could not have: no string, no "badge" in
+    the key, nothing for a substring search on prose to find."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = list(pm.iter_rows(model))[0]
+    row["expert_reviewed"] = True
+    assert_model_honesty(model)   # the STRING sweep sees nothing -- correctly
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    message = str(exc.value)
+    assert "expert_reviewed" in message
+    assert "D-13f" in message
+
+
+def test_positive_control_a_review_marker_nested_below_the_top_level_of_a_row():
+    """Recursion is the property under test: the previous behavioural check
+    looked at top-level row KEYS only."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = [r for r in pm.iter_rows(model) if len(r["nested"]) > 0][0]
+    row["nested"][0]["reviewed_by"] = "someone"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "rows[].nested[].reviewed_by" in str(exc.value)
+
+
+def test_positive_control_an_undeclared_field_appears_on_a_row():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["provenance_score"] = 3
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "provenance_score: key is outside the closed schema" in str(exc.value)
+
+
+def test_positive_control_a_declared_field_holding_the_wrong_type():
+    """Types are half the schema: `in_main_pool` carrying a string would make
+    every truthiness test downstream agree with itself and with nothing else."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["in_main_pool"] = "yes"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "in_main_pool: str is not one of the declared types" in str(exc.value)
+
+
+def test_positive_control_a_whole_object_the_schema_does_not_declare():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["provenance"] = {"reviewer": "x"}
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "no declared shape for this object" in str(exc.value)
+
+
+def test_positive_control_a_required_row_key_disappears():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    del list(pm.iter_rows(model))[0]["bucket"]
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "required key(s) ['bucket'] absent" in str(exc.value)
+
+
+def test_positive_control_a_row_whose_bucket_label_disagrees_with_its_membership():
+    made = kitchen_sink_bundle("en")
+    model = pm.build_panel_rows(made)
+    row = list(pm.iter_rows(model))[0]
+    row["bucket"] = bucket_label(not row["in_main_pool"], "en")
+    with pytest.raises(AssertionError) as exc:
+        assert_bucket_membership(made, model)
+    message = str(exc.value)
+    assert "disagrees with the shared rule" in message
+    assert "model.rows[0].bucket" in message
+
+
+def test_positive_control_a_row_whose_membership_disagrees_with_the_source():
+    """The control the old guard could not have. This row is INTERNALLY
+    CONSISTENT -- its label matches its own flag exactly as `bucket_label`
+    would produce it -- and it is still wrong, because the source envelope
+    decided otherwise."""
+    made = kitchen_sink_bundle("en")
+    model = pm.build_panel_rows(made)
+    row = list(pm.iter_rows(model))[0]
+    row["in_main_pool"] = not row["in_main_pool"]
+    row["bucket"] = bucket_label(row["in_main_pool"], "en")
+    assert row["bucket"] == bucket_label(row["in_main_pool"], "en")   # consistent
+
+    with pytest.raises(AssertionError) as exc:
+        assert_bucket_membership(made, model)
+    message = str(exc.value)
+    assert "in_main_pool" in message
+    assert "materialized main_pool" in message
+
+
+def test_positive_control_a_pane_chip_whose_membership_disagrees_with_the_source():
+    made = kitchen_sink_bundle("en")
+    model = pm.build_panel_rows(made)
+    chip = model.manuscript_pane["works"][0]
+    chip["in_main_pool"] = not chip["in_main_pool"]
+    chip["bucket"] = bucket_label(chip["in_main_pool"], "en")
+    with pytest.raises(AssertionError) as exc:
+        assert_bucket_membership(made, model)
+    assert "manuscript_pane.works[0].in_main_pool" in str(exc.value)
+
+
+# --- two ADDITIONAL controls, for the two detectors the four above do not
+# --- exercise. The four required controls are the ones above.
+
+
+def test_additional_control_a_bracketed_confidence_interval():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["low_coverage_note"] = "[0.9084, 0.9644]"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["interval"], fired
+    assert "bracketed interval" in message
+
+
+def test_additional_control_a_negated_prohibited_relation_word():
+    """A grep-based CI guard cannot see negation; this detector can."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    model.manuscript_pane["works"][0]["work_title"] = "This is not a copy of anything"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["prohibited-wording"], fired
+    assert "prohibited relation wording 'copy of'" in message
+    assert ".work_title:" in message
+
+
+def test_the_sweep_reports_the_field_it_inspected_not_the_whole_model():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["headline"] = "94.2%"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    assert re.search(r"model\.disclosure_levels\[\d+\]\.rows\[\d+\]\.headline", str(exc.value))
+
+
+# ===========================================================================
+# RULING F, AMENDED 2026-08-13 -- DIVERGENCE IS A PER-ROW MARKER, NOT A LEVEL
+# (136-GATE1-DECISIONS.md section F: "the default-hidden POSTURE is retired")
+#
+# The original ruling F tested `diverges_work` / `diverges_part` FIRST and
+# routed a match to a fourth disclosure level of its own, hidden by default.
+# The owner's 2026-08-13 amendment retires that POSTURE: a catalogue-divergent
+# claim now falls through `_disclosure_level_for` exactly like any other claim
+# and, when it qualifies for the default view, appears there -- carrying the
+# neutral `catalogue_divergent` flag and, only when True, the `divergence_chip`
+# on the row itself. The CATEGORY, the chip wording and the findings-page
+# filter all survive; only the routing/visibility posture is gone.
+#
+# The policy for WHICH shades are divergent has existed as
+# `HIDDEN_BY_DEFAULT_SHADES`/`is_hidden_by_default` since plan 136-04, and
+# still backs `catalogue_divergent` (`_is_catalogue_divergent`); it simply no
+# longer feeds `_disclosure_level_for`. Every test below asserts a property of
+# the MODEL.
+# ===========================================================================
+
+_DIVERGENCE_SHADES = ("diverges_work", "diverges_part")
+
+
+def _level_of(model, key):
+    return [lvl for lvl in model.disclosure_levels if lvl["key"] == key][0]
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("shade", _DIVERGENCE_SHADES)
+def test_a_main_pool_default_eligible_divergent_row_stays_in_identifications_with_its_chip(
+    shade, lang
+):
+    """The load-bearing one, in both languages. The row below is main-pool,
+    default-eligible and long-evidence -- a level-1 row by every other test --
+    and the 2026-08-13 amendment says divergence no longer moves it out."""
+    model = pm.build_panel_rows(bundle([claim_row(novelty_status=shade)], lang=lang))
+
+    default = _level_of(model, pm.LEVEL_IDENTIFICATIONS)
+    assert len(default["rows"]) == 1, (
+        "a main-pool, default-eligible divergent claim did not land in the "
+        "default level -- the retired posture may have come back")
+    row = default["rows"][0]
+    assert row["gated"] is False
+    assert row["catalogue_divergent"] is True
+    assert row["divergence_chip"] == ds.divergence_chip(lang)
+
+    assert _level_of(model, pm.LEVEL_MORE_MATCHES)["rows"] == ()
+
+
+def test_a_non_main_pool_divergent_row_lands_in_more_matches_like_any_other_screened_row():
+    """Divergence grants no promotion either: a row that fails the ordinary
+    main-pool test is screened exactly as it would be if it were not
+    divergent -- it still carries its own chip once it does surface, on
+    whichever level it lands on."""
+    weak_divergent = claim_row(
+        novelty_status="diverges_work", main_pool=False,
+        main_pool_reason=REASON_INSUFFICIENT_LENGTH, matched_letters=12,
+        coverage_ppm=20000)
+    model = pm.build_panel_rows(bundle([weak_divergent], show_more=True))
+    assert _level_of(model, pm.LEVEL_IDENTIFICATIONS)["rows"] == ()
+    gated = _level_of(model, pm.LEVEL_MORE_MATCHES)["rows"]
+    assert len(gated) == 1
+    assert gated[0]["catalogue_divergent"] is True
+    assert gated[0]["divergence_chip"] == ds.divergence_chip("en")
+
+
+def test_human_confirmation_still_carries_the_chip_it_does_not_adjudicate():
+    """Human confirmation adjudicates the CLAIM; it does not adjudicate the
+    DISAGREEMENT. `divergence_correctness` -- the only field that could -- is
+    human-only (ruling L) and NULL on every shipped row, so a confirmed row
+    still carries the neutral chip rather than the model silently supplying a
+    verdict nobody has reached."""
+    confirmed = claim_row(
+        novelty_status="diverges_part",
+        adjudication_status=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+        main_pool_reason=REASON_MAIN_HUMAN_CONFIRMED)
+    model = pm.build_panel_rows(bundle([confirmed]))
+    default = _level_of(model, pm.LEVEL_IDENTIFICATIONS)
+    assert len(default["rows"]) == 1
+    assert default["rows"][0]["catalogue_divergent"] is True
+    assert default["rows"][0]["divergence_chip"] == ds.divergence_chip("en")
+
+
+def test_an_undivergent_row_carries_no_chip_key_at_all():
+    """The other direction, in the shape the amendment cares about: a
+    `confirms` row's `catalogue_divergent` is always present and False, and
+    `divergence_chip` is ABSENT -- not None, not an empty string -- so a
+    renderer that forgets to check the flag prints nothing rather than an
+    empty chip."""
+    model = pm.build_panel_rows(bundle([claim_row(novelty_status="confirms")]))
+    row = _level_of(model, pm.LEVEL_IDENTIFICATIONS)["rows"][0]
+    assert row["catalogue_divergent"] is False
+    assert "divergence_chip" not in row
+
+
+def test_no_disclosure_level_carries_a_warning_key_any_more():
+    """Ruling F's old per-level warning was withdrawn along with the level it
+    warned about; the caveat now travels ON the row as `divergence_chip`."""
+    model = pm.build_panel_rows(bundle([claim_row(novelty_status="diverges_work")],
+                                       show_more=True))
+    for level in model.disclosure_levels:
+        assert "warning" not in level, level["key"]
+
+
+def test_the_more_matches_level_carries_note_generic_groups_and_related_pages():
+    """D-13e's amendment folds the old middle level's display content into
+    `LEVEL_MORE_MATCHES` unchanged: the never-an-identification note, the
+    generic-passage groups and the related-pages block are all still there,
+    alongside whatever rows were screened onto it."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    more_matches = _level_of(model, pm.LEVEL_MORE_MATCHES)
+    assert more_matches["note"] == ds.not_an_identification_note("en")
+    assert isinstance(more_matches["generic_groups"], tuple)
+    assert isinstance(more_matches["related_pages"], dict)
+
+
+def test_the_divergence_flag_is_the_shared_policy_and_not_a_restated_list():
+    """DERIVED. Two halves: neither shade appears as a literal in the model,
+    and the model's own `catalogue_divergent` flag agrees with
+    `is_hidden_by_default` for EVERY shade in the vocabulary -- so moving the
+    policy moves the flag."""
+    from shared.discovery_novelty import NOVELTY_STATUSES, is_hidden_by_default
+
+    source = _model_source()
+    for shade in _DIVERGENCE_SHADES:
+        assert f'"{shade}"' not in source and f"'{shade}'" not in source, (
+            f"{shade!r} is a literal in shared/discovery_panel_model.py")
+
+    for shade in sorted(NOVELTY_STATUSES):
+        model = pm.build_panel_rows(bundle([claim_row(novelty_status=shade)]))
+        row = list(pm.iter_rows(model))[0]
+        assert row["catalogue_divergent"] is is_hidden_by_default(shade), shade
+
+
+def test_an_unrecognised_novelty_shade_is_refused_rather_than_shown_by_default():
+    """Fail LOUD, not quiet. The vocabulary is frozen by the schema's CHECK
+    constraint and by the release verifier, so an unrecognized value means the
+    artifact is not the one this code was written against -- and the fail-quiet
+    reading of that would silently answer, in either direction, a divergence
+    question nobody has actually verified."""
+    with pytest.raises(pm.PanelContractError) as caught:
+        pm.build_panel_rows(bundle([claim_row(novelty_status="not_a_shade")]))
+    assert "novelty_status" in str(caught.value)
+    assert "not_a_shade" not in str(caught.value), (
+        "the refusal quoted the artifact's own value")

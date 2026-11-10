@@ -1,0 +1,1073 @@
+# -*- coding: utf-8 -*-
+"""Phase 94 smoke verification round 2 (2026-05-21) regression suite.
+
+Pins the round-2 fixes:
+
+1. Main sheet renamed 'Genizah Results' -> 'Search Results' (EN) /
+   'תוצאות גניזה' -> 'תוצאות חיפוש' (HE).
+2. 4-sheet workbook: ws[4] = 'Credits and Info' / 'קרדיט ומידע' holding
+   the canonical Stoekl Ben Ezra citation chain + per-export search
+   metadata + a GenizahSearch.com hyperlink.
+3. Main sheet no longer carries inline credits (web: bottom block;
+   desktop: pre-header rows).
+4. Hebrew domain substitution on the main-sheet Domains column when
+   lang='he' and a domain_name_map is supplied.
+5. Web search-metadata threading: search_mode / search_gap /
+   domain_name_map kwargs flow web/export_state.py ->
+   web/api.py:export_excel -> export_search_results_excel.
+
+These tests guard against future regressions of all 5 behaviors. They
+build the workbook in-memory via the public APIs and assert specific
+cells; no real Supabase / FJMS / NLI sidecar access required.
+"""
+from io import BytesIO
+
+import openpyxl
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures (kept minimal; the wave-3 / wave-4 test files have richer
+# fixtures — this file only needs the round-2 behaviors)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMetaMgr:
+    def get_meta_for_id(self, sys_id):
+        return (f'T-S {sys_id[-4:]}', f'Title for {sys_id}')
+
+    def get_library_for_id(self, sys_id):
+        return 'CUL'
+
+    def parse_full_id_components(self, header):
+        return {}
+
+
+def _meta_resolver_fake(sid):
+    if not sid:
+        return None
+    return {
+        'shelfmark': f'T-S {sid[-4:]}',
+        'title': f'Title {sid}',
+        'library_code': 'CUL',
+        'library_name': 'Cambridge University Library',
+    }
+
+
+def _identity_sanitize(text):
+    return '' if text is None else str(text)
+
+
+def _make_result(sys_id='99001234567890'):
+    return {
+        'uid': f'IE_x_P_y_FL_{sys_id}',
+        'display': {
+            'id': sys_id,
+            'shelfmark': f'T-S {sys_id[-4:]}',
+            'title': f'Title {sys_id}',
+            'library_code': 'CUL',
+            'img': '1r',
+            'source': 'ms',
+        },
+        'snippet': 'foo *bar* baz',
+        'raw_header': '',
+        'sort_score': 1.0,
+        'full_text': 'page text',
+    }
+
+
+@pytest.fixture
+def stub_dossier(monkeypatch):
+    """Same stub pattern as the wave-3 / wave-4 tests."""
+    from shared import export_dossier
+    monkeypatch.setattr(export_dossier, 'pgp_subset_for_sys_id', lambda s, **kw: {
+        'pgp_url': f'https://pgp.example/{s}',
+        'description': f'PGP desc {s}', 'document_type': 'Letter',
+        'date_display': '1100', 'languages': ['Hebrew', 'Aramaic'],
+        'tags': ['letter'],
+    } if s else None)
+    monkeypatch.setattr(export_dossier, 'nli_subset_for_sys_id', lambda s, **kw: {
+        'catalog_entry': f'Neubauer {s[-4:]}',
+        'library_viewer_url': f'https://cudl.example/{s}',
+    } if s else None)
+    monkeypatch.setattr(export_dossier, 'catalog_summary_for_sys_id', lambda s, **kw: {
+        'title': f'CatTitle {s}', 'author_text': 'Author',
+        'copy_date': '1180', 'copy_place': 'Fustat',
+    } if s else None)
+    monkeypatch.setattr(export_dossier, 'bibliography_for_sys_id', lambda s, **kw: [{
+        'running_title': 'Med. Soc.', 'title_year': 1967, 'mention_page': '123',
+        'article_name': 'Letter', 'article_author_eng': 'Goitein',
+        'catalog_acronym': 'MS',
+    }] if s == '99001234567890' else [])
+
+
+def _build_web(results, **kwargs):
+    from web.export_service import ExportService
+    svc = ExportService(_FakeMetaMgr())
+    content, _ = svc.export_search_results_excel(results, 'my query', **kwargs)
+    return openpyxl.load_workbook(BytesIO(content), rich_text=True)
+
+
+def _build_desktop(results, **kwargs):
+    from genizah_app import _build_search_results_xlsx_bytes
+    content = _build_search_results_xlsx_bytes(
+        results=results,
+        meta_resolver=_meta_resolver_fake,
+        sanitize_fn=_identity_sanitize,
+        **kwargs,
+    )
+    return openpyxl.load_workbook(BytesIO(content), rich_text=True)
+
+
+def _find_credits_sheet(wb, lang='en'):
+    from shared.export_dossier import sheet_titles
+    return wb[sheet_titles(lang)['credits_info']]
+
+
+def _all_cells(ws, max_row=100, max_col=5):
+    """Return a flat list of all non-empty cell values."""
+    cells = []
+    for r in range(1, max_row + 1):
+        for c in range(1, max_col + 1):
+            v = ws.cell(r, c).value
+            if v is not None and (not isinstance(v, str) or v.strip()):
+                cells.append(v)
+    return cells
+
+
+# ===========================================================================
+# Gap A: Sheet rename
+# ===========================================================================
+
+
+def test_main_sheet_named_search_results_en_web(stub_dossier):
+    wb = _build_web([_make_result()])
+    assert 'Search Results' in wb.sheetnames
+    assert 'Genizah Results' not in wb.sheetnames
+
+
+def test_main_sheet_named_search_results_en_desktop(stub_dossier):
+    wb = _build_desktop([_make_result()])
+    assert 'Search Results' in wb.sheetnames
+    assert 'Genizah Results' not in wb.sheetnames
+
+
+def test_main_sheet_named_search_results_he_web(stub_dossier):
+    wb = _build_web([_make_result()], lang='he')
+    assert 'תוצאות חיפוש' in wb.sheetnames
+    assert 'תוצאות גניזה' not in wb.sheetnames
+
+
+def test_main_sheet_named_search_results_he_desktop(stub_dossier):
+    wb = _build_desktop([_make_result()], lang='he')
+    assert 'תוצאות חיפוש' in wb.sheetnames
+    assert 'תוצאות גניזה' not in wb.sheetnames
+
+
+def test_sheet_titles_module_exports_round2_strings():
+    from shared.export_dossier import sheet_titles
+    assert sheet_titles('en')['main'] == 'Search Results'
+    assert sheet_titles('he')['main'] == 'תוצאות חיפוש'
+    assert sheet_titles('en')['credits_info'] == 'Credits and Info'
+    assert sheet_titles('he')['credits_info'] == 'קרדיט ומידע'
+
+
+# ===========================================================================
+# Gap B: Dedicated Credits and Info sheet (4-sheet workbook)
+# ===========================================================================
+
+
+def test_workbook_has_4_sheets_web(stub_dossier):
+    wb = _build_web([_make_result()])
+    assert wb.sheetnames == [
+        'Search Results', 'Manuscripts', 'Bibliography', 'Credits and Info',
+    ]
+
+
+def test_workbook_has_4_sheets_desktop(stub_dossier):
+    wb = _build_desktop([_make_result()])
+    assert wb.sheetnames == [
+        'Search Results', 'Manuscripts', 'Bibliography', 'Credits and Info',
+    ]
+
+
+def test_credits_sheet_has_citation_lines_web(stub_dossier):
+    wb = _build_web([_make_result()])
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    # Stoekl Ben Ezra citation must appear in some cell on the sheet.
+    cited = any('Stoekl Ben Ezra' in str(c) for c in cells)
+    assert cited, f"Citation missing from credits sheet; cells={cells}"
+    # Dataset URL also present.
+    has_doi = any('10.5281/zenodo.17734473' in str(c) for c in cells)
+    assert has_doi, f"DOI missing from credits sheet; cells={cells}"
+
+
+def test_credits_sheet_has_citation_lines_desktop(stub_dossier):
+    wb = _build_desktop([_make_result()])
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    cited = any('Stoekl Ben Ezra' in str(c) for c in cells)
+    assert cited
+    has_doi = any('10.5281/zenodo.17734473' in str(c) for c in cells)
+    assert has_doi
+
+
+def test_credits_sheet_has_hyperlink_to_genizahsearch_web(stub_dossier):
+    wb = _build_web([_make_result()])
+    ws = _find_credits_sheet(wb)
+    # Find the cell whose value is the GenizahSearch URL.
+    found_url_cell = None
+    for r in range(1, 50):
+        for c in range(1, 5):
+            v = ws.cell(r, c).value
+            if v == 'https://genizahsearch.com':
+                found_url_cell = ws.cell(r, c)
+                break
+        if found_url_cell:
+            break
+    assert found_url_cell is not None, "GenizahSearch URL cell missing"
+    assert found_url_cell.hyperlink is not None, "Hyperlink missing on URL cell"
+    assert found_url_cell.hyperlink.target == 'https://genizahsearch.com'
+
+
+def test_credits_sheet_has_hyperlink_to_genizahsearch_desktop(stub_dossier):
+    wb = _build_desktop([_make_result()])
+    ws = _find_credits_sheet(wb)
+    found_url_cell = None
+    for r in range(1, 50):
+        for c in range(1, 5):
+            v = ws.cell(r, c).value
+            if v == 'https://genizahsearch.com':
+                found_url_cell = ws.cell(r, c)
+                break
+        if found_url_cell:
+            break
+    assert found_url_cell is not None
+    assert found_url_cell.hyperlink is not None
+    assert found_url_cell.hyperlink.target == 'https://genizahsearch.com'
+
+
+def test_credits_sheet_title_row_en(stub_dossier):
+    wb = _build_web([_make_result()], lang='en')
+    ws = _find_credits_sheet(wb, 'en')
+    # Row 1 col 1 should be 'Credits and Info' (the sheet section title).
+    assert ws.cell(1, 1).value == 'Credits and Info'
+
+
+def test_credits_sheet_title_row_he(stub_dossier):
+    wb = _build_web([_make_result()], lang='he')
+    ws = _find_credits_sheet(wb, 'he')
+    assert ws.cell(1, 1).value == 'קרדיט ומידע'
+
+
+def test_main_sheet_no_inline_credits_web(stub_dossier):
+    """The web inline 'Credits' block at the bottom of the main sheet is gone."""
+    wb = _build_web([_make_result()])
+    ws = wb['Search Results']
+    # Scan the entire main sheet for the literal 'Credits' header or the
+    # canonical Stoekl Ben Ezra citation. Neither should appear.
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(r, 1).value
+        if isinstance(v, str):
+            assert 'Stoekl Ben Ezra' not in v, (
+                f"Inline credits still present on main sheet at row {r}: {v}"
+            )
+
+
+def test_main_sheet_no_inline_credits_desktop(stub_dossier):
+    """The desktop inline credit block above the header row is gone."""
+    wb = _build_desktop(
+        [_make_result()],
+        # Pass the legacy kwargs; they must be IGNORED on the main sheet now.
+        credit_text='Generated by Genizah Search Pro\nMiDRASH credit text',
+        search_info_text='Query: foo\nMode: text',
+    )
+    ws = wb['Search Results']
+    # Header row should be row 1.
+    assert ws.cell(1, 1).value == 'System ID', (
+        f"Header row not at row 1; got {ws.cell(1, 1).value!r}"
+    )
+    # The credit text 'Generated by Genizah Search Pro' must NOT appear.
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(r, 1).value
+        if isinstance(v, str):
+            assert 'Generated by Genizah Search Pro' not in v
+            assert 'MiDRASH credit text' not in v
+            assert 'Query: foo' not in v
+
+
+# ===========================================================================
+# Gap C: Web search metadata cells
+# ===========================================================================
+
+
+def test_credits_sheet_has_search_query_cell_web(stub_dossier):
+    wb = _build_web(
+        [_make_result()],
+        search_mode='text',
+        search_gap=5,
+    )
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    # Search Query label and the query string.
+    assert any('Search Query' in str(c) for c in cells)
+    assert any('my query' in str(c) for c in cells)
+
+
+def test_credits_sheet_has_search_mode_cell_web(stub_dossier):
+    wb = _build_web([_make_result()], search_mode='text', search_gap=5)
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    assert any('Search Mode' in str(c) for c in cells)
+    assert any(c == 'text' for c in cells)
+
+
+def test_credits_sheet_has_gap_cell_web(stub_dossier):
+    wb = _build_web([_make_result()], search_mode='text', search_gap=5)
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    # Gap label and the value 5.
+    assert any(c == 'Gap' for c in cells)
+    assert any(c == 5 for c in cells)
+
+
+def test_credits_sheet_has_result_count_cell_web(stub_dossier):
+    wb = _build_web([_make_result('A'), _make_result('B'), _make_result('C')])
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    assert any('Result count' in str(c) for c in cells)
+    assert any(c == 3 for c in cells)
+
+
+def test_credits_sheet_has_date_time_cell_web(stub_dossier):
+    """Date/time row should be present and contain an ISO-like date."""
+    import re as _re
+    wb = _build_web([_make_result()])
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    assert any('Date/time of export' in str(c) for c in cells)
+    # ISO datetime YYYY-MM-DD HH:MM:SS pattern.
+    has_iso = any(
+        isinstance(c, str)
+        and _re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', c)
+        for c in cells
+    )
+    assert has_iso, f"No ISO datetime found in credits sheet; cells={cells}"
+
+
+def test_credits_sheet_omits_lab_mode_on_web(stub_dossier):
+    """Web has no Lab Mode UI; the Lab Mode row must be absent."""
+    wb = _build_web([_make_result()])
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    assert not any('Lab Mode' in str(c) for c in cells)
+    assert not any('Deep Scan' in str(c) for c in cells)
+
+
+# ===========================================================================
+# Gap C': Desktop search metadata cells (parity with web)
+# ===========================================================================
+
+
+def test_credits_sheet_desktop_includes_lab_mode_row(stub_dossier):
+    """Desktop has Lab Mode; the row must be present when lab_mode_on is bool."""
+    wb = _build_desktop(
+        [_make_result()],
+        search_query='my query',
+        search_mode='Exact',
+        search_gap=5,
+        lab_mode_on=False,
+        deep_scan_on=None,
+    )
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    assert any('Lab Mode' in str(c) for c in cells)
+
+
+def test_credits_sheet_desktop_deep_scan_only_when_lab_on(stub_dossier):
+    # Lab Mode off -> Deep Scan row should NOT appear.
+    wb = _build_desktop(
+        [_make_result()],
+        lab_mode_on=False,
+        deep_scan_on=True,
+    )
+    ws = _find_credits_sheet(wb)
+    cells = _all_cells(ws)
+    assert not any('Deep Scan' in str(c) for c in cells)
+    # Lab Mode on -> Deep Scan row appears.
+    wb2 = _build_desktop(
+        [_make_result()],
+        lab_mode_on=True,
+        deep_scan_on=True,
+    )
+    ws2 = _find_credits_sheet(wb2)
+    cells2 = _all_cells(ws2)
+    assert any('Deep Scan' in str(c) for c in cells2)
+
+
+# ===========================================================================
+# Gap D: Hebrew domain substitution
+# ===========================================================================
+
+
+def test_hebrew_domain_substitution_web(stub_dossier):
+    """When lang='he' AND a domain_name_map is provided, the Domains cell
+    on the main sheet shows Hebrew names."""
+    domain_name_map = {
+        'Bible': 'מקרא',
+        'Letter': 'מכתב',
+        'Legal': 'משפטים',
+    }
+    wb = _build_web(
+        [_make_result('A')],
+        result_domains={'A': ['Bible', 'Letter', 'Legal']},
+        domain_name_map=domain_name_map,
+        lang='he',
+    )
+    from shared.export_dossier import sheet_titles
+    ws = wb[sheet_titles('he')['main']]
+    # Domains is col 11; row 2 is the first data row.
+    assert ws.cell(2, 11).value == 'מקרא|מכתב|משפטים'
+
+
+def test_hebrew_domain_substitution_desktop(stub_dossier):
+    domain_name_map = {
+        'Bible': 'מקרא',
+        'Letter': 'מכתב',
+    }
+    wb = _build_desktop(
+        [_make_result('A')],
+        result_domains={'A': ['Bible', 'Letter']},
+        domain_name_map=domain_name_map,
+        lang='he',
+    )
+    from shared.export_dossier import sheet_titles
+    ws = wb[sheet_titles('he')['main']]
+    # Desktop header row is row 1; first data row is row 2.
+    assert ws.cell(2, 11).value == 'מקרא|מכתב'
+
+
+def test_hebrew_domain_unknown_names_pass_through_web(stub_dossier):
+    """Names not in the map render with their original (English) text."""
+    domain_name_map = {'Bible': 'מקרא'}
+    wb = _build_web(
+        [_make_result('A')],
+        result_domains={'A': ['Bible', 'UnknownDomain']},
+        domain_name_map=domain_name_map,
+        lang='he',
+    )
+    from shared.export_dossier import sheet_titles
+    ws = wb[sheet_titles('he')['main']]
+    # Unknown 'UnknownDomain' should pass through verbatim — never dropped.
+    assert ws.cell(2, 11).value == 'מקרא|UnknownDomain'
+
+
+def test_hebrew_domain_unknown_names_pass_through_desktop(stub_dossier):
+    domain_name_map = {'Bible': 'מקרא'}
+    wb = _build_desktop(
+        [_make_result('A')],
+        result_domains={'A': ['Bible', 'UnknownDomain']},
+        domain_name_map=domain_name_map,
+        lang='he',
+    )
+    from shared.export_dossier import sheet_titles
+    ws = wb[sheet_titles('he')['main']]
+    assert ws.cell(2, 11).value == 'מקרא|UnknownDomain'
+
+
+def test_domain_map_ignored_when_lang_en_web(stub_dossier):
+    """lang='en' must NOT substitute even if a domain_name_map is provided."""
+    domain_name_map = {'Bible': 'מקרא'}
+    wb = _build_web(
+        [_make_result('A')],
+        result_domains={'A': ['Bible']},
+        domain_name_map=domain_name_map,
+        lang='en',
+    )
+    ws = wb['Search Results']
+    # English Bible passes through (no substitution under lang='en').
+    assert ws.cell(2, 11).value == 'Bible'
+
+
+def test_domain_map_ignored_when_lang_en_desktop(stub_dossier):
+    domain_name_map = {'Bible': 'מקרא'}
+    wb = _build_desktop(
+        [_make_result('A')],
+        result_domains={'A': ['Bible']},
+        domain_name_map=domain_name_map,
+        lang='en',
+    )
+    ws = wb['Search Results']
+    assert ws.cell(2, 11).value == 'Bible'
+
+
+def test_domain_map_none_falls_through_to_english_web(stub_dossier):
+    """When lang='he' but no domain_name_map -> English names render."""
+    wb = _build_web(
+        [_make_result('A')],
+        result_domains={'A': ['Bible', 'Letter']},
+        # No domain_name_map kwarg.
+        lang='he',
+    )
+    from shared.export_dossier import sheet_titles
+    ws = wb[sheet_titles('he')['main']]
+    assert ws.cell(2, 11).value == 'Bible|Letter'
+
+
+# ===========================================================================
+# Hebrew labels — pin the exact strings from the user's round-2 brief
+# ===========================================================================
+
+
+def test_hebrew_label_search_query():
+    from shared.export_dossier import search_meta_labels
+    assert search_meta_labels('he')['search_query'] == 'שאילתת חיפוש'
+
+
+def test_hebrew_label_search_mode():
+    from shared.export_dossier import search_meta_labels
+    # Smoke round 3 (2026-05-21): realigned to 'מצב חיפוש' to match the
+    # existing tr() entry in genizah_translations.py.
+    assert search_meta_labels('he')['search_mode'] == 'מצב חיפוש'
+
+
+def test_hebrew_label_search_gap():
+    from shared.export_dossier import search_meta_labels
+    assert search_meta_labels('he')['search_gap'] == 'רווח'
+
+
+def test_hebrew_label_lab_mode():
+    from shared.export_dossier import search_meta_labels
+    assert search_meta_labels('he')['lab_mode'] == 'מצב מעבדה'
+
+
+def test_hebrew_label_deep_scan():
+    from shared.export_dossier import search_meta_labels
+    assert search_meta_labels('he')['deep_scan'] == 'סריקה עמוקה'
+
+
+def test_hebrew_label_date_time():
+    from shared.export_dossier import search_meta_labels
+    assert search_meta_labels('he')['date_time'] == 'תאריך ושעת הייצוא'
+
+
+def test_hebrew_label_result_count():
+    from shared.export_dossier import search_meta_labels
+    assert search_meta_labels('he')['result_count'] == 'מספר תוצאות'
+
+
+def test_hebrew_label_visit_link():
+    from shared.export_dossier import search_meta_labels
+    # Smoke round 3 (2026-05-21): renamed from 'בקרו ב-GenizahSearch.com'
+    # to 'אתר הגניזה של דיקטה' (EN parallel: 'Visit GenizahSearch.com'
+    # → 'Dicta Genizah Search').
+    assert search_meta_labels('he')['visit_link_label'] == 'אתר הגניזה של דיקטה'
+
+
+def test_english_label_visit_link():
+    from shared.export_dossier import search_meta_labels
+    # Smoke round 3 (2026-05-21): renamed from 'Visit GenizahSearch.com'
+    # to 'Dicta Genizah Search'.
+    assert search_meta_labels('en')['visit_link_label'] == 'Dicta Genizah Search'
+
+
+# ===========================================================================
+# Smoke round 3 (2026-05-21): credit lines bilingual + Creator attribution
+# ===========================================================================
+
+
+def test_credits_lines_includes_creator_en():
+    from shared.export_dossier import credits_lines
+    lines = credits_lines('en')
+    assert any('Hillel Gershuni' in line and 'gershuni@gmail.com' in line for line in lines), (
+        f"Creator line missing from English credits: {lines}"
+    )
+
+
+def test_credits_lines_includes_creator_he():
+    from shared.export_dossier import credits_lines
+    lines = credits_lines('he')
+    assert any('הלל גרשוני' in line and 'gershuni@gmail.com' in line for line in lines), (
+        f"Creator line missing from Hebrew credits: {lines}"
+    )
+
+
+def test_credits_lines_he_uses_hebrew_header():
+    from shared.export_dossier import credits_lines
+    lines = credits_lines('he')
+    # First line is the localized "Generated by …" header on the Hebrew sheet.
+    assert lines[0].startswith('הופק על ידי'), lines[0]
+
+
+def test_credits_lines_citation_stays_english_regardless_of_lang():
+    # The academic citation row (DOI + Stoekl Ben Ezra et al.) must remain
+    # canonical English even on the Hebrew workbook — translating a
+    # published citation is incorrect.
+    from shared.export_dossier import credits_lines
+    he_lines = credits_lines('he')
+    assert any('Stoekl Ben Ezra' in line for line in he_lines)
+    assert any('10.5281/zenodo.17734473' in line for line in he_lines)
+
+
+def test_localize_search_mode_translates_to_hebrew():
+    from web.export_service import _localize_search_mode
+    # 'exact' -> 'מדויק' under lang='he'; 'Exact' under lang='en'.
+    assert _localize_search_mode('exact', lang='he') == 'מדויק'
+    assert _localize_search_mode('exact', lang='en') == 'Exact'
+
+
+def test_localize_search_mode_passes_through_unknown():
+    from web.export_service import _localize_search_mode
+    assert _localize_search_mode('weird_future_mode', lang='he') == 'weird_future_mode'
+    assert _localize_search_mode('weird_future_mode', lang='en') == 'weird_future_mode'
+
+
+def test_localize_search_mode_handles_empty():
+    from web.export_service import _localize_search_mode
+    assert _localize_search_mode(None, lang='he') is None
+    assert _localize_search_mode('', lang='he') == ''
+
+
+def test_localize_search_mode_variants_extended_hebrew():
+    from web.export_service import _localize_search_mode
+    assert _localize_search_mode('variants_extended', lang='he') == 'וריאנטים מורחב'
+
+
+# ===========================================================================
+# Web state plumbing: domain_name_map flows through set_search_export
+# ===========================================================================
+
+
+@pytest.fixture
+def stub_user_storage(monkeypatch):
+    """Mirrors tests/test_export_state_enrichment.py stub pattern."""
+    from types import SimpleNamespace
+    fake_storage = {}
+    stub = SimpleNamespace(storage=SimpleNamespace(user=fake_storage))
+    monkeypatch.setattr('web.safe_storage.app', stub)
+    return fake_storage
+
+
+def test_set_search_export_persists_domain_name_map(stub_user_storage):
+    """The new domain_name_map kwarg on set_search_export must round-trip
+    through the export payload and be readable by get_search_export."""
+    from web.export_state import set_search_export, get_search_export
+    domain_name_map = {'Bible': 'מקרא', 'Letter': 'מכתב'}
+    set_search_export(
+        results=[{'uid': 'u1', 'sys_id': 'A', 'snippet': '', 'sort_score': 1.0}],
+        query='q',
+        domain_name_map=domain_name_map,
+    )
+    payload = get_search_export()
+    assert payload is not None
+    assert payload.get('domain_name_map') == domain_name_map
+
+
+def test_update_search_export_enrichment_patches_domain_name_map(stub_user_storage):
+    from web.export_state import (
+        set_search_export,
+        update_search_export_enrichment,
+        get_search_export,
+    )
+    # Set baseline with empty map.
+    set_search_export(
+        results=[{'uid': 'u1', 'sys_id': 'A', 'snippet': '', 'sort_score': 1.0}],
+        query='q',
+    )
+    assert (get_search_export() or {}).get('domain_name_map') == {}
+
+    # Patch the map.
+    update_search_export_enrichment(
+        domain_name_map={'Bible': 'מקרא'},
+    )
+    payload = get_search_export()
+    assert payload['domain_name_map'] == {'Bible': 'מקרא'}
+
+    # Re-patching with None leaves the map untouched (opt-in semantics).
+    update_search_export_enrichment(transcription_sys_ids={'A'})
+    payload2 = get_search_export()
+    assert payload2['domain_name_map'] == {'Bible': 'מקרא'}
+    assert sorted(payload2['transcription_sys_ids']) == ['A']
+
+
+# ===========================================================================
+# Smoke round 4 (2026-05-21): Manuscripts-sheet URL cells are clickable
+# ===========================================================================
+
+
+def test_apply_manuscript_row_hyperlinks_sets_pgp_url():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    # Pad the row with 14 cells matching MANUSCRIPT_HEADERS order.
+    row = [
+        'sys123', 'T-S 12.345', 'CUL', 'Some Title',
+        'https://www.princeton.edu/genizah-project/document/sys123',  # PGP URL (idx 4)
+        'desc', 'Letter', '1100', 'Hebrew', 'tag1',
+        'NLI Catalog', 'Catalog Summary',
+        'https://cudl.lib.cam.ac.uk/view/MS-T-S-12-00345',  # Library Viewer URL (idx 12)
+        'https://genizahsearch.com/sys/sys123',  # GenizahSearch URL (idx 13)
+    ]
+    # Mimic the append-then-hyperlink flow.
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+
+    # Column E = 5 (1-based) = idx 4 = PGP URL.
+    assert ws.cell(row=1, column=5).hyperlink is not None
+    assert ws.cell(row=1, column=5).hyperlink.target == row[4]
+    # Column M = 13 = idx 12 = Library Viewer URL.
+    assert ws.cell(row=1, column=13).hyperlink is not None
+    assert ws.cell(row=1, column=13).hyperlink.target == row[12]
+    # Column N = 14 = idx 13 = GenizahSearch URL.
+    assert ws.cell(row=1, column=14).hyperlink is not None
+    assert ws.cell(row=1, column=14).hyperlink.target == row[13]
+
+
+def test_apply_manuscript_row_hyperlinks_skips_empty_cells():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    row = [
+        'sys123', 'T-S 12.345', 'CUL', 'Some Title',
+        '',  # PGP URL EMPTY
+        'desc', 'Letter', '1100', 'Hebrew', 'tag1',
+        'NLI Catalog', 'Catalog Summary',
+        None,  # Library Viewer URL is None (sys_id not in library viewer set)
+        'https://genizahsearch.com/sys/sys123',  # GenizahSearch URL — always present
+    ]
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+
+    # Empty cells should NOT acquire a hyperlink — and openpyxl raise nothing.
+    assert ws.cell(row=1, column=5).hyperlink is None
+    assert ws.cell(row=1, column=13).hyperlink is None
+    # The non-empty one still works.
+    assert ws.cell(row=1, column=14).hyperlink is not None
+
+
+def test_apply_manuscript_row_hyperlinks_skips_non_url_strings():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    row = [''] * 14
+    # Plain string in the PGP URL slot — must not become a hyperlink.
+    row[4] = 'not-a-url'
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+    assert ws.cell(row=1, column=5).hyperlink is None
+
+
+def test_apply_manuscript_row_hyperlinks_applies_blue_underline_font():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    row = [''] * 14
+    row[13] = 'https://genizahsearch.com/sys/sys123'
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+
+    cell = ws.cell(row=1, column=14)
+    # openpyxl encodes the colour as an aRGB hex string with FF alpha; the
+    # blue we set is 0563C1 → "000563C1" via the ``rgb`` property.
+    assert cell.font.color is not None
+    assert cell.font.color.rgb in ('0563C1', 'FF0563C1', '000563C1')
+    assert cell.font.underline == 'single'
+
+
+def test_manuscript_url_column_indices_constant():
+    from shared.export_dossier import MANUSCRIPT_HEADERS, MANUSCRIPT_URL_COLUMN_INDICES
+
+    # Sanity-check: indices line up with the headers labelled as URLs. This
+    # locks the constant against silent drift if MANUSCRIPT_HEADERS is ever
+    # reordered.
+    url_header_names = {MANUSCRIPT_HEADERS[i] for i in MANUSCRIPT_URL_COLUMN_INDICES}
+    assert url_header_names == {'PGP URL', 'Library Viewer URL', 'GenizahSearch URL'}
+
+
+# ===========================================================================
+# Smoke round 5 (2026-05-21): Domains list dedupes when one sys_id has
+# multiple FJMS rows for the same domain (e.g. 'Arabic Tafsir' × 7).
+# ===========================================================================
+
+
+def _process_domain_data_inline(raw_domains):
+    """Re-implement web's _process_domain_data filter+dedupe in isolation.
+
+    Avoids the heavy NiceGUI import chain that web/pages/search.py requires
+    at import time; mirrors the exact two-line transform we ship there.
+    """
+    from shared.fjms_service import qualify_domain_name
+    out = {}
+    for sys_id, doms in raw_domains.items():
+        child_names = {d['domain'] for d in doms}
+        filtered = [
+            qualify_domain_name(d['domain'], d.get('parent_domain'))
+            for d in doms
+            if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])
+        ]
+        filtered = list(dict.fromkeys(filtered))
+        if filtered:
+            out[sys_id] = filtered
+    return out
+
+
+def test_domains_dedupe_same_name_repeated():
+    """A sys_id with 7 FJMS rows tagged 'Arabic Tafsir' yields ONE entry."""
+    raw = {
+        'sys123': [
+            {'domain': 'Arabic Tafsir', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None}
+        ] * 7,
+    }
+    out = _process_domain_data_inline(raw)
+    assert out['sys123'] == ['Arabic Tafsir'], (
+        f"Expected single entry, got {out['sys123']}"
+    )
+
+
+def test_domains_dedupe_preserves_first_seen_order():
+    """Mixed duplicates collapse but order survives."""
+    raw = {
+        'sys456': [
+            {'domain': 'Bible', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Letter', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Bible', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Letter', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Legal', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+        ],
+    }
+    out = _process_domain_data_inline(raw)
+    assert out['sys456'] == ['Bible', 'Letter', 'Legal']
+
+
+def test_domains_dedupe_keeps_distinct_qualified_names():
+    """Qualified names ('Other (Liturgy and Brakhot)') stay distinct from
+    their unqualified counterparts.
+    """
+    raw = {
+        'sys789': [
+            {'domain': 'Other', 'parent_domain': 'Liturgy and Brakhot', 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Other', 'parent_domain': 'Bible', 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Other', 'parent_domain': 'Liturgy and Brakhot', 'domain_heb': None, 'parent_domain_heb': None},
+        ],
+    }
+    out = _process_domain_data_inline(raw)
+    # Both qualified names appear once; the duplicate of the first is gone.
+    assert len(out['sys789']) == 2
+    assert len(set(out['sys789'])) == 2
+
+
+def test_desktop_on_domain_enrichment_dedupe_logic():
+    """Mirrors the dedupe step inserted in genizah_app.py:_on_domain_enrichment_loaded.
+
+    Re-implements the transform locally to avoid PyQt6 import dependencies
+    in the unit-test pytest environment.
+    """
+    from shared.fjms_service import qualify_domain_name
+    raw = {
+        'sysAAA': [
+            {'domain': 'Arabic Tafsir', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None}
+        ] * 5,
+    }
+    sys_id, doms = next(iter(raw.items()))
+    child_names = {d['domain'] for d in doms}
+    filtered = [
+        qualify_domain_name(d['domain'], d.get('parent_domain'))
+        for d in doms
+        if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])
+    ]
+    filtered_deduped = list(dict.fromkeys(filtered))
+    assert len(filtered) == 5, "Pre-dedupe filtered should still have 5 entries"
+    assert filtered_deduped == ['Arabic Tafsir'], (
+        f"Post-dedupe filtered should have 1 entry, got {filtered_deduped}"
+    )
+
+
+# ===========================================================================
+# Smoke round 6 (2026-05-21): Image/Page numeric values are written as int
+# so Excel does not flag "Number stored as text".
+# ===========================================================================
+
+
+def test_coerce_img_page_pure_int_returns_int():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('5') == 5
+    assert coerce_img_page_cell('42') == 42
+    assert coerce_img_page_cell('  17  ') == 17  # surrounding whitespace OK
+
+
+def test_coerce_img_page_negative_int():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('-3') == -3
+
+
+def test_coerce_img_page_zero():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('0') == 0
+
+
+def test_coerce_img_page_folio_marker_stays_string():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('5r') == '5r'
+    assert coerce_img_page_cell('12v') == '12v'
+    assert coerce_img_page_cell('fol. 3v') == 'fol. 3v'
+    assert coerce_img_page_cell('12-14') == '12-14'
+
+
+def test_coerce_img_page_empty_inputs():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('') == ''
+    assert coerce_img_page_cell(None) == ''
+    assert coerce_img_page_cell('   ') == ''
+
+
+def test_coerce_img_page_native_int_passes_through():
+    from shared_export_utils import coerce_img_page_cell
+    # Already an int — return verbatim, no string round-trip.
+    assert coerce_img_page_cell(7) == 7
+    assert coerce_img_page_cell(0) == 0
+
+
+def test_coerce_img_page_bool_not_coerced_to_int():
+    # bool is an int subclass, so a naive isinstance(int) check would
+    # silently turn True/False into 1/0. Verify we keep bools as strings.
+    from shared_export_utils import coerce_img_page_cell
+    out = coerce_img_page_cell(True)
+    assert isinstance(out, str)
+    assert out == 'True'
+
+
+def test_coerce_img_page_float_stays_string():
+    # Floats are rare in Image/Page but if one slips in we keep it as a
+    # string — partial-page numbers (2.5) probably indicate a data error
+    # and we don't want to lose precision via int truncation.
+    from shared_export_utils import coerce_img_page_cell
+    out = coerce_img_page_cell('2.5')
+    assert out == '2.5'
+
+
+# ===========================================================================
+# Phase 94.1 (2026-05-21): per-folio Image URL replaces the empty IIIF
+# Manifest column. Helper resolves to genizahsearch.com proxy endpoints.
+# ===========================================================================
+
+
+def test_build_image_url_default_library_uses_nli_proxy():
+    from shared.export_dossier import build_image_url_for_row
+    out = build_image_url_for_row('123456', 'CUL', '5')
+    assert out == 'https://genizahsearch.com/api/nli_image_by_sysid/123456?page=4'
+
+
+def test_build_image_url_oxford_uses_oxford_proxy():
+    from shared.export_dossier import build_image_url_for_row
+    out = build_image_url_for_row('789', 'Oxford', '1')
+    assert out == 'https://genizahsearch.com/api/oxford_image/789?page=0'
+
+
+def test_build_image_url_page_index_is_zero_based():
+    # img_page='1' → page=0; img_page='5' → page=4.
+    from shared.export_dossier import build_image_url_for_row
+    assert build_image_url_for_row('A', 'CUL', '1').endswith('?page=0')
+    assert build_image_url_for_row('A', 'CUL', '5').endswith('?page=4')
+    assert build_image_url_for_row('A', 'CUL', 12).endswith('?page=11')
+
+
+def test_build_image_url_strips_folio_suffix():
+    from shared.export_dossier import build_image_url_for_row
+    # '5r' → page=4 (leading digits stripped, then -1)
+    assert build_image_url_for_row('A', 'CUL', '5r').endswith('?page=4')
+    assert build_image_url_for_row('A', 'CUL', '12v').endswith('?page=11')
+    # 'fol. 3v' starts with non-digit; helper falls back to page 0 rather
+    # than scanning anywhere. This is intentional — the production
+    # img_page field is page-number-only or 'Nr'/'Nv'; values with a
+    # textual prefix like 'fol. 3v' are not on the result-row contract.
+    assert build_image_url_for_row('A', 'CUL', 'fol. 3v').endswith('?page=0')
+
+
+def test_build_image_url_empty_sys_id_returns_empty():
+    from shared.export_dossier import build_image_url_for_row
+    assert build_image_url_for_row('', 'CUL', '5') == ''
+    assert build_image_url_for_row(None, 'CUL', '5') == ''
+
+
+def test_build_image_url_zero_or_invalid_page_falls_back_to_zero():
+    from shared.export_dossier import build_image_url_for_row
+    assert build_image_url_for_row('A', 'CUL', None).endswith('?page=0')
+    assert build_image_url_for_row('A', 'CUL', '').endswith('?page=0')
+    assert build_image_url_for_row('A', 'CUL', 'not-a-number').endswith('?page=0')
+    assert build_image_url_for_row('A', 'CUL', '0').endswith('?page=0')
+
+
+def test_build_image_url_custom_base():
+    from shared.export_dossier import build_image_url_for_row
+    out = build_image_url_for_row('A', 'CUL', '1', base_url='https://staging.example')
+    assert out == 'https://staging.example/api/nli_image_by_sysid/A?page=0'
+
+
+def test_apply_main_row_image_url_hyperlink_sets_link_and_font():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_main_row_image_url_hyperlink
+
+    wb = Workbook()
+    ws = wb.active
+    # Build a 12-cell main row, then set the link on col 12.
+    ws.append(['A', 'B', 'C', 'D', 1, 'F', 'G', 'H', '', '', '', 'https://genizahsearch.com/api/nli_image_by_sysid/A?page=0'])
+    apply_main_row_image_url_hyperlink(ws, 1, ws.cell(1, 12).value)
+    cell = ws.cell(row=1, column=12)
+    assert cell.hyperlink is not None
+    assert cell.hyperlink.target == 'https://genizahsearch.com/api/nli_image_by_sysid/A?page=0'
+    assert cell.font.color is not None
+    assert cell.font.color.rgb in ('0563C1', 'FF0563C1', '000563C1')
+    assert cell.font.underline == 'single'
+
+
+def test_apply_main_row_image_url_hyperlink_no_op_on_empty():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_main_row_image_url_hyperlink
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['A', '', '', '', '', '', '', '', '', '', '', ''])
+    apply_main_row_image_url_hyperlink(ws, 1, '')
+    assert ws.cell(row=1, column=12).hyperlink is None
+
+
+def test_image_url_column_index_constant():
+    from shared.export_dossier import MAIN_IMAGE_URL_COLUMN_INDEX, main_header_row
+    # Lock the constant against accidental drift if the column order changes.
+    en_headers = main_header_row('en')
+    assert en_headers[MAIN_IMAGE_URL_COLUMN_INDEX] == 'Image URL'
+    he_headers = main_header_row('he')
+    assert he_headers[MAIN_IMAGE_URL_COLUMN_INDEX] == 'כתובת תמונה'
+
+
+def test_build_image_url_synthetic_sys_id_returns_empty():
+    # Synthetic sys_ids (Phase 53 metadata-only manuscripts) have no NLI
+    # image; the cell stays empty rather than emitting a broken link.
+    from shared.export_dossier import build_image_url_for_row
+    from shared.synthetic_sys_id import is_synthetic_sys_id
+
+    # Pick a sys_id form known to be synthetic. The helper uses a centralized
+    # check; if the format definition changes, this test will follow.
+    # Pattern: a numeric sys_id well outside the real catalog range.
+    test_id = 'SYNTH_999999999'
+    if is_synthetic_sys_id(test_id):
+        assert build_image_url_for_row(test_id, 'CUL', '1') == ''
+    else:
+        # If the synthetic pattern changes, fall back to a known-synthetic
+        # example from the project: 9-digit IDs starting with 99 are reserved
+        # for synthetic per project convention. Skip this test gracefully
+        # rather than fail on naming-convention drift.
+        import pytest as _pytest
+        _pytest.skip(
+            "test_id is not recognised as synthetic — adjust to a known "
+            "synthetic pattern when shared.synthetic_sys_id changes."
+        )

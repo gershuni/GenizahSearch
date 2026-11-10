@@ -1,0 +1,882 @@
+"""
+Tests for Responsa pipeline integration: wiring Responsa components into
+build_tantivy_query, build_regex_pattern, parse_query_syntax, and execute_search.
+
+Tests cover:
+- build_tantivy_query Responsa branch (OR groups with boosting, AND-joined)
+- build_regex_pattern Responsa branch (wildcard patterns, flex spacing, bidirectional)
+- parse_query_syntax Responsa bypass (prefix shortcuts disabled)
+- execute_search Responsa pipeline (routing, explosion warning propagation)
+- Suffix expansion and plene/defective through the pipeline
+"""
+
+import sys
+import pytest
+from unittest.mock import MagicMock, patch
+
+import genizah_core as _gc_module
+
+from genizah_core import (
+    ResponsaComponent,
+    SearchEngine,
+)
+
+
+@pytest.fixture(autouse=True)
+def _ensure_genizah_core_module():
+    """Ensure genizah_core is properly loaded in sys.modules.
+
+    test_missing_tantivy.py pops genizah_core from sys.modules which can
+    break module-level patching in subsequent test files. This fixture
+    ensures the correct module object is in sys.modules.
+    """
+    if 'genizah_core' not in sys.modules or sys.modules['genizah_core'] is not _gc_module:
+        sys.modules['genizah_core'] = _gc_module
+    yield
+
+
+# ============================================================================
+# Helper: Create a SearchEngine with mocked index/searcher
+# ============================================================================
+
+def _make_search_engine():
+    """Create a SearchEngine with mocked dependencies for testing query building."""
+    meta_mgr = MagicMock()
+    var_mgr = MagicMock()
+    # Default: get_variants returns just the term itself
+    var_mgr.get_variants = MagicMock(side_effect=lambda term, mode, limit=200: [term])
+
+    # Patch reload_index to avoid needing an actual Tantivy index
+    with patch.object(SearchEngine, 'reload_index', return_value=False):
+        engine = SearchEngine(meta_mgr, var_mgr, worker_mode=True, open_local=False)  # no real FL-ID build / LOCAL index (see test_responsa_edge_cases)
+
+    return engine
+
+
+def _real_engine(tmp_path, manuscripts):
+    """A SearchEngine on a real fixture index (tests/responsa_fixture.py)."""
+    from tests.responsa_fixture import build_main, make_engine
+    build_main(tmp_path, manuscripts)
+    return make_engine(tmp_path)
+
+
+def _release(engine):
+    from tests.responsa_fixture import release
+    release(engine)
+
+
+# ============================================================================
+# build_tantivy_query — Responsa branch
+# ============================================================================
+
+class TestBuildTantivyQueryResponsa:
+    """Tests for the Responsa branch of build_tantivy_query."""
+
+    def test_single_component_or_group(self):
+        """Single component with expanded terms produces OR group with boosted exact term."""
+        engine = _make_search_engine()
+        components = [
+            {'tantivy_terms': ['shalom', 'ushalom', 'hashalom'],
+             'original_words': ['shalom']},
+        ]
+        result = engine.build_tantivy_query(
+            terms=None, mode='exact',
+            responsa_components=components, responsa_options={}
+        )
+        # Should contain OR group with exact term boosted ^5
+        assert '"shalom"^5' in result
+        assert 'OR' in result
+        assert '"ushalom"' in result or '"hashalom"' in result
+
+    def test_two_components_and_joined(self):
+        """Two components are AND-joined."""
+        engine = _make_search_engine()
+        components = [
+            {'tantivy_terms': ['a', 'b'], 'original_words': ['a']},
+            {'tantivy_terms': ['c', 'd'], 'original_words': ['c']},
+        ]
+        result = engine.build_tantivy_query(
+            terms=None, mode='exact',
+            responsa_components=components, responsa_options={}
+        )
+        assert 'AND' in result
+
+    def test_exact_term_boosted_highest(self):
+        """The original word(s) in each component get ^5 boost."""
+        engine = _make_search_engine()
+        components = [
+            {'tantivy_terms': ['shalom', 'ushalom', 'hashalom'],
+             'original_words': ['shalom']},
+        ]
+        result = engine.build_tantivy_query(
+            terms=None, mode='exact',
+            responsa_components=components, responsa_options={}
+        )
+        assert '"shalom"^5' in result
+
+    def test_existing_path_unchanged(self):
+        """When responsa_components is None, existing behavior is preserved."""
+        engine = _make_search_engine()
+        # Existing call: build_tantivy_query(terms, mode)
+        result = engine.build_tantivy_query(['test'], 'exact')
+        # Should produce existing format with OR groups
+        assert '"test"^5' in result
+
+    def test_different_length_variants_get_boost(self):
+        """Variants with different length than original get ^3 boost."""
+        engine = _make_search_engine()
+        components = [
+            {'tantivy_terms': ['ab', 'abc', 'a'],
+             'original_words': ['ab']},
+        ]
+        result = engine.build_tantivy_query(
+            terms=None, mode='exact',
+            responsa_components=components, responsa_options={}
+        )
+        # 'ab' is original -> ^5
+        assert '"ab"^5' in result
+        # 'abc' is different length -> ^3
+        assert '"abc"^3' in result
+
+
+# ============================================================================
+# build_regex_pattern — Responsa branch
+# ============================================================================
+
+class TestBuildRegexResponsa:
+    """Tests for the Responsa branch of build_regex_pattern."""
+
+    @staticmethod
+    def _star(wildcard, terms=(), pattern=None):
+        engine = _make_search_engine()
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=[{'regex_terms': list(terms), 'wildcard': wildcard,
+                                  'wildcard_pattern': pattern, 'flex_patterns': [],
+                                  'inline_pattern': None, 'original_words': list(terms)}],
+            responsa_options={})
+        assert result is not None
+        return lambda text: (m.group(0) if (m := result.search(text)) else None)
+
+    def test_suffix_wildcard(self):
+        """Suffix wildcard: any letters after the term, inside the word (Phase 3: no
+        longer \\S*, which took digits and punctuation too)."""
+        found = self._star('suffix', ['shalom'])
+        assert found('a shalomot b') == 'shalomot'
+        assert found('a shalom b') == 'shalom'
+        assert found('a shalom1 b') is None
+
+    def test_prefix_wildcard(self):
+        """Prefix wildcard *X: any letters before the term inside one word, none included
+        (Phase 3); never a digit (Phase 1's \\S* took one)."""
+        found = self._star('prefix', ['neder'])
+        assert found('x haneder y') == 'haneder'
+        assert found('x neder y') == 'neder'
+        assert found('x 1neder y') is None
+        assert found('x nederim y') is None
+
+    def test_character_pattern(self):
+        """Character pattern *a*b*c*: the letters in order inside one word."""
+        found = self._star('pattern', pattern='*a*b*c*')
+        assert found('w xaybzc w') == 'xaybzc'
+        assert found('w abc w') == 'abc'
+        assert found('w a b c w') is None
+        assert found('w a1bc w') is None
+
+    def test_inline_alternation_single_char(self):
+        """Inline alternation with single chars uses character class."""
+        engine = _make_search_engine()
+        # Pattern like word(a/b)end -> word[ab]end
+        components = [
+            {
+                'regex_terms': [],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': 'word(a/b)end',
+                'original_words': [],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components, responsa_options={}
+        )
+        assert result is not None
+        # Both spellings, as whole words; no other letter in the slot.
+        assert result.search('x wordaend y') and result.search('wordbend')
+        assert not result.search('wordcend')
+        assert not result.search('wordaendx')
+
+    def test_inline_alternation_multi_char(self):
+        """Inline alternation with multi-char uses alternation group."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': [],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': 'pre(abc/de)post',
+                'original_words': [],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components, responsa_options={}
+        )
+        assert result is not None
+        # Every alternative spelt out, as whole words.
+        assert result.search('preabcpost') and result.search('predepost')
+        assert not result.search('preapost')
+        assert not result.search('predepostx')
+
+    def test_flex_spacing(self):
+        """Flex spacing adds \\s* between chars of original terms as alternatives."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['abc', 'xabc'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [r'a\s*b\s*c'],
+                'inline_pattern': None,
+                'original_words': ['abc'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components,
+            responsa_options={'flex_spacing': True}
+        )
+        assert result is not None
+        pattern = result.pattern
+        # Should contain the flex pattern as an alternative
+        assert r'a\s*b\s*c' in pattern
+
+    def test_flex_spacing_only_on_original_terms(self):
+        """Flex spacing is NOT applied to expanded variants, only originals."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['abc', 'xabc', 'habc'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [r'a\s*b\s*c'],  # Only for 'abc', not xabc/habc
+                'inline_pattern': None,
+                'original_words': ['abc'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components,
+            responsa_options={'flex_spacing': True}
+        )
+        pattern = result.pattern
+        # Should have flex pattern for 'abc' but NOT for 'xabc'
+        assert r'a\s*b\s*c' in pattern
+        # xabc should be in the alternation as a regular escaped term, NOT flex-spaced.
+        # Mark-tolerant wrapping inserts optional diacritics between chars, so verify
+        # behavioral correctness: pattern matches 'xabc' and does NOT have flex-spacing
+        # applied to 'xabc' (i.e., no x\s*a\s*b\s*c in pattern).
+        assert result.search('xabc')
+        assert r'x\s*a\s*b\s*c' not in pattern  # xabc must NOT be flex-spaced
+
+    def test_bidirectional(self):
+        """Bidirectional with 2 components produces forward|backward alternation."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components,
+            responsa_options={'bidirectional': True}
+        )
+        assert result is not None
+        pattern = result.pattern
+        # Should contain both A...B and B...A orderings
+        assert 'A' in pattern and 'B' in pattern
+        # And alternation via |
+        assert '|' in pattern
+
+    def test_flex_separator_gap_zero(self):
+        """When flex_spacing=True and gap=0, separator uses * instead of +."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['X'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['X'],
+            },
+            {
+                'regex_terms': ['Y'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['Y'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components,
+            responsa_options={'flex_spacing': True}
+        )
+        assert result is not None
+        pattern = result.pattern
+        # The separator for gap=0 with flex_spacing should use * (zero or more)
+        # instead of + (one or more)
+        assert '*' in pattern
+
+    def test_existing_path_unchanged(self):
+        """When responsa_components is None, existing behavior is preserved."""
+        engine = _make_search_engine()
+        # Existing call
+        result = engine.build_regex_pattern(['test'], 'exact', 0)
+        assert result is not None
+        # Pattern matches the word "test" (mark-tolerant wrapping inserts optional
+        # diacritics between chars, so check behavior not literal substring)
+        assert result.search('test')
+
+    def test_suffix_expansion_in_alternation(self):
+        """Suffix-expanded terms appear in the regex alternation group."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['stem', 'stemim', 'stemot', 'stemah'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['stem'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components, responsa_options={}
+        )
+        assert result is not None
+        pattern = result.pattern
+        # All suffix-expanded terms should be matched by the compiled pattern.
+        # Mark-tolerant wrapping inserts optional diacritics between chars,
+        # so verify behavioral correctness rather than literal substring.
+        assert result.search('stem')
+        assert result.search('stemim')
+        assert result.search('stemot')
+        assert result.search('stemah')
+
+    def test_plene_defective_in_alternation(self):
+        """Plene/defective variants appear in the regex alternation group."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['shalom', 'shlm', 'shalm'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['shalom'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=0,
+            responsa_components=components, responsa_options={}
+        )
+        assert result is not None
+        pattern = result.pattern
+        # Verify behavioral correctness: compiled pattern matches all plene/defective variants.
+        # Mark-tolerant wrapping inserts optional diacritics between chars.
+        assert result.search('shalom')
+        assert result.search('shlm')
+        assert result.search('shalm')
+
+
+# ============================================================================
+# parse_query_syntax — Responsa bypass
+# ============================================================================
+
+class TestParseQuerySyntaxResponsaBypass:
+    """Tests for parse_query_syntax with responsa_mode parameter."""
+
+    def test_hash_bypass_when_responsa(self):
+        """# prefix is NOT interpreted as Shelfmark when responsa_mode=True."""
+        engine = _make_search_engine()
+        mode, clean = engine.parse_query_syntax('#shalom', responsa_mode=True)
+        assert mode is None
+        assert clean == '#shalom'
+
+    def test_question_mark_bypass_when_responsa(self):
+        """? prefix is NOT interpreted as variants when responsa_mode=True."""
+        engine = _make_search_engine()
+        mode, clean = engine.parse_query_syntax('?shalom', responsa_mode=True)
+        assert mode is None
+        assert clean == '?shalom'
+
+    def test_all_prefixes_bypass_when_responsa(self):
+        """All prefix shortcuts are bypassed when responsa_mode=True."""
+        engine = _make_search_engine()
+        for prefix in ['???', '??', '?', '=', '~', '/', '$', '#']:
+            query = prefix + 'test'
+            mode, clean = engine.parse_query_syntax(query, responsa_mode=True)
+            assert mode is None, f"Prefix '{prefix}' was not bypassed"
+            assert clean == query
+
+    def test_existing_hash_shelfmark_when_not_responsa(self):
+        """# prefix still interpreted as Shelfmark when responsa_mode=False."""
+        engine = _make_search_engine()
+        mode, clean = engine.parse_query_syntax('#shalom', responsa_mode=False)
+        assert mode == 'Shelfmark'
+        assert clean == 'shalom'
+
+    def test_existing_behavior_unchanged_plain_query(self):
+        """Plain query returns (None, query) regardless of responsa_mode."""
+        engine = _make_search_engine()
+        mode1, clean1 = engine.parse_query_syntax('plain')
+        mode2, clean2 = engine.parse_query_syntax('plain', responsa_mode=False)
+        mode3, clean3 = engine.parse_query_syntax('plain', responsa_mode=True)
+        assert mode1 is None and clean1 == 'plain'
+        assert mode2 is None and clean2 == 'plain'
+        assert mode3 is None and clean3 == 'plain'
+
+    def test_default_responsa_mode_is_false(self):
+        """Default responsa_mode is False (backward compatible)."""
+        engine = _make_search_engine()
+        # Call without the new parameter - should work identically to before
+        mode, clean = engine.parse_query_syntax('#test')
+        assert mode == 'Shelfmark'
+
+
+# ============================================================================
+# execute_search — Responsa pipeline
+# ============================================================================
+
+class TestExecuteSearchResponsa:
+    """Tests for the Responsa pipeline in execute_search."""
+
+    @pytest.mark.parametrize('content,expected', [
+        ('ראובן ' + 'מילה ' * 200 + '\nשמעון', True),
+        ('שמעון\n' + 'מילה ' * 200 + ' ראובן', True),
+        ('לוי שמעון ראובן', True),
+        ('ראובן בלבד', False),
+        ('שמעון בלבד', False),
+    ], ids=['distant', 'reversed', 'alternatives', 'missing-second', 'missing-first'])
+    def test_builder_document_and_execution(self, content, expected, tmp_path):
+        from shared.responsa import generate_tabular_syntax
+
+        query, _ = generate_tabular_syntax([
+            {'words': [{'text': 'ראובן'}]},
+            {'words': [{'text': 'שמעון'}, {'text': 'לוי'}]},
+        ], [0], scope='within_document')
+        # A real index: the lookup is a query object built on its schema, and a
+        # builder AND is an operator there, never a term the page must hold.
+        engine = _real_engine(tmp_path, {'990001': [('uid1', content)]})
+        try:
+            opts = {'responsa_mode': True}
+            results = engine.execute_search(query, 'exact', 0,
+                                            responsa_options=opts, corpus_scope='genizah')
+            assert bool(results) is expected
+            assert opts == {'responsa_mode': True}
+
+            # Local-library searches must interpret the same portable syntax.
+            _, local_regex = engine._build_local_responsa_query_and_regex(
+                query, 'exact', 0, opts)
+            assert bool(local_regex.search(content)) is expected
+        finally:
+            _release(engine)
+
+    def test_document_and_does_not_change_word_range(self):
+        engine = _make_search_engine()
+        _, pattern = engine._build_local_responsa_query_and_regex(
+            'ראובן שמעון', 'exact', 0, {'responsa_mode': True})
+        assert pattern.search('ראובן שמעון')
+        assert not pattern.search('ראובן מילה שמעון')
+        assert not pattern.search('שמעון ראובן')
+
+    def test_document_and_rejects_long_nonmatching_text_without_repeated_scans(self):
+        from shared.search_regex import search_budget
+        engine = _make_search_engine()
+        _, pattern = engine._build_local_responsa_query_and_regex(
+            'ראובן AND שמעון', 'exact', 0, {'responsa_mode': True})
+        with search_budget(2):
+            assert not pattern.search('מילה ' * 20000)
+
+    @pytest.mark.parametrize('failure_site', ['search', 'doc'])
+    def test_memory_exhaustion_never_becomes_successful_empty_results(self, failure_site, tmp_path):
+        engine = _real_engine(tmp_path, {'990001': [('uid1', 'ראובן ואחריו שמעון')]})
+        try:
+            engine.searcher = MagicMock(wraps=engine.searcher)
+            getattr(engine.searcher, failure_site).side_effect = MemoryError('worker allocation exhausted')
+            with pytest.raises(MemoryError):
+                engine.execute_search('ראובן AND שמעון', 'exact', 0,
+                                      responsa_options={'responsa_mode': True}, corpus_scope='genizah')
+        finally:
+            _release(engine)
+
+    def test_accepts_responsa_options_parameter(self):
+        """execute_search accepts responsa_options parameter without error."""
+        engine = _make_search_engine()
+        # With searcher=None, it returns early, but should NOT raise
+        result = engine.execute_search(
+            '#shalom', 'exact', 0,
+            responsa_options={'responsa_mode': True, 'variants': False, 'ja': False,
+                              'flex_spacing': False, 'bidirectional': False, 'variant_mode': 'exact'}
+        )
+        assert isinstance(result, list)
+
+    def test_responsa_options_none_is_existing_path(self):
+        """When responsa_options=None, existing path is used (no changes)."""
+        engine = _make_search_engine()
+        result = engine.execute_search('test', 'exact', 0, responsa_options=None)
+        assert isinstance(result, list)
+
+    def test_responsa_mode_false_is_existing_path(self):
+        """When responsa_mode=False in options, existing path is used."""
+        engine = _make_search_engine()
+        result = engine.execute_search(
+            'test', 'exact', 0,
+            responsa_options={'responsa_mode': False}
+        )
+        assert isinstance(result, list)
+
+    def test_explosion_warning_propagated(self, tmp_path):
+        """When the guard steps down, the warning reaches the first row and the
+        thread-local channel the API reads (a real search, a small limit)."""
+        from shared.config import Config
+        from shared.search_engine import _consume_last_responsa_downgrade
+        engine = _real_engine(tmp_path, {'990001': [('uid1', 'אמר ושלום עולם')]})
+        try:
+            with patch.object(Config, 'MAX_EXPANDED_TERMS', 100):
+                # #שלום# is 600 forms: over 100, so the suffixes go and 24 remain.
+                results = engine.execute_search(
+                    '#שלום# עולם', 'exact', 0,
+                    responsa_options={'responsa_mode': True}, corpus_scope='genizah')
+            assert [r['uid'] for r in results] == ['uid1']
+            warning = results[0].get('responsa_warning')
+            assert warning and ('suffix' in warning.lower() or 'סיומות' in warning)
+            assert _consume_last_responsa_downgrade() == warning
+        finally:
+            _release(engine)
+
+    def test_responsa_pipeline_calls_parse_responsa_query(self):
+        """Responsa path calls parse_responsa_query, not str.split()."""
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.index.parse_query = MagicMock(return_value=MagicMock())
+
+        mock_search_result = MagicMock()
+        mock_search_result.hits = []
+        engine.searcher.search = MagicMock(return_value=mock_search_result)
+
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse:
+            mock_parse.return_value = [ResponsaComponent(words=["test"])]
+
+            engine.execute_search(
+                '#test', 'exact', 0,
+                responsa_options={
+                    'responsa_mode': True, 'variants': False, 'ja': False,
+                    'flex_spacing': False, 'bidirectional': False,
+                    'variant_mode': 'exact'
+                }
+            )
+
+            mock_parse.assert_called_once()
+
+    def test_suffix_expansion_in_pipeline(self):
+        """Components with grammatical_suffixes=True get suffix-expanded in pipeline."""
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.index.parse_query = MagicMock(return_value=MagicMock())
+
+        mock_search_result = MagicMock()
+        mock_search_result.hits = []
+        engine.searcher.search = MagicMock(return_value=mock_search_result)
+
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
+             patch('shared.responsa_match.expand_grammatical_suffixes') as mock_suffix:
+            mock_parse.return_value = [
+                ResponsaComponent(words=["stem"], grammatical_suffixes=True)
+            ]
+            mock_suffix.return_value = ["stem", "stemim", "stemot"]
+
+            engine.execute_search(
+                'stem#', 'exact', 0,
+                responsa_options={
+                    'responsa_mode': True, 'variants': False, 'ja': False,
+                    'flex_spacing': False, 'bidirectional': False,
+                    'variant_mode': 'exact'
+                }
+            )
+
+            # expand_grammatical_suffixes should have been called
+            mock_suffix.assert_called()
+
+    def test_plene_defective_in_pipeline(self):
+        """Components with plene_defective=True get plene/defective expansion in pipeline."""
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.index.parse_query = MagicMock(return_value=MagicMock())
+
+        mock_search_result = MagicMock()
+        mock_search_result.hits = []
+        engine.searcher.search = MagicMock(return_value=mock_search_result)
+
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
+             patch('shared.responsa_match.expand_plene_defective') as mock_plene:
+            mock_parse.return_value = [
+                ResponsaComponent(words=["shalom"], plene_defective=True)
+            ]
+            mock_plene.return_value = ["shalom", "shlm"]
+
+            engine.execute_search(
+                '%shalom', 'exact', 0,
+                responsa_options={
+                    'responsa_mode': True, 'variants': False, 'ja': False,
+                    'flex_spacing': False, 'bidirectional': False,
+                    'variant_mode': 'exact'
+                }
+            )
+
+            # expand_plene_defective should have been called
+            mock_plene.assert_called()
+
+    def test_expansion_order_plene_then_prefixes_then_suffixes(self):
+        """Expansion order: plene/defective -> prefixes -> suffixes -> JA -> variants."""
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.index.parse_query = MagicMock(return_value=MagicMock())
+
+        mock_search_result = MagicMock()
+        mock_search_result.hits = []
+        engine.searcher.search = MagicMock(return_value=mock_search_result)
+
+        call_order = []
+
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
+             patch('shared.responsa_match.expand_plene_defective') as mock_plene, \
+             patch('shared.responsa_match.expand_grammatical_prefixes') as mock_prefix, \
+             patch('shared.responsa_match.expand_grammatical_suffixes') as mock_suffix:
+
+            comp = ResponsaComponent(
+                words=["word"],
+                plene_defective=True,
+                grammatical_prefixes=True,
+                grammatical_suffixes=True,
+            )
+            mock_parse.return_value = [comp]
+
+            def track_plene(w):
+                call_order.append('plene')
+                return [w, w + '_plene']
+            def track_prefix(w):
+                call_order.append('prefix')
+                return [w, 'ha' + w]
+            def track_suffix(w):
+                call_order.append('suffix')
+                return [w, w + 'im']
+
+            mock_plene.side_effect = track_plene
+            mock_prefix.side_effect = track_prefix
+            mock_suffix.side_effect = track_suffix
+
+            engine.execute_search(
+                '%#word#', 'exact', 0,
+                responsa_options={
+                    'responsa_mode': True, 'variants': False, 'ja': False,
+                    'flex_spacing': False, 'bidirectional': False,
+                    'variant_mode': 'exact'
+                }
+            )
+
+            # Plene should be called first, then prefix, then suffix
+            assert len(call_order) > 0
+            first_plene = call_order.index('plene') if 'plene' in call_order else 999
+            first_prefix = call_order.index('prefix') if 'prefix' in call_order else 999
+            first_suffix = call_order.index('suffix') if 'suffix' in call_order else 999
+            assert first_plene < first_prefix, "plene should be expanded before prefixes"
+            assert first_prefix < first_suffix, "prefixes should be expanded before suffixes"
+
+
+# ============================================================================
+# Per-pair gap regex building
+# ============================================================================
+
+class TestPerPairGapRegex:
+    """Tests for per_pair_gaps parameter in build_regex_pattern and execute_search."""
+
+    def test_per_pair_gaps_different_distances(self):
+        """build_regex_pattern with 3 components and per_pair_gaps=[2, 5] produces
+        regex where the separator between parts 0-1 allows 2 words and between
+        parts 1-2 allows 5 words."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+            {
+                'regex_terms': ['C'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['C'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=1,
+            responsa_components=components,
+            responsa_options={},
+            per_pair_gaps=[2, 5],
+        )
+        assert result is not None
+        pattern = result.pattern
+        # The pattern should contain {0,2} for first pair and {0,5} for second pair
+        assert '{0,2}' in pattern
+        assert '{0,5}' in pattern
+
+    def test_per_pair_gaps_none_falls_back_to_max_gap(self):
+        """per_pair_gaps=[None, 3] with max_gap=1 -> first pair uses gap 1, second uses 3."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+            {
+                'regex_terms': ['C'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['C'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=1,
+            responsa_components=components,
+            responsa_options={},
+            per_pair_gaps=[None, 3],
+        )
+        assert result is not None
+        pattern = result.pattern
+        # First pair: None -> falls back to max_gap=1 -> {0,1}
+        assert '{0,1}' in pattern
+        # Second pair: 3 -> {0,3}
+        assert '{0,3}' in pattern
+
+    def test_per_pair_gaps_bidirectional_reverses_gaps(self):
+        """per_pair_gaps=[2, 5] with bidirectional=True -> backward regex has gaps reversed."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+            {
+                'regex_terms': ['C'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['C'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=1,
+            responsa_components=components,
+            responsa_options={'bidirectional': True},
+            per_pair_gaps=[2, 5],
+        )
+        assert result is not None
+        pattern = result.pattern
+        # Should have alternation (forward|backward)
+        assert '|' in pattern
+        # Forward: A...{0,2}...B...{0,5}...C
+        # Backward: C...{0,5}...B...{0,2}...A  (gaps reversed)
+        # Both {0,2} and {0,5} should appear in the pattern (used in both directions)
+        assert '{0,2}' in pattern
+        assert '{0,5}' in pattern
+
+    def test_execute_search_passes_per_pair_gaps(self):
+        """Query '#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd' through execute_search with
+        responsa_options -> the compiler gets the per-pair gaps."""
+        import shared.search_engine as se
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.index.parse_query = MagicMock(return_value=MagicMock())
+
+        mock_search_result = MagicMock()
+        mock_search_result.hits = []
+        engine.searcher.search = MagicMock(return_value=mock_search_result)
+
+        with patch.object(se, 'compile_responsa_components', wraps=se.compile_responsa_components) as compiler:
+            engine.execute_search(
+                '#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd', 'exact', 1,
+                responsa_options={
+                    'responsa_mode': True, 'variants': False, 'ja': False,
+                    'flex_spacing': False, 'bidirectional': False,
+                    'variant_mode': 'exact'
+                }
+            )
+
+            compiler.assert_called_once()
+            assert compiler.call_args.args[4] == [3]

@@ -1,0 +1,146 @@
+# GenizahSearch API notes for research agents
+
+Read this when interpreting responses or configuring parallels. Full maintained
+reference: https://github.com/gershuni/GenizahSearch/blob/master-main/docs/SEARCH_API.md
+Interactive schemas: https://genizahsearch.com/api/docs
+
+## Requests
+
+- POST /api/search: `query`, `search_mode` (exact, variants, fuzzy, responsa,
+  title, shelfmark), `limit`, optional `gap`, `filters`, `responsa_options`.
+  Use search.py or stage.py; parallels uses `mode`, not `search_mode`.
+- GET /api/browse: use the returned `locator.sys_id`, `p_num` (1-based), and
+  `volume_ie`. Use browse.py, with `--text-cap 10000` for detailed reading.
+  Do not construct UIDs from shelfmarks. UID-only lookup can fail on deployments.
+- GET /api/capabilities: check `features.passage`, `features.passage_multi_witness`,
+  `parallels.methods`, `parallels.max_witnesses`, and live limits/timeouts.
+
+## Letter-level parallels
+
+POST /api/parallels:
+
+```json
+{"method":"passage", "text":"Text to match"}
+```
+
+CLI: `python scripts/parallels.py --method passage --text-file passage.txt`.
+The text limit is 20,000 characters. The index covers Genizah transcription data,
+not the user's local library. Passage tolerates recognition noise and changed line
+breaks. Do not send nondefault chunk_size, mode, max_freq, or boundary_mode.
+They have no letter-level equivalent. A 503 passage_unavailable is an unavailable
+engine, not zero results; never silently substitute chunk matching.
+
+For several witnesses of ONE work, replace text with a witnesses array:
+
+```json
+{"method":"passage", "witnesses":[
+  {"label":"A", "text":"First witness"},
+  {"label":"B", "raw_header":"EXACT_HEADER_FROM_A_RESULT"}
+], "sort":"fused"}
+```
+
+Each witness has exactly one of text or raw_header. Use actual returned headers,
+not invented locators. Do not concatenate witnesses. `sort` requires witnesses;
+choices are fused, best_match, witness_count. The server validates count and cost
+limits. CLI accepts the array alone in `--witnesses-file witnesses.json`.
+Multi-witness results may include `witness_fusion` with witness_count,
+witness_ids, fusion_score, and best_witness_score.
+
+## Legacy word chunks
+
+`--method chunk` is the script's compatibility default. It accepts chunk_size
+(2–20, default 5), mode (exact, variants, fuzzy), max_freq, and boundary_mode
+(full, boundary, combined). `max_freq` is a document-count cutoff, not a ratio;
+values >=50 cannot filter the engine's top-50 per-chunk retrieval.
+
+## Response interpretation
+
+Search and parallels return source, generated_at, results, count, total,
+warnings, and request (effective options, not a literal input echo). Browse
+instead has locator, text, text_source, text_truncated, metadata, and image;
+it has no results/count/request. Library attribution is `library: {code, name}`.
+Image URLs can be relative to the API base.
+
+Parallels results include shelfmark, locator, score, snippet, and matches.
+Each match includes chunk_index, source_chunk_text, manuscript_snippet, score.
+Passage matches are contiguous spans; score counts matched query letters, not a
+probability. Do not compare passage scores with chunk scores. Inspect all returned
+rows/pages relevant to a grouped result. Count and total are equal for parallels,
+and do not represent a complete census. `filtered` holds demoted results, including
+apparent duplicate photography, and should not be ignored when tracing witnesses.
+
+Warnings can be strings OR objects. Important warnings:
+
+- passage_results_truncated: candidate/verification budget hit. Report it; neither
+  zero results nor a small list proves that no other parallels exist.
+- truncated_to_200: only the top 200 manuscript groups returned.
+- results_cut_off (search, parallels): the result may be incomplete; more may exist.
+  Search: the candidate limit or the 3-minute time limit of a background job was
+  reached; `total` is a lower bound, not the number of matches. Parallels: a
+  background job reached the time limit and returned what it had found. Say so when
+  reporting a count or a list of witnesses.
+- duplicate_photography_demoted: apparent copies of the same photographed page.
+- witness_ref_unresolved / witness_duplicate_skipped: some input witnesses skipped.
+- sort_not_applied: too few witnesses resolved to apply fusion ordering.
+- text_shorter_than_chunk_size (chunk method): fewer words than chunk_size; the
+  whole text was searched as one shorter chunk (see effective_chunk_size).
+- text_too_short (chunk method): under two words, nothing was searched. An empty
+  result here says nothing about whether parallels exist.
+
+`text_source` is pgp_transcription, snippet, or none. Use
+`format_output.honesty_annotation(response)` in research notes for API-derived
+quotations. A nontruncated snippet is not automatically a scholarly transcription.
+Describe any additional image checking separately; do not claim independent
+palaeographic decipherment when merely editing automatic output.
+
+## Errors and network access
+
+Errors usually return `error: {code, message}`; edge proxies may return non-JSON
+bodies. Scripts handle JSON decoding failure and retain HTTP status in the message.
+Common errors: rate_limited, heavy_search_busy, core_timeout, invalid_request,
+manuscript_page_not_found, locator_conflict, passage_unavailable,
+passage_multi_witness_unavailable, passage_option_unsupported,
+filter_unavailable (503: valid filters could not be applied; the request was not
+run without them -- no Retry-After; retry later or send it without filters).
+Report failures and continue independent work without automatic retry loops.
+Retry-After can accompany 429 or 503. Scripts self-throttle each endpoint.
+Chunk requests allow 130 seconds for the documented 110-second server ceiling;
+passage's documented ceiling is 30 seconds. Live capabilities may differ.
+
+## Manuscript details (catalog, bibliography, credits)
+
+`details.py` calls `GET /api/chatgpt/manuscript-details`. This URL is usable by
+ordinary HTTP clients; no ChatGPT account is required. It requires the newer
+details integration to be deployed. A 404 on an older server is not an empty result.
+
+Required: `--sys-id` copied from a search/browse result and `--section`:
+
+- `fjms_catalog`: structured catalog detail and record/source associations.
+- `fjms_bibliography`: publication references, mention type, page/volume details.
+- `fjms_catalog_refs`: catalog references.
+- `nli_catalog`: cached MARC catalog fields.
+- `nli_bibliography`: raw cached MARC citations.
+- `pgp_sources`, `fgp_sources`: edition/translation credits and scope; no full text.
+
+Returns `sys_id`, `section`, `provider`, `availability`, `generated_at`, `snapshot`,
+`offset`, `returned`, `available`, `next_offset`, `records`, and `warnings`. Unlike
+the main endpoints, there is no schema_version/results/count/total. Record fields
+vary by source; preserve them. `available` is a local section count, not a census.
+Availability is local_records/local_cache/unavailable/not_cached. In particular,
+NLI missing cache means no local information, not no bibliography; no remote
+fetch is triggered. Legacy lookup failures can also produce empty lists.
+
+One invocation fetches one page (at most ten records, bounded bytes). Use
+`--offset NEXT_OFFSET --snapshot RETURNED_SNAPSHOT` for the next page and stop at
+null. Snapshots last at most ten minutes and can be evicted sooner. On 409
+`details_expired`, restart at offset 0 without snapshot; do not mix versions.
+For 503 `details_pending` or `details_busy`, honor retry_after before repeating
+the request. Pending work is shared. For 429 also honor retry_after. Oversized
+sections/records fail with details_too_large; use the website instead of retrying.
+The script preserves HTTP status and Retry-After in error.http_status/retry_after,
+including non-JSON failures, and never automatically retries or fetches all pages.
+
+Use browse metadata.pgp.transcription_source/doc_relation for its selected PGP
+text. Source lists cover the manuscript: match pgpid/page_info/folio scope before
+assigning a particular scholar's credit. Bibliography entries are research leads,
+not proof that the exact passage was published.

@@ -1,0 +1,1132 @@
+# -*- coding: utf-8 -*-
+"""Per-session export payload storage.
+
+Reads/writes export payloads through ``web.safe_storage`` chokepoint helpers
+(``safe_user_get`` / ``safe_user_set`` / ``safe_user_pop``), which route to
+``app.storage.user`` per NiceGUI session. The Phase 87 chokepoint provides:
+
+  - prune-race protection (AssertionError absorbed -> default/no-op)
+  - aliased-import enforcement (lint scanner verifies no raw access)
+  - sole legal access pattern for per-user state outside the allowlist
+
+Phase 88 (this rewrite) removed the pre-Phase-88 test-backend shim and
+its production-code selector helper. Tests now monkeypatch
+``web.safe_storage.app`` directly (mirrors the Phase 87 pattern in
+tests/test_browse_state.py), so production-code shims are no longer
+required.
+
+Update functions adopt:
+  - ``isinstance(payload, dict)`` guard before mutating retrieved payloads
+    (defends against poisoned-shape storage state)
+  - copy-on-update (``payload = dict(payload)``) before reassigning
+    (defends against shared-reference races between same-session requests)
+
+Read functions adopt (Phase 88 D-11 extension, Refinement 4 -- Codex review):
+  - ``isinstance(payload, dict)`` guard on return -- returns None if storage
+    holds a non-dict value at the key (defends callers from
+    ``payload.get('results')`` TypeError on poisoned storage).
+"""
+import json
+import os
+import time
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple, Callable
+
+from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+
+_SEARCH_KEY = 'export_search_payload'
+_PARALLELS_KEY = 'export_parallels_payload'
+
+# Hard cap on per-session export payload size. A Hebrew wildcard search can
+# return 30K+ results; persisting the full list into app.storage.user
+# produced 500 MB JSON files that NiceGUI rehydrated into RAM on every
+# session load (forensic evidence captured 2026-05-18: a single user
+# storage file held a 498 MB results list out of 864 MB total).
+# Capping by row count was not enough by itself: a handful of rows can still
+# weigh many MB when each carries a full manuscript transcription.
+#
+# SEED-002 (2026-05-19, fixup 2026-05-19): the row compactors use explicit
+# allowlists storing query-specific fields plus the minimal identity fields
+# needed to rehydrate display metadata at export/serialize time:
+#   - search:    {uid, sys_id, sort_score, snippet, match_terms, raw_header}
+#   - parallels: {uid, sys_id, sort_score, score, snippet, match_terms,
+#                 source_ctx, text, raw_header, chunk_hits}
+# Display fields (shelfmark, title, library_code, library_name) rehydrate
+# from meta_mgr at export/serialize time via
+# ``web.export_service._resolve_result_display`` and the analogous fallback
+# in ``shared.search_serializer._serialize_item``. Full text rehydrates from
+# Tantivy via ``_resolve_result_full_text``. The ed6f89c4 field-strip
+# invariants are subsumed by the allowlist (full_text, raw_file_hl, content
+# are all absent post-compaction).
+#
+# Why ``sys_id`` AND ``raw_header`` on search rows (initial fix kept neither):
+#   - production text-search uids are ``IE..._P..._FL...`` with no sys_id digits
+#     so ``parse_full_id_components(uid)['sys_id']`` returns None for the common
+#     case (verified at genizah_core.py:3617-3666, 3652-3666). Without an
+#     identity field, every exported shelfmark collapsed to 'Unknown'.
+#   - metadata-only rows (Title/Shelfmark mode at genizah_core.py:7440-7462)
+#     have uid='' AND raw_header=''; only ``display.id`` carries the sys_id.
+#     The compactor extracts it into a top-level ``sys_id`` field so the
+#     metadata-only path survives compaction.
+#   - ``raw_header`` is also needed by ``shared.search_serializer._serialize_item``
+#     to populate ``locator.volume_ie`` / ``locator.p_num`` for the public
+#     /api/search export envelope.
+#
+# Why ``chunk_hits`` is kept on parallels (initial fix dropped it):
+#   - shared/search_serializer.py:828 reads ``sub.get('chunk_hits')`` to build
+#     the per-row ``matches`` array in /api/export/parallels/json. Dropping it
+#     collapses every row to one degenerate match. Capped at 100 entries x
+#     1000 chars (same caps as ed6f89c4) to bound storage.
+#
+# ``score`` and ``raw_header`` are INTENTIONALLY KEPT on parallels rows:
+#   - live parallels UI reads them at 13 sites in web/pages/parallels.py
+#     (score: 2827/2831/2865/2868/3123/3310/3372; raw_header:
+#     2841/3134/3140/3359/3373) via compact_parallels_result_rows feeding
+#     p_state.results
+#   - shared/search_serializer.py:691 sums score into the public
+#     /api/parallels aggregate_score; dropping it collapses sort order
+#
+# Why the 7 live-UI scalars (final_score, has_boundary_matches,
+# boundary_quality, boundary_match_count, filter_reason, is_text_filtered,
+# is_filtered) are kept on parallels rows (Codex round-2 catch + self-audit):
+#   - compact_parallels_result_rows() at web/pages/parallels.py:2338-2339
+#     overwrites main_results / filtered_results with the compacted version
+#     BEFORE assigning into p_state.results. The live UI then reads:
+#       * final_score / has_boundary_matches / boundary_quality /
+#         boundary_match_count at parallels.py:3124-3127 to render the
+#         "boost" score badge and boundary-match indicator chips.
+#       * filter_reason / is_text_filtered / is_filtered at
+#         parallels.py:3063-3071 to show the specific filter reason
+#         ("Found in source text" / "High frequency" / generic "Filtered")
+#         on filtered-result chips.
+#     Without these in the allowlist the boost badge disappears, boundary
+#     match counts collapse to 0, and filtered chips lose their specific
+#     reason text (`is_filtered` fall-through is currently benign because
+#     the post-loop default also says 'Filtered' -- but locking the contract
+#     prevents future drift if non-display callers ever depend on the flag).
+#     Cost: ~50 bytes/row of small scalars (1 float, 1 int, 3 bools,
+#     1 short string, 1 derived int).
+_EXPORT_RESULTS_CAP = 5000
+_PARALLELS_TEXT_STORAGE_CHARS = 4000
+_PARALLELS_CHUNK_HITS_CAP = 100
+_PARALLELS_CHUNK_TEXT_STORAGE_CHARS = 1000
+
+# Allowlists: only these keys are kept in stored / live-state rows.
+#
+# Phase 94 MUST-FIX 94-03-A (2026-05-20): 'img' + 'source' added so Wave 3's
+# main-sheet Image/Page + Source columns (web/export_service.py
+# export_search_results_excel restructure) render non-empty cells for
+# compacted rows. Without these keys top-level, the display dict is dropped
+# at compaction time and the cells render empty for any row that survives
+# a session-storage round-trip. Cost: ~tens of bytes per row (short scalar
+# strings like '1r' / 'ms' / 'pgp'). Synthesis from display.img /
+# display.source happens BEFORE allowlist filtering in
+# _compact_search_result_row, mirroring the SEED-002 sys_id synthesis at
+# _extract_sys_id_from_row.
+_SEARCH_ROW_ALLOWLIST = frozenset((
+    'uid', 'sys_id', 'sort_score', 'snippet', 'match_terms', 'raw_header',
+    'img', 'source',
+))
+_PARALLELS_ROW_ALLOWLIST = frozenset((
+    'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
+    'source_ctx', 'text', 'raw_header', 'chunk_hits',
+    # Live-UI scalars (see module docstring "Why the 7 live-UI scalars..."):
+    'final_score', 'has_boundary_matches', 'boundary_quality',
+    'boundary_match_count', 'filter_reason', 'is_text_filtered',
+    'is_filtered',
+    # Multi-witness provenance -- four FLAT SCALARS, the same class as the
+    # live-UI scalars above. `witness_ids` is a comma-joined string rather
+    # than a list on purpose: _compact_parallels_result_row trusts allowed
+    # values without sanitising them, so a nested container on a row can
+    # bypass the snapshot's own size budget. A witness's TEXT is never a row
+    # field -- it lives once in the witness list, not once per matched page.
+    'witness_id', 'witness_label', 'witness_count', 'witness_ids',
+    'fusion_score', 'best_witness_score',
+))
+
+# Pre-compiled at module load for the per-row compaction hot path. CORPUS
+# namespace only: an export row is always a Genizah record. See
+# shared/sys_id_patterns.py for why this must not be widened to 97.
+_SYS_ID_RE = CORPUS_SYS_ID_RE
+
+
+def _extract_sys_id_from_row(row: Dict[str, Any]) -> str:
+    """Best-effort sys_id extraction at compaction time.
+
+    Used to populate the top-level ``sys_id`` field before allowlist filtering
+    drops the heavy ``display`` dict. Looking in priority order:
+
+      1. ``row['sys_id']`` (already set by caller / earlier compaction step)
+      2. ``row['display']['id']`` (legacy / metadata-only rows -- the only
+         channel that carries sys_id when both uid and raw_header are empty)
+      3. ``row['raw_header']`` regex (normal text-search rows)
+      4. ``row['uid']`` regex (legacy rows where uid was a sys-id-bearing string)
+
+    Returns '' when no sys_id can be derived. The resolver / serializer then
+    falls back to the 'Unknown' / 'ID: {sys_id}' chain.
+    """
+    existing = row.get('sys_id')
+    if isinstance(existing, str) and existing:
+        return existing
+    display = row.get('display')
+    if isinstance(display, dict):
+        did = display.get('id')
+        if isinstance(did, str) and did:
+            return did
+    raw_header = row.get('raw_header')
+    if isinstance(raw_header, str) and raw_header:
+        m = _SYS_ID_RE.search(raw_header)
+        if m:
+            return m.group(1)
+    uid = row.get('uid')
+    if isinstance(uid, str) and uid:
+        m = _SYS_ID_RE.search(uid)
+        if m:
+            return m.group(1)
+    return ''
+
+
+def _compact_chunk_hit(hit: Any) -> Tuple[Any, bool]:
+    """Compact one parallels chunk_hit while preserving tuple/list shape.
+
+    Restored from ed6f89c4 for SEED-002 fixup. chunk_hits tuples are
+    (chunk_index, source_chunk_text, score, manuscript_snippet); indices 1
+    and 3 are strings capped at ``_PARALLELS_CHUNK_TEXT_STORAGE_CHARS``.
+    """
+    changed = False
+    if isinstance(hit, tuple):
+        items = list(hit)
+        original_type = tuple
+    elif isinstance(hit, list):
+        items = list(hit)
+        original_type = list
+    else:
+        return hit, False
+
+    for idx in (1, 3):
+        if idx < len(items) and isinstance(items[idx], str):
+            truncated = items[idx][:_PARALLELS_CHUNK_TEXT_STORAGE_CHARS]
+            if truncated != items[idx]:
+                items[idx] = truncated
+                changed = True
+
+    return (tuple(items) if original_type is tuple else items), changed
+
+
+def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
+    """Return an allowlist-pruned search result row plus a changed flag.
+
+    SEED-002 fixup (2026-05-19): kept keys are the allowlist intersection of
+    the input dict, plus a synthesized ``sys_id`` extracted from
+    ``display.id`` / ``raw_header`` / ``uid`` BEFORE the display dict is
+    dropped. All other fields (display, full_text, full_text_excerpt,
+    raw_file_hl, content, score, etc.) are dropped — they rehydrate from
+    meta_mgr / Tantivy at export time.
+    """
+    if not isinstance(row, dict):
+        return row, False
+
+    # Synthesize sys_id BEFORE allowlist filtering -- this is the only chance
+    # to read display.id (the canonical channel for metadata-only rows, which
+    # have uid='' AND raw_header='').
+    synth_sys_id = _extract_sys_id_from_row(row)
+
+    kept: Dict[str, Any] = {}
+    for key in _SEARCH_ROW_ALLOWLIST:
+        if key in row:
+            kept[key] = row[key]
+    if synth_sys_id and not kept.get('sys_id'):
+        kept['sys_id'] = synth_sys_id
+
+    # Phase 94 MUST-FIX 94-03-A: synthesize img + source from display BEFORE
+    # the display dict is dropped. Top-level values (already copied into
+    # `kept` via the allowlist loop above) win; synthesis only kicks in when
+    # the top-level key is absent. Mirrors the SEED-002 sys_id synthesis
+    # pattern. Wave 3's main-sheet Image/Page + Source columns read these
+    # via the bounded fallback `display.get(...) or res.get(...)` so cells
+    # are non-empty regardless of compaction state.
+    display = row.get('display')
+    if isinstance(display, dict):
+        if 'img' not in kept:
+            img_v = display.get('img')
+            if isinstance(img_v, str) and img_v:
+                kept['img'] = img_v
+        if 'source' not in kept:
+            src_v = display.get('source')
+            if isinstance(src_v, str) and src_v:
+                kept['source'] = src_v
+
+    changed = bool(set(row.keys()) - _SEARCH_ROW_ALLOWLIST)
+    # Also flag changed when we ADDED sys_id (caller didn't supply it but we
+    # synthesized one) -- ensures downstream truncated/changed tracking is
+    # honest about the rewrite.
+    if synth_sys_id and not row.get('sys_id'):
+        changed = True
+    return kept, changed
+
+
+def _compact_parallels_result_row(row: Any) -> Tuple[Any, bool]:
+    """Return an allowlist-pruned parallels result row plus a changed flag.
+
+    SEED-002 fixup (2026-05-19): kept keys are the allowlist intersection of
+    the input dict; ``source_ctx`` and ``text`` retain the 4000-char
+    truncation cap from ed6f89c4. ``chunk_hits`` is kept (capped at
+    ``_PARALLELS_CHUNK_HITS_CAP`` entries x
+    ``_PARALLELS_CHUNK_TEXT_STORAGE_CHARS`` chars per index, matching
+    ed6f89c4) because the public ``/api/export/parallels/json`` serializer
+    reads it at ``shared/search_serializer.py:828``. ``sys_id`` is synthesized
+    from display.id / raw_header before display is dropped. All other fields
+    (display, full_text, raw_file_hl, content, etc.) are dropped.
+    """
+    if not isinstance(row, dict):
+        return row, False
+
+    synth_sys_id = _extract_sys_id_from_row(row)
+
+    kept: Dict[str, Any] = {}
+    for key in _PARALLELS_ROW_ALLOWLIST:
+        if key in row:
+            kept[key] = row[key]
+    if synth_sys_id and not kept.get('sys_id'):
+        kept['sys_id'] = synth_sys_id
+
+    changed = bool(set(row.keys()) - _PARALLELS_ROW_ALLOWLIST)
+    if synth_sys_id and not row.get('sys_id'):
+        changed = True
+
+    # Preserve the source_ctx / text 4000-char cap for storage safety —
+    # these fields are the longest survivors in the new allowlist and a
+    # pathological caller could still push KB-range strings here.
+    for key in ('source_ctx', 'text'):
+        value = kept.get(key)
+        if isinstance(value, str):
+            truncated = value[:_PARALLELS_TEXT_STORAGE_CHARS]
+            if truncated != value:
+                # A blind slice can cut between a highlight span's
+                # opening and closing `*`, leaving an odd marker
+                # count -- and every marker consumer (the xlsx
+                # rich-text renderer, the page's HTML highlighter)
+                # splits on `*` and would style the entire tail
+                # after the orphan as highlighted. Close the cut
+                # span: the highlighted run genuinely was truncated.
+                if truncated.count('*') % 2 == 1:
+                    truncated += '*'
+                kept[key] = truncated
+                changed = True
+
+    # chunk_hits cap: 100 entries x 1000 chars per text index, restored from
+    # ed6f89c4 to bound worst-case storage at ~200 KB/row. Without this a
+    # composition-search row with thousands of chunk_hits could blow past
+    # the 5MB-per-row target on its own.
+    chunk_hits = kept.get('chunk_hits')
+    if isinstance(chunk_hits, list):
+        source_hits = chunk_hits[:_PARALLELS_CHUNK_HITS_CAP]
+        if len(source_hits) != len(chunk_hits):
+            changed = True
+        compact_hits = []
+        for hit in source_hits:
+            compact_hit, hit_changed = _compact_chunk_hit(hit)
+            compact_hits.append(compact_hit)
+            changed = changed or hit_changed
+        kept['chunk_hits'] = compact_hits
+
+    return kept, changed
+
+
+def _identity_result_row(row: Any) -> Tuple[Any, bool]:
+    return row, False
+
+
+def _compact_results(
+    results: Any,
+    row_compactor: Callable[[Any], Tuple[Any, bool]],
+) -> Tuple[List[Any], bool, int, bool]:
+    """Cap and compact a result list.
+
+    Returns ``(rows, was_truncated, original_length, was_changed)``.
+    """
+    if not isinstance(results, list):
+        return [], False, 0, results is not None
+    n = len(results)
+    truncated = n > _EXPORT_RESULTS_CAP
+    source_rows = results[:_EXPORT_RESULTS_CAP] if truncated else results
+    compacted: List[Any] = []
+    changed = truncated
+    for row in source_rows:
+        compact_row, row_changed = row_compactor(row)
+        compacted.append(compact_row)
+        changed = changed or row_changed
+    return compacted, truncated, n, changed
+
+
+def _cap_results(results: Any) -> Tuple[List[Dict[str, Any]], bool, int]:
+    """Truncate ``results`` to ``_EXPORT_RESULTS_CAP``.
+
+    Returns ``(capped_list, was_truncated, original_length)``.
+    Non-list inputs degrade to ``([], False, 0)`` so callers stay total.
+    """
+    capped, truncated, original, _changed = _compact_results(results, _identity_result_row)
+    return capped, truncated, original
+
+
+def compact_parallels_result_rows(results: Any) -> List[Any]:
+    """Return parallels rows stripped of heavyweight fields for live UI state."""
+    if not isinstance(results, list):
+        return []
+    compacted = []
+    for row in results:
+        compact_row, _changed = _compact_parallels_result_row(row)
+        compacted.append(compact_row)
+    return compacted
+
+
+def _compact_search_export_payload(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    compacted, truncated, original, changed = _compact_results(
+        payload.get('results'),
+        _compact_search_result_row,
+    )
+    new_payload = dict(payload)
+    if changed or new_payload.get('results') is not compacted:
+        new_payload['results'] = compacted
+    if truncated:
+        new_payload['truncated'] = True
+        new_payload['total_count'] = original
+    else:
+        new_payload['total_count'] = int(new_payload.get('total_count') or original)
+        new_payload['truncated'] = bool(new_payload.get('truncated', False))
+    return new_payload, changed
+
+
+def _compact_parallels_export_payload(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    results_capped, results_trunc, results_total, results_changed = _compact_results(
+        payload.get('results'),
+        _compact_parallels_result_row,
+    )
+    filtered_capped, filtered_trunc, filtered_total, filtered_changed = _compact_results(
+        payload.get('filtered'),
+        _compact_parallels_result_row,
+    )
+    changed = results_changed or filtered_changed
+    new_payload = dict(payload)
+    new_payload['results'] = results_capped
+    new_payload['filtered'] = filtered_capped
+    new_payload['truncated'] = bool(new_payload.get('truncated', False)) or results_trunc or filtered_trunc
+    new_payload['total_count'] = int(new_payload.get('total_count') or results_total)
+    new_payload['filtered_total_count'] = int(new_payload.get('filtered_total_count') or filtered_total)
+    if results_trunc:
+        new_payload['total_count'] = results_total
+    if filtered_trunc:
+        new_payload['filtered_total_count'] = filtered_total
+    return new_payload, changed
+
+
+def compact_user_storage_export_payloads(storage_payload: Any) -> bool:
+    """Compact export payloads inside one NiceGUI user-storage dictionary.
+
+    Returns True when the payload was modified. This is used both on normal
+    writes and by startup maintenance for legacy oversized sessions.
+    """
+    if not isinstance(storage_payload, dict):
+        return False
+    changed = False
+    search_payload = storage_payload.get(_SEARCH_KEY)
+    if isinstance(search_payload, dict):
+        compacted, did_change = _compact_search_export_payload(search_payload)
+        if did_change:
+            storage_payload[_SEARCH_KEY] = compacted
+            changed = True
+    parallels_payload = storage_payload.get(_PARALLELS_KEY)
+    if isinstance(parallels_payload, dict):
+        compacted, did_change = _compact_parallels_export_payload(parallels_payload)
+        if did_change:
+            storage_payload[_PARALLELS_KEY] = compacted
+            changed = True
+    return changed
+
+
+# Age-based retention for on-disk NiceGUI storage-user files (2026-07-08).
+# NiceGUI prunes in-memory storage but never deletes on-disk files, so
+# one-visit anonymous/bot sessions accumulate forever (53K files / 260 MB on
+# prod when this shipped). mtime is refreshed on every session LOAD
+# (FilePersistentDict.initialize() re-writes via its change handler), so
+# mtime == "last visit" and old files belong to browsers absent for the whole
+# retention window. NOTE: deleting a file clears that browser's auth_session
+# too — a user absent longer than the retention window is logged out on
+# return (server-side lists/corrections live in Supabase and are unaffected).
+_STORAGE_RETENTION_DEFAULT_DAYS = 90
+
+
+def storage_retention_days_from_env() -> int:
+    """Read GENIZAH_STORAGE_RETENTION_DAYS (default 90; 0 disables)."""
+    raw = os.environ.get('GENIZAH_STORAGE_RETENTION_DAYS', '')
+    try:
+        value = int(raw) if raw.strip() else _STORAGE_RETENTION_DEFAULT_DAYS
+    except ValueError:
+        value = _STORAGE_RETENTION_DEFAULT_DAYS
+    return max(0, value)
+
+
+def compact_nicegui_export_storage(
+    storage: Any,
+    retention_days: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Compact loaded and on-disk NiceGUI export payloads.
+
+    The function deliberately touches NiceGUI's storage internals rather than
+    ``app.storage.user`` because it runs outside any single UI session.
+
+    When ``retention_days`` is a positive integer, on-disk
+    ``storage-user-*.json`` files whose mtime is older than the window are
+    deleted instead of compacted (skipping sessions currently loaded in
+    memory). Intended to run at startup, before clients connect.
+    """
+    summary = {
+        'loaded_users_checked': 0,
+        'loaded_users_compacted': 0,
+        'files_checked': 0,
+        'files_compacted': 0,
+        'files_deleted': 0,
+        'bytes_before': 0,
+        'bytes_after': 0,
+        'bytes_deleted': 0,
+        'errors': 0,
+    }
+
+    loaded_session_ids = set()
+    for _session_id, payload in list((getattr(storage, '_users', {}) or {}).items()):
+        loaded_session_ids.add(str(_session_id))
+        summary['loaded_users_checked'] += 1
+        try:
+            if compact_user_storage_export_payloads(payload):
+                summary['loaded_users_compacted'] += 1
+        except Exception:
+            summary['errors'] += 1
+
+    storage_path = Path(getattr(storage, 'path', '.nicegui'))
+    if not storage_path.exists():
+        return summary
+
+    cutoff = None
+    if retention_days and retention_days > 0:
+        cutoff = time.time() - retention_days * 86400
+
+    for filepath in storage_path.glob('storage-user-*.json'):
+        summary['files_checked'] += 1
+        try:
+            stat = filepath.stat()
+            before = stat.st_size
+            summary['bytes_before'] += before
+            if cutoff is not None and stat.st_mtime < cutoff:
+                # storage-user-<session_id>.json — never delete a session
+                # that is currently loaded in memory.
+                session_id = filepath.stem[len('storage-user-'):]
+                if session_id not in loaded_session_ids:
+                    filepath.unlink()
+                    summary['files_deleted'] += 1
+                    summary['bytes_deleted'] += before
+                    continue
+            with filepath.open('r', encoding='utf-8') as handle:
+                payload = json.load(handle)
+            if not compact_user_storage_export_payloads(payload):
+                summary['bytes_after'] += before
+                continue
+
+            tmp_path = filepath.with_name(
+                f"{filepath.name}.tmp.{os.getpid()}"
+            )
+            with tmp_path.open('w', encoding='utf-8') as handle:
+                json.dump(payload, handle, ensure_ascii=False, separators=(',', ':'))
+            os.replace(tmp_path, filepath)
+            after = filepath.stat().st_size
+            summary['bytes_after'] += after
+            summary['files_compacted'] += 1
+        except Exception:
+            summary['errors'] += 1
+            try:
+                summary['bytes_after'] += filepath.stat().st_size
+            except Exception:
+                pass
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Search export payload
+# ---------------------------------------------------------------------------
+
+def set_search_export(
+    results: List[Dict[str, Any]],
+    query: str,
+    mode: str = 'text',
+    gap: Optional[int] = None,
+    filters: Optional[Dict[str, Any]] = None,
+    warnings: Optional[List[str]] = None,
+    selected_uids: Optional[List[str]] = None,
+    # Phase 94 EXPORT-META-06: enrichment signals for the xlsx + JSON export
+    # pipeline. Defaults to empty containers -- search.py post-enrichment
+    # site calls update_search_export_enrichment(...) once the live values
+    # are computed. Accept set or list; cast to sorted list internally for
+    # JSON-safety (NiceGUI storage round-trips through JSON).
+    transcription_sys_ids: Optional[Any] = None,
+    printed_ids: Optional[Any] = None,
+    result_domains: Optional[Dict[str, List[str]]] = None,
+    # Smoke verification round 2 (2026-05-21):
+    # qualified-EN-name -> HE-display-name dict for the xlsx Hebrew domain
+    # substitution. Built at search time in
+    # ``web/pages/search.py:_process_domain_data`` from FJMS sidecar
+    # ``domain_heb`` / ``parent_domain_heb`` columns. None / empty means no
+    # Hebrew substitution (English names pass through verbatim).
+    domain_name_map: Optional[Dict[str, str]] = None,
+) -> None:
+    """Write the search export payload to this user's session.
+
+    Results are capped to ``_EXPORT_RESULTS_CAP`` before storage to prevent
+    the per-session leak that grew RSS unbounded under heavy wildcard
+    searches. ``truncated`` and ``total_count`` are emitted so downstream
+    consumers can surface a "showing first N of M" hint if they choose.
+
+    Phase 94 EXPORT-META-06 added 3 enrichment signal kwargs
+    (``transcription_sys_ids``, ``printed_ids``, ``result_domains``) which
+    propagate into the xlsx and JSON export pipelines. All three default
+    to empty containers; the post-enrichment site in
+    ``web/pages/search.py`` calls ``update_search_export_enrichment(...)``
+    once the live values are computed.
+
+    Smoke verification round 2 (2026-05-21) added a 4th additive kwarg
+    ``domain_name_map`` (qualified-EN-name -> HE-display-name). When the
+    xlsx is exported with ``lang='he'``, the main-sheet Domains column
+    substitutes names through this map; English exports ignore it.
+    """
+    capped, truncated, original, _changed = _compact_results(
+        results,
+        _compact_search_result_row,
+    )
+    # Phase 94 EXPORT-META-06: cast sets to sorted lists for JSON-safety
+    # (NiceGUI storage round-trips through JSON).
+    _trans_list = sorted(set(transcription_sys_ids)) if transcription_sys_ids else []
+    _printed_list = sorted(set(printed_ids)) if printed_ids else []
+    _domains_dict = dict(result_domains) if result_domains else {}
+    _domain_name_map = dict(domain_name_map) if domain_name_map else {}
+    safe_user_set(_SEARCH_KEY, {
+        'results': capped,
+        'query': query,
+        'mode': mode,
+        'gap': gap,
+        'filters': filters,
+        'warnings': warnings or [],
+        'selected_uids': selected_uids,
+        'truncated': truncated,
+        'total_count': original,
+        # Phase 94 EXPORT-META-06 -- enrichment signals
+        'transcription_sys_ids': _trans_list,
+        'printed_ids': _printed_list,
+        'result_domains': _domains_dict,
+        # Smoke verification round 2 (2026-05-21) -- Hebrew domain substitution.
+        'domain_name_map': _domain_name_map,
+    })
+
+
+def get_search_export() -> Optional[Dict[str, Any]]:
+    """Read this session's search export payload, or None if unset/pruned.
+
+    Phase 88 D-11 extension (Codex review): returns None if storage holds a
+    non-dict at the key (poisoned-shape defense). Callers in web/api.py do
+    ``payload.get('results')`` and would crash on a non-dict; this guard makes
+    the contract explicit -- return type is dict-or-None, never list/str/etc.
+    """
+    payload = safe_user_get(_SEARCH_KEY, None)
+    if not isinstance(payload, dict):
+        return None
+    compacted, changed = _compact_search_export_payload(payload)
+    if changed:
+        safe_user_set(_SEARCH_KEY, compacted)
+    return compacted
+
+
+def update_search_export_results(results: List[Dict[str, Any]]) -> None:
+    """Patch only the ``results`` field (post-display-filter sync).
+
+    Applies the same cap as ``set_search_export``; a filter that re-inflates
+    above the cap (rare but possible after an undo) is still bounded.
+    """
+    payload = safe_user_get(_SEARCH_KEY, None)
+    if not isinstance(payload, dict):
+        return  # D-11: poisoned-shape or missing payload
+    payload = dict(payload)  # D-12: copy-on-update
+    capped, truncated, original, _changed = _compact_results(
+        results,
+        _compact_search_result_row,
+    )
+    payload['results'] = capped
+    payload['truncated'] = truncated
+    payload['total_count'] = original
+    safe_user_set(_SEARCH_KEY, payload)
+
+
+def update_search_export_selection(selected_uids: Optional[List[str]]) -> None:
+    """Patch only the ``selected_uids`` field (per-row checkbox sync)."""
+    payload = safe_user_get(_SEARCH_KEY, None)
+    if not isinstance(payload, dict):
+        return
+    payload = dict(payload)
+    payload['selected_uids'] = selected_uids
+    safe_user_set(_SEARCH_KEY, payload)
+
+
+def update_search_export_enrichment(
+    transcription_sys_ids: Optional[Any] = None,
+    printed_ids: Optional[Any] = None,
+    result_domains: Optional[Dict[str, List[str]]] = None,
+    domain_name_map: Optional[Dict[str, str]] = None,
+) -> None:
+    """Patch enrichment fields after async post-search enrichment completes.
+
+    Phase 94 EXPORT-META-06. Called from web/pages/search.py after the
+    Stage-1 visible-page enrichment block and after the Stage-2 background-
+    chunk loop. Each kwarg is patched independently -- passing None for a
+    field leaves the existing value untouched (so the Stage-2 call can
+    re-emit all 3 fields without clobbering Stage-1 state for a field that
+    somehow regressed between stages).
+
+    Smoke verification round 2 (2026-05-21) added the ``domain_name_map``
+    kwarg (qualified-EN-name -> HE-display-name) for the xlsx-export Hebrew
+    domain substitution path. Same opt-in semantics: passing None leaves
+    the existing map untouched.
+
+    Follows the Phase 88 D-11 (isinstance guard) + D-12 (copy-on-update)
+    invariants -- same pattern as update_search_export_selection.
+    """
+    payload = safe_user_get(_SEARCH_KEY, None)
+    if not isinstance(payload, dict):
+        return  # D-11: poisoned-shape or missing payload (silent no-op)
+    payload = dict(payload)  # D-12: copy-on-update
+    if transcription_sys_ids is not None:
+        payload['transcription_sys_ids'] = sorted(set(transcription_sys_ids))
+    if printed_ids is not None:
+        payload['printed_ids'] = sorted(set(printed_ids))
+    if result_domains is not None:
+        payload['result_domains'] = dict(result_domains)
+    if domain_name_map is not None:
+        payload['domain_name_map'] = dict(domain_name_map)
+    safe_user_set(_SEARCH_KEY, payload)
+
+
+def clear_search_export() -> None:
+    """Remove the search export payload (New Search reset)."""
+    safe_user_pop(_SEARCH_KEY, None)
+
+
+# ---------------------------------------------------------------------------
+# Parallels export payload
+# ---------------------------------------------------------------------------
+
+def set_parallels_export(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Write the parallels export payload to this user's session.
+
+    The ``meta`` dict carries ``source_text`` plus envelope-echo metadata
+    (chunk_size, mode, max_freq, filters, boundary_options, warnings).
+    Per Phase 88 D-13, ``source_text`` is folded into ``meta`` instead of
+    living in a separate ``app.storage.user['parallels_source_text']`` key.
+
+    Both ``results`` and ``filtered`` are independently capped to
+    ``_EXPORT_RESULTS_CAP`` to bound payload size.
+    """
+    results_capped, results_trunc, results_total, _results_changed = _compact_results(
+        results,
+        _compact_parallels_result_row,
+    )
+    filtered_capped, filtered_trunc, filtered_total, _filtered_changed = _compact_results(
+        filtered,
+        _compact_parallels_result_row,
+    )
+    safe_user_set(_PARALLELS_KEY, {
+        'results': results_capped,
+        'filtered': filtered_capped,
+        'meta': meta,
+        'truncated': results_trunc or filtered_trunc,
+        'total_count': results_total,
+        'filtered_total_count': filtered_total,
+    })
+
+
+def get_parallels_export() -> Optional[Dict[str, Any]]:
+    """Read this session's parallels export payload, or None.
+
+    Phase 88 D-11 extension (Codex review): see get_search_export() -- same
+    poisoned-shape defense applies. Returns dict-or-None invariant.
+    """
+    payload = safe_user_get(_PARALLELS_KEY, None)
+    if not isinstance(payload, dict):
+        return None
+    compacted, changed = _compact_parallels_export_payload(payload)
+    if changed:
+        safe_user_set(_PARALLELS_KEY, compacted)
+    return compacted
+
+
+def _same_parallels_search(existing_meta: Dict[str, Any],
+                           offered_meta: Dict[str, Any]) -> bool:
+    """One identity rule for "is this payload from the SAME search?".
+
+    PR #325 review round 2 (Codex P2): source_text alone is too weak -- two
+    tabs of one user can search identical text with different widths, modes
+    or filters, and app.storage.user holds whichever tab wrote last, so a
+    source_text-only match let one tab's restore preserve (or recover) the
+    OTHER tab's rows. Fresh searches now stamp a `search_fingerprint` (a
+    stable hash over text + engine + width + chunk/mode/freq + filters);
+    when BOTH sides carry one, the fingerprints decide. The source_text
+    fallback survives only when BOTH sides predate the fingerprint; a pair
+    with exactly one fails closed (round 6 -- see the inline comment).
+    """
+    a = (existing_meta or {}).get('search_fingerprint')
+    b = (offered_meta or {}).get('search_fingerprint')
+    if a and b:
+        return a == b
+    if a or b:
+        # Mixed pair (round 6, Codex P2): every post-fingerprint writer
+        # stamps one -- fresh searches, the history restore, and the legacy
+        # bootstrap (which folds in the sibling
+        # `parallels_results_fingerprint` key when its fallback rows were
+        # written by stamped code). One-sided therefore means the two
+        # payloads straddle the fingerprint deploy and CANNOT be verified as
+        # the same search; source_text alone would let a same-text search
+        # with different width/mode/filters adopt the other tab's rows.
+        return False
+    return ((existing_meta or {}).get('source_text')
+            == (offered_meta or {}).get('source_text'))
+
+
+#: Inputs whose ORDER is meaningless to the search. Hashing them raw splits
+#: one search into many identities, so recovery silently never fires.
+_PARALLELS_FINGERPRINT_SET_INPUTS = ('library_filter', 'restrict', 'excluded')
+
+
+def _canonical_parallels_filters(filters):
+    """Sort every list inside the advanced-filter dict (order-insensitive)."""
+    if not isinstance(filters, dict):
+        return None
+    return {k: (sorted(v) if isinstance(v, list) else v)
+            for k, v in filters.items()}
+
+
+def _canonical_witnesses(witnesses) -> list:
+    """[(kind, identity...)] for the fingerprint -- see its docstring.
+
+    Every witness is identified by a digest of the TEXT THAT WAS SEARCHED,
+    promoted and pasted alike.
+
+    A promoted manuscript used to be identified by its sys_id alone, on the
+    reasoning that the sys_id is stable and the text re-fetchable from it.
+    The second half is false: a promoted witness is the concatenation of the
+    pages that MATCHED, which is a property of the result set on screen when
+    it was promoted. The same manuscript promoted from a seed-only result set
+    and from a richer one is two different witnesses, and under the old rule
+    the two searches hashed identically -- so `recover_richer_parallels_rows`
+    would judge them the same search and restore the wrong set's rows.
+
+    The sys_id stays in the tuple: it keeps a promoted witness from colliding
+    with a pasted one whose text happens to be that sys_id, and it keeps the
+    payload legible when a mismatch has to be debugged.
+
+    A promoted witness with no text falls back to ('promoted', sys_id) --
+    exactly today's identity -- so a snapshot written before witnesses
+    carried their text keeps hashing as it did, instead of collapsing every
+    textless promotion onto a digest of ''.
+    """
+    from shared.passage_fusion import text_digest
+
+    out = []
+    for w in witnesses or []:
+        if not isinstance(w, dict):
+            out.append(('pasted', text_digest(str(w))))
+            continue
+        sys_id = w.get('sys_id')
+        text = w.get('text') or ''
+        if w.get('kind') == 'manuscript' and sys_id:
+            if text.strip():
+                out.append(('promoted', str(sys_id), text_digest(text)))
+            else:
+                out.append(('promoted', str(sys_id)))
+        else:
+            out.append(('pasted', text_digest(text)))
+    return out
+
+
+# What every search ran with before variant preferences were kept per visitor
+# (the server's settings file, read 2026-09-28), written out in full so that a
+# later change to the website defaults cannot change which old fingerprints a
+# search matches.
+_SETTINGS_BEFORE_PER_VISITOR = {
+    'variant_min_word_len': 2,
+    'variant_aggressive': True,
+    'custom_variants': {
+        **{pair: True for pair in ('ב=כ', 'ה=ח', 'ד=ר', 'ס=ם')},
+        'ה' + chr(0x0308) + '=ה': True,
+        **{letter + chr(0x0307) + '=' + letter: True for letter in 'תדטכצץ'},
+    },
+    'comp_min_score': 70,
+}
+
+
+# Which of the visitor's preferences each /parallels engine reads: the word-level
+# (chunk) search expands variants with the first three (not in Exact mode), Lab
+# reads only its minimum score, and the letter-level (passage) search none.
+_PREFERENCES_READ = {
+    'chunk': ('variant_min_word_len', 'variant_aggressive', 'custom_variants'),
+    'lab': ('comp_min_score',),
+}
+
+
+def _preferences_read(engine, mode, preferences):
+    """The part of *preferences* the *engine* in *mode* actually reads."""
+    if engine == 'chunk' and mode in ('exact', 'literal'):
+        return {}
+    read = _PREFERENCES_READ.get(engine, ())
+    return {k: v for k, v in preferences.items() if k in read}
+
+
+def compute_parallels_search_fingerprint(
+    *,
+    text,
+    engine,
+    width=None,
+    length=None,
+    depth=None,
+    chunk_size=None,
+    mode=None,
+    max_freq=None,
+    filter_text='',
+    deep_scan=False,
+    boundary_mode=None,
+    boundary_delimiter=None,
+    boundary_boost=None,
+    min_boundary_matches=None,
+    min_delimiter_distance=None,
+    variant_level=None,
+    variant_max_changes=None,
+    variant_preferences=None,
+    library_mode=None,
+    library_filter=None,
+    restrict=None,
+    excluded=None,
+    filters=None,
+    witnesses=None,
+) -> str:
+    """Return the 16-hex identity of ONE parallels search.
+
+    THE one definition of "same search" for the preserve/recover logic. It
+    lives here, not in a page closure, for three reasons the PR #325 review
+    surfaced:
+
+    * it must be EXECUTABLE by tests -- a source-text pin over a closure
+      cannot prove that changing an input changes the hash;
+    * canonicalization must be structural, not remembered at each call site
+      (set-like inputs are sorted HERE, so no caller can forget);
+    * two call sites build it (a fresh search and a composition-history
+      restore), and an identity rule defined twice is an identity rule that
+      drifts.
+
+    Every parameter is keyword-only, so a positional call cannot shift values
+    between inputs. Callers must pass values CAPTURED AT DISPATCH: a live
+    widget read describes a configuration the search may not have used
+    (PR #325 review rounds 4-5).
+    """
+    import hashlib
+    import json
+
+    payload = {
+        'text': text or '',
+        'engine': engine,
+        'width': width,
+        'chunk_size': chunk_size,
+        'mode': mode,
+        'max_freq': max_freq,
+        'filter_text': filter_text or '',
+        'deep_scan': bool(deep_scan),
+        'boundary_mode': boundary_mode,
+        'boundary_delimiter': boundary_delimiter,
+        'boundary_boost': boundary_boost,
+        'min_boundary_matches': min_boundary_matches,
+        'min_delimiter_distance': min_delimiter_distance,
+        'variant_level': variant_level,
+        'variant_max_changes': variant_max_changes,
+        'library_mode': library_mode,
+        'library_filter': library_filter,
+        'restrict': restrict,
+        'excluded': excluded,
+        'filters': _canonical_parallels_filters(filters),
+    }
+    # The WITNESS SET is part of a search's identity: the same seed text
+    # searched with three witnesses and with seventeen produces different
+    # results, and recovering one set's rows for the other would be silently
+    # wrong. Enters the payload only when non-empty, so every fingerprint
+    # recorded before witnesses existed keeps matching.
+    #
+    # Each witness canonicalises to ('promoted', sys_id) or ('pasted',
+    # digest-of-text) and the list is SORTED, so the order they were added in
+    # does not change the identity.
+    #
+    # Labels are deliberately NOT hashed and are not sufficient on their own:
+    # they are user-editable, so two different pastes can share one, and a
+    # metadata-only entry does not identify the text that was actually
+    # searched -- recover_richer_parallels_rows would then hand back rows
+    # belonging to a different witness set. Text is hashed rather than
+    # stored, so the payload stays small.
+    if witnesses:
+        payload['witnesses'] = sorted(_canonical_witnesses(witnesses))
+    # `length` (the letter-level passage-length profile) joined this
+    # signature on 2026-08-24 and enters the payload ONLY when it is not the
+    # default. Two searches differing in it are genuinely different searches
+    # and must not collide -- but every fingerprint recorded before the
+    # parameter existed has to keep matching, or a stored composition-history
+    # entry stops recognising its own results.
+    if length not in (None, 'normal'):
+        payload['length'] = length
+    # `depth` (the letter-level search-depth profile) joined the same day,
+    # under the same rule: absent at its default so every earlier
+    # fingerprint keeps matching, present whenever the search genuinely ran
+    # with bigger budgets.
+    if depth not in (None, 'normal'):
+        payload['depth'] = depth
+    # The visitor's Settings-page variant preferences (per visitor since
+    # 2026-10-06) enter only when they differ from what every earlier search ran
+    # with -- the website defaults with Aggressive Mode on (the server's settings
+    # until then) -- under the same rule: an old fingerprint keeps matching a
+    # search with the same settings, and only that. Only the preferences the
+    # engine reads count: a setting it never read is not part of the search.
+    if variant_preferences:
+        changed = {k: v for k, v in _preferences_read(engine, mode, variant_preferences).items()
+                   if _SETTINGS_BEFORE_PER_VISITOR.get(k) != v}
+        if changed:
+            payload['variant_preferences'] = changed
+    for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
+        value = payload.get(key)
+        if value is not None:
+            payload[key] = sorted(value)
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                   default=str).encode('utf-8')
+    ).hexdigest()[:16]
+
+
+def recover_richer_parallels_rows(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> tuple:
+    """-> (results, filtered, recovered). Display recovery after a reload.
+
+    The display snapshot is 500 rows by design; the export payload persists
+    up to 5,000 rows of the SAME search and survives the reload. Payload rows
+    are display-safe by construction: after every fresh search the page
+    stores exactly these compacted rows as its own display state
+    (web/pages/parallels.py, compact_parallels_result_rows). So when the
+    payload is the same search and holds more, the page should show IT, not
+    the trimmed snapshot -- recovering the pager's tail instead of merely
+    apologising for losing it.
+
+    Never mixes searches (_same_parallels_search) and never downgrades: on
+    any mismatch or a smaller payload, the offered rows come back unchanged.
+    """
+    existing = get_parallels_export()
+    if isinstance(existing, dict) and _same_parallels_search(
+            existing.get('meta') or {}, meta or {}):
+        # Round 4 (Codex P2): compare BOTH buckets. Main-only missed the
+        # 400-main/800-filtered case -- equal mains, so recovery skipped
+        # the 300 filtered rows the payload already held. Same-search
+        # lists are prefixes of the same full lists, so a combined sum
+        # never downgrades one bucket to grow the other.
+        existing_rows = existing.get('results') or []
+        existing_filtered = existing.get('filtered') or []
+        if (len(existing_rows) + len(existing_filtered)
+                > len(results or []) + len(filtered or [])):
+            return existing_rows, existing_filtered, True
+    return (results or [], filtered or [], False)
+
+
+def parallels_restore_shortfall(
+    snapshot: Dict[str, Any],
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+) -> tuple:
+    """-> (shown, recorded_total) across BOTH buckets.
+
+    PR #325 round 2 (Codex P2): the restore notice compared only
+    results_total, so a search whose FILTERED bucket lost its tail to the
+    snapshot cap was announced as complete. One helper owns the arithmetic
+    so the both-buckets rule is unit-testable instead of living inline in a
+    page closure no test executes.
+    """
+    total = (int((snapshot or {}).get('results_total') or 0)
+             + int((snapshot or {}).get('filtered_total') or 0))
+    shown = len(results or []) + len(filtered or [])
+    return shown, total
+
+
+def preserve_or_set_parallels_export(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """RESTORE-path writer: keep an existing richer payload for the SAME search.
+
+    PR #325 review (Codex P2). The page's display snapshot is capped at 500
+    rows by design (the 778 MB search_history.json lesson), but the export
+    payload persists up to 5,000 rows in app.storage.user and SURVIVES a
+    reload intact. The restore path used to call set_parallels_export() with
+    the 500-row display fallback, overwriting the intact full payload -- so a
+    594-row Birkat Hamazon search silently exported 500 rows after a refresh.
+
+    This writer overwrites ONLY when it would not lose information: it skips
+    the write when a payload already exists for the same search (matched by
+    _same_parallels_search: fingerprint, source_text fallback for legacy
+    payloads) holding at least as many rows -- BOTH buckets counted -- as
+    the restore is offering.
+    Fresh searches must keep calling set_parallels_export() directly -- a new
+    search legitimately REPLACES the payload, whatever the sizes.
+
+    Returns True when it wrote, False when it preserved the existing payload.
+    """
+    existing = get_parallels_export()
+    if isinstance(existing, dict):
+        # Round 4 (Codex P2): richness is BOTH buckets here too, mirroring
+        # recover_richer_parallels_rows -- a payload with equal mains but a
+        # longer filtered tail must be preserved, not overwritten.
+        existing_total = (len(existing.get('results') or [])
+                          + len(existing.get('filtered') or []))
+        offered_total = len(results or []) + len(filtered or [])
+        if (_same_parallels_search(existing.get('meta') or {}, meta or {})
+                and existing_total >= offered_total):
+            return False
+    set_parallels_export(results=results, filtered=filtered, meta=meta)
+    return True
+
+
+def update_parallels_export_filtered(filtered: List[Dict[str, Any]]) -> None:
+    """Patch only the ``filtered`` field (post-filter sync).
+
+    Applies the same cap as ``set_parallels_export`` on the filtered list.
+    """
+    payload = safe_user_get(_PARALLELS_KEY, None)
+    if not isinstance(payload, dict):
+        return
+    payload = dict(payload)
+    capped, truncated, original, _changed = _compact_results(
+        filtered,
+        _compact_parallels_result_row,
+    )
+    payload['filtered'] = capped
+    payload['filtered_total_count'] = original
+    # OR-merge truncation flag: if either list was capped at any point, the
+    # payload as a whole is truncated.
+    payload['truncated'] = bool(payload.get('truncated', False)) or truncated
+    safe_user_set(_PARALLELS_KEY, payload)
+
+
+def clear_parallels_export() -> None:
+    """Remove the parallels export payload (New Search reset)."""
+    safe_user_pop(_PARALLELS_KEY, None)

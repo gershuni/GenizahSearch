@@ -1,0 +1,70 @@
+{
+    "prompts": [
+        {
+            "Hebrew": "תפסיר רס\"ג",
+            "English": "Tafsir R. Saadya Gaon"
+        },
+        {
+            "Hebrew": "תפסיר לאיכה",
+            "English": "Tafsir on Lamentations"
+        },
+        {
+            "Hebrew": "כתאב אלאינאס (פירוש מגלת אסתר)",
+            "English": "Kitab al-Inas (Commentary on the Book of Esther)"
+        },
+        {
+            "Hebrew": "כתאב אלשראיע [רס\"ג]",
+            "English": "Kitab al-Shara'i [R. Saadya Gaon]"
+        },
+        {
+            "Hebrew": "דלאלה אלחאירין",
+            "English": "Dalālat al-Ḥā'irīn (Guide for the Perplexed)"
+        },
+        {
+            "Hebrew": "שרח אלמקדמאת",
+            "English": "Sharḥ al-Muqaddimāt (Interpretation of Introductions)"
+        },
+        {
+            "Hebrew": "מקאלה פי אלדביחה",
+            "English": "Maqāla fi al-Dhabīḥa (Treatise on Slaughtering)"
+        },
+        {
+            "Hebrew": "קצת זיין אלמואצף",
+            "English": "Qiṣṣat Zayn al-Mawāṣif"
+        },
+        {
+            "Hebrew": "משנה תורה",
+            "English": "Mishneh Torah"
+        },
+        {
+            "Hebrew": "פירוש רש\"י לתלמוד",
+            "English": "Rashi's Talmud Commentary"
+        },
+        {
+            "Hebrew": "פירוש המשנה לרמב\"ם [ערבית]",
+            "English": "Maimonides Mishna Commentary [Arabic]"
+        },
+        {
+            "Hebrew": "הלכות הרי\"ף",
+            "English": "Hilkhot ha-Rif"
+        },
+        {
+            "Hebrew": "בראשית רבה",
+            "English": "Midrash Rabbah Genesis"
+        },
+        {
+            "Hebrew": "מכילתא דרבי ישמעאל",
+            "English": "Mekhilta de-Rabbi Yishma'el"
+        },
+        {
+            "Hebrew": "מאמר תחיית המתים",
+            "English": "Treatise on the Resurrection of the Dead"
+        },
+        {
+            "Hebrew": "ברכות מהר\"ם",
+            "English": "Berakhot of Maharam (R. Meir of Rothenburg)"
+        }
+    ],
+    "en_category": "English",
+    "he_category": "Hebrew"
+}

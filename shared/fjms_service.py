@@ -1,0 +1,4799 @@
+# -*- coding: utf-8 -*-
+"""
+FJMS Enrichment Service for accessing FIST/FJMS data from the SQLite sidecar.
+
+This module provides the FjmsService class for querying domain classifications,
+scholar join groups, and catalog metadata from the fjms_enrichment.db sidecar
+database. Used by both the web app and desktop app.
+
+All methods handle errors gracefully, returning empty results rather than
+raising exceptions. When the sidecar database is missing, the service
+degrades gracefully (is_available() returns False, all queries return empty).
+The exceptions are get_filter_sys_ids and Catalog Browse
+(get_browse_results, get_browse_library_facets): an active filter they
+cannot evaluate raises FilterUnavailable, because an empty result there
+would mean "no manuscript matches" and None would mean "no filter" (#17;
+docs/plans/CATALOGUE_CRITERIA_PLAN.md rule 9).
+
+Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
+so concurrent NiceGUI run.io_bound() calls each get their own connection.
+"""
+
+import copy
+import json
+import logging
+import os
+import re
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Optional
+
+from shared import domain_hierarchy as _domain_hierarchy
+from shared.catalog_numbers import span_label
+from shared.catalog_criteria import (
+    NOT_RECORDED, CriteriaUnavailable, clean_criteria, criteria_token, criterion_values,
+    match_criteria,
+)
+from shared.catalog_criteria import BY_KEY as _CRITERIA_BY_KEY
+from shared.catalog_criteria import CRITERIA as _CRITERIA
+from shared.catalog_criteria import NEW_TABLE_KEYS as _NEW_TABLE_KEYS
+from shared.catalog_criteria import SECTIONS as _CRITERIA_SECTIONS
+from shared.catalog_criteria import criteria_chips as _criteria_chips
+from shared.catalog_criteria import recorded_count as _recorded_count
+from shared.thread_local_db import ThreadLocalConnection
+# Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
+# Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
+# filter vocabulary cannot be loaded.
+from shared.api_errors import APIError
+
+logger = logging.getLogger(__name__)
+
+
+class FilterUnavailable(RuntimeError):
+    """An active catalog filter could not be evaluated.
+
+    Raised by FjmsService.get_filter_sys_ids instead of returning a value,
+    because every return value means something to the caller: None is "no
+    restriction" and an empty set is "the filters matched nothing". A lookup
+    that could not run is neither. Callers must tell the user (web notice,
+    desktop error label, HTTP 503 filter_unavailable) and must not run the
+    search unfiltered or report zero matches.
+
+    reason is one of:
+      'sidecar_unavailable' -- no FJMS sidecar connection;
+      'column_missing'      -- the sidecar is KNOWN (its schema was read) to
+                               lack the table or column a filter needs;
+                               ``filters`` names which: ('line_height',) or
+                               ('measurements',);
+      'query_failed'        -- the SQL raised (I/O error, locked or replaced
+                               file, per-thread connection failed to open);
+      'corpus_unavailable'  -- a criterion needs the list of every corpus
+                               manuscript (Not recorded, all except, Catalog
+                               Browse over the corpus) and the caller had none.
+    """
+
+    REASONS = ('sidecar_unavailable', 'column_missing', 'query_failed', 'corpus_unavailable')
+
+    def __init__(self, reason='query_failed', message='', filters=()):
+        # No validation that raises: BaseException pickling re-calls
+        # __init__ with self.args, so every argument must round-trip.
+        self.reason = reason if reason in self.REASONS else 'query_failed'
+        self.message = message
+        self.filters = tuple(filters or ())
+        super().__init__(self.reason, message, self.filters)
+
+    def __str__(self):
+        return self.message or self.reason
+
+
+# Capability of the open sidecar for a filter (K-16: three states, never two).
+# Only a schema inspection that SUCCEEDED can say 'unsupported'; a missing
+# sidecar or a failed inspection is 'unknown', and saved values are kept.
+FILTER_SUPPORTED = 'supported'
+FILTER_UNSUPPORTED = 'unsupported'
+FILTER_SUPPORT_UNKNOWN = 'unknown'
+
+_LINE_HEIGHT_COLUMN = 'avg_line_height_mm'
+LINE_HEIGHT_FILTER_KEYS = ('line_height_min', 'line_height_max')
+MEASUREMENT_FILTER_KEYS = (
+    'width_min', 'width_max', 'height_min', 'height_max',
+    'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+    'text_density_min', 'text_density_max', 'measurement_material',
+)
+
+
+def _measurement_conditions(width_min=None, width_max=None, height_min=None, height_max=None,
+                            line_count_min=None, line_count_max=None,
+                            line_height_min=None, line_height_max=None,
+                            text_density_min=None, text_density_max=None,
+                            measurement_material=None):
+    """(conditions, params) restricting ``c.AlmaId`` by manuscript_measurements;
+    no conditions when no bound is set. Reversed min/max are swapped (D-19)."""
+    width_min, width_max = _normalize_range(width_min, width_max)
+    height_min, height_max = _normalize_range(height_min, height_max)
+    line_count_min, line_count_max = _normalize_range(line_count_min, line_count_max)
+    line_height_min, line_height_max = _normalize_range(line_height_min, line_height_max)
+    text_density_min, text_density_max = _normalize_range(text_density_min, text_density_max)
+
+    mm_conds = []
+    mm_params = []
+    # Width: COALESCE prefers catalog, falls back to computed (review concern #10)
+    # catalog_width_cm = MAX across catalogers from Catalog_Sizes sheet
+    # max_computed_width_cm = MAX across image-derived measurements from Computed_Measurements sheet
+    if width_min is not None:
+        mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) >= ?")
+        mm_params.append(width_min)
+    if width_max is not None:
+        mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) <= ?")
+        mm_params.append(width_max)
+    # Height: same COALESCE strategy as width
+    # catalog_height_cm = MAX across catalogers; max_computed_height_cm = MAX across images
+    if height_min is not None:
+        mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) >= ?")
+        mm_params.append(height_min)
+    if height_max is not None:
+        mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) <= ?")
+        mm_params.append(height_max)
+    # Line count: avg_num_lines = AVG across unflagged image measurements
+    if line_count_min is not None:
+        mm_conds.append("m.avg_num_lines >= ?")
+        mm_params.append(line_count_min)
+    if line_count_max is not None:
+        mm_conds.append("m.avg_num_lines <= ?")
+        mm_params.append(line_count_max)
+    # Line height (mm): avg_line_height_mm = AVG of Avg_Line_Height_Text_mm (unflagged)
+    if line_height_min is not None:
+        mm_conds.append("m.avg_line_height_mm >= ?")
+        mm_params.append(line_height_min)
+    if line_height_max is not None:
+        mm_conds.append("m.avg_line_height_mm <= ?")
+        mm_params.append(line_height_max)
+    # Text density: avg_text_density = AVG of Text_Density_per10cm (per 10cm^2)
+    if text_density_min is not None:
+        mm_conds.append("m.avg_text_density >= ?")
+        mm_params.append(text_density_min)
+    if text_density_max is not None:
+        mm_conds.append("m.avg_text_density <= ?")
+        mm_params.append(text_density_max)
+    # Material: IN clause for multi-value list (review concern #2)
+    if measurement_material:
+        ph = ','.join('?' * len(measurement_material))
+        mm_conds.append(f"m.material IN ({ph})")
+        mm_params.extend(measurement_material)
+
+    if not mm_conds:
+        return [], []
+    mm_where = " AND ".join(mm_conds)
+    return ([f"c.AlmaId IN (SELECT m.AlmaId FROM manuscript_measurements m WHERE {mm_where})"],
+            mm_params)
+
+# Default sidecar filename
+_SIDECAR_FILENAME = "fjms_enrichment.db"
+_SIDECAR_DIR = "fist_data"
+
+# Printed badge display constants
+PRINTED_BADGE_COLORS = ('#fee2e2', '#dc2626')  # Red-tinted attention color (bg, text)
+PRINTED_LABEL_EN = 'Printed'
+PRINTED_LABEL_HE = '\u05d3\u05e4\u05d5\u05e1'
+
+# Team name data: maps EngDesc from dbo_CodeSource to display names.
+# Each entry: (en_header, en_full, he_header, he_full)
+# - en_header / he_header: column header without leader (e.g., "FGP Linguistics team")
+# - en_full / he_full: full name with leader (e.g., "FGP Linguistics team, Aharon Maman (head)")
+# - None means "fall back to raw source_name"
+# Leader names sourced from FJMS website (not present in FIST.db).
+_TEAM_NAMES = {
+    # fmt: off
+    "Aggadic Midrashim": (
+        "FGP Aggadic Midrashim team",
+        "FGP Aggadic Midrashim team, Chaim Milikowsky (head)",
+        "צוות FGP למדרשי אגדה",
+        "צוות FGP למדרשי אגדה, חיים מיליקובסקי (ראש צוות)",
+    ),
+    "Bibliography B": (
+        "FGP Bibliography B team",
+        "FGP Bibliography B team, Zvi Stampfer, Yitzchack Gila (head)",
+        "צוות FGP לביבליוגרפיה ב",
+        "צוות FGP לביבליוגרפיה ב, צבי שטמפפר, יצחק גילה (ראש צוות)",
+    ),
+    "Bibliography C": (
+        "FGP Bibliography C team",
+        "FGP Bibliography C team, Emanuel Friedberg (head)",
+        "צוות FGP לביבליוגרפיה ג",
+        "צוות FGP לביבליוגרפיה ג, עמנואל פרידברג (ראש צוות)",
+    ),
+    "Bibliography Cambridge": (
+        "FGP Bibliography Cambridge team",
+        "FGP Bibliography Cambridge team",
+        "צוות FGP לביבליוגרפיה קיימברידג",
+        "צוות FGP לביבליוגרפיה קיימברידג",
+    ),
+    "Firkovitch Collections": (
+        "FGP Firkovitch Collections team",
+        "FGP Firkovitch Collections team, David Sklare (head)",
+        "צוות FGP לאוספי פירקוביץ'",
+        "צוות FGP לאוספי פירקוביץ', דוד סקליר (ראש צוות)",
+    ),
+    "Halakhic Midrashim": (
+        "FGP Halakhic Midrashim team",
+        "FGP Halakhic Midrashim team, Menahem Kahana (head)",
+        "צוות FGP למדרשי הלכה",
+        "צוות FGP למדרשי הלכה, מנחם כהנא (ראש צוות)",
+    ),
+    "Judeo-Arabic Biblical Exegesis": (
+        "FGP Judeo-Arabic Biblical Exegesis team",
+        "FGP Judeo-Arabic Biblical Exegesis team, Ephraim Ben-Porat (head)",
+        "צוות FGP לפרשנות המקרא בערבית-יהודית",
+        "צוות FGP לפרשנות המקרא בערבית-יהודית, אפרים בן-פורת (ראש צוות)",
+    ),
+    "Judeo-Arabic Halakhic Literature": (
+        "FGP Judeo-Arabic Halakhic Literature team",
+        "FGP Judeo-Arabic Halakhic Literature team, David Sklare (head)",
+        "צוות FGP לספרות ההלכה בערבית-יהודית",
+        "צוות FGP לספרות ההלכה בערבית-יהודית, דוד סקליר (ראש צוות)",
+    ),
+    "Judeo-Persian": (
+        "FGP Judeo-Persian team",
+        "FGP Judeo-Persian team, Shaul Shaked (head)",
+        "צוות FGP לפרסית-יהודית",
+        "צוות FGP לפרסית-יהודית, שאול שקד (ראש צוות)",
+    ),
+    "Ladino": (
+        "FGP Ladino team",
+        "FGP Ladino team, Aldina Quintana (head)",
+        "צוות FGP ללאדינו",
+        "צוות FGP ללאדינו, אלדינה קינטנה (ראש צוות)",
+    ),
+    "Late Documentary Material (Hebrew)": (
+        "FGP Late Documentary Material (Hebrew) team",
+        "FGP Late Documentary Material (Hebrew) team, Avraham David (head)",
+        "צוות FGP לחומר תיעודי מאוחר (עברית)",
+        "צוות FGP לחומר תיעודי מאוחר (עברית), אברהם דוד (ראש צוות)",
+    ),
+    "Linguistics": (
+        "FGP Linguistics team",
+        "FGP Linguistics team, Aharon Maman (head)",
+        "צוות FGP לחכמת הלשון",
+        "צוות FGP לחכמת הלשון, אהרן ממן (ראש צוות)",
+    ),
+    "Liturgy": (
+        "FGP Liturgy team",
+        "FGP Liturgy team, Uri Erlich (head)",
+        "צוות FGP לתפילה",
+        "צוות FGP לתפילה, אורי ארליך (ראש צוות)",
+    ),
+    "Magic": (
+        "FGP Magic team",
+        "FGP Magic team, Gideon Bohak (head)",
+        "צוות FGP למאגיה",
+        "צוות FGP למאגיה, גדעון בוהק (ראש צוות)",
+    ),
+    "Midrash Eikha Rabba": (
+        "FGP Midrash Eikha Rabba team",
+        "FGP Midrash Eikha Rabba team, Paul Mandel (head)",
+        "צוות FGP למדרש איכה רבא",
+        "צוות FGP למדרש איכה רבא, פנחס מנדל (ראש צוות)",
+    ),
+    "Philosophy, Theology and Polemics": (
+        "FGP Philosophy, Theology and Polemics team",
+        "FGP Philosophy, Theology and Polemics team, Sarah Stroumsa (head)",
+        "צוות FGP לפילוסופיה, תיאולוגיה ופולמוס",
+        "צוות FGP לפילוסופיה, תיאולוגיה ופולמוס, שרה סטרומזה (ראש צוות)",
+    ),
+    "Princeton Documentary Material (Goitein)": (
+        "FGP Princeton Documentary Material (Goitein) team",
+        "FGP Princeton Documentary Material (Goitein) team, Mark Cohen (head)",
+        "צוות FGP פרינסטון לחומר תיעודי (גויטין)",
+        "צוות FGP פרינסטון לחומר תיעודי (גויטין), מרק כהן (ראש צוות)",
+    ),
+    "Rabbinic Material": (
+        "FGP Rabbinic Material team",
+        "FGP Rabbinic Material team, Ezra Chwat (head)",
+        "צוות FGP לחומר רבני",
+        "צוות FGP לחומר רבני, עזרא שבט (ראש צוות)",
+    ),
+    "Responsa": (
+        "FGP Responsa team",
+        "FGP Responsa team, Mordechai A. Friedman (head)",
+        "צוות FGP לשו\"ת",
+        "צוות FGP לשו\"ת, מרדכי עקיבא פרידמן (ראש צוות)",
+    ),
+    "Seride Teshuvot Team: Shocken Institute": (
+        "FGP Seride Teshuvot Team: Shocken Institute",
+        "FGP Seride Teshuvot Team: Shocken Institute, Shmuel Glick (head)",
+        "צוות FGP לשרידי תשובות \u2013 מכון שוקן",
+        "צוות FGP לשרידי תשובות \u2013 מכון שוקן, שמואל גליק (ראש צוות)",
+    ),
+    "T-S Cataloging": (
+        "FGP T-S Cataloging team",
+        "FGP T-S Cataloging team, Yaacov Sussmann (head)",
+        "צוות FGP לT-S NS",
+        "צוות FGP לT-S NS, יעקב זוסמן (ראש צוות)",
+    ),
+    "Talmud Commentaries and Halakhic Literature (Hebrew)": (
+        "FGP Talmud Commentaries and Halakhic Literature (Hebrew) team",
+        "FGP Talmud Commentaries and Halakhic Literature (Hebrew) team, Simcha Emanuel (head)",
+        "צוות FGP לפרשנות התלמוד והספרות ההלכתית (עברית)",
+        "צוות FGP לפרשנות התלמוד והספרות ההלכתית (עברית), שמחה עמנואל (ראש צוות)",
+    ),
+    "Talmudic Literature": (
+        "FGP Talmudic Literature team",
+        "FGP Talmudic Literature team, Yaacov Sussmann (head)",
+        "צוות FGP לספרות תלמודית",
+        "צוות FGP לספרות תלמודית, יעקב זוסמן (ראש צוות)",
+    ),
+    "Transcriptions and Information by various authors": (
+        "FGP Transcriptions and Information by various authors team",
+        "FGP Transcriptions and Information by various authors team, Emanuel Friedberg (head)",
+        "צוות FGP להעתקות ומידע ממחברים שונים",
+        "צוות FGP להעתקות ומידע ממחברים שונים, עמנואל פרידברג (ראש צוות)",
+    ),
+    "Transcriptions and Information from various publications": (
+        "FGP Transcriptions and Information from various publications team",
+        "FGP Transcriptions and Information from various publications team, Emanuel Friedberg (head)",
+        "צוות FGP להעתקות ומידע מכתבי עת ופרסומים שונים",
+        "צוות FGP להעתקות ומידע מכתבי עת ופרסומים שונים, עמנואל פרידברג (ראש צוות)",
+    ),
+    "Transcriptions Team-Genuzos": (
+        "FGP Transcriptions Team-Genuzos",
+        "FGP Transcriptions Team-Genuzos",
+        "צוות FGP להעתקות -גנוזות",
+        "צוות FGP להעתקות -גנוזות",
+    ),
+    "Yerushalmi": (
+        "FGP Yerushalmi team",
+        "FGP Yerushalmi team, Yaacov Sussmann (head)",
+        "צוות FGP לתלמוד ירושלמי",
+        "צוות FGP לתלמוד ירושלמי, יעקב זוסמן (ראש צוות)",
+    ),
+    # Teams without FJMS Hebrew data (header only, no leader)
+    "Bible": ("FGP Bible team", "FGP Bible team", None, None),
+    "Documentary Material (Goitein)": ("FGP Documentary Material (Goitein) team", "FGP Documentary Material (Goitein) team", None, None),
+    "Karaite Literature": ("FGP Karaite Literature team", "FGP Karaite Literature team", None, None),
+    "Piyyut": ("FGP Piyyut team", "FGP Piyyut team", None, None),
+    "Samaritan": ("FGP Samaritan team", "FGP Samaritan team", None, None),
+    "Science": ("FGP Science team", "FGP Science team", None, None),
+    "Scientific Joins": ("FGP Scientific Joins team", "FGP Scientific Joins team", None, None),
+    "Yemenite": ("FGP Yemenite team", "FGP Yemenite team", None, None),
+    # Non-team entries
+    "FGP": ("FGP", "FGP", None, None),
+    "PGPID": ("PGPID", "PGPID", None, None),
+    # fmt: on
+}
+
+# Case-insensitive lookup (EngDesc in FIST.db may be uppercase)
+_TEAM_NAMES_LOWER = {k.lower(): v for k, v in _TEAM_NAMES.items()}
+
+# Backward-compatible flat dict (en_full only) — used by existing callers
+TEAM_DISPLAY_NAMES = {k: v[1] for k, v in _TEAM_NAMES.items() if v[1]}
+
+# Generic source names that don't represent scholarly teams — filtered from
+# button counts and dialog team columns for consistency.
+GENERIC_SOURCE_NAMES = frozenset({
+    'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
+})
+
+# Known typos in FIST.db source names — correct for display
+_SOURCE_NAME_FIXES = {
+    'Instatution': 'Institution',
+}
+
+# Hebrew display names for catalog/handlist source names.
+# These are scholar handlists that have no Hebrew in FIST.db (SourceNameHeb == SourceName).
+# Format: "English Name" -> "Hebrew transliterated display name"
+_CATALOG_SOURCE_HE = {
+    "AIU Biblical Fragments Catalog": "קטלוג קטעי מקרא של כי\"ח",
+    "Adler Catalog": "קטלוג אדלר",
+    "Baker/Polliack Catalog": "קטלוג בייקר/פוליאק",
+    "Basel Catalog": "קטלוג באזל",
+    "Brody Catalog": "קטלוג ברודי",
+    "CUL Genizah Research Unit Catalog": "קטלוג יחידת מחקר הגניזה קיימברידג'",
+    "CUL Genizah Research Unit (10/2015) Catalog": "קטלוג יחידת מחקר הגניזה קיימברידג' (10/2015)",
+    "CUL Genizah Research Unit (2018) Catalog": "קטלוג יחידת מחקר הגניזה קיימברידג' (2018)",
+    "Columbia Catalog": "קטלוג קולומביה",
+    "Cowley (typewritten handlist) Catalog": "קטלוג קאולי (רשימה מודפסת)",
+    "Danzig Catalog": "קטלוג דנציג",
+    "Davis I Catalog": "קטלוג דייויס א",
+    "Davis II Catalog": "קטלוג דייויס ב",
+    "Davis/Outhwaite III Catalog": "קטלוג דייויס/אאותווייט ג",
+    "Davis/Outhwaite IV Catalog": "קטלוג דייויס/אאותווייט ד",
+    "Geneva Catalog": "קטלוג ג'נבה",
+    "Goitein/Gaster Catalog": "קטלוג גויטין/גסטר",
+    "Gottstein Catalog": "קטלוג גוטשטיין",
+    "Halper Catalog": "קטלוג האלפר",
+    "Hopkins Catalog": "קטלוג הופקינס",
+    "Isaacs Catalog": "קטלוג אייזקס",
+    "JTS Catalog": "קטלוג בית המדרש לרבנים",
+    "Khan (Karaite Bible) Catalog": "קטלוג חאן (מקרא קראי)",
+    "Khan (Legal) Catalog": "קטלוג חאן (משפטי)",
+    "Klein Catalog": "קטלוג קליין",
+    "Lieberman Catalog": "קטלוג ליברמן",
+    "Lutzki Catalog": "קטלוג לוצקי",
+    "Maman Catalog": "קטלוג ממן",
+    "Manchester Catalog": "קטלוג מנצ'סטר",
+    "Morag Catalog": "קטלוג מורג",
+    "Mosseri Catalog": "קטלוג מוסרי",
+    "NLI Aleph Catalog": "קטלוג אלף הספרייה הלאומית",
+    "Neubauer - Cowley Catalog": "קטלוג נויבאואר - קאולי",
+    "Otsar Nehmad Catalog": "קטלוג אוצר נחמד",
+    "Penn Catalog": "קטלוג פן",
+    "Reif (Bibl.) Catalog": "קטלוג רייף (ביבליוגרפי)",
+    "Reif (Cat. Heb. Manus.) Catalog": "קטלוג רייף (כתבי יד עבריים)",
+    "Sasoon Catalog": "קטלוג ששון",
+    "Schoyen Catalog": "קטלוג שוין",
+    "Schwab Catalog": "קטלוג שוואב",
+    "Schwarz Catalog": "קטלוג שוורץ",
+    "Shivtiel/Niessen Catalog": "קטלוג שבטיאל/ניסן",
+    "Strasbourg Catalog": "קטלוג שטרסבורג",
+    "Sussmann (Talmud) Catalog": "קטלוג זוסמן (תלמוד)",
+    "Sussmann (Talmud) \u2013 Supplement Catalog": "קטלוג זוסמן (תלמוד) \u2013 השלמה",
+    "Vienna Catalog": "קטלוג וינה",
+    "Widder Catalog": "קטלוג וידר",
+    "Worman Catalog": "קטלוג וורמן",
+    "Worrel Catalog": "קטלוג וורל",
+    "Yahalom Catalog": "קטלוג יהלום",
+    "Yeivin catalog Catalog": "קטלוג ייבין",
+    "Zulay/Widder Catalog": "קטלוג זולאי/וידר",
+}
+
+
+def get_catalog_source_he(source_name: str) -> str:
+    """Get Hebrew display name for a catalog source name.
+
+    Returns Hebrew name if available, otherwise returns the original name.
+    """
+    if not source_name:
+        return source_name or ''
+    return _CATALOG_SOURCE_HE.get(source_name, source_name)
+
+# Domains that appear as children of multiple parent categories.
+# These need qualification with parent name to be distinguishable in filters.
+# Data: SELECT Domain FROM domains WHERE ParentDomain IS NOT NULL AND ParentDomain != Domain
+#        GROUP BY Domain HAVING COUNT(DISTINCT ParentDomain) > 1
+AMBIGUOUS_CHILD_DOMAINS = frozenset({'Other'})
+
+
+def _lookup_team(source_name: str):
+    """Case-insensitive lookup in _TEAM_NAMES. Returns tuple or None."""
+    if not source_name:
+        return None
+    return _TEAM_NAMES.get(source_name) or _TEAM_NAMES_LOWER.get(source_name.lower())
+
+
+def is_team_source(source_name: str) -> bool:
+    """Check if a source_name maps to an FGP team (not catalog/other)."""
+    return _lookup_team(source_name) is not None
+
+
+def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
+    """Map a catalog SourceName to its full FJMS display name with team leader.
+
+    Case-insensitive lookup (EngDesc in FIST.db may be uppercase).
+    Falls back to the original source_name if no mapping exists.
+
+    Args:
+        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics" or "MAGIC").
+        is_heb: If True, return Hebrew name; otherwise English.
+
+    Returns:
+        Full display name (e.g., "FGP Linguistics team, Aharon Maman (head)").
+    """
+    if not source_name:
+        return source_name or ''
+    # Fix known typos in FIST.db source names
+    source_name = _SOURCE_NAME_FIXES.get(source_name, source_name)
+    data = _lookup_team(source_name)
+    if not data:
+        return source_name
+    result = data[3] if is_heb else data[1]
+    return result or source_name
+
+
+def get_team_header_name(source_name: str, is_heb: bool = False) -> str:
+    """Map a catalog SourceName to its column header name (without leader).
+
+    Case-insensitive lookup. Used for table column headers in the catalog dialog.
+    Falls back to the original source_name if no mapping exists.
+
+    Args:
+        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics" or "MAGIC").
+        is_heb: If True, return Hebrew header; otherwise English.
+
+    Returns:
+        Header name (e.g., "FGP Linguistics team" or "צוות FGP לחכמת הלשון").
+    """
+    if not source_name:
+        return source_name or ''
+    data = _lookup_team(source_name)
+    if not data:
+        return source_name
+    result = data[2] if is_heb else data[0]
+    return result or source_name
+
+
+def qualify_domain_name(domain: str, parent_domain: str = None) -> str:
+    """Qualify ambiguous child domain names with their parent for uniqueness.
+
+    Domains like "Other" appear under multiple parent categories. Without
+    qualification, filtering by "Other" in one parent would affect all parents.
+    This function returns "Other (Liturgy and Brakhot)" for ambiguous domains
+    and the bare domain name for unambiguous ones.
+
+    Args:
+        domain: The domain name (e.g., "Other", "Piyyut").
+        parent_domain: The parent domain name (e.g., "Liturgy and Brakhot").
+
+    Returns:
+        Qualified name if ambiguous, otherwise the bare domain name.
+    """
+    if domain in AMBIGUOUS_CHILD_DOMAINS and parent_domain and parent_domain != domain:
+        return f"{domain} ({parent_domain})"
+    return domain
+
+
+def unqualify_domain_name(qualified: str) -> tuple[str, str]:
+    """Extract bare domain and parent from a qualified domain name.
+
+    Returns (domain, parent_domain) tuple. For unqualified names,
+    parent_domain is empty string.
+
+    Args:
+        qualified: e.g., "Other (Liturgy and Brakhot)" or "Piyyut".
+
+    Returns:
+        Tuple of (domain, parent_domain).
+    """
+    if ' (' in qualified and qualified.endswith(')'):
+        idx = qualified.index(' (')
+        domain = qualified[:idx]
+        parent = qualified[idx + 2:-1]
+        if domain in AMBIGUOUS_CHILD_DOMAINS:
+            return (domain, parent)
+    return (qualified, '')
+
+
+# ---------------------------------------------------------------------------
+# Phase 78 Plan 03 (R2-#3): fail-closed filter validation helpers.
+# ---------------------------------------------------------------------------
+
+def _domain_vocabulary_is_loadable() -> bool:
+    """R2-#3 predicate: returns False when the FJMS domain vocabulary cannot
+    be loaded (sidecar absent, conn None, query raises, or table empty).
+
+    Used by validate_filter_values to choose between rejecting an unknown
+    token (HTTP 400) vs failing closed because we cannot tell (HTTP 503).
+    """
+    try:
+        svc = get_fjms_service(thread_safe=True)
+    except Exception:
+        return False
+    if getattr(svc, '_conn', None) is None:
+        return False
+    try:
+        rows = svc.get_all_domains()
+    except Exception:
+        return False
+    return bool(rows)
+
+
+def is_valid_domain_token(token: str) -> bool:
+    """R2-#3: returns True iff `token` is a domain value that get_filter_sys_ids
+    would accept. Canonicalizes through unqualify_domain_name and checks BOTH
+    Domain and ParentDomain columns of the domains table — matching the UNION
+    used in get_filter_sys_ids on bare tokens.
+
+    Round-2 fix: previous validator only checked get_all_domains() bare values,
+    which falsely rejected qualified domain forms like "Other (Bible)" and
+    parent-domain tokens like "Liturgy".
+
+    Returns False for empty input or when the sidecar connection is None.
+    Re-raises any underlying loader exception so the caller (validate_filter_values)
+    can route to APIError(503) — fail closed, not silent allow.
+    """
+    if not token:
+        return False
+    bare, parent = unqualify_domain_name(token)
+    svc = get_fjms_service(thread_safe=True)
+    if getattr(svc, '_conn', None) is None:
+        # Caller (validate_filter_values) is responsible for distinguishing
+        # "unknown token" from "vocabulary unavailable" via _domain_vocabulary_is_loadable.
+        return False
+    try:
+        if parent:
+            # Qualified form: must match BOTH Domain AND ParentDomain.
+            cur = svc._conn.execute(
+                "SELECT 1 FROM domains WHERE Domain = ? AND ParentDomain = ? LIMIT 1",
+                (bare, parent),
+            )
+            return cur.fetchone() is not None
+        # Bare form: matches if it's a Domain OR a ParentDomain (per the
+        # UNION in get_filter_sys_ids).
+        cur = svc._conn.execute(
+            "SELECT 1 FROM domains WHERE Domain = ? OR ParentDomain = ? LIMIT 1",
+            (bare, bare),
+        )
+        return cur.fetchone() is not None
+    except Exception as exc:
+        logger.error(f"is_valid_domain_token({token!r}) failed: {exc}")
+        # Loader-level exception: caller MUST treat as fail-closed.
+        # We can't return True (would falsely accept). Returning False alone
+        # would be ambiguous (caller might treat as 'just unknown'). Re-raise
+        # so validate_filter_values routes us to APIError(503).
+        raise
+
+
+def _find_project_root() -> Optional[Path]:
+    """Find the project root by looking for libraries.csv up from this file."""
+    current = Path(__file__).resolve().parent
+    for _ in range(5):  # Up to 5 levels
+        if (current / "libraries.csv").exists():
+            return current
+        current = current.parent
+    return None
+
+
+def _is_int(value) -> bool:
+    """Check if a value can be interpreted as an integer (for person_id/title_id)."""
+    if isinstance(value, int):
+        return True
+    if isinstance(value, str):
+        try:
+            int(value)
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def _normalize_range(vmin, vmax):
+    """Normalize reversed min/max bounds. Returns (min, max) tuple.
+    If min > max, swaps them. Handles None values gracefully.
+    Review concern #3/#9: backend guard for reversed bounds (D-19).
+    """
+    if vmin is not None and vmax is not None and vmin > vmax:
+        return vmax, vmin
+    return vmin, vmax
+
+
+# Canonical FJMS domain ordering (matches Friedberg classification system, not by count)
+_FJMS_PARENT_ORDER = [
+    # 'Unknown',  # Not present in enrichment DB
+    'Bible: Texts and Translations',
+    'Biblical Exegesis',
+    'Rabbinic Literature',
+    'Halakhic Literature and Talmudic Commentaries',
+    'Derashot and Later Midrashim',
+    'Philosophy, Theology, Ethical literature',
+    'Kabbalah',
+    'Polemics',
+    'Historiography and geographical descriptions',
+    'Occult Sciences',
+    'Sciences',
+    'Liturgy and Brakhot',
+    'Piyut and its Interpretation',
+    'Secular Poetry',
+    'Stories and Belles Lettres',
+    'Philology',
+    'Documentary',
+    'Ritual Objects',
+    'Other Religions',
+    'Teaching Aids,Pen Trials,Writing Exercises,Scribblings,Jotting',
+    'Ancillaries to the Main Work',
+    'Unspecified (Nature of text unclear after initial inspection)',
+    'Unspecified Domain',
+]
+_FJMS_PARENT_IDX = {name: i for i, name in enumerate(_FJMS_PARENT_ORDER)}
+
+# Canonical FJMS sub-domain ordering per parent (sub-domains only, not sub-sub-domains)
+_FJMS_CHILD_ORDER = {
+    'Bible: Texts and Translations': [
+        'Bible: Texts', 'Aramaic Targumim', 'Arabic Tafsir',
+        'Translations into other Languages', 'Apocryphal Literature',
+        'Massorah', 'Lists of Parshiyyot and Haftarot', 'Haftarot',
+    ],
+    'Biblical Exegesis': [
+        'Biblical Exegesis- Rabbanite', 'Biblical Exegesis- Karaite',
+    ],
+    'Rabbinic Literature': [
+        'Mishnah: Texts and Translations', 'Tosefta',
+        'Talmud Bavli: Texts and Anthologies', 'Minor Tractates',
+        'Talmud Yerushalmi', 'Midrash',
+    ],
+    'Halakhic Literature and Talmudic Commentaries': [
+        'Mishnaic Commentaries', 'Talmud Bavli Commentaries',
+        'Talmud Yerushalmi Commentaries', 'Talmudic Commentaries',
+        'Halakhic', 'Sifrei Mitzvot (Rabbinical)',
+        'Responsa and Halakhic Decisions', 'Minhagim',
+        'Talmud \u2013 Introductions and Rules',
+    ],
+    'Derashot and Later Midrashim': [
+        'Derashot', 'Eulogies', 'Later Midrashim',
+    ],
+    'Philosophy, Theology, Ethical literature': [
+        'Kalam', 'Philosophy', 'Logic', 'Ethical Literature',
+        'Mystical Literature (not Kabbalah)', 'Sufi Literature',
+        'Hermetic Literature', 'Wisdom Literature',
+        'Apocalyptic Literature', 'Theology',
+    ],
+    'Kabbalah': [
+        'Heikhalot', 'Zohar literature',
+        'Spanish and Provencal Kabbalah', 'Lurianic Kabbalah',
+    ],
+    'Polemics': [
+        'Polemics Karaite-Rabbanite', 'Polemics Jewish-Christian',
+        'Polemics Jewish-Muslim', 'Polemics Rabbinical',
+    ],
+    'Occult Sciences': [
+        'Theoretical Works', 'Astrology', 'Alchemy', 'Magic Recipes',
+        'Amulets', 'Shimmush Tehillim', 'Predicting the Future',
+        'Revealing Treasures',
+    ],
+    'Sciences': [
+        'Astronomy', 'Mathematics', 'Medicine', 'Meteorology', 'Physics',
+    ],
+    'Liturgy and Brakhot': [
+        'Common Prayers', 'Brakhot', 'Prayer Commentaries',
+        'Karaite Prayers', 'Occasional prayer', 'Liturgical additions',
+        'Baqqashot and Personal Prayers', 'Passover Haggadah',
+    ],
+    'Piyut and its Interpretation': [
+        'Piyyut', 'Liturgical commentary', 'Piyyut Commentaries',
+    ],
+    'Secular Poetry': ['Dirges'],
+    'Philology': [
+        'Grammar', 'Dictionaries', 'Glossaries', 'Cantillation notes',
+    ],
+    'Documentary': [
+        'Letters', 'Personal Status Documents and Legal documents',
+        'Business Documents', 'Lists', 'Communal Documents',
+        'Court Documents', 'Governmental Documents', 'Notes/Records', 'Accounts',
+    ],
+    'Ritual Objects': [
+        'Mezuzot', 'Tefillin', 'Torah scroll', 'Esther Scroll',
+    ],
+    'Other Religions': ['Christian', 'Muslim'],
+    'Ancillaries to the Main Work': [
+        'Colophons', 'Title Pages', 'Table of contents', 'Indices',
+        'Calendars', 'Teaching Aids',
+    ],
+    'Unspecified Domain': [
+        'Blank', 'Illegible', 'Missing',
+        'Cannot be determined from the catalogue', 'Unidentified',
+    ],
+}
+_FJMS_CHILD_IDX = {
+    parent: {name: i for i, name in enumerate(children)}
+    for parent, children in _FJMS_CHILD_ORDER.items()
+}
+
+# Canonical FJMS sub-sub-domain ordering (third level)
+_FJMS_SUBCHILD_ORDER = {
+    'Massorah': [
+        'Masorah that follows the text order', 'Cumulative or Comparative Masorah',
+        'Masorah in Arabic', 'Masorah Variants',
+        "Diqduqe ha-Te'amim and Qunterese ha-Masorah", 'Lists and Counts',
+    ],
+    'Mishnah: Texts and Translations': [
+        'Mishnah: Texts', 'Mishnah: Translations',
+    ],
+    'Talmud Bavli: Texts and Anthologies': [
+        'Talmud Bavli', 'Talmud Bavli: Anthologies',
+    ],
+    'Midrash': ['Halakhic Midrashim', 'Aggadic Midrashim'],
+    'Halakhic': [
+        'Halakhic - Saadia Gaon', 'Halakhic - Shmuel ben Hofni Gaon',
+        'Halakhot ha-Rif and its Commentaries', 'Halakhic- Gaonim',
+        'Mishneh Torah and its Commentaries',
+        'Halakhic- Rishonim and Aharonim', 'Halakhic- Karaite',
+    ],
+    'Responsa and Halakhic Decisions': [
+        'Responsa- Gaonim', 'Responsa- Rishonim and Aharonim', 'Responsa- Karaite',
+    ],
+    'Kalam': ['Jewish Kalam', 'Muslim Kalam'],
+    'Philosophy': ['Aristotelian Philosophy', 'Neoplatonic Philosophy'],
+    'Theology': ['Legal theory'],
+    'Predicting the Future': [
+        'Dream interpretation', 'Goralot (Lots)', 'Goralot (Lots) in Sand',
+        'Predictions by Thunder', 'Palmistry', 'Predictions by Ticks',
+        'Physiognomy', 'Hemorology/Horology',
+    ],
+    'Astronomy': ['Calendar'],
+    'Medicine': ['Medical Works', 'Medical Prescriptions', 'Pharmacology'],
+    'Glossaries': [
+        'Biblical Glossary', 'Mishnaic Glossary',
+        'Talmudic Glossary', 'Glossary for Piyyut',
+    ],
+    'Personal Status Documents and Legal documents': [
+        'Get Halitzah', 'Ketubbot', 'Legal documents',
+    ],
+    'Business Documents': ['Monetary Issues', 'Contracts'],
+    'Lists': [
+        'Book lists', 'Shopping lists', 'Charity Lists',
+        'Genealogical Records', 'Property Lists', 'Lists of People',
+        'Lists of Debts', 'Responsa lists',
+    ],
+    'Communal Documents': [
+        'Communal Registers', 'Writs of Appointment', 'Bans and Excommunications',
+    ],
+    'Court Documents': ['Court Records', 'Court Registers'],
+}
+_FJMS_SUBCHILD_IDX = {
+    parent: {name: i for i, name in enumerate(children)}
+    for parent, children in _FJMS_SUBCHILD_ORDER.items()
+}
+
+
+def fjms_domain_sort_key(value: str) -> tuple:
+    """Compatibility wrapper around the shared, database-free authority."""
+    return _domain_hierarchy.domain_sort_key(value)
+
+
+# Keep the existing public helper and catalogue implementation on the same
+# database-free authority that Discovery imports.  The aliases also preserve
+# compatibility for callers which historically imported the FJMS names here.
+_FJMS_PARENT_IDX = _domain_hierarchy.FJMS_PARENT_IDX
+_FJMS_CHILD_IDX = _domain_hierarchy.FJMS_CHILD_IDX
+_FJMS_SUBCHILD_IDX = _domain_hierarchy.FJMS_SUBCHILD_IDX
+
+
+def _resolve_universe(universe):
+    """A universe given as a set, a callable returning one, or None."""
+    universe = universe() if callable(universe) else universe
+    # A frozenset, so that its hash (the cache key) is computed once.
+    if universe is not None and not isinstance(universe, frozenset):
+        universe = frozenset(universe)
+    return universe
+
+
+def _universe_token(universe):
+    """A cache key for a universe: the set itself, compared in full (neither
+    its size nor its hash alone -- two corpora must never share cached
+    results). Wrapped in a tuple, whose comparison checks identity first, so
+    the usual case (the one cached corpus object) costs no set comparison."""
+    if universe is None:
+        return None
+    return (universe if isinstance(universe, frozenset) else frozenset(universe),)
+
+
+def _sidecar_version(path: Optional[str]) -> Optional[tuple]:
+    """meta.version of a sidecar as a tuple of ints, or None when the file is
+    missing, unreadable or unversioned. Read-only: never creates a file."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
+        finally:
+            conn.close()
+        return tuple(int(part) for part in str(row[0]).split(".")) if row else None
+    except Exception:
+        return None
+
+
+def _choose_sidecar(user_path: Optional[str], bundled_path: Optional[str]) -> Optional[str]:
+    """The desktop's downloaded copy (%LOCALAPPDATA%) wins only when it is at
+    least as new as the bundled one, so an installer that ships a newer file
+    (5.1.0, the catalogue criteria) is not masked by an older download."""
+    user_ok = bool(user_path) and os.path.isfile(user_path)
+    bundled_ok = bool(bundled_path) and os.path.isfile(bundled_path)
+    if user_ok and bundled_ok:
+        user_v, bundled_v = _sidecar_version(user_path), _sidecar_version(bundled_path)
+        if user_v is not None and (bundled_v is None or user_v >= bundled_v):
+            return user_path
+        logger.info("FjmsService: bundled sidecar %s is newer than the downloaded %s",
+                    bundled_v, user_v)
+        return bundled_path
+    if user_ok:
+        return user_path
+    return bundled_path
+
+
+class FjmsService:
+    """Service for accessing FJMS enrichment data from the SQLite sidecar."""
+
+    def __init__(self, db_path: str = None, thread_safe: bool = True):
+        """
+        Initialize FjmsService.
+
+        Args:
+            db_path: Path to fjms_enrichment.db. If None, auto-detect from project root.
+            thread_safe: If True, use per-thread connections. Default True because
+                        both the web app (concurrent requests) and desktop app
+                        (QThread workers for catalog browse) need cross-thread access.
+        """
+        self._conn = None  # ThreadLocalConnection or sqlite3.Connection
+        self._db_path: Optional[str] = None
+        self._hierarchy_cache: Optional[dict] = None
+        self._hierarchy_lock = threading.Lock()
+        self._authors_cache: Optional[list] = None
+        self._authors_lock = threading.Lock()
+        self._works_cache: Optional[list] = None
+        self._works_lock = threading.Lock()
+        self._unclassified_cache: Optional[int] = None
+        self._unclassified_lock = threading.Lock()
+        # English domain name -> Hebrew domain name (see get_domain_translations).
+        # None = never built; a dict (possibly empty) = built.
+        self._domain_translations_cache: Optional[dict] = None
+        self._domain_translations_lock = threading.Lock()
+        self._has_persons_titles: bool = False  # Set True if v5+ tables exist
+        self._has_bib_extended: bool = False  # Set True if extended bib columns exist
+        # Columns of manuscript_measurements (#17). None = not known: no
+        # sidecar, or the schema could not be read (retried on the next
+        # question). An empty frozenset = read, and the table is absent.
+        # The desktop swaps sidecars through reset_fjms_service(); the web
+        # reads a replaced file only after a process restart.
+        self._measurement_columns: Optional[frozenset] = None
+        self._measurement_probe_failed = False
+        # R2-#3: cache of distinct catalog_fields.FieldValue for FragmentMaterial.
+        # None = not yet computed. Empty set = computed but vocabulary is empty
+        # (which validate_filter_values treats as fail-closed, NOT allow-all).
+        self._materials_cache: Optional[set] = None
+        # Post-search criteria (match_result_criteria): the last few answers.
+        self._result_match_cache: dict = {}
+        self._result_match_lock = threading.Lock()
+        # GET /api/criteria (criteria_vocabulary): one build at a time -- a cold
+        # build reads the whole catalogue (~20 s on the full file).
+        self._criteria_vocabulary_lock = threading.Lock()
+        # The panel's values, coverage and corpus note: one cold build at a
+        # time PER KEY (_build_once), so a visitor who asks while the
+        # server-start warm-up is still building that key waits for the build
+        # instead of running the same corpus-wide query beside it, and other
+        # keys still build side by side (GitHub Codex on PR 461). Taken inside
+        # _criteria_vocabulary_lock, never around it.
+        self._criteria_key_locks: dict = {}
+        self._criteria_key_locks_guard = threading.Lock()
+        # SEED-023: per-thread registry of populated catalog-filter TEMP tables
+        # (name -> token). The PGP/edition membership sets are static per process,
+        # so each thread's TEMP table is built once and reused across requests.
+        self._filter_temp_local = threading.local()
+
+        # Resolve db_path
+        if db_path is None:
+            # A worktree does not contain gitignored sidecars. Let a local
+            # preview point explicitly at the main checkout's FJMS database
+            # without copying 1.5 GB or creating a junction. An explicit
+            # constructor argument still has priority over this environment
+            # override, which in turn has priority over auto-detection.
+            configured_path = os.environ.get("GENIZAH_FJMS_DB_PATH", "").strip()
+            if configured_path:
+                db_path = configured_path
+            else:
+                # Check user-updated sidecar location first (LOCALAPPDATA)
+                user_path = os.path.join(
+                    os.environ.get('LOCALAPPDATA', ''),
+                    'GenizahSearchPro', 'data', _SIDECAR_DIR, _SIDECAR_FILENAME
+                )
+                root = _find_project_root()
+                bundled = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME) if root else None
+                db_path = _choose_sidecar(user_path, bundled)
+
+        if db_path is None:
+            logger.warning("FjmsService: No db_path provided and project root not found")
+            return
+
+        self._db_path = db_path
+        db_file = Path(db_path)
+
+        if not db_file.exists():
+            logger.warning(f"FjmsService: Sidecar database not found at {db_path}")
+            return
+
+        try:
+            uri = f"file:{db_path}?mode=ro"
+            if thread_safe:
+                self._conn = ThreadLocalConnection(
+                    uri, row_factory=sqlite3.Row, timeout=10.0
+                )
+            else:
+                self._conn = sqlite3.connect(
+                    uri, uri=True, check_same_thread=True, timeout=10.0
+                )
+                self._conn.row_factory = sqlite3.Row
+            logger.info(f"FjmsService: Connected to {db_path}")
+
+            # Note: performance indexes are created lazily in pre_warm_caches()
+            # to avoid blocking the main thread during app startup.
+
+            # Detect v5+ lookup tables (genizah_persons, genizah_titles)
+            try:
+                cnt = self._conn.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                    "AND name IN ('genizah_persons', 'genizah_titles')"
+                ).fetchone()[0]
+                self._has_persons_titles = cnt == 2
+                if self._has_persons_titles:
+                    logger.info("FjmsService: v5+ lookup tables detected (genizah_persons, genizah_titles)")
+            except Exception:
+                self._has_persons_titles = False  # Feature detection failed; assume not available
+
+            # Detect extended bibliography columns (re-exported with JournalVolumeTxt etc.)
+            try:
+                self._conn.execute("SELECT RunningTitleHeb FROM bibliography LIMIT 0")
+                self._has_bib_extended = True
+                logger.info("FjmsService: extended bibliography columns detected")
+            except Exception:
+                self._has_bib_extended = False  # Feature detection failed; assume not available
+
+            # Which measurement filters this file can answer (#17).
+            self._probe_measurement_schema()
+        except Exception as e:
+            logger.error(f"FjmsService: Failed to connect to {db_path}: {e}")
+            self._conn = None
+
+    def is_available(self) -> bool:
+        """Returns True if the sidecar database connection is active."""
+        return self._conn is not None
+
+    # ------------------------------------------------------------------
+    # #17: what the open sidecar can answer, in three states.
+    # ------------------------------------------------------------------
+
+    def _probe_measurement_schema(self) -> None:
+        """Read manuscript_measurements' columns into ``_measurement_columns``.
+
+        Leaves it None (unknown) when there is no connection or the
+        inspection fails. Only a successful inspection is an answer: an empty
+        result means the table is absent.
+        """
+        if self._conn is None:
+            return
+        try:
+            rows = self._conn.execute(
+                "PRAGMA table_info(manuscript_measurements)").fetchall()
+        except Exception as e:
+            log = logger.debug if self._measurement_probe_failed else logger.warning
+            log("FjmsService: could not read the manuscript_measurements schema "
+                "(%s); measurement filter support is unknown", e)
+            self._measurement_probe_failed = True
+            return
+        cols = frozenset(row[1] for row in rows)
+        self._measurement_columns = cols
+        if not cols:
+            logger.info("FjmsService: no manuscript_measurements table; "
+                        "measurement filters are unavailable")
+        elif _LINE_HEIGHT_COLUMN not in cols:
+            logger.info("FjmsService: manuscript_measurements has no %s; "
+                        "the Line Height filter is unavailable", _LINE_HEIGHT_COLUMN)
+
+    def _known_measurement_columns(self) -> Optional[frozenset]:
+        """The measurement columns, or None when they are not known.
+
+        A failed inspection is retried here, so a transient error (a locked
+        file) does not fix the answer for the life of the process.
+        """
+        if self._conn is None:
+            return None
+        if self._measurement_columns is None:
+            self._probe_measurement_schema()
+        return self._measurement_columns
+
+    def measurement_filter_support(self) -> str:
+        """FILTER_SUPPORTED / FILTER_UNSUPPORTED / FILTER_SUPPORT_UNKNOWN for
+        the measurement filters (width, height, lines, density, material)."""
+        cols = self._known_measurement_columns()
+        if cols is None:
+            return FILTER_SUPPORT_UNKNOWN
+        return FILTER_SUPPORTED if cols else FILTER_UNSUPPORTED
+
+    def line_height_filter_support(self) -> str:
+        """Same three states for the Line Height filter."""
+        cols = self._known_measurement_columns()
+        if cols is None:
+            return FILTER_SUPPORT_UNKNOWN
+        return FILTER_SUPPORTED if _LINE_HEIGHT_COLUMN in cols else FILTER_UNSUPPORTED
+
+    @property
+    def has_measurement_table(self) -> bool:
+        """True when the open sidecar is known to have measurement data.
+        (Not to be confused with has_measurements(sys_id), a per-manuscript
+        lookup.)"""
+        return self.measurement_filter_support() == FILTER_SUPPORTED
+
+    @property
+    def has_line_height(self) -> bool:
+        """True when the open sidecar is known to answer a Line Height filter."""
+        return self.line_height_filter_support() == FILTER_SUPPORTED
+
+    def get_version(self) -> Optional[str]:
+        """
+        Get the sidecar database version.
+
+        Returns:
+            Version string (e.g., '1.0.0') or None if unavailable.
+        """
+        if self._conn is None:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT value FROM meta WHERE key = 'version'"
+            )
+            row = cursor.fetchone()
+            return row["value"] if row else None
+        except Exception as e:
+            logger.error(f"FjmsService.get_version error: {e}")
+            return None
+
+    def get_domains(self, sys_id: str) -> list[dict]:
+        """
+        Get domain classifications for a manuscript.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of dicts with keys: domain, domain_heb, parent_domain, parent_domain_heb.
+            Returns [] if conn is None or sys_id not found.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT Domain, DomainHeb, ParentDomain, ParentDomainHeb "
+                "FROM domains WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            return [
+                {
+                    "domain": row["Domain"],
+                    "domain_heb": row["DomainHeb"],
+                    "parent_domain": row["ParentDomain"],
+                    "parent_domain_heb": row["ParentDomainHeb"],
+                }
+                for row in cursor
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_domains error for {sys_id}: {e}")
+            return []
+
+    def get_manuscripts_by_domain(self, domain: str) -> set[str]:
+        """
+        Get all manuscript IDs classified under a domain.
+
+        Matches both direct domain assignments and parent domain references,
+        enabling domain-based search filtering via set intersection.
+
+        Args:
+            domain: Domain name in English (e.g., 'Piyyut', 'Letters').
+
+        Returns:
+            Set of AlmaId strings. Returns set() if conn is None.
+        """
+        if self._conn is None:
+            return set()
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT AlmaId FROM domains "
+                "WHERE Domain = ? OR ParentDomain = ?",
+                (domain, domain),
+            )
+            return {row["AlmaId"] for row in cursor}
+        except Exception as e:
+            logger.error(f"FjmsService.get_manuscripts_by_domain error for {domain}: {e}")
+            return set()
+
+    def get_domains_for_sys_ids(self, sys_ids: list[str]) -> dict:
+        """
+        Get domain classifications for multiple manuscripts in batch.
+
+        More efficient than calling get_domains() per sys_id when processing
+        search results. Uses batched IN queries to stay within SQLite limits.
+
+        Args:
+            sys_ids: List of Alma/system IDs.
+
+        Returns:
+            Dict mapping sys_id -> list of domain dicts.
+            Each domain dict has keys: domain, domain_heb, parent_domain, parent_domain_heb.
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            # Batch to stay under SQLite variable limit (999)
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT AlmaId, Domain, DomainHeb, ParentDomain, ParentDomainHeb "
+                    f"FROM domains WHERE AlmaId IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    sid = row["AlmaId"]
+                    if sid not in result:
+                        result[sid] = []
+                    result[sid].append({
+                        "domain": row["Domain"],
+                        "domain_heb": row["DomainHeb"],
+                        "parent_domain": row["ParentDomain"],
+                        "parent_domain_heb": row["ParentDomainHeb"],
+                    })
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_domains_for_sys_ids error: {e}")
+            return {}
+
+    def get_printed_sys_ids(self, sys_ids: list[str]) -> set:
+        """Batch lookup which sys_ids have FragmentMaterial=Printed.
+
+        Returns: set of sys_ids that are printed materials.
+        Uses the catalog_fields table: FieldCategory='FragmentMaterial' AND FieldValue='Printed'.
+        Covers ~12,421 AlmaIds in the Genizah corpus.
+        """
+        if not self._conn or not sys_ids:
+            return set()
+        try:
+            result = set()
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT DISTINCT AlmaId FROM catalog_fields "
+                    f"WHERE FieldCategory = 'FragmentMaterial' "
+                    f"AND FieldValue = 'Printed' "
+                    f"AND AlmaId IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    result.add(row["AlmaId"])
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_printed_sys_ids error: {e}")
+            return set()
+
+    def get_filter_sys_ids(
+        self,
+        domain: str = None,
+        author: str = None,
+        work: str = None,
+        date_from: int = None,
+        date_to: int = None,
+        include_undated: bool = False,
+        material_include: list[str] = None,
+        material_exclude: list[str] = None,
+        # Multi-select params (backward compatible)
+        domains: list[str] = None,
+        domains_exclude: list[str] = None,
+        authors: list[str] = None,
+        authors_exclude: list[str] = None,
+        works: list[str] = None,
+        works_exclude: list[str] = None,
+        text_all: list[str] = None,
+        text_any: list[str] = None,
+        text_not: list[str] = None,
+        # Measurement filters (D-15, D-21)
+        width_min: float = None, width_max: float = None,
+        height_min: float = None, height_max: float = None,
+        line_count_min: int = None, line_count_max: int = None,
+        line_height_min: float = None, line_height_max: float = None,
+        text_density_min: float = None, text_density_max: float = None,
+        measurement_material: list[str] = None,
+        criteria: dict = None,
+        universe=None,
+    ) -> Optional[set]:
+        """Return the set of sys_ids matching all provided filter criteria (intersection).
+
+        Used for pre-search filtering: callers pass the result as restrict_sys_ids
+        to execute_search / search_composition_logic so that non-matching manuscripts
+        are skipped before expensive regex verification or chunk processing.
+
+        Supports both legacy single-value params and multi-select lists.
+        If a legacy single param is provided alongside its list counterpart,
+        the single value is prepended to the list.
+
+        Args:
+            domain: Legacy single domain (auto-converts to domains=[domain]).
+            author: Legacy single author.
+            work: Legacy single work.
+            domains: Multiple domains to include (matches Domain OR ParentDomain).
+            domains_exclude: Multiple domains to exclude.
+            authors: Multiple author IDs or names to include.
+            authors_exclude: Multiple author IDs or names to exclude.
+            works: Multiple work IDs or titles to include.
+            works_exclude: Multiple work IDs or titles to exclude.
+            date_from: Minimum year inclusive.
+            date_to: Maximum year inclusive.
+            include_undated: If True AND date filter active, include records with no date.
+            material_include: List of FragmentMaterial values to INCLUDE.
+            material_exclude: List of FragmentMaterial values to EXCLUDE.
+            text_all: FTS5 terms that must ALL appear (AND).
+            text_any: FTS5 terms where ANY must appear (OR).
+            text_not: FTS5 terms that must NOT appear.
+            criteria: Catalogue criteria (shared/catalog_criteria.py), ANDed
+                with everything else.
+            universe: The set of every corpus sys_id, or a callable returning
+                it (``MetadataManager.corpus_sys_ids``, called only when
+                needed, so a search without such filters never waits for
+                libraries.csv). With it, uncatalogued manuscripts can match: criteria such as
+                "not recorded" select them (D14), and when every older filter
+                set is an exclusion (Exclude domains/authors/works/material,
+                text "not") they pass it, since nothing says they belong to
+                what is excluded (D17). Without it the older filters answer
+                for catalogued manuscripts only, as before, and criteria that
+                need it raise FilterUnavailable('corpus_unavailable').
+
+        Returns:
+            None when ALL filter params are None/empty (meaning "no restriction").
+            set of matching AlmaId strings when any filter is active.
+            Empty set when filters are active but match nothing.
+
+        Raises:
+            FilterUnavailable: a filter is active but cannot be evaluated --
+                no sidecar ('sidecar_unavailable'), a table or column the
+                open sidecar is KNOWN to lack ('column_missing'), or a query
+                error ('query_failed'). Never reported as None or an empty
+                set: those are answers, and this is not one.
+        """
+        # Legacy single-value -> list conversion
+        if domain is not None and not domains:
+            domains = [domain]
+        if author is not None and not authors:
+            authors = [author]
+        if work is not None and not works:
+            works = [work]
+
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+
+        # Fast path: no filters active -> None means "no restriction"
+        old_active = bool(
+            domains
+            or domains_exclude
+            or authors
+            or authors_exclude
+            or works
+            or works_exclude
+            or date_from is not None
+            or date_to is not None
+            or material_include
+            or material_exclude
+            or text_all
+            or text_any
+            or text_not
+            or width_min is not None or width_max is not None
+            or height_min is not None or height_max is not None
+            or line_count_min is not None or line_count_max is not None
+            or line_height_min is not None or line_height_max is not None
+            or text_density_min is not None or text_density_max is not None
+            or measurement_material
+        )
+        if not old_active and not criteria:
+            return None
+
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+
+        # One definition of "a measurement bound is set", used here and in
+        # the query below.
+        _has_measurement_filter = any([
+            width_min is not None, width_max is not None,
+            height_min is not None, height_max is not None,
+            line_count_min is not None, line_count_max is not None,
+            line_height_min is not None, line_height_max is not None,
+            text_density_min is not None, text_density_max is not None,
+            bool(measurement_material),
+        ])
+        if _has_measurement_filter:
+            # Only a KNOWN absence is reported as column_missing. When the
+            # schema could not be read, the query runs; if it then fails, that
+            # is query_failed below.
+            if self.measurement_filter_support() == FILTER_UNSUPPORTED:
+                raise FilterUnavailable('column_missing',
+                                        'this FJMS sidecar has no measurement data',
+                                        filters=('measurements',))
+            if ((line_height_min is not None or line_height_max is not None)
+                    and self.line_height_filter_support() == FILTER_UNSUPPORTED):
+                raise FilterUnavailable('column_missing',
+                                        'this FJMS sidecar has no line-height data',
+                                        filters=('line_height',))
+
+        try:
+            conditions = []
+            params = []
+
+            # Domain include filter (handles qualified names like "Other (Bible)")
+            if domains:
+                bare, qualified = [], []
+                for d in domains:
+                    dom, par = unqualify_domain_name(d)
+                    if par:
+                        qualified.append((dom, par))
+                    else:
+                        bare.append(dom)
+                parts = []
+                if bare:
+                    ph = ','.join('?' * len(bare))
+                    parts.append(
+                        f"SELECT AlmaId FROM domains WHERE Domain IN ({ph}) "
+                        f"UNION SELECT AlmaId FROM domains WHERE ParentDomain IN ({ph})"
+                    )
+                    params.extend(bare)
+                    params.extend(bare)
+                for dom, par in qualified:
+                    parts.append(
+                        "SELECT AlmaId FROM domains WHERE Domain = ? AND ParentDomain = ?"
+                    )
+                    params.extend([dom, par])
+                conditions.append(f"c.AlmaId IN ({' UNION '.join(parts)})")
+
+            # Domain exclude filter (handles qualified names)
+            if domains_exclude:
+                bare, qualified = [], []
+                for d in domains_exclude:
+                    dom, par = unqualify_domain_name(d)
+                    if par:
+                        qualified.append((dom, par))
+                    else:
+                        bare.append(dom)
+                parts = []
+                if bare:
+                    ph = ','.join('?' * len(bare))
+                    parts.append(
+                        f"SELECT AlmaId FROM domains WHERE Domain IN ({ph}) "
+                        f"UNION SELECT AlmaId FROM domains WHERE ParentDomain IN ({ph})"
+                    )
+                    params.extend(bare)
+                    params.extend(bare)
+                for dom, par in qualified:
+                    parts.append(
+                        "SELECT AlmaId FROM domains WHERE Domain = ? AND ParentDomain = ?"
+                    )
+                    params.extend([dom, par])
+                conditions.append(f"c.AlmaId NOT IN ({' UNION '.join(parts)})")
+
+            # Author include filter (multi)
+            if authors:
+                author_parts = []
+                for a in authors:
+                    if self._has_persons_titles and _is_int(a):
+                        pid = int(a)
+                        author_parts.append(
+                            "(c.GenizahTitleId IN ("
+                            "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                            "  WHERE gt.AuthorId = ?"
+                            ") OR c.Author = ?)"
+                        )
+                        params.extend([pid, pid])
+                    else:
+                        author_parts.append("c.AuthorText = ?")
+                        params.append(a)
+                if len(author_parts) == 1:
+                    conditions.append(author_parts[0])
+                else:
+                    conditions.append("(" + " OR ".join(author_parts) + ")")
+
+            # Author exclude filter (multi) — use AlmaId NOT IN subquery
+            # so that manuscripts with ANY matching row are fully excluded
+            if authors_exclude:
+                author_excl_parts = []
+                excl_params = []
+                for a in authors_exclude:
+                    if self._has_persons_titles and _is_int(a):
+                        pid = int(a)
+                        author_excl_parts.append(
+                            "(ce.GenizahTitleId IN ("
+                            "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                            "  WHERE gt.AuthorId = ?"
+                            ") OR ce.Author = ?)"
+                        )
+                        excl_params.extend([pid, pid])
+                    else:
+                        author_excl_parts.append("ce.AuthorText = ?")
+                        excl_params.append(a)
+                conditions.append(
+                    "c.AlmaId NOT IN ("
+                    "SELECT ce.AlmaId FROM catalog ce WHERE "
+                    + " OR ".join(author_excl_parts) + ")"
+                )
+                params.extend(excl_params)
+
+            # Work include filter (multi)
+            if works:
+                work_parts = []
+                for w in works:
+                    if self._has_persons_titles and _is_int(w):
+                        work_parts.append("c.GenizahTitleId = ?")
+                        params.append(int(w))
+                    else:
+                        work_parts.append("c.Title = ?")
+                        params.append(w)
+                if len(work_parts) == 1:
+                    conditions.append(work_parts[0])
+                else:
+                    conditions.append("(" + " OR ".join(work_parts) + ")")
+
+            # Work exclude filter (multi) — use AlmaId NOT IN subquery
+            if works_exclude:
+                work_excl_parts = []
+                excl_params = []
+                for w in works_exclude:
+                    if self._has_persons_titles and _is_int(w):
+                        work_excl_parts.append("ce.GenizahTitleId = ?")
+                        excl_params.append(int(w))
+                    else:
+                        work_excl_parts.append("ce.Title = ?")
+                        excl_params.append(w)
+                conditions.append(
+                    "c.AlmaId NOT IN ("
+                    "SELECT ce.AlmaId FROM catalog ce WHERE "
+                    + " OR ".join(work_excl_parts) + ")"
+                )
+                params.extend(excl_params)
+
+            # Date range filter (same logic as get_browse_results)
+            has_date_filter = date_from is not None or date_to is not None
+            if has_date_filter:
+                _no_date = "(c.CopyDate IS NULL OR c.CopyDate = '' OR c.CopyDate = '0' OR c.CopyDate = '-99')"
+                date_parts = []
+                if date_from is not None and date_to is not None:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) BETWEEN ? AND ?")
+                    params.extend([date_from, date_to])
+                elif date_from is not None:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) >= ?")
+                    params.append(date_from)
+                else:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) <= ?")
+                    params.append(date_to)
+                dated_cond = f"(NOT {_no_date} AND {date_parts[0]})"
+                if include_undated:
+                    conditions.append(f"({dated_cond} OR {_no_date})")
+                else:
+                    conditions.append(dated_cond)
+
+            # Material include filter
+            if material_include:
+                placeholders = ','.join('?' * len(material_include))
+                conditions.append(
+                    f"c.AlmaId IN ("
+                    f"SELECT AlmaId FROM catalog_fields "
+                    f"WHERE FieldCategory = 'FragmentMaterial' "
+                    f"AND FieldValue IN ({placeholders}))"
+                )
+                params.extend(material_include)
+
+            # Material exclude filter
+            if material_exclude:
+                placeholders = ','.join('?' * len(material_exclude))
+                conditions.append(
+                    f"c.AlmaId NOT IN ("
+                    f"SELECT AlmaId FROM catalog_fields "
+                    f"WHERE FieldCategory = 'FragmentMaterial' "
+                    f"AND FieldValue IN ({placeholders}))"
+                )
+                params.extend(material_exclude)
+
+            # Text filters (FTS5 hybrid: catalog_fts + domain LIKE)
+            if text_all or text_any or text_not:
+                def _fts_escape(term: str) -> str:
+                    escaped = term.replace('"', '""')
+                    return f'"{escaped}"'
+
+                _TEXT_MATCH = (
+                    "c.rowid IN ("
+                    "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                    "UNION "
+                    "SELECT c2.rowid FROM catalog c2 "
+                    "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                    "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+                    ")"
+                )
+                _TEXT_NOT_MATCH = (
+                    "c.rowid NOT IN ("
+                    "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                    "UNION "
+                    "SELECT c2.rowid FROM catalog c2 "
+                    "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                    "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+                    ")"
+                )
+
+                if text_all:
+                    for term in text_all:
+                        conditions.append(_TEXT_MATCH)
+                        like_pat = f"%{term}%"
+                        params.extend([_fts_escape(term), like_pat, like_pat])
+
+                if text_any:
+                    fts_expr = " OR ".join(_fts_escape(t) for t in text_any)
+                    like_parts = []
+                    like_params = []
+                    for t in text_any:
+                        like_parts.append("dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?")
+                        like_params.extend([f"%{t}%", f"%{t}%"])
+                    conditions.append(
+                        "c.rowid IN ("
+                        "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                        "UNION "
+                        "SELECT c2.rowid FROM catalog c2 "
+                        "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                        f"WHERE {' OR '.join(like_parts)}"
+                        ")"
+                    )
+                    params.append(fts_expr)
+                    params.extend(like_params)
+
+                if text_not:
+                    for term in text_not:
+                        conditions.append(_TEXT_NOT_MATCH)
+                        like_pat = f"%{term}%"
+                        params.extend([_fts_escape(term), like_pat, like_pat])
+
+            # Measurement filters (D-15, D-21) — subquery on manuscript_measurements
+            if _has_measurement_filter:
+                mm_conds, mm_params = _measurement_conditions(
+                    width_min, width_max, height_min, height_max,
+                    line_count_min, line_count_max, line_height_min, line_height_max,
+                    text_density_min, text_density_max, measurement_material)
+                conditions.extend(mm_conds)
+                params.extend(mm_params)
+
+            ids = None
+            if old_active:
+                where = " WHERE " + " AND ".join(conditions) if conditions else ""
+                sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
+                cursor = self._conn.execute(sql, params)
+                ids = {row["AlmaId"] for row in cursor}
+                inclusion = bool(
+                    domains or authors or works or date_from is not None
+                    or date_to is not None or material_include or text_all or text_any
+                    or _has_measurement_filter)
+                if universe is not None and not inclusion:
+                    ids |= set(_resolve_universe(universe)) - self.catalogued_ids()
+            if criteria:
+                matched = match_criteria(self._conn, criteria, _resolve_universe(universe))
+                ids = matched if ids is None else ids & matched
+            return ids
+
+        except FilterUnavailable:
+            raise  # e.g. corpus_sys_ids: keep its reason
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
+        except Exception as e:
+            # An empty set here would read as "nothing matches" (#17).
+            logger.error("FjmsService.get_filter_sys_ids error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed',
+                                    'the catalog filter lookup failed') from e
+
+    # ------------------------------------------------------------------
+    # Phase 78 Plan 03 (D-17, API-07, R2-#3): fail-closed filter validation.
+    # ------------------------------------------------------------------
+
+    def _discover_valid_materials(self) -> set:
+        """Return the set of distinct FragmentMaterial values present in
+        catalog_fields. Cached after first call. Returns empty set if
+        self._conn is None — caller (validate_filter_values) MUST treat
+        empty as fail-closed (R2-#3); previously the implementation
+        degraded to allow-all when valid_materials was empty, which is
+        the API-07 regression the round-2 review flagged.
+        """
+        if getattr(self, '_materials_cache', None) is not None:
+            return self._materials_cache
+        if self._conn is None:
+            self._materials_cache = set()
+            return self._materials_cache
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT FieldValue FROM catalog_fields "
+                "WHERE FieldCategory = 'FragmentMaterial' AND FieldValue IS NOT NULL"
+            )
+            materials = {row[0] for row in cursor if row[0]}
+            self._materials_cache = materials
+            return materials
+        except Exception as e:
+            logger.error(f"FjmsService._discover_valid_materials error: {e}")
+            self._materials_cache = set()
+            return self._materials_cache
+
+    # ------------------------------------------------------------------
+    # Catalogue criteria (docs/plans/CATALOGUE_CRITERIA_PLAN.md, PR 1a)
+    # ------------------------------------------------------------------
+
+    def catalogued_ids(self) -> frozenset:
+        """Every sys_id with a catalogue record, read once per process.
+        Raises FilterUnavailable when it cannot be read."""
+        cached = getattr(self, "_catalogued_ids_cache", None)
+        if cached is not None:
+            return cached
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        try:
+            ids = frozenset(row[0] for row in self._conn.execute(
+                "SELECT DISTINCT AlmaId FROM catalog") if row[0])
+        except Exception as e:
+            raise FilterUnavailable('query_failed', 'the catalog could not be read') from e
+        self._catalogued_ids_cache = ids
+        return ids
+
+    def criteria_support(self) -> str:
+        """Whether this file can answer the criteria that need the 5.1.0
+        tables (catalogue lines and columns, periods, vocalization extent,
+        attributes): FILTER_SUPPORTED / FILTER_UNSUPPORTED (the schema was
+        read and lacks them: the panel disables those controls) /
+        FILTER_SUPPORT_UNKNOWN (no file, or the schema could not be read)."""
+        if self._conn is None:
+            return FILTER_SUPPORT_UNKNOWN
+        try:
+            names = {row[0] for row in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('criteria_numbers', 'criteria_values')")}
+        except Exception:
+            return FILTER_SUPPORT_UNKNOWN
+        return FILTER_SUPPORTED if len(names) == 2 else FILTER_UNSUPPORTED
+
+    def get_criterion_values(self, key: str, universe=None, source: str = 'either') -> list:
+        """The choices a list criterion offers, with corpus counts (see
+        shared/catalog_criteria.py::criterion_values), cached per process.
+        Raises FilterUnavailable when they cannot be read."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        cache = self.__dict__.setdefault("_criterion_values_cache", {})
+        token = (key, source, _universe_token(universe))
+
+        def build():
+            try:
+                return criterion_values(self._conn, key, universe, source)
+            except Exception as e:
+                raise FilterUnavailable('query_failed', f'the {key} values could not be read',
+                                        filters=(key,)) from e
+        return copy.deepcopy(self._build_once('values', cache, token, build))
+
+    def _build_once(self, name: str, cache: dict, token, build):
+        """``cache[token]``, built by ``build()`` when missing -- by one
+        thread at a time for that key: the others wait for its answer (one
+        corpus-wide query, not one each), while other keys build beside it.
+        A build that raises caches nothing; the next caller tries again."""
+        if token in cache:
+            return cache[token]
+        with self._criteria_key_locks_guard:
+            lock = self._criteria_key_locks.setdefault((name, token), threading.Lock())
+        with lock:
+            if token not in cache:
+                cache[token] = build()
+        with self._criteria_key_locks_guard:
+            # Built: every later caller finds it in the cache without the lock.
+            self._criteria_key_locks.pop((name, token), None)
+        return cache[token]
+
+    def get_criterion_coverage(self, key: str, universe, source: str = 'either') -> int:
+        """How many manuscripts of ``universe`` (a set, or a callable giving
+        it) have ``key`` recorded by ``source`` -- "recorded for N of M"
+        (rule 8). Cached per process. Raises FilterUnavailable."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet', (key,))
+        cache = self.__dict__.setdefault("_criterion_coverage_cache", {})
+        token = (key, source, _universe_token(universe))
+
+        def build():
+            try:
+                return _recorded_count(self._conn, key, universe, source)
+            except Exception as e:
+                raise FilterUnavailable('query_failed', f'the {key} coverage could not be read',
+                                        filters=(key,)) from e
+        return self._build_once('coverage', cache, token, build)
+
+    def criteria_live_total(self, criteria, universe) -> dict:
+        """The panel's live total: ``{'total': N, 'not_recorded': {key: M}}``
+        -- how many manuscripts of the corpus the criteria select (None when
+        none is active), and for each "all except" list how many of those
+        have nothing recorded for it (rule 2: "225,375, of which 218,786
+        not recorded"). Raises FilterUnavailable."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        universe = _resolve_universe(universe)
+        matched = self.get_filter_sys_ids(criteria=criteria, universe=universe)
+        out = {'total': None if matched is None else len(matched), 'not_recorded': {}}
+        for key, spec in criteria.items():
+            # Attributes have no "not recorded" (D5 follow-up): nothing to say.
+            if spec.get('mode') != 'except' or not _CRITERIA_BY_KEY[key].not_recordable:
+                continue
+            missing = self.get_filter_sys_ids(
+                criteria={key: {'values': [NOT_RECORDED],
+                                **({'source': spec['source']} if 'source' in spec else {})}},
+                universe=universe)
+            out['not_recorded'][key] = len(matched & missing)
+        return out
+
+    def criteria_corpus_note(self, universe) -> dict:
+        """The figures of the panel's note under the total (§6.3):
+        ``{'corpus': N, 'uncatalogued': U, 'uncatalogued_sized': S}`` -- the
+        corpus, those with no catalogue record, and how many of those have
+        an unflagged catalogue size. Cached per corpus: the panel asks for it
+        beside every "recorded for N of M". Raises FilterUnavailable."""
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        cache = self.__dict__.setdefault("_criteria_note_cache", {})
+
+        def build():
+            uncatalogued = universe - self.catalogued_ids()
+            sized = universe - (self.get_filter_sys_ids(
+                criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
+                universe=universe) or set())
+            return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
+                    'uncatalogued_sized': len(uncatalogued & sized)}
+        return dict(self._build_once('note', cache, _universe_token(universe), build))
+
+    def criteria_vocabulary(self, universe) -> dict:
+        """What GET /api/criteria serves: every section and criterion in the
+        panel's order, with what a caller needs to send it -- kind, sources,
+        unit, whether "not recorded" exists -- and, over the corpus, how many
+        manuscripts have it recorded (``recorded``, per source in
+        ``recorded_by_source``) and a list criterion's values with their
+        counts (``count_by_source`` where it has sources; the list ends with
+        "_none", Not recorded, except for Attributes). A criterion this file
+        cannot answer (a 5.0.0 file: catalogue lines and columns, period,
+        vocalization extent, attributes) is ``available: false`` with no
+        figures. Cached per corpus. Raises FilterUnavailable."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        cache = self.__dict__.setdefault("_criteria_vocabulary_cache", {})
+        token = _universe_token(universe)
+        with self._criteria_vocabulary_lock:
+            if token not in cache:
+                cache[token] = self._build_criteria_vocabulary(universe)
+            return copy.deepcopy(cache[token])
+
+    def _build_criteria_vocabulary(self, universe: frozenset) -> dict:
+        unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        sections = []
+        for section in _CRITERIA_SECTIONS:
+            entries = []
+            for criterion in _CRITERIA:
+                if criterion.section != section.key:
+                    continue
+                key = criterion.key
+                entry = {'key': key, 'kind': criterion.kind,
+                         'label_en': criterion.label_en, 'label_he': criterion.label_he}
+                if criterion.sources:
+                    entry['sources'] = ['either', *criterion.sources]
+                if criterion.kind == 'range':
+                    entry['whole_numbers'] = criterion.integer
+                    if criterion.unit:
+                        entry['unit'] = criterion.unit
+                entry['not_recorded'] = criterion.not_recordable
+                entry['available'] = not (unsupported and key in _NEW_TABLE_KEYS)
+                if entry['available']:
+                    entry['recorded'] = self.get_criterion_coverage(key, universe)
+                    if criterion.sources:
+                        entry['recorded_by_source'] = {
+                            s: self.get_criterion_coverage(key, universe, s)
+                            for s in criterion.sources}
+                    if criterion.kind == 'list':
+                        values = self.get_criterion_values(key, universe)
+                        if criterion.sources:
+                            counts = {s: {v['value']: v['count']
+                                          for v in self.get_criterion_values(key, universe, s)}
+                                      for s in criterion.sources}
+                            for value in values:
+                                value['count_by_source'] = {
+                                    s: counts[s].get(value['value'], 0) for s in criterion.sources}
+                        entry['values'] = values
+                entries.append(entry)
+            sections.append({'key': section.key, 'label_en': section.label_en,
+                             'label_he': section.label_he, 'criteria': entries})
+        note = self.criteria_corpus_note(universe)
+        return {'corpus': note['corpus'], 'uncatalogued': note['uncatalogued'],
+                'sections': sections}
+
+    def criterion_value_labels(self, key: str, cached_only: bool = False) -> Optional[dict]:
+        """``{value: Hebrew label}`` of a list criterion, from the catalogue
+        (cached with its values). Raises FilterUnavailable as they do.
+        ``cached_only``: None while they are not loaded, never a query -- for
+        code on an event loop or a UI thread, which loads them elsewhere."""
+        if cached_only:
+            cache = self.__dict__.get("_criterion_values_cache", {})
+            values = cache.get((key, 'either', _universe_token(None)))
+            if values is None:
+                return None
+        else:
+            values = self.get_criterion_values(key)
+        return {v['value']: v['label_he'] for v in values if v.get('label_he')}
+
+    def criteria_chips(self, criteria, lang: str = 'en', cached_only: bool = False) -> list:
+        """``[(key, text)]``: one chip per active criterion, values in the
+        catalogue's Hebrew where ``lang`` is 'he' (shared/catalog_criteria.py::
+        criteria_chips). Never raises for a missing label. ``cached_only``:
+        never queries; a value whose labels are not loaded shows in English."""
+        return _criteria_chips(
+            criteria, lang, lambda key: self.criterion_value_labels(key, cached_only))
+
+    def criteria_summary(self, criteria, lang: str = 'en', sep: str = '; ',
+                         cached_only: bool = False) -> str:
+        """The chips as one line (history entries)."""
+        return sep.join(text for _key, text in self.criteria_chips(criteria, lang, cached_only))
+
+    def match_result_criteria(self, criteria, sys_ids) -> Optional[set]:
+        """The post-search filters (D20): which of a search's result
+        ``sys_ids`` the criteria keep, by the panel's rules -- the result is
+        the universe, so "not recorded" and "all except" are counted within
+        it. None when no criterion is active. Cached for the last few calls
+        (every re-render applies the filters again). Raises
+        FilterUnavailable like get_filter_sys_ids: never an empty set for an
+        error."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        if not criteria:
+            return None
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = frozenset(str(s) for s in sys_ids or () if s)
+        token = (criteria_token(criteria), universe)
+        with self._result_match_lock:
+            cached = self._result_match_cache.get(token)
+        if cached is not None:
+            return set(cached)
+        try:
+            matched = match_criteria(self._conn, criteria, set(universe))
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
+        except Exception as e:
+            logger.error("FjmsService.match_result_criteria error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the result filter lookup failed') from e
+        with self._result_match_lock:
+            self._result_match_cache[token] = frozenset(matched)
+            while len(self._result_match_cache) > 8:
+                self._result_match_cache.pop(next(iter(self._result_match_cache)))
+        return set(matched)
+
+    def validate_filter_values(self, filters: dict, universe=None) -> None:
+        """Probe each filter value against FJMS lookup tables (R2-#3 policy).
+
+        - Unknown token in a loaded vocabulary → APIError(http_status=400,
+          code='unresolvable_filter_value').
+        - Vocabulary cannot be loaded (sidecar absent / loader raises /
+          empty set when shouldn't be) → APIError(http_status=503,
+          code='filter_vocabulary_unavailable').
+        - The historical "if vocabulary empty, allow all" pattern is GONE
+          (was the API-07 regression).
+
+        Args:
+            filters: dict with optional keys 'domains', 'authors', 'works',
+                     'library', 'library_filter_mode', 'materials',
+                     'date_from', 'date_to', 'criteria' (D-15 shape,
+                     post-Pydantic validation; 'criteria' cleaned).
+                     'library' is validated against LIBRARY_CODES (Phase 129).
+                     'library_filter_mode' is intentionally not validated here —
+                     it is a Pydantic Literal field with no server-side vocabulary
+                     table; it is consumed by _intersect_library_filter.
+            universe: the corpus (a set, or a callable returning it), so a
+                     criteria value is checked against the values GET
+                     /api/criteria lists -- those with a corpus manuscript.
+        """
+        if not filters:
+            return
+
+        # ---- Domains: route through is_valid_domain_token + _domain_vocabulary_is_loadable.
+        domains = filters.get('domains')
+        if domains:
+            if not _domain_vocabulary_is_loadable():
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Domain filter vocabulary is unavailable; refusing to process filtered request',
+                    http_status=503,
+                )
+            for v in domains:
+                try:
+                    ok = is_valid_domain_token(v)
+                except Exception as exc:
+                    # Loader-level exception during the lookup itself → fail-closed.
+                    raise APIError(
+                        'filter_vocabulary_unavailable',
+                        'Domain filter vocabulary lookup failed',
+                        http_status=503,
+                    ) from exc
+                if not ok:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter domains={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Authors.
+        authors = filters.get('authors')
+        if authors:
+            try:
+                rows = self.get_browse_authors() or []
+            except Exception as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Authors filter vocabulary lookup failed',
+                    http_status=503,
+                ) from exc
+            if not rows:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Authors filter vocabulary is empty',
+                    http_status=503,
+                )
+            valid_person_ids: set = set()
+            valid_eng_descs: set = set()
+            for a in rows:
+                pid = a.get("person_id")
+                if pid is not None:
+                    valid_person_ids.add(str(pid))
+                ed = a.get("eng_desc")
+                if ed:
+                    valid_eng_descs.add(ed)
+            for v in authors:
+                v_str = str(v)
+                ok = (v_str in valid_person_ids) if v_str.isdigit() else (v_str in valid_eng_descs)
+                if not ok:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter authors={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Works: same shape as authors.
+        works = filters.get('works')
+        if works:
+            try:
+                rows = self.get_browse_works() or []
+            except Exception as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Works filter vocabulary lookup failed',
+                    http_status=503,
+                ) from exc
+            if not rows:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Works filter vocabulary is empty',
+                    http_status=503,
+                )
+            valid_title_ids: set = set()
+            valid_org_titles: set = set()
+            for w in rows:
+                tid = w.get("title_id")
+                if tid is not None:
+                    valid_title_ids.add(str(tid))
+                ot = w.get("org_title")
+                if ot:
+                    valid_org_titles.add(ot)
+            for v in works:
+                v_str = str(v)
+                ok = (v_str in valid_title_ids) if v_str.isdigit() else (v_str in valid_org_titles)
+                if not ok:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter works={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Library (SEED-026): codes validated against the static LIBRARY_CODES
+        # set (no FJMS sidecar dependency, so no 503 path). Unknown code -> 400, so a
+        # typo never silently falls through to an unfiltered (fail-open) result.
+        library = filters.get('library')
+        if library:
+            from shared.browse_map_utils import LIBRARY_CODES
+            for v in library:
+                if v not in LIBRARY_CODES:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter library={v!r} is not a known library code",
+                        http_status=400,
+                    )
+
+        # ---- Materials: R2-#3 — empty vocabulary MUST fail closed, NOT allow-all.
+        materials = filters.get('materials')
+        if materials:
+            try:
+                valid_materials = self._discover_valid_materials()
+            except Exception as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Materials filter vocabulary lookup failed',
+                    http_status=503,
+                ) from exc
+            if not valid_materials:
+                # PREVIOUS BUG: `if valid_materials and v not in valid_materials`
+                # no-oped here. R2-#3 fix: empty vocabulary is fail-closed.
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Materials filter vocabulary is unavailable or empty',
+                    http_status=503,
+                )
+            for v in materials:
+                if v not in valid_materials:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter materials={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Catalogue criteria (PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md).
+        criteria = filters.get('criteria')
+        if criteria:
+            self._validate_criteria_values(criteria, universe)
+        # date_from / date_to: any int is a valid token; range matching is FJMS's job.
+
+    def _validate_criteria_values(self, criteria: dict, universe=None) -> None:
+        """Each value of a list criterion must be one the catalogue (or, for
+        Material, a measurement) records under the chosen source for a
+        manuscript of ``universe`` -- the values GET /api/criteria lists
+        (Attributes too: only those present). ``criteria`` is already cleaned
+        (strict), so keys, shapes, attribute names and "_none" are checked.
+        Ranges have no vocabulary. A criterion this file cannot answer at all
+        is left to the lookup, which raises FilterUnavailable('column_missing')
+        for it; so is a corpus list that cannot be had (it raises
+        FilterUnavailable('corpus_unavailable') here)."""
+        unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        resolved = False
+        for key, spec in clean_criteria(criteria)[0].items():
+            criterion = _CRITERIA_BY_KEY[key]
+            if criterion.kind != 'list':
+                continue
+            if unsupported and key in _NEW_TABLE_KEYS:
+                continue
+            values = [v for v in spec['values'] if v != NOT_RECORDED]
+            if not values:
+                continue
+            source = spec.get('source', 'either')
+            if not resolved:
+                universe, resolved = _resolve_universe(universe), True
+            try:
+                # An empty list read successfully is an answer: nothing is
+                # recorded, so every value is unknown (400), not a 503.
+                known = {item['value'] for item in self.get_criterion_values(key, universe, source)}
+            except FilterUnavailable as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    f'The criteria.{key} vocabulary could not be read',
+                    http_status=503,
+                ) from exc
+            for v in values:
+                if v not in known:
+                    where = f" under source {source!r}" if criterion.sources else ''
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter criteria.{key}={v!r} is not a value the catalogue records{where}; "
+                        f"GET /api/criteria lists them",
+                        http_status=400,
+                    )
+
+    def get_all_domains(self) -> list[dict]:
+        """
+        Get all unique domain names with manuscript counts.
+
+        Useful for populating domain filter dropdowns in the UI.
+
+        Returns:
+            List of dicts with keys: domain, domain_heb, count.
+            Sorted by count descending. Returns [] if conn is None.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT Domain, DomainHeb, COUNT(DISTINCT AlmaId) as count "
+                "FROM domains GROUP BY Domain ORDER BY count DESC"
+            )
+            return [
+                {
+                    "domain": row["Domain"],
+                    "domain_heb": row["DomainHeb"],
+                    "count": row["count"],
+                }
+                for row in cursor
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_all_domains error: {e}")
+            return []
+
+    def get_domain_translations(self) -> dict:
+        """English domain name -> Hebrew domain name, over the WHOLE vocabulary.
+
+        FJMS is the authority for the bilingual domain vocabulary: every row of
+        ``domains`` carries ``Domain``/``DomainHeb`` and ``ParentDomain``/
+        ``ParentDomainHeb``. This returns the flat union of both pairs, so a
+        caller holding either a leaf name or a parent name can translate it
+        without knowing which it is.
+
+        Deliberately NOT derived from :meth:`get_domain_hierarchy`. That
+        accessor nests and de-duplicates for the browse tree and drops names in
+        the process (measured 2026-08-04: 126 names out of 188, leaving 10 of
+        the findings page's 38 genre strings untranslatable), so a caller that
+        reused it would silently fall back to English on a quarter of the
+        vocabulary. This query keeps every name.
+
+        Cached in memory after the first call (the vocabulary is static) and
+        thread-safe via double-checked locking, like the hierarchy cache. Runs
+        one ``SELECT DISTINCT`` (~0.08 s over ~390K rows, measured); callers on
+        an event loop must still reach it off-loop.
+
+        Returns ``{}`` when the sidecar is absent or the query fails -- never a
+        partial map and never an exception, so a caller can fall back to the
+        English name rather than rendering a blank label.
+        """
+        if self._domain_translations_cache is not None:
+            return self._domain_translations_cache
+
+        if self._conn is None:
+            return {}
+
+        with self._domain_translations_lock:
+            if self._domain_translations_cache is not None:
+                return self._domain_translations_cache
+            try:
+                cursor = self._conn.execute(
+                    "SELECT DISTINCT Domain, DomainHeb, ParentDomain, ParentDomainHeb "
+                    "FROM domains"
+                )
+                mapping: dict = {}
+                for row in cursor:
+                    for english, hebrew in (
+                        (row["Domain"], row["DomainHeb"]),
+                        (row["ParentDomain"], row["ParentDomainHeb"]),
+                    ):
+                        if not english or not hebrew:
+                            continue
+                        english = str(english).strip()
+                        hebrew = str(hebrew).strip()
+                        if english and hebrew:
+                            mapping.setdefault(english, hebrew)
+                self._domain_translations_cache = mapping
+                logger.info(
+                    "FjmsService.get_domain_translations: %d domain names", len(mapping)
+                )
+            except Exception as e:
+                logger.error(f"FjmsService.get_domain_translations error: {e}")
+                return {}
+        return self._domain_translations_cache
+
+    def get_domain_hierarchy(self) -> dict:
+        """
+        Get domain hierarchy with counts, grouped by parent domain.
+
+        Results are cached in memory after first computation (hierarchy is static).
+        Thread-safe via double-checked locking.
+
+        Returns:
+            Dict mapping parent_domain -> {
+                'parent_domain_heb': str,
+                'count': int,  # total manuscripts under this parent (including children)
+                'children': [{'domain': str, 'domain_heb': str, 'count': int}, ...]
+            }
+            Sorted by parent count descending, children by count descending within each parent.
+            Returns {} if conn is None.
+        """
+        # Fast path: return cached result
+        if self._hierarchy_cache is not None:
+            return self._hierarchy_cache
+
+        if self._conn is None:
+            return {}
+
+        # Slow path: compute and cache
+        with self._hierarchy_lock:
+            # Double-check after acquiring lock
+            if self._hierarchy_cache is not None:
+                return self._hierarchy_cache
+
+            try:
+                # COUNT(*) is correct per (Domain, ParentDomain) group — no
+                # duplicate AlmaIds within a group. Cross-group overlap (e.g.,
+                # Piyyut with NULL parent AND "Piyut..." parent) is handled
+                # by the dedup step below which queries true DISTINCT counts.
+                cursor = self._conn.execute(
+                    "SELECT Domain, DomainHeb, ParentDomain, ParentDomainHeb, "
+                    "COUNT(*) as count "
+                    "FROM domains GROUP BY Domain, ParentDomain ORDER BY count DESC"
+                )
+                rows = cursor.fetchall()
+
+                # Build hierarchy: map parent -> {parent_domain_heb, count, children[]}
+                hierarchy = {}
+                parent_counts = {}  # Track total counts per parent
+
+                for row in rows:
+                    domain = row["Domain"]
+                    domain_heb = row["DomainHeb"]
+                    parent = row["ParentDomain"]
+                    parent_heb = row["ParentDomainHeb"]
+                    count = row["count"]
+
+                    # If this domain HAS a parent (not a root domain)
+                    if parent and parent != domain:
+                        if parent not in hierarchy:
+                            hierarchy[parent] = {
+                                'parent_domain_heb': parent_heb,
+                                'count': 0,
+                                'children': []
+                            }
+                        hierarchy[parent]['children'].append({
+                            'domain': domain,
+                            'domain_heb': domain_heb,
+                            'count': count
+                        })
+                        hierarchy[parent]['count'] += count
+                        parent_counts[parent] = parent_counts.get(parent, 0) + count
+                    else:
+                        # Root-level domain (Domain == ParentDomain or no parent)
+                        if domain not in hierarchy:
+                            hierarchy[domain] = {
+                                'parent_domain_heb': domain_heb,
+                                'count': count,
+                                'children': []
+                            }
+                        else:
+                            # Already exists as parent, just update count
+                            hierarchy[domain]['count'] += count
+                        parent_counts[domain] = parent_counts.get(domain, 0) + count
+
+                # Deduplicate & nest: if a domain appears as both a child and a
+                # standalone root (e.g., "Piyyut" with ParentDomain=NULL AND
+                # ParentDomain="Piyut and its Interpretation"), fix the child's
+                # count and nest any sub-sub-domains under it (3-level hierarchy).
+                child_domains = set()
+                for info in hierarchy.values():
+                    for child in info.get('children', []):
+                        child_domains.add(child['domain'])
+                for child_name in child_domains:
+                    if child_name in hierarchy:
+                        # Query the true distinct count for this domain
+                        try:
+                            dc = self._conn.execute(
+                                "SELECT COUNT(DISTINCT AlmaId) FROM domains WHERE Domain = ?",
+                                (child_name,)
+                            ).fetchone()[0]
+                        except Exception:
+                            dc = hierarchy[child_name].get('count', 0)  # Count extraction failed; use default
+                        # Set the child entry's count and nest sub-sub-domains
+                        orphan_children = hierarchy[child_name].get('children', [])
+                        for info in hierarchy.values():
+                            for child in info.get('children', []):
+                                if child['domain'] == child_name:
+                                    child['count'] = dc
+                                    if orphan_children:
+                                        child['children'] = orphan_children
+                                    break
+                        del hierarchy[child_name]
+
+                # Merge duplicate children (e.g., two "Other" entries at same level)
+                for parent_name, info in hierarchy.items():
+                    seen = {}
+                    merged = []
+                    for child in info.get('children', []):
+                        key = child['domain']
+                        if key in seen:
+                            seen[key]['count'] += child['count']
+                        else:
+                            seen[key] = child
+                            merged.append(child)
+                    info['children'] = merged
+
+                # Sort children and sub-children using canonical FJMS ordering
+                fallback_pos = 9999
+                for parent_name, info in hierarchy.items():
+                    child_idx = _FJMS_CHILD_IDX.get(parent_name, {})
+                    info['children'].sort(
+                        key=lambda x: (
+                            child_idx.get(x['domain'], fallback_pos),
+                            -x['count'],
+                        )
+                    )
+                    # Sort sub-sub-domains (third level)
+                    for child in info['children']:
+                        subchildren = child.get('children', [])
+                        if subchildren:
+                            sc_idx = _FJMS_SUBCHILD_IDX.get(child['domain'], {})
+                            subchildren.sort(
+                                key=lambda x: (
+                                    sc_idx.get(x['domain'], fallback_pos),
+                                    -x['count'],
+                                )
+                            )
+
+                # Recalculate parent counts: use sum of children's distinct counts
+                # (fast approximation — avoids 25 slow DISTINCT queries at ~100ms each)
+                for parent_name, info in hierarchy.items():
+                    child_total = sum(c['count'] for c in info.get('children', []))
+                    own_count = info.get('count', 0)
+                    info['count'] = max(own_count, child_total)
+                    parent_counts[parent_name] = info['count']
+
+                # Sort parents using canonical FJMS ordering (fallback: count desc)
+                result = dict(sorted(
+                    hierarchy.items(),
+                    key=lambda x: (
+                        _FJMS_PARENT_IDX.get(x[0], fallback_pos),
+                        -parent_counts.get(x[0], 0),
+                    )
+                ))
+                self._hierarchy_cache = result
+                return result
+            except Exception as e:
+                logger.error(f"FjmsService.get_domain_hierarchy error: {e}")
+                return {}
+
+    # ── Catalog Browse Methods (Phase 41: BROWSE-01..05) ──────────
+
+    def get_browse_authors(self, domain: str = None) -> list[dict]:
+        """
+        Get unique authors from the catalog with manuscript counts.
+
+        With v5+ sidecar (genizah_persons/genizah_titles tables), uses the
+        structured FK path: catalog.GenizahTitleId -> genizah_titles.AuthorId
+        -> genizah_persons, UNION catalog.Author -> genizah_persons.
+
+        Falls back to sparse AuthorText for pre-v5 sidecars.
+
+        Args:
+            domain: Optional domain filter. If provided, only include manuscripts
+                    that have this domain (matches Domain OR ParentDomain).
+
+        Returns:
+            List of dicts with keys: person_id (int), eng_desc (str),
+            heb_desc (str), count (int). For legacy fallback: person_id=None,
+            eng_desc=AuthorText, heb_desc=''.
+            Sorted by count descending.
+            Returns [] if conn is None.
+        """
+        if self._conn is None:
+            return []
+
+        # Return cached result for unfiltered query
+        if domain is None and self._authors_cache is not None:
+            return self._authors_cache
+
+        try:
+            result = self._query_browse_authors(domain)
+
+            if domain is None:
+                with self._authors_lock:
+                    if self._authors_cache is not None:
+                        return self._authors_cache
+                    self._authors_cache = result
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_browse_authors error: {e}")
+            return []
+
+    def _query_browse_authors(self, domain: str = None) -> list[dict]:
+        """Execute the browse authors query."""
+        if self._has_persons_titles:
+            return self._query_browse_authors_v5(domain)
+        return self._query_browse_authors_legacy(domain)
+
+    def _query_browse_authors_v5(self, domain: str = None) -> list[dict]:
+        """v5+ query: structured FK path through genizah_persons.
+
+        Optimization: pre-dedup catalog rows in a CTE so COUNT(*) replaces
+        the expensive COUNT(DISTINCT AlmaId). Domain filter uses IN+UNION
+        subquery for proper index utilization (30s -> 0.3s).
+        """
+        params = []
+        if domain is not None:
+            domain_filter = (
+                "AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
+            params = [domain, domain]
+            cte = f"WITH dc AS (SELECT DISTINCT AlmaId, GenizahTitleId, Author FROM catalog WHERE {domain_filter})"
+        else:
+            cte = "WITH dc AS (SELECT DISTINCT AlmaId, GenizahTitleId, Author FROM catalog)"
+
+        # Path 1: catalog -> genizah_titles -> genizah_persons (via GenizahTitleId)
+        # Path 2: catalog.Author -> genizah_persons (direct FK, for records without GenizahTitleId)
+        sql = f"""
+            {cte}
+            SELECT person_id, eng_desc, heb_desc, SUM(cnt) as count FROM (
+                SELECT gp.GenizahPersonId as person_id, gp.EngDesc as eng_desc,
+                       gp.HebDesc as heb_desc, COUNT(*) as cnt
+                FROM dc
+                INNER JOIN genizah_titles gt ON dc.GenizahTitleId = gt.GenizahTitleId
+                INNER JOIN genizah_persons gp ON gt.AuthorId = gp.GenizahPersonId
+                WHERE gp.GenizahPersonId > 0
+                GROUP BY gp.GenizahPersonId, gp.EngDesc, gp.HebDesc
+                UNION ALL
+                SELECT gp.GenizahPersonId as person_id, gp.EngDesc as eng_desc,
+                       gp.HebDesc as heb_desc, COUNT(*) as cnt
+                FROM dc
+                INNER JOIN genizah_persons gp ON dc.Author = gp.GenizahPersonId
+                WHERE dc.GenizahTitleId IS NULL AND dc.Author IS NOT NULL AND dc.Author > 0
+                GROUP BY gp.GenizahPersonId, gp.EngDesc, gp.HebDesc
+            ) grouped
+            GROUP BY person_id, eng_desc, heb_desc
+            ORDER BY count DESC
+        """
+        cursor = self._conn.execute(sql, params)
+        return [
+            {
+                "person_id": row["person_id"],
+                "eng_desc": row["eng_desc"] or "",
+                "heb_desc": row["heb_desc"] or "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
+    def _query_browse_authors_legacy(self, domain: str = None) -> list[dict]:
+        """Legacy query: sparse AuthorText column."""
+        if domain is None:
+            cursor = self._conn.execute(
+                "SELECT AuthorText, COUNT(DISTINCT AlmaId) as count "
+                "FROM catalog "
+                "WHERE AuthorText IS NOT NULL AND AuthorText != '' "
+                "GROUP BY AuthorText ORDER BY count DESC"
+            )
+        else:
+            cursor = self._conn.execute(
+                "SELECT AuthorText, COUNT(DISTINCT AlmaId) as count "
+                "FROM catalog "
+                "WHERE AuthorText IS NOT NULL AND AuthorText != '' "
+                "  AND AlmaId IN ("
+                "    SELECT AlmaId FROM domains WHERE Domain = ? "
+                "    UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?) "
+                "GROUP BY AuthorText ORDER BY count DESC",
+                (domain, domain),
+            )
+        return [
+            {
+                "person_id": None,
+                "eng_desc": row["AuthorText"],
+                "heb_desc": "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
+    def get_browse_works(self, domain: str = None, author: str = None) -> list[dict]:
+        """
+        Get unique works from the catalog with manuscript counts.
+
+        With v5+ sidecar, uses genizah_titles for structured title lookup.
+        Falls back to sparse Title/TitleHeb for pre-v5 sidecars.
+
+        Args:
+            domain: Optional domain filter. If provided, only include manuscripts
+                    that have this domain (matches Domain OR ParentDomain).
+            author: Optional author filter. For v5+: person_id (int or str digit).
+                    For legacy: AuthorText string.
+
+        Returns:
+            List of dicts with keys: title_id (int), org_title (str),
+            eng_title (str), count (int). For legacy fallback: title_id=None,
+            org_title=Title, eng_title=TitleHeb.
+            Sorted by count descending.
+            Returns [] if conn is None.
+        """
+        if self._conn is None:
+            return []
+
+        # Return cached result for unfiltered query
+        if domain is None and author is None and self._works_cache is not None:
+            return self._works_cache
+
+        try:
+            result = self._query_browse_works(domain, author)
+
+            if domain is None and author is None:
+                with self._works_lock:
+                    if self._works_cache is not None:
+                        return self._works_cache
+                    self._works_cache = result
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_browse_works error: {e}")
+            return []
+
+    def _query_browse_works(self, domain: str = None, author=None) -> list[dict]:
+        """Execute the browse works query."""
+        if self._has_persons_titles:
+            return self._query_browse_works_v5(domain, author)
+        return self._query_browse_works_legacy(domain, author)
+
+    def _query_browse_works_v5(self, domain: str = None, author=None) -> list[dict]:
+        """v5+ query: structured genizah_titles lookup.
+
+        Optimization: pre-dedup catalog in CTE, use COUNT(*), IN+UNION for domain.
+        """
+        cte_conditions = []
+        cte_params = []
+
+        if domain is not None:
+            cte_conditions.append(
+                "AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
+            cte_params.extend([domain, domain])
+
+        if author is not None:
+            try:
+                person_id = int(author)
+                cte_conditions.append(
+                    "(GenizahTitleId IN ("
+                    "  SELECT gt.GenizahTitleId FROM genizah_titles gt WHERE gt.AuthorId = ?"
+                    ") OR Author = ?)"
+                )
+                cte_params.extend([person_id, person_id])
+            except (ValueError, TypeError):
+                cte_conditions.append("AuthorText = ?")
+                cte_params.append(author)
+
+        cte_where = (" WHERE " + " AND ".join(cte_conditions)) if cte_conditions else ""
+        sql = f"""
+            WITH dc AS (
+                SELECT DISTINCT AlmaId, GenizahTitleId FROM catalog{cte_where}
+            )
+            SELECT gt.GenizahTitleId as title_id, gt.OrgTitle as org_title,
+                   gt.EngTitle as eng_title, COUNT(*) as count
+            FROM dc
+            INNER JOIN genizah_titles gt ON dc.GenizahTitleId = gt.GenizahTitleId
+            WHERE gt.GenizahTitleId > 0
+            GROUP BY gt.GenizahTitleId, gt.OrgTitle, gt.EngTitle
+            ORDER BY count DESC
+        """
+        cursor = self._conn.execute(sql, cte_params)
+        return [
+            {
+                "title_id": row["title_id"],
+                "org_title": row["org_title"] or "",
+                "eng_title": row["eng_title"] or "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
+    def _query_browse_works_legacy(self, domain: str = None, author=None) -> list[dict]:
+        """Legacy query: sparse Title/TitleHeb columns."""
+        conditions = [
+            "(Title IS NOT NULL AND Title != '' "
+            "OR TitleHeb IS NOT NULL AND TitleHeb != '')"
+        ]
+        params = []
+
+        if domain is not None:
+            conditions.append(
+                "AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
+            params.extend([domain, domain])
+
+        if author is not None:
+            conditions.append("AuthorText = ?")
+            params.append(author)
+
+        where = " AND ".join(conditions)
+        sql = (
+            f"SELECT Title, TitleHeb, COUNT(DISTINCT AlmaId) as count "
+            f"FROM catalog "
+            f"WHERE {where} "
+            f"GROUP BY Title, TitleHeb ORDER BY count DESC"
+        )
+        cursor = self._conn.execute(sql, params)
+        return [
+            {
+                "title_id": None,
+                "org_title": row["Title"] or "",
+                "eng_title": row["TitleHeb"] or "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
+    # SEED-023/SEED-026: catalog-filter TEMP table names (fixed allowlist — never
+    # interpolated from caller input). Each maps a sys_id set onto AlmaId.
+    # PGP and Editions sets are static, corpus-wide (token = len is stable).
+    # The library filter (_browse_filter_library) is a DYNAMIC multi-select set;
+    # its token is content-derived (hash of sorted library_codes) so that two
+    # same-size but different selections correctly rebuild the TEMP table.
+    _FILTER_TEMP_TABLES = (
+        "_browse_filter_pgp",
+        "_browse_filter_edition",
+        "_browse_filter_library",
+        "_browse_filter_criteria",
+        "_browse_filter_outside",
+    )
+
+    def _ensure_filter_temp(self, name: str, sys_ids, token) -> bool:
+        """Build (once per thread) a TEMP table of AlmaIds for a catalog filter.
+
+        The PGP/edition membership sets are static and corpus-wide, so they use
+        ``len(sys_ids)`` as the token (a given filter value always maps to the same
+        set — token match skips the rebuild safely).
+
+        The library filter (``_browse_filter_library``) is a DYNAMIC multi-select:
+        two different selections can resolve to the same set *size*, so its caller
+        passes a CONTENT-derived token (``tuple(sorted(library_codes))``)
+        to guarantee a rebuild when the selection changes — even at the same size.
+        Using the sorted tuple directly (rather than ``hash()``) eliminates the
+        hash-collision class: two different selections always produce different tokens.
+        This method is intentionally generic: it just compares ``reg.get(name) ==
+        token`` and rebuilds on mismatch, regardless of which filter is calling.
+
+        Returns True if the table is ready to be referenced, False on failure
+        (caller then skips the filter rather than corrupting the result set).
+        """
+        if name not in self._FILTER_TEMP_TABLES or not self._conn:
+            return False
+        if not sys_ids:
+            return False
+        reg = getattr(self._filter_temp_local, "built", None)
+        if reg is None:
+            reg = {}
+            self._filter_temp_local.built = reg
+        if reg.get(name) == token:
+            return True
+        try:
+            self._conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+            self._conn.execute(f'CREATE TEMP TABLE "{name}" (AlmaId TEXT PRIMARY KEY)')
+            self._conn.executemany(
+                f'INSERT OR IGNORE INTO "{name}" (AlmaId) VALUES (?)',
+                [(s,) for s in sys_ids if s],
+            )
+            reg[name] = token
+            return True
+        except Exception as e:
+            logger.error(f"FjmsService._ensure_filter_temp({name}) failed: {e}")
+            reg.pop(name, None)
+            return False
+
+    def _build_browse_conditions(
+        self,
+        domain=None,
+        author=None,
+        work=None,
+        date_from=None,
+        date_to=None,
+        include_undated=False,
+        text_all=None,
+        text_any=None,
+        text_not=None,
+        pgp_filter=None,
+        pgp_sys_ids=None,
+        editions_filter=None,
+        edition_sys_ids=None,
+    ):
+        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions).
+
+        Used by both ``get_browse_results`` and ``get_browse_library_facets`` so that
+        the facet counts honour the same non-library filters as the browse query.
+
+        The *library* filter is intentionally **excluded** from this helper so that
+        ``get_browse_library_facets`` can count per-library WITHOUT scoping by the
+        chosen library filter.
+
+        Returns:
+            (conditions, params) — a list of SQL condition fragments and the
+            corresponding bound parameter list.
+        """
+        conditions = []
+        params = []
+
+        if domain is not None:
+            conditions.append(
+                "c.AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
+            params.extend([domain, domain])
+
+        if author is not None:
+            if self._has_persons_titles and _is_int(author):
+                # v5+: author is person_id -- match via title FK or direct Author FK
+                person_id = int(author)
+                conditions.append(
+                    "(c.GenizahTitleId IN ("
+                    "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                    "  WHERE gt.AuthorId = ?"
+                    ") OR c.Author = ?)"
+                )
+                params.extend([person_id, person_id])
+            else:
+                # Legacy: author is AuthorText string
+                conditions.append("c.AuthorText = ?")
+                params.append(author)
+
+        if work is not None:
+            if self._has_persons_titles and _is_int(work):
+                # v5+: work is GenizahTitleId
+                conditions.append("c.GenizahTitleId = ?")
+                params.append(int(work))
+            else:
+                # Legacy: work is Title string
+                conditions.append("c.Title = ?")
+                params.append(work)
+
+        # Date range filter
+        has_date_filter = date_from is not None or date_to is not None
+        if has_date_filter:
+            _no_date = "(c.CopyDate IS NULL OR c.CopyDate = '' OR c.CopyDate = '0' OR c.CopyDate = '-99')"
+            date_parts = []
+            if date_from is not None and date_to is not None:
+                date_parts.append("CAST(c.CopyDate AS INTEGER) BETWEEN ? AND ?")
+                params.extend([date_from, date_to])
+            elif date_from is not None:
+                date_parts.append("CAST(c.CopyDate AS INTEGER) >= ?")
+                params.append(date_from)
+            else:
+                date_parts.append("CAST(c.CopyDate AS INTEGER) <= ?")
+                params.append(date_to)
+            # Exclude sentinel values from the numeric range check
+            dated_cond = f"(NOT {_no_date} AND {date_parts[0]})"
+            if include_undated:
+                conditions.append(f"({dated_cond} OR {_no_date})")
+            else:
+                conditions.append(dated_cond)
+
+        # Free text filters: hybrid FTS5 (catalog fields) + domain name LIKE
+        # FTS5 covers Title, TitleHeb, TextualFrame*, RunningTitle, FreeDescription, FullText, DetailedFrames
+        # Domain LIKE covers Domain/DomainHeb names which are NOT in the FTS5 index
+        def _fts_escape(term: str) -> str:
+            """Escape FTS5 special characters and wrap for substring match."""
+            escaped = term.replace('"', '""')
+            return f'"{escaped}"'
+
+        _TEXT_MATCH = (
+            "c.rowid IN ("
+            "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+            "UNION "
+            "SELECT c2.rowid FROM catalog c2 "
+            "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+            "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+            ")"
+        )
+        _TEXT_NOT_MATCH = (
+            "c.rowid NOT IN ("
+            "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+            "UNION "
+            "SELECT c2.rowid FROM catalog c2 "
+            "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+            "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+            ")"
+        )
+
+        if text_all:
+            for term in text_all:
+                conditions.append(_TEXT_MATCH)
+                like_pat = f"%{term}%"
+                params.extend([_fts_escape(term), like_pat, like_pat])
+
+        if text_any:
+            fts_expr = " OR ".join(_fts_escape(t) for t in text_any)
+            like_parts = []
+            like_params = []
+            for t in text_any:
+                like_parts.append("dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?")
+                like_params.extend([f"%{t}%", f"%{t}%"])
+            conditions.append(
+                "c.rowid IN ("
+                "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                "UNION "
+                "SELECT c2.rowid FROM catalog c2 "
+                "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                f"WHERE {' OR '.join(like_parts)}"
+                ")"
+            )
+            params.append(fts_expr)
+            params.extend(like_params)
+
+        if text_not:
+            for term in text_not:
+                conditions.append(_TEXT_NOT_MATCH)
+                like_pat = f"%{term}%"
+                params.extend([_fts_escape(term), like_pat, like_pat])
+
+        # SEED-023: PGP / editions membership filters. Each materializes a
+        # per-thread TEMP table of AlmaIds and adds an [NOT] EXISTS clause
+        # (no bound params) so it flows into BOTH the count and the paged
+        # results query via the shared WHERE. If the set is missing or the
+        # TEMP build fails, the filter is skipped (fail-open: never silently
+        # truncate to an empty/wrong set).
+        if pgp_filter in ("has_pgp", "no_pgp") and pgp_sys_ids:
+            if self._ensure_filter_temp(
+                "_browse_filter_pgp", pgp_sys_ids, len(pgp_sys_ids)
+            ):
+                op = "EXISTS" if pgp_filter == "has_pgp" else "NOT EXISTS"
+                conditions.append(
+                    f'{op} (SELECT 1 FROM "_browse_filter_pgp" t '
+                    f"WHERE t.AlmaId = c.AlmaId)"
+                )
+
+        if editions_filter in ("has_edition", "no_edition") and edition_sys_ids:
+            if self._ensure_filter_temp(
+                "_browse_filter_edition", edition_sys_ids, len(edition_sys_ids)
+            ):
+                op = "EXISTS" if editions_filter == "has_edition" else "NOT EXISTS"
+                conditions.append(
+                    f'{op} (SELECT 1 FROM "_browse_filter_edition" t '
+                    f"WHERE t.AlmaId = c.AlmaId)"
+                )
+
+        return conditions, params
+
+    def get_browse_results(
+        self,
+        domain: str = None,
+        author: str = None,
+        work: str = None,
+        offset: int = 0,
+        limit: int = 50,
+        date_from: int = None,
+        date_to: int = None,
+        include_undated: bool = False,
+        text_all: list[str] = None,
+        text_any: list[str] = None,
+        text_not: list[str] = None,
+        pgp_filter: str = None,
+        pgp_sys_ids=None,
+        editions_filter: str = None,
+        edition_sys_ids=None,
+        library_codes: list = None,
+        library_sys_ids=None,
+        library_mode: str = 'show_only',
+        criteria: dict = None,
+        universe=None,
+    ) -> dict:
+        """
+        Get paginated browse results matching all provided filters (intersection).
+
+        Args:
+            domain: Optional domain filter (matches Domain OR ParentDomain).
+            author: Optional author filter (AuthorText = author).
+            work: Optional work/title filter (Title = work).
+            offset: Pagination offset.
+            limit: Maximum results to return per page.
+            date_from: Optional minimum year (inclusive). Records with year >= date_from.
+            date_to: Optional maximum year (inclusive). Records with year <= date_to.
+            include_undated: If True AND date filter is active, also include records
+                with no date (CopyDate is NULL, empty, '0', or '-99').
+            text_all: Terms that must ALL appear (AND). Matched across all text fields.
+            text_any: Terms where ANY must appear (OR). Matched across all text fields.
+            text_not: Terms that must NOT appear. Excluded across all text fields.
+            pgp_filter: SEED-023 3-state PGP filter -- ``'has_pgp'`` / ``'no_pgp'``
+                (None or ``'all'`` = no-op). Applied BEFORE COUNT/pagination so
+                ``total`` reflects the filtered set.
+            pgp_sys_ids: Full corpus set of sys_ids with a PGP link
+                (``document_service.get_all_pgp_link_sys_ids()``); required when
+                ``pgp_filter`` is active. Intersected on ``c.AlmaId == sys_id``.
+            editions_filter: SEED-023 3-state editions filter --
+                ``'has_edition'`` / ``'no_edition'`` (None or ``'all'`` = no-op).
+            edition_sys_ids: Full corpus set of sys_ids with a scholarly edition
+                (PGP ``%Edition%`` ∪ FGP ``Digital Edition``); required when
+                ``editions_filter`` is active.
+            library_codes: SEED-026 list of selected library codes (e.g.
+                ``['CUL', 'JTS']``); used as the content token source (UI state) and
+                for chip rendering by callers. None or empty list = no-op (all results
+                returned). Must be accompanied by ``library_sys_ids``.
+            library_sys_ids: Precomputed set of sys_ids belonging to the selected
+                libraries (from ``resolve_library_sys_ids()``).  Applied BEFORE
+                COUNT/pagination so ``total`` reflects the full filtered set.
+                When ``library_codes`` is truthy but this is falsy/empty, the filter
+                is SKIPPED (fail-open) and a warning is logged — never silently returns
+                0 results.  Callers MUST run ``resolve_library_sys_ids`` off the event
+                loop (it is O(255K) over csv_bank).
+            library_mode: Controls how the library filter is applied when both
+                ``library_codes`` and ``library_sys_ids`` are provided.
+                ``'show_only'`` (default): keeps rows whose AlmaId IS in the
+                resolved set (allowlist / EXISTS).  ``'hide'``: keeps rows whose
+                AlmaId is NOT in the resolved set (denylist / NOT EXISTS).
+                Omitted or unrecognised values fall back to ``'show_only'``
+                (fail-safe, today's behaviour).
+            criteria: Catalogue criteria (shared/catalog_criteria.py).
+            universe: The set of every corpus sys_id. With it the list is the
+                whole corpus (D16): catalogued manuscripts first, then those
+                with no catalogue record (D22), which pass the PGP, edition,
+                library and criteria filters like any manuscript, and every
+                older filter that only excludes, but no filter that picks
+                something in (domain, author, work, date, text all/any;
+                D17). Without it, catalogued manuscripts only.
+
+        Returns:
+            Dict with keys:
+                - results: list of dicts with keys: sys_id, title, title_heb,
+                  author, copy_date, copy_span ('944–1100'), textual_frame_heb,
+                  textual_frame_eng, domains, domains_heb, catalogued (False
+                  for a manuscript with no catalogue record: its text fields
+                  are empty)
+                - total: int (total matching count before pagination)
+
+        Raises:
+            FilterUnavailable: no sidecar ('sidecar_unavailable'), the query
+                failed, or a criterion cannot be answered (rule 9): never
+                reported as an empty list.
+        """
+        empty = {"results": [], "total": 0}
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+
+        try:
+            # Build shared non-library conditions (domain/author/work/date/text/pgp/editions)
+            conditions, params = self._build_browse_conditions(
+                domain=domain,
+                author=author,
+                work=work,
+                date_from=date_from,
+                date_to=date_to,
+                include_undated=include_undated,
+                text_all=text_all,
+                text_any=text_any,
+                text_not=text_not,
+                pgp_filter=pgp_filter,
+                pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter,
+                edition_sys_ids=edition_sys_ids,
+            )
+            matched = self._browse_criteria_condition(criteria, universe, conditions)
+            self._browse_universe_condition(universe, conditions)
+
+            # SEED-026: library filter.  The token is CONTENT-derived from the
+            # selection (not len) so that two same-size-but-different library
+            # selections on the same thread correctly rebuild the TEMP table and
+            # return distinct result sets (Codex REQUIRED CHANGE 1).
+            library_active = False
+            if library_codes and library_sys_ids:
+                # Content-derived token (Codex REQUIRED CHANGE 1 / SEED-026):
+                # same-size but different selections get different tokens.
+                # Use the sorted tuple directly (not hash()) to eliminate the
+                # hash-collision class entirely (WR-03).
+                _lib_token = tuple(sorted(library_codes))
+                if self._ensure_filter_temp(
+                    "_browse_filter_library", library_sys_ids, _lib_token
+                ):
+                    library_active = True
+                    # Dual-mode (DMF-07/08): 'hide' flips to NOT EXISTS so the
+                    # total and pagination are over the denylist-excluded set.
+                    # Any unrecognised mode falls back to 'show_only' (fail-safe).
+                    _exists_kw = "NOT EXISTS" if library_mode == "hide" else "EXISTS"
+                    conditions.append(
+                        f'{_exists_kw} (SELECT 1 FROM "_browse_filter_library" t '
+                        "WHERE t.AlmaId = c.AlmaId)"
+                    )
+            elif library_codes and not library_sys_ids:
+                # Selected-but-resolved-to-empty: fail open rather than returning 0
+                # results. This path is reached when all selected codes were invalid
+                # or the csv_bank was not yet loaded (Codex REQUIRED CHANGE 2).
+                logger.warning(
+                    "library filter selected (%d code(s): %s) but resolved to an "
+                    "empty sys_id set — skipping filter (fail-open). "
+                    "Check that library_codes are valid LIBRARY_CODES keys and that "
+                    "csv_bank is fully loaded before calling get_browse_results.",
+                    len(library_codes),
+                    library_codes,
+                )
+
+            where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            # Count query
+            count_sql = (
+                f"SELECT COUNT(DISTINCT c.AlmaId) as total "
+                f"FROM catalog c{where}"
+            )
+            catalogued_total = self._conn.execute(count_sql, params).fetchone()["total"]
+
+            # D16: the manuscripts with no catalogue record, after the
+            # catalogued ones (D22).
+            uncatalogued = self._browse_uncatalogued(
+                universe, matched,
+                inclusion=self._browse_inclusion_active(
+                    domain, author, work, date_from, date_to, text_all, text_any),
+                pgp_filter=pgp_filter, pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter, edition_sys_ids=edition_sys_ids,
+                library_sys_ids=library_sys_ids if library_active else None,
+                library_mode=library_mode,
+            )
+            total = catalogued_total + len(uncatalogued)
+            if total == 0:
+                return empty
+
+            rows = []
+            if offset < catalogued_total:
+                # Results query -- pick first non-empty value per grouped AlmaId
+                # Use GROUP BY + aggregation to deduplicate
+                span = self._copy_span_columns()
+                results_sql = (
+                    f"SELECT c.AlmaId, "
+                    f"  MAX(CASE WHEN c.Title IS NOT NULL AND c.Title != '' THEN c.Title END) as Title, "
+                    f"  MAX(CASE WHEN c.TitleHeb IS NOT NULL AND c.TitleHeb != '' THEN c.TitleHeb END) as TitleHeb, "
+                    f"  MAX(CASE WHEN c.AuthorText IS NOT NULL AND c.AuthorText != '' THEN c.AuthorText END) as AuthorText, "
+                    f"  MAX(CASE WHEN c.CopyDate IS NOT NULL AND c.CopyDate != '' THEN c.CopyDate END) as CopyDate, "
+                    f"  {span}, "
+                    f"  MAX(CASE WHEN c.TextualFrameHeb IS NOT NULL AND c.TextualFrameHeb != '' THEN c.TextualFrameHeb END) as TextualFrameHeb, "
+                    f"  MAX(CASE WHEN c.TextualFrameEng IS NOT NULL AND c.TextualFrameEng != '' THEN c.TextualFrameEng END) as TextualFrameEng "
+                    f"FROM catalog c{where} "
+                    f"GROUP BY c.AlmaId "
+                    f"ORDER BY c.AlmaId "
+                    f"LIMIT ? OFFSET ?"
+                )
+                result_params = list(params) + [limit, offset]
+                rows = self._conn.execute(results_sql, result_params).fetchall()
+
+            # Batch-fetch domains for result sys_ids
+            sys_ids = [row["AlmaId"] for row in rows]
+            domains_map = self._batch_domains(sys_ids)
+
+            results = []
+            for row in rows:
+                sid = row["AlmaId"]
+                dom_info = domains_map.get(sid, [])
+                results.append({
+                    "sys_id": sid,
+                    "title": row["Title"] or "",
+                    "title_heb": row["TitleHeb"] or "",
+                    "author": row["AuthorText"] or "",
+                    "copy_date": row["CopyDate"] or "",
+                    "copy_span": span_label((row["SpanFrom"], row["SpanTo"])
+                                            if row["SpanFrom"] else None),
+                    "textual_frame_heb": row["TextualFrameHeb"] or "",
+                    "textual_frame_eng": row["TextualFrameEng"] or "",
+                    "domains": list({d["domain"] for d in dom_info}),
+                    "domains_heb": list({d["domain_heb"] for d in dom_info if d.get("domain_heb")}),
+                    "catalogued": True,
+                })
+
+            room = limit - len(results)
+            if room > 0 and uncatalogued:
+                first = max(0, offset - catalogued_total)
+                for sid in uncatalogued[first:first + room]:
+                    results.append({
+                        "sys_id": sid, "title": "", "title_heb": "", "author": "",
+                        "copy_date": "", "copy_span": "", "textual_frame_heb": "",
+                        "textual_frame_eng": "", "domains": [], "domains_heb": [],
+                        "catalogued": False,
+                    })
+
+            return {"results": results, "total": total}
+        except FilterUnavailable:
+            raise
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
+        except Exception as e:
+            # An empty list would read as "nothing matches" (rule 9).
+            logger.error("FjmsService.get_browse_results error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the catalog browse query failed') from e
+
+    # -- Catalog Browse over the corpus (D16, D17, D22) -------------------
+
+    @staticmethod
+    def _browse_inclusion_active(domain, author, work, date_from, date_to,
+                                 text_all, text_any) -> bool:
+        """A browse filter that picks something IN: a manuscript with no
+        catalogue record cannot pass it (D17)."""
+        return bool(domain is not None or author is not None or work is not None
+                    or date_from is not None or date_to is not None
+                    or text_all or text_any)
+
+    def _browse_criteria_condition(self, criteria, universe, conditions):
+        """Add the criteria to a browse WHERE (via a per-thread TEMP table of
+        the matching sys_ids) and return that set, or None without criteria."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        if not criteria:
+            return None
+        matched = match_criteria(self._conn, criteria, universe)
+        token = (criteria_token(criteria), _universe_token(universe))
+        if not matched:
+            conditions.append("0")
+        elif self._ensure_filter_temp("_browse_filter_criteria", matched, token):
+            conditions.append('EXISTS (SELECT 1 FROM "_browse_filter_criteria" t '
+                              "WHERE t.AlmaId = c.AlmaId)")
+        else:
+            raise FilterUnavailable('query_failed', 'the criteria could not be applied')
+        return matched
+
+    def _browse_universe_condition(self, universe, conditions):
+        """Keep the catalogued rows inside the universe: the catalogue has
+        sys_ids that are not in libraries.csv (one in the 5.0.0 file)."""
+        if universe is None:
+            return
+        outside = self.catalogued_ids() - universe
+        if not outside:
+            return
+        if self._ensure_filter_temp("_browse_filter_outside", outside, _universe_token(universe)):
+            conditions.append('NOT EXISTS (SELECT 1 FROM "_browse_filter_outside" t '
+                              "WHERE t.AlmaId = c.AlmaId)")
+        else:
+            raise FilterUnavailable('query_failed', 'the manuscript list could not be applied')
+
+    def _browse_uncatalogued(self, universe, matched, *, inclusion, pgp_filter=None,
+                             pgp_sys_ids=None, editions_filter=None, edition_sys_ids=None,
+                             library_sys_ids=None, library_mode='show_only') -> list:
+        """The sorted sys_ids with no catalogue record that the browse lists."""
+        if universe is None or inclusion:
+            return []
+        ids = set(universe) - self.catalogued_ids()
+        if matched is not None:
+            ids &= matched
+        if pgp_filter in ("has_pgp", "no_pgp") and pgp_sys_ids:
+            ids = ids & set(pgp_sys_ids) if pgp_filter == "has_pgp" else ids - set(pgp_sys_ids)
+        if editions_filter in ("has_edition", "no_edition") and edition_sys_ids:
+            ids = (ids & set(edition_sys_ids) if editions_filter == "has_edition"
+                   else ids - set(edition_sys_ids))
+        if library_sys_ids:
+            ids = ids - set(library_sys_ids) if library_mode == "hide" else ids & set(library_sys_ids)
+        return sorted(ids)
+
+    def _copy_span_columns(self) -> str:
+        """SELECT terms SpanFrom / SpanTo: a manuscript's copy span over its
+        records (D18: an earlier or missing CopyToDate = the start year)."""
+        has_end = getattr(self, "_has_copy_to_date", None)
+        if has_end is None:
+            try:
+                has_end = any(row[1] == "CopyToDate" for row in
+                              self._conn.execute("PRAGMA table_info(catalog)"))
+            except Exception:
+                has_end = False
+            self._has_copy_to_date = has_end
+        start = "CAST(c.CopyDate AS INTEGER)"
+        end = (f"(CASE WHEN CAST(c.CopyToDate AS INTEGER) > {start} "
+               f"THEN CAST(c.CopyToDate AS INTEGER) ELSE {start} END)") if has_end else start
+        return (f"MIN(CASE WHEN {start} > 0 THEN {start} END) as SpanFrom, "
+                f"MAX(CASE WHEN {start} > 0 THEN {end} END) as SpanTo")
+
+    def get_browse_library_facets(
+        self,
+        domain=None,
+        author=None,
+        work=None,
+        date_from=None,
+        date_to=None,
+        include_undated=False,
+        text_all=None,
+        text_any=None,
+        text_not=None,
+        pgp_filter=None,
+        pgp_sys_ids=None,
+        editions_filter=None,
+        edition_sys_ids=None,
+        sys_id_to_library=None,
+        criteria=None,
+        universe=None,
+    ) -> dict:
+        """Return true full-set per-library manuscript counts honoring active non-library filters.
+
+        The library filter itself is intentionally excluded so the caller can show
+        counts for every library reachable under the current domain/author/work/pgp/
+        editions filters — regardless of which library is (or would be) selected.
+
+        The method mirrors the live ``COUNT(DISTINCT c.AlmaId)``/``GROUP BY c.AlmaId``
+        browse counting via a single ``SELECT DISTINCT c.AlmaId`` so a catalog table
+        row per AlmaId counts once (multiple rows for the same manuscript are collapsed
+        by DISTINCT before mapping).
+
+        Args:
+            domain, author, work, date_from, date_to, include_undated,
+            text_all, text_any, text_not, pgp_filter, pgp_sys_ids,
+            editions_filter, edition_sys_ids:
+                Same semantics as ``get_browse_results`` — the non-library subset.
+            sys_id_to_library: A CALLABLE (e.g. a bound
+                ``MetadataManager.get_library_for_id`` method, or a ``dict.get`` bound
+                method) invoked once per distinct AlmaId to resolve the library code.
+                The caller must supply a **full-corpus** resolver, NOT a page-local
+                one, so off-page libraries are counted correctly.
+                If ``None``, not callable, or the call returns a falsy/blank value,
+                that AlmaId is skipped.  ``'LOCAL'`` is always skipped.
+
+            criteria, universe: as ``get_browse_results``: with a universe the
+                manuscripts with no catalogue record that the list shows are
+                counted too.
+
+        Returns:
+            ``{library_code: count}`` dict.  Returns ``{}`` when
+            ``sys_id_to_library`` is None/not-callable.
+
+        Raises:
+            FilterUnavailable: no sidecar, or the query failed (never shown
+                as zero counts).
+        """
+        if sys_id_to_library is None or not callable(sys_id_to_library):
+            return {}
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+
+        try:
+            # Reuse the shared condition-builders (domain/author/work/date/text/pgp/editions).
+            # The library filter (_browse_filter_library) is intentionally NOT included here.
+            conditions, params = self._build_browse_conditions(
+                domain=domain,
+                author=author,
+                work=work,
+                date_from=date_from,
+                date_to=date_to,
+                include_undated=include_undated,
+                text_all=text_all,
+                text_any=text_any,
+                text_not=text_not,
+                pgp_filter=pgp_filter,
+                pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter,
+                edition_sys_ids=edition_sys_ids,
+            )
+            matched = self._browse_criteria_condition(criteria, universe, conditions)
+            self._browse_universe_condition(universe, conditions)
+            where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            # Single SQL-bounded DISTINCT query — mirrors COUNT(DISTINCT c.AlmaId)
+            # from get_browse_results so a manuscript with multiple catalog rows
+            # is counted once.  The DB does the DISTINCT work, not Python.
+            facet_sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
+            rows = self._conn.execute(facet_sql, params).fetchall()
+
+            # Map each distinct AlmaId to a library_code via the caller-supplied
+            # CALLABLE (the surface passes the full-corpus get_library_for_id bound
+            # method — NOT page-local _resolve_all — so off-page libraries appear).
+            ids = [row["AlmaId"] if hasattr(row, "keys") else row[0] for row in rows]
+            ids += self._browse_uncatalogued(
+                universe, matched,
+                inclusion=self._browse_inclusion_active(
+                    domain, author, work, date_from, date_to, text_all, text_any),
+                pgp_filter=pgp_filter, pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter, edition_sys_ids=edition_sys_ids,
+            )
+            counts: dict[str, int] = {}
+            for alma_id in ids:
+                lib = sys_id_to_library(alma_id)
+                if not lib or lib == "LOCAL":
+                    continue
+                counts[lib] = counts.get(lib, 0) + 1
+
+            return counts
+        except FilterUnavailable:
+            raise
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
+        except Exception as e:
+            logger.error("FjmsService.get_browse_library_facets error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the library counts could not be read') from e
+
+    def _batch_domains(self, sys_ids: list[str]) -> dict:
+        """Fetch domains for a batch of sys_ids efficiently.
+
+        Returns dict mapping sys_id -> list of {"domain": str, "domain_heb": str}.
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT AlmaId, Domain, DomainHeb FROM domains "
+                    f"WHERE AlmaId IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    sid = row["AlmaId"]
+                    if sid not in result:
+                        result[sid] = []
+                    result[sid].append({
+                        "domain": row["Domain"],
+                        "domain_heb": row["DomainHeb"],
+                    })
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService._batch_domains error: {e}")
+            return {}
+
+    def get_unclassified_count(self) -> int:
+        """
+        Get count of catalog AlmaIds that have no corresponding entry in the domains table.
+
+        Used for showing "Unclassified" bucket in the browse UI.
+        Cached after first computation (static data).
+
+        Returns:
+            Count of unclassified manuscript IDs. Returns 0 if conn is None.
+        """
+        if self._unclassified_cache is not None:
+            return self._unclassified_cache
+
+        if self._conn is None:
+            return 0
+
+        with self._unclassified_lock:
+            if self._unclassified_cache is not None:
+                return self._unclassified_cache
+            try:
+                cursor = self._conn.execute(
+                    "SELECT COUNT(DISTINCT c.AlmaId) as count FROM catalog c "
+                    "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.AlmaId = c.AlmaId)"
+                )
+                self._unclassified_cache = cursor.fetchone()["count"]
+                return self._unclassified_cache
+            except Exception as e:
+                logger.error(f"FjmsService.get_unclassified_count error: {e}")
+                return 0
+
+    def pre_warm_caches(self):
+        """Pre-compute and cache domain hierarchy, unclassified count, authors, and works.
+
+        Uses a JSON disk cache alongside the sidecar db so only the first-ever
+        launch pays the ~5s SQL cost. Subsequent launches load from disk (<50ms).
+        Safe to call multiple times (no-op if already cached in memory).
+        """
+        if self._conn is None:
+            return
+        if self._load_browse_cache():
+            return
+        # Performance indexes are pre-built in the sidecar by export_fist_enrichment.py.
+        # No runtime DDL needed (connection is read-only).
+        logger.debug("FjmsService: indexes expected pre-built in sidecar artifact")
+        self.get_domain_hierarchy()
+        self.get_unclassified_count()
+        self.get_browse_authors()
+        self.get_browse_works()
+        self._save_browse_cache()
+
+    def _browse_cache_path(self) -> Optional[str]:
+        if self._db_path:
+            return self._db_path + ".browse_cache.json"
+        return None
+
+    _BROWSE_CACHE_VERSION = 2  # Bump when hierarchy format changes (v2: 3-level nesting + canonical ordering)
+
+    def _load_browse_cache(self) -> bool:
+        """Load cached browse data from disk. Returns True if loaded successfully."""
+        cache_path = self._browse_cache_path()
+        if not cache_path or not os.path.exists(cache_path):
+            return False
+        try:
+            db_mtime = os.path.getmtime(self._db_path)
+            cache_mtime = os.path.getmtime(cache_path)
+            if db_mtime > cache_mtime:
+                return False  # DB newer than cache — recompute
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("version") != self._BROWSE_CACHE_VERSION:
+                return False  # Format changed — recompute
+            self._hierarchy_cache = data["hierarchy"]
+            self._unclassified_cache = data["unclassified"]
+            self._authors_cache = data["authors"]
+            self._works_cache = data["works"]
+            logger.info("FjmsService: loaded browse cache from disk (v%s)", self._BROWSE_CACHE_VERSION)
+            return True
+        except Exception as e:
+            logger.debug(f"FjmsService: disk cache load failed: {e}")
+            return False
+
+    def _save_browse_cache(self):
+        """Persist browse data to JSON file for fast subsequent startups."""
+        cache_path = self._browse_cache_path()
+        if not cache_path:
+            return
+        try:
+            data = {
+                "version": self._BROWSE_CACHE_VERSION,
+                "hierarchy": self._hierarchy_cache,
+                "unclassified": self._unclassified_cache,
+                "authors": self._authors_cache,
+                "works": self._works_cache,
+            }
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            logger.info("FjmsService: saved browse cache to disk (v%s)", self._BROWSE_CACHE_VERSION)
+        except Exception as e:
+            logger.debug(f"FjmsService: disk cache save failed: {e}")
+
+    @staticmethod
+    def _split_concat(val):
+        """Split GROUP_CONCAT result into list of non-empty strings."""
+        if not val:
+            return []
+        return [v.strip() for v in val.split(',') if v.strip()]
+
+    def get_join_group(self, sys_id: str) -> list[dict]:
+        """
+        Get other manuscripts in the same join group(s) as the given manuscript.
+
+        A manuscript may belong to multiple join groups. If the same partner
+        appears in multiple groups, it is returned once with all distinct
+        scholar names and join types aggregated into lists.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of dicts with keys:
+                - alma_id (str): Partner manuscript ID
+                - join_group_ids (list[int]): All join group IDs containing this partner
+                - scholar_names (list[str]): All distinct scholars who identified this join
+                - join_types (list[str]): All distinct non-NULL join types across groups
+                - comment (str or None): Comments joined with '; ' if multiple
+            Returns [] if conn is None or no joins found.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT AlmaId, "
+                "       GROUP_CONCAT(DISTINCT JoinGroupId) as JoinGroupIds, "
+                "       GROUP_CONCAT(DISTINCT ScholarName) as ScholarNames, "
+                "       GROUP_CONCAT(DISTINCT Comment) as Comments, "
+                "       GROUP_CONCAT(DISTINCT JoinType) as JoinTypes "
+                "FROM joins "
+                "WHERE JoinGroupId IN (SELECT JoinGroupId FROM joins WHERE AlmaId = ?) "
+                "  AND AlmaId != ? "
+                "GROUP BY AlmaId",
+                (sys_id, sys_id),
+            )
+            results = []
+            for row in cursor:
+                group_ids = self._split_concat(row["JoinGroupIds"])
+                comments = self._split_concat(row["Comments"])
+                results.append({
+                    "alma_id": row["AlmaId"],
+                    "join_group_ids": [int(g) for g in group_ids],
+                    "scholar_names": self._split_concat(row["ScholarNames"]),
+                    "join_types": self._split_concat(row["JoinTypes"]),
+                    "comment": '; '.join(comments) if comments else None,
+                })
+            return results
+        except Exception as e:
+            logger.error(f"FjmsService.get_join_group error for {sys_id}: {e}")
+            return []
+
+    def get_catalog(self, sys_id: str) -> Optional[dict]:
+        """
+        Get catalog metadata for a manuscript (first record only).
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Dict with keys: title, title_heb, author_text, copy_date, copy_place,
+            textual_frame_heb, textual_frame_eng, unit_catalog_rec_id,
+            num_folio, num_column, num_row, genizah_title_org, genizah_title_eng.
+            Returns None if conn is None or not found.
+        """
+        if self._conn is None:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM catalog WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            col_names = row.keys()
+            return {
+                "title": row["Title"],
+                "title_heb": row["TitleHeb"],
+                "author_text": row["AuthorText"],
+                "copy_date": row["CopyDate"],
+                "copy_place": row["CopyPlace"],
+                "textual_frame_heb": row["TextualFrameHeb"],
+                "textual_frame_eng": row["TextualFrameEng"],
+                "unit_catalog_rec_id": row["UnitCatalogRecId"] if "UnitCatalogRecId" in col_names else None,
+                "num_folio": row["NumFolio"] if "NumFolio" in col_names else None,
+                "num_column": row["NumColumn"] if "NumColumn" in col_names else None,
+                "num_row": row["NumRow"] if "NumRow" in col_names else None,
+                "genizah_title_org": row["GenizahTitleOrgTitle"] if "GenizahTitleOrgTitle" in col_names else None,
+                "genizah_title_eng": row["GenizahTitleEngTitle"] if "GenizahTitleEngTitle" in col_names else None,
+            }
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog error for {sys_id}: {e}")
+            return None
+
+    # Sentinel CopyDate values that should be treated as None
+    _SENTINEL_DATES = frozenset(('0', '-99', '-1', '0.0', '-99.0', '-1.0', ''))
+
+    def get_catalog_records(self, sys_id: str) -> list[dict]:
+        """Get all non-empty catalog records for a manuscript.
+
+        Returns list of dicts. Filters out completely empty records and
+        deduplicates by (textual_frame_eng, copy_date, title) tuple.
+        Sentinel CopyDate values (0, -99, -1) are normalized to None.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM catalog WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            results = []
+            seen = set()
+            col_names = None
+
+            for row in cursor:
+                if col_names is None:
+                    col_names = row.keys()
+
+                # Normalize CopyDate sentinel values
+                copy_date = row["CopyDate"]
+                if copy_date is not None and str(copy_date).strip() in self._SENTINEL_DATES:
+                    copy_date = None
+
+                # Handle SourceName columns gracefully (may not exist in old sidecars)
+                has_source = "SourceName" in col_names
+                source_name = row["SourceName"] if has_source else None
+                source_name_heb = row["SourceNameHeb"] if has_source else None
+
+                # Handle new v3.0.0 columns gracefully (may not exist in old sidecars)
+                has_rec_id = "UnitCatalogRecId" in col_names
+                has_num_folio = "NumFolio" in col_names
+                has_num_bifolio = "NumBifolio" in col_names
+                has_num_column = "NumColumn" in col_names
+                has_num_row = "NumRow" in col_names
+                has_genizah_org = "GenizahTitleOrgTitle" in col_names
+                has_genizah_eng = "GenizahTitleEngTitle" in col_names
+
+                record = {
+                    "title": row["Title"],
+                    "title_heb": row["TitleHeb"],
+                    "author_text": row["AuthorText"],
+                    "copy_date": copy_date,
+                    "copy_place": row["CopyPlace"],
+                    "textual_frame_heb": row["TextualFrameHeb"],
+                    "textual_frame_eng": row["TextualFrameEng"],
+                    "source_name": source_name,
+                    "source_name_heb": source_name_heb,
+                    "unit_catalog_rec_id": row["UnitCatalogRecId"] if has_rec_id else None,
+                    "num_folio": row["NumFolio"] if has_num_folio else None,
+                    "num_bifolio": row["NumBifolio"] if has_num_bifolio else None,
+                    "num_column": row["NumColumn"] if has_num_column else None,
+                    "num_row": row["NumRow"] if has_num_row else None,
+                    "genizah_title_org": row["GenizahTitleOrgTitle"] if has_genizah_org else None,
+                    "genizah_title_eng": row["GenizahTitleEngTitle"] if has_genizah_eng else None,
+                }
+
+                # Filter completely empty records (source fields don't count)
+                content_fields = (
+                    record["title"], record["title_heb"], record["author_text"],
+                    record["copy_date"], record["copy_place"],
+                    record["textual_frame_heb"], record["textual_frame_eng"],
+                    record["num_folio"], record["num_bifolio"],
+                    record["num_column"], record["num_row"],
+                    record["genizah_title_org"], record["genizah_title_eng"],
+                )
+                if not any(v and str(v).strip() for v in content_fields):
+                    continue
+
+                # Deduplicate by key tuple (include source + UCRID for multi-team records)
+                key = (
+                    record["textual_frame_eng"] or '',
+                    record["copy_date"] or '',
+                    record["title"] or '',
+                    record["source_name"] or '',
+                    record["unit_catalog_rec_id"] or '',
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                results.append(record)
+
+            return results
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog_records error for {sys_id}: {e}")
+            return []
+
+    # ── Bibliography & Catalog Refs (Phase 33: META-03) ─────────────
+
+    # Reference module-level constant for backward compatibility
+    _GENERIC_SOURCE_NAMES = GENERIC_SOURCE_NAMES
+
+    def get_bibliography(self, sys_id: str) -> list[dict]:
+        """
+        Get bibliography entries for a manuscript.
+
+        Returns denormalized bibliography rows with resolved author/title/mention
+        information, ordered with Discussion entries first, then Mentioned, then others.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of dicts with keys: running_title, running_title_heb, title_year,
+            title_acronym, title_acronym_heb, mention_page, from_page, to_page,
+            volume, e_volume, journal_date, mention_type, transcription_type,
+            translation_type, article_name, article_author_eng, article_author_heb,
+            catalog_acronym, comment, note_for_display, catalog_entry.
+            Extended fields are None when sidecar lacks extended columns.
+            Returns [] if conn is None, sys_id not found, or table missing.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM bibliography WHERE AlmaId = ? "
+                "ORDER BY CASE MentionType "
+                "WHEN 'Discussion' THEN 0 "
+                "WHEN 'Mentioned' THEN 1 "
+                "ELSE 2 END, RunningTitle",
+                (sys_id,),
+            )
+            extended = self._has_bib_extended
+            results = []
+            for row in cursor:
+                entry = {
+                    "running_title": row["RunningTitle"],
+                    "title_year": row["TitleYear"],
+                    "title_acronym": row["TitleAcronym"],
+                    "mention_page": row["MentionPage"],
+                    "from_page": row["FromPage"],
+                    "to_page": row["ToPage"],
+                    "volume": row["Volume"],
+                    "mention_type": row["MentionType"],
+                    "transcription_type": row["TranscriptionType"],
+                    "translation_type": row["TranslationType"],
+                    "article_name": row["ArticleName"],
+                    "article_author_eng": row["ArticleAuthorEng"],
+                    "article_author_heb": row["ArticleAuthorHeb"],
+                    "catalog_acronym": row["CatalogAcronym"],
+                }
+                if extended:
+                    entry["running_title_heb"] = row["RunningTitleHeb"]
+                    entry["title_acronym_heb"] = row["TitleAcronymHeb"]
+                    entry["e_volume"] = row["EVolume"]
+                    entry["journal_date"] = row["JournalDate"]
+                    entry["comment"] = row["Comment"]
+                    entry["note_for_display"] = row["NoteForDisplay"]
+                    entry["catalog_entry"] = row["CatalogEntry"]
+                else:
+                    entry["running_title_heb"] = None
+                    entry["title_acronym_heb"] = None
+                    entry["e_volume"] = None
+                    entry["journal_date"] = None
+                    entry["comment"] = None
+                    entry["note_for_display"] = None
+                    entry["catalog_entry"] = None
+                results.append(entry)
+            return results
+        except Exception as e:
+            logger.error(f"FjmsService.get_bibliography error for {sys_id}: {e}")
+            return []
+
+    def get_catalog_refs(self, sys_id: str) -> list[dict]:
+        """
+        Get catalog cross-references for a manuscript.
+
+        Returns entries linking the manuscript to scholarly catalogs
+        (e.g., Goitein Med Soc, Gil Palestine).
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of dicts with keys: cat_acronym, catalog_author,
+            catalog_title, catalog_entry, is_source.
+            Returns [] if conn is None, sys_id not found, or table missing.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM catalog_refs WHERE AlmaId = ? "
+                "ORDER BY CatAcronym, CatalogEntry",
+                (sys_id,),
+            )
+            return [
+                {
+                    "cat_acronym": row["CatAcronym"],
+                    "catalog_author": row["CatalogAuthor"],
+                    "catalog_title": row["CatalogTitle"],
+                    "catalog_entry": row["CatalogEntry"],
+                    "is_source": row["IsSource"],
+                }
+                for row in cursor
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog_refs error for {sys_id}: {e}")
+            return []
+
+    def get_source_names(self, sys_id: str) -> list[str]:
+        """
+        Get distinct scholarly source names for a manuscript.
+
+        Queries the catalog table for SourceName values, filtering out
+        generic labels like 'Catalogs', 'Institution', 'Collection', 'Other'.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of non-generic SourceName strings.
+            Returns [] if conn is None, sys_id not found, or table missing.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT SourceName FROM catalog "
+                "WHERE AlmaId = ? AND SourceName IS NOT NULL AND SourceName != ''",
+                (sys_id,),
+            )
+            return [
+                row["SourceName"]
+                for row in cursor
+                if row["SourceName"] not in self._GENERIC_SOURCE_NAMES
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_source_names error for {sys_id}: {e}")
+            return []
+
+    def get_catalog_source_counts(self, sys_ids: list[str]) -> dict[str, int]:
+        """
+        Get distinct catalog source counts for multiple manuscripts in batch.
+
+        Used for search card button labels: "Catalog Records (N)".
+        Excludes generic source names (Inventory, Nuscha, Institution, Collection, Other).
+
+        Args:
+            sys_ids: List of Alma/system IDs.
+
+        Returns:
+            Dict mapping sys_id -> count of distinct non-generic SourceName values.
+            IDs with no catalog data are omitted (not present in result).
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT AlmaId, COUNT(DISTINCT SourceName) as cnt FROM catalog "
+                    f"WHERE AlmaId IN ({placeholders}) "
+                    f"AND SourceName IS NOT NULL AND SourceName != '' "
+                    f"AND SourceName NOT IN ('Inventory','Nuscha','Institution','Instatution','Collection','Other') "
+                    f"GROUP BY AlmaId",
+                    batch,
+                )
+                for row in cursor:
+                    result[row["AlmaId"]] = row["cnt"]
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog_source_counts error: {e}")
+            return {}
+
+    def get_catalog_detail(self, sys_id: str) -> dict:
+        """
+        Get structured catalog detail for the dialog display.
+
+        Returns all catalog data for a manuscript grouped by child table:
+        records, running titles, sizes, fields, free descriptions,
+        full texts, textual frames, and mentions.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Dict with keys:
+                - records: list of catalog record dicts (from get_catalog_records)
+                - running_titles: dict mapping UnitCatalogRecId -> list of
+                    {"running_title": str, "comment": str}
+                - sizes: dict mapping UnitCatalogRecId -> list of
+                    {"size_x": float, "size_y": float, "inner_size_x": float, "inner_size_y": float}
+                - fields: dict mapping UnitCatalogRecId -> {FieldCategory: [{"value": str, "value_heb": str}]}
+                - free_descriptions: list of {"text": str, "signature_id": int}
+                - full_texts: list of {"text": str, "signature_id": int}
+                - textual_frames: dict mapping UnitCatalogRecId -> list of
+                    {"heb": str, "eng": str}
+                - mentions: dict mapping UnitCatalogRecId -> list of
+                    {"mention_type": str, "mention": str, "mention_desc": str}
+        """
+        empty = {
+            "records": [],
+            "running_titles": {},
+            "sizes": {},
+            "fields": {},
+            "free_descriptions": [],
+            "full_texts": [],
+            "textual_frames": {},
+            "mentions": {},
+        }
+        if self._conn is None:
+            return empty
+
+        # 1. Catalog records
+        records = self.get_catalog_records(sys_id)
+
+        # 2. Running titles
+        running_titles = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, RunningTitle, Comment "
+                "FROM catalog_running_titles WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in running_titles:
+                    running_titles[rec_id] = []
+                running_titles[rec_id].append({
+                    "running_title": row["RunningTitle"],
+                    "comment": row["Comment"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail running_titles error for {sys_id}: {e}")
+
+        # 3. Sizes (v1.0.0 schema: SizeX_cm/SizeY_cm; dict keys preserved for backward compat)
+        sizes = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, SizeX_cm, SizeY_cm, InnerSizeX_cm, InnerSizeY_cm "
+                "FROM catalog_sizes WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in sizes:
+                    sizes[rec_id] = []
+                sizes[rec_id].append({
+                    "size_x": row["SizeX_cm"],
+                    "size_y": row["SizeY_cm"],
+                    "inner_size_x": row["InnerSizeX_cm"],
+                    "inner_size_y": row["InnerSizeY_cm"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail sizes error for {sys_id}: {e}")
+
+        # 4. Fields (grouped by UnitCatalogRecId then FieldCategory)
+        fields = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, FieldCategory, FieldValue, FieldValueHeb "
+                "FROM catalog_fields WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                category = row["FieldCategory"]
+                if rec_id not in fields:
+                    fields[rec_id] = {}
+                if category not in fields[rec_id]:
+                    fields[rec_id][category] = []
+                fields[rec_id][category].append({
+                    "value": row["FieldValue"],
+                    "value_heb": row["FieldValueHeb"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail fields error for {sys_id}: {e}")
+
+        # 5. Free descriptions (deduplicated by source_name + text)
+        free_descriptions = []
+        seen_descs: set[tuple] = set()
+        try:
+            # Try with SourceName columns first (v4.1.0+ sidecar)
+            cursor = self._conn.execute(
+                "SELECT SignatureId, FreeDesc, SourceName, SourceNameHeb "
+                "FROM catalog_free_desc WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                key = (row["SourceName"] or '', row["FreeDesc"] or '')
+                if key in seen_descs:
+                    continue
+                seen_descs.add(key)
+                free_descriptions.append({
+                    "text": row["FreeDesc"],
+                    "signature_id": row["SignatureId"],
+                    "source_name": row["SourceName"],
+                    "source_name_heb": row["SourceNameHeb"],
+                })
+        except Exception:
+            # Fallback: old sidecar without SourceName columns
+            free_descriptions = []
+            seen_descs = set()
+            try:
+                cursor = self._conn.execute(
+                    "SELECT SignatureId, FreeDesc "
+                    "FROM catalog_free_desc WHERE AlmaId = ?",
+                    (sys_id,),
+                )
+                for row in cursor:
+                    desc_text = row["FreeDesc"] or ''
+                    if desc_text in seen_descs:
+                        continue
+                    seen_descs.add(desc_text)
+                    free_descriptions.append({
+                        "text": row["FreeDesc"],
+                        "signature_id": row["SignatureId"],
+                        "source_name": None,
+                        "source_name_heb": None,
+                    })
+            except Exception as e:
+                logger.debug(f"FjmsService.get_catalog_detail free_desc error for {sys_id}: {e}")
+
+        # 6. Full texts (v4.0.0+, may not exist in older sidecars)
+        full_texts = []
+        try:
+            cursor = self._conn.execute(
+                "SELECT rowid, SignatureId, FullText "
+                "FROM catalog_full_texts WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                text = row["FullText"]
+                if text and str(text).strip():
+                    full_texts.append({
+                        "text": row["FullText"],
+                        "signature_id": row["SignatureId"],
+                        "rowid": row["rowid"],
+                    })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail full_texts error for {sys_id}: {e}")
+
+        # 7. Detailed textual frames (v4.0.0+, may not exist in older sidecars)
+        textual_frames = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, TextualFrameHeb, TextualFrameEng "
+                "FROM catalog_textual_frames WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in textual_frames:
+                    textual_frames[rec_id] = []
+                textual_frames[rec_id].append({
+                    "heb": row["TextualFrameHeb"],
+                    "eng": row["TextualFrameEng"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail textual_frames error for {sys_id}: {e}")
+
+        # 8. Mentions (v4.0.0+, may not exist in older sidecars)
+        mentions = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, MentionType, Mention, MentionDesc "
+                "FROM catalog_mentions WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in mentions:
+                    mentions[rec_id] = []
+                mentions[rec_id].append({
+                    "mention_type": row["MentionType"],
+                    "mention": row["Mention"],
+                    "mention_desc": row["MentionDesc"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail mentions error for {sys_id}: {e}")
+
+        return {
+            "records": records,
+            "running_titles": running_titles,
+            "sizes": sizes,
+            "fields": fields,
+            "free_descriptions": free_descriptions,
+            "full_texts": full_texts,
+            "textual_frames": textual_frames,
+            "mentions": mentions,
+        }
+
+    def get_measurements(self, sys_id: str) -> dict:
+        """Get all measurement data for a manuscript.
+
+        Returns dict with keys: catalog_sizes, computed, extra_info, blank_images, summary.
+        Flagged records are excluded per D-11.
+        Gracefully handles missing tables (old sidecars).
+        """
+        if self._conn is None:
+            return {"catalog_sizes": [], "computed": [], "extra_info": [],
+                    "blank_images": [], "summary": None}
+
+        result = {"catalog_sizes": [], "computed": [], "extra_info": [],
+                  "blank_images": [], "summary": None}
+
+        # Summary row (manuscript_measurements)
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM manuscript_measurements WHERE AlmaId = ?", (sys_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                result["summary"] = dict(row)
+        except Exception:
+            pass  # Table may not exist in old sidecars
+
+        # Catalog sizes (exclude flagged per D-11/D-13)
+        try:
+            cursor = self._conn.execute(
+                "SELECT AlmaId, UnitCatalogRecId, SizeX_cm, SizeY_cm, "
+                "InnerSizeX_cm, InnerSizeY_cm, SizeUnit, Measurement_Scope "
+                "FROM catalog_sizes WHERE AlmaId = ? "
+                "AND Flag_WH_Swap IS NULL AND Flag_Unit_Error IS NULL",
+                (sys_id,),
+            )
+            result["catalog_sizes"] = [dict(r) for r in cursor]
+        except Exception:
+            pass  # Measurement query failed; try next source
+
+        # Computed measurements (exclude all 4 flags per D-11)
+        try:
+            cursor = self._conn.execute(
+                "SELECT FGP, Image_Side, Component_Num, Bifolio_Side, "
+                "Page_Width_cm, Page_Height_cm, Num_Lines, "
+                "Left_Margin_cm, Right_Margin_cm, Top_Margin_cm, Bottom_Margin_cm, "
+                "Written_Width_cm, Written_Height_cm, "
+                "Avg_Line_Height_Text_mm, Text_Density_per10cm, DpiGrid "
+                "FROM computed_measurements WHERE AlmaId = ? "
+                "AND Flag_DPI_High = 0 AND Flag_DPI_Low = 0 "
+                "AND Flag_Negative_Margin = 0 AND Flag_BifolioLoc_Error = 0",
+                (sys_id,),
+            )
+            result["computed"] = [dict(r) for r in cursor]
+        except Exception:
+            pass  # Measurement query failed; try next source
+
+        # Extra info for this manuscript
+        try:
+            cursor = self._conn.execute(
+                "SELECT FGP, Shelfmark, Material, Size_Category, "
+                "NumFolio, NumBifolio, Image_Type "
+                "FROM extra_info WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            result["extra_info"] = [dict(r) for r in cursor]
+        except Exception:
+            pass  # Measurement query failed; try next source
+
+        # Blank images (fragments without text blocks)
+        try:
+            cursor = self._conn.execute(
+                "SELECT FGP, Fragment_Width_cm, Fragment_Height_cm, IsNotWhole "
+                "FROM blank_images WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            result["blank_images"] = [dict(r) for r in cursor]
+        except Exception:
+            pass  # blank_images table may not exist in older sidecar versions
+
+        return result
+
+    def get_measurement_summaries_batch(self, sys_ids: list[str]) -> dict[str, dict]:
+        """Batch fetch measurement summaries for post-search filtering.
+
+        Returns {AlmaId: {width_cm, height_cm, avg_num_lines, avg_line_height_mm, avg_text_density, material}}.
+        Deduplicates sys_ids. Graceful when avg_line_height_mm column missing.
+        Robust to both Row objects and plain tuples (review concern #6).
+        """
+        if not sys_ids or self._conn is None:
+            return {}
+        # Deduplicate (review concern #9)
+        unique_ids = list(set(sys_ids))
+        result = {}
+        # Check if avg_line_height_mm column exists (review concern #7)
+        try:
+            cols_info = self._conn.execute("PRAGMA table_info(manuscript_measurements)").fetchall()
+            cols = {row[1] if isinstance(row, (tuple, list)) else row['name'] for row in cols_info}
+        except Exception:
+            return {}  # Lookup failed; return empty dict
+        has_line_height = 'avg_line_height_mm' in cols
+        lh_col = ", avg_line_height_mm" if has_line_height else ""
+        has_size_category = 'size_category' in cols
+        sc_col = ", size_category" if has_size_category else ""
+
+        # Define column names for positional fallback (review concern #6)
+        col_names = ['AlmaId', 'width_cm', 'height_cm', 'avg_num_lines', 'avg_text_density', 'material']
+        if has_line_height:
+            col_names.append('avg_line_height_mm')
+        if has_size_category:
+            col_names.append('size_category')
+
+        try:
+            for i in range(0, len(unique_ids), 500):
+                chunk = unique_ids[i:i+500]
+                ph = ','.join('?' * len(chunk))
+                cursor = self._conn.execute(f"""
+                    SELECT AlmaId,
+                           COALESCE(catalog_width_cm, max_computed_width_cm) as width_cm,
+                           COALESCE(catalog_height_cm, max_computed_height_cm) as height_cm,
+                           avg_num_lines, avg_text_density, material{lh_col}{sc_col}
+                    FROM manuscript_measurements
+                    WHERE AlmaId IN ({ph})
+                """, chunk)
+                for row in cursor:
+                    # Robust row access: try dict-like first, fall back to positional (review concern #6)
+                    try:
+                        r = dict(row)
+                    except (TypeError, ValueError):
+                        # Row is a plain tuple -- use col_names for mapping
+                        r = dict(zip(col_names, row))
+                    result[str(r.get('AlmaId', ''))] = {
+                        'width_cm': r.get('width_cm'),
+                        'height_cm': r.get('height_cm'),
+                        'avg_num_lines': r.get('avg_num_lines'),
+                        'avg_line_height_mm': r.get('avg_line_height_mm') if has_line_height else None,
+                        'avg_text_density': r.get('avg_text_density'),
+                        'material': r.get('material'),
+                        'size_category': r.get('size_category') if has_size_category else None,
+                    }
+        except Exception as e:
+            logger.error(f"FjmsService.get_measurement_summaries_batch error: {e}")
+        return result
+
+    def has_measurements(self, sys_id: str) -> bool:
+        """Check if a manuscript has any measurement data.
+
+        Checks manuscript_measurements summary, catalog_sizes, and computed_measurements.
+        Returns False gracefully if measurement tables don't exist (old sidecars).
+        """
+        if self._conn is None:
+            return False
+        # Check summary first (fastest -- single indexed lookup)
+        try:
+            row = self._conn.execute(
+                "SELECT 1 FROM manuscript_measurements WHERE AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass  # Measurement query failed; try next source
+        # Fallback: check catalog_sizes (may have data not in summary)
+        try:
+            row = self._conn.execute(
+                "SELECT 1 FROM catalog_sizes WHERE AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass  # Measurement query failed; try next source
+        # Fallback: check computed_measurements
+        try:
+            row = self._conn.execute(
+                "SELECT 1 FROM computed_measurements WHERE AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass  # Measurement query failed; try next source
+        return False
+
+    def close(self):
+        """Close the database connection if open."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+                logger.info("FjmsService: Connection closed")
+            except Exception as e:
+                logger.error(f"FjmsService.close error: {e}")
+            finally:
+                self._conn = None
+
+
+def format_page_ref(entry: dict) -> str:
+    """Format page reference from FJMS bibliography entry fields.
+
+    Handles mention_page, from_page/to_page ranges, and volume prefixes.
+
+    Args:
+        entry: Dict with keys mention_page, from_page, to_page, volume.
+
+    Returns:
+        Formatted page reference string (e.g., 'vol. 2, pp. 15-20') or ''.
+    """
+    parts = []
+    vol = entry.get('volume', '')
+    if vol and str(vol).strip():
+        parts.append(f'vol. {vol}')
+    mention_page = entry.get('mention_page', '')
+    from_page = entry.get('from_page', '')
+    to_page = entry.get('to_page', '')
+    if mention_page and str(mention_page).strip():
+        parts.append(f'p. {mention_page}')
+    elif from_page and str(from_page).strip():
+        if to_page and str(to_page).strip() and str(to_page) != str(from_page):
+            parts.append(f'pp. {from_page}-{to_page}')
+        else:
+            parts.append(f'p. {from_page}')
+    return ', '.join(parts)
+
+
+def _parse_marc_annotations(marc_str: str) -> dict:
+    """Parse Hebrew annotations from end of NLI MARC 581 string.
+
+    NLI MARC strings end with parenthetical Hebrew annotations derived from
+    FJMS data, e.g.: '(דיון, יש תמונה, יש העתקה (מלא), יש תרגום (מלא)).'
+
+    Args:
+        marc_str: Raw MARC bibliography string.
+
+    Returns:
+        Dict with keys: mention_type, has_image, transcription, translation.
+    """
+    result = {'mention_type': '', 'has_image': False, 'transcription': '', 'translation': ''}
+    if not marc_str:
+        return result
+
+    # Find the last parenthetical block containing Hebrew annotations
+    # Pattern: content in parens that contains Hebrew chars, possibly nested parens
+    match = re.search(r'\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*\.?\s*$', marc_str)
+    if not match:
+        return result
+
+    annotation = match.group(1)
+
+    # Mention type
+    if 'דיון' in annotation:
+        result['mention_type'] = 'Discussion'
+    elif 'איזכור' in annotation:
+        result['mention_type'] = 'Mentioned'
+    elif 'מפתח' in annotation:
+        result['mention_type'] = 'Index'
+
+    # Has image
+    if 'יש תמונה' in annotation or 'תמונה' in annotation:
+        result['has_image'] = True
+
+    # Transcription
+    if 'יש העתקה' in annotation:
+        if 'העתקה (מלא)' in annotation:
+            result['transcription'] = 'Full'
+        elif 'העתקה (חלקי)' in annotation:
+            result['transcription'] = 'Partial'
+        else:
+            result['transcription'] = 'Exists'
+
+    # Translation
+    if 'יש תרגום' in annotation:
+        if 'תרגום (מלא)' in annotation:
+            result['translation'] = 'Full'
+        elif 'תרגום (חלקי)' in annotation:
+            result['translation'] = 'Partial'
+        else:
+            result['translation'] = 'Exists'
+
+    return result
+
+
+def strip_marc_annotation_suffix(marc_str: str) -> str:
+    """Strip trailing Hebrew annotation parenthetical from MARC 581 string.
+
+    NLI MARC strings end with '(דיון, יש תמונה, ...).' — this returns
+    the clean reference text for display in the NLI bibliography table.
+
+    Args:
+        marc_str: Raw MARC bibliography string.
+
+    Returns:
+        Reference text with trailing annotation removed, or original string.
+    """
+    if not marc_str:
+        return ''
+    s = marc_str.strip()
+    # Remove trailing period
+    if s.endswith('.'):
+        s = s[:-1].rstrip()
+    # Remove last parenthetical block that contains Hebrew chars
+    cleaned = re.sub(r'\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*$', '', s)
+    # Only strip if the removed part actually contained Hebrew
+    if cleaned != s:
+        removed = s[len(cleaned):]
+        if re.search(r'[\u0590-\u05FF]', removed):
+            return cleaned.rstrip(' .,;-')
+    return s
+
+
+def _ts_symbol(value) -> str:
+    """Map transcription/translation value to FJMS-style symbol.
+
+    Full → '✓+', Partial → '✓−', truthy/Exists → '✓', None/empty → ''.
+    """
+    if not value or str(value).strip() in ('', 'None', 'Unknown'):
+        return ''
+    v = str(value).strip()
+    if v == 'Full':
+        return '\u2713+'
+    if v == 'Partial':
+        return '\u2713\u2212'
+    return '\u2713'
+
+
+def _parse_marc_bib_string(marc_str: str) -> dict:
+    """Parse an NLI MARC 581 bibliography string into structured fields.
+
+    Extracts author (text before first comma), 4-digit year, page numbers,
+    title, and Hebrew annotations from the raw MARC string.
+
+    Args:
+        marc_str: Raw bibliography string from MARC tag 581.
+
+    Returns:
+        Dict with keys: author, year, pages, title, plus annotation fields.
+    """
+    result = {'author': '', 'year': '', 'pages': '', 'title': ''}
+    if not marc_str or not marc_str.strip():
+        return result
+
+    s = marc_str.strip()
+
+    # Extract author: text before first comma (if not too long)
+    comma_idx = s.find(',')
+    if 0 < comma_idx <= 60:
+        result['author'] = s[:comma_idx].strip()
+
+    # Extract title: text between author section and year/page section
+    # Pattern: "Author, Article Title. Book/Journal Title, Year, ..."
+    # Try to find text after author+article that looks like a title
+    title_match = re.search(r'(?:,\s+[^,]+)?\.\s+([^,.]+?)(?:\.\s|\,\s*\d{4}|\,\s*\d+\s*עמ)', s)
+    if title_match:
+        candidate = title_match.group(1).strip()
+        # Only use if it's not too short and not just a year
+        if len(candidate) > 3 and not re.match(r'^\d{4}$', candidate):
+            result['title'] = candidate
+
+    # Extract 4-digit year
+    year_match = re.search(r'\b(1[4-9]\d{2}|20[0-2]\d)\b', s)
+    if year_match:
+        result['year'] = year_match.group(1)
+
+    # Extract page references - Hebrew patterns first (more common in MARC)
+    heb_match = re.search(r"עמ(?:וד|['\u2019])\s*([\w\d,/ \-–]+?)\.?(?:\s*\(|$)", s)
+    if heb_match:
+        result['pages'] = heb_match.group(1).strip().rstrip('.')
+    else:
+        # English patterns
+        page_match = re.search(r'(?:pp?\.\s*|pages?\s+)(\d+(?:\s*[-–]\s*\d+)?)', s)
+        if page_match:
+            result['pages'] = page_match.group(1).strip()
+
+    # Parse Hebrew annotations
+    annotations = _parse_marc_annotations(s)
+    result.update(annotations)
+
+    return result
+
+
+def merge_catalog_records(records: list[dict]) -> dict:
+    """Merge multiple catalog records into a display-ready structure.
+
+    Metadata fields (title, author, date, place) are merged by taking
+    the first non-empty value. TextualFrame entries are collected as
+    a list of distinct values with their source attribution.
+
+    Args:
+        records: List of catalog record dicts from get_catalog_records().
+
+    Returns:
+        Dict with keys: title, title_heb, author_text, copy_date, copy_place,
+        textual_frames (list of dicts), record_count (int).
+    """
+    if not records:
+        return {
+            "title": None, "title_heb": None, "author_text": None,
+            "copy_date": None, "copy_place": None,
+            "textual_frames": [], "record_count": 0,
+        }
+
+    result = {
+        "title": None,
+        "title_heb": None,
+        "author_text": None,
+        "copy_date": None,
+        "copy_place": None,
+    }
+
+    # Take first non-empty value for each metadata field
+    for rec in records:
+        for key in ("title", "title_heb", "author_text", "copy_date", "copy_place"):
+            if result[key] is None and rec.get(key) and str(rec[key]).strip():
+                result[key] = rec[key]
+
+    # Collect distinct TextualFrame entries with source attribution
+    # TextualFrame fields can contain multiple entries separated by '; @[$'
+    frames = []
+    seen_frames = set()
+    for rec in records:
+        eng_text = rec.get("textual_frame_eng") or ''
+        heb_text = rec.get("textual_frame_heb") or ''
+        if not eng_text.strip() and not heb_text.strip():
+            continue
+        eng_parts = split_textual_frames(eng_text)
+        heb_parts = split_textual_frames(heb_text)
+        max_len = max(len(eng_parts), len(heb_parts), 1)
+        # If no parts from split (plain text without [$...$]), use original
+        if not eng_parts and not heb_parts:
+            eng_parts = [eng_text.strip()] if eng_text.strip() else []
+            heb_parts = [heb_text.strip()] if heb_text.strip() else []
+            max_len = max(len(eng_parts), len(heb_parts))
+        for i in range(max_len):
+            eng = eng_parts[i].strip() if i < len(eng_parts) else None
+            heb = heb_parts[i].strip() if i < len(heb_parts) else None
+            if not (eng or heb):
+                continue
+            frame_key = (eng or '', heb or '')
+            if frame_key in seen_frames:
+                continue
+            seen_frames.add(frame_key)
+            frames.append({
+                "eng": eng if eng else None,
+                "heb": heb if heb else None,
+                "source_name": rec.get("source_name"),
+                "source_name_heb": rec.get("source_name_heb"),
+            })
+
+    result["textual_frames"] = frames
+    result["record_count"] = len(records)
+
+    return result
+
+
+def split_textual_frames(text: str) -> list[str]:
+    """Split a compound TextualFrame string into individual entries.
+
+    FJMS TextualFrame fields can contain multiple entries separated by '; '
+    where each entry starts with @[$Category$] or [$Category$] notation.
+    E.g.: '@[$Piyyut$]: "poem1"; @[$Piyyut$] (Yotzer): "poem2"'
+    """
+    if not text or not text.strip():
+        return []
+    # Split on '; ' followed by optional @ then [$
+    parts = re.split(r';\s*(?=@?\[\$)', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def parse_textual_frame(text: str) -> tuple[str, str]:
+    """Parse '[$Category$]: Content' notation into (category, content).
+
+    Strips optional @ prefix. Captures parenthetical sub-type as part of
+    category (e.g., '[$Piyyut$] (Yotzer)' -> category='Piyyut (Yotzer)').
+    Returns ('', full_text) if no pattern match.
+
+    Args:
+        text: A single textual frame entry (use split_textual_frames first
+              to split compound strings).
+
+    Returns:
+        Tuple of (category, content). Category is '' if no pattern match.
+    """
+    if not text:
+        return ('', '')
+    text = text.strip().lstrip('@')
+    match = re.match(r'\[\$(.+?)\$\]\s*(\([^)]+\))?\s*:?\s*(.*)', text, re.DOTALL)
+    if match:
+        category = match.group(1).strip()
+        sub_type = match.group(2)
+        content = match.group(3).strip()
+        if sub_type:
+            category = f"{category} {sub_type}"
+        return (category, content)
+    return ('', text)
+
+
+# Module-level singleton pattern
+_default_service: Optional[FjmsService] = None
+
+
+def get_fjms_service(thread_safe: bool = True) -> FjmsService:
+    """Get or create the default FjmsService singleton."""
+    global _default_service
+    if _default_service is None:
+        _default_service = FjmsService(thread_safe=thread_safe)
+    return _default_service
+
+
+def reset_fjms_service():
+    """Reset the singleton FjmsService instance.
+
+    Call this after replacing the fjms_enrichment.db sidecar file to force
+    re-initialization on next access. Closes the existing connection
+    before clearing the singleton.
+    """
+    global _default_service
+    if _default_service is not None:
+        _default_service.close()
+        _default_service = None
+
+
+def validate_filter_values(filters: dict, universe=None) -> None:
+    """Module-level shorthand for FjmsService.validate_filter_values.
+
+    Phase 78 Plan 03 (D-17, API-07, R2-#3 fail-closed). Uses the
+    thread-safe singleton — see FjmsService.validate_filter_values
+    for the policy contract.
+    """
+    return get_fjms_service(thread_safe=True).validate_filter_values(filters, universe)
+
+
+def get_filter_sys_ids(**kwargs):
+    """Module-level shorthand for FjmsService.get_filter_sys_ids.
+
+    Phase 78 Plan 03: callers in web/search_api.py invoke through this
+    function (rather than the bound method) so test fixtures can
+    monkeypatch shared.fjms_service.get_filter_sys_ids to inject empty
+    intersections without spinning up the real FJMS sidecar.
+
+    Raises FilterUnavailable exactly as the method does.
+    """
+    return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
+
+
+# ── #17: what the open catalog can answer (for the filter controls) ───────
+# These read a value cached at connect time (a failed schema read is retried),
+# so they are safe on a UI thread or the event loop once the singleton exists.
+
+def measurement_filter_support(service=None) -> str:
+    """FILTER_SUPPORTED / FILTER_UNSUPPORTED / FILTER_SUPPORT_UNKNOWN."""
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    return svc.measurement_filter_support()
+
+
+def line_height_filter_support(service=None) -> str:
+    """Three states for the Line Height filter; never 'supported' when the
+    measurement table itself is not."""
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    if svc.measurement_filter_support() == FILTER_UNSUPPORTED:
+        return FILTER_UNSUPPORTED
+    return svc.line_height_filter_support()
+
+
+def measurement_filters_available(service=None) -> bool:
+    """Show the measurement controls: True only when the open catalog is
+    KNOWN to have measurement data. Hiding a control never drops a saved
+    value by itself -- see unavailable_measurement_filter_keys."""
+    return measurement_filter_support(service) == FILTER_SUPPORTED
+
+
+def line_height_filter_available(service=None) -> bool:
+    """Show the Line Height controls: True only when the open catalog is
+    KNOWN to answer a Line Height filter."""
+    return line_height_filter_support(service) == FILTER_SUPPORTED
+
+
+def unavailable_measurement_filter_keys(service=None) -> frozenset:
+    """Filter keys the OPEN sidecar is KNOWN not to support.
+
+    Empty when the answer is not known -- no sidecar, or its schema could not
+    be read. An absent sidecar can come back (a download in progress, a file
+    being replaced), so saved values are kept and the lookup reports
+    FilterUnavailable instead. Only a successful schema inspection may
+    authorize dropping a saved value (K-16).
+    """
+    if measurement_filter_support(service) == FILTER_UNSUPPORTED:
+        return frozenset(MEASUREMENT_FILTER_KEYS)
+    if line_height_filter_support(service) == FILTER_UNSUPPORTED:
+        return frozenset(LINE_HEIGHT_FILTER_KEYS)
+    return frozenset()
+
+
+def drop_unavailable_measurement_filters(filters, service=None):
+    """Return (kept, dropped): a NEW dict without the keys the open sidecar is
+    known not to answer, and the dropped keys that held a value.
+
+    Never mutates ``filters`` (it may be a search-history entry), and shares
+    nothing with it: ``kept`` is a DEEP copy, because the caller makes it the
+    live filters and a chip removal edits a list such as ``domains`` in place
+    -- a shallow copy let that edit reach the saved history.
+    """
+    kept = copy.deepcopy(dict(filters or {}))
+    bad = unavailable_measurement_filter_keys(service)
+    dropped = sorted(k for k in kept if k in bad and kept[k] not in (None, [], ()))
+    for k in bad:
+        kept.pop(k, None)
+    return kept, dropped
+
+
+def resolve_library_sys_ids(library_codes, meta_mgr) -> set:
+    """Reverse-lookup: convert a list of library codes to the matching sys_id set.
+
+    Shared helper importable by both web catalog (Plan C) and desktop catalog
+    (Plan D) so neither duplicates this logic.
+
+    Args:
+        library_codes: Iterable of library-code strings (e.g. ``['CUL', 'JTS']``).
+            Unknown codes are silently dropped (they are validated against
+            ``LIBRARY_CODES`` keys).  Empty list or None → returns ``set()``.
+        meta_mgr: A ``MetadataManager`` instance whose ``csv_bank`` attribute maps
+            ``sys_id → {library_code: str, ...}``.  ``None`` → returns ``set()``.
+
+    Returns:
+        ``set[str]`` of sys_ids whose ``library_code`` is in the validated code set.
+        Returns ``set()`` on any input that cannot be resolved (empty codes, None
+        meta_mgr, no valid codes after validation).
+
+    Threading / performance note:
+        This function iterates over the full csv_bank (~255K entries) in Python.
+        It MUST be called off the asyncio event loop — run via
+        ``asyncio.get_event_loop().run_in_executor(None, resolve_library_sys_ids, ...)``
+        or equivalent.  The result is a plain Python set that can be passed directly
+        to ``get_browse_results(library_sys_ids=...)``.
+    """
+    if not library_codes or meta_mgr is None:
+        return set()
+
+    # Lazy import to avoid a top-level cycle — browse_map_utils is a shared/
+    # module but importing LIBRARY_CODES at module load is safe; the lazy import
+    # here mirrors the pattern used by other helpers in this file.
+    try:
+        from shared.browse_map_utils import LIBRARY_CODES as _VALID_CODES
+    except ImportError:
+        logger.error("resolve_library_sys_ids: could not import LIBRARY_CODES")
+        return set()
+
+    valid_code_set = {c for c in library_codes if c in _VALID_CODES}
+    if not valid_code_set:
+        logger.debug(
+            "resolve_library_sys_ids: all supplied codes %r are unknown — "
+            "returning empty set (no filter applied)",
+            list(library_codes),
+        )
+        return set()
+
+    return {
+        sid
+        for sid, row in meta_mgr.csv_bank.items()
+        if row.get("library_code") in valid_code_set
+    }
+
+
+def resolve_library_complement_sys_ids(library_codes, meta_mgr) -> set:
+    """Reverse-lookup: sys_ids whose ``library_code`` is NOT in ``library_codes``.
+
+    Complement of :func:`resolve_library_sys_ids`.  Used for the public API
+    ``library_filter_mode='exclude'`` path — results are scoped to manuscripts
+    that do NOT belong to any of the given libraries.
+
+    Args:
+        library_codes: Iterable of library-code strings (e.g. ``['CUL', 'JTS']``).
+            Unknown codes are treated as "excluding nothing" (see below).
+            Empty list or None → returns ``set()`` (caller short-circuits; no-op).
+        meta_mgr: A ``MetadataManager`` instance whose ``csv_bank`` attribute maps
+            ``sys_id → {library_code: str, ...}``.  ``None`` → returns ``set()``.
+
+    Returns:
+        ``set[str]`` of sys_ids whose ``library_code`` is NOT in the validated
+        exclusion set.  Special cases:
+
+        * Empty / None ``library_codes`` → ``set()`` (caller's short-circuit handles
+          the "no filter" semantic before reaching here).
+        * All supplied codes are unknown/invalid → full corpus
+          (``set(meta_mgr.csv_bank.keys())``); excluding nothing means show all.
+        * ``ImportError`` on LIBRARY_CODES → fail-open to full corpus + log error.
+
+    Threading / performance note:
+        Iterates the full csv_bank (~255K entries) in a single O(N) pass.
+        MUST be called off the asyncio event loop — use
+        ``asyncio.get_event_loop().run_in_executor(None, resolve_library_complement_sys_ids, ...)``
+        (same pattern as :func:`resolve_library_sys_ids`).
+    """
+    if not library_codes or meta_mgr is None:
+        return set()
+
+    try:
+        from shared.browse_map_utils import LIBRARY_CODES as _VALID_CODES
+    except ImportError:
+        logger.error("resolve_library_complement_sys_ids: could not import LIBRARY_CODES — fail-open to full corpus")
+        return set(meta_mgr.csv_bank.keys())
+
+    excl_set = {c for c in library_codes if c in _VALID_CODES}
+    if not excl_set:
+        # All codes unknown — excluding nothing = return full corpus
+        logger.debug(
+            "resolve_library_complement_sys_ids: all supplied codes %r are unknown — "
+            "returning full corpus (exclude-nothing)",
+            list(library_codes),
+        )
+        return set(meta_mgr.csv_bank.keys())
+
+    return {
+        sid
+        for sid, row in meta_mgr.csv_bank.items()
+        if row.get("library_code") not in excl_set
+    }

@@ -1,0 +1,875 @@
+# -*- coding: utf-8 -*-
+"""The discovery connections panel, RENDERED (Phase 136, plan 136-17).
+
+This module draws what `shared/discovery_panel_model.py` decided, and takes no
+display decision of its own. That split is the whole point: every honesty
+invariant on this surface is a property of a pure model plus a renderer that
+adds nothing, which is what makes the invariants testable without a browser.
+
+WHAT THIS MODULE MAY NOT DO, stated as prohibitions because each one has a test:
+
+* No bucket, collapse, gating or ordering decision. `shared.discovery_grouping`
+  and `shared.discovery_main_pool` already took them and the model already
+  called them.
+* No band comparison and no band string built here. 136-21 resolves the WEAKER
+  band of an expansion pair server-side and supplies its `band_label`; a second
+  comparator is exactly how a displayed band drifts from the filtered one.
+* No raw `neutral_title` read. Ruling R routes every title through
+  `display_work_title`; on `w000176` a raw read prints a halakhic work's name
+  over pages the owner ruled are mostly liturgy. The model routes what it
+  emits; the ONE title that could arrive here uncurated is on a 136-21
+  expansion row, and `_expansion_work_title` routes that through the same
+  function rather than formatting it.
+* No relation-keyed colour on any chip. Colour-coding by relation kind
+  reintroduces per-tier confidence styling through the back door, which is what
+  D-24 prohibits.
+* No catalogue description anywhere in the panel or its vicinity (D-13i). On a
+  composite shelfmark the browse header's catalogue line describes OTHER
+  leaves, and read beside a page-level claim the two produce a false alarm: a
+  manuscript catalogued as court records carried a verifiably correct
+  commentary identification on one folio. This panel therefore renders NO
+  catalogue-derived text at all, and `_MANUSCRIPT_PANE_SCOPE_NOTE` says in
+  words that the pane describes THIS manuscript's computed identifications.
+* No CSS. Every class here is one plan 136-10 landed in
+  `web/static/common.css`, scoped under `.gs-discovery`; the root element
+  carries that class or none of it applies.
+
+Off-loop discipline: the two LAZY reads (`get_related_pages_enveloped` and
+`get_work_expansion_enveloped`) are DIRECT awaits on the `web.discovery` async
+wrappers, which dispatch off the loop internally. No `run.io_bound` and no
+`web.discovery._service` access appears in this module -- an AST guard pins
+both.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Mapping, Optional
+
+from nicegui import ui
+
+import shared.discovery_display_strings as ds
+from shared.discovery_panel_model import (
+    PANE_EMPTY,
+    PANE_OUTAGE,
+    PANE_UNRESOLVED,
+    ROWS_NOT_REQUESTED,
+    ROWS_OUTAGE,
+    ROWS_POPULATED,
+    PanelModel,
+    related_page_row,
+)
+from shared.discovery_surface_projection import STATUS_OK, is_outage
+from web.components import discovery_links as links
+from web.components.findings_rows import (
+    ROW_CATALOGUE_TITLE_CLASS,
+    ROW_DIVERGENCE_CLASS,
+    copy_text as _findings_copy,
+    render_excerpt_disclosure,
+)
+from web.components.identification_review import (
+    render_identification_review_action,
+    render_published_identification_reviews,
+)
+from web.translations import tr
+
+logger = logging.getLogger(__name__)
+
+#: The panel's own marker classes. Render-smoke assertions scope to these; an
+#: assertion that searches the whole page can pass for the wrong reason.
+PANEL_ROOT_CLASS = 'discovery-panel'
+PANEL_ENTRY_CLASS = 'discovery-panel-entry'
+#: The launch HIGHLIGHT on the entry control (owner, 2026-08-07). The panel is a
+#: new surface arriving on a toolbar that already carries seven other controls,
+#: all rendered `flat dense`; without this it is a button nobody has a reason to
+#: notice. Purely presentational -- it says the CONTROL is new, never anything
+#: about the quality of what is behind it (D-24: no confidence styling anywhere
+#: on this surface).
+PANEL_ENTRY_NEW_CLASS = 'discovery-panel-entry-new'
+PANEL_ENTRY_NEW_BADGE_CLASS = 'discovery-panel-entry-new-badge'
+PANEL_ROW_CLASS = 'discovery-panel-row'
+PANEL_MANUSCRIPT_PANE_CLASS = 'discovery-panel-manuscript'
+PANEL_EXPANSION_CLASS = 'discovery-panel-expansion'
+PANEL_RELATED_CLASS = 'discovery-panel-related'
+PANEL_SERVICE_STATE_CLASS = 'discovery-panel-service-state'
+
+#: D-13i, implemented as OMISSION plus an explicit scope note. See the module
+#: docstring for the false alarm this prevents.
+_MANUSCRIPT_PANE_SCOPE_NOTE = {
+    'en': 'Computed for this manuscript only. No catalogue description is shown here.',
+    'he': 'מחושב עבור כתב יד זה בלבד. לא מוצג כאן תיאור קטלוגי.',
+}
+
+
+def _lang_of(model: PanelModel) -> str:
+    return 'he' if model.lang == 'he' else 'en'
+
+
+def _attr(value: Any) -> str:
+    """A value safe to place inside a double-quoted NiceGUI prop."""
+    return str(value or '').replace('"', "'")
+
+
+def _neutral_chip(text: str, tooltip: Optional[str] = None):
+    """The relation chip. VISUALLY NEUTRAL, always: the frozen band label rides
+    on `title` and never appears as visible text, and no per-kind class is ever
+    added (hard rule 2 of the discovery CSS block)."""
+    chip = ui.label(text).classes('rel')
+    if tooltip:
+        chip.props(f'title="{_attr(tooltip)}"')
+    return chip
+
+
+def _service_state_block(state: Mapping[str, Any], on_retry=None) -> None:
+    """A named temporary condition plus a retry -- never an empty section.
+
+    An empty section reads as an authoritative zero, which is the exact
+    false-zero class the envelope exists to prevent.
+
+    EVERY call site passes `on_retry` -- pinned as an AST guard by
+    `test_no_service_state_block_can_be_rendered_without_a_retry_handler`, so a
+    new outage branch cannot silently take the default. The round-12 defect was
+    exactly that: three of the four outage paths took it and left the reader an
+    outage message with no way out.
+
+    Whether a retry is OFFERED is still a decision, but it belongs to the MODEL,
+    which supplies a `service_state` only where re-running the reads can help.
+    This function's job is to forward the handler it was given.
+    """
+    with ui.row().classes(f'{PANEL_SERVICE_STATE_CLASS} items-center gap-2 dnote'):
+        ui.label(state.get('message') or '')
+        if on_retry is not None:
+            ui.button(state.get('retry') or '', on_click=on_retry).props(
+                'flat dense size=sm no-caps')
+
+
+# ---------------------------------------------------------------------------
+# The entry control (D-13). Visibility is a FIELD on the model, never a
+# render-time expression: hidden ONLY on a status of `ok` with a total of zero.
+# ---------------------------------------------------------------------------
+
+
+def render_discovery_entry_control(model: PanelModel, *, on_toggle=None,
+                                   highlight_new: bool = False) -> None:
+    entry = model.entry_control
+    if entry.get('hidden'):
+        return
+    lang = _lang_of(model)
+    count = entry.get('count')
+    if entry.get('manuscript_elsewhere_only'):
+        # A TRUE zero on this folio while the whole-manuscript read came back
+        # `ok` and non-empty. The two facts -- "nothing on this page" and "this
+        # page has N" -- are different facts, so they never share a rendering:
+        # this state gets its own wording, naming the scope, and no number at
+        # all. The MODEL decided the state; the renderer only speaks it.
+        label = tr('Computed identifications elsewhere in this manuscript')
+    else:
+        label = tr('Computed identifications')
+        if isinstance(count, int):
+            label = f'{label} ({count})'
+
+    # THE LAUNCH HIGHLIGHT (owner, 2026-08-07). `highlight_new` is decided by the
+    # CALLER, from the reader's own dismissal state -- this renderer never reads
+    # storage and never decides that a reader is new.
+    entry_classes = f'gs-discovery {PANEL_ENTRY_CLASS}'
+    if highlight_new:
+        entry_classes = f'{entry_classes} {PANEL_ENTRY_NEW_CLASS}'
+    with ui.element('span').classes(entry_classes):
+        button = ui.button(label, icon='hub', on_click=on_toggle).props(
+            'flat dense size=sm no-caps')
+        if highlight_new:
+            # A SEPARATE element, not text appended to the label: the label is
+            # already `Computed identifications (N)`, and a reader matching on
+            # that string -- a screen reader listing controls, a test driver --
+            # must still find it. `aria-hidden` because the word adds nothing
+            # spoken that the button's own name does not already carry.
+            ui.label(tr('New')).classes(
+                f'{PANEL_ENTRY_NEW_BADGE_CLASS}').props('aria-hidden=true')
+        degraded_status = entry.get('degraded_status')
+        if degraded_status:
+            # An outage ANYWHERE behind this control keeps it VISIBLE and says
+            # so. Hiding it would tell the reader this manuscript has nothing on
+            # the strength of a query that failed; saying nothing would leave a
+            # bare "(0)" standing beside an unknown until the panel is opened.
+            # The MODEL names which read failed and how -- the renderer never
+            # recombines the claims status with the scope state to decide this,
+            # and never substitutes a status of its own.
+            button.props('disable=false')
+            _neutral_chip(ds.service_state_message(degraded_status, lang))
+
+
+# ---------------------------------------------------------------------------
+# One identification row, in the documented order.
+# ---------------------------------------------------------------------------
+
+
+def _render_expansion(row: Mapping[str, Any], lang: str,
+                      catalogue_title=None, catalogue_identity=None) -> None:
+    """"Other manuscripts matching <work>" -- a DESCRIPTOR until the reader asks.
+
+    The read is issued on open and never with the panel: the heaviest work has
+    thousands of claim rows while the median manuscript carries one work, so
+    eager loading pays the worst case to serve the common one.
+
+    `catalogue_title` is threaded straight through to the rows. It is passed to
+    BOTH `_render_expansion_envelope` call sites below, including the failure
+    one: that path renders no rows, but a parameter supplied on only one of two
+    routes to the same renderer is how the two drift.
+    """
+    descriptor = row.get('expansion') or {}
+    body = ui.element('div').classes(f'{PANEL_EXPANSION_CLASS} dbody')
+    state: Dict[str, Any] = {'open': False, 'page': 1, 'loaded': False}
+
+    async def _load_page() -> None:
+        from web import discovery as _discovery
+        body.clear()
+        try:
+            envelope = await _discovery.get_work_expansion_enveloped(
+                descriptor.get('work_id'),
+                page=state['page'],
+                page_size=descriptor.get('page_size'),
+                anchor_sys_id=descriptor.get('anchor_sys_id'),
+                anchor_rendered_relation=descriptor.get('anchor_rendered_relation'),
+                anchor_evidence_source=descriptor.get('anchor_evidence_source'),
+                anchor_confidence_band=descriptor.get('anchor_confidence_band'),
+                lang=lang,
+            )
+        except Exception as e:  # never let an expansion take the panel down
+            # NAMED, not blank. The body has already been CLEARED and the
+            # disclosure is OPEN, so returning here leaves the reader looking at
+            # an empty expansion -- which reads as "no other manuscript carries
+            # this work". That is a research claim, and an outage is not
+            # entitled to make it; it is the same false-zero the enveloped path
+            # below already refuses.
+            #
+            # Routed through the SAME `_render_expansion_envelope` the enveloped
+            # failures use, by synthesising the envelope shape it expects, so
+            # the two failure routes render one treatment with one retry rather
+            # than two that can drift. The exception TYPE is logged and its
+            # value never is (an artifact-derived id stays out of the error
+            # log and every other output path).
+            logger.error('discovery expansion failed: %s', type(e).__name__)
+            state['loaded'] = False
+            with body:
+                _render_expansion_envelope(
+                    {'status': 'unavailable', 'items': [], 'total': 0,
+                     'meta': {'reason': 'query_failed'}},
+                    lang, state, _load_page,
+                    page_size=int(descriptor.get('page_size') or 0),
+                    catalogue_title=catalogue_title,
+                    catalogue_identity=catalogue_identity)
+            return
+        state['loaded'] = True
+        with body:
+            _render_expansion_envelope(
+                envelope, lang, state, _load_page,
+                page_size=int(descriptor.get('page_size') or 0),
+                catalogue_title=catalogue_title,
+                catalogue_identity=catalogue_identity)
+
+    async def _toggle() -> None:
+        state['open'] = not state['open']
+        body.style('display: block;' if state['open'] else 'display: none;')
+        if state['open'] and not state['loaded']:
+            await _load_page()
+
+    ui.button(descriptor.get('heading') or '', on_click=_toggle).props(
+        'flat dense size=sm no-caps')
+    body.style('display: none;')
+
+
+def _expansion_work_title(item: Mapping[str, Any], lang: str) -> Optional[str]:
+    """Ruling R for a row the MODEL did not curate.
+
+    `SURFACE_EXPANSION_FIELDS` carries no title today, so this normally returns
+    None. If one is ever added, it goes through `display_work_title` here rather
+    than being formatted -- which is the difference between honouring the
+    curation and silently opting out of it.
+    """
+    raw = item.get('neutral_title')
+    if not raw:
+        return None
+    return ds.display_work_title(
+        item.get('display_work_id') or item.get('work_id'), raw, lang) or None
+
+
+def _render_catalogue_title(item: Mapping[str, Any], lang: str,
+                            catalogue_title=None) -> None:
+    """"Catalogued as: <title>" for an expansion row, when one resolves.
+
+    THE SAME anatomy, label and class as the findings page's
+    `_render_shelfmark` -- imported from it rather than re-spelled, because the
+    two surfaces are one product and a second copy of a bilingual label is a
+    second thing to keep in step. The TITLE is never translated (it is the
+    cataloguer's own words, and on the rows where our identification and theirs
+    differ a machine translation would put words in their mouth at exactly the
+    moment the reader is judging those words); only the LABEL is bilingual.
+
+    Injected as a CALLABLE, exactly as the findings page injects it: this module
+    has no business reading `libraries.csv`, and the resolver is memoised by its
+    owner so a shared manuscript costs one lookup however many rows carry it.
+    Absent injection -- or an unresolved title -- renders NOTHING, not an empty
+    element and not a placeholder.
+    """
+    title_text = catalogue_title(item) if catalogue_title is not None else None
+    if title_text:
+        with ui.row().classes(
+            f'{ROW_CATALOGUE_TITLE_CLASS} items-center gap-1'
+        ).style('font-weight: normal;'):
+            ui.label(_findings_copy('catalogue_title_label', lang)).classes(
+                'dnote text-xs')
+            ui.label(str(title_text)).classes('dnote text-xs').props(
+                'dir="auto"').style('unicode-bidi: isolate;')
+
+
+def _render_expansion_envelope(
+    envelope: Mapping[str, Any], lang: str, state: Dict[str, Any], reload_cb,
+    *, page_size: int = 0, catalogue_title=None, catalogue_identity=None,
+) -> None:
+    if is_outage(envelope):
+        _service_state_block({
+            'message': ds.service_state_message(envelope.get('status'), lang),
+            'retry': ds.retry_label(lang),
+        }, on_retry=reload_cb)
+        return
+
+    items = list(envelope.get('items') or ())
+    # The REAL total, from 136-21's count query. Never `len(items)`: a page
+    # length where a count belongs is a number nobody measured. Rendered as a
+    # bare figure beside the match-framed heading rather than wrapped in a
+    # borrowed sentence -- no display string in the shared vocabulary says
+    # "N other manuscripts", and inventing one here would put claim wording in
+    # a renderer.
+    total = int(envelope.get('total') or 0)
+    ui.label(str(total)).classes('chip')
+
+    for item in items:
+        with ui.row().classes('items-center gap-2 row flex-wrap'):
+            sys_id = item.get('representative_sys_id')
+            # THE FALLBACK NAME, resolved before the branch is chosen so the row
+            # asks "can this be named at all?" rather than "did the artifact name
+            # it?" (owner report, 2026-08-07: three rows on one screen read
+            # "Manuscript not in the display index" for manuscripts the rest of
+            # the site names fine).
+            #
+            # `manuscript_display` is built only for `shipped`/`human_confirmed`
+            # carriers, so EVERY `review_only` one is absent from it -- and those
+            # are precisely the rows behind "Show more possible matches". The
+            # unresolved state was therefore the NORMAL state here, not the rare
+            # one, which is not what a named-failure string is for.
+            #
+            # Merged, never overriding: a row the artifact DID name keeps the
+            # artifact's own strings, so the sidecar stays authoritative wherever
+            # it has an answer and the fallback only fills a gap.
+            if item.get('display_missing') and catalogue_identity is not None:
+                recovered = catalogue_identity(item)
+                if recovered:
+                    item = {**item, **recovered, 'display_missing': False}
+            if item.get('display_missing'):
+                # An absent manuscript_display row is FLAGGED, never blanked --
+                # a blank cell reads as a manuscript with no name rather than as
+                # a name we could not resolve.
+                #
+                # The string says the MANUSCRIPT could not be named. It used to
+                # be `ds.missing_title` -- "Title unavailable" -- which describes
+                # a missing WORK title, so three rows on w000069 told the reader
+                # a title was unavailable when the work was named in the heading
+                # directly above and it was the shelfmark that was missing (owner
+                # report, 2026-08-07). `_RELATED_ROW_COPY['display_missing']` is
+                # the sibling renderer's already-correct wording for exactly this
+                # state, reused rather than re-worded.
+                ui.label(_RELATED_ROW_COPY['display_missing'][lang]).classes('dnote')
+            else:
+                ui.label(str(item.get('library_code') or '')).classes('chip')
+                shelfmark = str(item.get('shelfmark_display') or '')
+                # A LINK, as every other shelfmark on both surfaces is
+                # (`_render_related_page_row` just below, and the findings page's
+                # `_render_shelfmark`). These rows answer "what else carries this
+                # work", so the next thing a reader wants is that manuscript --
+                # and it was the one shelfmark in the panel they had to copy out
+                # and paste into the search box (owner report, 2026-08-07).
+                #
+                # `representative_sys_id` is the row's own ranked representative,
+                # already on `SURFACE_EXPANSION_FIELDS`; `member_sys_ids` may hold
+                # several for a merged witness unit, and linking any other one
+                # would take the reader to a manuscript this row is not named
+                # after.
+                #
+                # IT NOW CARRIES THE FOLIO TOO (owner request, 2026-08-08). This
+                # comment used to end "No `page`: the expansion is per-CARRIER,
+                # and the representative page is not necessarily where the match
+                # sits" -- which was wrong. The row's representative IS the
+                # carrier's best-ranked claim FOR THIS WORK, so its page is a
+                # page this work was matched on. It is not the ONLY one, which is
+                # why the service names the pair `representative_*` and no
+                # ordinal is claimed. Landing a reader on the manuscript's first
+                # page instead was the same defect the findings preview had.
+                target = links.browse_url(
+                    sys_id, page=item.get('representative_page'),
+                    volume_ie=item.get('representative_volume_ie'))
+                if target:
+                    ui.link(shelfmark, target)
+                else:
+                    ui.label(shelfmark)
+                _render_catalogue_title(item, lang, catalogue_title)
+            title = _expansion_work_title(item, lang)
+            if title:
+                ui.label(title)
+            band_label = item.get('band_label')
+            # BOTH sides' RENDERED relations when they DIFFER, using the
+            # service's own `relations_differ` marker -- never a comparison made
+            # here.
+            #
+            # C-track step 3d: these were the stored `claim_type` /
+            # `anchor_claim_type`, which is what made this pane the last surface
+            # still printing "Direct match" on rows the router declined to ship.
+            # Both values are now the matrix output capped at member grain
+            # (matrix-spec §3.2), and `relations_differ` compares the same two
+            # values -- so the marker can no longer disagree with the chips it
+            # governs.
+            _neutral_chip(ds.relation_chip(item.get('rendered_relation'), lang), band_label)
+            if item.get('relations_differ'):
+                _neutral_chip(
+                    ds.relation_chip(item.get('anchor_rendered_relation'), lang),
+                    band_label)
+
+    if page_size > 0 and total > page_size:
+        with ui.row().classes('items-center gap-2'):
+            async def _next() -> None:
+                state['page'] = int(state['page']) + 1
+                await reload_cb()
+
+            async def _prev() -> None:
+                state['page'] = max(1, int(state['page']) - 1)
+                await reload_cb()
+
+            ui.button(icon='chevron_left', on_click=_prev).props('flat dense size=sm')
+            ui.button(icon='chevron_right', on_click=_next).props('flat dense size=sm')
+
+
+def _render_identification_row(row: Mapping[str, Any], lang: str,
+                               catalogue_title=None, catalogue_identity=None,
+                               load_excerpt=None, sidecar_version=None,
+                               approved_reviews=()) -> None:
+    with ui.element('div').classes(f'{PANEL_ROW_CLASS} row'):
+        # 1. verb + work title, as PLAIN TEXT. `/work/{id}` does not exist until
+        #    Phase 136.1, and a dead link is worse than plain text.
+        ui.label(row.get('headline') or '').classes('font-semibold')
+        if row.get('locus_subline'):
+            ui.label(row['locus_subline']).classes('dnote locus_subline').props(
+                'dir="auto"').style('unicode-bidi: isolate;')
+
+
+        # 2. the meta line, beginning with the relation chip; the band label is
+        #    the chip's tooltip and never visible text.
+        with ui.row().classes('items-center gap-2 side'):
+            _neutral_chip(row.get('relation_chip') or '', row.get('band_tooltip'))
+            # owner ruling 2026-08-13, Ruling F amended: divergence is a
+            # per-row marker, not a fourth disclosure level. Same element and
+            # class treatment `findings_rows.py` uses for this exact marker
+            # (`chip` + `ROW_DIVERGENCE_CLASS`), so the two surfaces match --
+            # NO tooltip and no per-kind colour (D-24): the model supplies one
+            # pre-localized string on `catalogue_divergent` rows and nothing
+            # else to render.
+            if row.get('catalogue_divergent'):
+                ui.label(row.get('divergence_chip') or '').classes(
+                    f'chip {ROW_DIVERGENCE_CLASS}')
+            if row.get('coverage_label'):
+                ui.label(row['coverage_label']).classes('dnote')
+            ui.label(str(row.get('bucket') or '')).classes('dnote')
+
+        # 3. the optional granularity sub-line (D-13d).
+        if row.get('granularity_subline'):
+            ui.label(row['granularity_subline']).classes('dnote')
+
+        # 4. the optional low-coverage note. It is about COVERAGE, never review.
+        if row.get('low_coverage_note'):
+            ui.label(row['low_coverage_note']).classes('dnote')
+
+        # 5. the actions. The structured review is version-bound and leaf-only;
+        #    without a version it renders nothing rather than recording an
+        #    irreproducible assessment.
+        with ui.row().classes('items-center gap-2 side'):
+            _render_expansion(row, lang, catalogue_title, catalogue_identity)
+            render_identification_review_action(
+                row, lang, sidecar_version=sidecar_version,
+                shown_relation=row.get('relation_chip'))
+
+        # 6. the text-vs-text disclosure (excerpt-v1) -- the SAME component the
+        #    findings page renders, injected the same way: this module renders,
+        #    it does not read. Absent entirely (not merely empty) when the
+        #    caller passed no loader -- excerpts unavailable, or a pre-excerpt
+        #    sidecar after a rollback.
+        if load_excerpt is not None and row.get('identification_id'):
+            render_excerpt_disclosure(row, lang, load_excerpt)
+
+    # Editorially approved human assessments must not inherit the computed
+    # row's visual box or appear to be another machine-derived field.
+    render_published_identification_reviews(approved_reviews, lang)
+
+
+# ---------------------------------------------------------------------------
+# The related-pages section (D-11/D-11a). Header and count by default; the ROWS
+# are the LAZY fifth read and are issued by this toggle, never with the panel.
+# ---------------------------------------------------------------------------
+
+
+#: The related-page row's own bilingual copy. TWO strings, and both are about
+#: what the row could not resolve rather than about the match itself -- the
+#: match framing ("unevaluated candidate alignments") stays on the section
+#: label, unchanged.
+_RELATED_ROW_COPY = {
+    # A manuscript with no `manuscript_display` row. Named, never blanked, and
+    # never the composite id: printing the internal identifier as a fallback is
+    # exactly how this defect would come back.
+    'display_missing': {
+        'en': 'Manuscript not in the display index',
+        'he': 'כתב היד אינו במפתח התצוגה',
+    },
+    # The folio, when the id carried one. A bare number beside a shelfmark
+    # reads as part of the shelfmark, so the word is not optional.
+    'page_number': {
+        'en': 'page {number}',
+        'he': 'דף {number}',
+    },
+}
+
+
+def _render_related_page_row(row: Mapping[str, Any], lang: str) -> None:
+    """ONE candidate alignment, in the findings page's own row anatomy: the
+    library chip, then the shelfmark as a LINK, then quiet metadata.
+
+    Reusing that anatomy is the point -- it is the vocabulary the corpus-wide
+    surface already established (`web/components/findings_rows.py::
+    _render_shelfmark`), the `chip` class IS the badge, and a second anatomy for
+    the same object is how two surfaces stop looking like one product.
+
+    THE COMPOSITE PAGE ID CANNOT REACH THIS FUNCTION. `related_page_row` does
+    not emit it, on either path, so there is nothing here to fall back to and
+    nothing to forget: an unresolvable manuscript renders a NAMED state.
+
+    The shelfmark is Latin script inside a Hebrew line. It is its own element in
+    a flex row rather than concatenated into a sentence, which is how the
+    findings rows already solve the boundary reorder -- not re-solved here.
+    """
+    with ui.row().classes('items-center gap-2 row flex-wrap'):
+        if row.get('display_missing'):
+            ui.label(_RELATED_ROW_COPY['display_missing'][lang]).classes('dnote')
+        else:
+            ui.label(str(row.get('library_code') or '')).classes('chip')
+            shelfmark = str(row.get('shelfmark_display') or '')
+            sys_id = row.get('sys_id')
+            page_number = row.get('page_number')
+            # THE SHARED BUILDER, which this comment used to say did not exist
+            # ("there is no shared builder to call, and this is not the place to
+            # invent a second one"). `web/components/discovery_links.py` is now
+            # that place, and all three discovery link sites go through it.
+            #
+            # THE VOLUME IS THE FIX (owner request, 2026-08-08). This row already
+            # added `&page=<n>` on its own, and that was a HALF ADDRESS: folio
+            # numbering is per volume, so a bare `page` resolves against whichever
+            # volume `/browse` opens, and on the 988 identifications that span
+            # volumes the reader landed on a real folio in the wrong place --
+            # which reads as the alignment being wrong rather than the link.
+            # `browse_url` adds the two together or neither.
+            target = links.browse_url(
+                sys_id, page=page_number, volume_ie=row.get('volume_ie'))
+            if target:
+                ui.link(shelfmark, target)
+            else:
+                ui.label(shelfmark)
+        page_number = row.get('page_number')
+        if isinstance(page_number, int):
+            ui.label(
+                _RELATED_ROW_COPY['page_number'][lang].format(number=page_number)
+            ).classes('dnote')
+
+
+def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Optional[str],
+                          on_retry=None) -> None:
+    with ui.element('div').classes(f'{PANEL_RELATED_CLASS} dbody'):
+        ui.label(section.get('header') or '').classes('font-semibold')
+        # Labelled as UNEVALUATED candidate alignments, always.
+        ui.label(section.get('label') or '').classes('dnote')
+
+        if section.get('count_state') == ROWS_OUTAGE:
+            # The count is an EAGER read, so its recovery is the seam's retry --
+            # the same handler the claims-level outage gets. An outage with no
+            # retry is a dead end the reader cannot leave.
+            _service_state_block(section.get('count_service_state') or {},
+                                 on_retry=on_retry)
+        elif section.get('count_line'):
+            ui.label(section['count_line']).classes('dnote')
+
+        rows_body = ui.element('div')
+        rows_state = section.get('rows_state')
+        state: Dict[str, Any] = {'open': False, 'loaded': rows_state != ROWS_NOT_REQUESTED}
+
+        def _paint(envelope: Optional[Mapping[str, Any]]) -> None:
+            rows_body.clear()
+            with rows_body:
+                if envelope is not None and is_outage(envelope):
+                    _service_state_block({
+                        'message': ds.service_state_message(envelope.get('status'), lang),
+                        'retry': ds.retry_label(lang),
+                    }, on_retry=_load)
+                    return
+                # BOTH paths project through the model's own row function: the
+                # section's rows were built by it, and a freshly-loaded envelope
+                # goes through it here. That is what keeps the eager and the
+                # lazy path from drifting -- and what means neither of them ever
+                # holds the composite page id.
+                if envelope is not None:
+                    rows = [related_page_row(item)
+                            for item in (envelope.get('items') or ())]
+                else:
+                    rows = list(section.get('rows') or ())
+                for row in rows:
+                    _render_related_page_row(row, lang)
+
+        async def _load() -> None:
+            from web import discovery as _discovery
+            if not page_id:
+                return
+            try:
+                envelope = await _discovery.get_related_pages_enveloped(page_id)
+            except Exception as e:
+                logger.error('discovery related-pages read failed: %s', type(e).__name__)
+                return
+            state['loaded'] = True
+            _paint(envelope)
+
+        async def _toggle() -> None:
+            state['open'] = not state['open']
+            rows_body.style('display: block;' if state['open'] else 'display: none;')
+            if state['open'] and not state['loaded']:
+                await _load()
+
+        ui.button(ds.disclosure_toggle(ds.TOGGLE_ALSO_SHARES_TEXT, lang),
+                  on_click=_toggle).props('flat dense size=sm no-caps')
+        rows_body.style('display: none;')
+        if rows_state == ROWS_POPULATED:
+            _paint(None)
+
+
+# ---------------------------------------------------------------------------
+# The manuscript pane (D-13h). NAMED works with their page counts -- a bare
+# count is what makes a single claim unjudgeable.
+# ---------------------------------------------------------------------------
+
+
+def _manuscript_work_chip(chip: Mapping[str, Any]) -> None:
+    """One work in "elsewhere in this manuscript": its name, its page count, and
+    -- since C-track step 3c -- what it is CLAIMING.
+
+    The relation chip was computed by the model and thrown away here, so the
+    pane named a dozen works while saying nothing about how any of them relates
+    to the manuscript; every one of them read as an identification. Owner ruled
+    2026-08-12 that it should show a relation.
+
+    Rendered as a second neutral chip beside the work, which is the panel's OWN
+    established pattern for exactly this shape (`_render_generic_group` below)
+    rather than a new one invented here. It stays visually neutral for the same
+    reason every other relation chip does: colour-coding by relation kind
+    reintroduces per-tier styling through the back door (D-24).
+
+    Absent rather than blank when the model emitted no chip -- an empty chip
+    element beside a work would read as a relation the pane failed to load.
+    """
+    classes = 'chip here' if not chip.get('gated') else 'chip gated'
+    label = chip.get('work_title') or ''
+    count = chip.get('page_count')
+    if isinstance(count, int):
+        label = f'{label} ({count})'
+    ui.label(label).classes(classes)
+    relation = chip.get('relation_chip')
+    if relation:
+        _neutral_chip(relation)
+    # Owner ruling 2026-08-13: a second, separate marker beside the chip --
+    # never folded into the same label the page-count uses -- so a reader
+    # scanning the "In this manuscript" pane can tell which of these works
+    # is also matched on the page they are already looking at. Same muted
+    # `dnote` treatment the row-level secondary text (coverage, bucket) already
+    # uses next to a chip in this file; absent, not blank, when the model did
+    # not mark this work as on-page.
+    if chip.get('on_this_page'):
+        ui.label(chip.get('this_page_marker') or '').classes('dnote')
+
+
+def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -> None:
+    with ui.element('div').classes(PANEL_MANUSCRIPT_PANE_CLASS):
+        ui.label(pane.get('header') or '').classes('font-semibold')
+        ui.label(_MANUSCRIPT_PANE_SCOPE_NOTE['he' if lang == 'he' else 'en']).classes('dnote')
+
+        state = pane.get('state')
+        if state == PANE_UNRESOLVED:
+            # OUR plumbing failed. The pane reports nothing about the manuscript
+            # -- not a total, not an empty marker, not a zero. The MODEL decides
+            # whether that failure is recoverable: it supplies a `service_state`
+            # only for a page-scope OUTAGE, never for a manuscript that has no
+            # resolvable page scope, so a retry is offered exactly where it can
+            # work.
+            unresolved_state = pane.get('service_state')
+            if unresolved_state:
+                _service_state_block(unresolved_state, on_retry=on_retry)
+            else:
+                ui.label(ds.service_state_message('unavailable', lang)).classes('dnote')
+            return
+        if state == PANE_OUTAGE:
+            # An EAGER read, so the seam's retry re-issues it.
+            _service_state_block(pane.get('service_state') or {}, on_retry=on_retry)
+            return
+        if pane.get('partial_scope'):
+            ui.label(ds.related_pages_label(lang)).classes('dnote')
+        if state == PANE_EMPTY:
+            return
+
+        works = list(pane.get('works') or ())
+        threshold = int(pane.get('page_threshold') or len(works) or 1)
+        shown = works if not pane.get('paginated') else works[:threshold]
+        with ui.row().classes('items-center gap-1 flex-wrap'):
+            for chip in shown:
+                _manuscript_work_chip(chip)
+        if pane.get('paginated'):
+            rest = ui.element('div')
+            rest.style('display: none;')
+            with rest:
+                with ui.row().classes('items-center gap-1 flex-wrap'):
+                    for chip in works[threshold:]:
+                        _manuscript_work_chip(chip)
+            hidden = {'value': True}
+
+            def _show_rest() -> None:
+                hidden['value'] = not hidden['value']
+                rest.style('display: none;' if hidden['value'] else 'display: block;')
+
+            ui.button(ds.disclosure_toggle(ds.TOGGLE_MORE_MATCHES, lang),
+                      on_click=_show_rest).props('flat dense size=sm no-caps')
+
+
+# ---------------------------------------------------------------------------
+# The panel body.
+# ---------------------------------------------------------------------------
+
+
+def render_discovery_panel_body(
+    model: PanelModel, *, on_retry=None, page_id: Optional[str] = None,
+    catalogue_title=None, catalogue_identity=None, load_excerpt=None,
+    sidecar_version=None, approved_reviews=None,
+) -> None:
+    lang = _lang_of(model)
+    root = ui.element('div').classes(f'gs-discovery {PANEL_ROOT_CLASS} w-full')
+    if lang == 'he':
+        root.props('dir=rtl')
+
+    with root:
+        # --- header + the PERMANENT caveat slot (a designed element between
+        # --- header and body, never fine print and never a warning banner).
+        with ui.element('div').classes('phead'):
+            with ui.row().classes('items-center gap-2'):
+                ui.label(tr('Computed identifications')).classes('text-lg font-semibold')
+                count = model.entry_control.get('count')
+                if isinstance(count, int):
+                    ui.label(str(count)).classes('chip')
+            ui.label(model.caveat).classes('caveat')
+            ui.label(model.bucket_rule_sentence).classes('dnote')
+
+        if model.panel_status != STATUS_OK:
+            _service_state_block(model.service_state, on_retry=on_retry)
+
+        # --- the two EVEN panes. Block stack on mobile (page pane FIRST), a
+        # --- `1fr 1fr` grid at 900px and above. Both carry equal weight and the
+        # --- manuscript pane is NOT collapsed.
+        # ---
+        # --- ORDER is the model's decision, not one taken here: on the
+        # --- `manuscript_elsewhere_only` state the page pane is an empty list
+        # --- and the manuscript pane is the whole reason the reader opened the
+        # --- panel, so the model leads with it and the stack order follows.
+        def _page_pane() -> None:
+            with ui.element('div'):
+                for level in model.disclosure_levels:
+                    _render_level(level, lang, page_id, on_retry=on_retry,
+                                  catalogue_title=catalogue_title,
+                                  catalogue_identity=catalogue_identity,
+                                  load_excerpt=load_excerpt,
+                                  sidecar_version=sidecar_version,
+                                  approved_reviews=approved_reviews)
+
+        with ui.element('div').classes('dpanes'):
+            if model.lead_with_manuscript_pane:
+                _render_manuscript_pane(model.manuscript_pane, lang, on_retry=on_retry)
+                _page_pane()
+            else:
+                _page_pane()
+                _render_manuscript_pane(model.manuscript_pane, lang, on_retry=on_retry)
+
+
+def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
+                  on_retry=None, catalogue_title=None,
+                  catalogue_identity=None, load_excerpt=None,
+                  sidecar_version=None, approved_reviews=None) -> None:
+    """Exactly the disclosure levels the model emits -- no more, no fewer."""
+    if level.get('default_visible'):
+        ui.label(level.get('label') or '').classes('font-semibold')
+        for row in level.get('rows') or ():
+            _render_identification_row(row, lang, catalogue_title,
+                                       catalogue_identity,
+                                       load_excerpt=load_excerpt,
+                                       sidecar_version=sidecar_version,
+                                       approved_reviews=(approved_reviews or {}).get(
+                                           str(row.get('identification_id') or ''),
+                                           ()))
+        return
+
+    # A collapsed level. `notid` is applied only where the model says the level
+    # is NOT identifications (D-13e), so the marking follows the model rather
+    # than a guess made here.
+    #
+    # owner ruling 2026-08-13: the fourth level (ruling F's divergence axis) is
+    # GONE -- divergence is now a per-row marker on the identification row
+    # itself (see `_render_identification_row`), not a level with its own
+    # warning. There is exactly one collapsed level left ("more matches"), and
+    # it no longer has a `warning` key to read.
+    classes = 'disc' if level.get('is_identifications') else 'disc notid'
+    details = ui.element('details').classes(classes)
+    if level.get('visible'):
+        details.props('open')
+    with details:
+        with ui.element('summary').classes('font-semibold'):
+            ui.label(level.get('label') or '')
+        with ui.element('div').classes('dbody'):
+            # ORDER (owner ruling 2026-08-13): the removed "also shares text"
+            # level's `note` / `generic_groups` / `related_pages` now live on
+            # THIS level alongside its own `rows`, and the identification rows
+            # come FIRST -- they are this level's primary content, not an
+            # afterthought to a note about shared wording. The note describes
+            # the generic-groups/related-pages block, so it sits directly ABOVE
+            # that block and never above the identification rows, where it
+            # would mislabel them as "not identifications". It is rendered only
+            # when there is a generic-groups or related-pages block for it to
+            # describe.
+            for row in level.get('rows') or ():
+                _render_identification_row(row, lang, catalogue_title,
+                                           catalogue_identity,
+                                           load_excerpt=load_excerpt,
+                                           sidecar_version=sidecar_version,
+                                           approved_reviews=(approved_reviews or {}).get(
+                                               str(row.get('identification_id') or ''),
+                                               ()))
+            generic_groups = level.get('generic_groups') or ()
+            related = level.get('related_pages')
+            if level.get('note') and (generic_groups or related is not None):
+                ui.label(level['note']).classes('dnote')
+            for group in generic_groups:
+                _render_generic_group(group, lang)
+            if related is not None:
+                _render_related_pages(related, lang, page_id, on_retry=on_retry)
+
+
+def _render_generic_group(group: Mapping[str, Any], lang: str) -> None:
+    with ui.element('div').classes('row'):
+        ui.label(group.get('note') or '').classes('dnote')
+        with ui.row().classes('items-center gap-2 flex-wrap'):
+            for work in group.get('works') or ():
+                ui.label(work.get('work_title') or '').classes('chip')
+                _neutral_chip(work.get('relation_chip') or '')

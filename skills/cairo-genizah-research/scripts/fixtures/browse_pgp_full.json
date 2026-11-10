@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source": "browse",
+  "generated_at": "2026-05-04T12:00:01.000Z",
+  "locator": {"uid": "990001234560205171_001r", "sys_id": "990001234560205171", "volume_ie": "IE12345", "p_num": 1, "fl_id": "T-S 12.123.1r"},
+  "shelfmark": "T-S 12.123",
+  "title": "Liturgical fragment",
+  "library_code": "CUL",
+  "library_name": "Cambridge University Library",
+  "text": "ויאמר משה אל בני ישראל ראו קרא ה' בשם בצלאל בן אורי בן חור למטה יהודה",
+  "text_source": "pgp_transcription",
+  "text_truncated": false,
+  "metadata": {
+    "pgp": {"pgpid": 12345, "description": "Piyyut for Shabbat"},
+    "fjms": null,
+    "nli": {"manifest_id": "abc"}
+  },
+  "image": {
+    "url": "/api/nli_image_by_sysid/990001234560205171?page=0",
+    "provider": "NLI",
+    "sources": [{"label": "NLI", "url": "/api/nli_image_by_sysid/990001234560205171?page=0"}]
+  },
+  "warnings": []
+}

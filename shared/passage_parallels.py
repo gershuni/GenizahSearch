@@ -1,0 +1,1341 @@
+# -*- coding: utf-8 -*-
+"""CompositionSearcher-shaped wrapper over shared.passage_search (Phase 145).
+
+Contract: docs/specs/passage-matching-algorithm.md sections 6-8; the plan's
+"Relationship to the incumbent" (a passage-matching parallels search web
+surface). This is the ONLY place a passage-matching result becomes a row
+shaped like `shared/parallels_service.py::CompositionSearcher` expects --
+`{uid, raw_header, src_lbl, source_ctx, text, score, final_score,
+chunk_count, chunk_hits, highlight_pattern, source_highlight_pattern}` --
+so both serializers, both UIs, exports and the public envelope keep working
+unmodified against it, exactly as they do against
+`SearchEngine.search_composition_logic`.
+
+Design decisions this module makes, so they are not re-litigated per call
+site:
+
+* Each ACCEPTED SPAN on a record is one "chunk hit". `chunk_count` is the
+  number of merged spans (`PassageHit.n_spans`), not a re-derived count --
+  unlike the incumbent, whose `chunk_count` is deduped post-hoc from raw
+  Tantivy hits (search_engine.py::_count_unique_chunks). Passage spans are
+  already merged and distinct by construction.
+* `score` / `final_score` are BOTH `PassageHit.score` (matched letters,
+  merged-span length). Passage never computes a boundary-boosted
+  `final_score`: there is no boundary-crossing concept over a letter stream
+  with no token boundaries.
+
+  NOT COMPARABLE TO THE INCUMBENT'S SCORE, and an earlier version of this
+  docstring wrongly said it was "directly comparable" (adversarial review
+  round 2). The two numbers are measured on OPPOSITE SIDES of the match:
+  passage sums QUERY-stream spans (`sum(q1 - q0)`,
+  shared/passage_search.py::search), while the incumbent sums merged spans
+  in the CANDIDATE's raw `content` (shared/search_engine.py, `base_score`).
+  They are not the same quantity in different units, so no conversion
+  factor exists to reconcile them -- and three further gaps compound it:
+  the passage stream has whitespace, marks, punctuation and digits removed
+  by `norm_stream`; passage alignment is approximate and may merge spans
+  differently; and raw-character inflation varies with each manuscript's
+  orthography and pointing.
+
+  Consequence for any surface combining the two methods: rank WITHIN a
+  method and append, never pool the raw scores into one sorted list. This
+  matches the evaluation rule in docs/specs/parallels-method-comparison.md
+  ("stratify by per-method rank/quantile, never by pooled raw score").
+  `boundary_mode` accordingly must be `'full'` -- anything else raises
+  ValueError rather than silently degrading (adversarial review finding #2;
+  web/search_api.py rejects 'boundary'/'combined' with a 400 BEFORE ever
+  calling this searcher, and web/pages/parallels.py disables the boundary
+  controls while passage mode is selected, so this ValueError is a
+  structural backstop, not the primary enforcement point).
+* RENDERED ROWS == KEPT ROWS, always (adversarial review finding #1, "THE
+  BIG ONE"). Earlier code rendered highlights for the first `render_cap`
+  hits by RAW HIT RANK, but `shared.parallels_service._cap_main_results_by_
+  group` (what the API path applies downstream, and what the page's direct
+  call path does NOT apply at all) keeps rows by a DIFFERENT rule: top
+  `render_cap` distinct sys_id GROUPS by summed score, uncapped when group
+  count <= render_cap. With >render_cap raw hits spread across
+  <=render_cap manuscripts, rows past raw rank `render_cap` were kept by
+  the group rule but never rendered -- silently blank `text`/`source_ctx`/
+  `chunk_hits`. Fixed by applying the SAME group-cap function INSIDE this
+  searcher (via `_RegexSysIdParser`, a minimal stand-in for the
+  `UidComponentParser` the real function needs -- passage has no
+  MetadataManager dependency, so it derives sys_id the same way it already
+  does for `restrict_sys_ids` filtering, `_extract_sys_id`), rendering
+  highlights ONLY for the surviving rows, and RETURNING ONLY those rows.
+  This makes the API path's own downstream call to the same function a
+  no-op (already <= cap groups) rather than a second, different selection,
+  and makes the page's direct call path bounded for the first time (it
+  applied no cap before).
+* Codex review finding #16(a): `filtered_results` is now group-capped TOO,
+  by the SAME function and the SAME cap, not left unbounded. The incumbent
+  (shared/parallels_service.py's documented v7.10 decision) leaves ITS
+  filtered bucket uncapped on the stated assumption that it is "typically
+  small, driven by the user's max_freq threshold" -- passage has no
+  max_freq-shaped signal at all; its filtered bucket is driven by
+  `filter_text` substring matches, which has no such size guarantee (a
+  large pasted "known source" blob could match most of the corpus). Without
+  a cap, EVERY verified candidate up to `policy.verify_cap` (default 3,000)
+  could land in `filtered` and get its own live, uncapped Tantivy lookup --
+  exactly the unbounded-cost risk the render cap exists to prevent for
+  `main`. So filtered rows go through the identical
+  `_cap_main_results_by_group` call, capped and rendered the same way.
+* Codex review finding #16(b): a FAILED text lookup no longer produces a
+  silently blank row. Previously a row that survived the cap but whose
+  `get_full_text_by_header` call returned nothing (or raised) still made it
+  into the output with `text=''`/`source_ctx=''`/`chunk_hits=[]` --
+  indistinguishable from "this row survived the cap but genuinely has
+  nothing to highlight." Now `_render_highlights` reports success/failure;
+  a failed row is DROPPED from the returned list entirely and counted in
+  the new `dropped_text_lookup_failures` key of this method's return dict
+  (mirrors this project's "no silent truncation -- count every exclusion"
+  rule). `shared/parallels_service.py::fetch_parallels_results` reads this
+  count into `ParallelsResultBundle.dropped_text_lookup_failures`, and
+  web/search_api.py surfaces it as a `passage_text_lookup_failed` warning
+  in the public envelope when non-zero. web/pages/parallels.py's direct
+  call path receives the same count in its own result dict but does not
+  yet display it -- a documented, deliberately out-of-scope gap for this
+  fix (no UI surface for a warnings array exists on that page today).
+* `filter_text` (the page's "Filter Sources" text) is honored with the SAME
+  semantics `SearchEngine.search_composition_logic` uses (adversarial
+  review finding #3) -- if the query-side text of ANY span matched on a
+  record also appears (letter-stream-normalized) inside `filter_text`, the
+  WHOLE row is routed to `filtered` rather than `main` (per-RECORD
+  granularity, matching `rec['is_filtered']` in search_engine.py, not
+  per-span). `max_freq` has no passage equivalent (passage's own posting
+  budget already bounds retrieval internally) and stays unused.
+* `chunk_hits[i][0]` (`chunk_index`) is the ordinal of the span's query-side
+  start offset among ALL distinct start offsets across every surviving hit
+  for this query -- computed ONCE, shared across every record (adversarial
+  review finding #4). This mirrors the incumbent's `chunk_index`, which is
+  a position in the PASTED COMPOSITION comparable across records (the
+  sliding-window index), not a per-record-local counter: two different
+  records whose spans start at the same query offset carry the SAME
+  `chunk_index` here, exactly as they would if the same sliding-window
+  chunk matched both records in the incumbent.
+* `_highlight_span` sanitizes a literal `'*'` out of the highlighted window
+  before inserting `*marker*` syntax (adversarial review finding #5) --
+  mirrors `SearchEngine.highlight` / `_highlight_by_span`'s
+  `snippet.replace('*', ' ')` precedent (shared/search_engine.py, the
+  general-purpose highlight helper; the composition path's OWN inline
+  snippet builder happens to skip this, but the established pattern does
+  not, and a literal asterisk in manuscript text would otherwise be
+  indistinguishable from marker syntax downstream).
+* `highlight_pattern` / `source_highlight_pattern` are literal
+  alternations of the matched substrings, NOT the query. They exist for the
+  one consumer that does not render the snippets this row already carries:
+  the desktop viewer (desktop/result_dialog.py) fetches the whole page and
+  re-marks it from a regex, which is why a passage row without one opened
+  with nothing highlighted at all. Two patterns because the record side and
+  the query side matched DIFFERENT text -- approximate matching's whole
+  point -- so a single pattern cannot mark both panes. They are best-effort
+  by construction: a consumer whose copy of the text differs from the
+  indexed one simply finds no match, which is the pre-existing behaviour
+  and never worse than it.
+* Highlight text (`text`, `source_ctx`, and each `chunk_hits` tuple's
+  `manuscript_snippet`) is built for exactly the rows this method RETURNS
+  (both `main` and `filtered`, each capped independently to `render_cap`
+  groups) -- a BOUNDED re-normalization per the plan's display-span
+  contract. Row count per bucket is bounded upstream by `policy.verify_cap`
+  (shared/passage_policy.py: at most one hit per verified candidate), at a
+  measured ~1.3 ms/row render cost. This is an ACCEPTED cost, not further
+  sub-capped, specifically so "rendered == kept" holds even in the worst
+  case.
+
+  **That bound is 3,000 only at `normal` depth.** This paragraph used to
+  say "default 3,000 ... comfortably inside SEARCH_API_PASSAGE_TIMEOUT
+  (30s)", which was true when written and stopped being true when the
+  search-depth axis raised `verify_cap` to 50,000 for `deep` and `deepest`
+  -- a 16x larger bound argued as safe on the smaller one (Codex review,
+  PR #328).
+
+  Measured on the real index (759,224 records) with a real 7,562-char query
+  at `max-40+short`. `hits` and `search` are observed; `render` is the hit
+  count times the ~1.3 ms/row constant above, so it is arithmetic rather
+  than a fourth measurement:
+
+      depth     verify_cap    hits   search   render*   total
+      normal         3,000     272     1.2s     0.4s     1.5s
+      deep          50,000     725     6.3s     0.9s     7.3s
+      deepest       50,000   2,431    15.5s     3.2s    18.6s
+
+  Acceptance runs at roughly 5% of `verify_cap`, not 100%, so the ~65s
+  render a full cap would imply does not occur. What HAS gone is the
+  margin: `deepest` spends about two thirds of the 30s budget where this
+  paragraph once described a tenth of it.
+
+  The breach arrives at roughly **11,150 rendered rows** -- (30s - 15.5s
+  search) / 1.3 ms -- about 4.6x anything measured.
+
+  Three corrections to an earlier version of this note, all of which made
+  the margin look different than it is (Codex review, PR #328):
+
+  * It said ~8,000 rows. That was (30 - 18.6) / 1.3 ms, the rows that fit
+    ON TOP of the 2,431 already rendered, written as though it were the
+    total. Subtract the search cost, not the whole measured run.
+  * It said a `filter_text` halves the threshold "since both buckets
+    render", and then that the pre-existing "worst-case full cap on BOTH
+    buckets" was 2x too pessimistic. Both statements are wrong, because
+    the answer depends on `render_cap` and neither said which regime it
+    meant (Codex, again, on the test written to pin the first correction):
+
+      - `render_cap == 0` -- the PAGE path, and the one this threshold is
+        about. No cap, so each hit lands in `filtered_candidate_rows` OR
+        `eligible_rows` (one `if/else`, one loop), the buckets PARTITION
+        the hits, and every row renders exactly once. A `filter_text`
+        redistributes the cost and adds none.
+      - `render_cap > 0` -- the API path. The two buckets are capped
+        INDEPENDENTLY, so a filter splitting hits across both raises the
+        rendered total from one cap to as many as two. Measured on a
+        4-group fixture at `render_cap=2`: 6 rows unfiltered, 12 with a
+        mixed filter. The pre-existing "full cap on BOTH buckets" was
+        RIGHT for this path.
+
+    `tests/test_passage_parallels.py::test_the_two_buckets_partition_the_hits`
+    now pins both regimes, because this paragraph has been corrected three
+    times and been wrong in a different direction each time.
+  * 11,150 assumes `search` stays at 15.5s while accepting 4.6x more rows,
+    and verification is what PRODUCES rows -- so a query returning 11,000
+    hits spends longer searching too, and the real breach comes earlier.
+    Treat it as an upper bound, not an estimate.
+
+  A render sub-cap was considered and NOT added: it would partially undo
+  the owner's 2026-08-23 ruling that `render_cap=0` exists so found
+  manuscripts stop being hidden (198 shown of 497 found on Birkat Hamazon),
+  and the measurement does not justify that price. Anyone widening
+  `verify_cap` further should redo the table above rather than trust this
+  one -- which is exactly the mistake this note records.
+* Two costs are deliberately NOT optimized away (adversarial review,
+  "deliberately skipped" items): (1) `nfc()` runs twice per rendered row's
+  manuscript text -- once explicitly here, once again inside
+  `norm_stream()` -- fixing it would mean changing the versioned
+  normalizer's own contract (shared/passage_normalize.py), which is out of
+  proportion to the cost; (2) `get_full_text_by_header` issues one live
+  Tantivy query PER rendered row rather than a batch fetch -- bounded by
+  the same render-cap/verify-cap chain as the render cost above (and now
+  ALSO applied to `filtered`, finding #16(a)), so it is documented rather
+  than restructured.
+* `mode` (exact/variants/fuzzy), `progress_callback`, `boundary_delimiter`,
+  `boundary_boost` and `min_delimiter_distance` are accepted (for
+  call-shape compatibility with the real `SearchEngine.search_composition_
+  logic`, which both `web/pages/parallels.py` and
+  `shared/parallels_service.py` invoke with the full keyword set) but
+  IGNORED -- none has a passage-matching equivalent: character-level
+  Levenshtein matching has no morphological variant expansion and no
+  paragraph-token boundary concept. `min_boundary_matches` (the "min. chunk
+  matches" UI control in 'full' boundary_mode) IS honored, since it is a
+  trivial post-filter on `n_spans` and skipping it would silently ignore a
+  visible control. `corpus_scope` is accepted but ignored: the passage
+  index never holds Local-corpus records regardless of its value, and
+  disabling `passage` for non-Genizah scope is the CALLER's job (API
+  validation / the page's method selector), not this searcher's -- see
+  web/search_api.py.
+* `checkpoint` (keyword-only, 2026-10-07) is how a search is STOPPED, and it
+  is deliberately not `progress_callback`: the desktop passes its composition
+  thread's callback, which drives a chunk progress bar and a Stop/Pause the
+  desktop refuses during a letter-level scan (genizah_app.py,
+  `_refuse_stop_during_passage_scan`), so calling it would change the
+  desktop. The website's research worker passes its time limit
+  (Config.WEB_SEARCH_TIME_LIMIT) as `checkpoint`; it is asked between
+  witnesses and before each candidate is verified, and an InterruptedError
+  from it ends the search with what was completed, marked `'partial': True`
+  -- the key the /parallels page and /api/parallels read for the chunk
+  engine. A witness's candidate gathering and the rendering of found rows
+  have no checkpoint (both are bounded: the posting budget, verify_cap); the
+  web side's kill TIME_LIMIT_GRACE_SECONDS after the limit is the fallback.
+* `page_windows` (owner, 2026-10-14): added to `search_composition_logic`'s
+  rows ONLY -- the record's own matched-core windows there
+  (`PassageHit.windows`, UNMERGED; see its docstring), carried through
+  straight from the hit. For the must_not "own text" rule
+  (`shared/compound_query.py::must_not_version_search`), a page's protection
+  must include what the MAIN search itself already matched there, not only
+  what a SECOND search of the main text (over a must_not condition's scope)
+  later re-finds -- a noisy or long page can re-find less than the first
+  search established. `fuse()` (shared/passage_fusion.py) copies it on a
+  fused row like every other field (`dict(best_row)`); it is additive and
+  every other reader of a row is unaffected by its presence. NOT added to
+  `search_condition`'s evidence rows -- those already carry their OWN
+  `hit_windows` on the `ConditionSearch` they come with, keyed by record id
+  rather than per row.
+"""
+from __future__ import annotations
+
+import logging
+import re
+import traceback
+from dataclasses import dataclass, field, replace
+from typing import Optional, Protocol
+
+from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
+from shared.passage_hygiene import is_duplicate_photography
+from shared.passage_fusion import (fuse_routed, tag_rows, witness_id_for,
+                                   witness_text_key)
+from shared.passage_index import PassageIndex
+from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
+from shared.passage_policy import PassagePolicy, get_preset
+from shared.passage_search import search_passage
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+
+# How many score-adjacent SURVIVORS each rendered row is compared against in
+# the duplicate-photography pass. Duplicate photographs of one page score
+# near-identically (same text matched), so they land adjacent in score order
+# -- a small window catches the class the measurement found (36/36 join
+# anomalies were adjacent duplicates) while keeping the pass O(window x rows)
+# instead of the O(rows^2) the plan's "Bounded Stage-0" section forbids.
+DUP_SCAN_WINDOW = 3
+
+logger = logging.getLogger(__name__)
+
+# Letters of context on each side of a highlighted span, matching
+# shared/search_engine.py's ms_snip / src_snippets windows exactly (both use
+# a +-60 character window around each merged match).
+HIGHLIGHT_CONTEXT_PAD = 60
+
+# Same header shape the corpus builder emits and the Tantivy `full_header`
+# field stores verbatim (shared/passage_corpus.py's HEADER_RE captures the
+# whole `{sys_id}_{IE..}_{P######}_{FL..}` token; this narrows to just the
+# IE/P/FL portion, matching shared/metadata_manager.py::extract_unique_id's
+# own first-attempt regex so `uid` is byte-identical to what the Tantivy
+# `unique_id` field would hold for the SAME page).
+_UID_RE = re.compile(r'(IE\d+_P\d+_FL\d+)')
+# NARROWED to the CORPUS namespace (2026-08-25). The passage index is built
+# from the Genizah corpus and is web-only; a LOCAL ("My Library", 97-prefix)
+# record can never appear in it. Do not re-widen -- see
+# shared/sys_id_patterns.py for the measurement and the mis-match hazard.
+_SYS_ID_RE = CORPUS_SYS_ID_RE
+
+# A witness reference is a page `raw_header` -- the exact value carried on
+# every result row and stored verbatim in Tantivy's `full_header` field, e.g.
+# `990001234560205171_IE12345_P00001_FL678`. Alphanumerics and underscores,
+# nothing else. THIS regex is the authoritative one (see
+# `PassageSearcher._resolve_witnesses`); web/search_api.py's copy is fail-fast
+# UX for a caller's benefit, not a second boundary.
+_WITNESS_REF_RE = re.compile(r'^[A-Za-z0-9_]+$')
+
+
+# Caps for a condition search. The search runs over a mask (the pages the
+# condition applies to), so verification is the whole cost. Measured
+# 2026-10-14 on the installed index, condition texts of 5,000-10,000 letters
+# over 5,000 manuscripts: the deepest depth profile's 50,000 verifications cut
+# every one ("not fully checked"); these caps completed all of them, verifying
+# 100,063-186,307 candidates in 2.5-7.2 s. Stop works inside verification.
+CONDITION_VERIFY_CAP = 500_000
+CONDITION_CANDIDATE_CAP = 2_000_000
+
+
+@dataclass(frozen=True)
+class ConditionSearch:
+    """What `PassageSearcher.search_condition` established for one version:
+    the verified hits' record ids, their merged spans (for evidence display),
+    the QueryReport as a dict, and whether a stop cut it short."""
+    hit_record_ids: tuple
+    hit_spans: tuple
+    report: dict
+    stopped: bool
+    # Rendered rows (text, source_ctx, highlight patterns) for the first
+    # `render_limit` hits by score, for showing the evidence; empty unless
+    # asked for. A hit whose page text cannot be read is simply not among
+    # them -- it still counts in `hit_record_ids`, which is what is judged.
+    rows: tuple = ()
+    # record_id -> tuple of (r0, r1) page-letter windows, UNMERGED (the same
+    # ones `PassageHit.windows` carries -- never the coarser `hit_spans`
+    # above). Used only by the must_not "own text" rule
+    # (shared/compound_query.py::own_text_runs); every other reader of
+    # ConditionSearch is unaffected by it being empty.
+    hit_windows: dict = field(default_factory=dict)
+
+    def as_version_search(self):
+        from shared.compound_query import VersionSearch, cut_reason
+        return VersionSearch(self.hit_record_ids,
+                             cut_reason(self.report, stopped=self.stopped))
+
+
+class NoWitnessesResolved(ValueError):
+    """Every witness in a non-empty witness list failed to resolve.
+
+    Carries the same `witness_report` the success path returns, so the caller
+    can tell the user WHICH witness failed and why. An empty result set would
+    be indistinguishable from an honest "no matches" -- the one thing a
+    search must never be ambiguous about.
+    """
+
+    def __init__(self, report: dict):
+        super().__init__('no witness resolved to searchable text')
+        self.report = report
+
+
+@dataclass
+class _WitnessRun:
+    """One witness's search plus everything its rows need to be rendered.
+
+    `q_nfc`, `q_offsets` and `span_index_of_q0` are PER WITNESS and are only
+    meaningful against that witness's own text -- which is why a fused row
+    records the witness that produced it and the renderer looks the context
+    up by that id rather than reusing whichever one happens to be in scope.
+    """
+    wid: str
+    label: str
+    hits: list
+    q_nfc: str
+    q_offsets: object
+    span_index_of_q0: dict
+    report: dict
+
+
+def _synthesize_query_report(reports: list) -> dict:
+    """Collapse N witnesses' QueryReports into the ONE `query_report` the
+    envelope contract exposes.
+
+    Booleans are OR-ed and counters summed, so a truncation on witness 7
+    still reaches the caller. Passing through only the first witness's report
+    -- the obvious shape -- would under-report exactly the case the report
+    exists for: "a truncated search that does not say so is a correctness
+    defect" (shared/passage_search.py::QueryReport).
+
+    A single report is returned UNCHANGED (identity, not a rebuild), which is
+    what keeps the single-witness result byte-identical to the pre-witness
+    behaviour.
+    """
+    if not reports:
+        return {}
+    if len(reports) == 1:
+        return reports[0]
+    out: dict = {}
+    for key, value in reports[0].items():
+        if isinstance(value, bool):
+            out[key] = any(bool(r.get(key)) for r in reports)
+        elif isinstance(value, (int, float)):
+            out[key] = sum((r.get(key) or 0) for r in reports)
+        else:
+            # policy_id / policy_name: identical across witnesses (one policy
+            # per request), so the first is the whole truth.
+            out[key] = value
+    return out
+
+
+class _Checkpoint:
+    """A caller's `checkpoint` as a go-on test: True to continue, False once it
+    has raised InterruptedError (the website's time limit,
+    shared/research_worker.py::_time_limited). After that it is never called
+    again -- the time-limit check raises on every call past its deadline -- and
+    `stopped` says the search was cut short."""
+
+    def __init__(self, check):
+        self._check = check
+        self.stopped = False
+
+    def __call__(self, done: int, total: int) -> bool:
+        if self.stopped:
+            return False
+        try:
+            self._check(done, total)
+        except InterruptedError:
+            self.stopped = True
+            return False
+        return True
+
+
+def _derive_uid(record_id: str) -> str:
+    m = _UID_RE.search(record_id)
+    return m.group(1) if m else record_id
+
+
+def _extract_sys_id(record_id: str, sys_id_re=None) -> Optional[str]:
+    m = (sys_id_re or _SYS_ID_RE).search(record_id)
+    return m.group(1) if m else None
+
+
+# A record's image set: the `IE` of `{sys_id}_IE{n}_P{######}_FL{n}`.
+_IMAGE_SET_RE = re.compile(r'_(IE\d+)_P\d+')
+
+
+def _image_set(record_id: str) -> Optional[str]:
+    m = _IMAGE_SET_RE.search(record_id or '')
+    return m.group(1) if m else None
+
+
+def _shared_image_sets(rows, sys_id_re=None) -> frozenset:
+    """The image sets (IEs) that more than one catalogue record carries, as
+    this search's own rows show them.
+
+    The duplicate-photography pass uses this to decide WHICH copy of a page
+    to keep. Three RNL microfilm reels are attached to every box record on
+    them (66, 52 and 47 records, each carrying the whole reel: 5.8% of the
+    index, measured 2026-10-17), so a reel page is one photograph listed
+    under dozens of shelfmarks, and the copy kept by score order is usually
+    the wrong box -- while that box's OWN photograph, the one row whose
+    shelfmark is certain, was the copy demoted.
+
+    Read from the rows rather than the index: every record carrying a page
+    returns it (each record holds the same text), so the rows show the
+    sharing without scanning 702K record ids. A pre-search restriction can
+    hide it, and the pass then keeps the higher score, as it always did."""
+    carriers: dict = {}
+    for row in rows:
+        header = row.get('raw_header') or ''
+        ie = _image_set(header)
+        if ie is not None:
+            carriers.setdefault(ie, set()).add(
+                _extract_sys_id(header, sys_id_re))
+    return frozenset(ie for ie, sids in carriers.items() if len(sids) > 1)
+
+
+class _RegexSysIdParser:
+    """Minimal `UidComponentParser` (shared/parallels_service.py's Protocol)
+    for PassageSearcher's OWN group cap. PassageSearcher has no
+    MetadataManager dependency and does not need the full parser -- only the
+    sys_id it can already derive from a record_id (raw_header) via
+    `_extract_sys_id`, the SAME extraction `restrict_sys_ids` filtering
+    already uses. Passed into `shared.parallels_service._cap_main_results_
+    by_group` so grouping/capping is the EXACT SAME function the API path
+    applies to the incumbent's rows -- never a forked reimplementation of
+    the grouping logic (adversarial review finding #1)."""
+
+    def __init__(self, sys_id_re=None):
+        self._sys_id_re = sys_id_re
+
+    def parse_full_id_components(self, uid_or_header: str) -> dict:
+        return {'sys_id': _extract_sys_id(uid_or_header, self._sys_id_re)}
+
+
+def _orig_span(offsets, start: int, end: int, text_len: int):
+    """Original-text `[s, e)` for normalized-stream span `[start, end)`, or
+    None when the span is out of range.
+
+    Factored out of `_highlight_span` (whose arithmetic this is, unchanged)
+    so the pattern builder can reach the same bounds without re-deriving
+    them from the marked-up snippet -- the snippet has already had literal
+    asterisks replaced by spaces, so text cut from IT would no longer be a
+    substring of the page.
+    """
+    if not len(offsets) or start >= len(offsets) or end <= start:
+        return None
+    end = min(end, len(offsets))
+    s = offsets[start]
+    e = min(text_len, offsets[end - 1] + 1)
+    return s, e
+
+
+def _match_pattern(literals) -> str:
+    """A regex re-finding exactly `literals` -- an ordered alternation of
+    escaped literal substrings.
+
+    Longest first, because alternation is first-match-wins: a short literal
+    that happens to prefix a longer one would otherwise truncate it. A
+    literal wholly contained in another is dropped rather than kept, so the
+    marker pass cannot nest one match inside another and produce `*a*b*c*`.
+
+    Returns '' when there is nothing to match; every consumer already
+    treats a falsy pattern as "no highlighting", so that is the honest
+    no-op rather than a regex that matches everywhere.
+    """
+    seen, uniq = set(), []
+    for lit in literals:
+        if not lit or lit in seen:
+            continue
+        seen.add(lit)
+        uniq.append(lit)
+    uniq.sort(key=len, reverse=True)
+    kept = []
+    for lit in uniq:
+        if not any(lit in bigger for bigger in kept):
+            kept.append(lit)
+    return '|'.join(re.escape(lit) for lit in kept)
+
+
+def _highlight_span(orig_text: str, offsets, start: int, end: int,
+                     pad: int = HIGHLIGHT_CONTEXT_PAD) -> str:
+    """Build a `*match*`-marked snippet around normalized-stream span
+    [start, end) inside `orig_text`, mirroring
+    shared/search_engine.py's ms_snip formula
+    (``content[start:s] + f"*{content[s:e]}*" + content[e:end]``), PLUS the
+    literal-`'*'` sanitization `SearchEngine.highlight` /
+    `_highlight_by_span` apply (`snippet.replace('*', ' ')`) that the
+    composition path's own inline builder happens to skip -- a manuscript
+    page containing a literal asterisk must not produce a spurious marker
+    (adversarial review finding #5).
+
+    `offsets` maps normalized-stream index -> index in `orig_text` (from
+    `shared.passage_normalize.norm_stream`). Returns '' on an out-of-range
+    span (mirrors `project_span`'s own bounds handling) rather than raising
+    -- a display helper must never crash a search that otherwise succeeded.
+    """
+    bounds = _orig_span(offsets, start, end, len(orig_text))
+    if bounds is None:
+        return ''
+    s, e = bounds
+    win_start = max(0, s - pad)
+    win_end = min(len(orig_text), e + pad)
+    # Sanitize the WINDOW (not the whole orig_text) -- .replace() preserves
+    # length, so indices relative to the window stay valid post-sanitize.
+    window = orig_text[win_start:win_end].replace('*', ' ')
+    rel_s = s - win_start
+    rel_e = e - win_start
+    return window[:rel_s] + f"*{window[rel_s:rel_e]}*" + window[rel_e:]
+
+
+class PageTextFetcher(Protocol):
+    """Structural type for the injected text source (SEED-016 #3 style).
+
+    Satisfied by the process-singleton SearchEngine
+    (`shared/search_engine.py::SearchEngine.get_full_text_by_header`, added
+    alongside the pre-existing `get_full_text_by_id`) without importing it
+    here -- `shared/` stays framework-agnostic; the caller
+    (`web/passage_assets.py`) injects the real engine. PUBLIC (not
+    underscore-prefixed) so other modules needing the same shape import
+    THIS one rather than redeclaring it (adversarial review finding #9).
+    """
+
+    def get_full_text_by_header(self, full_header: str) -> Optional[str]:
+        ...
+
+
+@dataclass
+class PassageSearcher:
+    """A `CompositionSearcher` (shared/parallels_service.py) backed by the
+    passage-matching engine (`shared.passage_search.search_passage`).
+
+    Constructed only when `web.passage_assets.passage_available()` is True
+    (the index opened successfully at startup) -- callers must never build
+    one against an index that failed to load; there is no internal
+    fallback, by design (a searcher that silently no-ops on a bad index is
+    exactly the failure mode the rest of this project's fail-closed loaders
+    exist to prevent).
+    """
+    index: PassageIndex
+    text_fetcher: PageTextFetcher
+    policy: Optional[PassagePolicy] = None
+    # <= 0 means UNCAPPED (owner ruling 2026-08-23, the Birkat Hamazon
+    # session): return every group, fully rendered. The page passes 0 -- its
+    # display layer already batches 50 groups per "Load more" click, and the
+    # export layer caps at 5,000 rows, so the 200-group cap here was hiding
+    # 299 of 497 found manuscripts from BOTH surfaces for no benefit. The
+    # API path keeps the default: its envelope contract is 200 groups, and
+    # rendering rows the service would immediately discard is pure waste.
+    # Cost bound when uncapped: verify_cap (3,000 records) bounds the render
+    # at ~4s worst case, inside every timeout that guards this path.
+    render_cap: int = PARALLELS_GROUP_CAP
+    # Which sys_id namespace this searcher's index holds. The Genizah index
+    # holds corpus (99) records only, hence the default; the My Library index
+    # holds LOCAL (97) records only and passes `LOCAL_SYS_ID_RE`. Never the
+    # ANY pattern: an index holds exactly one namespace, and a pattern that
+    # matched the other would group, cap and restrict on a wrong id.
+    sys_id_re: Optional[re.Pattern] = None
+    # The post-verify duplicate-PHOTOGRAPHY demotion (below) is a Genizah
+    # rule: the same physical page photographed under two catalogue records.
+    # The My Library index turns it off -- two near-identical pages of a
+    # user's own files are two pages they own, and labelling one a "duplicate
+    # photograph" hid the very page a query was copied from (measured on the
+    # owner's library, 2026-10-16: 22 rows demoted in one search). The
+    # build-time photography filters are off for My Library for the same
+    # reason (owner ruling, 2026-10-16).
+    demote_duplicate_photography: bool = True
+
+    def __post_init__(self) -> None:
+        if self.policy is None:
+            self.policy = get_preset('standard-40')
+
+    # -- CompositionSearcher protocol ---------------------------------------
+
+    def search_composition_logic(
+        self,
+        full_text: str,
+        chunk_size: int = 5,
+        max_freq: float = 100.0,
+        mode: str = 'exact',
+        filter_text: Optional[str] = None,
+        progress_callback=None,
+        boundary_mode: str = 'full',
+        boundary_delimiter: str = '\n',
+        boundary_boost: float = 1.5,
+        min_boundary_matches: int = 0,
+        min_delimiter_distance: int = 3,
+        restrict_sys_ids: Optional[set] = None,
+        corpus_scope: str = 'genizah',
+        *,
+        witnesses: Optional[list] = None,
+        witness_text_cap: Optional[int] = None,
+        checkpoint=None,
+        **_ignored,
+    ) -> dict:
+        """Same parameter names/order as
+        `SearchEngine.search_composition_logic` so both existing call sites
+        (the page's positional `text` + full keyword set, and
+        `shared/parallels_service.py`'s all-keyword subset) bind correctly.
+        See the module docstring for which parameters are honored vs
+        accepted-but-ignored.
+
+        `witnesses` (keyword-only, additive) is the multi-witness entry
+        point: a list of `{'id', 'label', 'text' | 'raw_header'}` dicts, each
+        searched SEPARATELY and fused by rank. Omitted or empty, this method
+        behaves byte-for-byte as it did before the parameter existed -- which
+        is what makes every existing caller and test safe. `witnesses`
+        resolving to exactly ONE text short-circuits into the single-witness
+        path too: RRF over one list is a `1/(k+rank)` rescale that carries no
+        information, and `score` must keep meaning "matched letters" for the
+        common case however it arrived.
+
+        Note the `*` -- `witnesses` is keyword-only. The chunk engine's
+        `SearchEngine.search_composition_logic` has a fixed parameter list
+        with no `**kwargs`, so a `witnesses=` aimed at the wrong searcher
+        raises TypeError rather than being silently swallowed.
+
+        Returns:
+            ``{'main': [...], 'filtered': [...], 'truncated_to_200': bool,
+            'dropped_text_lookup_failures': int,
+            'duplicate_photography_demoted': int, 'query_report': {...}}``,
+            plus -- ONLY when `witnesses` was passed at all --
+            ``'per_witness_query_reports'`` and ``'witness_report'``. The
+            gate is "witnesses were requested", NOT "two or more resolved":
+            asking for seventeen and searching sixteen is precisely the case
+            a caller has to be able to see, and it would be hidden by an
+            N>=2 gate whenever the drop left a single survivor. Omitting
+            `witnesses` leaves the result byte-identical to what it was
+            before this parameter existed, which is the parity that protects
+            every existing consumer.
+
+            For N>=2 `query_report` is SYNTHESISED across the witnesses
+            (booleans OR-ed, counters summed) rather than being one witness's
+            report. Reporting only the first witness's would under-report a
+            truncation that happened on witness 7, and "a truncated search
+            that does not say so is a correctness defect" (QueryReport's own
+            contract).
+
+            ``'partial': True`` is added ONLY when `checkpoint` stopped the
+            search (see the module docstring): the rows are those of the
+            witnesses searched before the stop -- the last one's from the
+            candidates it had verified -- and `witness_report['searched']`
+            counts the witnesses that ran. An unstopped result has no
+            `partial` key, byte-identical to before.
+
+        Raises:
+            ValueError: if `boundary_mode != 'full'` -- passage-matching has
+                no cross-paragraph/token-boundary concept over a letter
+                stream, and silently degrading to 'full' would be exactly
+                the silent-degradation failure mode this project's
+                fail-closed posture exists to prevent (adversarial review
+                finding #2). Callers must reject this BEFORE invoking this
+                searcher (web/search_api.py does, at request-validation
+                time, before any concurrency slot is acquired;
+                web/pages/parallels.py disables the boundary controls while
+                passage mode is selected).
+            ValueError: if BOTH `full_text` and `witnesses` are non-empty.
+                Never silently pick one: the query the user believes was
+                searched would differ from the one that ran.
+            NoWitnessesResolved: if `witnesses` was non-empty but not one
+                entry resolved to searchable text. Carries `.report`, so the
+                caller can say WHICH failed and why instead of returning an
+                empty result indistinguishable from "no matches".
+        """
+        if boundary_mode != 'full':
+            raise ValueError(
+                f"PassageSearcher only supports boundary_mode='full' (got "
+                f"{boundary_mode!r}); passage-matching has no cross-"
+                f"paragraph/token-boundary concept over a letter stream."
+            )
+
+        queries, witness_report = self._resolve_witnesses(
+            witnesses, full_text, witness_text_cap)
+
+        # Asked between witnesses and, inside each, before every candidate is
+        # verified. Stopped, the witnesses searched so far are what there is.
+        stop = _Checkpoint(checkpoint) if checkpoint is not None else None
+        runs = []
+        for n, (wid, label, text) in enumerate(queries):
+            if stop is not None and not stop(n, len(queries)):
+                break
+            runs.append(self._run_one_witness(wid, label, text, restrict_sys_ids,
+                                              min_boundary_matches, checkpoint=stop))
+            if stop is not None and stop.stopped:
+                break
+        stopped = stop is not None and stop.stopped
+        if stopped and witness_report:
+            witness_report['searched'] = len(runs)
+        # Fused only when two or more witnesses actually ran.
+        multi = len(runs) > 1
+
+        filter_stream = norm_stream_fast(filter_text) if filter_text else ''
+
+        # Per-witness buckets. `hit_by_key` is keyed by (witness, record) --
+        # NOT by record alone, which is the shape the single-witness code
+        # used and which COLLIDES the moment a second witness matches the
+        # same manuscript. Last-witness-wins there would silently reduce
+        # every witness_count to 1 while looking entirely healthy.
+        eligible_by_witness: dict = {}
+        filtered_by_witness: dict = {}
+        hit_by_key: dict = {}
+        run_by_witness: dict = {}
+        for run in runs:
+            run_by_witness[run.wid] = run
+            rows: list = []
+            for hit in run.hits:
+                hit_by_key[(run.wid, hit.record_id)] = hit
+                rows.append({
+                    'uid': _derive_uid(hit.record_id),
+                    'raw_header': hit.record_id,
+                    'src_lbl': '',
+                    'source_ctx': '',
+                    'text': '',
+                    'highlight_pattern': '',
+                    'source_highlight_pattern': '',
+                    'score': float(hit.score),
+                    'final_score': float(hit.score),
+                    'chunk_count': int(hit.n_spans),
+                    'chunk_hits': [],
+                    'page_windows': tuple(hit.windows),
+                })
+            if multi:
+                # Tag BEFORE the filter split: a witness's rank is its
+                # position in that witness's FULL result list. A rank derived
+                # from the post-filter list would shift with the caller's
+                # filter text, changing the fusion for a reason that has
+                # nothing to do with match quality.
+                tag_rows(rows, run.wid, run.label)
+            eligible, source_filtered = [], []
+            for row, hit in zip(rows, run.hits):
+                if filter_stream and self._is_source_text_filtered(
+                    hit, filter_stream, run.q_nfc, run.q_offsets,
+                ):
+                    # Matches SearchEngine.search_composition_logic's
+                    # filter_text semantics: a record is routed to `filtered`
+                    # (never `main`) when the composition text it matched is
+                    # itself known/printed source text.
+                    source_filtered.append(row)
+                else:
+                    eligible.append(row)
+            eligible_by_witness[run.wid] = eligible
+            filtered_by_witness[run.wid] = source_filtered
+
+        if multi:
+            # Routing AND the contributor arithmetic in one place --
+            # `fuse_routed` owns both, so this path and the page's cannot
+            # drift. A record is `filtered` only when EVERY witness that
+            # matched it filtered it, and a main record's fusion statistics
+            # count every contributor, including those whose own row was
+            # routed to `filtered`; the rendered row still comes from an
+            # eligible one.
+            eligible_rows, filtered_candidate_rows = fuse_routed(
+                [(r.wid, eligible_by_witness[r.wid]) for r in runs],
+                [(r.wid, filtered_by_witness[r.wid]) for r in runs],
+            )
+            # The cap must ORDER by the key the rows were SELECTED by, or it
+            # discards exactly the groups the fusion promoted. It must NOT
+            # change what aggregate_score reports -- that becomes the public
+            # `score`, which stays matched letters (review finding).
+            order_key = 'fusion_score'
+        else:
+            # One witness ran -- or none, when the search was stopped before the
+            # first, and there is nothing to render.
+            eligible_rows = eligible_by_witness[runs[0].wid] if runs else []
+            filtered_candidate_rows = filtered_by_witness[runs[0].wid] if runs else []
+            order_key = None
+
+        # Finding #1 ("THE BIG ONE") + finding #16(a): apply the SAME
+        # group-cap rule to BOTH buckets, so rendered rows == kept rows
+        # always -- see the module docstring for the full rationale on why
+        # `filtered` is capped too (unlike the incumbent's own filtered
+        # bucket, which is documented as "typically small" on an assumption
+        # passage's filter_text mechanism does not share).
+        if self.render_cap and self.render_cap > 0:
+            capped_main_candidates, main_truncated = _cap_main_results_by_group(
+                eligible_rows, _RegexSysIdParser(self.sys_id_re), cap=self.render_cap,
+                order_key=order_key)
+            capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
+                filtered_candidate_rows, _RegexSysIdParser(self.sys_id_re), cap=self.render_cap,
+                order_key=order_key)
+        else:
+            # Uncapped: every group survives, so nothing is truncated by
+            # definition and "rendered == kept" holds over the full set.
+            capped_main_candidates = eligible_rows
+            capped_filtered_candidates = filtered_candidate_rows
+            main_truncated = False
+
+        # Finding #16(b): a row whose text lookup fails is DROPPED and
+        # COUNTED, never returned half-blank.
+        dropped = 0
+        # Raw page text captured during rendering, for the duplicate-
+        # photography pass below -- the render already fetched it, so the
+        # hygiene pass costs no extra Tantivy lookups.
+        raw_text_by_header: dict = {}
+
+        def _render(row: dict) -> bool:
+            # The WINNING witness supplies the evidence. A span offset is a
+            # position in ONE witness's text, so projecting it through
+            # another witness's offset map would highlight the wrong letters
+            # -- and would still look entirely plausible on screen.
+            run = run_by_witness.get(row.get('witness_id') or runs[0].wid,
+                                     runs[0])
+            hit = hit_by_key[(run.wid, row['raw_header'])]
+            return self._render_highlights(row, hit, run.q_nfc, run.q_offsets,
+                                           run.span_index_of_q0,
+                                           raw_text_out=raw_text_by_header)
+
+        main_results = []
+        for row in capped_main_candidates:
+            if _render(row):
+                main_results.append(row)
+            else:
+                dropped += 1
+
+        filtered_results = []
+        for row in capped_filtered_candidates:
+            if _render(row):
+                filtered_results.append(row)
+            else:
+                dropped += 1
+
+        # Post-verify Stage-0: duplicate-photography suppression (PR #324
+        # round 3 -- the algorithm spec section 9 marks this MANDATORY, and
+        # until this pass the helper existed only at its definition). The
+        # false-positive class it removes is the one that looks most like a
+        # discovery: the same physical page photographed under two catalogue
+        # records, measured 36 of 36 among "join anomaly" pairs. Bounded
+        # exactly as the plan's "Bounded Stage-0" section requires: each row
+        # is compared only against the last DUP_SCAN_WINDOW SURVIVORS in
+        # score order (a cluster of N photographs of one page collapses to
+        # its best-scored copy with N-1 window-1 comparisons, not N^2), and
+        # the demoted count ships in the return dict -- never a silent
+        # removal. Demote, not delete: the row moves to `filtered`, already
+        # rendered, so a skeptical user can still inspect it.
+        #
+        # WHICH copy stays: a record's own photograph over a copy on an image
+        # set several records carry (`_shared_image_sets`), then the higher
+        # score. The own photograph takes the kept copy's place in the list.
+        dup_demoted = 0
+        if self.demote_duplicate_photography and len(main_results) > 1:
+            shared_images = _shared_image_sets(
+                list(eligible_rows) + list(filtered_candidate_rows),
+                self.sys_id_re)
+
+            def _on_shared_image(r: dict) -> bool:
+                return _image_set(r['raw_header']) in shared_images
+
+            survivors: list = []
+            for row in main_results:
+                dup_at = None
+                tb = raw_text_by_header.get(row['raw_header'])
+                if tb:
+                    start = max(0, len(survivors) - DUP_SCAN_WINDOW)
+                    for i in range(start, len(survivors)):
+                        ta = raw_text_by_header.get(survivors[i]['raw_header'])
+                        if ta and is_duplicate_photography(ta, tb):
+                            dup_at = i
+                            break
+                if dup_at is None:
+                    survivors.append(row)
+                    continue
+                demoted = row
+                if (_on_shared_image(survivors[dup_at])
+                        and not _on_shared_image(row)):
+                    demoted, survivors[dup_at] = survivors[dup_at], row
+                demoted['filter_reason'] = 'duplicate_photography'
+                filtered_results.append(demoted)
+                dup_demoted += 1
+            main_results = survivors
+
+        result = {
+            'main': main_results,
+            'filtered': filtered_results,
+            # PR #324 round 5: this flag used to be computed and DISCARDED.
+            # The API path then re-applied the same cap downstream to an
+            # already-capped list, concluded nothing was truncated, and
+            # omitted truncated_to_200 -- queries with over render_cap
+            # manuscript groups silently looked complete.
+            'truncated_to_200': bool(main_truncated),
+            'dropped_text_lookup_failures': dropped,
+            'duplicate_photography_demoted': dup_demoted,
+            # The budget/truncation report. QueryReport's own contract says
+            # it "ships in the result envelope -- a truncated search that
+            # does not say so is a correctness defect"; until PR #324 round 3
+            # this method bound it to `_report` and threw it away, so a
+            # capped search looked complete to users AND to the evaluation
+            # instruments.
+            'query_report': _synthesize_query_report([r.report for r in runs]),
+        }
+        if witness_report:
+            # Present whenever `witnesses` was PASSED -- not merely when two
+            # or more resolved. Requesting seventeen and searching sixteen is
+            # exactly the case a caller must be able to see, and gating this
+            # on N>=2 would hide it whenever the drop left one survivor.
+            # Absent when `witnesses` was omitted, which is the parity that
+            # protects every existing consumer.
+            result['per_witness_query_reports'] = [
+                {'witness_id': r.wid, 'witness_label': r.label,
+                 'report': r.report} for r in runs
+            ]
+            result['witness_report'] = witness_report
+        if stopped:
+            # The key both engines' consumers read; the cut-off signal agrees,
+            # as the chunk engine's does.
+            from shared.search_engine import _note_search_cutoff  # noqa: PLC0415 -- lazy: only a stopped search pays for it
+            _note_search_cutoff(interrupted=True)
+            result['partial'] = True
+        return result
+
+    # -- multi-witness plumbing ---------------------------------------------
+
+    def _resolve_witnesses(self, witnesses, full_text: str,
+                           text_cap: Optional[int]):
+        """Turn the caller's witness list into `[(id, label, text), ...]`.
+
+        THE single place a `raw_header` reference is validated and resolved.
+        `web/search_api.py` also shape-checks the field, but that is
+        fail-fast UX and never a second security boundary -- two copies of a
+        validation rule drift, and the copy running closest to the fetch is
+        the one that has to be authoritative.
+
+        Resolution happens HERE, inside the searcher, because it is Tantivy
+        work: doing it in the route handler would block the single uvicorn
+        event loop, and this method already runs inside a bounded executor.
+
+        The length cap is re-checked AFTER resolution, because twenty-five
+        tiny references can resolve to twenty-five 20,000-character pages --
+        a payload-only cap bounds the REQUEST, not the WORK.
+
+        An unresolvable witness is SKIPPED AND REPORTED, never fatal:
+        rejecting a seventeen-witness request over one stale reference wastes
+        the sixteen searches the user asked for and can still have.
+        """
+        if not witnesses:
+            return [('seed', '', full_text or '')], {}
+        if (full_text or '').strip():
+            raise ValueError(
+                'PassageSearcher: pass EITHER full_text OR witnesses, never '
+                'both -- silently searching one of them would make the query '
+                'that actually ran invisible to the caller.'
+            )
+
+        queries: list = []
+        entries: list = []
+        # Resolved-text digest -> the id of the witness that claimed it. Keyed
+        # on the TEXT, not the reference: two different `raw_header`s can
+        # resolve to the same page, and a pasted text can duplicate a resolved
+        # one. Every such pair inflates `witness_count` and `fusion_score`
+        # identically, because `fuse()` counts contributors by POSITION.
+        seen_text: dict = {}
+        for i, w in enumerate(witnesses):
+            w = w if isinstance(w, dict) else {'text': w}
+            wid = str(w.get('id') or witness_id_for(i))
+            label = str(w.get('label') or '')
+            text = w.get('text')
+            kind = 'pasted'
+            reason = None
+            if text is None or not str(text).strip():
+                kind = 'manuscript'
+                text = None
+                ref = str(w.get('raw_header') or '').strip()
+                if not ref:
+                    reason = 'empty'
+                elif not _WITNESS_REF_RE.match(ref):
+                    reason = 'bad_ref'
+                else:
+                    try:
+                        text = self.text_fetcher.get_full_text_by_header(ref)
+                    except MemoryError:
+                        raise
+                    except Exception:
+                        # traceback.format_exc() -- a STRING -- not
+                        # exc_info=True. `exc_info=True` stores the raw
+                        # (type, value, traceback) tuple on the LogRecord,
+                        # and that traceback's outermost frame holds `self`
+                        # (this searcher, hence its index): any handler
+                        # that retains LogRecords (MemoryHandler, a Qt
+                        # recent-errors panel, pytest's own caplog) keeps
+                        # the index reachable past close(). A formatted
+                        # string holds no frames.
+                        logger.warning(
+                            'passage_parallels: witness ref lookup raised for '
+                            '%s:\n%s', ref, traceback.format_exc(),
+                        )
+                        text = None
+                    if not text:
+                        reason = 'not_found'
+            if reason is None and text_cap and len(text) > text_cap:
+                reason = 'too_long'
+            duplicate_of = None
+            if reason is None:
+                digest = witness_text_key(text)
+                duplicate_of = seen_text.get(digest)
+                if duplicate_of is None:
+                    seen_text[digest] = wid
+                else:
+                    # Searching it again would spend a slot of the witness
+                    # budget to arrive at rows already in hand, and then count
+                    # them twice.
+                    reason = 'duplicate'
+            entry = {
+                'id': wid,
+                'label': label,
+                'kind': kind,
+                'resolved': reason is None,
+                'reason': reason,
+                'letters': len(text or '') if reason is None else 0,
+            }
+            if duplicate_of is not None:
+                entry['duplicate_of'] = duplicate_of
+            entries.append(entry)
+            if reason is None:
+                queries.append((wid, label, text))
+
+        report = {
+            'requested': len(witnesses),
+            'searched': len(queries),
+            'witnesses': entries,
+            # A duplicate is NOT an unresolved reference: it resolved
+            # perfectly, and reporting it as unresolved would send a caller
+            # looking for a stale shelfmark that is not there. Separate list,
+            # separate warning code.
+            'unresolved': [e for e in entries
+                           if not e['resolved'] and e['reason'] != 'duplicate'],
+            'duplicates': [e for e in entries if e['reason'] == 'duplicate'],
+        }
+        if not queries:
+            raise NoWitnessesResolved(report)
+        return queries, report
+
+    # -- Composition Search conditions ---------------------------------------
+
+    def search_condition(self, text: str, pages=(), sys_ids=(),
+                         should_stop=None,
+                         render_limit: int = 0) -> 'ConditionSearch':
+        """One version of a condition, searched EXHAUSTIVELY over its pages
+        (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 3).
+
+        `pages` are (sys_id, IE, P) keys and `sys_ids` whole manuscripts. The
+        record mask is built HERE, from the page map of the index this
+        searcher holds, and the map is checked against this index's build
+        before any posting is read -- so a scope computed while another index
+        generation was current can never select the wrong records.
+
+        Every query gram present in the index is admitted (no posting budget);
+        the condition caps apply (CONDITION_CANDIDATE_CAP, CONDITION_VERIFY_CAP)
+        and their flags come back on the report. Hits are the engine's VERIFIED hits,
+        unrendered: no display cap, text lookup, Filter Text or duplicate-
+        photography routing can drop one. Calls `search_passage` directly, not
+        `_run_one_witness` (which filters by `min_boundary_matches`).
+
+        `should_stop()` is asked before the search and before each candidate
+        is verified; True stops it, and the result says `stopped=True` --
+        the hits found so far are kept, but they no longer prove absence."""
+        from shared.passage_pages import page_index_for
+        from shared.passage_search import QueryReport
+
+        if should_stop is not None and should_stop():
+            return ConditionSearch((), (), QueryReport().as_dict(), True)
+        mask = page_index_for(self.index).mask_for(
+            self.index, pages=pages, sys_ids=sys_ids)
+        if not mask.any():
+            # Nothing searchable in scope: absence from the searchable pages
+            # is proven trivially.
+            return ConditionSearch((), (), QueryReport(exhaustive_mask=True).as_dict(),
+                                   False)
+        policy = replace(self.policy, verify_cap=CONDITION_VERIFY_CAP,
+                         candidate_cap=CONDITION_CANDIDATE_CAP)
+        stopped = [False]
+
+        def _checkpoint(_done, _total):
+            if should_stop is not None and should_stop():
+                stopped[0] = True
+                return False
+            return True
+
+        hits, report = search_passage(self.index, text, policy,
+                                      record_mask=mask, checkpoint=_checkpoint)
+        rows = []
+        if render_limit and hits:
+            q_nfc = nfc(text or '')
+            _q_stream, q_offsets = norm_stream(text or '')
+            starts = sorted({span[0] for h in hits for span in h.spans})
+            span_index = {q0: i for i, q0 in enumerate(starts)}
+            for hit in hits[:render_limit]:           # hits are best first
+                row = {
+                    'uid': _derive_uid(hit.record_id), 'raw_header': hit.record_id,
+                    'src_lbl': '', 'source_ctx': '', 'text': '',
+                    'highlight_pattern': '', 'source_highlight_pattern': '',
+                    'score': float(hit.score), 'final_score': float(hit.score),
+                    'chunk_count': int(hit.n_spans), 'chunk_hits': [],
+                }
+                try:
+                    ok = self._render_highlights(row, hit, q_nfc, q_offsets, span_index)
+                except Exception as exc:     # noqa: BLE001 -- display only
+                    # Rendering is for SHOWING evidence. The hit is verified
+                    # and is returned below whatever happens here.
+                    logger.warning('condition evidence render failed for %s: %s',
+                                   hit.record_id, exc)
+                    ok = False
+                if ok:
+                    rows.append(row)
+        hit_windows = {h.record_id: tuple(h.windows) for h in hits}
+        return ConditionSearch(tuple(h.record_id for h in hits),
+                               tuple((h.record_id, tuple(h.spans)) for h in hits),
+                               report.as_dict(), stopped[0], tuple(rows),
+                               hit_windows)
+
+    def _run_one_witness(self, wid: str, label: str, text: str,
+                         restrict_sys_ids, min_boundary_matches: int,
+                         checkpoint=None):
+        """Search ONE witness and build everything its rendering will need.
+
+        `checkpoint` goes to search_passage: stopped, the witness's hits are
+        those of the candidates it had verified.
+
+        Never call this with two witnesses joined into one string. The
+        passage engine spends a per-query POSTING BUDGET, so a concatenated
+        query starves: the 17 Birkat Hamazon witnesses joined into one query
+        admit 2.4% of their own postings and reach 48.2% of the reachable
+        census -- WORSE than the best single witness (56.7%) and well under
+        the 74.1% the same 17 reach fused. See
+        shared/passage_fusion.py for the numbers, and for why this does not
+        generalise to the chunk engine.
+        """
+        text = text or ''
+        # PR #324 round 5: the restriction goes INTO the engine so the
+        # candidate/verify caps are spent only on records the caller can
+        # receive. Filtering hits afterwards (the old shape, kept below as
+        # belt-and-braces) let out-of-set candidates consume the caps and
+        # produced false negatives on filtered searches over common texts.
+        _allowed = (None if restrict_sys_ids is None else
+                    (lambda rid: _extract_sys_id(rid, self.sys_id_re)
+                                  in restrict_sys_ids))
+        hits, report = search_passage(self.index, text, self.policy,
+                                      record_allowed=_allowed,
+                                      **({} if checkpoint is None else {'checkpoint': checkpoint}))
+
+        if min_boundary_matches:
+            hits = [h for h in hits if h.n_spans >= min_boundary_matches]
+
+        if restrict_sys_ids is not None:
+            hits = [h for h in hits
+                    if _extract_sys_id(h.record_id, self.sys_id_re)
+                    in restrict_sys_ids]
+
+        # Query-side offset map, computed ONCE per witness (not per hit/span
+        # -- this is O(query length), never O(corpus)) so every rendered
+        # span's source_ctx/chunk_hits text can be projected back onto that
+        # witness's own text exactly like the manuscript side.
+        q_nfc = nfc(text)
+        _q_stream, q_offsets = norm_stream(text)
+
+        # Finding #4: chunk_index is a position in the PASTED COMPOSITION,
+        # comparable across records -- the ordinal of a span's query-side
+        # start offset among ALL distinct start offsets across every
+        # surviving hit, computed once and shared by every record. Two
+        # different records whose spans start at the same query offset get
+        # the SAME chunk_index, mirroring the incumbent's sliding-window
+        # index exactly.
+        #
+        # It is PER WITNESS, and comparable only WITHIN one: offset 200 of
+        # witness A and offset 200 of witness B are different places in
+        # different texts. Every fused row records which witness produced it
+        # (`witness_id`), so the index is never read out of its context.
+        all_q_starts = sorted({span[0] for h in hits for span in h.spans})
+        return _WitnessRun(
+            wid=wid, label=label, hits=hits, q_nfc=q_nfc, q_offsets=q_offsets,
+            span_index_of_q0={q0: i for i, q0 in enumerate(all_q_starts)},
+            report=report.as_dict(),
+        )
+
+    # -- filter_text parity (finding #3) -------------------------------------
+
+    def _is_source_text_filtered(self, hit, filter_stream: str,
+                                  q_nfc: str, q_offsets) -> bool:
+        """True when the query-side text of ANY span matched on `hit` also
+        appears (letter-stream-normalized) inside the caller's filter text.
+
+        Mirrors `SearchEngine.search_composition_logic`'s filter_text
+        semantics (shared/search_engine.py): the check is per-RECORD (any
+        one matching span is enough to route the WHOLE record to
+        `filtered`), not per-span -- same granularity as the incumbent's
+        `rec['is_filtered']` flag, which is set once a record accumulates
+        ANY text-filtered chunk hit.
+        """
+        for q0, q1, _r0, _r1, _density in hit.spans:
+            span_text = project_span(q_offsets, q0, q1, q_nfc)
+            span_stream = norm_stream_fast(span_text)
+            if span_stream and span_stream in filter_stream:
+                return True
+        return False
+
+    # -- bounded re-normalization (display path only) -----------------------
+
+    def _render_highlights(self, row: dict, hit, q_nfc: str, q_offsets,
+                            span_index_of_q0: dict,
+                            raw_text_out: Optional[dict] = None) -> bool:
+        """Fill in `text` / `source_ctx` / `chunk_hits` for ONE row (either a
+        surviving `main` row or a surviving `filtered` row -- both are
+        group-capped identically, finding #16(a)).
+
+        Per-render work, deliberately -- the display-span contract
+        (docs/specs/passage-matching-algorithm.md) requires re-normalizing
+        only the pages actually shown, reading original text the same way
+        the incumbent path does (Tantivy's stored `content`, via
+        `SearchEngine.get_full_text_by_header`). One live Tantivy query per
+        row (not batched) and one redundant nfc() pass (`norm_stream` below
+        calls it again internally) are both accepted costs -- see the
+        module docstring's "deliberately NOT optimized away" note.
+
+        Returns:
+            True if the row was successfully rendered (caller should keep
+            it); False if the text lookup failed (caller must DROP the row
+            and count it -- finding #16(b): never return a silently blank
+            row that survived the cap but has no real content).
+        """
+        orig_text = None
+        try:
+            orig_text = self.text_fetcher.get_full_text_by_header(hit.record_id)
+        except MemoryError:
+            raise
+        except Exception:
+            # traceback.format_exc(), never exc_info=True -- see the
+            # matching comment in _resolve_witnesses above. This is the
+            # site that actually motivated it: a handler that RETAINS
+            # LogRecords (MemoryHandler, a Qt recent-errors panel,
+            # pytest's caplog) would otherwise keep this searcher -- and
+            # therefore its PassageIndex -- reachable through the stored
+            # (type, value, traceback) tuple long after
+            # close_passage_state() tears the index's memmaps down.
+            logger.warning(
+                'passage_parallels: text fetch raised for record %s:\n%s',
+                hit.record_id, traceback.format_exc(),
+            )
+        if not orig_text:
+            logger.warning(
+                'passage_parallels: dropping record %s -- text lookup failed '
+                '(counted, not returned as a blank row)', hit.record_id,
+            )
+            return False
+
+        if raw_text_out is not None:
+            # For the duplicate-photography pass: line_agreement needs the
+            # ORIGINAL text with its line breaks (line breaks are a property
+            # of the physical page), and this is the one place it is fetched.
+            raw_text_out[hit.record_id] = orig_text
+
+        r_nfc = nfc(orig_text)  # redundant with norm_stream's internal nfc() -- accepted cost
+        _r_stream, r_offsets = norm_stream(orig_text)
+
+        src_snips, ms_snips, chunk_hits = [], [], []
+        ms_literals, src_literals = [], []
+        for q0, q1, r0, r1, _density in hit.spans:
+            src_snips.append(_highlight_span(q_nfc, q_offsets, q0, q1))
+            ms_snip = _highlight_span(r_nfc, r_offsets, r0, r1)
+            ms_snips.append(ms_snip)
+            plain_query_text = project_span(q_offsets, q0, q1, q_nfc)
+            chunk_index = span_index_of_q0.get(q0, 0)
+            chunk_hits.append((chunk_index, plain_query_text, float(q1 - q0), ms_snip))
+            # Cut from the NFC text the offsets belong to, not from the
+            # snippets above: those are padded with context and have had
+            # literal asterisks blanked, so neither is a substring of the
+            # page a viewer would re-mark.
+            r_bounds = _orig_span(r_offsets, r0, r1, len(r_nfc))
+            if r_bounds is not None:
+                ms_literals.append(r_nfc[r_bounds[0]:r_bounds[1]])
+            q_bounds = _orig_span(q_offsets, q0, q1, len(q_nfc))
+            if q_bounds is not None:
+                src_literals.append(q_nfc[q_bounds[0]:q_bounds[1]])
+
+        row['source_ctx'] = "\n\n".join(src_snips)
+        row['text'] = "\n...\n".join(ms_snips)
+        row['chunk_hits'] = chunk_hits
+        row['highlight_pattern'] = _match_pattern(ms_literals)
+        row['source_highlight_pattern'] = _match_pattern(src_literals)
+        return True

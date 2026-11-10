@@ -1,0 +1,466 @@
+# Discovery Sidecar Deploy / Rollback / Rebuild Runbook (DATA-08)
+
+**Status:** ACTIVE. Version 1, created 2026-07-23 (Phase 134, plan 134-08).
+
+> **Note (2026-08-16):** `DISCOVERY_ENABLED` has been ON in production since 2026-08-08. The
+> "flag stays OFF" language below describes the flag-bypassed readiness smoke this runbook's
+> *deploy* step runs before the flag is ever touched — it is not a claim that the flag is off in
+> production today.
+
+This is the operational runbook for shipping, rolling back, and reproducibly
+rebuilding the Discovery Data Spine sidecar (`discovery.db`). It is the
+concrete procedure the 134-08 Task 3 human/live-server checkpoint follows and
+the reference for every future refresh (FUT-04).
+
+This runbook does not name the reference corpora the sidecar draws on; sourcing detail and an
+additional pre-upload content-safety check are maintained in the private operations runbook.
+
+---
+
+## 0. Deploy shape at a glance
+
+```
+dev box:   build --release --frozen-precision-defaults
+             -> <sidecar-verify script, kept in the private repository> <DB> --expected-frame-hash <hex>
+             -> verify_append_preservation.py <LIVE copy> <DB>   (OPS-02: no unruled loss of a
+                live main-pool identification)
+web box:   scp <DB> asset-first (immutable content-hashed name)
+             -> STAGE candidate manifest.json.candidate (points at the new asset_basename)
+             -> verify + strict content-safety gate + append-preservation gate the STAGED target
+                (exact filename resolved from the candidate manifest, NEVER the live/old one)
+             -> ATOMIC live-manifest swap (mv manifest.json.candidate manifest.json)
+             -> restart -> live smoke (flag-bypass readiness probe; DISCOVERY_ENABLED stays OFF)
+rollback:  ATOMIC repoint live manifest to the PRIOR asset_basename -> restart
+```
+
+The build and verify-sidecar steps run scripts kept in the private repository; only
+`verify_append_preservation.py` is public (see §2.1/§2.4 below for the exact commands this repo ships).
+
+Trust boundaries: (1) **dev-box built DB → prod web box** — the staged verify
+must pass on the STAGED filename before the swap; (2)
+**live manifest pointer → loader** — the atomic manifest swap + exact-basename
+resolution IS the deploy/rollback safety mechanism.
+
+---
+
+## 1. On-box layout (what the loader reads)
+
+The sidecar lives in repo-root **`discovery_data/`** on the web box — OUTSIDE
+`web/static/`, so it can never be served as raw bytes (mirrors
+`atlas_data/`). The whole directory is gitignored (`/discovery_data/`), so both
+the `.db` and `manifest.json` are managed OUT OF BAND via `scp` — never via
+`git` / `deploy.sh`. Files:
+
+| File | Role | Mutability |
+|---|---|---|
+| `discovery_data/manifest.json` | The **live pointer**: `asset_basename`, `content_hash`, `frame_content_hash`, `schema_version`. | **MUTABLE** — atomically swapped on deploy/rollback. |
+| `discovery_data/<asset_basename>.db` | The content-hashed sidecar payload. | **IMMUTABLE** — a new build is a new filename; old siblings are left in place. |
+
+`web/discovery_assets.py::_resolve_versioned_db()` resolves ONLY the EXACT
+`<asset_basename>.db` named in the manifest. **A sibling `*.db` that is not that
+exact name is deliberately IGNORED** — this is what makes rollback safe: leaving
+the prior asset on disk never causes it to be picked up. The loader runs ONCE at
+startup (`load_discovery_state()` from `web/main.py`); there is no per-request
+`os.path.exists`, so the process MUST be restarted after any manifest swap.
+
+Current live frame (example, for reference — replace with the frame you are
+shipping):
+
+- `asset_basename` = `discovery-v1-8e43451300429ed4ace5e29e5513359a29674ac49731d5c969eb1d607e0ca065`
+- `content_hash`   = `8e43451300429ed4ace5e29e5513359a29674ac49731d5c969eb1d607e0ca065`
+- `frame_content_hash` = `17bf5601bc1ef89404ee5ccdeb1ce9616f3e3274432c4297f79b5c8a99ba6efd`
+- `schema_version` = `discovery-v1`
+
+> **Exact-filename discipline (N6):** every command below names the exact
+> `.db` / manifest filename. NEVER use a `*` glob — on the dev box the shell is
+> PowerShell, where a stray glob resolves unpredictably, and a glob could match
+> a stale sibling and swap in the wrong asset.
+
+---
+
+## 2. DEPLOY (asset-first)
+
+### 2.1 Build + verify + gate on the dev box
+
+Build the sidecar (see §4 for the full reproducible invocation), then, on the
+dev box, verify it against its own frame hash over the exact built filename:
+
+```powershell
+# dev box (Windows / PowerShell). $DB = the exact built filename.
+$env:PYTHONUTF8 = '1'
+$DB = 'discovery_data\discovery-v1-<content_hash>.db'
+$FRAME = '<frame_content_hash from manifest.json>'
+# verify-sidecar is a script kept in the private repository:
+# <private verify-sidecar command> $DB --expected-frame-hash $FRAME
+# $LIVE = a byte copy of the asset production serves (its SHA-256 = the box's live content_hash)
+python scripts/verify_append_preservation.py $LIVE $DB --report-html _tmp\append-delta.html --draft-acceptance _tmp\append-acceptance.json
+```
+
+Both MUST exit 0. If either fails, STOP — do not upload. (The first is the
+same gate 134-07 already passed for the current frame; re-run it on any rebuild.
+The second is OPS-02 — see the `## Amendment 2026-10-20` section below for what to do
+when it reports a loss.)
+
+> **⚠ Amendment 2026-08-02 (Phase 136) — `$FRAME` here is NOT an externally
+> pinned value.** It is read from the CANDIDATE build's own `manifest.json` —
+> the artifact being verified vouching for itself. That can prove internal
+> self-consistency (the DB matches the frame it claims) but it CANNOT detect
+> a wrong rebuild (a build over the wrong inputs still produces an internally
+> self-consistent manifest). For the Phase-136 rebuild, `$FRAME` MUST instead
+> be the PRE-rebuild frame hash from an externally pinned source — today that
+> is the private frame-identity record's `frame_content_hash`
+> (`53725098…`, the currently-deployed v2 frame), superseded once plan 136-05
+> lands its rebuild-preservation baseline artifact (pinned from the live
+> asset BEFORE the rebuild begins). See the `## Amendment 2026-08-02` section
+> below for the full rebuild-preservation gate this feeds.
+
+### 2.2 Upload the asset first (temp name → final name)
+
+`scp` the `.db` to the box's `discovery_data/` while the live `manifest.json`
+still points at the PRIOR asset (so nothing reads the half-uploaded file). Upload
+to a temp name, then rename to the final immutable content-hashed name once the
+transfer is complete:
+
+```bash
+# web box target dir = <APP_ROOT>/discovery_data/  (repo-root on the box)
+scp discovery-v1-<content_hash>.db  webbox:<APP_ROOT>/discovery_data/discovery-v1-<content_hash>.db.uploading
+ssh webbox 'mv -f <APP_ROOT>/discovery_data/discovery-v1-<content_hash>.db.uploading \
+                  <APP_ROOT>/discovery_data/discovery-v1-<content_hash>.db'
+```
+
+The live app is still serving the old frame — no behavior change yet.
+
+### 2.3 STAGE a candidate manifest
+
+Write the new manifest as `manifest.json.candidate` (NOT the live `manifest.json`
+yet). It points at the new `asset_basename` and carries the new `content_hash` +
+`frame_content_hash`. Copy the `manifest.json` produced by the build:
+
+```bash
+scp manifest.json  webbox:<APP_ROOT>/discovery_data/manifest.json.candidate
+```
+
+### 2.4 Verify the STAGED target (pre-swap)
+
+Resolve the DB filename FROM THE STAGED CANDIDATE manifest (never the live/old
+one) and run BOTH gates over that exact staged filename ON THE BOX (the private
+operations runbook adds its own pre-upload content-safety check at this point):
+
+```bash
+ssh webbox
+cd <APP_ROOT>
+export PYTHONUTF8=1
+# resolve the staged asset_basename from the CANDIDATE manifest, not the live one:
+STAGED_DB="discovery_data/$(python -c "import json;print(json.load(open('discovery_data/manifest.json.candidate'))['asset_basename'])").db"
+# ⚠ Amendment 2026-08-02 (Phase 136): do NOT read the expected frame hash from
+# the candidate manifest being verified (self-vouching — see the §2.1 note
+# above). Pin it from an EXTERNAL source instead: the pre-rebuild frame from
+# the private frame-identity record, or plan 136-05's rebuild-preservation
+# baseline once it lands.
+STAGED_FRAME="<external pinned frame_content_hash — the private frame-identity record, or the 136-05 rebuild-preservation baseline>"
+
+# verify-sidecar is a script kept in the private repository:
+# <private verify-sidecar command> "$STAGED_DB" --expected-frame-hash "$STAGED_FRAME"
+# OPS-02. Add --acceptance scripts/discovery_append_acceptance_<live12>_to_<candidate12>.json
+# only when the owner has ruled on this exact delta (the file must be in the deployed code).
+python scripts/verify_append_preservation.py \
+    --live-manifest discovery_data/manifest.json \
+    --candidate-manifest discovery_data/manifest.json.candidate
+```
+
+Both MUST exit 0 on the box before the swap. This re-checks the asset AT ITS
+DESTINATION (defends against a corrupt transfer) before the exact bytes that will go live.
+**Reading `frame_content_hash` FROM
+the staged candidate manifest itself (the pre-2026-08-02 form of this command)
+cannot detect a wrong rebuild** — a build over the wrong inputs still produces
+an internally self-consistent manifest that would pass its own self-check.
+
+### 2.5 ATOMIC live-manifest swap
+
+Preserve the current live manifest as `manifest.prev.json` (the rollback
+target), then atomically move the candidate into place. `mv` within one
+directory on one filesystem is atomic — a concurrent reader sees either the old
+or the new manifest, never a torn file:
+
+```bash
+cp -f  discovery_data/manifest.json       discovery_data/manifest.prev.json   # rollback target
+mv -f  discovery_data/manifest.json.candidate  discovery_data/manifest.json    # ATOMIC swap
+```
+
+### 2.6 Restart + live smoke (flag stays OFF)
+
+Restart the web process so the startup `load_discovery_state()` picks up the new
+manifest. Then run a flag-bypassing readiness smoke — `DISCOVERY_ENABLED` STAYS
+OFF this phase, so no UI/surface is exposed; the smoke only proves the service
+reads real rows:
+
+```bash
+# restart per the standard web-app restart (see reference_server_operations)
+export PYTHONUTF8=1
+python scripts/smoke_discovery_readiness.py
+```
+
+> **CHANGED 2026-08-20 — this step used to run `scripts/bench_discovery.py
+> --sample 50 --warm-passes 1`, and that was wrong.** Neither of those flags
+> bounds `bench_findings_page()`, which is invoked unconditionally and expands to
+> ~15,363 filter/unit/sort combinations x 5 repeats — about **76,815 timed
+> statements, one to two hours**. On 2026-08-19 it turned the V4.2 deploy into an
+> hour-plus hang that ended in `client_loop: send disconnect: Connection reset`,
+> and the deploy was recorded as **failed** when steps 0–7 had in fact succeeded
+> and the swap was live and healthy. Depth belongs to
+> the private sidecar-verify script (already run pre-swap, §2.5) and breadth belongs
+> to the benchmark, run deliberately and **never on a deploy path**.
+
+`smoke_discovery_readiness.py` answers the one question this step exists to ask —
+can the app load the asset it is now serving, and does that asset answer real
+reads — in **about a second**. It goes through the real `load_discovery_state()`
+and `web.discovery` paths, not just the file, so a fail-closed sidecar, a hash
+mismatch, a wrong audience or a loader-rejected schema all surface here. It also
+reads a **citation range over the heaviest locus-bearing work**, deliberately:
+that read was silently broken from before 2026-08-19 until `4f6e31f4`, and a
+smoke that only fetched the default page did not see it. Exit 0 means ready;
+non-zero names the reason.
+
+Confirm the app log shows NO "Discovery sidecar not loaded (fail-closed)" line.
+
+**If the deploy runs over ssh, the long-step lesson applies to every step:** give
+the client `-o ServerAliveInterval=15 -o ServerAliveCountMax=8`. A silent
+connection reset is indistinguishable from a real failure, which is exactly how
+the V4.2 outcome was misread.
+
+### 2.7 Record the prod-box RSS (Task 3)
+
+While the process is warm, sample the SERVING process's RSS directly and record
+the number in `docs/specs/discovery-budgets.md` §4 as
+**MEASURED ACTUALS (prod-box)** vs the ≤ 250 MB cap:
+
+```bash
+systemctl show -p MainPID --value genizah-web | xargs -I{} grep VmRSS /proc/{}/status
+```
+
+Read it from the live process, **not** by running `bench_discovery.py` on the box
+(as this section used to suggest). That is the same trap as §2.6: the benchmark's
+`added RSS` figure costs a one-to-two-hour run to obtain, and the number wanted
+here is the RSS of the process actually serving readers — which the command above
+reports in milliseconds. Run the benchmark deliberately, off the deploy path,
+when a benchmark is what you want.
+
+---
+
+## 3. ROLLBACK
+
+Because old asset siblings are left on disk and the loader ignores any file that
+is not the manifest's exact `asset_basename`, rollback is a single atomic
+manifest repoint — no file deletion, no re-upload:
+
+```bash
+mv -f  discovery_data/manifest.prev.json  discovery_data/manifest.json   # ATOMIC repoint to prior asset
+# restart the web process
+python scripts/smoke_discovery_readiness.py                              # confirm the app is fully up on the prior frame
+```
+
+The app comes back on the prior frame; the new asset sibling stays on disk,
+inert (ignored), ready to re-point forward once the issue is resolved. If the
+prior manifest was not preserved, reconstruct a candidate manifest pointing at
+the prior `asset_basename` and swap that in (§2.3–2.5) — the mechanism is
+identical.
+
+**Rollback drill (Task 3):** deploy the new frame (§2), then immediately
+rollback (§3) and confirm the app stays fully up on the prior frame, then
+re-point forward. This proves the swap is reversible before it matters.
+
+---
+
+## 4. REBUILD (reproducible)
+
+**⚠ Amendment 2026-08-02 (Phase 136): the command below was corrected.** The
+prior form of this command was v1-shaped — it named only the source DB,
+`--from-approved`, `--crosswalk`, `--research-data-dir`, `--libraries-csv`,
+`--fjms-db` and `--out`, silently OMITTING the three v2-specific hash-pinned
+inputs (`--canonical-merges`, `--composition-dates`, `--seftja-dates`) the
+LIVE deployed v2 asset actually requires. A rebuild run against the OLD command
+would silently drop those inputs and produce a v1-shaped asset, not a v2
+rebuild. The corrected command below names all seven pinned inputs (crosswalk
++ the three v2 inputs, each with its SHA-256) explicitly rather than
+defaulting:
+
+```powershell
+# dev box (Windows / PowerShell). Exact filenames only; no glob.
+# The build script itself is kept in the private repository; shown here as pseudocode
+# for the full set of pinned inputs it takes.
+$env:PYTHONUTF8 = '1'
+
+<private build-sidecar command> `
+    same_work_spike/probe/data/fullcorpus_v2.db `
+    --from-approved              discovery_data/discovery-review-approved-final.csv `
+    --crosswalk                  discovery_data/crosswalk.json `
+    --canonical-merges           <private hash-pinned input -- see private ops runbook> `
+    --canonical-merges-sha256    cc054d111b9b4a76dd69912923ba50cd2b63f7820cb632617f645c12c207429a `
+    --composition-dates          discovery_data/composition_dates.json `
+    --composition-dates-sha256   2b46b4708ddccb9f26961dcb9ba6d62b23d64cc1da225d133af1be21bf2e9476 `
+    --seftja-dates               <private hash-pinned input -- see private ops runbook> `
+    --seftja-dates-sha256        0076028917c60044ac72ee36504c173b9e6decd0a5aef9890ec0f0fe934b22d7 `
+    --research-data-dir          same_work_spike/probe/data `
+    --libraries-csv              libraries.csv `
+    --fjms-db                    fist_data/fjms_enrichment.db `
+    --out                        discovery_data/discovery-v1-<new_content_hash>.db `
+    --release `
+    --precision-spec             <path to the §1.6-amended precision spec — see the note below>
+```
+
+The three v2 SHA-256 pins above are the CURRENTLY-DEPLOYED values, recorded in
+the private frame-identity record §1 (`canonical_merges_sha256` /
+`composition_dates_sha256` / `seftja_dates_sha256`) alongside `source_db_sha256`
+and `crosswalk_sha256`. **Re-verify them against the live asset's own `meta`
+table before reusing them for a new rebuild** — if the owner-held source files
+named above have moved or changed since the 135-07 bake, the correct current
+paths and hashes must be re-pinned here as a further dated amendment, never
+silently substituted with a default.
+
+Notes:
+
+- `--release` REQUIRES a precision source: either `--frozen-precision-defaults`
+  (bakes the UNAMENDED pre-registered contract precision — insufficient for
+  this rebuild, since it does not carry the §1.6 `tier_a` authorization from
+  `docs/specs/discovery-sidecar-schema-v1.md`'s 2026-08-02 amendment) OR
+  `--precision-spec <json>` (an explicit spec, validated by
+  `_validate_precision_spec` against the frozen release `band_precision`
+  row-set). **The Phase-136 rebuild REQUIRES `--precision-spec`** — the spec
+  JSON must be the frozen §1.6 row-set WITH the amended `tier_a` row
+  (`measurement_status='measured_pass'`, `ci_low=0.9084`, `precision` still
+  NULL); `--frozen-precision-defaults` would silently omit that authorization.
+- The build writes `discovery_data/manifest.json` alongside the `.db`; its
+  `asset_basename` == the `.db` stem, its `content_hash` == the DB bytes' SHA-256,
+  and its `frame_content_hash` == the membership-based frame hash. The final
+  filename is chosen by the build's own content hash — set `--out` to the exact
+  intended name (or let the build name it and read the manifest back). **This
+  self-reported `frame_content_hash` is NEVER the value used as
+  `--expected-frame-hash` when verifying THIS SAME build** — see the §2.1/§2.4
+  external-pin notes above and the Amendment section below.
+- After building, run the §2.1 verify gates before uploading.
+
+A full rebuild + re-deploy of the SAME membership produces the SAME
+`frame_content_hash` (volatile `meta` excluded from the hash), so a rebuild that
+changes the frame hash means the membership changed — treat that as a NEW
+versioned frame (the private frame-identity record, dated-amended in place),
+not an in-place swap. The Phase-136 rebuild is ADDITIVE (new columns/tables
+only, no membership change), so its `frame_content_hash` is EXPECTED to equal
+the pre-rebuild value (`53725098…`) — an unexpected change here is a signal to
+investigate before deploying, not to update the pin and proceed.
+
+## Amendment 2026-08-02 (Phase 136) — externally pinned frame hash + rebuild-preservation gate
+
+**Reading the expected frame hash from the candidate build's own manifest cannot detect a wrong
+rebuild** (D-02b) — a build run over the wrong inputs still produces an internally self-consistent
+manifest whose `frame_content_hash` matches its own DB. This amendment corrects that at both points in
+§2 where `$FRAME`/`STAGED_FRAME` was previously read from the artifact being verified:
+
+- **§2.1 (dev-box build verify):** `$FRAME` must be an EXTERNALLY pinned value, not read from the
+  just-built `manifest.json`.
+- **§2.4 (staged pre-swap verify):** `STAGED_FRAME` must be an EXTERNALLY pinned value, not read from
+  `manifest.json.candidate`.
+
+**The pinned source, until plan 136-05 lands:** the private frame-identity record's
+`frame_content_hash` (`53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7`) — the frozen,
+committed, pre-Phase-136 frame identity. **Once plan 136-05's rebuild-preservation gate lands** (pinned
+from the live asset BEFORE this rebuild begins — the full old/new allowlisted-diff gate D-02b
+describes: every pre-existing column byte-identical, only the new coverage/novelty/visibility columns
+and the amended `tier_a` registry row permitted to differ), its baseline artifact supersedes
+that record as the authoritative external pin for this specific rebuild, and this note
+should be updated to point at it by name.
+
+This amendment does not itself change the deploy MECHANISM (the atomic manifest swap, the
+exact-basename resolver, and the rollback procedure in §1-§3 above are unaffected) — it changes WHERE
+the verification commands' expected-frame-hash value comes from.
+
+---
+
+## Amendment 2026-08-03 (Phase 136, plan 136-13) — `--canonical-merges` named the WRONG FILE
+
+The §4 rebuild command block named the full canonical-merges census (a private, hash-pinned input;
+86,163 bytes, SHA-256 `86b1d0ea…`). The **live v2 asset was not built from that file.** Its `meta`
+table pins `canonical_merges_sha256 = cc054d11…`, which is the slim build projection of that same
+private input (2,382 bytes). The command block above is corrected in place to name the slim file.
+
+This was caught by the §4 instruction to re-verify the pinned hashes against the live asset's own
+`meta` table before reusing them. That check is load-bearing and must not be skipped: it is the only
+thing standing between the documented command and a wrong-input rebuild.
+
+**Naming the census file is not a harmless synonym.** The full census (built by a script kept in the
+private repository) carries nine fields per merge entry, including some that must never reach a public
+build, while the build's `--canonical-merges` parser accepts EXACTLY `{dropped_by_135, merges}` with
+exactly three frozen fields per entry and **halts on any extra field**. The slim file is the deliberate,
+pure-ASCII projection fit for a public build input. Pointing the rebuild at the full census would
+therefore halt the parser rather than succeed.
+
+**Membership is unaffected.** Both files carry the same 16 merges and the same
+`dropped_by_135 = ["w001239"]`; only the per-entry field set differs. So this correction does not
+change the frame, and the Phase-136 rebuild's `frame_content_hash` is still EXPECTED to equal the
+pre-rebuild `53725098…`.
+
+The other four pinned inputs (`source_db_sha256`, `crosswalk_sha256`, `composition_dates_sha256`,
+`seftja_dates_sha256`) were re-verified against the live asset's `meta` on 2026-08-03 and all MATCH.
+
+`--precision-spec` for this rebuild is
+`.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-PRECISION-SPEC.json`,
+generated from the module's own `_frozen_real_band_precision_rows(v2_bands=True)` — the single source
+of truth `_validate_precision_spec` cross-checks against — so it carries the D-02a `tier_a`
+authorization pair (`ci_low=0.9084`, `measurement_status='measured_pass'`, `precision` still NULL) by
+construction rather than by hand-transcription.
+
+---
+
+## Amendment 2026-10-20 (OPS-02, v9.0.0 audit C3) — the append-preservation gate
+
+**Why.** Track-1 matching is not monotonic in reference-corpus size: `REF_DF_CAP` drops every
+posting of an over-cap gram, so adding reference works removes match seeds from old, unrelated
+works. The V4 -> V4.2 append deleted 131 live main-pool identifications without any gate
+noticing; the owner accepted that loss on 2026-08-19 on condition that every later append is
+diffed against live before it ships, as a gate. `scripts/verify_append_preservation.py` is that
+gate, now step three of §2.1 and §2.4.
+
+**What blocks.** A live main-pool identification (`discovery_identification.main_pool = 1`,
+keyed by `(sys_id, canonical_work_id)`) that the candidate deletes or demotes below the
+main-pool bar. Each loss is given one cause (`demoted`, `deleted_page_reattributed`,
+`deleted_evidence_kept`, `deleted_no_pair_evidence`); the cause explains, it never excuses.
+Identifications outside the main pool that disappear, and everything the candidate adds, are
+counted and do not block. Both inputs must be public projections; anything unreadable fails.
+
+**When it reports a loss.**
+
+1. Send the owner the `--report-html` page (one row per loss: shelfmark, work, cause, coverage
+   live -> candidate).
+2. If the owner accepts, fill `ruled_by`, `ruled_on` and `ruling` in the `--draft-acceptance`
+   file, in the owner's words, and commit it as
+   `scripts/discovery_append_acceptance_<live12>_to_<candidate12>.json`. Never fill it without
+   the owner's ruling.
+3. Re-run with `--acceptance <that file>`; it passes only for exactly these two files (by
+   SHA-256) and exactly this set of losses. A rebuild voids it.
+4. Deploy that code before §2.4, so the box has the script and the acceptance.
+
+**Measured on V4 -> V4.2** (`528f6d36…` -> `e5bcd347…`, 2026-10-20): exit 1 with 654 losses —
+the 131 deletions the August review counted, plus **523 demotions it did not** (218
+`low_coverage`, 119 `overlapping_tie`, 116 `shared_wording`, 57 `insufficient_length`, 13
+`missing_signal`; 406 of the 523 with lower coverage than live). Production serves `e5bcd347…`
+(genizahsearch.com showed its counts on 2026-10-20: 30,528 main pool, 28,074 additional, 58,602
+in all), so the 523 are on the site under "התאמות נוספות". **Owner ruling 2026-10-20: accept
+them, nothing more**; the matcher fix stays deferred.
+
+Rollback (§3) does not run this gate: returning to the prior asset is the point.
+
+---
+
+## 5. Cross-references
+
+- `docs/specs/discovery-budgets.md` — PERF-01 caps + measured actuals (the
+  prod-box RSS from §2.7 lands there).
+- `docs/specs/discovery-sidecar-schema-v1.md` — the frozen schema + frame-hash
+  recipe the verifier enforces.
+- `web/discovery_assets.py` — the exact-basename manifest resolver +
+  siblings-ignored fail-closed loader (the rollback mechanism).
+- server operations notes (private).
+
+---
+
+*Phase: 134-Discovery Data Spine (plan 134-08).*
+*Runbook for DATA-08 (asset-first deploy + rollback + reproducible rebuild).*

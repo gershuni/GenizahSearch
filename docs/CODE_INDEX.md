@@ -1,0 +1,3847 @@
+# Codebase Index
+
+> Last updated: 2026-09-27
+
+Auto-generated index of classes and methods. New sections for modules can be
+appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
+Python AST and emits markdown in the existing style).
+
+**Phase 77 (Serializer & JSON Export) added** `shared/search_serializer.py` —
+single source of truth for the Claude-friendly JSON payload shape consumed by
+the new `/api/export/json` and `/api/export/parallels/json` download handlers
+(and Phase 78+ `/api/search` / `/api/parallels`). See its dedicated section
+below alongside the other `shared/` service modules.
+
+**v7.9 decomposition (Phases 67–74) added the following modules** — see the
+"v7.9 Decomposed Modules" section below for their class / function indexes:
+
+- Desktop: `desktop/widgets.py`, `desktop/title_helpers.py`,
+  `desktop/image_loader.py`, `desktop/result_dialog.py`,
+  `desktop/dialogs_filter.py`, `desktop/dialogs_scholarly.py`,
+  `desktop/viewers.py`, `desktop/puzzle.py`, `desktop/vs_cache.py`
+- Web: `web/pages/search_state.py`, `web/pages/search_results.py`,
+  `web/pages/browse_state.py`, `web/pages/browse_enrichment.py`,
+  `web/search_bootstrap.py` (and, since PR #436, `web/search_runs.py`)
+
+(The `## genizah_app.py` and `## genizah_core.py` sections were since refreshed by
+the v8.3.0 pass below; `web/pages/search.py` / `web/pages/browse.py` are large and
+not separately indexed here — grep them directly.)
+
+**v8.3.0 God-File Decomposition (Phases 122-127) refreshed the `genizah_core.py`
+and `genizah_app.py` sections below and added new `shared/*` + `desktop/*` sections.**
+`genizah_core.py` is now a thin (~755-line) re-export facade — search, metadata,
+variants, codicological, Responsa, joins/lists managers, browse-map utils, text
+normalization, the indexer, and the SearchEngine/LabEngine/LabSettings classes now
+live in `shared/*.py` (see the "v8.3.0 Decomposed Modules" section). Desktop dialog/
+widget/update-UI classes moved to `desktop/settings_dialogs.py`, `desktop/ui_widgets.py`,
+and `desktop/update_ui.py`. `genizah_core.X is shared.Y.X` and `genizah_app.X is
+desktop.Y.X` identity holds via the facades.
+
+## genizah_app.py
+
+- **Function** `space_scroll_action` (Line 135) — Pure decision for desktop results-table Space-scroll.
+- **Function** `paused_seconds` (Line 168) — Seconds spent parked, INCLUDING a pause that is still in progress.
+- **Function** `effective_elapsed` (Line 184) — Working seconds elapsed: monotonic span minus parked time, never negative.
+- **Class** `_PauseCtx` (Line 201) — Pause UI state for ONE operation (the search tab, or the composition tab).
+    - Method `__init__` (Line 213)
+    - Method `reset_for_run` (Line 223)
+    - Method `elapsed` (Line 232) — Working-time elapsed for this operation, excluding parked time.
+    - Method `accepts_ack` (Line 239) — Whether a queued pause acknowledgement belongs to the live pause.
+- **Function** `_aggregate_local_pages_with_separators` (Line 260) — Phase 96 NEW-2 D-14: aggregate page texts with labeled separators.
+- **Function** `_setup_crash_handler` (Line 296)
+- **Class** `LabPanel` (Line 332)
+    - Method `__init__` (Line 333)
+    - Method `set_engine` (Line 346)
+    - Method `enable_controls` (Line 353)
+    - Method `init_ui` (Line 356)
+    - Method `refresh_values` (Line 465)
+    - Method `on_change` (Line 481)
+    - Method `open_scoring` (Line 496)
+    - Method `_mark_rebuild_required` (Line 501)
+    - Method `run_rebuild` (Line 509)
+    - Method `on_rebuild_progress` (Line 541)
+    - Method `on_rebuild_error` (Line 544)
+    - Method `on_rebuild_finished` (Line 549)
+- **Function** `log_tls_relaxation_notice` (Line 560) — Log once that TLS verification is intentionally disabled for thumbnail fetches.
+- **Function** `_get_catalog_filter_sets` (Line 578) — Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both sets).
+- **Function** `reset_catalog_filter_sets` (Line 604) — Invalidate the cached catalog availability sets so the next filtered query
+- **Class** `_CatalogRefreshWorker` (Line 612) — Background worker for catalog browse DB queries (authors/works/results).
+    - Method `__init__` (Line 621)
+    - Method `run` (Line 650)
+- **Class** `_CatalogFacetWorker` (Line 697) — Background worker that computes per-library facet counts for the catalog dialog.
+    - Method `__init__` (Line 711)
+    - Method `run` (Line 730)
+- **Function** `_format_list_star` (Line 762)
+- **Function** `_build_search_results_xlsx_bytes` (Line 778) — Build the 4-sheet workbook bytes for desktop xlsx search-results export.
+- **Function** `_local_page_label` (Line 1194) — D-02 page label for a LOCAL result. ``chunk_locator`` is used VERBATIM
+- **Function** `_build_export_data_row` (Line 1208) — Build one 7-column data_rows entry for export_results.
+- **Function** `_csv_extra_cols` (Line 1246) — Return the extra (Filepath, Page) pair for LOCAL rows in a mixed CSV.
+- **Function** `_local_parent_folder` (Line 1263) — Parent-folder name from a LOCAL filepath, separator-agnostic.
+- **Function** `_format_txt_local_block` (Line 1277) — Return the TXT block string for a LOCAL result (Phase 103 D-09).
+- **Function** `_format_txt_genizah_block` (Line 1316) — Return the TXT block string for a Genizah result.
+- **Function** `_show_ok_notice` (Line 1341) — QMessageBox.information/.warning (`kind` is 'information' or
+- **Function** `_report_failed_relaunch` (Line 1355) — The language restart could not start the new copy (relaunch_if_requested's
+- **Function** `_telemetry_result_bucket` (Line 1365) — Coarse result-count bucket for Phase 114 telemetry (D-07/D-08).
+- **Class** `GenizahGUI` (Line 1380) — Main application window orchestrating search, browsing, and indexing.
+    - Method `__init__` (Line 1419)
+    - Method `_report_lists_load_problem` (Line 1629) — Tell the user when lists.pkl could not be read at startup.
+    - Method `_watch_lists_saves` (Line 1690) — Hear about lists.pkl saves that fail, whichever thread ran them.
+    - Method `_on_lists_save_state` (Line 1711) — A lists.pkl save failed (saved False) or landed again (saved True).
+    - Method `_lists_file_path` (Line 1744)
+    - Method `_lists_not_saved_line` (Line 1747) — The status-bar line shown while saves do not reach lists.pkl.
+    - Method `start_background_init` (Line 1755)
+    - Method `on_startup_finished` (Line 1764)
+    - Method `_sync_telemetry_identity` (Line 1905) — Reconcile PostHog identity against the live Supabase session.
+    - Method `_run_startup_telemetry_coordinator` (Line 1930) — Single boot/opt-in sequence: consent → identity-sync → session_start.
+    - Method `_telemetry_ready` (Line 1989) — Producer gate: True only after the coordinator's session_start branch ran.
+    - Method `_emit_feature_opened` (Line 2001) — Centralized desktop_feature_opened producer (D-03 / D-04 / REVIEWS MEDIUM-9).
+    - Method `_setup_active_ping` (Line 2034) — Wire daily active-user heartbeat (D-16 / USAGE-04).
+    - Method `_on_app_state_changed` (Line 2057) — Focus/resume handler — fires heartbeat on app activation.
+    - Method `_maybe_emit_active_ping` (Line 2077) — Emit desktop_active_ping at most once per UTC day, active-only (USAGE-04 / D-16).
+    - Method `_maybe_flush_perf_summary` (Line 2114) — Periodically flush the per-session perf accumulator (Phase 115 D-04/D-05/KQ-4).
+    - Method `_check_shelfmark_completer_ready` (Line 2144)
+    - Method `setup_shelfmark_completer` (Line 2152) — Initialize the shelfmark autocomplete with data from csv_bank and Parts.
+    - Method `init_ui` (Line 2208)
+    - Method `_update_corner_login_state` (Line 2392) — Update the login button (and its side-menu twin) based on login state (and Sync lists now,
+    - Method `_set_lists_sync_now_enabled` (Line 2406)
+    - Method `_set_active_tab` (Line 2414) — Set the active tab programmatically without emitting telemetry.
+    - Method `_on_tab_changed` (Line 2431) — Handle tab change events.
+    - Method `_corner_login_clicked` (Line 2485) — Login, or -- logged in -- the account menu, under the button clicked
+    - Method `_show_login_dialog` (Line 2492)
+    - Method `_show_register_dialog` (Line 2505)
+    - Method `_do_logout` (Line 2516) — Sign out. Returns at once: the last list upload runs on the runner, and the
+    - Method `_finish_logout` (Line 2567) — The second half of a sign-out; runs once per sign-out.
+    - Method `_logout_notice_paragraphs` (Line 2632) — What the sign-out notice says about the lists, beyond "You have been logged out.".
+    - Method `_lists_sync_account` (Line 2681) — The signed-in account's UUID, or None.
+    - Method `_enable_lists_cloud_sync` (Line 2702) — Turn list sync on for the signed-in account, then offer the sync choice.
+    - Method `_on_lists_preview` (Line 2756) — The preview of the account's lists arrived: offer the sync choice if needed.
+    - Method `_sync_dialog_allowed` (Line 2813) — Whether a list-sync question (the sync choice, the website-removal prompt)
+    - Method `_offer_lists_sync_dialog` (Line 2824) — Show the sync choice now if the screen is free, else hold it and look again.
+    - Method `_recheck_held_lists_dialog` (Line 2838)
+    - Method `_drop_held_lists_dialog` (Line 2856)
+    - Method `_show_lists_sync_choice` (Line 2866) — The sync choice. Closed without an action (Skip), uploads continue: one now.
+    - Method `_sync_error_text` (Line 2872) — A failed sync `result`'s message, in the interface language.
+    - Method `_too_long_notes_line` (Line 2889) — The line about notes too long to update in the account. While lists.pkl
+    - Method `_sync_note_lines` (Line 2897) — Lines about notes to add to a sync result message, success or failure.
+    - Method `_show_lists_sync_dialog` (Line 2924) — Show dialog to let user choose how to sync lists. Returns its exec() result:
+    - Method `_lists_sync_runner` (Line 3023) — The window's one ListsSyncRunner (desktop/lists_sync_runner.py), made on first use.
+    - Method `_close_lists_sync_progress` (Line 3037) — Close a list-sync progress dialog without it cancelling its job:
+    - Method `_lists_sync_status` (Line 3052) — A list-sync line on the window's status bar (seen from every tab).
+    - Method `_do_sync_action` (Line 3059) — Run the chosen sync action on the list-sync worker, behind a progress
+    - Method `_on_lists_sync_progress` (Line 3083) — The runner's progress for one job: 'start' (a queued job's turn came),
+    - Method `_on_lists_sync_done` (Line 3101) — A sync-dialog action ended (UI thread): say how it went.
+    - Method `_on_lists_auto_done` (Line 3193) — An automatic upload ended (UI thread): the website-removal prompt for
+    - Method `_offer_web_removals` (Line 3217) — Ask about entries the website removed from a list (desktop/lists_web_removals_dialog.py).
+    - Method `_recheck_web_removal_offer` (Line 3265)
+    - Method `_stop_web_removal_offer` (Line 3268)
+    - Method `_web_removal_entry` (Line 3278) — (item_id, list_id, shelfmark text, list name) for one row of the prompt.
+    - Method `_show_discoveries_dialog` (Line 3295)
+    - Method `_show_create_discovery_dialog` (Line 3303)
+    - Method `_show_all_corrections_dialog` (Line 3328)
+    - Method `_show_my_corrections_dialog` (Line 3332)
+    - Method `_show_my_comments_dialog` (Line 3339)
+    - Method `_browse_toggle_edit_mode` (Line 3352) — Toggle edit mode for inline corrections.
+    - Method `_browse_on_text_changed` (Line 3383) — Handle text changes in edit mode.
+    - Method `_browse_cancel_edit` (Line 3415) — Cancel edit mode and restore original text.
+    - Method `_browse_exit_edit_mode` (Line 3434) — Exit edit mode without restoring text (after successful submit).
+    - Method `_browse_save_correction` (Line 3449) — Save the inline correction.
+    - Method `_browse_change_version` (Line 3592) — Change between text versions.
+    - Method `_browse_load_version` (Line 3608) — Load and display a specific version.
+    - Method `_browse_markers_are_ours` (Line 3698) — Are the asterisks in ``text`` search markers, or the page's own?
+    - Method `_browse_mark_search_hits` (Line 3726) — Re-derive the `*...*` search-hit markers from `browse_highlight_pattern`.
+    - Method `_browse_original_display_text` (Line 3743) — The V0.8 text to re-render, WITH its search-hit markers when we have them.
+    - Method `_browse_display_version_text` (Line 3766) — Display version text in the browse text area.
+    - Method `_displayed_folio_label_for_pgp` (Line 3790) — Folio label ('1r','2v',…) of the image at the current browse page.
+    - Method `_displayed_page_for_pgp` (Line 3810) — (_browse_folio_images, 1-based displayed page, total pages).
+    - Method `_displayed_fgp_image_number_for_pgp` (Line 3827) — FGP image number (fgp_image_number_id) of the image at the current page.
+    - Method `_populate_pgp_combo` (Line 3841) — Build combo items with PGP editions and translations grouped.
+    - Method `_browse_full_htr_text` (Line 4005) — Whole-manuscript HTR (V0.8) text — all folios concatenated — for the
+    - Method `_auto_select_pgp_edition` (Line 4022) — Select the combo item matching the shared default-source policy.
+    - Method `_check_document_community_status` (Line 4088) — Check if document has comments and load available versions.
+    - Method `_browse_add_comment` (Line 4264) — Open comment dialog for current document.
+    - Method `_browse_view_corrections` (Line 4289) — View corrections for current document.
+    - Method `_browse_view_comments` (Line 4312) — View comments for current document.
+    - Method `_browse_view_joins` (Line 4333) — View joined fragments for current document.
+    - Method `_browse_view_visual_similarity` (Line 4376) — REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded.
+    - Method `_enrich_vs_suggestions` (Line 4401) — Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms.
+    - Method `_on_vs_fetch_complete` (Line 4426)
+    - Method `_show_vs_dialog` (Line 4436) — Create and show the enriched Visual Similarity workbench dialog.
+    - Method `_vs_navigate_to` (Line 4890) — Navigate browse to a VS partner manuscript.
+    - Method `_vs_open_joins_with_partner` (Line 4910) — Open JoinsDialog with fragment A (original) and fragment B (partner) pre-filled.
+    - Method `_vs_add_to_puzzle` (Line 4932) — Add a VS partner to the Fragment Puzzle.
+    - Method `_vs_get_partners` (Line 4945) — Get VS partner sys_ids from local DB, cache, or server (synchronous).
+    - Method `_search_in_visual_suggestions` (Line 4972) — Restrict search to visual similarity partner pool ('Search in VS' action).
+    - Method `_browse_visual_suggestions` (Line 5006) — Show VS partner pool as a result set by running a wildcard search restricted to partners.
+    - Method `_clear_vs_restriction` (Line 5036) — Clear the visual similarity search restriction.
+    - Method `_update_vs_breadcrumb` (Line 5045) — Show or hide the VS restriction breadcrumb in the search area.
+    - Method `_update_joins_dropdown` (Line 5074) — Update the joins dropdown menu with connected fragments.
+    - Method `_on_joins_menu_show` (Line 5303) — Called when joins menu is about to show - trigger sync and update.
+    - Method `_navigate_to_joined_fragment` (Line 5314) — Navigate to a joined fragment in browse tab.
+    - Method `_show_results_context_menu` (Line 5322) — Show context menu for search results with community options.
+    - Method `_context_view_document` (Line 5456) — Navigate to browse tab for this document.
+    - Method `_context_submit_correction` (Line 5463) — Open correction dialog from context menu.
+    - Method `_context_add_comment` (Line 5475) — Open comment dialog from context menu.
+    - Method `_context_view_corrections` (Line 5487) — View corrections from context menu.
+    - Method `_context_view_comments` (Line 5498) — View comments from context menu.
+    - Method `_context_share_discovery` (Line 5507) — Share discovery from context menu.
+    - Method `toggle_language` (Line 5522)
+    - Method `create_search_tab` (Line 5573)
+    - Method `set_results_loading` (Line 6311) — Toggle the search results placeholder while components initialize.
+    - Method `create_composition_tab` (Line 6317)
+    - Method `create_browse_tab` (Line 6881)
+    - Method `browse_toggle_lists_panel` (Line 7538) — Toggle the browse lists side panel.
+    - Method `browse_set_lists_panel_visible` (Line 7542) — Show or hide the browse lists side panel.
+    - Method `browse_refresh_lists_panel` (Line 7577) — Refresh the lists tree and items list in the browse panel.
+    - Method `browse_on_list_selected` (Line 7614) — Handle selection of a list in the browse lists panel.
+    - Method `browse_on_list_item_clicked` (Line 7664) — Open a list item in the browse tab using FL/Image ID lookup.
+    - Method `_browse_append_printed_badge` (Line 7709) — Append printed material badge to browse info label text if applicable.
+    - Method `_start_browse_enrichment` (Line 7729) — Centralized enrichment launch — disconnects stale worker, bumps generation counter,
+    - Method `_build_nli_iiif_url_for_page` (Line 7792) — Build a direct NLI IIIF URL for (sys_id, page_idx).
+    - Method `_is_cambridge_display` (Line 7859) — Return True iff display_meta looks like a CUDL-Cambridge source.
+    - Method `_resolve_cambridge_page_or_fallback` (Line 7881) — Compute (display_meta, idx) for a Cambridge CUDL page using
+    - Method `_switch_browse_viewer_to_nli_for_page` (Line 7957) — Flip the browse viewer to NLI and jump to a positional page.
+    - Method `_restore_browse_viewer_to_ext` (Line 8005) — Restore the browse viewer to CUDL after an auto-fallback.
+    - Method `_resolve_cambridge_navigation_index` (Line 8046) — Side-aware index lookup for prev/next navigation on CUDL.
+    - Method `on_browse_enriched_loaded` (Line 8098)
+    - Method `_on_browse_pgp_loaded` (Line 8471) — Handle PGP sources loaded from background thread.
+    - Method `_on_browse_pgp_error` (Line 8555) — Handle PGP source fetch error -- silently fall back to existing behavior.
+    - Method `_build_pgp_extended_info_html` (Line 8564) — Build HTML for PGP metadata section in extended info panels.
+    - Method `_build_fjms_domain_html` (Line 8662) — Build HTML for FJMS domain classifications in extended info.
+    - Method `_build_fjms_catalog_html` (Line 8705) — Build HTML for FJMS catalog metadata in extended info.
+    - Method `_build_catalog_refs_html` (Line 8791) — Build HTML for FIST catalog cross-references in extended info.
+    - Method `_build_secondary_metadata_html` (Line 8812) — Build HTML for secondary metadata (source names, collection, storage).
+    - Method `_build_browse_enriched_html` (Line 8852) — Build HTML for KTI/Oxford/Cambridge enrichment data in Browse extended info.
+    - Method `_browse_toggle_extended_info` (Line 9074) — Toggle browse tab extended info panel visibility.
+    - Method `_show_fjms_bibliography_dialog` (Line 9081) — Open the FJMS bibliography dialog.
+    - Method `_show_nli_bibliography_dialog` (Line 9094) — Open the NLI bibliography dialog.
+    - Method `_show_fjms_catalog_dialog` (Line 9107) — Open the FJMS catalog records dialog from Browse tab (lazy fetch).
+    - Method `_show_browse_measurements_dialog` (Line 9136) — Open measurements dialog from Browse tab (lazy fetch on first click).
+    - Method `_on_browse_ext_link_clicked` (Line 9159) — Handle clicks on links in browse tab extended info.
+    - Method `_search_toggle_translations` (Line 9189) — Toggle show_translations from search tab toolbar button.
+    - Method `_refresh_search_titles` (Line 9209) — Refresh title column in search results to reflect translation state.
+    - Method `_browse_toggle_translations` (Line 9222) — Toggle show_translations from browse tab toolbar button.
+    - Method `_refresh_browse_title` (Line 9245) — Refresh the browse info label to reflect current show_translations state.
+    - Method `_handle_toggle_trans` (Line 9256) — Toggle translated/original text by rebuilding the PGP HTML section.
+    - Method `_refresh_browse_extended_info` (Line 9276) — Refresh the browse extended info panel (after toggling show_translations).
+    - Method `_start_field_translation` (Line 9320) — Start an on-demand field translation via Dicta API.
+    - Method `_get_field_original_text` (Line 9367) — Extract the original English text for a field key from stored metadata.
+    - Method `_on_field_translated` (Line 9411) — Handle completed field translation — refresh the relevant panel.
+    - Method `_navigate_to_catalog_browse` (Line 9437) — Navigate to the catalog browse tab with the specified filter pre-set.
+    - Method `_apply_pending_catalog_nav` (Line 9475) — Apply a pending domain selection after async tree load completes.
+    - Method `_catalog_select_domain_in_tree` (Line 9490) — Select a domain in the catalog browse domain tree by its English key.
+    - Method `_browse_display_pgp_text` (Line 9508) — Display PGP edition/translation text with proper directionality.
+    - Method `_browse_refresh_pgp_for_page` (Line 9533) — Re-fetch PGP/FGP sources for current page (called on page change within same manuscript).
+    - Method `_on_browse_link_clicked` (Line 9565) — Handle clicks on internal links in browse text (View All and Reading Desk modes).
+    - Method `_browse_enter_reading_desk` (Line 9621) — Enter reading desk mode with the given fragments.
+    - Method `_browse_rd_enrich_entry` (Line 9729) — Ensure meta_mgr.nli_cache[sys_id] has image metadata for the reading desk.
+    - Method `_browse_rd_on_sources_loaded` (Line 9790) — Handle PGP sources loaded from ReadingDeskWorker.
+    - Method `_browse_exit_reading_desk` (Line 9806) — Exit reading desk mode and restore normal browse view.
+    - Method `_browse_add_to_view` (Line 9861) — Handle 'Add to View' button click -- enter reading desk or add a manuscript.
+    - Method `_browse_add_to_puzzle` (Line 9933) — Add current browse manuscript to the puzzle canvas.
+    - Method `_browse_open_join_workbench` (Line 9954) — Browse tab entry point for the Join Workbench. D-03 #2.
+    - Method `_browse_rd_add_entry` (Line 9975) — Add a single manuscript entry to the reading desk (duplicate-safe).
+    - Method `_browse_rd_add_by_shelfmark` (Line 10040) — Add a manuscript to the reading desk by shelfmark (toolbar input).
+    - Method `_browse_rd_add_from_list` (Line 10088) — Show the browse lists panel so items can be added to reading desk.
+    - Method `_browse_open_joins_in_reading_desk` (Line 10092) — Open all joined fragments in the reading desk.
+    - Method `_browse_open_pgp_joins_in_reading_desk` (Line 10176) — Open PGP multi-fragment joined document in reading desk.
+    - Method `_browse_rd_render` (Line 10203) — Render reading desk: stacked texts in text pane, stacked images in viewer pane.
+    - Method `_browse_rd_render_images` (Line 10332) — Render stacked images in the viewer pane (right side of browse splitter).
+    - Method `_browse_rd_disconnect_sync` (Line 10471) — Disconnect sync scroll handlers without affecting other signal connections.
+    - Method `_browse_rd_setup_sync_scroll` (Line 10488) — Set up proportional scroll synchronization between text and image panes.
+    - Method `_browse_rd_restore_normal_view` (Line 10536) — Hide reading desk image scroll and restore normal viewer.
+    - Method `_browse_rd_remove_entry` (Line 10548) — Remove a fragment entry from the reading desk and re-render or exit.
+    - Method `_browse_rd_show_version_dialog` (Line 10558) — Show a dialog to select PGP version source for a specific fragment.
+    - Method `toggle_browse_view_all` (Line 10615)
+    - Method `on_browse_page_combo_changed` (Line 10631)
+    - Method `_on_browse_volume_changed` (Line 10648) — Handle volume selector change — switch to a different IE's pages and images.
+    - Method `_refresh_browse_images_for_volume` (Line 10665) — Launch lightweight manifest-only worker for volume switch (no full enrichment).
+    - Method `_on_volume_manifest_loaded` (Line 10691) — Handle volume manifest fetch result — update image viewer for the active volume.
+    - Method `toggle_browse_image` (Line 10779)
+    - Method `_set_browse_image_pane_visible` (Line 10783) — Phase 95 D-27 helper — programmatic equivalent of toggle_browse_image.
+    - Method `browse_search_parallels` (Line 10795)
+    - Method `browse_add_to_list` (Line 10828) — Add current manuscript to a list.
+    - Method `_set_last_browse_field` (Line 10842)
+    - Method `browse_load_page` (Line 10845) — Load single page text and sync viewer.
+    - Method `_apply_browse_highlights` (Line 10858)
+    - Method `browse_load_all` (Line 10877) — Load all pages into the text browser for continuous scrolling.
+    - Method `browse_save_full` (Line 11055)
+    - Method `create_catalog_browse_tab` (Line 11113) — Create the 'Browse by Identification' tab with domain tree, author/work search, and results table.
+    - Method `_catalog_refresh` (Line 11470) — Main refresh: re-fetch results with current filters + pagination, update UI.
+    - Method `_catalog_update_text_summary` (Line 11583) — Update the human-readable text filter summary label.
+    - Method `_catalog_refresh_authors` (Line 11601) — Fetch authors scoped to current domain, update author list widget.
+    - Method `_catalog_filter_authors` (Line 11610) — Filter author list widget based on current text input.
+    - Method `_catalog_refresh_works` (Line 11634) — Fetch works scoped to current domain + author, update works list widget.
+    - Method `_catalog_filter_works` (Line 11646) — Filter works list widget based on current text input.
+    - Method `_catalog_on_domain_select` (Line 11672) — Handle domain tree item click.
+    - Method `_catalog_start_async_refresh` (Line 11685) — Run catalog browse refresh in a background thread (never blocks UI).
+    - Method `_catalog_on_async_refresh_done` (Line 11721) — Handle results from background refresh thread.
+    - Method `_catalog_on_author_select` (Line 11803) — Handle author list item click.
+    - Method `_catalog_on_work_select` (Line 11816) — Handle work list item click.
+    - Method `_catalog_on_date_changed` (Line 11827) — Handle date From/To input change.
+    - Method `_catalog_on_undated_changed` (Line 11842) — Handle include-undated checkbox toggle.
+    - Method `_catalog_set_century` (Line 11849) — Set date range to a single century and refresh.
+    - Method `_catalog_set_century_range` (Line 11856) — Set date range spanning multiple centuries and refresh.
+    - Method `_catalog_clear_date` (Line 11863) — Clear date filter state and UI.
+    - Method `_catalog_add_text_term` (Line 11872) — Add the current text input as a filter term with the selected mode.
+    - Method `_catalog_remove_text_term` (Line 11890) — Remove a text filter term and refresh.
+    - Method `_catalog_render_text_chips` (Line 11903) — Re-render the inline text filter chips below the input in the sidebar.
+    - Method `_catalog_update_avail_filter_btns` (Line 11925) — Set the PGP / scholarly-transcription filter button labels + colors
+    - Method `_catalog_cycle_pgp_filter` (Line 11949) — Cycle the PGP availability filter: all -> has_pgp -> no_pgp -> all.
+    - Method `_catalog_cycle_editions_filter` (Line 11957) — Cycle the scholarly-transcription filter: all -> has_edition -> no_edition -> all.
+    - Method `_open_catalog_library_dialog` (Line 11965) — Open LibraryFilterDialog (GAP-G) and apply the selection (dual-mode, DMF-07).
+    - Method `_catalog_update_library_filter_btn` (Line 12027) — Update the library filter button label + colour to reflect the selection.
+    - Method `_catalog_remove_filter` (Line 12071) — Remove a specific filter (or all) and refresh.
+    - Method `_resolve_catalog_author_display` (Line 12144) — Resolve author value to display name from cached authors list.
+    - Method `_resolve_catalog_work_display` (Line 12154) — Resolve work value to display name from cached works list.
+    - Method `_catalog_update_chips` (Line 12164) — Update the active filter chips bar.
+    - Method `_catalog_build_browse_filters` (Line 12284) — Build pre_search_filters dict from all active catalog browse filters.
+    - Method `_catalog_search_in_results` (Line 12305) — Navigate to search tab with browse filters as pre-search filters.
+    - Method `_catalog_parallels_in_results` (Line 12349) — Navigate to composition tab with browse filters as pre-search filters.
+    - Method `_catalog_view_result` (Line 12391) — Double-click result row: open ResultDialog with prev/next navigation.
+    - Method `_catalog_view_result_by_row` (Line 12395) — Open ResultDialog for the catalog browse result at the given row.
+    - Method `_catalog_browse_manuscript_by_row` (Line 12423) — Navigate to Browse by Shelfmark tab for the given row.
+    - Method `_catalog_on_cell_entered` (Line 12434) — Handle mouse hover on catalog results table rows for action button visibility.
+    - Method `_catalog_next_page` (Line 12452) — Go to next page of results.
+    - Method `_catalog_prev_page` (Line 12457) — Go to previous page of results.
+    - Method `_catalog_populate_tree` (Line 12465) — Start async population of the domain tree. Never blocks main thread.
+    - Method `_catalog_load_tree_from_cache` (Line 12482) — Load tree data from already-cached service (runs on main thread, instant).
+    - Method `_catalog_render_tree` (Line 12498) — Render tree from pre-fetched data (runs on main thread via signal).
+    - Method `create_lists_tab` (Line 12557) — Create the Personal Lists tab for managing starred manuscripts.
+    - Method `lists_toggle_preview` (Line 12875) — Toggle the preview panel visibility.
+    - Method `_normalize_fl_id` (Line 12879)
+    - Method `_format_image_display` (Line 12883)
+    - Method `_get_list_display_name` (Line 12886)
+    - Method `_get_list_display_color` (Line 12894)
+    - Method `lists_set_preview_visible` (Line 12904) — Show/hide preview panel with a slim collapsed bar.
+    - Method `lists_refresh_all` (Line 12953) — Refresh the lists sidebar and current items view.
+    - Method `_lists_auto_sync` (Line 12960) — Ask for an upload after a list change (if list sync is on).
+    - Method `lists_refresh_sidebar` (Line 12976) — Refresh the lists tree in the sidebar.
+    - Method `lists_handle_tree_reorder` (Line 13064) — Apply drag-and-drop changes to list/project order and assignment.
+    - Method `lists_refresh_items` (Line 13103) — Refresh the items table for the current list.
+    - Method `_get_recent_items_deduped` (Line 13225) — Return Recently Viewed items in view order, with true duplicates collapsed.
+    - Method `lists_on_list_selected` (Line 13259) — Handle list selection in the sidebar.
+    - Method `lists_on_item_clicked` (Line 13269) — Handle item click in the table.
+    - Method `lists_on_item_checkbox_changed` (Line 13282) — Handle checkbox state change.
+    - Method `lists_update_selection_label` (Line 13288) — Update the selection count label.
+    - Method `lists_on_select_all_toggled` (Line 13302) — Toggle all checkboxes in the list table.
+    - Method `lists_sync_select_all_checkbox` (Line 13316) — Sync 'Select All' checkbox state with row selections.
+    - Method `lists_get_selected_item_ids` (Line 13340) — Get list of selected item ids.
+    - Method `lists_show_item_details` (Line 13351) — Show details for a specific item.
+    - Method `_lists_load_preview` (Line 13427) — Load text and image preview for an item.
+    - Method `_lists_load_preview_image` (Line 13461) — Load image for preview panel.
+    - Method `_lists_start_preview_download` (Line 13482) — Download and display preview image for lists panel.
+    - Method `_lists_on_preview_image_loaded` (Line 13502) — Handle preview image loaded for lists panel.
+    - Method `_lists_on_preview_image_failed` (Line 13515) — Handle preview image load failure for lists panel.
+    - Method `_lists_cancel_preview_image_thread` (Line 13522)
+    - Method `lists_clear_details` (Line 13528) — Clear the details panel and preview.
+    - Method `lists_save_item_details` (Line 13554) — Save changes to the current item.
+    - Method `lists_create_new_list` (Line 13563) — Create a new list.
+    - Method `lists_create_new_project` (Line 13572) — Create a new project.
+    - Method `lists_edit_current_list` (Line 13581) — Edit the current list name/color.
+    - Method `lists_delete_current_list` (Line 13596) — Delete the current list.
+    - Method `lists_duplicate_selected_list` (Line 13618) — Duplicate the current list.
+    - Method `lists_merge_lists` (Line 13627) — Show dialog to merge lists.
+    - Method `lists_cleanup_duplicates` (Line 13663) — Clean up duplicate lists created by sync bugs.
+    - Method `_show_duplicate_conflict_dialog` (Line 13715) — Show dialog for user to resolve a duplicate list conflict.
+    - Method `lists_show_trash` (Line 13774) — Show dialog with deleted lists (trash).
+    - Method `_trash_restore` (Line 13836) — Restore selected list from trash.
+    - Method `_trash_delete_permanently` (Line 13851) — Permanently delete selected list from trash.
+    - Method `_trash_empty` (Line 13872) — Empty all trash.
+    - Method `lists_move_selected_items` (Line 13887) — Move selected items to another list.
+    - Method `lists_add_tag_to_selected` (Line 13917) — Add a tag to selected items.
+    - Method `lists_add_tag_to_item` (Line 13932) — Add a tag to a specific item.
+    - Method `lists_remove_selected_items` (Line 13944) — Remove selected items from current list.
+    - Method `lists_remove_item_by_id` (Line 13965) — Remove a specific item from current list.
+    - Method `lists_quick_view_item` (Line 13974) — Quick view the current item.
+    - Method `lists_quick_view_by_id` (Line 13979) — Open quick view dialog for an item.
+    - Method `lists_browse_item` (Line 14023) — Browse the current item in the Browse tab.
+    - Method `lists_browse_by_id` (Line 14028) — Open an item in the Browse tab.
+    - Method `_open_document_result_dialog` (Line 14044) — Open ResultDialog for a document by shelfmark or sys_id.
+    - Method `_browse_document_by_shelfmark` (Line 14098) — Browse a document by shelfmark in the Browse tab.
+    - Method `lists_copy_item_info` (Line 14105) — Copy current item info to clipboard.
+    - Method `_lists_add_to_puzzle` (Line 14110) — Add a list item to the puzzle canvas.
+    - Method `lists_copy_info_by_id` (Line 14123) — Copy item info to clipboard with format options.
+    - Method `_do_copy_info` (Line 14141) — Actually copy the info to clipboard.
+    - Method `lists_export_current_list` (Line 14180) — Export the current list.
+    - Method `lists_import_list` (Line 14204) — Import a list from file.
+    - Method `lists_show_list_context_menu` (Line 14238) — Show context menu for list items in sidebar.
+    - Method `_rename_list` (Line 14354) — Rename a specific list.
+    - Method `_delete_list` (Line 14369) — Delete a specific list.
+    - Method `_duplicate_list` (Line 14392) — Duplicate a specific list.
+    - Method `_export_list` (Line 14401) — Export a specific list (opens format menu).
+    - Method `_export_list_format` (Line 14405) — Export a specific list in the given format.
+    - Method `_format_item_text` (Line 14439) — Format a single item for text export.
+    - Method `_export_as_text` (Line 14466) — Export list as plain text.
+    - Method `_export_as_json` (Line 14483) — Export list as JSON.
+    - Method `_export_as_excel` (Line 14505) — Export list as Excel file.
+    - Method `_export_as_word` (Line 14548) — Export list as Word document.
+    - Method `_save_text_to_file` (Line 14599) — Save text to file.
+    - Method `_copy_to_clipboard` (Line 14613) — Copy text to clipboard.
+    - Method `_send_by_email` (Line 14619) — Robust Email: Copies text to clipboard and opens empty email draft.
+    - Method `lists_apply_filter` (Line 14641) — Apply filter to items table.
+    - Method `show_add_to_list_menu` (Line 14647) — Show menu for adding items to a list.
+    - Method `create_community_tab` (Line 14717) — Create the Community tab with panels for discoveries, corrections, and comments.
+    - Method `_refresh_community_panels` (Line 14942) — Refresh all community panels and update UI state.
+    - Method `_update_community_header` (Line 14996) — Update the community header with user info.
+    - Method `_refresh_discoveries_panel` (Line 15008) — Refresh the discoveries list panel.
+    - Method `_filter_discoveries` (Line 15065) — Filter discoveries list by selected type.
+    - Method `_populate_discoveries_list` (Line 15093) — Populate discoveries list from data.
+    - Method `_refresh_corrections_panel` (Line 15135) — Refresh the corrections list panels.
+    - Method `_populate_my_corrections_list` (Line 15182) — Populate my corrections list from data (only latest per document).
+    - Method `_populate_all_corrections_list` (Line 15217) — Populate all corrections list from data (only latest per user per document).
+    - Method `_refresh_comments_panel` (Line 15253) — Refresh the comments list panels (My Comments + All Comments).
+    - Method `_populate_comments_list` (Line 15310) — Populate comments list from data.
+    - Method `_discoveries_context_menu` (Line 15354) — Show context menu for discoveries list.
+    - Method `_edit_discovery_from_list` (Line 15404) — Open edit dialog for discovery from context menu.
+    - Method `_delete_discovery_from_list` (Line 15410) — Delete discovery from context menu.
+    - Method `_toggle_pin_discovery` (Line 15426) — Toggle pin status from context menu.
+    - Method `_toggle_hide_discovery` (Line 15434) — Toggle hide status from context menu.
+    - Method `_corrections_context_menu` (Line 15445) — Show context menu for corrections list.
+    - Method `_show_correction_details` (Line 15468) — Show correction details dialog.
+    - Method `_comments_context_menu` (Line 15491) — Show context menu for comments list.
+    - Method `_on_discovery_clicked` (Line 15509) — Handle discovery item double-click.
+    - Method `_on_correction_clicked` (Line 15516) — Handle correction item double-click - open ResultDialog.
+    - Method `_on_comment_clicked` (Line 15531) — Handle comment item double-click - open ResultDialog.
+    - Method `_refresh_joins_panel` (Line 15543) — Refresh the joins list panels (My Joins + All Joins).
+    - Method `_populate_joins_list` (Line 15632) — Populate joins list from data.
+    - Method `_populate_puzzles_list` (Line 15665) — Populate puzzle list from published joins data.
+    - Method `_on_puzzle_clicked` (Line 15688) — Handle double-click on a published puzzle — fork and open.
+    - Method `_joins_context_menu` (Line 15702) — Show context menu for joins list.
+    - Method `_on_join_clicked` (Line 15747) — Handle join item double-click - open Fragment A.
+    - Method `_open_join_fragment` (Line 15755) — Open a fragment from a join - navigate to browse tab.
+    - Method `_copy_join_shelfmarks` (Line 15766) — Copy join shelfmarks to clipboard.
+    - Method `_delete_join_from_list` (Line 15772) — Delete a join from the community panel.
+    - Method `_show_joins_feed_dialog` (Line 15791) — Show the full joins feed dialog.
+    - Method `_open_puzzle_window` (Line 15804) — Open the puzzle canvas window (or bring existing one to front).
+    - Method `_show_result_dialog` (Line 15814) — Open the Manuscript Viewer (ResultDialog) as an independent,
+    - Method `_on_result_dialog_finished` (Line 15878) — Release the viewer once it has closed (any path: X, Esc, done()).
+    - Method `_close_result_dialog` (Line 15887) — Close the open Manuscript Viewer, if any. Called at shutdown;
+    - Method `add_to_puzzle` (Line 15901) — Add a fragment to the puzzle canvas. Opens puzzle window if needed.
+    - Method `open_join_workbench` (Line 15936) — Open the Join Lab (no anchor required). Restores last session state if available.
+    - Method `open_joins_workbench` (Line 15978) — Open (or re-anchor) the Join Workbench. D-01 modeless; single reusable instance.
+    - Method `open_anchor_in_puzzle` (Line 16020) — Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5.
+    - Method `open_anchors_in_puzzle` (Line 16024) — Public: add multiple fragments to the Fragment Puzzle canvas.
+    - Method `open_anchor_as_join` (Line 16038) — Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely.
+    - Method `_main_window_floor` (Line 16081) — The main window's minimum size: 800x520, but never more than the
+    - Method `showEvent` (Line 16095)
+    - Method `resizeEvent` (Line 16122)
+    - Method `_open_settings_dialog` (Line 16128) — Open the settings dialog.
+    - Method `apply_settings` (Line 16147) — OK path for the Settings dialog (DESK-01 thin named API / SP-4 boundary).
+    - Method `cancel_settings` (Line 16156) — Cancel path for the Settings dialog (DESK-01 thin named API / SP-4).
+    - Method `_on_language_combo_changed` (Line 16164) — Handle language combo box change — close settings dialog first to
+    - Method `_citation_lang` (Line 16172) — The reader's language, in the form the shared credit module wants.
+    - Method `_credit_version_info` (Line 16182) — Translate a version-combo item into the shared module's `version_info`.
+    - Method `_browse_page_citation` (Line 16293) — How to cite the manuscript page on the Browse tab, or None.
+    - Method `_sync_browse_cite_button` (Line 16377) — Enable "Cite this page" exactly when there is a page worth citing.
+    - Method `_browse_web_url` (Line 16406) — The genizahsearch.com address of the Browse page on screen, or None.
+    - Method `_browse_open_on_web` (Line 16413)
+    - Method `_browse_copy_web_link` (Line 16420)
+    - Method `_software_clause` (Line 16428) — "Dicta Genizah Search Pro V<version>" -- what this app IS.
+    - Method `_site_citation_text` (Line 16438) — How to cite the APPLICATION as a whole -- names it, its version, MiDRASH.
+    - Method `_citation_stamp` (Line 16451) — Today, ISO, for an "accessed" clause. Stamped when a citation is COPIED.
+    - Method `_create_citation_bar` (Line 16456) — The persistent citation bar at the bottom of the main window.
+    - Method `_copy_citation_text` (Line 16552)
+    - Method `copy_page_citation` (Line 16557) — Cite the manuscript page on screen, crediting whoever transcribed it.
+    - Method `copy_site_citation` (Line 16578) — Cite the site as a whole -- Dicta, the address, and MiDRASH.
+    - Method `_show_citation_reminder` (Line 16583) — Show a one-time citation reminder dialog on first launch.
+    - Method `_maybe_show_first_run_prompt` (Line 16616) — Gate for the one-time first-run consent dialog.
+    - Method `_maybe_show_telemetry_reask` (Line 16660) — Startup gate for the non-modal telemetry re-ask bar. Never blocks.
+    - Method `on_telemetry_reask_enable` (Line 16680) — User clicked Enable on the re-ask bar — the sole implicit opt-in path.
+    - Method `on_telemetry_reask_learn_more` (Line 16695) — Open the full bilingual privacy disclosure (same as first-run Learn more).
+    - Method `on_telemetry_reask_never` (Line 16703) — User clicked Don't ask again — persist a hard, permanent opt-out.
+    - Method `on_telemetry_reask_dismissed` (Line 16712) — User dismissed the bar with ✕ — ignored this time (count already recorded).
+    - Method `open_help_center` (Line 16720) — Open the bundled Help.html with optional anchor scrolling; HelpDialog shows a translated notice with the website's Help link if it cannot be loaded (the old built-in help texts were removed 2026-10-18).
+    - Method `_sanitize_filename` (Line 16770)
+    - Method `_get_default_save_folder` (Line 16775) — Get the default folder for saving reports. Checks last used location first.
+    - Method `_get_unique_filepath` (Line 16816) — If file exists, add (1), (2), etc. until we find a unique name.
+    - Method `_save_last_folder` (Line 16829) — Remember the folder where user saved a file.
+    - Method `_default_report_path` (Line 16835)
+    - Method `_get_credit_header` (Line 16848)
+    - Method `_show_export_saved_dialog` (Line 16869) — EXPUX-01: 'export complete' dialog with Open File / Open Folder.
+    - Method `_get_lab_config_block` (Line 16901)
+    - Method `open_search_settings` (Line 16915) — Open the Search Settings dialog for variant configuration.
+    - Method `_on_search_mode_changed` (Line 16928) — Show/hide variant controls and swap query/tag input based on selected mode.
+    - Method `_on_comp_mode_changed` (Line 16951) — Show/hide variant slider for composition based on selected mode.
+    - Method `_on_boundary_mode_changed` (Line 16958) — Update UI based on boundary mode selection.
+    - Method `_on_boundary_delimiter_changed` (Line 16983) — Save delimiter setting and update stats when delimiter changes.
+    - Method `_update_boundary_stats` (Line 16995) — Update the boundary statistics label based on current text and settings.
+    - Method `_open_boundary_advanced_dialog` (Line 17035) — Open dialog for advanced boundary search settings.
+    - Method `_set_variant_preset` (Line 17092) — Set variant level from preset button.
+    - Method `_get_current_variant_pairs_count` (Line 17116) — Get the current variant pairs count (from preset or slider).
+    - Method `_sync_variant_sliders` (Line 17125) — Keep variant sliders synchronized between search and composition tabs.
+    - Method `_on_query_text_changed` (Line 17151) — Handle live text changes: detect shortcut prefixes and update variant preview.
+    - Method `_update_variant_count_preview` (Line 17174) — Update the variant count label based on current query and slider value.
+    - Method `_comp_passage_preference_fields` (Line 17240) — The method and its three policy axes, as the session stores them.
+    - Method `_comp_chunk_preference` (Line 17284) — The user's OWN value for a forced chunk control.
+    - Method `_start_passage_load` (Line 17310) — Open (and if necessary recover) the letter-level index, off the
+    - Method `_on_passage_loaded` (Line 17328)
+    - Method `_honour_deferred_comp_method` (Line 17355) — Re-apply a letter-level selection that was demoted for "not built".
+    - Method `_maybe_offer_passage_build` (Line 17399) — Offer to build the letter-level index when there is none, once per
+    - Method `_passage_release_seam` (Line 17474) — Called ON THE WORKER THREAD. Hops to the UI thread, releases
+    - Method `_on_passage_release_requested` (Line 17503) — UI thread. The one place `_state` is mutated for a build.
+    - Method `_start_passage_build_worker` (Line 17517)
+    - Method `_on_passage_build_progress` (Line 17554)
+    - Method `_finish_passage_build` (Line 17573)
+    - Method `_on_passage_build_finished` (Line 17586)
+    - Method `_on_passage_build_cancelled` (Line 17641)
+    - Method `_on_passage_build_error` (Line 17647)
+    - Method `run_passage_index_build` (Line 17656) — Build the letter-level index from the transcriptions already on
+    - Method `_restore_comp_passage_preferences` (Line 17748) — Preference half of Task 8. Restores the method and the three
+    - Method `_restored_provenance_is_valid` (Line 17888) — Provenance half of Task 8. True when a saved RESULT snapshot may
+    - Method `_passage_snapshot_must_wait` (Line 17910) — True when a saved letter-level result set cannot be judged YET.
+    - Method `_display_restored_comp_snapshot` (Line 17926) — Re-display a saved composition result set, re-establishing the
+    - Method `_comp_passage_axis` (Line 17965) — The selected value of one policy axis, falling back to its own
+    - Method `_comp_axis_label` (Line 17979) — The label the control itself shows for one policy value, so a
+    - Method `_comp_export_settings_lines` (Line 17993) — The "Search Settings" block of an exported report.
+    - Method `_passage_scan_in_flight` (Line 18046) — True only while a PASSAGE scan is running. Grouping is
+    - Method `_passage_batch_in_flight` (Line 18055) — True while a MULTI-WITNESS passage batch is running.
+    - Method `_refuse_stop_during_passage_scan` (Line 18069) — The one guarded stop helper. `PassageSearcher` has no mid-search
+    - Method `_on_witness_progress` (Line 18106) — "Witness 3/17: Ashkenaz" while a batch runs.
+    - Method `_open_add_witness_dialog` (Line 18122) — Paste one witness, or a whole file split on blank lines.
+    - Method `_report_witness_additions` (Line 18191) — Say what was refused, and why, in ONE message per reason.
+    - Method `_revive_stale_witnesses` (Line 18219)
+    - Method `_remove_stale_witnesses` (Line 18225)
+    - Method `_search_pending_witnesses` (Line 18230) — Dispatch the pending witnesses through the ordinary search path.
+    - Method `_promote_checked_comp` (Line 18252) — Add the checked manuscripts as witnesses and search them.
+    - Method `_checked_comp_sys_ids` (Line 18272) — The sys_ids of the CHECKED result rows, in display order.
+    - Method `_promote_sys_ids` (Line 18296) — Turn manuscripts into witnesses and search them.
+    - Method `_auto_expand_settings` (Line 18360) — ``(rounds, top_k)`` for auto-expand, readable at any time.
+    - Method `_run_auto_expand` (Line 18385)
+    - Method `_advance_auto_expand` (Line 18395) — One round: promote the best K manuscripts and search them.
+    - Method `_stop_auto_expand` (Line 18446)
+    - Method `_build_witness_button` (Line 18454) — One button in the letter-level options row; everything else lives
+    - Method `_set_witness_panel_visible` (Line 18497) — Letter-level only. Joins the same contract as the policy
+    - Method `_accent_amber_pair` (Line 18510) — The (background, text) an amber accent paints, for the CURRENT
+    - Method `_witness_button_accent` (Line 18537) — The Witnesses button's accent, built from the LIVE palette.
+    - Method `_text_position_accent` (Line 18552) — The Text Position selector's accent, for a non-default position.
+    - Method `_update_witness_affordance` (Line 18572) — Point at the Witnesses button once, then never again.
+    - Method `_open_witness_dialog` (Line 18599) — The witness list, its actions and auto-expand -- all here.
+    - Method `_witness_dialog_is_open` (Line 18752)
+    - Method `_refresh_witness_panel` (Line 18756) — Update the button caption, and the dialog too if it is open.
+    - Method `_witness_edits_are_locked` (Line 18829) — True while a run owns the witness list.
+    - Method `_witness_status_item` (Line 18839)
+    - Method `_selected_witness_ids` (Line 18857)
+    - Method `_remove_selected_witnesses` (Line 18868)
+    - Method `_remove_all_witnesses` (Line 18888) — Clear the list in one action.
+    - Method `_rehydrate_witness_texts` (Line 18910) — Re-fetch the text of restored MANUSCRIPT witnesses, before dispatch.
+    - Method `_load_witness_files` (Line 18982) — Add witnesses from one or more files on disk.
+    - Method `_after_witness_removal` (Line 19038) — Shared tail for every removal: re-fuse, redraw, persist, and say
+    - Method `_witness_notify` (Line 19084) — One message, shown wherever the user is looking.
+    - Method `_retry_failed_witnesses` (Line 19099) — Re-queue every failed witness.
+    - Method `_apply_comp_witness_cell` (Line 19117) — "{n} of {m} witnesses" on a manuscript row, tooltipped with which.
+    - Method `_comp_witness_total` (Line 19143) — How many witnesses produced the rows CURRENTLY on screen.
+    - Method `_comp_witness_state` (Line 19151) — The window's `WitnessSet`, created on first use.
+    - Method `_comp_seed_text` (Line 19164) — What is in the box RIGHT NOW.
+    - Method `_comp_has_witnesses` (Line 19174)
+    - Method `_comp_witness_roster` (Line 19177) — `[(witness_id, label)]` in fusion order, the seed first.
+    - Method `_comp_witness_dispatch_list` (Line 19189) — `[(witness_id, label, text)]` for the witnesses to SEARCH now.
+    - Method `_comp_witness_cache_key` (Line 19216) — Everything a cached witness row depends on, as one comparable value.
+    - Method `_comp_witness_prior_rows` (Line 19241) — The rows of witnesses searched in an EARLIER round.
+    - Method `_absorb_witness_result` (Line 19251) — Fold a finished batch's per-witness rows back into the WitnessSet.
+    - Method `_clear_passage_dropped_warning` (Line 19284)
+    - Method `_show_passage_dropped_warning` (Line 19290) — `dropped_text_lookup_failures` counts rows the searcher matched
+    - Method `_method_help_text` (Line 19305)
+    - Method `_composition_tab_is_current` (Line 19324) — Whether the user can actually SEE the composition tab right now.
+    - Method `_announcement_allowed` (Line 19349) — Whether this announcement may still be shown, decided ONCE per
+    - Method `_mark_announcement_seen` (Line 19371) — Record that it has now been shown. Idempotent within a launch --
+    - Method `_retire_announcement` (Line 19384) — The user has USED the feature, so stop pointing at it -- now, not
+    - Method `_update_comp_method_affordance` (Line 19395) — Point at the new option while it is worth pointing at: chunk is
+    - Method `_apply_default_comp_method` (Line 19421) — Letter-level search is the DEFAULT once an index exists.
+    - Method `_update_comp_method_help` (Line 19463)
+    - Method `_comp_method` (Line 19468) — The selected method, defaulting to chunk. Reads the widget so a
+    - Method `_passage_disabled_reason_now` (Line 19476) — The ONE choke point (Task 4). Gathers the live state the pure
+    - Method `_passage_reason_text` (Line 19507) — Reason KEY -> translated sentence. The pure function returns keys
+    - Method `_show_passage_reason` (Line 19531) — Persistent inline label, never a modal: this fires on silent
+    - Method `_set_boundary_row_visible` (Line 19548) — Show or hide the whole paragraph row. Letter-level search has no
+    - Method `_set_passage_options_visible` (Line 19572)
+    - Method `_apply_passage_mode_ui` (Line 19583) — Force-set and disable the chunk knobs a letter-level search does
+    - Method `_refresh_comp_method_enabled` (Line 19694) — Never a blind setEnabled(True): the combo is frozen for the whole
+    - Method `_revert_comp_method_to_chunk` (Line 19707) — Snap the selection back without re-entering this handler.
+    - Method `_on_comp_method_changed` (Line 19720)
+    - Method `_revalidate_comp_method` (Line 19761) — Re-run the gate after something else changed (scope, Lab, build
+    - Method `update_lab_ui_state` (Line 19778) — Disable standard controls when Lab Mode is active.
+    - Method `on_deep_scan_toggled_search` (Line 19804)
+    - Method `on_deep_scan_toggled_comp` (Line 19810)
+    - Method `on_lab_mode_toggled_search` (Line 19816)
+    - Method `on_lab_mode_toggled_comp` (Line 19832)
+    - Method `_open_domain_filter_dialog` (Line 19852) — Open the domain filter dialog for post-search dynamic filtering.
+    - Method `_update_domain_filter_label` (Line 19874) — Update the domain filter label badge to show exclusion state.
+    - Method `_domain_display_name` (Line 19889) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
+    - Method `_apply_domain_exclusions` (Line 19899) — Apply domain exclusions through the one results visibility pass.
+    - Method `_open_measurement_filter_dialog` (Line 19913) — Open a dialog to filter results by physical measurements.
+    - Method `_open_pre_search_filter_dialog` (Line 20010) — Open the pre-search filter dialog.
+    - Method `_update_filter_chip_bar` (Line 20026) — Update both search and composition chip bars to reflect active filters.
+    - Method `_add_filter_chip` (Line 20148) — Add a removable chip button to the filter chip bar layout.
+    - Method `_remove_filter` (Line 20162) — Remove a single filter and recompute restrict_sys_ids.
+    - Method `_on_filter_recompute_finished` (Line 20197) — Handle recomputed filter set after chip removal.
+    - Method `_on_restore_filter_finished` (Line 20210) — Handle filter recompute after session/history restore.
+    - Method `_exclude_word_search_result` (Line 20225) — Exclude a manuscript -- every row of it -- from the search results.
+    - Method `_on_domain_enrichment_loaded` (Line 20245) — Handle async domain enrichment results from DomainEnrichmentWorker.
+    - Method `_navigate_to_search_with_domain` (Line 20306) — Navigate to search tab with domain context (exclusions cleared).
+    - Method `_collect_comp_domain_data` (Line 20315) — Collect domain data for composition results.
+    - Method `_open_comp_domain_filter_dialog` (Line 20400) — Open the domain filter dialog for composition results.
+    - Method `_update_comp_domain_filter_label` (Line 20429) — Update the composition domain filter label.
+    - Method `_apply_comp_domain_exclusions` (Line 20444) — Apply domain exclusions by hiding/showing composition tree items.
+    - Method `_open_query_builder` (Line 20454) — Open the tabular query builder dialog.
+    - Method `_on_corpus_scope_changed` (Line 20484) — Phase 95 smoke-fix (item 2): persist the corpus scope selection via session JSON.
+    - Method `_search_run_corpus` (Line 20493) — The corpus scope of the run that just finished -- recorded by
+    - Method `_set_local_scope_strip_visible` (Line 20504)
+    - Method `_local_scope_strip_colors` (Line 20512) — Light orange, bright enough to read as a notice and not as
+    - Method `_style_local_scope_strip` (Line 20521) — Apply the theme's colours. Same lightness probe the rest of the
+    - Method `_update_local_scope_strip` (Line 20544) — Show the hint only for a LOCAL-scope run that COMPLETED and found
+    - Method `_search_genizah_instead` (Line 20557) — One click: scope -> Genizah, same query, run again. Goes through
+    - Method `_on_comp_corpus_scope_changed` (Line 20569) — Phase 110 (COMP-LOC-01): persist the composition corpus scope. Mirrors
+    - Method `_deliver_unless_discarded` (Line 20586) — Pass a search worker's signal to `slot` unless New discarded its run.
+    - Method `_discardable` (Line 20602) — `slot` for a worker signal, bound to the New generation current
+    - Method `_drain_previous_worker` (Line 20608) — Refuse to rebind a worker slot while the old worker is still alive.
+    - Method `toggle_search` (Line 20644)
+    - Method `start_search` (Line 20653)
+    - Method `_emit_search_telemetry` (Line 20840) — Emit desktop_search_executed for a regular search run (Phase 114 USAGE-03).
+    - Method `_on_perf_signal` (Line 20876) — UI-thread slot for all four search thread perf_signal emissions (Phase 115 PERF-01).
+    - Method `_pause_worker_for` (Line 20907) — The live worker a pause context is tracking, or None.
+    - Method `_apply_pause_state` (Line 20913) — Single owner of every Pause/Resume widget mutation.
+    - Method `_pause_elapsed_str` (Line 20967)
+    - Method `_paint_pause_status` (Line 20971) — Write the paused/pausing wording onto whichever surface owns this run.
+    - Method `_on_pause_clicked` (Line 20988) — Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
+    - Method `_on_pause_ack` (Line 21036) — Queued acknowledgement from a worker that has actually parked.
+    - Method `_on_search_phase` (Line 21051) — A search entered a new phase whose progress is not comparable to the last.
+    - Method `stop_search` (Line 21072)
+    - Method `reset_ui` (Line 21089)
+    - Method `_update_search_elapsed` (Line 21106) — Tick every 1s to keep elapsed time updating during search.
+    - Method `on_error` (Line 21122)
+    - Method `_reset_search` (Line 21124) — Clear all search state and start fresh.
+    - Method `_on_search_progress` (Line 21241)
+    - Method `render_asterisks_to_html` (Line 21252)
+    - Method `check_scroll_load` (Line 21257)
+    - Method `_install_load_more_button` (Line 21265) — The Search tab's "Load more results" button. Returns the layout
+    - Method `_results_rows_fit` (Line 21296) — True when the visible rows fit in the results table as it is
+    - Method `_load_more_remaining` (Line 21321) — How many results "Load more results" reaches, or 0 when it must
+    - Method `_all_terms_view_active` (Line 21337) — True while "Only results with all terms" narrows the table.
+    - Method `_update_load_more_button` (Line 21349) — Show "Load more results" exactly when _load_more_remaining says
+    - Method `_on_load_more_clicked` (Line 21362)
+    - Method `load_next_batch` (Line 21368)
+    - Method `_notify_search_complete` (Line 21572) — Flash taskbar icon if app is not focused when search completes.
+    - Method `on_search_finished` (Line 21609)
+    - Method `_replay_refinement_chain` (Line 21800) — D-13: Re-execute chain to rebuild restrict sets. Shows 'Re-evaluating...' feedback.
+    - Method `_replay_for_restore` (Line 21818) — Replay the refinement chain during session restore, OFF the UI thread.
+    - Method `_on_replay_for_restore_finished` (Line 21842) — Apply the restrict set rebuilt by the off-thread chain replay.
+    - Method `_on_replay_for_restore_error` (Line 21852) — Replay failed -- clear the chain rather than leave stale state.
+    - Method `_search_status_or_blank` (Line 21862) — What the replay leaves in the status label once it is done: the
+    - Method `_enter_refine_mode` (Line 21871) — D-02, D-03: Activate refine mode on desktop search bar.
+    - Method `_exit_refine_mode` (Line 21914) — D-02a: Cancel refine mode without search.
+    - Method `_update_refinement_strip` (Line 21920) — D-04, D-05, D-06, D-07, D-10: Rebuild breadcrumb chip widgets.
+    - Method `_remove_refinement_step` (Line 22004) — D-12: Remove chip at index and all subsequent, re-execute with feedback.
+    - Method `_toggle_all_terms_filter` (Line 22012) — Toggle 'Only results with all terms' post-filter and re-render results.
+    - Method `_apply_all_terms_filter_and_rerender` (Line 22018) — Re-render results table applying the all-terms filter.
+    - Method `_clear_refinement_chain` (Line 22049) — D-11: Remove entire chain, return to unrestricted search.
+    - Method `_update_search_within_btn` (Line 22065) — D-01: Show/hide search within button based on result availability.
+    - Method `_undo_zero_result_refine` (Line 22078) — D-14a: Recover from zero-result refinement -- replay chain to restore previous results.
+    - Method `_launch_enrichment_workers` (Line 22092) — Launch domain, PGP badge, printed badge, and measurement enrichment workers.
+    - Method `_open_results_filter_dialog` (Line 22167)
+    - Method `_update_results_filter_indicators` (Line 22212)
+    - Method `_results_filter_text_for_row` (Line 22216)
+    - Method `_apply_local_filter` (Line 22232) — Apply LOCAL three-state filter per D-10 / D-10 P1.
+    - Method `_apply_local_optout_filter` (Line 22257) — Phase 96 D-F1: drop LOCAL hits whose canonical filepath is in
+    - Method `_reapply_filters_for_optout_change` (Line 22297) — Phase 96 D-F1: re-run both cascade joinpoints after the user
+    - Method `_local_filter_state_index` (Line 22322) — Return the index of ``value`` in ``states``, or 0 if unknown.
+    - Method `_text_position_from_index` (Line 22335) — Map a combo index to its text-position option, or None if out of range.
+    - Method `_toggle_local_filter_search` (Line 22345) — Cycle the LOCAL filter state for the Search surface (D-10 / D-39).
+    - Method `_toggle_local_filter_composition` (Line 22354) — Cycle the LOCAL filter state for the Composition surface (D-10 / D-39).
+    - Method `_toggle_local_filter_parallels` (Line 22363) — Cycle the LOCAL filter state for the Parallels surface (D-10 / D-39).
+    - Method `_update_local_filter_btn_search` (Line 22372) — Update label on the Search surface LOCAL filter button.
+    - Method `_update_local_filter_btn_composition` (Line 22384) — Update label on the Composition surface LOCAL filter button.
+    - Method `_update_local_filter_btn_parallels` (Line 22396) — Update label on the Parallels surface LOCAL filter button.
+    - Method `_update_local_filter_visibility_search` (Line 22408) — Show/hide the Search LOCAL filter button based on LOCAL hits presence.
+    - Method `_update_local_filter_visibility_comp` (Line 22420) — Show/hide the Composition LOCAL filter button based on LOCAL hits presence.
+    - Method `_update_local_filter_visibility_parallels` (Line 22428) — Show/hide the Parallels LOCAL filter button based on LOCAL hits presence.
+    - Method `_show_local_filter_chip` (Line 22436) — Show or hide the no-op chip for the given surface.
+    - Method `_row_is_excluded` (Line 22449) — Is this results row's manuscript excluded on the Search surface?
+    - Method `_search_excluded_note` (Line 22461) — ' (N excluded)' for the rows the last visibility pass hid by
+    - Method `_search_status_summary` (Line 22467) — The Search results status line, from the table as it is now.
+    - Method `_with_search_summary` (Line 22491) — `message`, followed by the results summary when any row is hidden,
+    - Method `_apply_results_table_filters` (Line 22504) — Recompute the visibility of every Search results row.
+    - Method `_result_page_num` (Line 22670) — The 1-based page a results row is showing, or None.
+    - Method `_pgp_url_for_row` (Line 22691) — The PGP url THIS row should open.
+    - Method `_make_pgp_badge_item` (Line 22721) — Build the PGP cell for one row, as a link when the url is known.
+    - Method `_write_pgp_badge_cell` (Line 22752) — Write (or clear) the PGP cell of one results row.
+    - Method `_pgp_url_for_cell` (Line 22757) — The PGP url a results row links to, or None when it is not a link.
+    - Method `_on_results_cell_clicked` (Line 22762) — A single click on a linked PGP badge opens the PGP document page.
+    - Method `_on_results_double_clicked` (Line 22775) — Double-click opens the result -- except on a linked PGP badge.
+    - Method `_on_pgp_badges_loaded` (Line 22788) — Handle PGP badge worker results - update the PGP + scholarly-transcription
+    - Method `_on_printed_badges_loaded` (Line 22813) — Handle Printed badge worker results - update Printed column for all rows.
+    - Method `_on_pgp_tags_loaded` (Line 22829) — Handle PGP tags worker results - populate tag dropdown with categorized Hebrew translations.
+    - Method `_emit_pgp_tag_search_telemetry` (Line 22851) — Emit desktop_search_executed for a PGP-tags search run (Phase 114 USAGE-03).
+    - Method `_execute_tag_search` (Line 22895) — Execute a search by PGP tag from the dropdown.
+    - Method `_on_tag_search_results` (Line 22944) — Handle tag search results - display in results table.
+    - Method `_search_by_pgp_tag` (Line 23076) — Entry point for searching by PGP tag (from browse/result dialog links).
+    - Method `_open_comp_filter_dialog` (Line 23090)
+    - Method `_update_comp_filter_indicators` (Line 23128)
+    - Method `_comp_ms_display` (Line 23142) — Display fields of a composition manuscript/part row: shelfmark, library
+    - Method `_comp_shelf_cells` (Line 23183) — The Shelfmark cell text of a manuscript/part row and of each of its page
+    - Method `_comp_shelf_cells_uncached` (Line 23201)
+    - Method `_comp_ms_sys_id` (Line 23235)
+    - Method `_comp_filter_population` (Line 23241) — Every composition item the tree can show, drawn or not.
+    - Method `_comp_filter_state` (Line 23248) — The current tree filters, frozen, plus the host lookups the rule needs.
+    - Method `_apply_comp_tree_filters` (Line 23353) — Hide/show composition tree rows by the shared rule (comp_view_filter).
+    - Method `_comp_filter_summary` (Line 23409) — One line naming the active result-list filters, for the Manuscript Viewer.
+    - Method `_comp_data_matches_filters` (Line 23444)
+    - Method `_text_matches_filter` (Line 23486)
+    - Method `start_metadata_loading` (Line 23496)
+    - Method `on_meta_progress` (Line 23554)
+    - Method `on_meta_finished` (Line 23594)
+    - Method `_format_metadata_status` (Line 23607)
+    - Method `_create_action_button` (Line 23615)
+    - Method `_is_item_in_non_recent_list` (Line 23632)
+    - Method `_set_add_to_list_button_label` (Line 23639)
+    - Method `_update_browse_add_to_list_button` (Line 23644)
+    - Method `_update_search_row_list_indicator` (Line 23654)
+    - Method `_update_search_action_stars` (Line 23676)
+    - Method `on_table_cell_entered` (Line 23682)
+    - Method `on_lists_table_cell_entered` (Line 23707)
+    - Method `eventFilter` (Line 23723)
+    - Method `_collect_sorted_results` (Line 23817)
+    - Method `_extract_fl_id` (Line 23833)
+    - Method `show_full_text` (Line 23863)
+    - Method `show_full_text_for_result` (Line 23884)
+    - Method `open_result_in_browse_from_table` (Line 23913)
+    - Method `on_search_select_all_toggled` (Line 23929) — Handle Select All checkbox toggle (skips hidden/excluded rows).
+    - Method `on_search_result_item_changed` (Line 23942) — Handle individual checkbox changes in search results.
+    - Method `_update_search_export_label` (Line 23974)
+    - Method `search_add_selected_to_list` (Line 23995) — Add selected search results to a list.
+    - Method `search_add_row_to_list` (Line 24022) — Add a single search result row to a list.
+    - Method `_collect_selected_comp_pages` (Line 24038)
+    - Method `comp_add_selected_to_list` (Line 24069) — Add selected composition results to a list.
+    - Method `open_result_in_browse` (Line 24094)
+    - Method `_lookup_local_filepath` (Line 24177) — Phase 95 D-28 — look up the canonical filepath for a LOCAL sys_id.
+    - Method `_prime_local_filepath_cache` (Line 24202) — v7.16 BUG-6: batch-load canonical filepaths for all LOCAL hits in
+    - Method `_get_local_pages_for_sys_id` (Line 24224) — Return sorted [(p_num, text), ...] for all indexed pages of a LOCAL sys_id.
+    - Method `_get_local_full_text_for_sys_id` (Line 24271) — Category 3: aggregate all pages of a LOCAL sys_id into a single text.
+    - Method `_open_local_browse` (Line 24296) — Phase 95 D-27 + Phase 96 NEW-2 view-mode dispatch.
+    - Method `_render_view_all_batch` (Line 24503) — Phase 97 U-04 — re-render the accumulated page list via apply_line_numbered_text.
+    - Method `_append_next_view_all_batch` (Line 24542) — Phase 97 U-04 — schedule the next 50-page batch via QTimer.singleShot(0, ...).
+    - Method `_on_browse_open_file_clicked` (Line 24560) — Phase 95 D-28 — launch OS default app for the current LOCAL file.
+    - Method `_on_browse_open_file_location_clicked` (Line 24571) — v7.16: reveal the current LOCAL file in the OS file manager.
+    - Method `_is_browsing_local` (Line 24583) — Return True when the Browse panel currently shows a LOCAL file.
+    - Method `_browse_prev_next` (Line 24594) — Unified prev/next handler for Browse panel.
+    - Method `_show_local_browse_controls` (Line 24605) — Phase 96 NEW-2: update Browse-panel controls for LOCAL vs Genizah mode.
+    - Method `_open_local_browse_page` (Line 24638) — Phase 96 NEW-2: render ONE LOCAL page at a time in the Browse panel.
+    - Method `_on_local_browse_nav` (Line 24829) — Phase 96 NEW-2: prev/next click handler for LOCAL Browse nav.
+    - Method `_toggle_local_browse_view_mode` (Line 24866) — Phase 96 NEW-2: flip View-All ↔ Per-Page and re-render.
+    - Method `send_result_to_composition` (Line 24891)
+    - Method `_sanitize_for_excel` (Line 24923) — Cleans text to prevent Excel XML corruption.
+    - Method `_add_docx_highlighted_runs` (Line 24930)
+    - Method `_set_paragraph_rtl` (Line 24941)
+    - Method `_set_table_rtl` (Line 24954)
+    - Method `_set_table_width_pct` (Line 24964)
+    - Method `export_results` (Line 24975) — Export results handling specific formats directly.
+    - Method `export_comp_report` (Line 25402)
+    - Method `open_filter_dialog` (Line 26467)
+    - Method `_get_filter_text` (Line 26506) — Get combined filter text from enabled sources.
+    - Method `_update_list_filter_cache` (Line 26514) — Cache the set of system IDs for the currently selected lists to optimize filtering.
+    - Method `open_list_filter_dialog` (Line 26535)
+    - Method `toggle_list_filter` (Line 26553)
+    - Method `load_comp_file` (Line 26572)
+    - Method `_excl_get` (Line 26603) — One field of one surface's exclusion list.
+    - Method `_excl_set` (Line 26607)
+    - Method `_clear_exclusions` (Line 26610) — Empty ONE surface's exclusion list, leaving the other alone.
+    - Method `_comp_snapshot_has_own_exclusions` (Line 26619) — Does this composition snapshot carry its OWN exclusion list?
+    - Method `open_exclude_dialog` (Line 26634) — Edit ONE surface's exclusion list.
+    - Method `set_excluded_entries` (Line 26672) — Replace one surface's exclusion list from newline-separated text.
+    - Method `_normalize_shelfmark` (Line 26701) — Normalize shelfmarks using the canonical function from genizah_core.
+    - Method `_rerender_with_exclusions` (Line 26705) — Re-apply the Search tab's Exclude Manuscripts list to the table.
+    - Method `_update_exclusion_display` (Line 26719) — Update ONE surface's exclusion status label (D-07 breakdown).
+    - Method `_remove_exclusion_source` (Line 26752) — Remove a single exclusion source by source_id (D-06 per-source clear).
+    - Method `_ensure_shelf_map` (Line 26763) — Build a mapping from normalized shelfmark to sys_id for quick lookups.
+    - Method `_get_meta_for_header` (Line 26785) — Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks.
+    - Method `_comp_item_is_local` (Line 26803) — Phase 110 UAT (Issue 1): True iff a composition item is a LOCAL hit.
+    - Method `_comp_local_display_fields` (Line 26829) — Phase 110 UAT (Issue 1): compute (shelfmark, library_display) for a
+    - Method `_prime_comp_local_filepath_cache` (Line 26861) — Phase 110 UAT (Issue 1): batch-prime _local_filepath_cache for the
+    - Method `_item_matches_exclusion` (Line 26898)
+    - Method `_apply_manual_exclusions` (Line 26927)
+    - Method `toggle_composition` (Line 26953)
+    - Method `cancel_composition` (Line 27003) — Cancel composition search gracefully (called by Escape shortcut).
+    - Method `reset_comp_ui` (Line 27018)
+    - Method `_reset_is_pending` (Line 27030) — True while a New pressed during the CURRENT composition run's
+    - Method `_retry_pending_reset` (Line 27042) — Poll until the cancelled witness batch has actually finished, then
+    - Method `_reset_composition` (Line 27074) — Clear all composition search state and start fresh.
+    - Method `_emit_comp_search_telemetry` (Line 27256) — Emit desktop_search_executed for a composition search run (Phase 114 USAGE-03).
+    - Method `run_composition` (Line 27294) — Main entry point for Composition Search.
+    - Method `on_comp_display_mode_changed` (Line 27652)
+    - Method `run_recursive_composition` (Line 27671)
+    - Method `on_comp_status_update` (Line 27715)
+    - Method `on_comp_progress` (Line 27720)
+    - Method `on_comp_error` (Line 27750) — Handle errors during composition search.
+    - Method `on_comp_scan_finished` (Line 27771)
+    - Method `start_grouping` (Line 27958)
+    - Method `on_grouping_error` (Line 28001)
+    - Method `on_comp_finished` (Line 28014)
+    - Method `_collect_comp_items` (Line 28056)
+    - Method `_comp_sort_mode_for_column` (Line 28074)
+    - Method `_configure_comp_tree_header` (Line 28083) — Configure the LIVE composition header.
+    - Method `on_comp_header_clicked` (Line 28128)
+    - Method `_current_comp_sort_mode` (Line 28159) — The sort mode, validated.
+    - Method `_get_comp_item_meta` (Line 28171)
+    - Method `_comp_sort_key` (Line 28189)
+    - Method `_sort_comp_items` (Line 28216)
+    - Method `_build_comp_preview_label` (Line 28221)
+    - Method `_set_comp_tree_text` (Line 28227)
+    - Method `_format_score_with_boundary` (Line 28231) — Format score string with boundary indicator if applicable.
+    - Method `_get_boundary_tooltip` (Line 28242) — Get tooltip text for boundary match indicator.
+    - Method `_process_snippet_queue` (Line 28252)
+    - Method `_update_comp_tree_tooltip` (Line 28273)
+    - Method `_refresh_comp_tree_tooltips` (Line 28300)
+    - Method `_apply_comp_node_previews` (Line 28312)
+    - Method `_clear_comp_node_previews` (Line 28327)
+    - Method `_set_comp_node_previews` (Line 28333)
+    - Method `_comp_preview_source_text` (Line 28359) — The source-context text exactly as the tree previews it (hits wrapped in
+    - Method `display_comp_results` (Line 28377)
+    - Method `_get_filter_reason` (Line 28857) — Get human-readable filter reason for a composition result item.
+    - Method `_make_node_checkable` (Line 28882) — Make a tree node checkable.
+    - Method `_apply_comp_printed_badge` (Line 28887) — Set dedicated Printed column on composition tree node if manuscript is printed material.
+    - Method `_add_manuscript_node` (Line 28896) — Add a manuscript/part node to the tree. Used for lazy/batched loading.
+    - Method `_comp_flat_marker_map` (Line 29024) — Rows the flat view must mark: {id(item): (item, kind, reason)}.
+    - Method `_comp_flat_root_label` (Line 29039) — 'All Results (N)', plus how many of them are filtered or excluded.
+    - Method `_apply_comp_flat_marker` (Line 29053) — Mark a flat-view row that belongs to the Filtered or Excluded group.
+    - Method `_add_single_node_to_tree` (Line 29070) — Dedicated helper to add one row to the tree.
+    - Method `_start_batched_tree_load` (Line 29130) — Start loading items into tree in batches to prevent UI freeze.
+    - Method `_batch_parent_is_alive` (Line 29149) — False once Qt has deleted the parent item under us.
+    - Method `_finish_batched_tree_load` (Line 29159) — Release the queue and hand the tree back to the user.
+    - Method `_process_tree_batch` (Line 29168) — Process one batch of items and schedule next batch.
+    - Method `_trigger_lazy_metadata_fetch` (Line 29209) — Starts background fetching for items that are currently displayed but missing data.
+    - Method `on_comp_tree_item_changed` (Line 29223)
+    - Method `on_comp_header_toggled` (Line 29254) — Toggle all root items in the composition tree.
+    - Method `_set_check_state_recursive` (Line 29269)
+    - Method `_update_comp_export_label` (Line 29275)
+    - Method `_collect_checked_comp_items_struct` (Line 29284) — Collect checked items maintaining the structure (Main, Appendix, etc.)
+    - Method `on_comp_tree_item_expanded` (Line 29427)
+    - Method `on_comp_tree_item_collapsed` (Line 29460)
+    - Method `_sync_parent_check_state` (Line 29464)
+    - Method `_collect_checked_comp_page_uids` (Line 29482)
+    - Method `_collect_all_comp_page_uids` (Line 29512)
+    - Method `_update_recursive_button_state` (Line 29541)
+    - Method `_has_comp_results` (Line 29557)
+    - Method `show_comp_detail` (Line 29564)
+    - Method `_refresh_comp_tree_metadata` (Line 29654)
+    - Method `_fmt_item_legacy` (Line 29678)
+    - Method `_format_comp_entry` (Line 29698)
+    - Method `_fetch_metadata_with_dialog` (Line 29714)
+    - Method `_resolve_meta_labels` (Line 29770)
+    - Method `_update_part_state_for_sid` (Line 29783) — Refresh Part context (Neubauer) for the given system ID.
+    - Method `browse_load` (Line 29797)
+    - Method `_browse_load_part` (Line 29970) — Load a Codicological Part (Neubauer) for browsing.
+    - Method `browse_navigate` (Line 30107)
+    - Method `browse_render_page` (Line 30154)
+    - Method `browse_open_catalog` (Line 30526)
+    - Method `browse_open_pgp` (Line 30531) — Open the current manuscript's Princeton Geniza Project page.
+    - Method `_update_browse_pgp_button` (Line 30536) — Show the browse PGP button only while a PGP url is actually known.
+    - Method `_browse_open_external_link` (Line 30548)
+    - Method `_on_browse_thumb_resolved` (Line 30555)
+    - Method `start_browse_download` (Line 30561)
+    - Method `on_browse_img_loaded` (Line 30577)
+    - Method `on_browse_img_failed` (Line 30587)
+    - Method `cancel_browse_image_thread` (Line 30591)
+    - Method `_cleanup_browse_inflight` (Line 30606) — Remove finished browse thread from in-flight list.
+    - Method `fetch_browse_thumbnail` (Line 30614)
+    - Method `check_updates_auto` (Line 30634) — Run update checker silently at startup.
+    - Method `check_updates_manual` (Line 30645) — Run update checker with UI feedback.
+    - Method `on_update_result` (Line 30655)
+    - Method `on_update_error` (Line 30688)
+    - Method `_on_sidecar_updates` (Line 30696) — Handle sidecar update availability notification.
+    - Method `_start_sidecar_download` (Line 30720) — Download sidecar updates sequentially.
+    - Method `_reset_sidecar_connections` (Line 30734) — Close all sidecar DB connections so files can be replaced.
+    - Method `_download_next_sidecar` (Line 30746) — Download the next sidecar in the queue.
+    - Method `_on_sidecar_download_finished` (Line 30764) — Handle completion of a single sidecar download.
+    - Method `on_update_dismissed` (Line 30772) — Save dismissed version to config.
+    - Method `on_whats_new_dismissed` (Line 30776) — Save that user has seen What's New for this version.
+    - Method `show_whats_new_dialog` (Line 30780) — Show detailed What's New dialog.
+    - Method `start_in_app_update` (Line 30787) — Start the in-app update process with progress dialog.
+    - Method `run_indexing` (Line 30800)
+    - Method `on_index_progress` (Line 30851)
+    - Method `on_index_finished` (Line 30856)
+    - Method `on_index_error` (Line 30862)
+    - Method `_on_history_menu_hovered` (Line 30889) — Highlight the active QWidgetAction container on hover/keyboard navigation.
+    - Method `_show_search_history_menu` (Line 30905) — Show the search history dropdown below the query input.
+    - Method `_show_comp_history_menu` (Line 30913) — Show the composition history dropdown below the title input.
+    - Method `_refresh_search_history` (Line 30920) — Rebuild the search history menu with per-item delete buttons.
+    - Method `_refresh_comp_history` (Line 30934) — Rebuild the composition history menu with per-item delete buttons.
+    - Method `_build_filter_summary` (Line 30949) — Build a compact filter summary string like [כולל: תנ״ך, תוספתא. 1000-1300].
+    - Method `_history_query_with_witnesses` (Line 31014) — The witness count on a history line, rendered NOW.
+    - Method `_add_history_menu_item` (Line 31049) — Add a single history entry to a menu with a delete button.
+    - Method `_on_history_item_clicked` (Line 31110) — Restore state when a history menu item is clicked.
+    - Method `_delete_history_item` (Line 31122) — Delete a single history entry and refresh the menu.
+    - Method `_restore_regular_search_from_state` (Line 31137) — Apply a history entry and re-run the regular search.
+    - Method `_restore_comp_search_from_state` (Line 31211) — Apply a history entry and re-run the composition search.
+    - Method `_add_regular_search_to_history` (Line 31305) — Save the current regular search to history.
+    - Method `_add_comp_search_to_history` (Line 31343) — Save the current composition search to history.
+    - Method `_clear_search_history` (Line 31422) — Clear all entries for a search type after confirmation.
+    - Method `_apply_persistent_session_preferences` (Line 31441) — Apply lightweight preferences that must survive even when full
+    - Method `_save_session` (Line 31550) — Save current search state to disk for session persistence.
+    - Method `_schedule_session_save` (Line 31719) — Schedule a debounced session save (500ms).
+    - Method `_restore_session_then_lists_sync` (Line 31727) — Startup: restore the session (its questions are modal, so they are
+    - Method `_start_restored_lists_sync` (Line 31736) — A sign-in restored from the last session syncs as an explicit one does:
+    - Method `_restore_session` (Line 31752) — Restore search state from saved session on startup.
+    - Method `_passage_workers_busy` (Line 32212)
+    - Method `_defer_close_for_passage` (Line 32227) — Returns True when the close was deferred. Uses a QTimer to
+    - Method `_retry_pending_close` (Line 32256)
+    - Method `closeEvent` (Line 32266)
+    - Method `_add_single_comp_node` (Line 32417) — Adds a node to the composition tree with parent/child logic.
+    - Method `_on_comp_item_expanded` (Line 32512)
+    - Method `_on_comp_item_collapsed` (Line 32517)
+    - Method `_comp_viewer_entry` (Line 32545) — One Manuscript Viewer entry for a hit page, tagged with its category.
+    - Method `on_comp_item_double_clicked` (Line 32580) — Open the Manuscript Viewer on the clicked result, with the WHOLE result list
+    - Method `navigate_manuscript` (Line 32632) — Navigate to prev/next manuscript by file order, crossing Part boundaries.
+    - Method `_update_part_image_for_folio` (Line 32696) — Update image viewer to show the current folio's images within a Part.
+- **Function** `resource_path` (Line 32743) — Get absolute path to resource, works for dev and for PyInstaller
+
+## genizah_core.py
+
+- **Class** `SafeRotatingFileHandler` (Line 15) — A RotatingFileHandler that handles Windows file locking gracefully.
+    - Method `doRollover` (Line 21)
+- **Function** `construct_mosseri_cudl_label` (Line 143) — Convert a Mosseri shelfmark variant to a CUDL manifest label.
+- **Function** `encode_word_shmidman` (Line 185) — Encode a single word by selecting its two rarest Hebrew characters.
+- **Function** `text_to_fingerprint` (Line 204) — Convert free text into a fingerprint representation.
+- **Function** `parse_boundaries` (Line 219) — Find word indices where boundaries occur.
+- **Function** `chunk_crosses_boundary` (Line 256) — Check if a chunk spans any boundary with words on BOTH sides.
+- **Function** `get_crossed_boundaries` (Line 279) — Get the set of boundary indices that a chunk crosses.
+- **Function** `calculate_boundary_quality` (Line 298) — Calculate boundary match quality as average of match strengths.
+- **Function** `calculate_final_score_with_boost` (Line 313) — Calculate final score with boundary boost.
+- **Function** `get_boundary_stats` (Line 345) — Get pre-search statistics about boundaries.
+- **Function** `get_volume_pages` (Line 410) — Filter browse_map pages to a specific IE's pages only.
+- **Function** `get_volumes_for_sys_id` (Line 423) — Get volume information for a sys_id from ie_volume_map.
+- **Function** `resolve_volume_suffix` (Line 434) — Map an IE identifier to its IIIF manifest suffix for a given sys_id.
+- **Function** `configure_logger` (Line 467) — Configure a rotating file logger for the app (quiet for users, verbose for devs).
+- **Function** `get_logger` (Line 490)
+- **Function** `configure_lab_logger` (Line 498) — Configure a separate logger for Lab Mode operations.
+- **Function** `load_language` (Line 539) — Load language preference. Returns 'en' or 'he'.
+- **Function** `save_language` (Line 549) — Save language preference.
+- **Function** `load_app_config` (Line 558) — Load general app configuration.
+- **Function** `save_app_config` (Line 569) — Update general app configuration with new keys.
+- **Function** `tr` (Line 583) — Translate text if current language is Hebrew.
+- **Function** `calculate_smart_weights` (Line 627) — Analyzes corpus to generate HTR-aware letter frequency weights.
+
+## desktop/supabase_corrections_client.py
+
+- **Function** `_sanitize_ilike_pattern` (Line 73) — Sanitize a user string for interpolation into a PostgREST `.ilike` pattern.
+- **Class** `User` (Line 96) — User data class
+- **Class** `Correction` (Line 111) — Correction data class
+- **Class** `Comment` (Line 136) — Comment data class
+- **Class** `Discovery` (Line 156) — Discovery/Question data class
+- **Class** `FragmentJoin` (Line 185) — Fragment join data class
+- **Class** `JoinedFragmentDetail` (Line 202) — A fragment in the connected component with relationship info
+- **Class** `ConnectedFragments` (Line 213) — Connected fragments response
+- **Class** `DiscoveryResponse` (Line 225) — Response to a discovery
+- **Class** `FeedItem` (Line 237) — Activity feed item
+- **Function** `_map_join_type` (Line 275) — Map UI join type value to DB CHECK constraint value.
+- **Class** `SupabaseCorrectionsClient` (Line 283) — Supabase-based client for corrections, comments, discoveries, and joins.
+    - Method `__init__` (Line 291) — Initialize the Supabase corrections client.
+    - Method `_get_client` (Line 314) — Get or create Supabase client.
+    - Method `_load_credentials` (Line 331) — Load saved Supabase session from disk.
+    - Method `_save_credentials` (Line 368) — Save Supabase session to disk.
+    - Method `save_login_credentials` (Line 407) — Save login credentials securely using keyring.
+    - Method `get_saved_login_credentials` (Line 440) — Get saved login credentials.
+    - Method `clear_saved_login_credentials` (Line 472) — Clear saved login credentials.
+    - Method `_load_cache` (Line 498) — Load cached community data from disk.
+    - Method `_save_cache` (Line 511) — Save community data cache to disk.
+    - Method `get_cached_data` (Line 519) — Get cached data if available.
+    - Method `set_cached_data` (Line 524) — Set cache data and save to disk.
+    - Method `clear_cache` (Line 529) — Clear the community data cache.
+    - Method `is_server_available` (Line 538) — Check if Supabase is reachable.
+    - Method `reset_offline_status` (Line 566) — Reset offline status to force a fresh connectivity check.
+    - Method `is_logged_in` (Line 573) — Check if user is logged in.
+    - Method `login` (Line 584) — Login with email and password.
+    - Method `register` (Line 624) — Register a new user.
+    - Method `logout` (Line 677) — Log out and forget the saved session.
+    - Method `_forget_saved_session` (Line 706)
+    - Method `_revoke_session` (Line 714)
+    - Method `request_password_reset` (Line 720) — Request a password reset email.
+    - Method `_load_user_profile` (Line 746) — Load user profile from Supabase.
+    - Method `get_current_user` (Line 781) — Get current logged-in user.
+    - Method `create_correction` (Line 803) — Create a new correction.
+    - Method `get_correction` (Line 866) — Get a specific correction.
+    - Method `get_corrections_for_document` (Line 882) — Get all corrections for a document.
+    - Method `get_my_corrections` (Line 930) — Get current user's corrections.
+    - Method `get_all_corrections` (Line 980) — Get all corrections.
+    - Method `vote_correction` (Line 1042) — Vote on a correction (+1 or -1).
+    - Method `_parse_correction` (Line 1071) — Parse correction data into Correction object.
+    - Method `create_comment` (Line 1092) — Create a new comment.
+    - Method `get_document_comments` (Line 1140) — Get comments for a document.
+    - Method `get_comments_for_document` (Line 1167) — Alias for get_document_comments.
+    - Method `get_my_comments` (Line 1171) — Get current user's comments.
+    - Method `_parse_comment` (Line 1191) — Parse comment data into Comment object.
+    - Method `create_discovery` (Line 1209) — Create a new discovery/question.
+    - Method `get_discovery` (Line 1253) — Get a single discovery.
+    - Method `get_discoveries` (Line 1279) — Get list of discoveries.
+    - Method `vote_discovery` (Line 1335) — Vote on a discovery ('up', 'down', or 'none').
+    - Method `_parse_discovery` (Line 1370) — Parse discovery data into Discovery object.
+    - Method `create_join` (Line 1398) — Create a join between two fragments.
+    - Method `get_connected_fragments` (Line 1439) — Get all fragments connected to the given shelfmark.
+    - Method `get_connected_fragments_quick` (Line 1505) — Get connected fragments with a short timeout.
+    - Method `get_connected_fragments_by_id` (Line 1509) — Get all fragments connected to the given document_id.
+    - Method `search_joins` (Line 1550) — Search joins by shelfmark pattern or filters. Returns (joins, total).
+    - Method `get_my_joins` (Line 1587) — Get current user's joins. Returns (joins, total).
+    - Method `_parse_join` (Line 1623) — Parse join data into FragmentJoin object.
+    - Method `_resolve_join_authors` (Line 1639) — Batch-resolve user_ids to full names via profiles table.
+    - Method `publish_puzzle_join` (Line 1672) — Publish a puzzle join document to community.
+    - Method `unpublish_puzzle_join` (Line 1691) — Unpublish a puzzle join.
+    - Method `check_is_published` (Line 1703) — Check if a join document is currently published.
+    - Method `get_published_puzzle_joins` (Line 1715) — Get published puzzle joins for feed display.
+    - Method `get_published_joins_for_fragment` (Line 1727) — Get published puzzle joins containing a specific fragment.
+    - Method `fork_puzzle_join` (Line 1739) — Fork a published puzzle join to local workspace.
+    - Method `get_feed` (Line 1755) — Get activity feed - combines discoveries, corrections, comments, joins.
+    - Method `get_correction_stats` (Line 1835) — Get correction statistics.
+    - Method `get_discovery_stats` (Line 1852) — Get discovery statistics matching web stat card keys.
+    - Method `submit_correction` (Line 1881) — Submit a draft correction for review.
+    - Method `get_all_comments` (Line 1896) — Get all public comments.
+    - Method `update_discovery` (Line 1915) — Update a discovery.
+    - Method `delete_discovery` (Line 1947) — Delete (hide) a discovery.
+    - Method `add_discovery_response` (Line 1959) — Add a response to a discovery (as a comment).
+    - Method `get_discovery_responses` (Line 1970) — Get responses for a discovery.
+    - Method `mark_discovery_answered` (Line 1975) — Mark a question as answered.
+    - Method `get_pending_corrections` (Line 1988) — Get pending corrections for review.
+    - Method `review_correction` (Line 1992) — Review a correction.
+    - Method `get_document_stats` (Line 2026) — Get statistics for a document.
+    - Method `get_corrected_text` (Line 2043) — Apply all approved corrections to document text.
+    - Method `get_page_versions` (Line 2049) — Fetch all versions for a document page.
+    - Method `get_version_content` (Line 2054) — Fetch content for a specific version.
+    - Method `record_document_view` (Line 2058) — Record a document view for statistics.
+    - Method `get_leaderboard` (Line 2062) — Get top users by reputation.
+    - Method `get_join_by_id` (Line 2085) — Get a specific join by ID.
+    - Method `delete_join` (Line 2101) — Delete a join.
+    - Method `update_join` (Line 2113) — Update a join's metadata.
+    - Method `react_to_comment` (Line 2139) — Add/toggle reaction to a comment.
+    - Method `pin_discovery` (Line 2144) — Pin or unpin a discovery.
+    - Method `hide_discovery` (Line 2156) — Hide a discovery.
+    - Method `unhide_discovery` (Line 2160) — Unhide a discovery.
+- **Function** `get_supabase_corrections_client` (Line 2180) — Get or create the Supabase corrections client singleton.
+
+## desktop/gui_threads.py
+
+- **Function** `_keep_until_finished` (Line 25) — Hold ``worker`` until its QThread has finished, then let it go.
+- **Function** `_retire_worker` (Line 62) — Stop listening to a replaced worker and keep it until its QThread has finished.
+- **Function** `_prevent_sleep` (Line 88) — Prevent OS sleep while search is running (Windows only).
+- **Function** `_allow_sleep` (Line 99) — Re-allow OS sleep after search completes (Windows only).
+- **Class** `IndexerThread` (Line 108) — Build or refresh the index without blocking the UI.
+    - Method `__init__` (Line 114)
+    - Method `run` (Line 118)
+- **Class** `RefinementReplayThread` (Line 125) — Replay a refinement chain off the UI thread to rebuild restrict sets.
+    - Method `__init__` (Line 139)
+    - Method `run` (Line 145)
+- **Class** `PausableSearchMixin` (Line 155) — Cancel + pause plumbing shared by the four desktop search workers.
+    - Method `_init_pause_support` (Line 170)
+    - Method `pause` (Line 185)
+    - Method `resume` (Line 188)
+    - Method `is_pause_pending` (Line 191)
+    - Method `request_cancel` (Line 194) — The one stop entry point: set the flag AND un-park, atomically.
+    - Method `requestInterruption` (Line 205) — Route Qt's own interruption request into request_cancel().
+    - Method `_emit_pause_ack` (Line 217)
+    - Method `_should_abort` (Line 223)
+    - Method `_checkpoint` (Line 234) — Cooperative checkpoint: raises to cancel, blocks to pause.
+- **Class** `SearchThread` (Line 246) — Execute a search query asynchronously.
+    - Method `__init__` (Line 260)
+    - Method `run` (Line 270)
+- **Class** `LabSearchThread` (Line 314) — Execute a Lab Mode search query.
+    - Method `__init__` (Line 326)
+    - Method `run` (Line 343)
+- **Class** `CompositionThread` (Line 388) — Scan compositions in background to keep UI responsive.
+    - Method `__init__` (Line 400)
+    - Method `run` (Line 425)
+- **Class** `MultiWitnessCompositionThread` (Line 468) — Search N witnesses of one work, one at a time, and rank-fuse them.
+    - Method `__init__` (Line 509)
+    - Method `_abort_if_generation_moved` (Line 542) — Void the batch if the index was replaced under it.
+    - Method `run` (Line 557)
+- **Class** `LabCompositionThread` (Line 714) — Execute Lab Composition Search (Broad-to-Narrow).
+    - Method `__init__` (Line 726)
+    - Method `run` (Line 750)
+- **Class** `GroupingThread` (Line 802) — Group composition results while reporting progress to the UI.
+    - Method `__init__` (Line 811)
+    - Method `run` (Line 818)
+- **Class** `ShelfmarkLoaderThread` (Line 851) — Background thread to load metadata.
+    - Method `__init__` (Line 861)
+    - Method `request_cancel` (Line 866)
+    - Method `run` (Line 869)
+- **Class** `StartupThread` (Line 893) — Initialize heavy components in the background.
+    - Method `run` (Line 898)
+- **Class** `EnrichMetadataThread` (Line 913) — Fetch extended metadata (IIIF/MARC) in the background.
+    - Method `__init__` (Line 917)
+    - Method `run` (Line 923)
+- **Class** `VolumeManifestThread` (Line 933) — Lightweight manifest-only fetch for volume switches (no full enrichment).
+    - Method `__init__` (Line 937)
+    - Method `run` (Line 944)
+- **Class** `ExternalResourceThread` (Line 952) — Fetch external IIIF resources (e.g. Cambridge) in background.
+    - Method `__init__` (Line 956)
+    - Method `run` (Line 961)
+- **Function** `few_shot_data_dir` (Line 969) — Absolute path of the repository's ``data/`` directory, which holds the few-shot prompts.
+- **Class** `TranslateTextThread` (Line 986) — Translate a single text field via Dicta API in the background.
+    - Method `__init__` (Line 991)
+    - Method `run` (Line 997)
+- **Class** `UpdateCheckerThread` (Line 1015) — Check for updates on GitHub.
+    - Method `__init__` (Line 1022)
+    - Method `run` (Line 1027)
+- **Class** `UpdateDownloaderThread` (Line 1067) — Download update installer from GitHub Releases with progress reporting.
+    - Method `__init__` (Line 1073)
+    - Method `cancel` (Line 1079) — Request cancellation of the download.
+    - Method `run` (Line 1083)
+- **Class** `DomainEnrichmentWorker` (Line 1141) — Batch-fetch FJMS domain classifications for search results in background.
+    - Method `__init__` (Line 1149)
+    - Method `run` (Line 1153)
+- **Class** `PGPSourceWorker` (Line 1176) — Fetch PGP edition/translation sources for a fragment in the background.
+    - Method `__init__` (Line 1185)
+    - Method `run` (Line 1208)
+- **Class** `PGPBadgeWorker` (Line 1283) — Batch check badge sets for the results table (SEED-022).
+    - Method `__init__` (Line 1308)
+    - Method `run` (Line 1312)
+- **Class** `PrintedBadgeWorker` (Line 1341) — Batch check which sys_ids have FragmentMaterial=Printed for badge display.
+    - Method `__init__` (Line 1345)
+    - Method `run` (Line 1349)
+- **Class** `PGPTagsWorker` (Line 1363) — Fetch all distinct PGP tags for dropdown population.
+    - Method `__init__` (Line 1367)
+    - Method `run` (Line 1370)
+- **Class** `PGPTagSearchWorker` (Line 1380) — Search for fragments by PGP tag.
+    - Method `__init__` (Line 1384)
+    - Method `run` (Line 1388)
+- **Class** `ReadingDeskWorker` (Line 1398) — Batch load PGP sources for multiple fragments for the reading desk.
+    - Method `__init__` (Line 1407)
+    - Method `run` (Line 1411)
+- **Class** `SidecarUpdateThread` (Line 1434) — Check for sidecar data updates via GitHub release manifest.
+    - Method `run` (Line 1446)
+    - Method `_get_local_version` (Line 1496) — Get local sidecar version from the service singleton.
+    - Method `_is_newer` (Line 1510) — Compare SemVer strings. Returns True if remote > local.
+- **Class** `SidecarDownloadThread` (Line 1525) — Download a sidecar database update from GitHub Releases.
+    - Method `__init__` (Line 1531)
+    - Method `cancel` (Line 1538)
+    - Method `run` (Line 1541)
+- **Class** `PuzzleImageLoaderThread` (Line 1583) — Load and process a fragment image in the background via PuzzleImageService.
+    - Method `__init__` (Line 1588)
+    - Method `run` (Line 1598)
+- **Class** `ShelfmarkResolveThread` — runs `resolve_system_by_shelfmark` off the UI thread for the Puzzle add box and the Joins dialog's fragment B (a cold first lookup builds the index).
+- **Class** `PuzzleMetaLoaderThread` (Line 1615) — Resolve images_nli (with fl_ids) for a sys_id in the background.
+    - Method `__init__` (Line 1625)
+    - Method `run` (Line 1631)
+    - Method `_resolve_oxford_images` (Line 1685) — Try to resolve Oxford part images via shelfmark-based lookup.
+- **Class** `FilterCountWorker` (Line 1737) — Background worker to compute manuscript count for pre-search filters.
+    - Method `__init__` (Line 1741)
+    - Method `run` (Line 1751)
+
+## web/components/blau_panel.py
+
+- **Function** `lookup_on` (Line 168) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
+- **Function** `set_lookup_on` (Line 173) — The reader's choice; turning it on also marks the switch as no longer new.
+- **Function** `switch_is_new` (Line 180) — Is the switch still new to this visitor (highlighted, its label saying so)? Yes until
+- **Function** `switch_label` (Line 192) — The switch's label (shown from 640px).
+- **Function** `switch_tooltip` (Line 197) — What the switch will do when pressed.
+- **Function** `lookup_event` (Line 202) — The ``POSTHOG_LOOKUP`` properties of one answered lookup (never the word).
+- **Function** `pick_tab` (Line 209) — The tab a lookup opens on: the one the reader last chose while it has
+- **Function** `head_html` (Line 221) — The ``<head>`` line that loads the click script, versioned by its
+- **Function** `lookup_word` (Line 233) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
+- **Function** `_attr` (Line 255)
+- **Function** `_rtl` (Line 259) — A Hebrew-letter text, right-to-left whatever the UI direction.
+- **Function** `_gloss_pair` (Line 264) — (text, class) of the glosses to show, the UI language's first.
+- **Function** `_render_sense` (Line 272)
+- **Function** `_render_card` (Line 295)
+- **Function** `_render_examples` (Line 326)
+- **Function** `_render_credit` (Line 338) — The credit, as a link to the dictionary site (ruling (a): the credit
+- **Function** `_render_box` (Line 351) — The box at the top of the panel: the word shown, editable; Enter or the
+- **Function** `_render_blau` (Line 364) — Blau's tab: the disclaimer, the cards and the examples, or what was
+- **Function** `_render_lane` (Line 386) — Lane's tab: its section (web/components/lane_panel.py), or its title and,
+- **Function** `render_lookup` (Line 395) — Draw the dictionaries' answers for one word into the current container:
+
+## web/components/lane_panel.py
+
+- **Function** `_attr` (Line 56)
+- **Function** `_arabic` (Line 60)
+- **Function** `_render_readings` (Line 64)
+- **Function** `_render_entry` (Line 79)
+- **Function** `_render_root` (Line 90)
+- **Function** `_render_credit` (Line 106) — The Perseus line verbatim (D3; English in both UIs, as Perseus words it), then the
+- **Function** `render_lane_empty` (Line 116) — Lane's tab when Lane has no reading for ``word`` (or no word was typed yet): its title,
+- **Function** `render_lane` (Line 126) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
+
+## web/components/criteria_panel.py
+
+The "Manuscript features" control (catalogue criteria, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.3, PR 1b):
+on `/catalog-browse` (sidebar card, chips under the button), in "Search only in..." on `/search` and
+`/parallels` (chips in the page's chip bar), and in the Joins Lab's "More filters…" dialog with `within`
+(the candidates' sys_ids: the total counts among them, D20; values and coverage stay on the corpus).
+
+- **Class** `CriteriaControl(get_criteria, on_apply, fjms, universe, mark, show_chips, on_chips, within)` — the button with
+  its badge, the chips (`chips`, `refresh()`, `remove(key)`), and `open()`: the panel (a window over the page, full
+  screen under 640 px) with the sections beside their controls, value lists with counts and a filter box, the
+  only/all-except toggle, the source choice (D6), ranges with "or: not recorded", per-criterion coverage, the live
+  total (`FjmsService.criteria_live_total`) and Clear section / Clear all / Apply. Sidecar reads run in `run.io_bound`.
+- **Function** `active_criteria_count` — the badge.
+- **Function** `unsupported_criteria` / `drop_unsupported` — the criteria a 5.0.0 file is KNOWN not to answer (rule 9):
+  disabled in the panel, dropped (with a notice) from a saved session or an address.
+- Related, in `web/components/filter_panel.py`: `restore_saved_criteria` (every restore path), `retire_old_saved_filters`
+  (R2), `load_history_labels_then` (the history menus read Hebrew value labels from the cache only and load missing
+  ones off the event loop, then redraw once).
+
+## web/components/shelfmark_picker.py
+
+- **Function** `open_shelfmark_picker(container, items, on_pick, query)` — "Select Manuscript" dialog for a shelfmark naming several records (reading desk, Joins Lab load box, Fragment Puzzle); entered in an explicit container; close = cancel.
+- **Function** `items_from_manuscripts` / `items_from_options` — plain picker items from `ManuscriptInfo` rows / resolver options.
+
+## web/components/translate_button.py
+
+- **Function** `_get_few_shot_prompt` (Line 29)
+- **Function** `detect_language` (Line 71)
+- **Function** `translate_text` (Line 97)
+- **Function** `create_translate_button` (Line 146)
+- **Function** `create_translatable_text` (Line 227)
+
+## web/components/notes_display.py
+
+- **Function** `render_content_with_mentions` (Line 30)
+- **Function** `fetch_document_comments` (Line 170)
+- **Function** `create_notes_panel` (Line 223)
+- **Function** `create_comment_card` (Line 277)
+- **Function** `create_reply_item` (Line 327)
+- **Function** `create_notes_button` (Line 355)
+
+## web/components/visual_similarity_dialog.py
+
+- **Function** `_normalize_view` (Line 51) — 'grid' for the thumbnail view; anything else is the list (the default).
+- **Function** `_normalize_thumb_size` (Line 56) — 's', 'm' or 'l'; anything else is Small (the default, the size before).
+- **Function** `_domain_label` (Line 61) — The suggestion's domain as the visitor reads it: Hebrew in the Hebrew UI.
+- **Function** `_library_ok` / `_domain_ok` (Line 76) — one suggestion against the Library / Domain filter (a chosen parent domain takes its branch).
+- **Function** `_passes_filters` (Line 86) — Whether a suggestion passes the Library and Domain filters, each showing only its chosen values or hiding them.
+- **Function** `_facet_options` (Line 92) — The Library and Domain options with counts (each counting what the other filter keeps) and the domains' depths.
+- **Function** `_wire_facet_filter` (Line 114) — A Library or Domain select: its values filter at once, shown only or hidden as the Show only | Hide switch at the top of its open list says; `refilter(key)` recounts the other select.
+- **Function** `_suggestion_thumbnail_url` (Line 105) — Low-resolution first-image URL for a suggestion's thumbnail card.
+- **Function** `_pick_preview_image_url` (Line 121) — Choose the same best-effort preview source family as the browse page.
+- **Function** `_resolve_preview_image_url_sync` (Line 156) — Populate browse metadata on demand, then pick the preview image URL.
+- **Function** `_fetch_original_info` (Line 184) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_preview_image_url` (Line 224) — Resolve the best preview image URL without blocking the UI event loop.
+- **Function** `_fetch_suggestion_text` (Line 232) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 250) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 608) — Render a single suggestion row with expandable detail section.
+- **Function** `_render_suggestion_actions` (Line 785) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
+- **Function** `_render_suggestion_card` (Line 855) — Render one suggestion as a thumbnail card (the grid view).
+
+## web/components/candidate_grid.py
+
+- **Function** `_placeholder_style` (Line 79) — The no-image box of a card thumbnail *height_px* tall.
+- **Function** `normalize_card_size` (Line 100) — 's', 'm' or 'l'; anything else is Medium (the default, the size before).
+- **Function** `paginate` (Line 109) — Paginate a list of candidates.
+- **Function** `_paginate` (Line 139) — Internal alias for paginate() using the module-level _PAGE_SIZE.
+- **Function** `is_size_mismatch` (Line 148) — Return True if candidate width differs from anchor width by more than threshold×.
+- **Class** `TriageState` (Line 184) — In-memory triage state keyed by sys_id.
+    - Method `__init__` (Line 196)
+    - Method `set` (Line 202) — Set verdict for a sys_id. Raises ValueError for invalid verdicts.
+    - Method `set_bulk` (Line 210) — Set the same verdict for multiple sys_ids. Raises ValueError for invalid verdicts.
+    - Method `get` (Line 219) — Return the verdict for sys_id, or None if not triaged.
+    - Method `reset` (Line 223) — Clear all triage verdicts (called on re-anchor / new search).
+    - Method `__len__` (Line 227)
+    - Method `__contains__` (Line 230)
+- **Function** `make_triage_state` (Line 234) — Factory for a fresh in-memory triage state object (D-11).
+- **Function** `compute_filtered` (Line 245) — Apply filter_state predicates to all_candidates and return the filtered list. `criteria_matched`: the manuscripts the Manuscript features keep (None = none chosen or not known: nothing filtered by them); `catalogue_ok=False`: the filters that read the enrichment stand down.
+- **Function** `_filter_parts` (Line 293) — compute_filtered's filters as three predicates: Library, Domain, the rest (the features among the rest).
+- **Function** `candidate_domain_label` (Line 350) — The candidate's domain as the visitor reads it ('' when it has none).
+- **Function** `facet_options` (Line 356) — The toolbar's Library and Domain options, each [(value, label, count, depth)], counting what the other filters keep.
+- **Function** `more_filters_count` (Line 371) — How many of the "More filters…" dialog's filters are on.
+- **Function** `get_table_columns` (Line 380) — Return the 8-column table column definitions (D-10, CND-03).
+- **Function** `get_table_config` (Line 398) — Return table configuration dict (used by tests to assert multi-select etc.).
+- **Function** `_make_table_rows` (Line 410) — Build row dicts for the ui.table from a candidate list.
+- **Function** `build_thumbnail_url` (Line 484) — Derive a proxy thumbnail URL for a candidate.
+- **Function** `build_browse_url` (Line 549) — Build the /browse deep-link URL for a candidate.
+- **Function** `_truncate_title` (Line 560) — Truncate a title to max_chars and append '...' if needed.
+- **Function** `cap_candidates` (Line 569) — Decide how many candidate cards to render (WebSocket-safety cap).
+- **Function** `_make_restyle_fn` (Line 599) — Return a render-scoped restyle callable that operates on ``card_refs``.
+- **Function** `_create_candidate_card` (Line 676) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
+- **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06): the Manuscript features button (`CriteriaControl(within=...)`, mark `joins-criteria`), size mismatch, triage, text. Material, size and "Has dimensions data" are features (owner, 2026-11-02).
+- **Function** `create_candidate_table` (Line 1152) — Render the multi-select sortable table view of candidates (D-10, CND-03).
+- **Function** `nest_options` (Line 1354) — Show a select's options as a tree: an `option` slot indents each by its depth (the value is its index); also the Visual Similarity window's Domain.
+- **Function** `_facet_select` (Line 1372) — One toolbar filter, Library or Domain: several values, each with its count. Each opens with a Show only | Hide switch (`libraries_mode` / `domains_mode`); Domain is nested.
+- **Function** `candidates_toolbar` (Line 1492) — The row above the cards or the table: the count, then Library, Domain, Sort and More filters…; under it the notices (features still checking, or not applied).
+- **Function** `create_candidate_grid` (Line 1510) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
+
+## web/main.py
+
+- **Function** `_inject_font_display_swap` (Line 36) — middleware injecting `font-display: swap` into NiceGUI fonts.css
+- **Function** `page_meta` (Line 128) — per-route SEO metadata (title, description, canonical, OG/Twitter)
+- **Function** `_resolve_ui_language` (Line 222) — detect UI language from storage/cookie
+- **Function** `create_layout` (Line 240) — shared page layout (header, sidebar, footer)
+- `create_layout`'s `render_header_center` — the header's go-to box on every page, `/` and `/search` included (owner, 2026-11-04): `home_query_target` with `catalogue_has_shelfmark` via `run.io_bound`; placeholder "Search text or go to a shelfmark..."; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css. Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
+- **Function** `_show_citation_reminder` (Line 635) — periodic citation reminder popup
+- **Function** `apply_theme_immediately` (Line 689) — inject dark/light theme CSS
+- **Function** `_safe_user_storage_get` (Line 821) — safe app.storage.user accessor
+- **Function** `set_current_page` (Line 829) — track current page for analytics
+- **Function** `dashboard_page` (Line 837) — homepage route
+- **Function** `search_page_route` (Line 901) — search page route
+- **Function** `parallels_page_route` (Line 935) — parallels page route
+- **Function** `browse_page_route` (Line 954) — manuscript browse route
+- **Function** `catalog_browse_page_route` (Line 1026) — FJMS catalog browse route
+- **Function** `lists_page_route` (Line 1070) — user lists route
+- **Function** `puzzle_page_route` (Line 1084) — fragment puzzle route
+- **Function** `atlas_page_route` — Phase 133 Visual Atlas Preview beta `/atlas` route; gated on `atlas_preview_available()`, clean-hides + `noindex` when unavailable
+- **Function** `_negotiate_encoding` — Accept-Encoding q-value negotiation (br/identity/`*`, honoring `q=0`) for the atlas data route; returns `'br' | 'identity' | None` (None → 406)
+- **Function** `_register_atlas_data_routes` — registers `/atlas-data/manifest.json` (no-cache + ETag + 304) and `/atlas-data/{asset_name}` (content-hashed, immutable, Brotli) onto the app; both gated on `atlas_preview_available()`
+- **Function** `auth_callback_route` (Line 1317) — OAuth callback handler
+- **Function** `initialize_engine` (Line 1404) — async startup: load search engine, metadata, variants
+- **Function** `_find_free_port` (Line 1465) — dev-mode port auto-discovery
+
+## web/atlas_assets.py
+
+Phase 133 (ATLAS-01) — the SINGLE authoritative asset-state source for the Visual Atlas Preview. Loads the baked binary once at startup from repo-root `atlas_data/` (deliberately OUTSIDE `web/static/`, HIGH-1) and exposes the shared availability predicate + byte accessors the `/atlas` page, nav link, and `/atlas-data/*` routes all consume.
+
+- **Constant** `ATLAS_DATA_DIR` — repo-root `atlas_data/` (outside `STATIC_DIR`)
+- **Function** `load_atlas_state` — read manifest + plain `.bin` (required) + `.bin.br` (optional) once at startup; fail-closed (`ready=False`) on any error
+- **Function** `atlas_preview_available` — `ATLAS_PREVIEW_ENABLED and state.ready`; the one predicate gating page/nav/data routes (and the 133-05 teaser)
+- **Functions** `atlas_bin_name` / `atlas_plain_bytes` / `atlas_br_bytes` / `atlas_manifest_bytes` / `atlas_manifest_etag` — byte + ETag accessors for the data routes
+
+## web/pages/atlas.py
+
+Phase 133 (ATLAS-01) — the Visual Atlas Preview page chrome (shared-shell embedded, Pattern 1).
+
+- **Function** `create_atlas_page` — Beta badge + honesty banner + one-line intro (EN/HE + RTL via `tr`/`is_rtl`), a CLS-reserved fixed-dimension `<canvas>` container, and a documented JS injection point the 133-04 Canvas 2D renderer fills in
+
+## web/pages/findings.py
+
+Phase 136 — the corpus-wide "Computed Identifications" page (`/computed-identifications`).
+Partial entry: the filter-state → read paths only, not the whole surface.
+
+- **Filter state lives in per-user `safe_storage`, not the URL** — `_KEY_LOCUS_FROM` /
+  `_KEY_LOCUS_TO` and siblings. Consequence: no page state can be reproduced from a link, so
+  the citation-range filter cannot be exercised by `curl` and a readiness probe must call the
+  service instead
+- **Function** `fetch_findings` — the parent read. Passes every filter axis the builder
+  accepts, including `locus_from` / `locus_to`, with `divergence=SHOWN`
+- **Function** `_child_state` — the child's filter state: the parent's state with `unit`
+  pinned to the leaf grain and the group key replaced. Copies *every* axis by contract
+- **Function** `_fetch_children` — one grouped row's children, through the same shipped read.
+  **The parent/child one-predicate invariant**: whatever axis `fetch_findings` passes, this
+  must pass too, or a parent's count and its own child list describe different populations. A
+  reader cannot see that kind of wrongness, which is what makes it worse than an error they
+  can. `locus_from` / `locus_to` were missing here until 2026-08-20 and are covered by tests
+  kept in the private repository.
+- **Function** `_facet_request` / `fetch_facets` — the domain → author → work cascade. Never
+  passes `work_id` or the locus bounds, so the citation-range predicate is structurally
+  inactive in facet counts
+
+## web/framework_patches.py
+
+- **Function** `_validate_session_id` — session id validation: a non-canonical id is replaced with a fresh uuid4 before NiceGUI user storage is looked up (2026-09-25)
+- **Class** `_CacheSafeRequestTrackingMiddleware` — skips session work for public assets; otherwise validates the session id, then defers to NiceGUI
+- **Function** `_patch_nicegui_esm_handler` (Line 20) — add is_file() guard to ESM route handler (prevents RuntimeError on directory URLs)
+- **Function** `_patch_html_lang_attribute` (Line 63) — patch NiceGUI index.html to add `lang="he"` for Lighthouse a11y
+- **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
+- **Function** `_is_session_free_path` — `/mcp` and `/mcp/`: never read, create or reissue a session (not cacheable; 2026-10-09)
+- **Function** `_patch_binding_remove` — NiceGUI < 3.15: `binding.remove` drops binding links without walking every property marker in the process, so `element.clear()` no longer slows with each open tab (2026-10-20)
+- **Function** `_patch_sessionless_404` — a 404 without a session (stale `/_nicegui/<old version>/...`, missing `/static` on 3.8) gets FastAPI's JSON 404, not NiceGUI's HTML page in a session-less `Client` that broke `prune_user_storage` for 60 s (2026-10-20)
+- **Function** `_patch_httpx_ssl_context` — httpx 0.28: the default SSL context is built from the certifi bundle read once (`cadata`), not re-read per client; a signed-in supabase client build went 1.56 s -> 0.17 s locally (2026-10-20)
+- **Function** `_patch_expects_arguments_memo` — NiceGUI 3.18: `helpers.expects_arguments` (an `inspect.signature` per call, asked for the Classes/Style/Props change handler of every element built and for every event handler) is remembered per function for bound methods, keyed by `__func__`; plain functions and lambdas pass through so no closure is kept alive. It was 31% of a 1,204-element build on the dev box (2026-10-21)
+- **Function** `_patch_handshake_counter` — a transparent wrapper over `nicegui.nicegui._on_handshake` (module global for the implicit path, `sio.on('handshake')` for the explicit one) counting `accepted` / `unknown_client` / `refused_other` with first/last times; `/_internal/memstat` `handshakes`; more than 30 unknown clients in a minute logs one "reload burst" warning (2026-10-21)
+
+## web/translations.py
+
+The web UI language, per visitor (2026-10-20; it was one value per process). Precedence is in the module comment.
+- **Function** `get_language` / `tr` / `is_rtl` — `using_language` block, else the page build and the tasks it started, else the page's client (event handlers), else the request (saved choice, else browser), else the process default
+- **Function** `set_language` — in a page: that page's language; in another task: that task's; outside any task: the process default
+- **Function** `using_language` — override for a block; task-local, so the block may await
+- **Function** `in_visitor_language` — wrap a callable for `run.io_bound`, whose threads get no context: it runs in the language read on the loop (2026-10-20; the browse library name and image credit were Hebrew for English visitors)
+- **Function** `visitor_language` — the one rule: a saved `ui_language`, else the browser's `Accept-Language` (`web/main.py::_resolve_ui_language`, the Excel export)
+
+## web/pages/puzzle.py (saving a join)
+
+How the web Fragment Puzzle saves (2026-10-20). Checked in a real browser by `scripts/e2e_puzzle_autosave.py` (manual, Playwright) and in the harness by `tests/render_smoke/test_puzzle_autosave_render_smoke.py`.
+- **Function** `schedule_auto_save` — called only from edits; debounced 1.5 s, deferred to the end of a load; the task enters `page_client`
+- **Function** `_auto_save_now` — writes the open draft; never writes an empty canvas over a non-empty draft
+- **Function** `build_fragments_list(stored=)` — a fragment the canvas did not draw keeps the stored draft's copy, else the tab's kept position
+- **Function** `load_document(doc_id, restoring=)` — returns True when loaded; writes the loaded canvas into the tab; `restoring` = the tab's own draft, quietly
+- **Function** `_restore_tab_canvas` — reopens the tab's draft from its saved copy, else rebuilds the tab's canvas (positions and crops); skipped for `?doc=` unless that cannot be opened
+- **Function** `save_state` — every `STATE_SAVE_INTERVAL_S` and at the end of a load: positions and `getCropState()` into the tab
+
+## web/ux_timing.py
+
+User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20). Browser side: `web/static/js/ux_timing.js`; env: `UX_TIMING_ENABLED`, `UX_TIMING_SAMPLE_RATE`.
+- **Function** `ux_done(client, workflow, outcome, *, server_ms, nav, img_selector)` — tell the page's browser an update was just sent; always pass the page's own client
+- **Function** `ux_ignored(client, workflow)` — the server turned the latest action away (Enter again while a search runs); the browser keeps the earlier start
+- **Function** `pending_wait_ms` — per-workflow time the browser keeps a start (a search: `WEB_SEARCH_TIME_LIMIT` + 30 s; others 60 s)
+- **Constant** `WORKFLOWS` / `OUTCOMES` — the registry; triggers are elements tagged `data-ux=<workflow>` (`data-ux-enter` for Enter)
+- **Function** `head_html` — the `<head>` snippet, appended to `POSTHOG_SCRIPT` (web/main.py)
+
+## web/reconnect_backoff.py
+
+A website restart must not reload every open tab at once (2026-10-21). Browser side: `web/static/js/reconnect_backoff.js`, inlined in `<head>` before the deferred socket.io.min.js; env: `RECONNECT_BACKOFF_ENABLED`, `RECONNECT_BACKOFF_BASE_MS`, `RECONNECT_BACKOFF_CAP_MS`, `RECONNECT_DELAY_MAX_MS`.
+- **Function** `head_html` — `window.GS_RECONNECT` config, then the script inlined (never a `src` with `defer`); `''` when switched off. Added once for every page with `ui.add_head_html(..., shared=True)` in web/main.py
+- **Function** `enabled` / `config` — the switch (independent of `POSTHOG_API_KEY`) and the three numbers the browser reads
+- **Script** `reconnect_backoff.js` — an accessor on `window.io` wraps socket.io's `io(url, opts)`: merges `reconnectionDelay`/`reconnectionDelayMax`/`randomizationFactor` (caller keys win) and delays NiceGUI's `connect_error` handler for "Implicit handshake failed" and "timeout" by `base * 2^n`, jittered x0.5-1.5 (n: consecutive reloads in `sessionStorage['gs_reload_n']`, reset after 60 s connected); a hidden tab waits for `visibilitychange`; other errors pass through; `posthog.capture('reload_scheduled', ...)` before the deferred handler
+
+## web/keyboard_shortcuts.py
+
+The website's keyboard shortcuts and the card that lists them (owner, 2026-11-05). Browser side: `web/static/js/shortcuts.js` (`?` opens the card, `/` jumps to the page's `data-gs-primary-search` box or the header's go-to box), loaded by `create_layout` in web/main.py together with the trigger (not shared: the layout-less routes have no card); the card opens on the page's hidden `.gs-shortcuts-trigger` (`gs-shortcuts`) and from the sidebar's "Keyboard shortcuts".
+- **Function** `sections` — the card's rows, `(keys, what they do)`, each a key a script handles: browse's key script (arrows by the page's direction, +, −, 0, F), `blau_lookup.js` (D or M tapped then a click, Alt + a click, Esc), `search.py` (Space); `PLAIN_WORDS` are actions, not keys, and `CONNECTORS` (or, then) take no "+"
+- **Function** `strings` — every string the card translates (tested against `TRANSLATIONS`)
+- **Function** `head_html` — the versioned `<script ... defer>` line; `''` when the file is missing
+- **Function** `served_dictionaries` / `expression_dictionaries` / `dictionaries_served` / `build_card` — which dictionaries are served, by name in the panel's tab order, and which of them have the expression search now (Blau's only on a 1.1.0 sidecar); the Help page's bullets follow both; the M rows only where one is served; the card as a dialog built in the caller's slot
+
+## web/ai_listings.py
+
+Which AI listings are live, from production settings (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md).
+- **Function** `current` — the live listings (ChatGPT plugin, Claude connector), whether the GPT is still offered (no plugin, before 2026-12-11), and whether the launch is announced
+- **Function** `chatgpt_target` — where /chatgpt leads: the plugin, else the GPT while it lives, else /ai
+- **Function** `whats_new_suffix` — appended to the What's New key so each launch relights the unread dot
+
+## web/mcp_server.py
+
+Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in docs/SEARCH_API.md "MCP server").
+- **Function** `register_mcp_server` — adds the exact POST route, the `/mcp/` redirect and the SDK manager in the host lifespan; no route unless `MCP_ENABLED` and the facade
+- **Function** `build_server` — the eight tools over one facade (`get_capabilities`, `list_manuscript_features`, `search_manuscripts`, `find_passage_parallels`, `find_chunk_parallels`, `get_research_job`, `browse_manuscript_page`, `get_manuscript_details`; chunk tool and variant levels: docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md)
+- **Class** `_RequestGuard` — before dispatch: 64 KiB body, id/name lengths, undeclared arguments refused
+- **Class** `_ReplyCap` — every reply within 100,000 bytes; streams never held; ASGI order kept
+- **Function** `_run_tool` / `_start_and_wait` — one `mcp_tool_call` event per call; coded errors; in-tool wait of three polls
+- **Function** `how_to_cite` — page citation from `shared/transcription_credits.py`, by `text_source`
+
+## web/nli_image_store.py
+
+The NLI image proxy's two disk stores (2026-10-21; docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md). Locations from the environment on every call; every error is a miss.
+- **Function** `fl_id_store_get` / `fl_id_store_put` — a manuscript's NLI image ids in `nli_fl_ids.db`, kept `NLI_DISK_CACHE_TTL` (30 days); `web/api.py::_save_nli_persistent_cache` is the one writer
+- **Function** `fl_id_store_prepare` — at startup: drop expired rows (the old `nli_fl_ids_cache.json` is not read)
+- Readers outside the image routes: `web/api.py::nli_fl_ids` (the routes' cached FL-id list, [] for the MARC record's partial one), for `web/page_count.py` (below)
+
+## web/page_count.py
+
+The page count of a manuscript the index holds no pages of (no automatic transcription; its page has `total_pages` 0). Browse Phase B and Quick View, 2026-10-29.
+- **Function** `manuscript_image_count` — BLOCKING: the NLI crossref folio count, else `web/api.py::nli_fl_ids`, of the volume (manifest suffix) the page's images come from (a later volume: its own manifest only); 0 when unknown or synthetic
+- **Function** `apply_page_count` — give a page with no count its count, its page number clamped into it
+- **Function** `count_pages` — async: the count within `PAGE_COUNT_WAIT_S` (0.5 s), else None now and `on_late(count)` when it comes, so no view waits on the NLI manifest
+- **Function** `thumb_path` — where a thumbnail lives, or None (corpus sys_ids only, widths in `NLI_THUMB_CACHE_WIDTHS`); the prefetch script is to use it too
+- **Function** `thumb_get` / `thumb_put` — read / keep a JPEG (atomic write; none past `NLI_THUMB_CACHE_MAX_MB` or below `NLI_THUMB_CACHE_MIN_FREE_MB` free)
+- **Function** `stats` — counters for `/_internal/memstat` (`nli_image_store`)
+
+## web/public_pages.py
+
+- **Function** `register_public_pages` — `/terms`, `/support`, `/ai/privacy`, and `/.well-known/openai-apps-challenge` (only when `OPENAI_APPS_CHALLENGE` is set)
+
+## web/session_hardening.py
+
+- **Function** `resolve_storage_secret` — return the stripped `GENIZAH_STORAGE_SECRET`, or refuse to start (SystemExit; never prints the value)
+- **Function** `is_canonical_session_id` — whether a value is a canonical lowercase uuid4 string
+- **Function** `require_session_id_validation` — refuse to start unless NiceGUI will install the validating middleware
+
+## web/clipboard.py
+
+- **Function** `clipboard_write_js` — the JavaScript expression that writes a text exactly and resolves to a bool
+- **Function** `copy_text_to_clipboard` — async; copy in the browser and toast the real outcome (success / failed / unconfirmed)
+
+## shared/fgp_marks_legend.py
+
+The Genuzot team's legend of transcription marks (GS-274 option A), one table for both apps.
+`web/components/version_selector.py::create_version_selector` shows its "?" while a Genuzot transcription is on screen.
+
+- **Class** `Mark` — one mark: how it looks in the text, and what it means in each language
+    - Method `meaning`
+- `PRAYER_MARKS` (prayer and piyyut fragments, 2024 list) and `TALMUD_MARKS` (Talmud fragments for Hachi Garsinan, 2014 list)
+- **Function** `labels` — the legend's frame (title, two headings, column names) in ``lang``
+- **Function** `legend_html` — the whole legend as one HTML fragment, for both apps: two headed tables
+- **Function** `uses_genuzot_marks` — is ``source`` a transcription by the Genuzot team, which uses these marks?
+
+## desktop/marks_legend.py
+
+- **Class** `MarksLegendDialog` — the legend; non-modal, so it can stay open beside the text it explains
+- **Function** `make_marks_legend_button` — a small hidden "?" that opens the legend
+- **Function** `sync_marks_legend_button` — show the button iff the chooser's current item is a Genuzot transcription
+
+(`desktop/widgets/__init__.py::text_lines_to_html` — escape page text for `setHtml`, then `\n` → `<br>`; every
+desktop text-to-HTML site uses it, pinned by `tests/test_desktop_angle_marks.py`.)
+
+## web/auth_state.py
+
+- **Class** `GlobalAuthState` (Line 28) — singleton auth state using NiceGUI app.storage.user
+    - Method `get_user` (Line 39)
+    - Method `get_profile` (Line 46)
+    - Method `is_logged_in` (Line 55)
+    - Method `get_user_id` (Line 60)
+    - Method `get_role` (Line 66)
+    - Method `is_admin` (Line 72)
+    - Method `is_editor` (Line 77)
+    - Method `can_edit` (Line 83)
+    - Method `can_comment` (Line 88)
+    - Method `set_auth` (Line 93)
+    - Method `_posthog_identify` (Line 102)
+    - Method `update_profile_cache` (Line 115)
+    - Method `clear_auth` (Line 120)
+    - Method `get_username` (Line 137)
+    - Method `get_headers` (Line 148)
+- **Function** `do_login` (Line 154) — perform login and update global auth state
+- **Function** `do_register` (Line 199) — register; signs in only when Supabase returns a session, else `{'check_email': True}` (production requires email confirmation; the same answer for an address that already has an account). The typed fields go in the metadata under `SIGNUP_PROFILE_KEY`; the database trigger writes them into the profile (`migrations/profiles_no_email_username.sql`)
+- **Function** `do_logout` (Line 240) — clear auth state
+- **Function** `create_login_dialog` (Line 245) — build login/register dialog
+- **Function** `create_auth_buttons` (Line 421) — header auth buttons (login/register or user menu)
+- **Function** `get_api_base` (Line 482) — legacy compatibility stub
+- **Function** `api_call` (Line 487) — legacy API call redirector
+
+## shared/thread_local_db.py
+
+- **Class** `ThreadLocalConnection` (Line 29) — thread-safe SQLite connection pool (one connection per thread)
+    - Method `__init__` (Line 45)
+    - Method `_prune_dead` (Line 69) — close connections from dead threads
+    - Method `_get_conn` (Line 83) — get or create per-thread connection
+    - Method `execute` (Line 110) — execute SQL on current thread's connection
+    - Property `row_factory` (Line 114)
+    - Method `close` (Line 126) — close all connections and reset state
+    - Method `__bool__` (Line 138) — truthy for availability checks
+
+## shared/sys_id_patterns.py
+
+Canonical `sys_id` extraction patterns for BOTH namespaces (2026-08-25). Added because ~24
+sites hand-rolled their own regex inline and drifted into two incompatible dialects.
+
+**Two namespaces, deliberately disjoint:** `99` is the Genizah corpus (Alma MMS ids +
+Phase-85 synthetics); `97` is the LOCAL "My Library" namespace (Phase 95,
+`shared/local_sys_id.py`) — desktop-generated, never a corpus record. Do NOT unify the two
+constants; they answer different questions.
+
+**Module-level constants:**
+- `CORPUS_SYS_ID_PATTERN` / `CORPUS_SYS_ID_RE` — corpus namespace only. Use for anything
+  that resolves a record against corpus data: exports, grouping, allowlists, metadata.
+- `ANY_SYS_ID_PATTERN` / `ANY_SYS_ID_RE` — corpus OR LOCAL. Use ONLY where a LOCAL header
+  can genuinely arrive (the desktop namespace-agnostic parsers in `metadata_manager.py`).
+
+Both are anchored with a leading `(?<!\d)`, which is load-bearing rather than cosmetic: an
+unanchored corpus pattern run over a LOCAL header can match a `99` inside the LOCAL id's
+random digits and return a truncated, wrong sys_id (6.36% of LOCAL ids, measured) — silent
+corruption, not a silent drop.
+
+**Public API:**
+- **Function** `extract_corpus_sys_id(text)` — first corpus sys_id, or None (None for LOCAL)
+- **Function** `extract_any_sys_id(text)` — first sys_id from either namespace, or None
+
+**Enforcement:** `tests/test_sys_id_patterns.py` repo-greps every tracked `.py` and fails on
+a hand-rolled pattern lacking a `sys-id-pattern-exempt: <reason>` annotation, pins each
+migrated site to the shared object, and pins the never-match-LOCAL property.
+`scripts/check_sys_id_prefixes.py` re-measures which prefixes the corpus actually contains.
+
+## shared/search_serializer.py
+
+Phase 77 single-source-of-truth serializer for the "Claude-friendly JSON" payload shape. One module powers both download handlers (`/api/export/json`, `/api/export/parallels/json`) and Phase 78+ API responses (`/api/search`, `/api/parallels`); modifying `_serialize_item()` updates download AND API in lockstep per EXPORT-03.
+
+**Module-level constants:**
+- `SCHEMA_VERSION = 1` (Line 52) — bump on incompatible envelope/item shape changes
+- `NLI_RESOLVABLE_LIBRARY_CODES` (Line 61) — frozenset whitelist of providers with NLI IIIF coverage (CUL/JTS/BL/Manchester/RNL/AIU/Mosseri/Gaster/Halper); Oxford and other providers get `image_url=null` per HIGH-07
+- `_filename_counter` (Line 72) — module-level `itertools.count()` for filename uniqueness without `time.sleep` per HIGH-06
+
+**Public API (5 exports):**
+- **Function** `serialize_search_payload` — emit envelope `{schema_version, source: 'search', query, mode, gap, filters, count, total, warnings, generated_at, results: [...]}` for /search results
+- **Function** `serialize_parallels_payload` — emit envelope with separate top-level `results[]` and `filtered[]` arrays per D-11; one result per manuscript with `matches: [{chunk_index, source_chunk_text, manuscript_snippet, score}, ...]` per D-13 Path A; aggregate_score is SUM across uids
+- **Function** `build_search_filename` — `genizah-search-{ISO timestamp with ms}_{counter}.json`
+- **Function** `build_parallels_filename` — `genizah-parallels-{ISO timestamp with ms}_{counter}.json`
+
+**Private helpers (single source of truth):**
+- **Function** `_serialize_item` — THE per-item shape; emits `{uid, locator: {sys_id, volume_ie, p_num}, score, shelfmark, title, library: {code, name}, domains: [...], dating, snippet, excerpt, match_terms: [...], image_url}`. Both top-level functions reach into this — `serialize_parallels_payload` via `_to_parallels_envelope_item` which adds `matches: [...]` on top. `tests/test_search_serializer.py::test_serializers_share_serialize_item` enforces structurally via `dir()` introspection (no `_serialize_search_item` / `_serialize_parallels_item` shadows allowed)
+- **Function** `_extract_match_terms` — D-03 dedup-in-order from `*term*` markers
+- **Function** `_build_image_url` — server-relative `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}` or null when library_code not in whitelist (HIGH-07)
+- **Function** `_safe_library_name` — graceful-degrade lookup via `genizah_core.get_library_display`
+- **Function** `_safe_fjms_lookups` — graceful FJMS singleton consumer; **does NOT call .close()** (HIGH-05; close is reserved for `reset_fjms_service()`)
+- **Function** `_group_parallels_by_sys_id`, `_to_parallels_envelope_item` — D-13 Path A grouping; per Plan 05 smoke-check fixes (commits `c24fcc48`, `327aea31`): rep-field mapping uses `synth['snippet']` / `synth['full_text']` so parallels items get populated `snippet`/`excerpt`/`match_terms`, AND group-level dedup keyed on `(chunk_index, manuscript_snippet)` collapses cross-uid duplicates that NLI's multi-uid cataloging emits (e.g. Karaite prayer books with multiple Alma uids on one sys_id) — highest-scoring entry wins, matches[] then sorted by `chunk_index` ascending for stable output. The `for ch_idx, src_text, score, ms_snippet in item.get('chunk_hits', [])` loop is wrapped in `isinstance(chunk_hits, list)` guard (commit `baf481fb`) so future shape regressions fall back to Path B (single degenerate match) instead of crashing
+- **Function** `_filename_timestamp_with_ms`, `_utc_iso_now` — separate concerns: filename ms+counter vs envelope second-resolution
+
+**Companion shape contract in `genizah_core.py` (Plan 02 + Plan 05 smoke-check):**
+- Both `lab_composition_search` (lab path, Plan 02 commit `6ebefb71`) AND `search_composition_logic` (standard path, Plan 05 commit `c24fcc48`) now populate per-uid `chunk_hits` as a list-of-tuples `[(chunk_index_0_based, source_chunk_text, match_score, manuscript_snippet), ...]` consumed by `_to_parallels_envelope_item`. The pre-existing int counter on the standard path was renamed `chunk_count` to free the field name (avoid future collisions). Both paths apply per-uid `_chunk_hit_keys` dedup (commit `2e2d2b75`) so the same Tantivy uid does not emit duplicate (chunk_index, ms_snippet) entries when returned from multiple segments. Search results in `search_text_tantivy` (genizah_core.py:7542 + :7559) now record the `score` variable into the result dict so JSON exports carry the Tantivy relevance score (was always 0.0 prior to commit `2e2d2b75`).
+
+Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /api/export/parallels/json` (Line ~1957) — both upgraded to `logger.exception` (was `logger.error`) per Plan 05 smoke-check commit `baf481fb` so future serializer crashes surface stack traces in production logs. Future Phase 78 `POST /api/search` and Phase 80 `POST /api/parallels` inherit the same envelope/item shape via the same imports.
+
+
+---
+
+# v7.9 Decomposed Modules
+
+## desktop/__init__.py
+
+
+## desktop/widgets.py
+
+- **Class** `ActionsHoverWidget` (Line 12)
+    - Method `__init__` (Line 13)
+    - Method `add_btn` (Line 22)
+    - Method `set_buttons_visible` (Line 31)
+- **Function** `_format_add_to_list_label` (Line 39)
+- **Function** `apply_find_highlight` (Line 44)
+- **Function** `_get_folio_number_from_shelfmark` (Line 66) — Extract folio number from Oxford-style shelfmarks only.
+- **Function** `_get_folio_image_index` (Line 94)
+- **Function** `_get_initial_image_index` (Line 122)
+- **Class** `ShelfmarkCompleter` (Line 155) — Custom Completer that normalizes input before matching.
+    - Method `__init__` (Line 160)
+    - Method `normalize` (Line 165)
+    - Method `splitPath` (Line 169)
+    - Method `pathFromIndex` (Line 172)
+    - Method `complete` (Line 176)
+
+## desktop/title_helpers.py
+
+- **Function** `_get_title_svc` (Line 11) — Get or create a cached TranslationService for title lookups.
+- **Function** `_truncate_title` (Line 22) — Truncate long title text with ellipsis. Returns (truncated_text, tooltip_or_None).
+- **Function** `_is_hebrew_text` (Line 30) — Check if text is purely/nearly Hebrew with negligible English.
+- **Function** `_translate_hebrew_date` (Line 43) — Translate Hebrew-numeral dates like 'מאה ט״ו' → '15th century'.
+- **Function** `_resolve_display_title` (Line 95) — Resolve the display title using libraries_translations.db if available.
+- **Function** `_set_label_with_tooltip` (Line 164) — Set label text with truncation and tooltip for full text.
+
+## desktop/image_loader.py
+
+- **Class** `ImageLoaderThread` (Line 15) — Smart Image Loader:
+    - Method `__init__` (Line 26)
+    - Method `cancel` (Line 42)
+    - Method `run` (Line 45)
+    - Method `_download_bytes` (Line 123) — Helper to download bytes safely.
+
+## desktop/result_dialog.py
+
+- **Function** `fit_window_geometry` — Size and position for a top-level window so it fits its screen's usable area; the title bar always stays on screen (2026-09-24).
+- **Class** `ResultDialog` (Line 36) — Allow browsing a single search result and its surrounding pages.
+    - Method `__init__` (Line 42)
+    - Method `fit_on_screen` — Shrink and place the viewer inside a screen; the host calls it before the first show and again right after.
+    - Method `init_ui` (Line 73)
+    - Method `_toggle_compact_mode` (Line 507) — Toggle between compact and full header mode.
+    - Method `navigate_results` (Line 529)
+    - Method `open_full_transcription` (Line 535)
+    - Method `search_for_parallels` (Line 546)
+    - Method `add_current_to_list` (Line 564) — Add the current manuscript to a list.
+    - Method `_add_to_puzzle` (Line 588) — Add current result to puzzle canvas (mirrors _browse_add_to_puzzle logic).
+    - Method `_rd_search_visual_similarity` (Line 618) — D-10: Show visual similarity dialog from ResultDialog context.
+    - Method `_update_add_to_list_button` (Line 667)
+    - Method `add_comment` (Line 683) — Open comment dialog for current document.
+    - Method `view_corrections` (Line 699) — View corrections for current document.
+    - Method `view_comments` (Line 713) — View comments for current document.
+    - Method `_rd_view_joins` (Line 725) — View joined fragments for current document.
+    - Method `_rd_update_joins_menu` (Line 754) — Update the joins dropdown menu with connected fragments.
+    - Method `_rd_on_joins_menu_show` (Line 914) — Called when joins menu is about to show - trigger sync and update.
+    - Method `_rd_navigate_to_joined_fragment` (Line 926) — Navigate to a joined fragment within the same results dialog.
+    - Method `_rd_load_versions` (Line 931) — Load versions for current document page.
+    - Method `_rd_change_version` (Line 965) — Handle version change in ResultDialog.
+    - Method `_rd_refresh_versions` (Line 971) — Refresh version list. If select_latest=True, select and load the latest version.
+    - Method `_rd_load_version_content` (Line 1184) — Load and display version content.
+    - Method `_rd_display_text` (Line 1256) — Display text in the manuscript viewer.
+    - Method `_rd_display_pgp_text` (Line 1261) — Display PGP edition/translation text with proper directionality.
+    - Method `_on_rd_pgp_loaded` (Line 1272) — Handle PGP sources loaded from background thread.
+    - Method `_on_rd_pgp_error` (Line 1337) — Handle PGP source fetch error -- silently fall back to existing behavior.
+    - Method `_rd_update_extended_info_with_pgp` (Line 1341) — Rebuild extended info HTML after PGP data arrives late.
+    - Method `_rd_build_extended_html` (Line 1360) — Build the full extended info HTML for ResultDialog.
+    - Method `_rd_refresh_extended_info` (Line 1565) — Rebuild ResultDialog extended info with current toggle state.
+    - Method `_rd_toggle_edit_mode` (Line 1581) — Toggle edit mode in ResultDialog.
+    - Method `_rd_exit_edit_mode` (Line 1619) — Exit edit mode.
+    - Method `_rd_on_text_changed` (Line 1638) — Handle text changes in edit mode.
+    - Method `_rd_cancel_edit` (Line 1667) — Cancel edit mode and restore original text.
+    - Method `_rd_save_correction` (Line 1673) — Save correction from ResultDialog.
+    - Method `_refresh_find_highlights` (Line 1781)
+    - Method `_apply_source_highlights` (Line 1784)
+    - Method `open_external_link` (Line 1798)
+    - Method `_htmlify` (Line 1806)
+    - Method `_apply_manual_highlights_to_text` (Line 1812)
+    - Method `load_result_by_index` (Line 1834)
+    - Method `_preload_next_result` (Line 1924)
+    - Method `load_by_shelfmark` (Line 1940) — Load a document by shelfmark within the same dialog.
+    - Method `load_page` (Line 1999)
+    - Method `_update_rd_domain_label` (Line 2135) — Update domain info label and printed badge for the current result in ResultDialog.
+    - Method `apply_metadata` (Line 2212)
+    - Method `toggle_extended_info` (Line 2232)
+    - Method `_on_rd_ext_link_clicked` (Line 2243) — Handle clicks on links in ResultDialog extended info.
+    - Method `_rd_toggle_translations` (Line 2279) — Toggle show_translations from ResultDialog toolbar button.
+    - Method `_rd_refresh_title` (Line 2316) — Refresh the ResultDialog title label based on current translation toggle.
+    - Method `_rd_auto_translate_all` (Line 2328) — Auto-fire translations for all translatable fields that aren't cached yet.
+    - Method `_show_rd_fjms_bib` (Line 2389) — Open FJMS bibliography dialog from ResultDialog.
+    - Method `_show_rd_nli_bib` (Line 2403) — Open NLI bibliography dialog from ResultDialog.
+    - Method `_show_rd_catalog` (Line 2417) — Open FJMS catalog records dialog from reading desk (lazy fetch).
+    - Method `_show_rd_measurements` (Line 2441) — Open measurements dialog from reading desk (lazy fetch on first click).
+    - Method `toggle_external_viewer` (Line 2465)
+    - Method `on_enriched_data_loaded` (Line 2470)
+    - Method `sync_external_view` (Line 2679)
+    - Method `on_metadata_loaded` (Line 2697)
+    - Method `_wait_or_terminate_thread` (Line 2703) — Wait for a QThread to finish; terminate as last resort.
+    - Method `cancel_image_thread` (Line 2711)
+    - Method `fetch_image` (Line 2719)
+    - Method `_on_thumb_resolved` (Line 2746)
+    - Method `start_download` (Line 2754)
+    - Method `on_img_loaded` (Line 2770)
+    - Method `on_img_failed` (Line 2776)
+    - Method `closeEvent` (Line 2780)
+    - Method `open_catalog` (Line 2808)
+    - Method `open_viewer` (Line 2811)
+
+## desktop/shelfmark_picker.py
+
+- **Function** `pick_shelfmark_option(parent, options)` — the numbered "Multiple shelfmarks found" picker (from `browse_load`), shared by the Puzzle add box, the Joins dialog's fragment B and Share a Discovery; `None` = cancelled.
+
+## desktop/dialogs_filter.py
+
+- **Class** `ExcludeDialog` (Line 21) — Collect system IDs or shelfmarks that should be excluded from searches.
+    - Method `__init__` (Line 23)
+    - Method `_clear_all` (Line 175) — Clear all entries from the editor and accept (removes all exclusions).
+    - Method `_load_list_to_editor` (Line 191) — Load selected list items into the editor tab (sys_ids + shelfmarks).
+    - Method `_resolve_and_show_report` (Line 225) — Resolve shelfmarks from the text areas and show resolution report table.
+    - Method `get_exclusion_sources` (Line 261) — Return ExclusionSource objects from the active tab.
+    - Method `eventFilter` (Line 327)
+    - Method `_split_existing_entries` (Line 346)
+    - Method `_on_sys_text_changed` (Line 360)
+    - Method `_on_shelf_text_changed` (Line 365)
+    - Method `_sync_from_sys` (Line 370)
+    - Method `_sync_from_shelf` (Line 379)
+    - Method `resizeEvent` (Line 388)
+    - Method `_get_lines` (Line 393)
+    - Method `_set_titles` (Line 396)
+    - Method `_refresh_title_display` (Line 400)
+    - Method `_resolve_shelves_from_sys` (Line 409)
+    - Method `_resolve_titles_from_sys` (Line 423)
+    - Method `_ensure_shelf_map` (Line 437)
+    - Method `_add_shelf_map` (Line 448)
+    - Method `_resolve_sys_from_shelves` (Line 453)
+    - Method `_normalize_shelfmark` (Line 461)
+    - Method `load_file` (Line 470)
+    - Method `get_entries_text` (Line 507)
+- **Class** `DomainFilterDialog` (Line 533) — Hierarchical domain filter dialog with checkboxes and type-ahead search.
+    - Method `__init__` (Line 540)
+    - Method `_populate_tree` (Line 593) — Populate tree with domains from current search results only.
+    - Method `_filter_tree` (Line 671) — Filter tree items by search text.
+    - Method `_handle_item_changed` (Line 701) — Handle checkbox state changes with parent-child propagation.
+    - Method `_check_all` (Line 722) — Check all items (no filtering).
+    - Method `_uncheck_all` (Line 737) — Uncheck all items (exclude all domains).
+    - Method `_restore_exclusions` (Line 752) — Restore previously excluded domains by unchecking them.
+    - Method `get_excluded_domains` (Line 779) — Return set of excluded (unchecked) domain names.
+    - Method `_update_summary` (Line 803) — Update exclusion summary label.
+- **Class** `PreSearchFilterDialog` (Line 818) — Pre-search filter dialog with multi-select domain, author, work, date range,
+    - Method `__init__` (Line 826)
+    - Method `_check_list_item` (Line 1117) — Check/uncheck a QListWidget item by its data value.
+    - Method `_check_tree_item` (Line 1126) — Check/uncheck a QTreeWidget item by its data value (searches all levels).
+    - Method `_get_checked_items` (Line 1142) — Return list of data values for all checked items.
+    - Method `_get_checked_tree_items` (Line 1154) — Return list of data values for all checked leaf/child items in a QTreeWidget (up to 3 levels).
+    - Method `_populate_domains` (Line 1184) — Populate domain tree with hierarchy from FJMS.
+    - Method `_populate_authors` (Line 1241) — Populate author dropdown, optionally filtered by first selected domain.
+    - Method `_populate_works` (Line 1271) — Populate work dropdown, optionally filtered by domain and author.
+    - Method `_filter_domain_list` (Line 1302) — Filter domain tree items by search text.
+    - Method `_on_domain_tree_changed` (Line 1318) — Handle domain tree checkbox with parent-child propagation.
+    - Method `_on_domain_changed` (Line 1335) — When domain selection changes, re-populate authors and works.
+    - Method `_on_author_selected` (Line 1342) — Handle author dropdown selection — add to selected list.
+    - Method `_on_work_selected` (Line 1352) — Handle work dropdown selection — add to selected list.
+    - Method `_on_author_changed` (Line 1362) — When author selection changes, re-populate works.
+    - Method `_on_filter_changed` (Line 1368) — Any filter changed -- update count and chip bar.
+    - Method `_add_text_term` (Line 1373) — Add a text filter term from the input.
+    - Method `_remove_text_term` (Line 1385) — Remove a text filter term.
+    - Method `_make_chip` (Line 1392) — Create a removable chip button (dark-mode aware).
+    - Method `_rebuild_dialog_chips` (Line 1420) — Rebuild unified chip bar showing all active filters.
+    - Method `_get_current_filter_dict` (Line 1516) — Build filter dict from current dialog state.
+    - Method `_get_measurement_filters` (Line 1550) — Extract measurement filter values from dialog spin boxes and checkboxes.
+    - Method `_get_display_name` (Line 1578) — Get display name (without count) from data map.
+    - Method `_update_count` (Line 1583) — Recompute manuscript count in background thread.
+    - Method `_on_count_finished` (Line 1597) — Handle count worker result.
+    - Method `_clear_all` (Line 1610) — Reset all filter controls to default.
+    - Method `get_filters` (Line 1650) — Return the current filter state dict.
+    - Method `get_restrict_sys_ids` (Line 1654) — Return the computed restrict_sys_ids set (or None).
+
+## desktop/dialogs_scholarly.py
+
+- **Class** `FjmsBibliographyDialog` (Line 13) — FJMS bibliography dialog with structured table.
+    - Method `__init__` (Line 16)
+    - Method `_filter_rows` (Line 125)
+    - Method `_safe` (Line 162) — Return stripped string or empty string for None/placeholder values.
+    - Method `_on_row_selected` (Line 167)
+- **Class** `FjmsCatalogDialog` (Line 213) — Dialog showing FJMS catalog records with multi-team scholarly descriptions.
+    - Method `__init__` (Line 222)
+    - Method `_on_anchor_clicked` (Line 259) — Handle anchor clicks: toggle translation or open external links.
+    - Method `_build_html` (Line 272) — Build HTML table mirroring FIST Cataloging Data Details view.
+    - Method `_section_row` (Line 836) — Build a section header row.
+    - Method `_field_row` (Line 844) — Build a field row: label + value columns. RTL: values first, label last.
+    - Method `_field_category_row` (Line 862) — Build a row for a specific FieldCategory from catalog_fields.
+    - Method `_fmt_num` (Line 881) — Format a numeric value for size display, removing trailing .0.
+    - Method `_fmt_int` (Line 891) — Format a numeric value as integer (2.0 → '2').
+- **Class** `FjmsMeasurementsDialog` (Line 901) — Dialog showing physical measurements for a manuscript.
+    - Method `__init__` (Line 908)
+    - Method `_build_html` (Line 942) — Build HTML content for the measurements dialog.
+- **Class** `NliBibliographyDialog` (Line 1146) — NLI bibliography dialog with MARC 581 reference strings.
+    - Method `__init__` (Line 1149)
+    - Method `_filter_rows` (Line 1257)
+    - Method `_on_row_selected` (Line 1288)
+
+## desktop/viewers.py
+
+- **Function** `_make_scrollable_row` (Line 28) — Wrap a QHBoxLayout in a horizontal QScrollArea so it can shrink freely in a splitter.
+- **Function** `_generate_oxford_dynamic_url` (Line 45) — Generate dynamic Oxford image URL for a folio not in the database.
+- **Class** `ZoomableScrollArea` (Line 70) — A GraphicsView that supports hand-panning and wheel-zooming.
+    - Method `__init__` (Line 72)
+    - Method `_show_image_context_menu` (Line 113) — Show context menu with Copy/Save options for the displayed image.
+    - Method `_copy_image` (Line 126) — Copy current image (with rotation) to clipboard.
+    - Method `_save_image` (Line 132) — Save current image (with rotation) to file.
+    - Method `_get_rotated_pixmap` (Line 143) — Return the current pixmap with adjustments and rotation applied (for export).
+    - Method `set_image` (Line 155)
+    - Method `set_status_message` (Line 198)
+    - Method `_update_text_pos` (Line 206)
+    - Method `set_rotation` (Line 217) — Set absolute rotation (degrees clockwise) and update view.
+    - Method `rotate_view` (Line 222) — Add degrees to current rotation and update.
+    - Method `wheelEvent` (Line 227)
+    - Method `zoom_in` (Line 239)
+    - Method `zoom_out` (Line 243)
+    - Method `_apply_zoom` (Line 247)
+    - Method `resizeEvent` (Line 259)
+    - Method `_apply_fit_to_viewport` (Line 266)
+    - Method `set_adjustments` (Line 275) — Update image adjustment values and schedule a filter update.
+    - Method `_schedule_filter_update` (Line 283) — Debounce filter updates to 100ms for performance on large images.
+    - Method `_build_lut` (Line 295) — Build a 256-entry lookup table for brightness/contrast/gamma/invert.
+    - Method `_apply_display_filters` (Line 314) — Apply brightness/contrast/gamma/invert to display via LUT on pixels.
+    - Method `_apply_adjustments_to_pixmap` (Line 351) — Apply current adjustments to a pixmap and return the result. Used for export.
+    - Method `reset_adjustments` (Line 378) — Reset all image adjustments to defaults.
+- **Class** `FullscreenImageWindow` (Line 390) — Borderless fullscreen window for manuscript image viewing.
+    - Method `__init__` (Line 402)
+    - Method `_adjust_rotation` (Line 581)
+    - Method `_update_page_label` (Line 585)
+    - Method `set_image` (Line 594) — Update the displayed image (called when page changes).
+    - Method `keyPressEvent` (Line 607)
+    - Method `showFullScreen` (Line 618)
+- **Class** `ManuscriptViewerWidget` (Line 625) — Reusable widget for displaying manuscript images with navigation.
+    - Method `__init__` (Line 629)
+    - Method `init_ui` (Line 649)
+    - Method `_detect_external_provider` (Line 815)
+    - Method `set_image_by_fl_id` (Line 842)
+    - Method `load_images` (Line 859)
+    - Method `_on_source_changed` (Line 979)
+    - Method `_resolve_url` (Line 994)
+    - Method `_retire_thread` (Line 999) — Move a canceled QThread to the in-flight list so it stays alive until finished.
+    - Method `_cleanup_inflight` (Line 1015) — Remove a finished thread from the in-flight list and schedule deletion.
+    - Method `_preload` (Line 1023)
+    - Method `_wait_or_terminate` (Line 1036) — Wait for a QThread to finish; terminate as last resort to prevent destroyed-while-running.
+    - Method `stop_threads` (Line 1044) — Stop all running image loading threads. Call before destroying widget.
+    - Method `_on_thumbnail_ready` (Line 1062) — Handle thumbnail loaded signal - only display if still on same page and same load generation.
+    - Method `_load_thumbnail_async` (Line 1070) — Load thumbnail asynchronously for quick display while full image loads.
+    - Method `set_page` (Line 1100)
+    - Method `_execute_set_page` (Line 1120) — Actually load the image after debounce settles.
+    - Method `display_image` (Line 1167)
+    - Method `open_external` (Line 1180)
+    - Method `_open_ktiv_viewer` (Line 1188) — Open the NLI KTIV manuscript viewer at the current page.
+    - Method `_open_fullscreen` (Line 1201) — Open current image in fullscreen window.
+    - Method `_on_fullscreen_page_change` (Line 1211) — Handle page navigation from fullscreen window.
+    - Method `_sync_fullscreen_image` (Line 1218) — Push current image to the fullscreen window if open.
+    - Method `adjust_rotation` (Line 1225) — Adjust rotation via slider to keep controls in sync.
+
+## desktop/puzzle.py
+
+- **Function** `_label_buttons` (Line 43)
+- **Function** `_ask` (Line 50) — QMessageBox.question with translated button labels.
+- **Function** `_notify` (Line 71) — QMessageBox.information/.warning (`kind` is 'information' or
+- **Class** `PuzzleFragmentItem` (Line 84) — A positioned fragment image on the puzzle canvas.
+    - Method `__init__` (Line 100)
+    - Method `_pixmap_rect` (Line 128) — The actual pixmap bounding rect (without handle margin).
+    - Method `_handle_points` (Line 132) — Return dict of handle_id -> QPointF center positions.
+    - Method `_hit_handle` (Line 143) — Return handle id under pos using wide border zones.
+    - Method `_apply_flip` (Line 188) — Apply horizontal/vertical flip via QTransform.
+    - Method `flip_horizontal` (Line 200)
+    - Method `flip_vertical` (Line 204)
+    - Method `_is_crop_mode` (Line 210) — Check if crop mode is active (set by PuzzleCanvasWindow).
+    - Method `mousePressEvent` (Line 214)
+    - Method `mouseMoveEvent` (Line 254)
+    - Method `mouseReleaseEvent` (Line 347)
+    - Method `hoverMoveEvent` (Line 390)
+    - Method `hoverLeaveEvent` (Line 406)
+    - Method `adjust_scale_from_wheel` (Line 412) — Resize fragment from a wheel delta (called by PuzzleCanvasView).
+    - Method `wheelEvent` (Line 420)
+    - Method `boundingRect` (Line 427) — Always include handle margin so Qt repaints handle areas on move.
+    - Method `paint` (Line 433)
+    - Method `update_pixmap` (Line 486) — Replace displayed image (e.g. folio nav or threshold change).
+    - Method `shape` (Line 513)
+- **Class** `PuzzleCanvasView` (Line 519) — A QGraphicsView hosting PuzzleFragmentItem instances.
+    - Method `__init__` (Line 525)
+    - Method `cycle_background` (Line 561) — Cycle to the next background mode.
+    - Method `set_checkerboard` (Line 567) — Legacy toggle -- switches between dark gray and checkerboard.
+    - Method `drawBackground` (Line 572)
+    - Method `mousePressEvent` (Line 608)
+    - Method `mouseMoveEvent` (Line 623)
+    - Method `mouseReleaseEvent` (Line 637)
+    - Method `wheelEvent` (Line 647)
+    - Method `get_fragment_items` (Line 670) — Return all PuzzleFragmentItem instances on the scene.
+    - Method `get_selected_fragments` (Line 674) — Return selected PuzzleFragmentItem instances.
+- **Class** `PuzzleExportThread` (Line 679) — Compose and save a puzzle PNG without blocking the desktop UI.
+    - Method `__init__` (Line 687)
+    - Method `run` (Line 694)
+- **Class** `PuzzlePublishThread` (Line 729) — Worker thread for publish/unpublish operations.
+    - Method `__init__` (Line 733)
+    - Method `run` (Line 740)
+- **Class** `PuzzleCanvasWindow` (Line 751) — Standalone puzzle workspace for assembling fragment images.
+    - Method `__init__` (Line 759)
+    - Method `add_fragment` (Line 1140) — Add a fragment to the puzzle canvas. Starts async image load.
+    - Method `_start_image_load` (Line 1203) — Start the one image request `item_key` now waits for.
+    - Method `_drop_request` (Line 1222) — Forget the pending image request for `item_key`, if any: its result
+    - Method `_take_request` (Line 1234) — True when `req` is the request `item_key` waits for; it is then
+    - Method `_load_step_done` (Line 1243) — One key of the open join's load has its answer. The load ends when
+    - Method `_on_add_shelfmark` (Line 1262) — Handle shelfmark entry: resolve sys_id, then async fl_id resolution.
+    - Method `_start_meta_resolve` (Line 1295) — Resolve a manuscript's folios in the background, then add its first
+    - Method `_show_add_from_list` (Line 1308) — Show picker to add fragments from a personal list.
+    - Method `_show_add_from_joins` (Line 1371) — Show connected fragments for the selected fragment and add them.
+    - Method `_on_meta_resolved` (Line 1461) — Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio.
+    - Method `_on_meta_failed` (Line 1478) — Callback from PuzzleMetaLoaderThread -- show error.
+    - Method `_on_image_loaded` (Line 1491) — Called when PuzzleImageLoaderThread finishes -- create or update item.
+    - Method `_fit_all_fragments` (Line 1560) — Fit view to show all fragments with some padding.
+    - Method `_on_image_failed` (Line 1574) — Called when PuzzleImageLoaderThread fails.
+    - Method `_on_selection_changed` (Line 1598) — Update toolbar to reflect current selection.
+    - Method `_flip_selected_h` (Line 1639)
+    - Method `_flip_selected_v` (Line 1643)
+    - Method `_cycle_bg` (Line 1647) — Cycle to next background mode and show name in status bar.
+    - Method `_rotate_selected` (Line 1660) — Rotate selected fragments by given degrees.
+    - Method `_has_blue_mat` (Line 1668) — Check if a PuzzleFragment is likely from a library with blue conservation mat.
+    - Method `_flip_recto_verso` (Line 1682) — Flip selected fragment(s) to show recto/verso -- navigates to next/prev folio.
+    - Method `_retarget_flipped` (Line 1721) — Point `pf` at the other side (the flip buttons); returns the
+    - Method `_retarget_navigated` (Line 1733) — Point `pf` at another folio (the < > buttons); returns the loader
+    - Method `_rekey_items` (Line 1740) — Move canvas items to other folios as one batch.
+    - Method `_flip_entire_puzzle` (Line 1786) — Flip ALL fragments -- shows the other side of the joined page.
+    - Method `_toggle_crop_mode` (Line 1852) — Enter/exit crop mode. In crop mode, drag edges of selected fragment to trim.
+    - Method `_crop_edge` (Line 1875) — Crop a specific edge from selected fragment.
+    - Method `_revert_crop` (Line 1908) — Revert selected fragments to original uncropped image.
+    - Method `_nudge_threshold` (Line 1931) — Increment/decrement threshold by delta, then apply.
+    - Method `_on_threshold_changed` (Line 1937) — Re-fetch images with new threshold for selected fragments.
+    - Method `_nudge_scale` (Line 1948) — Increment/decrement scale by delta percent.
+    - Method `_on_scale_changed` (Line 1953) — Update scale for selected fragments proportionally.
+    - Method `_navigate_folio` (Line 1984) — Navigate folio prev/next for selected fragments.
+    - Method `_change_z_order` (Line 2024) — Move selected fragment one layer up (+1) or down (-1).
+    - Method `_delete_selected` (Line 2034) — Remove selected fragments from the canvas (the Delete key, the
+    - Method `_undo_last_delete` (Line 2067) — Put back what the last Delete removed (one level).
+    - Method `_on_undo_shortcut` (Line 2090)
+    - Method `_canvas_keys_have_focus` (Line 2094) — True when Delete and Ctrl+Z belong to the canvas: focus is on the
+    - Method `_refresh_fragment_combo` (Line 2111) — Rebuild the fragment dropdown from current items.
+    - Method `_browse_selected_fragment` (Line 2122) — Open the selected fragment in the browse tab.
+    - Method `_on_fragment_combo_changed` (Line 2139) — Select the fragment chosen in the dropdown.
+    - Method `_on_canvas_context_menu` (Line 2151) — Show right-click context menu on fragment items.
+    - Method `_refresh_docs_list` (Line 2215) — Refresh the saved documents list in the side panel.
+    - Method `_on_doc_list_clicked` (Line 2249) — Load a document when clicked in the side panel.
+    - Method `_load_document` (Line 2256) — Load a PuzzleDocument onto the canvas, replacing current content.
+    - Method `_spawn_meta_loader` (Line 2318) — Spawn a PuzzleMetaLoaderThread to fetch folio lists for a sys_id.
+    - Method `_on_meta_ready_for_load` (Line 2326) — Handle meta_ready from folio list rebuild during document load.
+    - Method `_on_save_join` (Line 2332) — Save the current puzzle as a join document (new or update).
+    - Method `_show_saved_status` (Line 2420) — The one status line after a successful write, posted last: the
+    - Method `_set_details_fields` (Line 2430) — Set the Details title and notes without scheduling an autosave.
+    - Method `_build_fragments_list` (Line 2441) — Build list of PuzzleFragment from current canvas items.
+    - Method `_fragments_to_store` (Line 2464) — What a write of the open join contains: the canvas, plus, for a
+    - Method `_thumbnail_for_save` (Line 2475) — The thumbnail to write with `stored`, or None to keep the stored
+    - Method `_write_open_join` (Line 2492) — Write the open saved join. Returns None when nothing was written
+    - Method `_has_unsaved_work` (Line 2524) — Work that leaving now would lose: a scratch pad with a fragment on
+    - Method `_confirm_leave_current` (Line 2532) — Before the canvas is cleared or replaced: write a pending autosave,
+    - Method `_prompting` (Line 2552) — Counts one open leave prompt or Save dialog (see is_prompting).
+    - Method `is_prompting` (Line 2560) — True while a leave prompt (New, opening another join, quitting)
+    - Method `_on_new_puzzle` (Line 2567) — Clear canvas to a fresh scratch pad.
+    - Method `_clear_canvas` (Line 2581) — Remove all fragments from canvas.
+    - Method `_on_export_png` (Line 2606) — Export composite PNG in a background thread.
+    - Method `_cancel_export_thread` (Line 2674) — Request cancellation of the active export thread.
+    - Method `_on_export_progress` (Line 2681) — Update the desktop export progress dialog.
+    - Method `_clear_export_ui` (Line 2690) — Close and release the active export UI objects.
+    - Method `_on_export_finished` (Line 2702) — Handle successful export completion.
+    - Method `_on_export_cancelled` (Line 2707) — Handle user-cancelled export.
+    - Method `_on_export_error` (Line 2712) — Handle export failure.
+    - Method `_on_publish` (Line 2719) — Toggle publish/unpublish for current puzzle join.
+    - Method `_run_publish_worker` (Line 2755) — Run publish/unpublish on a worker thread to avoid freezing UI.
+    - Method `_on_publish_finished` (Line 2798) — Handle publish/unpublish completion on main thread.
+    - Method `_check_publish_state` (Line 2825) — Check if current doc is published and update button state.
+    - Method `_on_doc_context_menu` (Line 2841) — Show context menu on right-click in document list.
+    - Method `_delete_document` (Line 2856) — Delete a saved join document with confirmation.
+    - Method `_rename_document` (Line 2890) — Rename a saved join document.
+    - Method `_on_title_changed` (Line 2921) — Handle title edit finished -- auto-save if editing a saved document.
+    - Method `_on_notes_changed` (Line 2927) — Handle notes text changed -- auto-save if editing a saved document.
+    - Method `_on_scene_changed` (Line 2933) — Handle scene.changed signal -- debounce and trigger auto-save for saved documents.
+    - Method `_schedule_auto_save` (Line 2938) — Schedule a debounced auto-save (1.5s) of the open saved join. A
+    - Method `_auto_save` (Line 2945) — Write the open saved join (the timer's slot). Returns False only
+    - Method `_flush_auto_save` (Line 2969) — Write a pending autosave now, before the canvas is cleared,
+    - Method `_mark_save_failed` (Line 2985) — The open join's last write failed: keep saying so in the status
+    - Method `_mark_saved` (Line 2999) — The open join is written (or was left): clear the failure state.
+    - Method `_update_fragments_label` (Line 3004) — Update the fragments read-only label in the details panel.
+    - Method `keyPressEvent` (Line 3019) — Keyboard shortcuts for puzzle canvas.
+    - Method `confirm_quit` (Line 3087) — Asked by GenizahGUI.closeEvent before the app quits: write a
+    - Method `closeEvent` (Line 3102) — Write a pending autosave, wait for active loader threads, close.
+
+## desktop/vs_cache.py
+
+- **Class** `DesktopVSCache` (Line 11) — Local SQLite cache for visual similarity suggestions fetched from server.
+    - Method `__init__` (Line 15)
+    - Method `get_server_version` (Line 38)
+    - Method `set_server_version` (Line 42)
+    - Method `check_and_update_version` (Line 50) — Check server version and invalidate cache if stale. Called on app startup.
+    - Method `get_cached` (Line 63)
+    - Method `store` (Line 74)
+    - Method `has_cached` (Line 90)
+    - Method `get_cached_partners` (Line 93)
+- **Class** `VSFetchThread` (Line 107) — Fetch visual similarity suggestions from server for a single manuscript.
+    - Method `__init__` (Line 112)
+    - Method `run` (Line 117)
+- **Class** `VSDownloadThread` (Line 128) — Download full visual_similarity.db with checksum, disk-space, and corruption checks.
+    - Method `__init__` (Line 134)
+    - Method `run` (Line 139)
+
+## web/pages/search_state.py
+
+- **Class** `SearchUIState` (Line 27)
+    - Method `__init__` (Line 28)
+- **Class** `AdvancedViewState` (Line 129) — State holder for the Advanced View dialog to enable in-place updates.
+    - Method `__init__` (Line 131)
+- **Class** `SearchPageRefs` (Line 175) — UI element references and callbacks needed by extracted search_results functions.
+- **Function** `restore_search_snapshot` (Line 241) — Hydrate page-scoped state from app.storage.user snapshot.
+- **Function** `persist_search_snapshot` (Line 293) — Serialize restorable fields of SearchUIState to app.storage.user.
+- **Function** `clear_search_snapshot` (Line 333) — Wipe all search snapshot keys from app.storage.user.
+- **Function** `clear_search_filters` (Line 397) — Reset only pre-search filter storage keys (Advanced 'Clear All' filters).
+- **Function** `get_search_history` (Line 430) — Get search history from storage.
+- **Function** `add_to_search_history` (Line 435) — Add or update a search history entry. Deduplicates by query+mode.
+- **Function** `delete_search_history_entry` (Line 469) — Delete a specific history entry by index.
+- **Function** `clear_search_history` (Line 477) — Clear all search history.
+- **Function** `domain_display_name` (Line 486) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
+- **Function** `preview_shows_final_rows` — True when no post-search filter could hide an early row, so the page may show the worker's preview
+- **Function** `engine_mode` — the engine mode a web search runs: the page's Exact is the engine's `literal` (whole words, Exact's fast paths). Also used by `/api/search` (search_mode `exact`, since 2026-10-21; the response still says `exact`) and the Joins Lab's single-line search
+
+## shared/composition_windows.py
+
+Where a composition search's windows go, for both engines, and the notices that say when they differ from the settings.
+
+- **Function** `plan_windows` — window starts and size: a short text is one whole-text window; a window always ends on the last word
+- **Function** `distinct_windows` — how many different chunk texts the plan searches (what a result's chunk count can reach)
+- **Function** `cap_min_chunk_matches` — lowers an unreachable "Min. chunk matches", with a notice
+- **Function** `plan_standard` / `standard_notices` — the standard engine's windows, and its notices for a text answered without searching
+- **Function** `chunk_notice_message` — the translated sentence for a notice
+
+## web/variant_preferences.py
+
+Variant and Lab preferences of one website visitor, kept in that visitor's storage and sent with that visitor's searches; the web never writes the shared LabSettings or its file.
+
+- **Constant** `WEBSITE_DEFAULTS` — what a visitor who changed nothing gets, and what every API job uses (Basic 30 pairs, ×1, short words one change, the eleven custom pairs, Lab min score 70)
+- **Constant** `REQUEST_SETTINGS` — the settings one search may choose, each with its check
+- **Function** `request_settings` — checked copies; an unknown name raises
+- **Function** `get` / `set` — this visitor's Settings-page value
+- **Function** `level_of` — 'basic', 'extended' or 'maximum' for a variant mode or pair count
+- **Function** `default_search` — (engine mode, settings) of a search by a visitor who chose nothing, per page (search page: Basic ×1, Extended and Maximum as their own modes at ×2; parallels page: every level as `variants` at Basic's ×1; fuzzy ×2); what every API search runs -- the API offers Basic and Extended for search, Basic for chunk (2026-10-11)
+- **Function** `max_changes_table` / `max_changes` / `set_max_changes` — this visitor's ×1-×3 per level (key `search_max_changes_by_level`; the old single `search_max_changes` seeds Extended and Maximum)
+- **Function** `for_search` — the complete settings one of this visitor's searches runs with: the level's ×1-×3 in variant modes, ×2 in Fuzzy, Basic's elsewhere
+
+## web/pages/search_results.py
+
+- **Function** `_apply_highlight_marks` — Quick View text as HTML: escaped, search terms marked on the raw text, newlines as `<br>`
+- **Function** `_fgp_text_for_display` — decode the HTML entities FGP sidecar text stores (web-side only)
+- **Function** `copy_result_text` — async; copy text to the clipboard through `web.clipboard.copy_text_to_clipboard`
+- **Function** `show_add_to_list_dialog` (Line 61)
+- **Function** `toggle_expansion` (Line 86) — Toggle inline accordion expansion for a result card.
+- **Function** `render_results` (Line 115)
+- **Function** `render_preview_results` — the rows found so far, shown under "Still searching" while a search runs (no export/filter/pagination; the result re-renders)
+- **Function** `create_result_card` (Line 345)
+- **Function** `_quick_view_has_reading_view` — whether Quick View builds its version chooser, Edit, Comment and Joins: Browse's `page_has_reading_view`, so also on a page without an automatic transcription (2026-10-29)
+- **Function** `open_advanced_dialog` (Line 752) — Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
+
+## web/pages/browse_state.py
+
+- **Class** `BrowseState` (Line 23) — Holds the state for the browse page.
+    - Method `__init__` (Line 26)
+- **Function** `page_has_reading_view` — whether the reading view offers its versions, Edit, Comment, Notes and Joins: also on a page without an automatic transcription, not on a synthetic catalogue-only record (2026-10-27)
+- **Function** `restore_browse_snapshot` (Line 95) — Hydrate browse snapshot fields; return raw (position, reading_desk) dicts.
+- **Function** `persist_browse_snapshot` (Line 154) — Serialize browse position and reading desk state to app.storage.user.
+- **Function** `clear_browse_snapshot` (Line 196) — Wipe browse snapshot keys.
+
+## web/pages/browse_enrichment.py
+
+- **Class** `BrowsePageRefs` (Line 33) — UI element references and callbacks needed by extracted browse_enrichment functions.
+- **Function** `load_enrichment` (Line 66) — Phase B: Load PGP + FJMS enrichment data in background.
+- **Function** `update_enrichment_sections` (Line 404) — Update enrichment placeholder containers after Phase B completes.
+- **Function** `populate_bib_catalog_buttons` (Line 464) — Populate bibliography and catalog buttons in the page navigation pane.
+
+## web/home_query.py
+
+- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Optional `has_shelfmark` predicate: Latin text with a digit the rules call text is looked up in the catalogue first (`Mingana 9`). Tests: `tests/test_home_query_routing.py`.
+- **Function** `catalogue_has_shelfmark` — the pages' `has_shelfmark`: `state.meta_mgr.has_shelfmark`, False when the catalogue is not loaded or the lookup fails; the pages call `home_query_target` with it via `run.io_bound`.
+
+## shared/search_box_input.py
+
+What a search or go-to box holds (moved from `web/` on 2026-11-04, so the desktop's Go to box shares the website's rule; desktop must not import `web/`). Tests: `tests/test_search_box_input.py`, `tests/test_quick_open.py`.
+
+- **Function** `has_hebrew_or_arabic_letter` — True when the text holds a Hebrew or Arabic LETTER (niqqud, cantillation and Arabic-Indic digits do not count). Here since 2026-11-04; `shared/quick_open.py` and `web/home_query.py` re-export it.
+- **Function** `search_box_input_kind` — ``'sys_id'``, ``'shelfmark'`` or ``'text'`` for what the search box holds.
+- **Function** `typed_as_shelfmark` — True when the search box holds a shelfmark (not a system number, not words).
+- **Function** `go_to_kind` — where a go-to box sends the text: ``'sys_id'`` / ``'shelfmark'`` / ``'text'`` (None if blank); `search_box_input_kind`, plus the optional catalogue check `has_shelfmark` for text with a digit and no Hebrew/Arabic letter (`Mingana 9`). One rule for `web/home_query.py::home_query_target` and `shared/quick_open.py::quick_open_target`.
+- **Function** `split_placeholder` — ``(before, after)`` the placeholder in a translated sentence, so the query can be rendered as a link between the two halves.
+
+## web/public_name.py
+
+- **Function** `clean_public_name` (Line 39) — the name as it will be stored, or None (blank, or contains `@`).
+- **Function** `suggested_public_name` (Line 51) — the name the person's own sign-in carries (Google's), to prefill.
+- **Function** `needs_public_name` (Line 61) — True while `public_name_confirmed` is false and the full name empty (migrations/profiles_public_aliases.sql).
+- **Function** `maybe_ask_public_name` (Line 67) — called by `create_auth_buttons`; opens the dialog once per account, re-reads a profile cached before the column existed.
+- **Function** `show_public_name_dialog` (Line 104) — the one-time "How should your name appear?" dialog: "Use my name" (full name, prefilled from the sign-in data) or "Use the alias"; both set the flag.
+
+## web/search_bootstrap.py
+
+- **Function** `matches_saved_run` — True when a stamped URL (`run=` code, query, mode, Responsa options) is the address of a saved run.
+- **Function** `resolve_search_bootstrap` — Resolve whether persisted search UI state should be reused for this request (Back by run code; rejoin a running search).
+
+## web/search_runs.py
+
+What a search page left, kept on the server for Back: one entry per run, keyed by browser and run code (PR #436).
+- **Class** `SearchRun` — the running job (followed by a page reached by Back) or the page's snapshot once it ran.
+- **Function** `new_stamp` / `start_run` / `get_run` / `finish_run` / `update_run` — register, find, save and update a run; bounded by age, per browser and in total.
+
+## v8.3.0 Decomposed Modules
+
+Modules created by the v8.3.0 god-file decomposition (Phases 122-127), holding code
+moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `desktop/*`).
+
+## shared/config.py
+
+- **Class** `Config` (Line 15) — Static paths and limits used by the application and by bundled binaries.
+    - Method `_pick_writable_dir` (Line 18) — Prefer primary; if we cannot create/write there, use fallback.
+    - Method `_get_documents_dir` (Line 38) — Best-effort Documents directory (Windows-aware), falling back to home.
+    - Method `resource_path` (Line 143) — Return absolute path to bundled resources.
+
+## shared/variants.py
+
+- **Constant** `DEFAULT_MAX_CHANGES_BY_PRESET` — ×1 Basic, ×2 Extended and Maximum (owner ruling 2026-09-28)
+- **Function** `variant_preset_of` — the level a pair count belongs to (under 70 Basic, under 150 Extended, else Maximum)
+- **Function** `max_changes_by_preset` — a checked per-level ×1-×3 table; a legacy single value seeds Extended and Maximum only
+- **Method** `VariantManager.variants_overflowed` — whether a word's spellings were cut at the budget (feeds "N+")
+- **Class** `VariantManager` (Line 21) — Generate spelling variants for Hebrew search terms using unified frequency-based pairs.
+    - Method `make_multimap` (Line 50) — Create bidirectional mapping from character pairs.
+    - Method `__init__` (Line 58)
+    - Method `_get_custom_pairs` (Line 69) — Parse custom variants from settings.
+    - Method `_get_pairs_count` (Line 101) — Get the number of variant pairs to use.
+    - Method `_get_unified_pairs` (Line 117) — Get top N pairs from unified variant list, split into single-char and multi-char.
+    - Method `_get_multichar_pairs_for_mode` (Line 138) — Get multi-character pairs based on search mode and settings.
+    - Method `_generate_multichar_variants` (Line 154) — Generate variants using multi-character substitution pairs.
+    - Method `_rebuild_maps` (Line 183) — Build variant maps from unified frequency-sorted pairs list.
+    - Method `set_settings` (Line 207) — Update settings reference, rebuild maps, and clear cache.
+    - Method `set_variant_level` (Line 213) — Update variant pairs count (slider value) and rebuild slider map.
+    - Method `get_variant_level` (Line 229) — Get current variant pairs count.
+    - Method `get_max_variant_pairs` (Line 233) — Get total number of available variant pairs.
+    - Method `_get_max_changes_for_length` (Line 237) — Dynamic max_changes based on term length to prevent combinatorial explosion.
+    - Method `hamming_distance` (Line 261) — Calculate character difference count between term and variant.
+    - Method `generate_variants` (Line 267) — Generate variants with early termination and smart position filtering.
+    - Method `get_variants` (Line 317) — Generate spelling variants for Hebrew search terms.
+    - Method `clear_cache` (Line 415) — Clear the variant cache.
+
+## shared/codicological.py
+
+- **Class** `CodicologicalManager` (Line 20) — Manages codicological units (Parts) for Oxford manuscripts.
+    - Method `__init__` (Line 29)
+    - Method `load` (Line 46) — Load Oxford database and build all mappings.
+    - Method `_build_part_mappings` (Line 78) — Build part_metadata and volume structure from JSON.
+    - Method `_build_folio_mappings` (Line 106) — Build folio→part mappings using CSV data.
+    - Method `_resolve_part_by_folio_range` (Line 141) — Resolve a shelfmark to its Part using folio_range from JSON.
+    - Method `_get_folio_number` (Line 182) — Extract folio number from shelfmark for sorting.
+    - Method `_build_autocomplete_list` (Line 189) — Build autocomplete entries for Parts with 'part X' suffix.
+    - Method `get_part_for_folio` (Line 222) — Get the Part ID for a given system ID (folio).
+    - Method `get_folios_for_part` (Line 226) — Get all system IDs (folios) belonging to a Part, in order.
+    - Method `get_part_metadata` (Line 230) — Get full metadata for a Part.
+    - Method `get_part_images` (Line 234) — Get all images for a Part.
+    - Method `get_part_display_name` (Line 239) — Get display name for a Part (with 'part X' suffix).
+    - Method `get_part_label` (Line 251) — Return a short Part label suitable for shelfmark suffixes (e.g., "part 23").
+    - Method `is_part_id` (Line 262) — Check if an identifier is a Part ID (vs a regular shelfmark).
+    - Method `parse_part_identifier` (Line 274) — Parse an identifier that might be a Part.
+    - Method `get_image_for_folio` (Line 316) — Get the specific image URL for a folio within its Part.
+    - Method `get_all_images_for_part` (Line 353) — Get all images for a Part with their labels.
+    - Method `get_adjacent_part` (Line 357) — Get the next or previous Part in the same volume.
+
+## shared/responsa.py
+
+- **Function** `_tr` (Line 19) — Translate text if current language is Hebrew.
+- **Class** `ResponsaComponent` (Line 72) — Structured representation of a single token in a parsed Responsa query.
+- **Function** `parse_responsa_query` (Line 91) — Parse a Responsa-Project style query string into a list of ResponsaComponent objects.
+- **Function** `_has_line_break_syntax` (Line 144) — Check if a query string contains line-break syntax (| characters).
+- **Class** `LineGroup` (Line 177) — A constraint on one line of text in a line-break search.
+- **Function** `_parse_line_break_query` (Line 192) — Parse a Responsa query with line-break syntax into line groups.
+- **Function** `extract_per_pair_gaps` (Line 322) — Extract per-pair gap values from [N] tokens in a Responsa query.
+- **Function** `generate_tabular_syntax` (Line 364) — Generate Responsa syntax string from tabular builder state.
+- **Function** `_tokenize_responsa_query` (Line 462) — Split a Responsa query into tokens, respecting parentheses as grouping.
+- **Function** `_parse_single_token` (Line 492) — Parse a single Responsa query token into a ResponsaComponent.
+- **Function** `expand_grammatical_prefixes` (Line 621) — Expand a Hebrew word with all grammatical prefix combinations.
+- **Function** `expand_judeo_arabic` (Line 643) — Expand a Judeo-Arabic word with definite article and preposition forms.
+- **Function** `expand_grammatical_suffixes` (Line 702) — Expand a Hebrew word with all grammatical suffix combinations.
+- **Function** `expand_plene_defective` (Line 730) — Generate plene/defective spelling variants of a Hebrew word.
+- **Function** `_count_expanded_terms` (Line 777) — The number of terms the lookup of *components* holds: every form, and a star
+- **Function** `_apply_explosion_guard` (Line 835) — Apply the explosion guard to prevent combinatorial blowup in Responsa queries.
+- **Function** `_expand_inline_alternation` (Line 977) — Expand an inline alternation pattern into a regex.
+
+
+## shared/responsa_match.py
+
+- **Class** `ResponsaQueryRefused` (Line 64) — A query the engine does not search yet: refused with a message, never zero rows.
+    - Method `__init__` (Line 73)
+- **Function** `_star_word_ok` (Line 77) — One star at the start, one at the end, or one at each end of a word with
+- **Function** `refuse_unsupported_stars` (Line 90) — Raise ResponsaQueryRefused when a component holds a star shape Phase 1 cannot
+- **Function** `rewrite_both_end_stars` (Line 110) — ``*X*`` -> ``#X#`` in place (today's meaning until Phase 3); True if any was.
+- **Function** `_inline_forms` (Line 132) — ``אירו(ס/ש)ין`` -> ``['אירוסין', 'אירושין']``: every choice of every group, in
+- **Function** `literal_forms` (Line 153) — The component's own words: an OR group's words, or an inline alternation spelt
+- **Class** `_OverLimit` (Line 162) — The expansion passed the guard's limit (raised early, before it is complete).
+- **Class** `_Budget` (Line 166)
+    - Method `__init__` (Line 167)
+    - Method `take` (Line 171)
+- **Function** `_variants` (Line 177)
+- **Function** `expand_stems` (Line 183) — The component's finite forms: its words, then plene/defective (``%``), the
+- **Function** `_star_list` (Line 222) — Today's retrieval list of a star word (Phase 1; Phase 3 replaces it): ``*X``
+- **Function** `retrieval_terms` (Line 238) — Every form the lookup asks for: the stems, and a star word's list.
+- **Function** `expand_under_guard` (Line 247) — Expand *components* (positive ones; negated words are letters to exclude) under
+- **Function** `_class` (Line 318) — A character class of *points* (sorted code points), as ranges.
+- **Function** `edge_classes` (Line 333) — (continues, looked past): ``_continues_word``'s characters (letters, decimal
+- **Function** `start_edge` (Line 356) — Before a bounded word. Lenient (the check): rejects only a word whose
+- **Function** `end_edge` (Line 369) — After a bounded word: Exact's ``_ends_word`` exactly (a lookahead may be any
+- **Class** `WordPlan` (Line 381) — One positive component, compiled.
+    - Property `star` (Line 388)
+    - Property `bounds` (Line 392) — (start bounded, end bounded): a star relaxes only its own side (§4).
+    - Property `original_words` (Line 400)
+    - Method `terms` (Line 403)
+    - Method `tantivy_dict` (Line 406) — The component dict build_tantivy_query / component_query_string read.
+    - Method `body` (Line 419) — The word's own pattern, without edges.
+- **Function** `plans_from_dicts` (Line 433) — WordPlans from the component dicts build_regex_pattern has always taken
+- **Function** `_separator` (Line 456) — The text between two words: non-word characters, with up to *gap_val* words.
+- **Class** `CompiledResponsa` (Line 464) — A Responsa query compiled for retrieval, check and highlight.
+    - Property `expanded_count` (Line 477)
+    - Property `has_star` (Line 481)
+    - Method `compile_check` (Line 484)
+    - Method `accept` (Line 488) — Exact's whole-word predicate on every word the match holds (§5.2): the
+    - Method `retrieval` (Line 502) — The lookup on *index* (its own schema; plan §5.1, Codex 2.4): per word its
+- **Function** `_names` (Line 510)
+- **Function** `_word_piece` (Line 514)
+- **Function** `_sequence` (Line 523) — Words joined by separators. The first word gets no start lookbehind in the
+- **Function** `build_patterns` (Line 546) — (check pattern, highlight pattern, groups) for the word sequence *plans*.
+- **Function** `compile_components` (Line 597) — Compile parsed *components* (one query, no line groups) into a CompiledResponsa.
+- **Function** `_line_word_separator` (Line 636) — Between two words of one line (never crosses a line break): whitespace, with
+- **Function** `compile_line_groups` (Line 644) — Compile a line-break query (``_parse_line_break_query``'s groups) through the
+- **Function** `build_line_patterns` (Line 697) — (check, highlight, groups) of a line-break query: each group one line pattern,
+- **Function** `negated_words` (Line 738) — The letters a ``-word`` excludes: the word, and its plene/defective spellings
+- **Function** `component_query_string` (Line 756) — One component's scored clause, as the Responsa query string always had it: the
+- **Function** `_rust_escape` (Line 820)
+- **Function** `tolerant_patterns` (Line 824) — The tolerant lookup patterns of *forms* (already folded), each one alternation.
+- **Function** `tolerant_queries` (Line 829) — ``regex_query``s over *forms*, split until each fits tantivy-fst's size limit.
+- **Function** `retrieval_query` (Line 856) — The candidates for *plans* on *index*: per word, its scored clause on *field*,
+## shared/joins_manager.py
+
+- **Class** `JoinsManager` (Line 25) — Manages fragment joins with offline-first caching.
+    - Method `__init__` (Line 39) — Initialize the joins manager.
+    - Method `_get_default_data` (Line 49) — Return the default data structure.
+    - Method `_normalize_shelfmark` (Line 60) — Normalize shelfmarks using the canonical module-level function.
+    - Method `load` (Line 64) — Load joins from local cache file.
+    - Method `save` (Line 83) — Save joins to local cache file.
+    - Method `_index_join` (Line 92) — Add a join to the normalized index (by shelfmark and document_id).
+    - Method `_unindex_join` (Line 117) — Remove a join from the normalized index.
+    - Method `get_joins_for_shelfmark` (Line 137) — Get all joins involving a shelfmark from local cache.
+    - Method `get_connected_fragments` (Line 153) — Get all fragments connected to this shelfmark (BFS through joins).
+    - Method `get_connected_fragments_by_id` (Line 216) — Get all fragments connected to this document_id (sys_id).
+    - Method `has_joins_by_id` (Line 290) — Quick check if a document_id has any joins.
+    - Method `has_joins` (Line 296) — Quick check if a shelfmark has any joins.
+    - Method `get_join_count` (Line 301) — Get count of joins for a shelfmark.
+    - Method `start_background_sync` (Line 308) — Start background sync thread.
+    - Method `stop_background_sync` (Line 318) — Stop background sync thread.
+    - Method `_sync_loop` (Line 324) — Background sync — runs once at startup only.
+    - Method `sync_with_server` (Line 334) — Sync joins with server. Called in background.
+    - Method `_fetch_all_joins` (Line 380) — Fetch all joins from server with pagination.
+    - Method `_process_pending_operations` (Line 420) — Process any pending create/delete operations.
+    - Method `create_join_local` (Line 469) — Create a join locally and queue for server sync.
+    - Method `delete_join_local` (Line 511) — Delete a join locally and queue for server sync.
+    - Method `get_all_shelfmarks_with_joins` (Line 542) — Get list of all shelfmarks that have joins (for autocomplete).
+
+## shared/joins_lab.py
+
+- **Class** `BuilderRow` (Line 30) — One row in the Joins Lab line-by-line query builder.
+- **Class** `SideQuery` (Line 48) — A complete query specification for one side of a join search.
+    - Method `__post_init__` (Line 68)
+- **Class** `Candidate` (Line 77) — A normalized search result candidate for the Joins Lab.
+    - Property `key` (Line 126) — Canonical per-image dedup key: (sys_id, page).
+- **Class** `MergeResult` (Line 142) — Result of a text/VS candidate merge operation (Plan 02).
+- **Class** `SearchExecutor` (Line 160) — Narrow adapter Protocol over the search engine.
+    - Method `execute_search` (Line 172)
+    - Method `get_browse_page` (Line 186)
+    - Method `get_meta_for_id` (Line 198)
+    - Method `get_library_for_id` (Line 201)
+- **Function** `_to_int` (Line 208) — Coerce v to int; return None on any conversion failure.
+- **Function** `_r_sid` (Line 216) — Extract sys_id from a result dict (sketch L61 accessor).
+- **Function** `_r_shelf` (Line 221) — Extract shelfmark from a result dict (sketch L65 accessor).
+- **Function** `_r_title` (Line 227) — Extract title from a result dict (sketch L68 accessor).
+- **Function** `_r_lib` (Line 232) — Extract library_code from a result dict (sketch L73 accessor).
+- **Function** `page_of` (Line 238) — Best-effort 1-based page/image number for a result dict.
+- **Function** `normalize_candidate` (Line 258) — Normalize a raw engine result dict to a Candidate.
+- **Function** `resolve_other_side_pages` (Line 294) — Return the set of neighbor page numbers that form the 'other side' of a leaf.
+- **Function** `cross_side_membership` (Line 317) — Pure AND/OR set logic for cross-side filtering (transplanted from sketch L400-428).
+- **Function** `apply_cross_side` (Line 355) — I/O-bound orchestrator for cross-side AND/OR membership (SC#2).
+- **Function** `dedup_candidates` (Line 515) — Deduplicate raw result dicts to one Candidate per (sys_id, page).
+- **Function** `merge_candidates` (Line 557) — Merge text and VS candidate lists into a stable, provenance-tagged ordering.
+- **Function** `detect_self_match` (Line 611) — Report whether the anchor's own sys_id appears in a fetched result list.
+- **Function** `badge_and_tooltip` (Line 649) — Return (icon_name | None, tooltip_text) for a candidate badge.
+- **Function** `_match_line` (Line 672) — Return the index of the first line whose content matches the pattern.
+- **Function** `htmlify` (Line 706) — Escape corpus text to HTML, optionally highlighting pattern matches.
+- **Function** `snippet_html` (Line 736) — HTML snippet centered on the first regex match.
+- **Function** `snippet_plain` (Line 758) — Plain-text snippet centered on the first regex match, for table cells.
+- **Function** `compose` (Line 781) — Compose a SideQuery into the engine's line-break query syntax.
+- **Function** `normalize_order` (Line 873) — 'library' or 'domain'; anything else is 'rank' (the order the search gave).
+- **Function** `domain_hebrew_names` (Line 881) — {English: Hebrew} for the domains of ``FjmsService.get_domain_hierarchy()``.
+- **Function** `domain_path` (Line 896) — A domain's place in the FJMS tree: [[key, English, Hebrew], ...] from the top (canonical parents from `shared.domain_hierarchy.FJMS_PARENT_OF`; "Other" keyed by its parent).
+- **Function** `primary_domain` (Line 924) — A fragment's domain as the Visual Similarity window shows it, with its `domain_path`.
+- **Function** `domain_path_of` (Line 943) — A candidate's domain path from its enrichment (or a suggestion's fields); its domain alone when it carries none.
+- **Function** `normalize_filter_mode` (Line 958) — 'hide' (leave the chosen values out); anything else is 'show_only'.
+- **Function** `filter_passes` (Line 963) — Whether a candidate whose library (or domain) is *value* passes that filter.
+- **Function** `path_passes` (Line 975) — filter_passes for a domain path: a chosen parent takes in its branch.
+- **Function** `domain_label` (Line 984) — The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
+- **Function** `counted_options` (Line 995) — [(value, label, count)] for each distinct value, in label order; `counted=` counts some candidates only.
+- **Function** `domain_tree_options` (Line 1015) — The Domain filter as a tree: [(key, label, count, depth)], canonical FJMS order, a parent counting its branch.
+- **Function** `facet_rows` (Line 1055) — Library and Domain options for both Joins Labs, each counting the candidates the other filters keep.
+- **Function** `order_candidates` (Line 1075) — The candidates in the search's order, or grouped by library or by domain.
+
+## shared/atomic_io.py
+
+- **Function** `_pauses` (Line 30) — RETRY_DELAYS, then 0.5 s steps, adding up to ``budget`` seconds.
+- **Function** `is_busy` (Line 41) — True for the error Windows raises while another program holds the file.
+- **Function** `_retry_while_busy` (Line 46)
+- **Function** `_read_all` (Line 57)
+- **Function** `read_bytes` (Line 62) — Return the whole file, retrying for up to ``budget`` seconds while Windows reports it busy.
+- **Function** `replace_file` (Line 71) — ``os.replace(src, dst)``, retried while Windows reports either file busy.
+- **Function** `_write_in_place` (Line 76)
+- **Function** `_discard` (Line 83)
+- **Function** `write_bytes_atomic` (Line 90) — Replace the contents of ``path`` with ``data``, all or nothing.
+
+## shared/lists_manager.py
+
+- **Function** `_tr` (Line 31) — Translate text if current language is Hebrew.
+- **Function** `_worth_retrying_at_startup` (Line 44) — Any failed read of lists.pkl is retried at startup, except a file that is gone.
+- **Function** `_item_records` (Line 58)
+- **Function** `_pop_record` (Line 65)
+- **Function** `_queue_record` (Line 73) — An explicit removal of a remembered row: the next upload deletes it, by id and list.
+- **Function** `_identity` (Line 91)
+- **Function** `_queue_cloud_delete` (Line 96) — The entry left list_id for good: its row there, and any row on its way there, are to be deleted.
+- **Function** `_forget_item` (Line 114) — The entry is deleted: every row still remembered for it is to be deleted.
+- **Function** `_restore_cloud_row` (Line 132) — The entry is back in list_id before its removal (or move) from there was sent: undone.
+- **Function** `_mark_pending_move` (Line 180) — The entry moved from from_list to to_list: its row there goes with it, whatever to_list holds.
+- **Function** `_mark_unsent` (Line 204) — A list was changed here in what an upload sends for it: its name ('list_name_unsent'), or
+- **Function** `_keep_web_removal` (Line 224) — Keep an entry the website removed: forget its tombstone, so the next upload inserts it again.
+- **Class** `ListsManager` (Line 232) — Manages personal lists (starred/saved manuscripts) with tags and notes.
+    - Method `__init__` (Line 303) — Initialize the lists manager.
+    - Method `_get_default_data` (Line 309) — Return the default data structure.
+    - Method `_backup_paths` (Line 340)
+    - Method `_read_store` (Line 343) — Unpickle one copy of the store and fill in the fields newer builds expect.
+    - Method `load` (Line 378) — Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
+    - Method `_rotate_backups` (Line 416) — Make a copy of lists.pkl the new .bak1: .bak2 -> .bak3, .bak1 -> .bak2.
+    - Method `_keep_unreadable_locked` (Line 446) — Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
+    - Method `keep_unreadable_copy` (Line 459) — After a load that could not read lists.pkl, copy it aside now.
+    - Method `save` (Line 479) — Save lists to file. Returns True when lists.pkl was written.
+    - Method `_tell` (Line 516) — Call a save hook, if one is set; what it raises is logged, not passed on.
+    - Method `write_snapshot` (Line 525) — Write the in-memory store (or payload, its pickled bytes) to lists.pkl.<label>, atomically.
+    - Method `saves_failing` (Line 541) — True while saves do not reach lists.pkl (see save()): the lists live in memory only.
+    - Method `clear_all` (Line 545) — Clear all lists and reset to default state. Used after migration.
+    - Method `enable_cloud_sync` (Line 552) — Enable cloud sync for the given user (call after login).
+    - Method `disable_cloud_sync` (Line 571) — Disable cloud sync (call on logout).
+    - Method `sync_from_cloud` (Line 580) — Pull lists from cloud and merge with local data.
+    - Method `is_sync_available` (Line 591) — Check if cloud sync is available (user logged in, network ok).
+    - Property `_last_sync` (Line 603) — Get timestamp of last sync (for debouncing).
+    - Method `sync_to_cloud` (Line 612) — Push local lists to cloud (keywords as ListsCloudSync.sync_to_cloud: data=, should_stop=, ...).
+    - Method `fetch_cloud_state` (Line 623) — The network half of a download (ListsCloudSync.fetch_cloud_state): reads nothing local.
+    - Method `apply_cloud_state` (Line 633) — The local half of a download, on this thread (ListsCloudSync.apply_cloud_state).
+    - Method `cloud_user` (Line 643) — The account list sync is set up for, or None.
+    - Method `remembered_row_ids` (Line 651) — The rows a download confirms, taken from the store on the thread that owns it.
+    - Method `begin_upload` (Line 668) — Snapshot lists.pkl.pre-upload and open the journal. Returns (copy, base), two copies of the store.
+    - Method `withdrawn_now` (Line 681) — The memberships removed since the upload began: (item id, list id). The engine's withdrawn().
+    - Method `_close_journal` (Line 687)
+    - Method `finish_upload` (Line 693) — Install an upload's copy, whatever the upload's end (success, failure, stop, error).
+    - Method `_began_as` (Line 702) — What the install needs of the store an upload began from.
+    - Method `abandon_upload` (Line 706) — The app closes while an upload runs: install what it reported, as finish_upload would.
+    - Method `_install_upload` (Line 740)
+    - Method `_replay` (Line 754) — The bookkeeping of every edit made during the upload, again, in order, on its copy.
+    - Method `_keep_user_deletes` (Line 759) — The deletes queued during the upload that its copy lacks: kept, unless the upload gave that
+    - Method `_install` (Line 774) — The copy's cloud identity into the live store; nothing else is touched. Returns whether it changed.
+    - Method `_book` (Line 825) — Apply a bookkeeping helper to the live store, and journal it while an upload runs on a copy.
+    - Method `_back_in_list` (Line 832) — An entry went into a list: if it left that list since the last upload, it gets its rows back.
+    - Method `pending_web_removals` (Line 838) — [(item id, list id)] of entries the website removed that are still in that list here.
+    - Method `resolve_web_removals` (Line 849) — Apply the prompt's answers {(item id, list id): 'remove' | 'keep'}. Returns (removed, kept).
+    - Method `differing_notes_count` (Line 875) — Entries in a list whose note or tags differ from the account's copy and were left as they are.
+    - Method `get_cloud_lists_preview` (Line 888) — Get preview of cloud lists without syncing (for dialog display); should_stop= as the engine's.
+    - Method `get_local_lists_summary` (Line 899) — Get summary of local lists for dialog display.
+    - Method `get_all_lists` (Line 915) — Get all lists sorted alphabetically (system lists have special handling).
+    - Method `get_deleted_lists` (Line 944) — Get soft-deleted lists (trash view).
+    - Method `_get_list_item_count` (Line 958) — Get the number of items in a list.
+    - Method `create_list` (Line 969) — Create a new list. Returns the list ID.
+    - Method `update_list` (Line 996) — Update list properties.
+    - Method `update_list_project` (Line 1022) — Assign a list to a project (or clear project).
+    - Method `create_project` (Line 1040) — Create a new project. Returns the project ID.
+    - Method `get_projects` (Line 1068) — Get projects sorted by name.
+    - Method `update_project` (Line 1082) — Update a project's properties.
+    - Method `delete_project` (Line 1092) — Delete a project and optionally its lists.
+    - Method `_get_next_project_color` (Line 1116)
+    - Method `apply_list_layout` (Line 1128) — Apply list ordering and project assignments in one save.
+    - Method `delete_list` (Line 1157) — Soft-delete a list (move to trash).
+    - Method `restore_list` (Line 1196) — Restore a soft-deleted list from trash.
+    - Method `permanently_delete_list` (Line 1210) — Permanently delete a list (no recovery).
+    - Method `empty_trash` (Line 1214) — Permanently delete all soft-deleted lists.
+    - Method `duplicate_list` (Line 1223) — Duplicate a list with all its items.
+    - Method `merge_lists` (Line 1245) — Merge source list into target list.
+    - Method `find_duplicate_lists` (Line 1268) — Find all duplicate lists (same name) and return info for resolution.
+    - Method `merge_duplicate_group` (Line 1321) — Merge a group of duplicate lists into one.
+    - Method `auto_merge_duplicate_group` (Line 1378) — Automatically merge a duplicate group using heuristics.
+    - Method `restore_project_hierarchy` (Line 1400) — Restore project hierarchy for orphaned lists by color matching.
+    - Method `_build_item_id` (Line 1430)
+    - Method `add_item` (Line 1437) — Add an item to a list. Returns True if added, False if already exists.
+    - Method `add_items_bulk` (Line 1482) — Add multiple items to a list at once.
+    - Method `update_item` (Line 1539) — Update an item's properties.
+    - Method `remove_item_from_list` (Line 1567) — Remove an item from a specific list.
+    - Method `move_items_to_list` (Line 1587) — Move items from one list to another (their cloud rows follow at the next upload).
+    - Method `get_items_in_list` (Line 1604) — Get all items in a list with their metadata.
+    - Method `get_item` (Line 1629) — Get a single item's data.
+    - Method `is_item_in_any_list` (Line 1639) — Check if an item is in any list (excluding recent).
+    - Method `get_item_lists` (Line 1643) — Get list of lists an item belongs to.
+    - Method `add_to_recent` (Line 1651) — Add an item to the recently viewed list.
+    - Method `get_all_tags` (Line 1695) — Get all tags for autocomplete.
+    - Method `add_tag_to_items` (Line 1699) — Add a tag to multiple items.
+    - Method `export_list` (Line 1719) — Export a list to a dictionary suitable for JSON serialization.
+    - Method `import_list` (Line 1757) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
+    - Method `shelfmark_sort_key` (Line 1805) — Sort key for shelfmarks that handles dots correctly.
+    - Method `get_items_sorted` (Line 1823) — Get items in a list, sorted by the specified field.
+    - Method `get_item_copy_text` (Line 1848) — Generate text for copying item info.
+
+## shared/lists_sync.py
+
+- **Function** `_held_state` (Line 84) — The parts of a list's own state its LIST_STATE_UNSENT mark holds back (a set of LIST_STATE_FIELDS).
+- **Function** `_norm` (Line 104)
+- **Function** `_id_key` (Line 111)
+- **Function** `_after` (Line 115) — One page of a keyset read (ListsCloudSync._paged): the rows after row id `after`.
+- **Function** `_item_identity` (Line 125) — (sys_id, fl_id, page) of a local item: its fields, else the ::fl:: / ::img:: parts of its key.
+- **Function** `_row_identity` (Line 138)
+- **Function** `_same_entry` (Line 144) — True only when two identities are certainly one entry.
+- **Function** `_clean` (Line 170)
+- **Function** `_has_lines` (Line 174) — small is empty, equal to big, or a run of complete lines of big (never a raw substring).
+- **Function** `_separators` (Line 181) — The line kept notes are joined with, in English and in Hebrew (a note may hold either).
+- **Function** `_blocks` (Line 192) — The texts a kept note is made of: the parts between its marker lines.
+- **Function** `_holds` (Line 200) — big already contains small: as complete lines, or every text small was kept from.
+- **Function** `_same_text` (Line 209) — Equal, or each holds the other: the same notes kept in another order.
+- **Function** `_keep_both` (Line 214) — Both texts: the desktop's, a marker line, then what the cloud's text adds to it.
+- **Function** `_fold_notes` (Line 231)
+- **Function** `_union` (Line 238)
+- **Function** `_tagset` (Line 246)
+- **Function** `_tags_filter_literal` (Line 250) — list_items.tags is jsonb: the cs/cd filters take JSON text, never the text[] literal {a,b}.
+- **Function** `count_differing_notes` (Line 255) — Entries whose note or tags differ from the account's copy and were left as they are.
+- **Function** `remembered_ids` (Line 284) — The rows a download confirms: every non-gone record's, while the store is this account's.
+- **Function** `_records` (Line 299)
+- **Function** `_is_move_key` (Line 303)
+- **Function** `_live_record` (Line 307)
+- **Function** `_orphans` (Line 314) — Records for local lists the item is no longer in (a Move, a removal, a merged list).
+- **Function** `_orphan_ids` (Line 321)
+- **Function** `_base_of` (Line 325) — A copy of the record naming this row (for its note/tag bases), or None.
+- **Function** `_drop_record` (Line 333)
+- **Function** `_drop_left_tombstones` (Line 341)
+- **Function** `rows_index` (Line 349) — Which records name each row: {row id: [(item, list key)]}, for record_row.
+- **Function** `record_row` (Line 359) — The only writer of a record. note/tags: the cloud values the local copy is known to include.
+- **Function** `_remember` (Line 409) — record_row for a pass, which also tells the pass's on_recorded (an upload on a copy).
+- **Function** `_set_field` (Line 420) — The one writer, in an upload, of a list's or project's cloud_id or a list's unsent marks.
+- **Function** `apply_account_guard` (Line 441) — Records belong to one account: drop another account's, then claim the store for this one.
+- **Function** `_is_missing_column` (Line 461)
+- **Function** `_is_url_too_long` (Line 469)
+- **Function** `_insert_rolled_back` (Line 473) — True when an insert error proves nothing was written, so retrying rows one by one is safe.
+- **Function** `_session_user` (Line 493) — The user id of the client's current session, or None (no session, or no way to tell).
+- **Class** `_Stopped` (Line 503) — should_stop() said so before a request. Not an Exception: no handler of a failed request takes it.
+- **Class** `_Pass` (Line 507) — Everything one sync pass learns; never kept on the sync object.
+    - Method `__init__` (Line 510)
+    - Method `check` (Line 533) — Called before every request: raises _Stopped once should_stop() is true.
+    - Method `withdrawn_now` (Line 538) — The memberships the user removed while this pass ran (read right before a write is sent).
+    - Method `records_naming` (Line 548) — Which records name each row: built at the pass's first record, then kept by record_row.
+    - Method `prove_auth` (Line 558)
+- **Function** `_list_order` (Line 564)
+- **Function** `_syncable_list` (Line 572)
+- **Function** `_match_rows` (Line 580) — Pair cloud rows of one list with local items. Returns {row_id: item_id}.
+- **Class** `ListsCloudSync` (Line 648) — Handles synchronization between local ListsManager and Supabase.
+    - Method `__init__` (Line 673) — Initialize the sync manager.
+    - Property `_sync_in_progress` (Line 683)
+    - Method `set_client` (Line 686) — Set an external authenticated client (from corrections system).
+    - Method `_get_client` (Line 691) — Get Supabase client - preferring the authenticated external client.
+    - Method `set_user` (Line 708) — Set the current user ID (UUID from Supabase auth).
+    - Method `clear_user` (Line 712) — Clear user ID (on logout), and the client: no request can go out on the signed-out account's.
+    - Method `is_sync_available` (Line 717) — Check if cloud sync is available.
+    - Method `get_cloud_lists_preview` (Line 732) — Get a preview of cloud lists without syncing.
+    - Method `_backup_local_data` (Line 787) — Snapshot the local lists before a sync. Returns True if the snapshot was written.
+    - Method `_guard` (Line 813) — Records belong to one account: drop another account's, then claim the store for this one.
+    - Method `_paged` (Line 817) — Read every row of a query, a page at a time by row id. Returns (rows, complete).
+    - Method `_fetch_list_rows` (Line 860)
+    - Method `_read_user_lists` (Line 885)
+    - Method `_read_projects` (Line 890) — Every cloud project of the account, in keyset pages as the lists are: (rows, complete).
+    - Method `_confirm` (Line 896) — Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok.
+    - Method `_may_tombstone` (Line 931) — May this remembered row be taken as removed on the website?
+    - Method `_tombstone` (Line 945)
+    - Method `_repair_shared_cloud_rows` (Line 957) — Items that hold the same cloud row: fold certain duplicates (download), split the rest.
+    - Method `sync_to_cloud` (Line 1012) — Push local lists and items to Supabase.
+    - Method `_upload_result` (Line 1059)
+    - Method `_upload` (Line 1065)
+    - Method `_not_uploaded` (Line 1125)
+    - Method `_push_projects_and_lists` (Line 1132) — Projects and lists as before, except that a cloud list has at most one local owner.
+    - Method `_push_list_items` (Line 1330) — The item half of an upload, for the given (local list, cloud list) pairs.
+    - Method `_tell_progress` (Line 1412) — progress['tell'](done, total), or (done, total, what) for a step that is not a list.
+    - Method `_hold_conflicts` (Line 1425) — Entries whose note (or tags) differ on one of their rows and may not be replaced there.
+    - Method `_write_list` (Line 1462)
+    - Method `_write_unmatched` (Line 1478) — A membership that no row of its list's read paired with.
+    - Method `_orphan_choice` (Line 1519) — The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
+    - Method `_move_orphan` (Line 1553) — Move (or adopt) a row this item left in a list it is no longer in.
+    - Method `_orphan_gone` (Line 1614)
+    - Method `_reread` (Line 1622)
+    - Method `_changes` (Line 1632) — What an upload may change on a paired row.
+    - Method `_write_matched` (Line 1686) — A row paired with this membership; only what changed, conditional on what was read.
+    - Method `_send_rest` (Line 1715) — After a note/tag change could not be made: send the row's other changed fields alone.
+    - Method `_agreed_bases` (Line 1724) — Bases when a note/tag write did not happen: equal values are agreed, the rest unchanged.
+    - Method `_patch` (Line 1734) — One PATCH of a row, filtered by id, list and the note/tags it replaces.
+    - Method `_insert_rows` (Line 1782) — One batch per list; returned rows are recorded by identity, never by position.
+    - Method `_insert_one` (Line 1855)
+    - Method `_pending` (Line 1873) — This account's pending removals (another account's wait for it).
+    - Method `_suppressed` (Line 1878) — {cloud list id: the rows there this account waits to delete} (a download leaves them out).
+    - Method `_has_deletes` (Line 1885)
+    - Method `_send_deletes` (Line 1889) — Explicit removals, then the moved rows whose destination has its own row.
+    - Method `_unqueue` (Line 1904)
+    - Method `_send_explicit` (Line 1908) — One explicit removal: DELETE by id and the list this computer last knew, no other condition.
+    - Method `_settle_moved_row` (Line 1945) — A moved row no membership took in Phase 2: gone, redundant, or waiting for its list.
+    - Method `_delete_row` (Line 1990) — One DELETE of a row, by id and list, and with cond=(note, tags) only as it was read.
+    - Method `sync_from_cloud` (Line 2023) — Pull lists and items from Supabase and merge with local data: the fetch and the
+    - Method `_download_result` (Line 2052)
+    - Method `_fetch_failed` (Line 2056) — A download whose fetch did not complete: nothing local was read or changed.
+    - Method `fetch_cloud_state` (Line 2067) — The network half of a download: reads the cloud, reads and writes nothing local.
+    - Method `_fetch` (Line 2084)
+    - Method `apply_cloud_state` (Line 2106) — The local half of a download, from fetch_cloud_state's state: snapshot, merge, save.
+    - Method `_apply` (Line 2119)
+    - Method `_fetch_cloud_state` (Line 2141) — Everything a download needs from the cloud; reads nothing local and writes nothing.
+    - Method `_apply_projects` (Line 2162) — Cloud projects mapped to local ones by name, as before.
+    - Method `_cloud_deleted_at` (Line 2199)
+    - Method `_map_lists` (Line 2216) — Each local list's own cloud list, and the same-name cloud lists read for it.
+    - Method `_apply_cloud_state` (Line 2364) — The local half of a download: map lists, fold rows into items, reconcile notes once per item.
+    - Method `_walk_list` (Line 2482) — The rows of one local list's own and same-name cloud lists: pair, fold or create.
+    - Method `_plan_list` (Line 2533)
+    - Method `_new_item` (Line 2636) — An unmatched row that is no local entry's: a new item at a free key.
+    - Method `_judge_unseen` (Line 2667) — A remembered row of this membership that no read or confirmation paired with it.
+    - Method `_sweep_unowned` (Line 2683) — Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
+    - Method `_reconcile` (Line 2706) — Every cloud value that reached this entry in this pass, applied at once, in row-id order.
+    - Method `sync_list_to_cloud` (Line 2762) — Push a specific list and its items to cloud.
+    - Method `sync_item_to_cloud` (Line 2823) — Push one membership (an item in one list) to cloud, as an upload would.
+    - Method `delete_list_from_cloud` (Line 2877) — Delete a list from cloud (cascade deletes items).
+    - Method `delete_item_from_cloud` (Line 2901) — Delete the one cloud row remembered for this item in this list; nothing else.
+- **Function** `get_lists_sync` (Line 2932) — Get or create the lists sync singleton.
+
+## desktop/lists_sync_runner.py
+
+- **Function** `sync_dialog_allowed` (Line 41) — Whether a list-sync question (the sync choice, the website-removal prompt) may open now.
+- **Class** `SyncJob` (Line 50) — One queued or running sync. on_done(outcome) is called once, whatever its end.
+    - Method `__init__` (Line 59)
+    - Method `past_deadline` (Line 77)
+- **Class** `ListsSyncRunner` (Line 81) — The one owner of every list sync of the desktop window (see the module docstring).
+    - Method `__init__` (Line 84)
+    - Property `busy` (Line 107)
+    - Property `unsent` (Line 111) — Changes not known to be in the account: edits made since the last upload's copy,
+    - Property `closed` (Line 120)
+    - Method `invalidate_auth` (Line 123) — A sign-out or a new sign-in: what runs or waits now is stale (it stops, and is not shown).
+    - Method `allow_auto` (Line 127)
+    - Method `mark_dirty` (Line 131) — Edits were made that no upload has taken yet (while list sync was off).
+    - Method `request_auto` (Line 136) — A list changed: upload it now, or once after what runs or waits.
+    - Method `run` (Line 148) — Queue a sync ('preview', 'download', 'upload', 'merge'). Returns its job, or None once closed.
+    - Method `begin_logout` (Line 160) — No more automatic uploads; one last upload if one is needed, within budget_s.
+    - Method `cancel` (Line 184) — Stop a job: a waiting one completes at once; a running one stops before its next request
+    - Method `shutdown` (Line 195) — The window closes: install what the upload already did, complete every job, stop. Never blocks.
+    - Method `_new_job` (Line 240)
+    - Method `_should_stop` (Line 248)
+    - Method `_stale` (Line 251) — Checked on the UI thread before a result is used: an old sign-in, or past the sign-out's deadline.
+    - Method `_logout_needs_upload` (Line 260)
+    - Method `_start` (Line 264)
+    - Method `_start_upload` (Line 294)
+    - Method `_spawn` (Line 319)
+    - Method `_progress_cb` (Line 333)
+    - Method `_poll` (Line 340)
+    - Method `_drain` (Line 346)
+    - Method `_value` (Line 375)
+    - Method `_after` (Line 381)
+    - Method `_upload_after_download` (Line 435) — A Download sends nothing: when changes made here are still not in the account,
+    - Method `_complete` (Line 441) — The one end of every job: once, whatever the exit.
+    - Method `_deliver` (Line 474)
+    - Method `_tell_progress` (Line 482)
+    - Method `_call` (Line 487)
+
+## desktop/lists_web_removals_dialog.py
+
+- **Class** `WebRemovalsDialog` (Line 34) — One row per entry, each with its own choice; Decide later by default.
+    - Method `__init__` (Line 37)
+    - Method `_decide_all` (Line 91)
+    - Method `_apply` (Line 96)
+    - Method `choices` (Line 102) — The decided rows; nothing when the prompt was closed without Apply.
+- **Function** `ask_about_web_removals` (Line 107)
+
+## shared/browse_map_utils.py
+
+- **Function** `normalize_shelfmark` (Line 123) — Normalize shelfmarks for consistent matching across the codebase.
+- **Function** `natural_sort_key` (Line 174) — Sort strings containing numbers naturally (e.g. 'Item 2' < 'Item 10').
+- **Function** `get_library_display` (Line 180) — Return library name for display.
+- **Function** `_get_library_prefix_aliases` (Line 211) — Build sorted list of (lowercase_prefix, ) for library name stripping.
+- **Function** `_strip_library_prefix` (Line 243) — Strip a leading library name/code prefix from a shelfmark query.
+- **Function** `_load_ie_volume_map` (Line 265) — Load IE volume map from JSON file (cached after first call).
+- **Function** `_extract_ie_from_header` (Line 310) — Extract IE identifier from a browse_map entry's full_header.
+- **Function** `_repair_missing_ie_pages` (Line 316) — Repair browse_map for multi-IE manuscripts where pages from non-primary IEs
+- **Function** `dedupe_browse_map` (Line 448) — Deduplicate browse_map pages and tag each page with its IE.
+
+## shared/catalog_shelfmark.py
+
+Catalogue-form shelfmarks (plan `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`): the fallback ("T2") that
+reads shelfmarks as the NLI catalogue writes them (`Cambridge University Library, Ms. T-S K 08.026`,
+`Mosseri, Jacques, Ms. VIII.402`), run only when the resolver found no exact match.
+
+- **Function** `zs` / `zkey` / `numbers` — leading zeros stripped on the raw text, then normalized; integers for the numeric check.
+- **Function** `looks_like_catalogue_form` — cheap gate (`Ms.` token or zero-padded number) so an ordinary empty search builds no index.
+- **Function** `head_codes` / `alias_codes` — authoritative `LIBRARY_CODES` codes for an institution head / prefix (case-equivalent `BnF`/`BNF`); never frequency.
+- **Class** `CatalogTables` — heads (from raw call numbers, >= 3 uses), their codes, the stored-side zero table; keeps a reference to its index.
+- **Function** `prefix_codes` / `named_prefix` — the codes a removed library prefix names (exactly a `LIBRARY_CODES` code or name), shared by the resolver's prefix rule and T2 (plan `docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md`).
+- **Function** `in_libraries` — whether a record lies in a named library for the shelfmark looked up: its code, collection provenance per shelfmark (a stored `<head> Ms. <this shelfmark>`, from its call numbers or the NLI-cache strings the index carries (`MetadataManager._get_shelfmark_index` returns a `_ShelfmarkIndex` with `cached_variants`), `Ms.` in any case, zeros ignored), or no csv row.
+- **Function** `named_library_exact` — the resolver's exact answer when a prefix named a library and T1 answers exactly: today's exact candidates outside the named library removed, plus the records storing the whole input; empty (= today's answer) when nothing kept carries the numbers. Called by `resolve_system_by_shelfmark` and the restated T1 below.
+- **Function** `t1_exact_entries` — the resolver's exact candidates for many inputs, with the prefix rule (`scoped=False`: without it); pinned to the baseline by `tests/test_catalog_shelfmark_real.py`.
+- **Function** `resolve_many` — exact stage + union of candidates (D0 unpadded exact within the institution, long form, Mosseri `Moss.` form, rest within the institution, the whole input for a named alias, whole input when none named; Mosseri parent only if empty), one pass for many inputs. `prefix_rule=False` answers as before the library-prefix rule (the real-data gate's comparison).
+
+## shared/catalog_criteria.py
+
+Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): one definition of every
+"manuscript feature" for Catalog Browse, "Search only in..." and the API. Must not import
+`shared.fjms_service` (which imports it).
+
+- **Constants** `SECTIONS`, `CRITERIA` / `BY_KEY` — sections (FJMS's Hebrew names) and criteria (list / range,
+  sources, `catalog_fields` category, `criteria_values` / `criteria_numbers` key, measured-page column);
+  `ATTRIBUTES` — the attribute conditions (also used by the 5.1.0 migration); `NOT_RECORDED` (`"_none"`).
+- **Function** `clean_criteria` — the canonical list / range shapes; strict (API) or drop-and-report.
+- **Function** `criteria_to_params` / `criteria_from_params` — the address grammar of D8
+  (`region=!Oriental`, `material=cat:Vellum,_none`, `lines=meas:20..25`, `columns=_none`).
+- **Function** `match_criteria` — the matching sys_ids: any record, all except = universe − only, Not recorded
+  per source (uncatalogued included), one measured page for every measured range, one catalogue size
+  record; raises `CriteriaUnavailable` ('column_missing' / 'corpus_unavailable').
+- **Function** `criterion_values` — a list criterion's choices with corpus counts, Unknown last, then Not recorded.
+- **Function** `legacy_conflicts` / `criteria_with_legacy_keys` — the API's older keys (`materials`,
+  `date_from` / `date_to`) read as Material from the catalogue and Period of copy; refused beside their criterion.
+
+## shared/catalog_numbers.py
+
+- **Function** `parse_number_text` — the catalogue's free-text line / column counts as intervals (ruling D7);
+  pinned by `tests/fixtures/catalog_numbers_golden.json`.
+- **Function** `copy_span` / `span_label` — a record's copy-date span (ruling D18) and its label (`944–1100`).
+
+## Catalogue criteria on the desktop (PR 1c)
+
+- `desktop/dialogs_filter.py`: **Class** `CriteriaDialog` — "Manuscript features": sections in a list, each
+  section's controls beside it, the live total; opened from the Catalog tab, from "Search only in..." and
+  (with `sections` / `within`) for the post-search filters. **Function** `migrate_saved_filters` — saved
+  pre-search filters as they run today (dates → Period of copy, D18; old measurement bounds dropped, R2);
+  `criteria_unavailable_keys` / `drop_unavailable_criteria` — what a 5.0.0 file is KNOWN unable to answer
+  (rule 9, K-16); `criteria_chip_texts` — chips via `FjmsService.criteria_chips(cached_only=True)`: on the UI
+  thread, labels from the cache only. `CatalogTraitsDialog` and
+  `build_script_lists` were removed.
+- `desktop/gui_threads.py`: **Class** `CriterionValuesWorker` — a list's values with corpus counts and each
+  criterion's coverage, off the UI thread; **Class** `CriteriaCountWorker` — the dialog's live total and "of
+  which N not recorded" (signal `counted`, not `finished`); **Class** `CriteriaMatchWorker` — which of a set
+  of results' manuscripts the features keep (D20), for the Joins Lab (`matched(tag, ids)` / `failed`).
+- `genizah_app.py`: **Class** `_CatalogUncataloguedWorker` — the domain tree's "No catalogue record (N)";
+  **Class** `_PostCriteriaWorker` — the post-search criteria's matches among the results, off the UI thread;
+  **Class** `_CatalogHandoffWorker` — the scope of "Search / Parallel search in these results", off the UI
+  thread (`_catalog_hand_off` / `_catalog_on_handoff_scope`); `_warm_criteria_labels` — the chips' Hebrew
+  value labels, read at start-up by **Class** `_FjmsWarmupThread` (`GenizahGUI._start_fjms_warmup`), whose
+  end draws the chips again (`_redraw_criteria_chips`);
+  `GenizahGUI._catalog_open_criteria_dialog` / `_catalog_set_criteria` / `_catalog_remove_criterion`;
+  `_migrate_saved_pre_search_filters` (history and session restores); `_recompute_post_criteria` /
+  `_open_measurement_filter_dialog` — post-search filters by the panel's rules
+  (`FjmsService.match_result_criteria`, D20).
+
+## Catalogue criteria in the API and MCP (PR 2)
+
+- `web/criteria_models.py`: **Class** `CriteriaModel` — `filters.criteria`, built from the registry
+  (`ListCriterion` / `RangeCriterion` per key); shared by `web/search_api.py::FiltersModel` and the MCP
+  `SearchFilters`.
+- `web/search_api.py`: `FiltersModel._check_criteria` — strict cleaning and the 400 `invalid_combination` for an
+  older key beside its criterion; `_resolve_fjms_filters_sync(filters, meta_mgr)` — the older keys read as
+  criteria, the corpus (`MetadataManager.corpus_sys_ids`) as the universe; **Route** `GET /api/criteria`
+  (`criteria_endpoint`, its own `_criteria_rate_limiter`), 503 `filter_vocabulary_unavailable` when it cannot
+  be built.
+- `shared/fjms_service.py`: `FjmsService.criteria_vocabulary(universe)` — what `GET /api/criteria` serves,
+  built once per corpus under a lock; `_validate_criteria_values` — a list value must be one the catalogue
+  records under the chosen source (400 `unresolvable_filter_value`).
+- `web/chatgpt_api.py`: `GET /api/chatgpt/criteria`; `web/mcp_server.py`: the `list_manuscript_features` tool
+  and `criteria` in `SearchFilters`.
+
+## shared/text_normalize.py
+
+- **Function** `strip_nikud` (Line 17) — Remove Hebrew vowel marks (nikud) and cantillation marks from text.
+- **Function** `strip_search_diacritics` (Line 44) — Strip combining diacritical marks, apostrophe variants, and geresh/gershayim from search text.
+
+## shared/metadata_manager.py
+
+- **Function** `_warn_bridge_import_failed` (Line 37) — Log shelfmark_bridge import failure at WARNING once per process (Gemini LOW).
+- **Function** `_parse_cudl_label` (Line 48) — Parse a CUDL canvas label → (folio_num:int|None, folio_side:'r'|'v'|None).
+- **Function** `_get_crossref_service` (Line 85) — Lazy accessor for the NLI crossref sidecar service (desktop use).
+- **Function** `_get_fjms_service` (Line 102) — Lazy accessor for the FJMS enrichment sidecar service.
+- **Class** `_BoundedLRUCache` (Line 137) — Thread-safe, bounded, dict-like LRU.
+    - Method `__init__` (Line 148)
+    - Method `_evict_locked` (Line 158)
+    - Method `__contains__` (Line 164)
+    - Method `__getitem__` (Line 168)
+    - Method `__setitem__` (Line 174)
+    - Method `get` (Line 180)
+    - Method `items` (Line 187)
+    - Method `keys` (Line 191)
+    - Method `values` (Line 195)
+    - Method `__len__` (Line 199)
+    - Method `__iter__` (Line 203)
+    - Method `__reduce__` (Line 207)
+    - Property `maxsize` (Line 214)
+- **Class** `MetadataManager` (Line 228)
+    - Method `_make_session` (Line 229)
+    - Method `__init__` (Line 233)
+    - Method `start_background_loading` (Line 255) — Start loading heavy metadata resources (CSV, Maps) in background.
+    - Method `_load_small_caches` (Line 260)
+    - Method `_load_heavy_caches_bg` (Line 279)
+    - Method `_load_csv_bank` (Line 284) — Load the massive CSV file into memory for instant lookup.
+    - Method `get_meta_for_id` (Line 377)
+    - Method `get_library_for_id` (Line 413) — Get library code for a system ID.
+    - Method `get_shelfmark_from_header` (Line 429)
+    - Method `save_caches` (Line 442)
+    - Method `get_part_for_folio` (Line 452) — Get the Part ID for a given system ID.
+    - Method `get_folios_for_part` (Line 456) — Get all system IDs (folios) belonging to a Part.
+    - Method `get_part_metadata` (Line 460) — Get full metadata for a Part (Oxford Neubauer).
+    - Method `get_part_images` (Line 464) — Get all images for a Part.
+    - Method `is_part_id` (Line 468) — Check if an identifier is a Part ID.
+    - Method `parse_part_identifier` (Line 472) — Parse an identifier that might be a Part. Returns (part_id, is_part).
+    - Method `get_part_autocomplete_list` (Line 476) — Get list of Parts for autocomplete.
+    - Method `get_meta_with_part` (Line 480) — Get shelfmark, title, and Part info for a system ID.
+    - Method `_build_file_map_background` (Line 506)
+    - Method `extract_unique_id` (Line 523) — Robust extraction of Unique ID.
+    - Method `parse_header_smart` (Line 546)
+    - Method `parse_full_id_components` (Line 559) — Parse header into components regardless of order or separators.
+    - Method `fetch_nli_data` (Line 596)
+    - Method `_bounded_cache_get` (Line 639)
+    - Method `_bounded_cache_set` (Line 647)
+    - Method `_timestamp_cache_recent` (Line 659)
+    - Method `_timestamp_cache_set` (Line 670)
+    - Method `get_runtime_cache_stats` (Line 679) — Return lightweight cache sizes for the memstat diagnostic endpoint.
+    - Method `fetch_iiif_manifest` (Line 690) — Fetch and parse IIIF manifest for physical description, attribution, and image labels.
+    - Method `fetch_marc_data` (Line 803) — Fetch and parse MARC XML for bibliography, notes, and extended metadata.
+    - Method `enrich_metadata` (Line 979) — Fetch extended metadata (IIIF/MARC), build Image List, and merge into cache.
+    - Method `fetch_volume_manifest` (Line 1267) — Lightweight manifest-only fetch for volume switches (no MARC, no FJMS, no crossref).
+    - Method `fetch_external_iiif_data` (Line 1282) — Generic handler to fetch external IIIF data.
+    - Method `_fetch_single_worker` (Line 1362)
+    - Method `_extract_fl_ids` (Line 1492)
+    - Method `_resolve_thumbnail` (Line 1501)
+    - Method `get_rosetta_fallback_url` (Line 1523) — Construct a fallback URL for Rosetta stream if IIIF fails.
+    - Method `_fetch_fl_ids` (Line 1532)
+    - Method `get_thumbnail` (Line 1576)
+    - Method `batch_fetch_shelfmarks` (Line 1597) — Populate metadata cache.
+    - Method `search_by_meta` (Line 1636) — Search for system IDs where the specified field matches the query.
+    - Method `_shelfmark_search_catalogue` / class `_ShelfmarkSearchIndex` — the catalogue normalized once for Shelfmark searches (three sorted views: normalized, dotless, tokens), narrowing a query to the records that can match; `_shelfmark_matches` (the old loop's rules) decides over those, so the answer is the loop's. `_shelfmark_scan_catalogue` is the loop itself: the path while libraries.csv loads, and the reference `tests/test_shelfmark_search_path.py` checks the index against.
+    - Method `prewarm_shelfmark_search` — builds that index at server start (web/main.py, background), ~2 s over the corpus.
+    - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
+    - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
+    - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
+    - Method `has_shelfmark` — True when the query, normalised (library prefix off, or whole), is a record's catalogue shelfmark exactly: a binary search of the prewarmed `_ShelfmarkSearchIndex.norm_keys`; False until that index is built (never builds it). For the website's go-to boxes (`web/home_query.py::catalogue_has_shelfmark`). Tests: `tests/test_metadata_has_shelfmark.py`.
+    - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces. A prefix naming a library keeps it (`catalog_shelfmark.named_library_exact`). When nothing matches exactly, falls back to catalogue forms (`shared/catalog_shelfmark.py`) before substring options.
+    - Method `resolve_catalog_form` / `resolve_catalog_forms` — exact-or-catalogue-form answer for one / many inputs (one index pass), never substring options; `{sys_id, options, selected_shelfmark, total, tier}`. Used by `search_by_meta`'s empty-result fallback and exclusion lists.
+    - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).
+    - Method `get_display_data` (Line 1924)
+
+## shared/nli_metadata_store.py
+
+The parsed NLI MARC / IIIF-manifest answers kept on disk (2026-11-03), one SQLite file beside the NLI image proxy's FL-id store, so an NLI outage does not empty /browse. Read by `MetadataManager.fetch_marc_data` and `fetch_iiif_manifest` through the module (a test can intercept it). Location from the environment on every call; every error is a miss.
+- **Function** `metadata_store_get` — the stored answer for (kind, sys_id, suffix) as a `StoredAnswer` (payload, fetched_at, fresh), fresh or not; None when there is none or the sys_id is synthetic
+- **Function** `metadata_store_put` — keep a parsed answer; refuses an empty one (`has_content`) and prunes past `NLI_METADATA_STORE_MAX_ROWS`, oldest-fetched first
+- **Function** `served_stale` — the answer a caller returns when NLI cannot answer now: the payload with `stale: True` and `fetched_at`
+- **Function** `stale_from` — the oldest `fetched_at` among the answers served stale (`enrich_metadata` writes it as `nli_stale_from`; `web/pages/browse.py` shows the date under the image)
+- **Function** `metadata_store_prepare` — at web startup: bring the file under the row cap (rows are never dropped for age)
+- **Function** `stats` — counters, row count and file size for `/_internal/memstat` (`nli_metadata_store`)
+
+## shared/indexer.py
+
+- **Function** `_tr` (Line 38) — Translate text if current language is Hebrew.
+- **Function** `_strip_brackets` (Line 51) — Remove all square brackets from *text*. Mirrors genizah_core._strip_brackets.
+- **Class** `Indexer` (Line 56) — Create or update the Tantivy index and keep browse maps in sync.
+    - Method `__init__` (Line 58)
+    - Method `_extract_position_fields` (Line 62) — Extract position-search fields from content text.
+    - Method `_validate_position_match` (Line 90) — Post-filter: validate that a regex match occurs at the expected text position.
+    - Method `_validate_line_break_match` (Line 142) — Post-filter: validate that a document satisfies line-break constraints.
+    - Method `create_index` (Line 229)
+    - Method `_add_continuous_document` (Line 426) — Add an aggregated document (system/part) with boundary metadata.
+    - Method `_add_chunked_continuous_documents` (Line 470) — Split a large aggregated document into multiple chunks to avoid massive allocations.
+
+## shared/search_engine.py
+
+- **Function** `_tr` (Line 49) — Translate text if current language is Hebrew.
+- **Function** `_set_last_responsa_downgrade` (Line 80) — Record a Responsa downgrade signal on the current thread.
+- **Function** `_consume_last_responsa_downgrade` (Line 89) — Read-and-clear the per-thread downgrade signal. Returns None if unset.
+- **Function** `_set_last_responsa_downgrade_meta` (Line 106) — Phase 81A — record a structured per-flag cascade outcome.
+- **Function** `_consume_last_responsa_downgrade_meta` (Line 117) — Phase 81A — read-and-clear the structured cascade outcome.
+- **Function** `_count_unique_chunks` (Line 133) — Count distinct source-chunk contents from a chunk_hits list.
+- **Class** `_ChunkPlan` (Line 152) — Per-chunk precomputed plan for search_composition_logic (SEED-011 dedup).
+- **Class** `_LabChunkPlan` (Line 176) — Per-chunk fingerprint plan for lab_composition_search (SEED-011 dedup).
+- **Function** `_make_flex_spacing_pattern` (Line 203) — Create a flex-spacing regex pattern for a term.
+- **Function** `_build_wildcard_regex` (Line 217) — Build a regex pattern for a component with wildcard type.
+- **Function** `_add_bracket_variants` (Line 268) — Return bracket-adorned variants of *term* for Tantivy OR expansion.
+- **Function** `_query_has_brackets` (Line 293) — Return True if *query_str* contains literal square brackets.
+- **Function** `_strip_brackets` (Line 303) — Remove all square brackets from *text*.
+- **Function** `_index_has_field` (Line 308) — SEED-006 compat gate: True if *index*'s schema defines *field_name*.
+- **Function** `content_search_staleness_messages` (Line 332) — SEED-019 #28: human-readable staleness diagnostics for the SEED-006
+- **Function** `make_mark_tolerant_pattern` (Line 378) — Insert optional combining mark matchers between characters of an escaped regex term.
+- **Class** `SearchEngine` (Line 404) — Run searches, build queries, and provide browsing utilities.
+    - Method `__init__` (Line 406)
+    - Method `attach_my_library_tab` (Line 441) — Phase 97 R-01: attach a weakref to the MyLibraryTab for is_searchable gate.
+    - Method `close_local_searcher` (Line 450) — Phase 97 R-02 LD-5: close BOTH main + LAB searcher + index handles.
+    - Method `close_local_lab_searcher` (Line 464) — Phase 97 R-02 LD-5 (LAB-only variant used by rebuild_lab_index_atomic).
+    - Method `_open_local_searcher` (Line 469) — Phase 97 R-02: open LOCAL side-index with atomic-rebuild recovery.
+    - Method `reload_local_indexes` (Line 565) — HIGH-1 review fix: reopen LOCAL Tantivy searchers (main + LAB) so newly
+    - Method `reload_local_lab_index` (Line 579) — HIGH-1 review fix (LAB-only narrow reload). Reopens self.local_lab_searcher
+    - Method `_current_lab_weights_hash` (Line 628) — Compute hash of current LAB weights for D-38 staleness check.
+    - Method `_check_local_lab_freshness` (Line 670) — Return True if LOCAL LAB index is fresh; False if stale or missing.
+    - Method `rebuild_local_lab_index` (Line 693) — Trigger LOCAL LAB rebuild via LocalIndexer, passing fingerprint helpers
+    - Method `_compute_fingerprint_dyn` (Line 736) — Compute fingerprint_dyn for a content string using the given rank map.
+    - Method `_compute_fingerprint_static` (Line 742) — Compute static fingerprint for a content string using HEBREW_FREQ.
+    - Method `_normalize_text` (Line 748) — Normalize content for the text_normalized field (W5 Option C callback).
+    - Method `_query_local_index` (Line 761) — Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
+    - Method `_build_local_result_dict` (Line 858) — Construct a result row from a LOCAL Tantivy doc per D-34 shape.
+    - Method `_rrf_merge` (Line 950) — Reciprocal Rank Fusion merger (D-08 Codex P0). BM25 scores from two
+    - Method `_build_fl_id_index` (Line 983) — Build FL ID -> (sys_id, page_idx) index from browse_map. Called in background thread.
+    - Method `start_fl_id_index_build` (Line 1003) — Start building FL ID index in background. Non-blocking.
+    - Method `_build_fl_id_index_thread` (Line 1011)
+    - Method `format_snippet` (Line 1020) — Format snippet with highlighted matches, safely escaping HTML.
+    - Method `close_index` (Line 1042) — Release Tantivy index and searcher to unlock files (required before rebuild on Windows).
+    - Method `reload_index` (Line 1049)
+    - Method `index_staleness_report` (Line 1074) — SEED-019 #28: queryable verdict on the SEED-006 ``content_search`` compat
+    - Method `_warn_if_local_index_stale` (Line 1105) — SEED-019 #28: log a remediation warning when a freshly-opened LOCAL
+    - Method `_load_browse_map` (Line 1120) — Load the browse map, deduplicate it, and persist corrections if needed.
+    - Method `_get_or_compute_variants` (Line 1155) — Pre-compute variants at the larger limit for each search term.
+    - Method `_build_local_responsa_query_and_regex` (Line 1175) — Build a Tantivy query string + filter regex for a Responsa query, for
+    - Method `build_tantivy_query` (Line 1301)
+    - Method `build_regex_pattern` (Line 1463)
+    - Method `highlight` (Line 1591)
+    - Method `_highlight_by_span` (Line 1618) — Return a highlighted snippet around a specific span.
+    - Method `_parse_boundaries` (Line 1637)
+    - Method `_map_span_to_pages` (Line 1652) — Return page overlaps and primary page for a match span.
+    - Method `_get_field` (Line 1684)
+    - Method `_get_best_text_for_id` (Line 1690) — Find the first page with meaningful text for a given System ID.
+    - Method `parse_query_syntax` (Line 1739) — Parses search syntax prefix from query string.
+    - Method `_expand_responsa_component` (Line 1784) — Expand a single ResponsaComponent through the full Responsa expansion pipeline.
+    - Method `_build_line_break_regex` (Line 1831) — Build a regex pattern for line-break search.
+    - Method `_execute_line_break_search` (Line 1928) — Execute a line-break search using | syntax.
+    - Method `metadata_search_ids` — the manuscripts a Title/Shelfmark search is for; the web resolves them in the server process and hands them to `execute_search(metadata_sys_ids=)`.
+    - Method `words_occur` — whether every word of a query occurs as a whole word in the open index (one count query, limit 1); the search page's gate for the keyboard-layout suggestion.
+    - Method `_execute_metadata_search` (Line 2157) — Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
+    - Method `execute_search` (Line 2234)
+    - Method `_deduplicate` (Line 2756)
+    - Method `search_composition_logic` (Line 2763) — Scans composition chunks against the index.
+    - Method `group_pages_by_manuscript` (Line 3337) — Aggregate individual page results into manuscript-level items.
+    - Method `group_composition_results` (Line 3450)
+    - Method `get_full_text_by_id` (Line 3554)
+    - Method `get_full_manuscript` (Line 3563) — Fetch ALL pages for a system ID, sorted by page number.
+    - Method `_get_metadata_only_browse_page` (Line 3585) — Build a minimal browse result from csv_bank for records with no Tantivy text.
+    - Method `get_browse_page` (Line 3632)
+    - Method `get_local_browse_page` (Line 3730) — Phase 96 NEW-2: LOCAL analog to `get_browse_page` (folio nav for LOCAL files).
+    - Method `get_browse_page_by_fl` (Line 3862)
+    - Method `get_adjacent_sys_id_by_file_order` (Line 3933) — Returns the next/prev system ID based on the order in Transcriptions.txt.
+
+## shared/lab_engine.py
+
+- **Class** `LabEngine` (Line 39)
+    - Method `__init__` (Line 44)
+    - Method `_close_index` (Line 81)
+    - Method `_ensure_lab_tokenizers` (Line 87) — Register analyzers safely.
+    - Method `_reload_lab_index` (Line 98) — Loads index with heavy debug logging.
+    - Method `reload_local_lab_index` (Line 124) — Reopen the LOCAL LAB side-index against the current Config.LOCAL_LAB_INDEX_DIR.
+    - Method `_current_lab_weights_hash` (Line 171) — Compute hash of current LAB weights for D-38 staleness check.
+    - Method `_check_local_lab_freshness` (Line 187) — Return True if LOCAL LAB index is fresh; False if stale or missing.
+    - Method `lab_index_normalize` (Line 212)
+    - Method `rebuild_lab_index` (Line 215)
+    - Method `_create_lab_query` (Line 341) — Helper to construct the Tantivy query object based on settings.
+    - Method `_execute_batched_search` (Line 376) — Executes a Tantivy search in memory-safe batches.
+    - Method `_get_term_weight` (Line 429) — Calculates importance using User Configurable Stop-Word scores.
+    - Method `_calculate_match_metrics` (Line 455) — Calculates score with STRICT FREQUENCY CAP & SEQUENTIAL ORDER.
+    - Method `_generate_highlighted_snippet` (Line 597) — Generates a snippet with asterisk markers (*text*) for highlighting.
+    - Method `lab_search` (Line 656) — Lab Mode (fingerprint) word search.
+    - Method `lab_composition_search` (Line 855) — Scans a composition using Lab Mode.
+    - Method `_is_word_too_common` (Line 1474) — Check existing index stats to see if a word is essentially a stop-word.
+    - Method `_is_phrase_statistically_weak` (Line 1495) — Returns True if the phrase consists ONLY of extremely common words.
+
+## shared/lab_settings.py
+
+- **Class** `LabSettings` (Line 18) — Manages configuration for the Lab Mode, including scoring weights.
+    - Method `__init__` (Line 20)
+    - Method `load` (Line 67)
+    - Method `save` (Line 112)
+
+## desktop/settings_dialogs.py
+
+- **Class** `LabScoringDialog` (Line 67) — Configuration for Lab Mode Scoring (Advanced).
+    - Method `__init__` (Line 69)
+    - Method `save_and_close` (Line 152)
+- **Class** `SearchSettingsDialog` (Line 168) — Settings for Standard Search - Variant configuration and custom pairs.
+    - Method `__init__` (Line 170)
+    - Method `save_and_close` (Line 294)
+- **Class** `HelpDialog` (Line 324) — Display HTML help content from the bundled Help.html file with graceful fallback.
+    - Method `__init__` (Line 326)
+    - Method `_load_content` (Line 343)
+- **Class** `TabularQueryBuilderDialog` (Line 388) — Tabular Query Builder for Responsa syntax composition.
+    - Method `__init__` (Line 395)
+    - Method `_setup_ui` (Line 423) — Build the complete dialog UI.
+    - Method `_initialize_components` (Line 567) — Create the initial 2 components with distance spinner between them.
+    - Method `_create_component` (Line 575) — Create a component card (QFrame with word inputs).
+    - Method `_create_distance_spinner` (Line 675) — Create a distance spinner between components pair_index and pair_index+1.
+    - Method `_update_add_word_visibility` (Line 718) — Show/hide the + button based on how many word slots are visible.
+    - Method `_update_add_component_visibility` (Line 726) — Show/hide the + Component button based on current count.
+    - Method `_show_next_word` (Line 731) — Reveal the next hidden word input in the given component.
+    - Method `_add_component` (Line 742) — Add a new component (up to max 4).
+    - Method `_remove_component` (Line 753) — Remove a component (cannot go below 2).
+    - Method `_on_scope_changed` (Line 801) — Toggle distance spinner/modifier visibility based on scope.
+    - Method `_on_word_focus` (Line 821) — Handle focus on a word input -- update modifier checkboxes.
+    - Method `_update_mod_indicator` (Line 845) — Update the modifier indicator label for a specific word.
+    - Method `_on_modifier_changed` (Line 855) — Save modifier state to the active word's data.
+    - Method `_on_word_text_changed` (Line 876) — Sync QLineEdit text back to component data and update preview.
+    - Method `_update_preview` (Line 888) — Regenerate syntax from current state and update preview label.
+    - Method `_clear_all` (Line 924) — Reset all inputs, modifiers, spinners, and components to initial state.
+    - Method `_apply` (Line 975) — Generate final syntax and accept the dialog.
+    - Method `get_syntax` (Line 980) — Return the generated Responsa syntax string.
+    - Method `get_negated_words` (Line 985) — Return list of words marked for exclusion.
+    - Method `eventFilter` (Line 990) — Catch focus events on word inputs to update modifier checkboxes.
+- **Class** `SettingsDialog` (Line 1001) — Modal settings dialog with General and About tabs.
+    - Method `__init__` (Line 1013)
+    - Method `_on_cancel` (Line 1082) — Restore config snapshot and close.
+    - Method `_build_general_tab` (Line 1088)
+    - Method `_start_vs_download` (Line 1377) — Start downloading the full visual_similarity.db with robustness checks.
+    - Method `_on_vs_download_progress` (Line 1397)
+    - Method `_on_vs_download_complete` (Line 1405)
+    - Method `_on_vs_download_error` (Line 1415)
+    - Method `_build_about_tab` (Line 1423)
+    - Method `_section_label` (Line 1556)
+
+## desktop/ui_widgets.py
+
+- **Class** `ShelfmarkTableWidgetItem` (Line 42) — Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case.
+    - Method `__lt__` (Line 44)
+- **Class** `CheckBoxHeader` (Line 49) — Custom HeaderView that draws a checkbox in the first section.
+    - Method `__init__` (Line 53)
+    - Method `get_checkbox_rect` (Line 66)
+    - Method `paintSection` (Line 78)
+    - Method `mousePressEvent` (Line 105)
+    - Method `setChecked` (Line 152)
+    - Method `_get_icon_rect` (Line 157)
+    - Method `_draw_filter_icon` (Line 173)
+    - Method `_draw_star_icon` (Line 202)
+    - Method `set_filter_active` (Line 247)
+    - Method `set_star_active` (Line 254)
+    - Method `event` (Line 261)
+- **Class** `MatchCentredSnippet` (Line 358) — A one-line snippet cell: a QLabel at its natural width inside a clipping widget, slid so the `*...*` marks (by colour) are centred in the cell's contents rect, never past either end of the text; `anchor_text` picks the mark to centre on; a mark-less snippet shows its start. The Search tab's Snippet cell.
+    - Method `text` (Line 400)
+    - Method `slide` (Line 407)
+    - Method `changeEvent` (Line 414)
+    - Method `resizeEvent` (Line 421)
+    - Method `paintEvent` (Line 426)
+    - Method `_measure` (Line 431)
+    - Method `_place` (Line 462)
+- **Class** `ContextSnippet` (Line 477) — The Composition tab's Context / MS Context cells, built from the marked text (bold dark-red marks, unbalanced-marker rules, tooltip, 5 px gap, wheel slides the text); replaced `HiddenScrollArea` (a QScrollArea centred by character share) on 2026-10-23.
+    - Method `marked_html` (Line 503)
+    - Method `wheelEvent` (Line 516)
+- **Class** `ListsTreeWidget` (Line 363)
+    - Method `__init__` (Line 364)
+    - Method `dropEvent` (Line 374)
+
+## desktop/update_ui.py
+
+- **Class** `UpdateNotificationBar` (Line 38) — A narrow notification bar at the top of the screen.
+    - Method `__init__` (Line 44)
+    - Method `show_update` (Line 82)
+    - Method `on_download` (Line 89)
+    - Method `on_dismiss` (Line 92)
+- **Class** `WhatsNewBar` (Line 97) — A notification bar showing new features after a version update.
+    - Method `__init__` (Line 103)
+    - Method `show_whats_new` (Line 137)
+    - Method `on_learn_more` (Line 141)
+    - Method `on_dismiss` (Line 144)
+- **Class** `WhatsNewDialog` (Line 149) — Dialog showing detailed What's New information.
+    - Method `__init__` (Line 152)
+- **Class** `UpdateProgressDialog` (Line 218) — Shows download progress and handles update installation.
+    - Method `__init__` (Line 221)
+    - Method `start_download` (Line 280) — Start the download process.
+    - Method `on_progress` (Line 308) — Update progress bar with download progress.
+    - Method `on_download_finished` (Line 326) — Handle download completion.
+    - Method `execute_update` (Line 352) — Run the installer in silent mode (Windows only).
+    - Method `on_cancel` (Line 417) — Handle cancel button click.
+    - Method `closeEvent` (Line 432) — Handle dialog close event.
+
+## desktop/single_instance.py
+
+- **Function** `restarted_from` (Line 49) — The pid named by ``--restarted-from=<pid>`` in argv, or None.
+- **Function** `restart_argv` (Line 61) — The command line that relaunches this app, naming ``pid`` as the copy to wait for.
+- **Function** `acquire_instance_lock` (Line 67) — Return (lock, other_copy_running).
+- **Function** `relaunch_looks_possible` (Line 98) — True when what the relaunch would run is there: the interpreter (or the
+- **Function** `request_restart` (Line 122) — Relaunch the app once its event loop has ended (see relaunch_if_requested).
+- **Function** `relaunch_if_requested` (Line 128) — Start the new copy if request_restart() was called. Returns True if one was started.
+
+## desktop/qthread_exit.py
+
+- **Function** `running_qthreads` (Line 48) — Every QThread created from Python whose thread is still running, except this one.
+- **Function** `settle_running_threads` (Line 69) — Stop what stops within ``wait_ms``; keep the rest from being destroyed at exit.
+
+## desktop/qt_translations.py
+
+- **Function** `install_qt_translations` (Line 41) — Install Qt's Hebrew translation on `app` when `lang` is 'he' (the Yes / No / OK / Cancel Qt draws itself).
+
+## Phase 145 — Passage-Matching Parallels Search (web beta)
+
+`shared/passage_parallels.py` and `web/passage_assets.py`, added for the
+`method='passage'` option on `POST /api/parallels` (see CLAUDE.md's Key
+Files list and docs/SEARCH_API.md for the feature). `web/pages/parallels.py`
+gained a method selector beside the pre-existing Lab Mode toggle
+(`passage_mode` checkbox, `on_passage_mode_change`) but is not separately
+indexed here (too large; grep it directly, per this file's existing
+convention for `web/pages/search.py` / `web/pages/browse.py`).
+
+## shared/passage_witness_source.py
+
+Turning a WITNESS into searchable text -- pure, dependency-free, and shared by the web page, the public API and the desktop.
+
+Five rules, each of which was a bug on the web first: `witness_sys_id` (the one sys_id pattern, 99- and 97-prefixed), `restore_witness_entries` (a manuscript witness with a sys_id survives a reload WITHOUT its text; anything else textless is dropped), `witnesses_needing_text` (which restored witnesses can be re-fetched -- missing this made them search the empty string and report an honest-looking `0 matches`), `witness_headers_for` and `collect_witness_texts` (a promoted manuscript's text comes from the pages that MATCHED, via their own `raw_header`s -- resolving through `get_full_manuscript` goes via `Config.BROWSE_MAP` and made every promotion fail).
+
+Moved out of `web/pages/parallels.py` when the desktop needed the same rules; the page re-exports them, so its own callers are unchanged.
+
+## desktop/comp_view_filter.py
+
+ONE eligibility rule for the Composition result tree and the Manuscript Viewer (user letter, Tishrei 5787). Qt-free: the host passes a `FilterHost` of lookups, so the rule is tested directly.
+
+`eligible_pages(ms_item, state, host)` is the contract: manuscript-level filters (library, shelfmark, title, printed column, the 3-state printed filter, LOCAL only/hidden and opt-outs, domain exclusions) keep or drop a manuscript with all its pages; the Context / MS Context filters keep only the matching pages. `viewer_pages(groups, state, host)` walks the ordered `ViewGroup`s that `GenizahGUI.display_comp_results` records as `_comp_view_groups` -- data, not widgets, so collapsed groups, unexpanded lazy groups and rows a batched load has not drawn are all included. `filter_reason_ids` gives stable reason ids (raw `filter_reason` values kept, e.g. `duplicate_photography`).
+
+Host side in `genizah_app.py`: `_comp_ms_display` (the single display resolver both row builders use), `_comp_filter_state` (freezes the filters and settles the LOCAL no-op rule and chip), `_apply_comp_tree_filters` (the one pass; `_apply_comp_domain_exclusions` delegates to it), `on_comp_item_double_clicked` (builds the viewer list and its category tags), `_comp_filter_summary` (the viewer's frozen filter strip). `ResultDialog.set_results_filter_summary` / `_update_results_context` show the category, a Filters button (the summary is its tooltip) and "Back to results" in the navigation row, only for entries that carry a `category`.
+
+## desktop/widgets/overflow_row.py
+
+One-line rows that never force a window wider than its screen (2026-09-24, low-resolution / 300% zoom). `OverflowRow.add(widget, priority, stretch, short_text=AUTO)`: icons before menus (owner) -- when tight, buttons whose label starts or ends with an icon shrink to it one at a time, least important first (`icon_part`; the label becomes the tooltip, and a label the button's own code changes meanwhile is the one restored); only then does what still does not fit move into a "More ▾" menu, highest priority number first; `PINNED` (-1) widgets always stay, and every widget is squeezed toward its own minimum before anything is cut. Overflow never calls `setVisible` on a widget -- buttons in this app show and hide themselves as metadata arrives -- it parks the widget outside the row, so `isHidden()` keeps meaning "not applicable". `populate_menu_from_buttons` mirrors text / enabled / checked and clicks the real button. `add(..., group="Sources")`: a member that does not fit goes into its group's own menu button, shown where the group sits, instead of More -- the viewer's Bib FJMS, Bib Ktiv, Catalog and Measurements are separate buttons while there is room (Info is never grouped); `overflowed_in(group)` lists a menu's members. `MenuGroupButton` (a button whose members always live in its menu) remains for callers that want that. `explicitly_hidden(w)` distinguishes "hidden by code" from "never shown" (and from Qt's hide-on-reparent). `set_width_cap` limits the row's size hint, for a container that never squeezes its child (a QTabWidget corner widget). Used by the Manuscript Viewer (navigation, actions, community, compact rows), the image viewer's toolbar (`ManuscriptViewerWidget.image_toolbar`) and the export rows.
+
+## desktop/widgets/side_nav.py
+
+The main window's two menu layouts (owner, 2026-10-24: first "move the menu to one of the app sides, remove the V tick boxes, and add also the puzzle, joins lab and settings to the menu", then "Keep the tabs. Offer an option to change them to the side menu"). Settings > Menu picks `Tabs at the top` (the default: the tab bar and its corner `OverflowRow`) or `Side menu` (this column on the start side -- right in Hebrew, left in English); `GenizahGUI.set_nav_layout` applies it at once and saves `nav_layout` in config.pkl, `_apply_nav_layout` shows one and hides the other (both are built), and Cancel in Settings puts the restored one back. The Settings dialog now retakes its Cancel snapshot each time it opens (`SettingsDialog.refresh_config_snapshot`): it is built once at startup, and the startup snapshot made Cancel undo settings changed since outside the dialog.
+
+`SideNav.add_section(glyph, label, shortcut)` (exclusive, checkable; `set_current` follows `tabs.currentChanged`), `add_button` (Puzzle, Joins Lab; `footer=True` for Settings, the account, the language switch and the website), `add_separator`, `add_widget` (the version). The current section is highlighted with an accent bar on the start edge; nothing is ever ticked. Expanded shows icon + label; compact, icons with the label as tooltip; ☰ toggles and `toggled(bool)` is saved as `side_nav_expanded`. `fit_to(window_width)` (from `GenizahGUI.resizeEvent`) keeps it compact while the expanded column would take more than `EXPANDED_WIDTH_SHARE` (20%) of the window, and ☰ then opens the entries as a menu. `build_menu(menu, omit=, extras=)` is the one menu builder: icons, labels, the shortcut in QMenu's tab-separated column, the current section bold, no checkable item; the tab layout's ☰ menu (`GenizahGUI._fill_sections_menu`) is built from it, omitting the account, language and website (they are beside it in the tab row) and adding "Move the menu to the side"; `menu_extras` ends the narrow-window menu and the right-click menu, `context_extras` the right-click menu only ("Move the menu to tabs", which the column also shows as its own footer entry, `nav_to_tabs_btn`; owner 2026-10-25). The footer also has A+ / A- (`nav_text_larger_btn` / `nav_text_smaller_btn`, `_step_text_size`), as the tab row has `corner_text_larger_btn` / `corner_text_smaller_btn`. `LayoutProofShortcuts` (installed on the application on Windows): Ctrl+G, Ctrl+F and Ctrl+, also by the physical key (`nativeVirtualKey`), for a keyboard layout whose letter keys type another script; a press a QShortcut took never reaches it. `popup_point(anchor, menu, beside=)` places a menu below a top-row button or beside a side-menu entry, mirrored for right-to-left (QMenu does not mirror an explicit position). Widths are measured from a hidden probe button; a long label is elided at `MAX_EXPANDED`; the entries scroll inside the column. `NavButton.setText`/`text` act on the LABEL and keep the icon. `LinkedButton` (the tab row's `corner_login_btn` and `lang_btn`) copies its text and enabled state to its side-menu twin (`nav_login_btn`, `nav_lang_btn`), so the code that relabels the login button need not know which layout is showing. Ctrl+1..Ctrl+7 (`GenizahGUI._section_shortcuts`) open the sections in either layout; each tab's tooltip names its key. Logged in, the login button reads "<name> ▾" and opens the account menu (`_show_account_menu` / `_fill_account_menu`: Sync lists now, mirroring the Lists tab's button, then Logout) instead of logging out on one click. Tests: `tests/test_side_nav.py`.
+
+## Text size (genizah_app.py, desktop/result_dialog.py)
+
+Owner, 2026-10-24: "option to change the size of the texts in search etc windows". Two sizes. **The result lists** (`results_table`, `comp_tree`, `catalog_results_table`, `lists_items_table`; `GenizahGUI._results_text_widgets`): one level, `RESULTS_TEXT_STEPS` = +0/+2/+4/+6 pt over the window's font (Normal / Large / Larger / Largest), saved as `results_text_level`; Settings > Text size in result lists (`combo_results_text`) or Ctrl+= (also Ctrl++) / Ctrl+- / Ctrl+0 (`_step_text_size`); `set_results_text_level` applies, saves and syncs the combo, and Cancel in Settings puts the restored level back. `_apply_results_text_level` pins each view's headers to the window's font first (the size set explicitly: an unmodified copy of an inherited font still counts as inherited), sets table rows to `max(the style's height, line height + 10)`, and gives the font to the viewport and to every snippet cell (`_snippet_cells`): under the Composition tree's style sheet Qt passes a font on to neither, and `MatchCentredSnippet` now hands its font to its label on every FontChange for the same reason (`ContextSnippet` re-fixes its one-line height). **The transcription** (Browse's `browse_text`, the Manuscript Viewer's panes): `result_dialog.reading_text_size()`, one shared size saved under `viewer_text_pt` with a `changed` signal, so an open viewer and the Browse tab follow each other; A- / A+ beside Find in both (`btn_b_text_smaller` / `btn_b_text_larger` on Browse), and on the Browse tab Ctrl+= / Ctrl+- / Ctrl+0 size it instead of the lists. Tests: `tests/test_text_size.py`.
+
+## shared/quick_open.py, desktop/go_to_dialog.py, desktop/shortcuts_dialog.py
+
+The desktop Go to box (Ctrl+G or Ctrl+O, owner 2026-10-24 / 2026-10-30; also "Go to..." in the ☰ menu and the side menu). `quick_open_target(text, has_shelfmark=None)` decides what a typed line is, by the website's go-to rule (`shared/search_box_input.py::go_to_kind`, shared with `web/home_query.py` since 2026-11-04) plus two desktop cases: `('sys_id', id)` for either namespace (`ANY_SYS_ID_RE` -- a `97` My Library id is a real document on the desktop), `('fl', 'FL<digits>')` for `FL` and digits, `('shelfmark', text)` for a real shelfmark (the recogniser, or the catalogue check `GenizahGUI._catalogue_has_shelfmark` -> `MetadataManager.has_shelfmark`, whose index `_prewarm_shelfmark_search` builds in a background thread at start), else `('search', text)` -- English words, `Psalm 23`, wrong-layout Hebrew (`dcuk`), a bare number. **"Did you mean <Hebrew>?"** on the Search tab (2026-11-04, as the website's /search): after an Exact/Variants/Fuzzy search over the Genizah index that found nothing (`start_search` keeps `_layout_offer`), `_offer_layout_suggestion` asks `SearchEngine.words_occur` in `_LayoutSuggestionWorker` (a QThread) for `shared/keyboard_layout.layout_suggestion`'s Hebrew; `_on_layout_suggestion_checked` shows `layout_suggestion_label` (a rich-text link inside the results box, where the rows would be: `_install_layout_suggestion` puts it in a layout of `results_table.viewport()`, owner 2026-11-04) unless another run started or New reset it (`_layout_cleared_run`); the click (`_take_layout_suggestion`) runs the Hebrew in the same mode. Tests: `tests/test_desktop_layout_suggestion.py`. `GoToDialog` asks for the line, with a completer of its own on the window's `shelf_completer` model and settings (`_own_completer`: a QCompleter serves one widget at a time, and the borrowed one was left attached to nothing, so typing in Browse's shelfmark field crashed); under it, the last ten manuscripts opened (owner, 2026-10-25; `GenizahGUI._go_to_recent_items`: Recently Viewed, one row per manuscript), narrowed by typing, Down/Up from the box to pick one, and `choice()` is `('recent', item_id)` when one is highlighted -- opened by `_open_recent_item` through `_browse_open_list_entry`, the path Browse's own Recently Viewed list takes. The hint no longer names FL numbers (owner: nobody types one); the routing still takes them. `GenizahGUI.go_to` acts on it: Browse with only that one field filled (`browse_load` reads all three, so a leftover number would compete), or the Search tab with the words, starting the search unless one is running. With it, F1 (`open_help_for_current_section`: Help at the section in front, `_SECTION_HELP`), Ctrl+, (Settings) and Ctrl+F (`_focus_section_field`, `_SECTION_FIND_FIELD`); Help is also an entry of the menus. Displayed keys go through `side_nav.ltr()`: in the Hebrew UI an unmarked "Ctrl+," shows as ",Ctrl+". In the tab layout the ☰ (`corner_menu_holder`) is the QTabWidget's TopLeftCorner widget -- the start edge, mirrored in Hebrew -- no longer the first item of the corner row. **The cursor in the search box** (owner, 2026-10-30): at launch (`_focus_on_launch`, right after `init_ui`, so typing works while the index loads; after the restore `_refocus_after_restore` selects the restored words unless the user typed or pasted there -- `_typed_since_launch`, from `textEdited`, since the prefix handling's `setText` clears `isModified()` -- opened another section -- the section in front as the restore began, so the session's own saved section still gets its box -- or moved the cursor meanwhile), on Ctrl+1 .. Ctrl+7 (`_open_section`; a click on a tab leaves the cursor where it was, so Space still pages the results) and on Ctrl+E as well as Ctrl+F; on Browse by Shelfmark with no manuscript open (`current_browse_sid` None) the field is the shelfmark box, not Find; in PGP Tags mode it is `tag_search_combo`. **The cursor in the results** when a search with results ends (`on_search_finished` and `_on_tag_search_results` -> `_focus_results_after_search`, not on a session restore): only on the Search tab, only with a shown row (`_first_shown_result_row`; `_fill_first_results_page` looks again), and only while the cursor is where the search was asked for (`_focus_at_search_start`, kept by `start_search` and `_execute_tag_search`, and by `_restore_regular_search_from_state` for a history snapshot it shows; a search that waits for the filter lookup keeps its place apart in `_deferred_search_focus` -- set by `start_search`'s deferral and by a history entry's queued re-run -- which `_run_deferred_after_filter` hands to the search it starts, so a search still running keeps its own; read through `_window_focus`, None for the tests' stand-in windows); the current cell is set to the first shown row and a column other than `COL_CHECKBOX` (Qt would make the check box current, where Space ticks); `_all_terms_after_completion` gives the box back when the filter hides every row. **The keys of the result lists** (owner, 2026-10-30; `eventFilter` -> `_results_table_key`, `_lists_table_key`, `_comp_tree_key`, `_comp_text_key`): Space ticks the Search result (Ctrl/Shift+Space nothing; Space no longer pages), Enter opens (`_enter_action`), Ctrl+Enter or Ctrl+B opens in Browse (`_open_action`), Ctrl+A ticks all or none; Ctrl+Enter in Composition's text runs it; Esc on the Search tab stops a search (`_search_stop_key`). **Manuscript Viewer keys** (`ResultDialog._install_shortcuts`): Ctrl+arrow result, Ctrl+Shift+arrow manuscript (mirrored in Hebrew, `arrow_keys`), Ctrl+PgDown/PgUp image, Ctrl+B, Ctrl+F, text size; Browse by Shelfmark the same image and manuscript keys (`_browse_keys`). Key names in tooltips and the card through `key_label` (Hebrew names for arrows and Space, read right to left). **The keyboard shortcuts card** (`ShortcutsDialog`, Ctrl+/, "Keyboard shortcuts" in both menus and the ⌨ button beside A− in the tab layout's corner row, `open_shortcuts`): `SHORTCUTS` lists every key, checked both ways against the keys `init_ui` binds. Ctrl+O, Ctrl+E and Ctrl+/ also answer to the physical key (`LayoutProofShortcuts`; `/` is VK 0xBF). Tests: `tests/test_quick_open.py`.
+
+## Saved searches, window size, Composition tooltips (genizah_app.py)
+
+Owner, 2026-10-25. **Saved searches:** each row of the Search and Composition Search history menus (`_fill_history_menu`, `_add_history_menu_item`) has a ☆ (`history_star`; the row's widgets are found by object name, `history_label` / `history_star` / `history_delete`, for the hover highlight). `_set_history_saved` -> `shared/session_persistence.set_history_pinned(search_type, index, pinned)` sets `pinned` on the entry in `search_history.json`; saved entries are listed first under "Saved searches", `add_history_entry`'s limit counts only the unsaved ones, and `clear_history(..., keep_pinned=True)` (the menu's Clear) keeps them. Rows keep their index in the stored newest-first list, which is what star and delete act on. **Window size:** `save_window_geometry` (closeEvent, once the close goes ahead) keeps `saveGeometry()` as base64 under `main_window_geometry` in config.pkl; at start `restore_window_geometry()` puts it back (Qt moves an off-screen window onto a screen), else the window opens maximized as before. **Composition tooltips** in plain words (what each setting does and which way to turn it); the recursive button's follows its label (`_recursive_tip`). Tests: `tests/test_saved_searches.py`.
+
+## desktop/startup_tips.py
+
+One tip at each start (owner, 2026-10-25), in a strip under the notice bars (`TipStrip`: Show me, Next tip, Don't show tips, x). The 55 tips are the owner's (English in `TIPS`, Hebrew as each text's TRANSLATIONS entry; `**bold**` = a name on screen, `tip_html` renders it with the language's direction mark), in the owner's order: the strongest five first. `next_tip(seen, used)`: the first tip not shown and whose feature is not in use. Kept in config.pkl: `tips_seen`, `features_used` (`mark_used`, written once per feature), `tips_starts` (the first start shows none), `tips_closed_in_row` (five closes turn the tips off), `tips_off` (the strip's button; Settings > *Show a tip when the program starts*). The window: `GenizahGUI._maybe_show_startup_tip` (1.5 s after startup; not beside What's New, the telemetry re-ask or the update bar), `_show_next_tip`, `_tip_show_me` -> `_run_tip_action` (opens the section and rings the control with `_flash_widget`, an overlay frame), `_tip_invitation` (a tip that needs the letter-level index or an account: its button builds the index, `_maybe_offer_passage_build(explicit=True)`, or opens the login). Features in use: `_TIP_WIRES` / `_wire_tip_signals` (one widget's signal), `startup_tips.mark_used(...)` at the other call sites, and `_tip_derived_features` (search history, lists, My Library, settings). Tests: `tests/test_startup_tips.py`.
+
+## desktop/widgets/flow_layout.py
+
+`FlowLayout` / `FlowWidget`: a wrapping, right-to-left-aware layout with height-for-width; hidden widgets take no space. Used for the Search tab's second row (`search_row2`), the Composition title buttons (`comp_title_actions`), options row (`comp_options_row`) and letter-level options (`comp_passage_row`), and the viewer's info row (`info_flow`).
+
+## desktop/widgets/filter_chip.py
+
+`make_filter_chip(text, bg_color, on_click)`: a removable chip ("text  ×", dark-mode aware), clicking it removes that filter. Shared by the search's filter dialog (`dialogs_filter._make_chip`) and the Joins Lab's row of active filters (`JoinCandidatePane._refresh_filter_chips`, in a `FlowLayout` under the results toolbar: one chip per filter of the Filter dialog, "Clear all" from two on, and the count on the Filter button). The Joins Lab's Library and Domain choices are plain state (`facet_chosen` / `facet_mode`); its Filter dialog lists them as checklists (Domain the FJMS tree, `_fill_checklist`), each with Select All / Select None, counting live what the dialog's other choices keep (`_facet_rows`). Material and size are Manuscript features (`self._criteria`, the dialog's "Manuscript features…" button opens `CriteriaDialog(within=...)`; the anchor shortcuts fill them in), matched per manuscript by `CriteriaMatchWorker` (`_applied_criteria_ids`, `_criteria_ids_for`, answers kept in `_criteria_answers`), saved in the session (`_restored_criteria`). Tests: `tests/test_join_workbench_library_domain_qt.py`, `tests/test_join_workbench_criteria_qt.py`.
+
+## shared/web_links.py
+
+`web_browse_url(sys_id, page, volume_ie)`: the genizahsearch.com address of the page on screen, for the desktop's "Open on the website" / "Copy link" buttons (Manuscript Viewer `btn_rd_open_web` / `btn_rd_copy_web`; Browse tab `btn_b_open_web` / `btn_b_copy_web`, enabled by `_sync_browse_cite_button`). The website's own locator (`/browse?sys_id=&page=&volume_ie=`, as `web/pages/browse.py` builds it); `None` for a My Library (`97`) document, `sys_id` only for a synthetic metadata-only record. `page` resolves through the same `get_browse_page(p_num=...)` on both apps.
+
+## web/joins_lab_link.py
+
+The Joins Lab screen as a link (owner, 2026-10-19). The anchor stays in the readable `sys_id` /
+`page` / `fl_id` / `volume_ie` parameters; the rest rides in one `state` parameter (compact JSON,
+zlib-compressed, base64url, `v: 1`).
+
+What `state` carries:
+- `b`: the anchor-side builder;
+- `g`: the global options;
+- `o`: the other side;
+- `vs`, `f`, `view`, and `gp` (the 0-based results page);
+- `cmp`: the Compare pair, `[sys_id, page]`;
+- `m`: the sender's marks, only on request, capped at 300.
+
+Functions:
+- `encode_share_state` / `decode_share_state`. Decode never raises. It caps the token at 12,000
+  characters and the decompressed size at 200 KB, drops unknown keys, and coerces or drops every
+  value. Builder rows go through `joins_lab_storage._cap_rows`.
+- `clean_share_state`.
+- `build_share_url`.
+- `share_inputs_from_full_state`: the stored session in link shape, so one `_apply_inputs` serves
+  both.
+- `same_inputs`.
+
+In `web/pages/joins_lab.py`:
+- `_share_state` / `_share_url`;
+- `_sync_address_bar`: `history.replaceState`, marks left out;
+- `_copy_share_link`, through `web/clipboard.py`;
+- `_apply_inputs`;
+- `_restore_from_snapshot`;
+- `_open_from_link`: reuses this tab's snapshot when the stored inputs equal the link's;
+- `_own_marks`: what is persisted; a link's unchanged marks are not.
+
+The route is `web/main.py::joins_lab_page_route(state=...)`. The Compare header's
+`on_copy_link` lives in `web/components/compare_modal.py`.
+
+## web/static/js/joins_lab_anchor_strip.js
+
+The Joins Lab on a phone (2026-10-23). Under 1024px the anchor pane stacks above the work
+column; once it has scrolled off, `anchor_strip` in `web/pages/joins_lab.py` (class
+`joins-lab-anchor-strip`: thumbnail, shelfmark, a tap scrolls back up) shows under the header.
+This script sets `is-visible` from an IntersectionObserver on the pane, copies the pane's image
+into the thumbnail, and sets `under-hidden-header` while the header's reveal has hidden it; the
+rules are in `web/static/common.css` ("Joins Lab anchor strip"). The Compare window's phone
+layout is CSS over the `compare-pane-*` hooks in `web/components/compare_modal.py` ("Compare on
+a phone"): the two images alone, each head one row, with the header's "Show text" button
+toggling `compare-text-shown` on the panes row. Both are pinned in
+`tests/test_phone_layout_rules.py`.
+
+## shared/fragment_details.py
+
+What the Joins Lab Compare window shows about a fragment besides its images, one rule for both apps:
+- `info_line(library, domains, dating, width_cm, height_cm, material)`: library · domain(s) · date ·
+  size · material, skipping what is unknown.
+- `domain_labels(domains, hebrew=)`: Hebrew names in the Hebrew UI, English where a domain has none.
+- `dims_text` and `ktiv_url`: `ktiv_url` is None for synthetic and My Library ids.
+- `fetch_fragment_details(sys_id, page, meta_mgr=)`: library code and title (libraries.csv through
+  `meta_mgr.csv_bank`), FJMS domains and copy date, and links in a fixed order: Ktiv, the library's
+  viewer (NLI crossref `get_library_viewer_url`, else the Oxford part's `direct_link`), then PGP
+  (`get_document_for_fragment`). It uses local reads only and never raises.
+
+Consumers:
+- Web: `web/components/compare_modal.py` `_render_pane_details`, fetched through the
+  `details_fetcher` that `web/pages/joins_lab.py::_details_fetcher_sync` passes.
+- Desktop: `desktop/join_workbench.py` `CompareDialog._render_pane_info`, with
+  `_PaneDetailsWorker` off the UI thread.
+
+## desktop/column_chooser.py
+
+`ColumnChooser`: right-click a results header to show or hide columns; the choice is saved in the app config (`hidden_result_columns`, `hidden_comp_columns`). Every column shows until the user hides one (`default_hidden` exists but no caller uses it). `ColumnFitter` keeps every shown column inside the view's width (no sideways scrolling): the reading columns (Search: Snippet; Composition: Context + MS Context) take what the others leave, and when even their minimum does not fit the other columns shrink toward a floor. All columns stay Interactive -- not QHeaderView Stretch, whose neighbour drags resize the stretch column instead. A column widened by hand keeps its width; a reading column resized by hand pauses fitting until the header menu's "Fit columns to window". `CheckBoxHeader._on_resize_grip` (desktop/ui_widgets.py) lets a press on a resize grip reach Qt even on the checkbox and non-sortable columns, which could not be resized from their own edge before. Columns whose visibility the app derives from the data (Src, Witnesses) are not offered.
+
+## Composition Search conditions (docs/plans/COMPOSITION_CONDITIONS_PLAN.md)
+
+Extra texts under the Composition main text, each "must appear" / "must not appear" on the same image, an adjacent image (P+-1 in the same sys_id and IE) or the same manuscript; letter-level only.
+
+- `shared/compound_query.py` (pure): `Condition` (strict `from_dict`; `version_names` -- one name per version, parallel to `versions`, owner 2026-10-15 for `QuotingTextsDialog`; `to_dict` omits the key when empty so an old saved condition and its fingerprint stay byte-identical, `from_dict` requires its length to match `versions` when present), `PageKey` / `parse_page_key` (corpus, LOCAL `..._F####`, V0.7 paths), `validate` (4 conditions, 10 versions, 25 searches, 10,000 letters, the length floor), `search_scope`, `VersionSearch` / `cut_reason`, `judge` (the table in the module docstring; dropped > removed > unresolved > main), `PageOutcome` (strict restore), `route` (caps Main and Filtered AFTER judging, never Removed / Not fully checked), `fingerprint`. "Own text" (owner, 2026-10-14, section 12): `OWN_TEXT_MIN` (40) / `EDGE_ALLOWANCE` (12), `own_text_runs` (record id -> longest contiguous uncovered run from {record: windows} maps, never summing islands), `must_not_version_search` (one must_not version's `ConditionSearch` plus its protection search(es), plus `seed_windows` -> the `VersionSearch` to judge; protection is the UNION of `seed_windows` and the protection searches' own `hit_windows`; ANY protection cut removes nothing), `protection_scopes` (one `(pages, sys_ids)` per DISTINCT must_not `where`, shared scope planning for the worker and the gate), `seed_protection_windows` ({record: windows} from `page_windows` on main-text result rows).
+- `shared/passage_pages.py`: `PageIndex` -- (sys_id, IE, P) -> record and sys_id -> records, built once per index build (`build_identity`: manifest plus the record table, because reordered builds can share a manifest) and cached; `mask_for` refuses another build.
+- `shared/passage_search.py::search_passage(record_mask=)`: exhaustive over a mask -- every gram admitted, postings filtered before clustering. `PassageHit.windows`: the accepted windows' page-side MATCHED-CORE (r0, r1) bounds UNMERGED -- `(min_r, max_r + K)`, BEFORE the verify-margin extension -- alongside the (coarser, merged, margin-extended) `spans`; own_text_runs needs letters actually matched, not the margin-padded kind.
+- `shared/passage_parallels.py::PassageSearcher.search_condition` (`CONDITION_VERIFY_CAP` 500,000, `CONDITION_CANDIDATE_CAP` 2,000,000; mask built from keys inside the call; verified hits unrendered, optional `render_limit` rows; reports a stop) -> `ConditionSearch` (now also `hit_windows`: record id -> `PassageHit.windows`, for the own-text rule). `search_composition_logic`'s own rows (not `search_condition`'s) also carry `page_windows` (= `hit.windows`), for the own-text rule's protection union.
+- `desktop/passage_lifecycle.py`: `PassageSearchAdapter.search_condition` and `_call_in_lease` (the one lease + exception boundary); `excluded_page_counts()` (unsearchable pages per manuscript, from `excluded_records.tsv`). Also used, unchanged, to search PROTECTION (the main text as typed, over a must_not condition's scope) for the own-text rule.
+- `desktop/gui_threads.py::CompoundCompositionThread`: every main-text witness, then ONE protection search per distinct scope among the must_not conditions (`cq.protection_scopes`; own progress step, same Stop/generation handling as a condition version), then every condition version -- a must_not version's `VersionSearch` comes from `cq.must_not_version_search` (protection = that search's windows UNION the main search's own `page_windows`, via `cq.seed_protection_windows`), a must version's from `.as_version_search()` unchanged; Stop inside steps; generation checked after every step; evidence rows tagged per condition, but for a must_not condition only for its DECISIVE records (`VersionSearch.hit_record_ids`) -- a kept page never shows a non-decisive quoting match as evidence.
+- `desktop/compound_ui.py`: `ConditionsStrip` (under the main text; no "Add" button -- hidden when there are no conditions; `add_condition(requirement)`, `can_add`, `add_disabled_reason`, `open_quoting_texts()` -- owner 2026-10-15, the "Quoting texts..." menu item's own entry point: edits the first existing must_not condition if there is one, else adds one), `_dialog_for` (dispatches `ConditionDialog` for `REQ_MUST`, `QuotingTextsDialog` for `REQ_MUST_NOT` -- a LAZY import, so this module stays free of `desktop/quoting_texts_dialog.py`'s network code; used by both `add_condition` and `_edit`, so a row's edit button always opens the dialog matching ITS OWN requirement, never a fixed one), `ConditionDialog` (requirement FIXED at construction -- `requirement=` or the edited `condition`'s own; no requirement combo; must_not defaults to `WHERE_SAME_IMAGE` since 2026-10-14's own-text rule; still constructible with `REQ_MUST_NOT` for old callers and `scripts/verify_compound_conditions.py`, but nothing in the UI routes to it any more), `condition_summary`.
+- `desktop/quoting_texts_dialog.py` (owner, 2026-10-15): `QuotingTextsDialog` -- the "Quoting texts..." dialog, built to LOOK LIKE `desktop/filter_text_dialog.py::FilterTextDialog` rather than the generic `ConditionDialog`: a list of named texts (Sefaria ref, custom name or file name; no on/off checkboxes -- one search, not several filter sources), "Load from Sefaria..." (reuses `AllSourcesDialog` to pick a book, then `PassagePromptDialog` for the passage within it -- an empty or whole-book answer is refused before any fetch, since Sefaria returns the whole book otherwise), "Add Custom Text" / "Load from files..." (reused unchanged), one place for every text. `condition()` returns one `Condition(REQ_MUST_NOT, ..., version_names=...)`. The fetch thread (`SefariaFetchThread`, reused) is cancelled and waited for on `accept`/`reject`/`closeEvent` alike, so it never outlives the dialog.
+- `genizah_app.py`: one "Filter texts" button/menu on the Composition tab (owner, 2026-10-14, replacing the old "Filter Text" button and the strip's own "+ Add condition"): `_build_comp_filter_menu` (three items -- "Quoted texts..." opens `open_filter_dialog` unchanged; "Quoting texts..." calls `ConditionsStrip.open_quoting_texts()` since 2026-10-15; "Add condition..." calls `_comp_add_condition(REQ_MUST)`), `_refresh_comp_filter_menu` (on `aboutToShow`: item 1's active-source count, items 2/3 enabled state and tooltip from `ConditionsStrip.add_disabled_reason`). `_comp_compound_gate` (after the dispatch-time demotion; refuses any other method), `_attach_compound_evidence`, `_add_compound_groups` ("Removed by a condition", "Not fully checked"), `_compound_viewer_fields` / `_compound_page_note` (the viewer's per-image highlights and evidence strip; `ResultDialog._pattern_for_current_page`, `_refresh_compound_strip`), `_compound_export_buckets` / `_split_by_compound_category` (exports file rows by stored outcome), `_restore_comp_conditions`, `_snapshot_has_compound_rows` (judged rows are never restored).
+- Gates: `tests/test_compound_query.py`, `test_compound_worker.py`, `test_compound_persistence.py`, `test_compound_ui_gui.py` / `test_quoting_texts_dialog_gui.py` (GUI lane), compound cases in `test_comp_flat_markers_and_xlsx_columns.py`; real index: `scripts/verify_compound_conditions.py [--self-test] [--cases FILE]` (own-text control case: the main text given as its own must_not condition removes nothing).
+
+## desktop/passage_witnesses.py
+
+The desktop's multi-witness state machine -- identity, duplication, staleness, capacity, fusion and persistence. Qt-free by construction, so every rule is reachable from a test without a QApplication.
+
+`fuse_and_cap` applies the 200-group cap ONCE to the fused list, ordered by `fusion_score`; each witness is searched uncapped (`get_passage_searcher(..., render_cap=0)`) because capping per witness first fuses already-truncated lists. `fusion_set` builds the set for one fusion from a roster plus row caches, so a later auto-expand round searches only what it just promoted -- `1 + rounds x K` searches rather than quadratic. The cap is a flat 25 at every depth, unlike the web's 25/8/4, because a desktop shares no pool and no timeout.
+
+The worker that drives it is `gui_threads.MultiWitnessCompositionThread`, which loops rather than using the engine's own `witnesses=[...]` fan-out so that Stop has a checkpoint between witnesses.
+
+## shared/passage_fusion.py
+
+Rank fusion for multi-witness passage search. Pure -- no engine, no NiceGUI,
+no I/O -- because it has two callers with different shapes that must not
+drift: `POST /api/parallels` fans N witnesses out inside ONE request and
+fuses at the end, while `web/pages/parallels.py` is a session that searches
+each newly added witness alone and re-fuses against what is already on
+screen. Same maths, one definition. The measurements behind it (and why
+concatenation starves here but not on the chunk engine) are in
+docs/specs/passage-matching-algorithm.md SS10.2b.
+
+- **Function** `witness_id_for` — canonical short id for the Nth witness
+- **Function** `text_digest` — stable short digest of a witness text, for the search fingerprint
+- **Function** `split_pasted` — split a bulk paste on blank lines; returns `(texts, skipped_too_short)`, never a silent drop
+- **Function** `tag_rows` — stamp `witness_id` / `witness_label` / `witness_rank`; THE one place a rank is assigned
+- **Function** `fuse` — one row per record, RRF-scored (k=60); the winning witness supplies every rendered field
+- **Function** `split_ids` — parse a fused row's flat `witness_ids` scalar
+- **Function** `group_stats` — per-manuscript `{witness_count, fusion_score, witness_ids}`; the count is a UNION across the group's rows, never a sum
+- **Function** `sort_key_for` — group ordering under a user-chosen sort
+
+## shared/passage_parallels.py
+
+- **Function** `_derive_uid` (Line 145)
+- **Function** `_extract_sys_id` (Line 150)
+- **Class** `_RegexSysIdParser` (Line 155) — Minimal `UidComponentParser` (shared/parallels_service.py's Protocol)
+    - Method `parse_full_id_components` (Line 166)
+- **Function** `_highlight_span` (Line 170) — Build a `*match*`-marked snippet around normalized-stream span
+- **Class** `PageTextFetcher` (Line 202) — Structural type for the injected text source (SEED-016 #3 style).
+    - Method `get_full_text_by_header` (Line 214)
+- **Class** `PassageSearcher` (Line 219) — A `CompositionSearcher` (shared/parallels_service.py) backed by the
+    - Method `__post_init__` (Line 235)
+    - Method `search_composition_logic` (Line 241) — Same parameter names/order as
+    - Method `_is_source_text_filtered` (Line 357) — True when the query-side text of ANY span matched on `hit` also
+    - Method `_render_highlights` (Line 378) — Fill in `text` / `source_ctx` / `chunk_hits` for ONE row (either a
+
+## web/passage_assets.py
+
+- **Class** `_PassageState` (Line 71)
+- **Function** `load_passage_state` (Line 80) — Open + validate the passage index ONCE at startup.
+- **Function** `passage_available` (Line 116) — The ONE predicate any future passage-matching surface must gate on.
+- **Function** `passage_multi_witness_available` — The ONE predicate for multi-witness passage search (its own flag ANDed with `passage_available()`).
+- **Function** `get_passage_searcher` (Line 127) — A fresh ``PassageSearcher``, or ``None`` when unavailable.
+
+# Discovery and passage-matching core modules (generated 2026-09-18)
+
+Generated with `python scripts/gen_code_index_section.py` for the thirteen `shared/discovery_*.py`
+modules and the four passage core modules (`passage_index`, `passage_search`, `passage_normalize`,
+`passage_policy`) that had no section. Their roles are described in
+[docs/architecture/OVERVIEW.md](architecture/OVERVIEW.md).
+
+## shared/discovery_band_labels.py
+
+- **Function** `_canon_band_key` (Line 73) — Normalize a stored `confidence_band` key to its v2 canonical form.
+- **Function** `band_label` (Line 123) — The EN or HE display label for a stored (evidence_source,
+- **Function** `review_overlay` (Line 155) — The review-status marker for a claim. Returns the
+- **Function** `format_precision_copy` (Line 194) — Render a `band_precision` row's precision as user-facing copy, per
+- **Function** `band_measurement_status` (Line 232) — A machine-readable status enum derived data-driven from a
+- **Function** `is_default_eligible` (Line 272) — Whether a claim shows on the DEFAULT (non-expanded, non-toggled)
+- **Function** `serialize_banded_claim` (Line 324) — Compose the ONE band-bearing presentation object every discovery
+
+## shared/discovery_display_strings.py
+
+- **Function** `_lang_key` (Line 103)
+- **Function** `_pick` (Line 107)
+- **Function** `relation_chip` (Line 174) — The reader-facing chip for a rendered relation -- "Matches this work" /
+- **Function** `relation_tooltip` (Line 192) — The frozen band label, UNMODIFIED, for use as the relation chip's
+- **Function** `_coverage_percent` (Line 258) — Parts-per-million -> a whole percent, clamped to [0, 100]. `None`
+- **Function** `row_headline` (Line 272) — The match-framing headline for one row.
+- **Function** `coverage_label` (Line 330) — The standalone name of the one permitted figure, for a tooltip, an
+- **Function** `low_coverage_note` (Line 344) — The optional note under a row whose match covers little of the page.
+- **Function** `granularity_subline` (Line 358) — The optional sub-line under a row whose identical-span group
+- **Function** `locus_subline` (Line 368) — The baked scholarly address, with one language-neutral structural cue.
+- **Function** `missing_title` (Line 392) — What a row shows when the work's title could not be resolved. Four of
+- **Function** `not_an_identification_note` (Line 406) — The italic qualifier the middle disclosure bucket carries. D-13e
+- **Function** `section_header` (Line 451) — One of the four panel/work-page section headers, in match framing.
+- **Function** `this_page_marker` (Line 473) — The reader-aid marker on a manuscript-pane work chip whose pages
+- **Function** `disclosure_toggle` (Line 547) — The label of one disclosure toggle.
+- **Function** `divergence_warning` (Line 565) — The warning ruling F requires beside a divergence control. It records
+- **Function** `divergence_chip` (Line 603) — The neutral marker one catalogue-divergent row carries.
+- **Function** `related_pages_label` (Line 635) — The bare label for the related-pages count.
+- **Function** `related_pages_count_line` (Line 640) — The related-pages count line, with singular agreement in both
+- **Function** `bucket_name` (Line 656) — The bilingual bucket name, straight from
+- **Function** `rule_sentence` (Line 666) — The ONE reader-facing sentence describing the two-bucket rule,
+- **Function** `recall_disclaimer` (Line 673) — The D-12 recall disclaimer, straight from
+- **Function** `novelty_strings` (Line 730) — The four candidacy strings, keyed `toggle` / `badge` / `subline` /
+- **Function** `novelty_unknown_badge` (Line 745) — The muted counterpart of the candidacy badge, for a row whose
+- **Function** `filter_codes` (Line 775) — Every relation filter code, in display order.
+- **Function** `filter_code` (Line 780) — The short code for a stored relation kind. Raises on an unknown kind
+- **Function** `is_filter_code` (Line 793) — Whether `code` is one of the three relation filter codes. A stored
+- **Function** `filter_label` (Line 800) — The reverse direction: a short code -> the label a reader sees for
+- **Function** `matches_filter_codes` (Line 813) — Whether a row of `relation_kind` survives a relation filter holding
+- **Function** `excerpt_strings` (Line 881) — Every excerpt-disclosure string, resolved for one language.
+- **Function** `service_state_message` (Line 920) — The reader-facing message for one envelope status. `ok` returns an
+- **Function** `retry_label` (Line 936) — The retry affordance that accompanies every non-ok service state.
+- **Function** `display_work_title` (Line 972) — The title a READER sees for a work, applying any owner-ruled curated
+
+## shared/discovery_errors.py
+
+- **Class** `DiscoveryUnavailable` (Line 16) — Raised when a ``DiscoveryService`` read cannot complete right now:
+- **Class** `DiscoveryOverload` (Line 24) — Raised specifically when the bounded heavy-query concurrency
+
+## shared/discovery_family.py
+
+- **Function** `base_family` (Line 60) — The A0c-frozen four-way: ja / bible / canonical / other_staged.
+- **Function** `assign_family` (Line 72) — The fam-v1 five-way: the base rule, then the pinned daf overrides.
+
+## shared/discovery_grouping.py
+
+- **Function** `collapse_canonical` (Line 50) — Collapse `rows` that share the same `canonical_work_id` into ONE
+- **Function** `lead_attribution` (Line 91) — Deterministic lead attribution for an identical-span group -- several
+- **Function** `normalize_title` (Line 147) — NFC + strip quote/geresh/gershayim marks + collapse whitespace.
+- **Function** `titles_share_prefix` (Line 163) — True when the two (already-normalized) titles share a >= min_len
+- **Function** `works_related_by_title` (Line 176) — D-13d's ratified separation predicate (136-GATE1-DECISIONS.md § A
+- **Function** `separate_granularity` (Line 219) — For an identical-span group (>=2 works claiming a byte-identical
+
+## shared/discovery_locus.py
+
+- **Class** `LocusAddress` (Line 64) — One parsed address. `sub` is the verse / mishnah / halakhah, if the address has one.
+- **Function** `norm_stream` (Line 78) — The reference corpus's coordinate system: (letter stream, offset map).
+- **Function** `stream_offset_for_raw` (Line 105) — Raw (NFC) character position -> offset in the normalized letter stream.
+- **Function** `heb_numeral` (Line 139) — 1 -> 'א', 15 -> 'טו', 176 -> 'קעו'. For addresses that arrive as integers.
+- **Function** `parse_unit_numeral` (Line 157) — 'קעו' -> 176, and '176' -> 176. None when the label is not a numeral.
+- **Function** `amud_ordinal` (Line 208) — 'א' -> 1 ... 'ד' -> 4; 0 when the label names no column.
+- **Function** `sefaria_daf` (Line 222) — Sefaria's flat Talmud section index -> (daf, amud), amud 1 = ע"א.
+- **Function** `daf_label_he` (Line 246) — (14, 1) -> 'יד ע"א'. `prefix` names a foliation that is not the tractate's.
+- **Function** `units_for_span` (Line 310) — Half-open stream interval ``[start, end)`` -> inclusive ``(lo_ord, hi_ord)``.
+- **Function** `_floor_index` (Line 364) — Index of the last unit starting at or before `offset` (0 when it precedes all).
+- **Function** `split_at_citation_breaks` (Line 376) — Split one unit range wherever the CITATION stops running forwards.
+- **Function** `compress_pieces` (Line 415) — Merge unit intervals into display runs -- BY CITATION ADJACENCY ONLY.
+- **Function** `citation_seq_for_daf` (Line 462) — [(daf, amud)] -> the dense citation positions `compress_pieces` wants.
+- **Function** `citation_runs` (Line 482) — Unit-ordinal ranges -> the runs of CITATION POSITIONS they witness.
+- **Function** `_label_at` (Line 525) — Look a label up by ordinal or by citation position, refusing a miss.
+- **Function** `label_segments` (Line 540) — Split a compound label on `, ` -- but NEVER inside brackets.
+- **Function** `_label_word_key` (Line 626) — A citation word folded for comparison against a title word.
+- **Function** `strip_work_title_prefix` (Line 633) — `labels` with the work's own title removed from the head of each one.
+- **Function** `shorten_range_tail` (Line 750) — The tail of a range, with whatever it already shares with the head removed.
+- **Function** `render_ranges` (Line 797) — Runs -> the displayed citation, e.g. ``ב–יא; טו–לב``.
+- **Function** `render_locus_label` (Line 820) — Render witnessed work-side spans in one work's citation system.
+- **Class** `RefSpanProjectionError` (Line 870) — Fail-closed error reading a match row's paired page/work spans.
+- **Class** `RefAlignment` (Line 874) — ONE dual-side alignment, exactly as the producer paired it.
+- **Function** `parse_ref_span_alignments` (Line 888) — EVERY dual-side alignment a match row carries, in the producer's own order.
+- **Function** `select_primary_alignment` (Line 936) — The ONE alignment a single evidence row carries. This rule is FROZEN.
+- **Function** `merge_witnessed_spans` (Line 958) — Half-open work-side spans -> the same witnessed text, without repetition.
+- **Function** `select_locus_work` (Line 1000) — Pick the ONE coordinate space an identification's address is rendered in.
+
+## shared/discovery_main_pool.py
+
+- **Function** `_field` (Line 126) — Read `name` off `obj`, which may be a plain Mapping (dict) OR the
+- **Class** `Identification` (Line 137) — One hand-built (manuscript x canonical work) identification record.
+- **Function** `main_pool_decision` (Line 186) — Decide whether `identification` belongs in the main pool.
+- **Function** `main_pool_sentence` (Line 289) — The ONE reader-facing sentence describing the two-bucket rule, in EN
+- **Function** `bucket_label` (Line 317) — The bilingual display name of the bucket `in_main_pool` selects --
+
+## shared/discovery_novelty.py
+
+- **Function** `is_candidate_for_new_finds` (Line 231) — The public "Candidates for new finds" predicate (decision E). Raises
+- **Function** `is_hidden_by_default` (Line 241) — Ruling F's divergence-shade predicate: True only for
+- **Function** `divergence_correctness_applicable` (Line 260) — True only for diverges_work/diverges_part -- callers (the build
+- **Function** `novelty_columns_for` (Line 269) — The pure verdict -> column mapping plan 136-12's build script calls,
+- **Function** `provenance_label` (Line 359) — names the source where it is nameable ("recorded in the
+- **Function** `load_alias_groups` (Line 391) — Loads the curated work-id alias-group artifact (a JSON object shaped
+- **Function** `novelty_work_key` (Line 414) — The reviewed, alias-aware identity a novelty check keys on.
+- **Function** `normalize_free_text` (Line 462) — NFC-normalize, strip nikud (``shared.text_normalize.strip_nikud``)
+- **Class** `BatchResponseInvalid` (Line 585) — A batched response could not be safely aligned to the cases sent.
+- **Function** `resolve_batch_model_output` (Line 597) — Maps a raw BATCHED response to per-case stored columns, keyed by the
+- **Function** `build_cache_key` (Line 670) — Builds the novelty LLM gate's cache key deterministically over
+- **Function** `resolve_model_output` (Line 684) — Maps a raw structured model response to the stored
+
+## shared/discovery_panel_model.py
+
+- **Class** `ArbitrationOutcome` (Line 270) — What one (claims status, page-scope state) combination decides.
+- **Class** `PanelContractError` (Line 338) — A refusal this module composed ITSELF, and whose text is therefore safe
+- **Function** `_reduce_to_type` (Line 378) — Re-raise material for an exception this module did not compose.
+- **Function** `_int_or_refuse` (Line 387) — `int(value)`, with the conversion's own error message suppressed.
+- **Function** `_validate_envelope` (Line 408) — Reject anything that is not a four-key envelope.
+- **Class** `PanelServiceBundle` (Line 453) — The model's ONLY input: the five live envelopes, verbatim.
+    - Method `__post_init__` (Line 469)
+    - Method `with_related_rows` (Line 484) — A copy carrying the lazily-fetched related-page rows -- what a
+- **Function** `_is_ok` (Line 495)
+- **Function** `_envelope_total` (Line 499) — The envelope's own total. `total` is artifact content, so the
+- **Function** `_is_ok_zero` (Line 506) — A SUCCESSFUL zero -- the only state the entry control hides on.
+- **Function** `_items` (Line 511)
+- **Function** `_service_state` (Line 515) — The temporary-unavailable copy plus its retry, for a section whose own
+- **Function** `_scope_state` (Line 531) — Which of the four page-scope states the bundle describes.
+- **Function** `_routed_title` (Line 558) — `(display title, title_missing)` for one row.
+- **Function** `_display_work_id` (Line 573)
+- **Function** `_band_rank` (Line 577) — The row's band rank, with an out-of-lattice/absent rank sorting LAST.
+- **Function** `_split_confirmed` (Line 588) — `(confirmed, rest)`, order preserved.
+- **Function** `_in_ratified_order` (Line 602) — `members` in `lead_attribution`'s total order -- the ratified order, over
+- **Function** `_collapse_duplicates` (Line 614) — `grouping.collapse_canonical`, applied only to rows that HAVE a canonical
+- **Function** `_span_key` (Line 652)
+- **Function** `_group_by_span` (Line 659) — Split `rows` into standalone rows and identical-span groups (>=2 rows on
+- **Function** `_generic_group` (Line 677) — One identical-span group of genuinely different works, as it leaves the
+- **Function** `_is_shipped` (Line 717) — D-13g limb 1, read from the row's OWN routing status.
+- **Function** `_is_human_confirmed` (Line 722) — D-13g limb 2, and ONLY the explicit adjudication limb.
+- **Function** `_is_default_surface_eligible` (Line 740) — D-13g's eligibility predicate, EXACTLY: `routing_status == 'shipped'`
+- **Function** `_validate_claim_row` (Line 803) — The D-13g contract on ONE input claim, checked at the model boundary.
+- **Function** `_is_catalogue_divergent` (Line 889) — Whether this claim contradicts a catalogue identification (ruling F).
+- **Function** `_disclosure_level_for` (Line 920) — Which disclosure level one identification row belongs to.
+- **Function** `_anchor_identity` (Line 977) — The four anchor-identity fields the work expansion needs, ALL-OR-NONE.
+- **Function** `_expansion_descriptor` (Line 1021) — The "other manuscripts matching this work" expansion, as a DESCRIPTOR the
+- **Function** `_nested_entry` (Line 1036)
+- **Function** `_identification_row` (Line 1046) — One emitted identification row.
+- **Function** `_compose_rows` (Line 1154) — The pipeline, in the ONE order that is correct.
+- **Function** `_sort_offset` (Line 1249) — One passage offset as a sort key: `(present, magnitude)`.
+- **Function** `_lead_sort_key` (Line 1263) — Deterministic emission order: strongest band first, then the passage's
+- **Function** `related_page_row` (Line 1286) — ONE related-page row as the panel may render it -- and the composite
+- **Function** `_related_pages` (Line 1325)
+- **Function** `_work_chip` (Line 1387)
+- **Function** `_work_chip_sort_key` (Line 1423) — Strongest band first, then the widest page span, then the work id -- a
+- **Function** `_on_this_page_work_ids` (Line 1433) — The work ids claimed on the CURRENT page, for the manuscript pane's
+- **Function** `_manuscript_pane` (Line 1449)
+- **Function** `_manuscript_reports_identifications` (Line 1515) — Whether the WHOLE-MANUSCRIPT read is evidence of anything at all.
+- **Function** `_entry_control` (Line 1536) — Visibility is a FIELD on the model, not a render-time expression.
+- **Class** `PanelModel` (Line 1596) — Everything the renderer needs, and no judgement left for it to make.
+    - Property `related_pages` (Line 1618)
+    - Property `generic_groups` (Line 1624)
+    - Method `_level` (Line 1627)
+    - Method `as_dict` (Line 1633) — The whole emitted model as plain data -- what the honesty sweep
+- **Function** `iter_rows` (Line 1639) — Every emitted identification row, in disclosure-level order.
+- **Function** `build_panel_rows` (Line 1646) — The panel's whole display model, as a pure function of the envelope set.
+- **Function** `_build_panel_rows` (Line 1667)
+
+## shared/discovery_relation_matrix.py
+
+- **Class** `RelationMatrixError` (Line 87) — A parameterization or stored-value problem that must stop a build.
+- **Class** `MatrixParameterization` (Line 92) — The two open parameters of §2, and only those.
+    - Method `__post_init__` (Line 105)
+- **Class** `RelationInputs` (Line 130) — One identification's matrix inputs, all six of them.
+- **Function** `render_relation` (Line 159) — Return the rendered relation for one identification.
+- **Function** `cap_member_relation` (Line 231) — §3.2: what ONE member-grain row may assert, given its identification's
+- **Function** `relation_rank_sql` (Line 302) — A SQL expression ranking ``column``'s rendered relation, strongest = 0.
+- **Function** `relation_from_rank` (Line 327) — The inverse of :func:`relation_rank_sql`. Anything that is not an exact
+- **Function** `work_divergence_ratios` (Line 345) — Step 4a's per-work divergence ratios, from ``(canonical_work_id,
+- **Class** `RegionInputUnavailable` (Line 396) — Raised when step 3 is ACTIVE but no region source is present.
+- **Function** `iter_relation_inputs` (Line 413) — Yield ``(identification_id, RelationInputs)`` for every row of a
+- **Function** `region_bands_by_work` (Line 497) — This asset's region bands, grouped by ``work_id`` and sorted.
+- **Function** `covering_verdict` (Line 539) — The verdict of the band CONTAINING ``[w_start, w_end)``, or ``None``.
+- **Function** `footprint_verdicts` (Line 577) — ``identification_id -> footprint_all_non_discriminative``, the tri-state.
+- **Function** `curated_quoter_work_ids` (Line 614) — The canonical work ids on this asset's curated quoter list.
+- **Function** `recompute_and_store` (Line 634) — Recompute ``rendered_relation`` for every identification and store it.
+- **Function** `stored_relation_mismatches` (Line 658) — Row-for-row recompute-equality: return
+- **Function** `parameterization_meta_rows` (Line 682) — The ``(key, value)`` meta rows recording which parameterization an
+- **Function** `parameterization_from_meta` (Line 701) — Reconstruct the parameterization an asset was built under.
+
+## shared/discovery_service.py
+
+- **Function** `_get_float_env` (Line 309)
+- **Function** `_get_int_env` (Line 319)
+- **Function** `_get_positive_int_env` (Line 329) — Like ``_get_int_env``, but coerces to >= 1 (M3) -- a non-positive or
+- **Function** `_get_positive_float_env` (Line 339) — Like ``_get_float_env``, but coerces to > 0 (M3) -- a non-positive
+- **Function** `_shutdown_executors` (Line 348) — Retire a collected service's per-budget threadpools.
+- **Function** `_parse_json_field` (Line 364) — Best-effort JSON parse for the seed_spans/seed_ms_ids TEXT columns.
+- **Function** `_band_rank` (Line 408) — Lower is "stronger" (rank 0 = expert_verified, the strongest band).
+- **Function** `_page_number_from_page_id` (Line 417) — The folio number carried INSIDE a page id, or None.
+- **Function** `_volume_ie_from_page_id` (Line 443) — The inventory-entry (volume) id carried INSIDE a page id, or None.
+- **Function** `_browse_address_from_page_id` (Line 465) — `(folio, volume)` for a page id -- BOTH or NEITHER, never one of the two.
+- **Function** `_representative_browse_address` (Line 488) — The expansion row's two `/browse` address keys, as a dict to splat.
+- **Function** `_build_band_rank_case_sql` (Line 593) — Build the frozen band-rank lattice as a SQL CASE expression (H1) --
+- **Function** `eligibility_clause` (Line 680) — The `AND`-prefixed routing predicate for `mode`, or `''` for `all`.
+- **Function** `_review_toggle_mode` (Line 703) — `include_review` as an eligibility mode -- the one place the toggle's
+- **Function** `findings_novelty_offered` (Line 763) — Whether a row of `unit` can DISPLAY a single novelty verdict.
+- **Function** `novelty_view_shades` (Line 885) — The `novelty` argument for a selector view. THE authority on that mapping.
+- **Function** `findings_divergence_offered` (Line 899) — Whether the divergence axis can change ANYTHING, given the candidacy
+- **Function** `_validate_contribution_shades` (Line 1138) — Raise unless every contribution shade is in the novelty vocabulary.
+- **Function** `_build_launch_contribution_sql` (Line 1163) — The ONE grouped statement both contribution figures are computed with.
+- **Function** `_build_launch_manuscript_sql` (Line 1188) — Distinct CONTRIBUTING manuscripts, on the same basis as the total above.
+- **Function** `_like_prefix` (Line 1209) — `value` as a LIKE pattern matching its own children (`value / ...`),
+- **Function** `_build_findings_filter` (Line 1232) — The ONE findings predicate, shared by the row query and the facet
+- **Function** `_divergence_flag_sql` (Line 1507) — `(expression, params)` for a findings row's own divergence flag.
+- **Function** `_build_findings_query` (Line 1527) — Build the findings query for ONE unit. The single query builder -- all
+- **Function** `_build_manuscript_works_sql` (Line 1607) — The D-13h manuscript-scope query, as SQL, for `n_page_ids` bound
+- **Function** `_build_work_witnesses_ranked_cte_sql` (Line 1679) — The ranked CTE body. `restrict_work_id=False` builds the CORPUS-WIDE
+- **Function** `_validate_anchor_identity` (Line 1783) — Enforce the all-or-none invariant; return True when the anchor is
+- **Function** `_resolve_displayed_band` (Line 1808) — DATA-01: the WEAKER of the two claims' bands -- `(evidence_source,
+- **Function** `_build_work_expansion_pipeline` (Line 1856) — Build the shared `WITH ranked ... unit_best ... filtered` prefix and its
+- **Function** `build_work_expansion_rows_sql` (Line 1943) — The paginated expansion row query. Built from the shared pipeline, so it
+- **Function** `build_work_expansion_count_sql` (Line 1958) — The EXACT count of distinct witness UNITS the row query would return
+- **Function** `_project_work_witnesses` (Line 1977) — Group ``claim_rows`` (one row per real (page_id, work_id) witness
+- **Function** `_present_expansion_row` (Line 2162) — One raw expansion query row -> the INTERNAL expansion row.
+- **Function** `_export_page_guard` (Line 2249) — How many pages an export walk may fetch before it is treated as runaway.
+- **Class** `DiscoveryService` (Line 2262) — The one async read-only chokepoint over ``discovery.db``.
+    - Method `__init__` (Line 2271)
+    - Method `_get_conn` (Line 2368)
+    - Method `is_available` (Line 2425)
+    - Method `_has_locus_display` (Line 2434) — Whether this exact asset advertises the additive baked-label contract.
+    - Method `_has_locus_filter` (Line 2450) — Whether this asset carries the interval index used by range filters.
+    - Method `_clamp_page` (Line 2471)
+    - Method `_clamp_page_size` (Line 2479)
+    - Method `get_version` (Line 2508)
+    - Method `excerpts_available` (Line 2522) — PLAN-textvtext-excerpts.md: True iff the LOADED sidecar carries
+    - Method `get_band_precision` (Line 2573) — BAND-02: the matching ``scope='band'`` ``band_precision`` row, or
+    - Method `get_band_precision_collection` (Line 2604) — The ``scope='collection'`` ``band_precision`` row -- the
+    - Method `get_band_claim_counts` (Line 2634) — Codex #9/#B1: the version-aware, SHIPPED, DISPLAY-DEDUPLICATED
+    - Method `get_claims_for_page` (Line 2668) — PANEL-01/02: the manuscript's banded claims on this page, each at
+    - Method `_query_claims_for_page` (Line 2699) — The single page query: claim + display evidence + the materialized
+    - Method `_band_measurements` (Line 2817) — `(evidence_source, confidence_band) -> (measurement_status, ci_low)`
+    - Method `_present_claim_row` (Line 2857) — One raw query row -> the surface-safe panel row.
+    - Method `get_claims_for_page_enveloped` (Line 2911) — The SYNC enveloped shape of `get_claims_for_page` (D-13).
+    - Method `get_manuscript_works_enveloped` (Line 2947) — "Elsewhere in this manuscript", as NAMED works (D-13h).
+    - Method `get_related_page_count_enveloped` (Line 3019) — The header figure: DISTINCT opposite pages for this anchor,
+    - Method `get_related_pages_enveloped` (Line 3058) — The rows behind the toggle: ONE row per DISTINCT opposite page,
+    - Method `_clamp_findings_page_size` (Line 3170)
+    - Method `_first_match_pages` (Line 3179) — `{(sys_id, canonical_work_id): first matched page id}`, in ONE query.
+    - Method `get_locus_units_enveloped` (Line 3221) — Ordered address units for one selected work, when the asset supports it.
+    - Method `get_findings_enveloped` (Line 3255) — The corpus-wide findings query, in whichever of the three offered
+    - Method `_export_artifact_identity` (Line 3449) — `(resolved path, sidecar_version)` -- the identity the export pins
+    - Method `_export_timeout` (Line 3468)
+    - Method `_export_walk` (Line 3472) — Every page of ONE `get_findings_enveloped` query, as a flat list.
+    - Method `collect_findings_for_export` (Line 3550) — EVERY row matching the filters, plus its excerpt, in ONE envelope.
+    - Method `get_findings_facets_enveloped` (Line 3809) — The domain / author / work cascade, mirroring the catalogue page's
+    - Method `_project_facets` (Line 3919) — Shape the grouped rows into facet rows.
+    - Method `_findings_timeout` (Line 3973)
+    - Method `_query_launch_contribution` (Line 3981) — `(rows_by_shade, total, manuscript_count)` on ONE basis.
+    - Method `_copy_launch_envelope` (Line 4000) — A DEFENSIVE COPY of a cached launch envelope.
+    - Method `get_launch_stats_enveloped` (Line 4016) — Ruling U's launch statistics, computed from the LOADED artifact.
+    - Method `get_pages_related_to_page` (Line 4177) — PANEL-02: shared_text alignments touching this page, from EITHER
+    - Method `get_evidence` (Line 4224) — PANEL-03: every evidence row for a claim (offsets + text_layer +
+    - Method `_query_excerpt_for_identification` (Line 4267) — The excerpt row for `identification_id`, projected through
+    - Method `_decode_excerpt_row` (Line 4306) — Decode the stored JSON highlight intervals, IN PLACE, and return the
+    - Method `_query_excerpts_for_identifications` (Line 4322) — `{identification_id: projected excerpt row}` for a SET of ids, read
+    - Method `get_excerpts_for_identifications` (Line 4394) — `{}`-on-failure wrapper, mirroring `get_excerpt_for_identification`'s
+    - Method `get_excerpt_for_identification` (Line 4412) — LEGACY LIST CONTRACT (mirrors `get_work_witnesses`): `[]` on EVERY
+    - Method `get_excerpt_enveloped` (Line 4434) — The text-vs-text excerpt in the CLOSED four-key envelope (D-13):
+    - Method `get_work_witnesses` (Line 4460) — DATA-10 unit x work projection: witnesses of ``work_id``, one row
+    - Method `_query_work_expansion` (Line 4530) — The expansion's rows AND its EXACT total -- ``(rows, total)``.
+    - Method `get_work_expansion_enveloped` (Line 4630) — PANEL-02's expansion in the CLOSED four-key envelope (D-13):
+    - Method `_acquire_slot` (Line 4734)
+    - Method `_executor_for` (Line 4764) — This budget class's OWN threadpool, `max_workers` == its capacity.
+    - Method `_acquire_heavy_slot` (Line 4780) — The heavy budget, by its original name (kept: it is what the
+    - Method `_run_off_loop` (Line 4793)
+    - Method `_browse_timeout` (Line 4856)
+    - Method `_work_timeout` (Line 4859)
+    - Method `_browse_cached_call` (Line 4867)
+    - Method `get_version_async` (Line 4906)
+    - Method `excerpts_available_async` (Line 4909) — The async shape of `excerpts_available` -- a thin off-loop wrapper,
+    - Method `get_band_precision_async` (Line 4919)
+    - Method `get_band_precision_collection_async` (Line 4927)
+    - Method `get_band_claim_counts_async` (Line 4934)
+    - Method `get_claims_for_page_async` (Line 4937)
+    - Method `get_pages_related_to_page_async` (Line 4955)
+    - Method `_enveloped_off_loop` (Line 4975) — Run an enveloped SYNC callable off the loop and classify its failure
+    - Method `get_claims_for_page_enveloped_async` (Line 5020) — The async shape of `get_claims_for_page_enveloped` -- a thin wrapper
+    - Method `get_manuscript_works_enveloped_async` (Line 5033)
+    - Method `get_related_page_count_enveloped_async` (Line 5045)
+    - Method `get_related_pages_enveloped_async` (Line 5055)
+    - Method `get_locus_units_enveloped_async` (Line 5066)
+    - Method `get_findings_enveloped_async` (Line 5074) — Heavy by design: the corpus-wide query gets a bounded-concurrency
+    - Method `get_launch_stats_enveloped_async` (Line 5103) — The async shape of `get_launch_stats_enveloped` (ruling U).
+    - Method `get_findings_facets_enveloped_async` (Line 5131)
+    - Method `collect_findings_for_export_async` (Line 5156) — The export collector, off the loop, on the EXPORT budget.
+    - Method `run_off_loop` (Line 5191) — PUBLIC alias of the off-loop dispatch discipline, for the web
+    - Method `get_evidence_async` (Line 5212)
+    - Method `get_excerpt_enveloped_async` (Line 5219) — The async shape of `get_excerpt_enveloped` -- a thin wrapper over
+    - Method `get_work_witnesses_async` (Line 5262)
+    - Method `get_work_expansion_enveloped_async` (Line 5276) — The async shape of `get_work_expansion_enveloped` -- a thin wrapper
+
+## shared/discovery_surface_projection.py
+
+- **Function** `is_forbidden_surface_field` (Line 97) — True when `key` may never appear in surface-bound output.
+- **Function** `_assert_allowlist_safe` (Line 463) — Raise if `fields` names a forbidden field or repeats one.
+- **Function** `_project` (Line 494) — Project `row` onto exactly `fields`.
+- **Function** `surface_safe_claim` (Line 504) — The panel row a surface may receive (PANEL-01/02).
+- **Function** `surface_safe_work_summary` (Line 509) — One "elsewhere in this manuscript" work row (D-13h).
+- **Function** `surface_safe_related_page` (Line 514) — One unevaluated candidate alignment (D-11a).
+- **Function** `surface_safe_finding` (Line 519) — One corpus-wide findings row, in any of the three offered units (A-6).
+- **Function** `surface_safe_expansion` (Line 524) — One "Other manuscripts matching <work>" expansion row (PANEL-02).
+- **Function** `surface_safe_launch_shade` (Line 529) — One launch contribution-shade row (ruling U, plan 136-22).
+- **Function** `surface_safe_facet` (Line 534) — One domain / author / work facet row.
+- **Function** `surface_safe_locus_unit` (Line 539) — One addressable unit offered by the work-specific range control.
+- **Function** `surface_safe_excerpt` (Line 544) — One text-vs-text `discovery_excerpt` row (`PLAN-textvtext-excerpts.md`).
+- **Function** `_rate_or_interval_violation` (Line 643) — The reason `value` is a rendered rate/interval, or None.
+- **Function** `_walk_nodes` (Line 656) — Yield `(path, key, value)` for EVERY key/value pair reachable in `node`.
+- **Function** `_assert_surface_safe` (Line 678) — Re-check what the projection already guarantees.
+- **Function** `make_envelope` (Line 747) — Build the ONE shape every Discovery read returns to a surface.
+- **Function** `ok_envelope` (Line 787)
+- **Function** `unavailable_envelope` (Line 794) — The sidecar is not serving: flag off, asset absent, loader not ready.
+- **Function** `timeout_envelope` (Line 799) — The query exceeded its budget -- distinct from `unavailable`, because the
+- **Function** `busy_envelope` (Line 805) — Bounded concurrency rejected this call -- distinct from both above.
+- **Function** `is_outage` (Line 810) — True when the envelope reports an outage rather than a genuine result.
+
+## shared/discovery_visibility.py
+
+- **Function** `_corpus_code_to_visibility` (Line 93) — Fail-closed mapping from a raw `source_corpus` CODE (never a
+- **Function** `assertion_visibility` (Line 113) — D-22's FIRST axis: the visibility of the DISPLAYED ASSERTION -- derived
+- **Function** `identity_visibility` (Line 143) — D-22's SECOND axis: the visibility of the DISPLAYED WORK's own
+- **Function** `is_public` (Line 161) — The ONE public-eligibility rule (D-22): the conjunction of BOTH axes.
+- **Function** `_vis01_launch_scope_predicate` (Line 185) — VIS-01's OWN launch-scope shortcut, reproduced LITERALLY as a
+- **Function** `reconcile_launch_scope` (Line 212) — Reconcile VIS-01's launch-scope shortcut against the D-22 two-axis
+
+## shared/passage_index.py
+
+- **Class** `IndexFormatError` (Line 83) — Raised by build-side helpers; the reader never propagates it.
+- **Class** `BuildCancelled` (Line 87) — Raised by build_index (and the corpus hasher it depends on) when a
+- **Class** `PassageIndexClosed` (Line 92) — Raised by any access to a `PassageIndex` section after `close()`.
+- **Class** `_ClosedSection` (Line 100) — Poison stand-in `PassageIndex.close()` swaps each of the five
+    - Method `__getattr__` (Line 120)
+    - Method `__getitem__` (Line 123)
+    - Method `__len__` (Line 126)
+    - Method `__iter__` (Line 129)
+    - Method `__array__` (Line 132)
+- **Function** `require_little_endian` (Line 140) — The packed layouts are little-endian by definition, not by accident.
+- **Function** `pack_postings` (Line 148) — (pages, positions) -> uint8 array of POSTING_BYTES per posting.
+- **Function** `unpack_postings` (Line 172) — uint8 POSTING_BYTES-per-posting array -> (pages, positions).
+- **Function** `encode_stream` (Line 189) — Normalized letter stream -> uint8 letter indices (0..26).
+- **Function** `decode_stream` (Line 202) — uint8 letter indices -> normalized letter stream.
+- **Function** `layout_fingerprint` (Line 212) — The layout facts a reader must agree with before touching a byte.
+- **Function** `write_manifest` (Line 227) — Write manifest.json last, after every data file is closed and sized.
+- **Function** `_expected_sizes` (Line 239)
+- **Class** `PassageIndex` (Line 253) — Memory-mapped reader. Construct via `open_index`, never directly.
+    - Method `__post_init__` (Line 284)
+    - Method `close` (Line 287) — Close every section's underlying mapping, then REPLACE the
+    - Property `n_records` (Line 345)
+    - Property `n_postings` (Line 349)
+    - Method `df` (Line 352) — Postings for one gram code. Not distinct records -- postings.
+    - Method `dfs` (Line 358) — Vectorised `df` -- the query budget needs all of them at once.
+    - Method `postings_for` (Line 368)
+    - Method `stream` (Line 377)
+    - Method `record_id` (Line 382)
+- **Function** `open_index` (Line 388) — Open an index, or return None. Never raises on a bad artifact.
+- **Function** `diagnose_index` (Line 480) — Why would `open_index(index_dir)` return None? One human sentence.
+- **Function** `csr_is_monotone` (Line 565) — True when `gram_offsets` is non-decreasing. Chunked, ~1 MB transient.
+- **Function** `verify_csr_monotone` (Line 592) — Raising form, for the build/verify side.
+
+## shared/passage_search.py
+
+- **Class** `PassageHit` (Line 49)
+- **Class** `QueryReport` (Line 59) — Everything that happened to the query. Ships in the result envelope --
+    - Method `as_dict` (Line 81)
+- **Function** `_admit_grams` (Line 86) — Select which query grams to expand, under the posting budget.
+- **Function** `_candidates` (Line 168) — Diagonal two-hit with DISTINCT gram codes (spec section 6.1).
+- **Function** `_verify_and_merge` (Line 268) — Extend, align, accept, and merge per record.
+- **Function** `search_passage` (Line 338) — The full arrangement-C query. Returns (hits, report).
+
+## shared/passage_normalize.py
+
+- **Function** `nfc` (Line 71) — NFC-normalize. Offsets returned by norm_stream index THIS string.
+- **Function** `norm_stream_fast` (Line 76) — Space-free normalized Hebrew letter stream. No offset map.
+- **Function** `norm_stream` (Line 85) — Return (stream, offsets).
+- **Function** `project_span` (Line 102) — Map stream span [start, end) back onto orig_text, with `pad` context.
+- **Function** `gram_codes` (Line 120) — uint64 base-27 codes for every overlapping K-gram of `stream`.
+
+## shared/passage_policy.py
+
+- **Function** `_boundary_one_sided` (Line 48)
+- **Function** `_boundary_two_sided` (Line 54)
+- **Class** `PassagePolicy` (Line 64) — Everything about a query that can change its results.
+    - Method `__post_init__` (Line 102)
+    - Property `policy_id` (Line 122) — Content hash over every field. Stable across processes and runs.
+    - Method `as_dict` (Line 143)
+    - Method `max_density` (Line 150)
+    - Method `accepts` (Line 156)
+- **Function** `compose` (Line 303) — A width preset plus a passage-length profile plus a search depth,
+- **Function** `get_preset` (Line 351)
+
+## shared/arabic_normalize.py
+
+- **Function** `ja_letters` (Line 57) — (letter, dotted) for each Hebrew letter of one word: finals folded, the dot read
+- **Function** `is_abbreviation` (Line 70) — Gershayim, or a quote mark after a letter that takes no dot (ב׳כ׳ר׳, ר').
+- **Function** `readings` (Line 85) — Every Arabic skeleton a Judeo-Arabic word may be, plain letters first, the last
+- **Function** `_readings` (Line 98)
+- **Function** `strip_harakat` (Line 124) — NFC, then the Arabic vowel signs, shadda, sukun, tanwin and Quranic marks removed.
+- **Function** `skeleton` (Line 129) — The frequency key of an Arabic word: harakat and tatweel dropped, the hamza seats
+- **Function** `arabic_tokens` (Line 136) — Surface Arabic words of a text, harakat dropped (hamza kept).
+- **Function** `root_key` (Line 145) — A root key, so the dictionaries' spellings meet: Arabic letters only, every hamza
+- **Function** `strong_letters` (Line 163) — The root key's letters that are neither hamza nor weak, doubles collapsed.
+- **Function** `buckwalter_to_arabic` (Line 179) — The consonants of a Perseus-Buckwalter string in Arabic script (vowels dropped).
+
+## shared/blau_normalize.py
+
+- **Function** `strip_site_diacritics` (Line 78) — The site's own "strip diacritics": exactly its regex, nothing more.
+- **Function** `strip_marks` (Line 83) — NFC, then every combining mark (category Mn, Mc, Me) removed.
+- **Function** `fold_finals` (Line 90)
+- **Function** `ja_words` (Line 94) — The Hebrew-letter words of ``text`` after marks, quote marks and finals are folded.
+- **Function** `normalize_ja` (Line 106) — The lookup key of a Judeo-Arabic form or of a corpus token: see the module docstring.
+- **Function** `normalize_arabic` (Line 114) — The lookup key of an Arabic-script spelling: NFKC, marks and tatweel dropped,
+- **Function** `_peel_prefixes` (Line 134)
+- **Function** `_peel_suffix` (Line 149)
+- **Function** `candidate_stems` (Line 157) — Normalized lookup candidates for one corpus word, the word itself first, then with
+
+## shared/arabic_method.py
+
+- **Function** `backoff_count` (Line 35) — The count of the commonest stem left when a proclitic and a pronoun are
+- **Function** `rank_readings` (Line 50) — (skeleton, count) of the word's attested readings, best first.
+- **Function** `_proclitic_layers` (Line 78) — How many proclitics a peeled prefix is: و/ف, then ب/ل/ك, then the article (لل is two).
+- **Function** `form_roots` (Line 90) — Roots of a reading through Lane's headwords: the reading, or the reading with
+- **Function** `strip_roots` (Line 126) — Root keys an Arabic word may come from: peel a proclitic, a pronoun, an
+- **Function** `closed_class_roots` (Line 169) — v4: a closed-class word, alone or after a conjunction (و, ف), is the table's: its roots in
+- **Function** `reading_roots` (Line 178) — The roots of one reading, best first, by method ``version``: the closed-class table (v4),
+
+## shared/arabic_service.py
+
+- **Function** `lane_enabled` (Line 92) — The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 100) — One Lane entry on Ephraim Meiri's site.
+- **Function** `root_url` (Line 105) — Lane's entries under a root on Ephraim Meiri's site (a headword search in Lane).
+- **Function** `default_sidecar_path` (Line 110) — Where the sidecar lives: the user's updated copy first (as for the Blau, FGP and PGP
+- **Class** `LaneReading` (Line 126) — One Arabic reading of the word: its skeleton, its commonest spelling in the word count
+- **Class** `LaneEntry` (Line 135) — One Lane entry: the headword, the printed page, the text (cut at ``MAX_TEXT``).
+- **Class** `LaneRoot` (Line 148) — One root the first reading may come from, with its entries.
+- **Class** `LaneLookup` (Line 159)
+    - Property `found` (Line 167)
+    - Property `reading` (Line 171) — The reading the root cards are for: the first.
+- **Function** `one_ja_word` (Line 182) — ``word`` is ONE Judeo-Arabic word: no space at all, and, NFC-normalized as ``ja_letters``
+- **Function** `empty_lane` (Line 195)
+- **Function** `_text` (Line 199)
+- **Function** `_page` (Line 203)
+- **Function** `cut_text` (Line 210) — ``text`` up to ``limit`` characters, ended at a space where one is near, and whether
+- **Function** `lane_heading` (Line 223) — Which of a root key's Lane headings titles the card, when the key has several (Lane files
+- **Class** `_FreqView` (Line 243) — The word count for one lookup: ``.get`` like a Counter, read from ``freq`` by key and kept
+    - Method `__init__` (Line 247)
+    - Method `__bool__` (Line 251)
+    - Method `prefetch` (Line 254)
+    - Method `_row` (Line 265)
+    - Method `get` (Line 270)
+    - Method `spelling` (Line 274)
+- **Class** `ArabicService` (Line 279) — Read-only access to the Arabic sidecar. See the module docstring.
+    - Method `__init__` (Line 282)
+    - Method `_load_tables` (Line 325) — The small tables the method reads on every lookup, held in memory (as the gate's
+    - Property `db_path` (Line 345)
+    - Method `is_ready` (Line 348) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 352) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 356)
+    - Property `credit` (Line 360) — The Perseus credit line (D3), verbatim; shown on every Lane card.
+    - Method `close` (Line 364)
+    - Method `lookup` (Line 375) — What Lane has for one clicked or typed word. Hebrew letters are read as Judeo-Arabic;
+    - Method `_matched_entries` (Line 412) — The entries of ``root_key`` whose headword is the reading, or the reading with a
+    - Method `_root` (Line 436)
+- **Function** `_validate` (Line 467) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `get_arabic_service` (Line 509) — The default service, created on first use (per-thread connections by default: safe under
+- **Function** `reset_arabic_service` (Line 519) — Forget the default service (after the sidecar file is replaced).
+
+## shared/blau_service.py
+
+- **Function** `blau_enabled` (Line 117) — The ``BLAU_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 125) — The dictionary site's page for one entry.
+- **Function** `dot_pattern` (Line 133) — The Hebrew letters of ``text`` (finals folded, other marks dropped, words
+- **Function** `_dots_agree` (Line 151) — The dictionary spelling's first word, dots included, sits inside the
+- **Function** `arabic_key` (Line 165) — One Arabic spelling as a lookup key: ``normalize_arabic``, the dictionary's
+- **Function** `arabic_keys` (Line 176) — The keys of a stored Arabic spelling: one per alternative (the dictionary
+- **Function** `arabic_candidates` (Line 187) — A typed Arabic word's candidates: the word, then without a conjunction
+- **Function** `default_sidecar_path` (Line 204) — Where the sidecar lives: the user's updated copy first (the desktop
+- **Class** `BlauSense` (Line 222) — One form under an entry: the dictionary's own text, spelling, binyan,
+- **Class** `BlauCard` (Line 243) — One dictionary entry (a root) that a candidate key hit.
+- **Class** `BlauExample` (Line 263) — An entry whose example phrases contain the key: it defines another word.
+- **Class** `BlauLookup` (Line 272)
+    - Property `found` (Line 284)
+- **Function** `empty_lookup` (Line 288)
+- **Class** `_CardBuild` (Line 294) — A card while its hits are collected: one scope (an entry, or one of its
+    - Method `__init__` (Line 301)
+- **Function** `_text` (Line 313)
+- **Function** `_page` (Line 317)
+- **Function** `_has_content` (Line 324)
+- **Class** `BlauService` (Line 328) — Read-only access to the Blau sidecar. See the module docstring.
+    - Method `__init__` (Line 331)
+    - Property `db_path` (Line 376)
+    - Method `is_ready` (Line 379) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 383) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 387)
+    - Property `credit_he` (Line 391) — The site's own credit line (ruling (a)); shown on every surface.
+    - Property `credit_en` (Line 396)
+    - Method `close` (Line 399)
+    - Method `lookup` (Line 410) — What the dictionary has for one clicked or typed word. A word with
+    - Method `_arabic` (Line 438) — arabic_key -> the hits it reaches: entries and sub-entries by their
+    - Method `_lookup_arabic` (Line 468)
+    - Method `_lookup` (Line 483)
+    - Method `_add_hit` (Line 545) — One hit into its card. ``row`` is a ``forms_norm`` row, or the same
+    - Method `_finish` (Line 574)
+    - Method `_sense` (Line 619)
+    - Method `_root` (Line 639)
+    - Method `_target_root` (Line 646) — A form's cross-reference target: a root, or a stem (then its root).
+- **Function** `_validate` (Line 656) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `name_alternatives` — the names a `forms.ja_text` column holds (headword and variants), one scope each; the builder and the gate split it the same way
+- **Class** `BlauCitation` / `BlauPlace` / `BlauExpressionHit` / `BlauExpression` — the expression search's answer (2026-11-08); `BlauAnswer` is a lookup or an expression
+- **Method** `BlauService.expressions_available` — the open file carries the `tokens` table (schema 1.1.0; a 1.0.0 file is served without it)
+- **Method** `BlauService.answer` — what the panel asks: one word a lookup, several words an expression search (or the lookup on a 1.0.0 file)
+- **Method** `BlauService.expression` / `_expression` / `_place` / `_hit` — the search over the `tokens` table, tiered by `shared.ja_expression.tiered`
+- **Function** `get_blau_service` (Line 692) — The default service, created on first use (per-thread connections by
+- **Function** `reset_blau_service` (Line 702) — Forget the default service (after the sidecar file is replaced).
+
+## shared/cudl_identity.py
+
+- **Function** `cudl_label_to_shelfmark` (Line 58) — Convert a CUDL manifest label to a human-readable shelfmark.
+- **Function** `_signature` (Line 103) — Letters merged between numbers (so ``Ja`` == ``J-A``), numbers as integers.
+- **Function** `label_signature` (Line 119) — Structure of a CUDL label: ``MS-TS-00008-J-A-00002`` -> ('TS', 8, 'JA', 2).
+- **Function** `_generic_tokens` (Line 126)
+- **Function** `_mosseri_tokens` (Line 143)
+- **Function** `_name_tokens` (Line 155)
+- **Function** `name_signature` (Line 166) — Structure of a catalogue name, or None when it is not a form we can read whole.
+- **Function** `_readable` (Line 177)
+- **Function** `candidate_key` (Line 185) — The ``normalized_shelfmark`` every label with this structure carries.
+- **Function** `guess_label` (Line 191) — The CUDL label spelled the way the name is written (``T-S Ar.18(1).6`` ->
+- **Function** `label_from_url` (Line 201) — ``https://cudl.lib.cam.ac.uk/view/MS-TS-00001-00001/2`` -> ``MS-TS-00001-00001``.
+- **Function** `viewer_url` (Line 209)
+- **Function** `manifest_url_for` (Line 213)
+- **Function** `match_name` (Line 217) — One name -> ``{'status': 'match'|'ambiguous'|'none', 'label', 'manifest_url', 'labels'}``.
+- **Function** `resolution_is_current` (Line 238) — True when ``res`` is a final resolution made by this revision of the rules.
+- **Function** `cached_decision_stale` (Line 243) — True when ``meta_mgr``'s cached entry for ``sys_id`` has no current Cambridge
+- **Function** `unavailable` (Line 253) — No answer yet (catalogue still loading, sidecar unreadable). Carries no
+- **Function** `_result` (Line 262)
+- **Function** `_resolve_record` (Line 276) — The CUDL item a catalogue record links to.
+- **Function** `resolve_record` (Line 358) — See ``_resolve_record``; the result also carries ``marc_label``, the item the
+
+## shared/keyboard_layout.py
+
+- **Function** `map_keys_to_hebrew` (Line 40) — *text* read key by key on the Hebrew layout, or None when a character
+- **Function** `is_latin_query` (Line 55) — ASCII with at least one Latin letter: what a wrong-layout query looks like.
+- **Function** `layout_suggestion` (Line 60) — The Hebrew a Latin-script query spells on the Hebrew layout, or None.
+
+## shared/whats_new_history.py
+
+- **Function** `version_key` (Line 46) — ``'9.13.1'`` (or ``'v9.13.1'``) -> ``(9, 13, 1)``; anything else raises ValueError.
+- **Function** `_for_app` (Line 54) — A copy of ``release`` with only the items ``app`` shows (all of them for None);
+- **Function** `releases` (Line 63) — Every release, newest first; with ``app``, only the items that app shows, and only
+- **Function** `releases_between` (Line 76) — The releases after ``since`` up to and including ``upto`` (no upper bound when
+- **Function** `localize` (Line 86) — One release in one language: ``{'version', 'date', 'apps', 'title', 'sections'}``,
+- **Function** `app_note` (Line 106) — The label to show beside an item that is in one app only (English key), else None.
+- **Function** `problems` (Line 116) — Everything wrong with the entries, one sentence each (empty when they are sound).
+- **Function** `to_public` (Line 166) — A release as ``GET /api/whats-new`` serves it (both languages).
+- **Function** `from_public` (Line 178) — The releases in a ``GET /api/whats-new`` answer, checked; raises ValueError on
+
+## desktop/version_history.py
+
+- **Function** `render_html` (Line 44) — The releases as the dialog's HTML: a heading per version, then its categories.
+- **Class** `ReleaseNotesThread` (Line 71) — Fetches the entries between two versions from the website, off the UI thread.
+    - Method `__init__` (Line 79)
+    - Method `run` (Line 84)
+- **Function** `_strip_v` (Line 102)
+- **Class** `VersionHistoryDialog` (Line 106) — The history (``releases`` given) or, with ``update_to``, the changes since this
+    - Method `__init__` (Line 110)
+    - Method `done` (Line 179) — Closing while the fetch still runs hands the thread to the keeper (a dropped
+    - Method `set_releases` (Line 192)
+    - Method `set_loading` (Line 196)
+    - Method `set_failed` (Line 199)
+    - Method `_on_notes` (Line 203)
+    - Method `_open_release_page` (Line 211)
+
+## web/pages/whats_new.py
+
+- **Function** `_release` (Line 40)
+- **Function** `create_whats_new_page` (Line 58) — The page body (the route in web/main.py adds the head and the layout).
+
+## shared/ja_expression.py
+
+The expression search the Judeo-Arabic dictionaries share (2026-11-08): several words selected on /browse or
+typed in the panel's box, found in order inside one name or one quotation of a dictionary's own text, within
+a gap. Friedman's reader and Blau's import it; their sidecar builders write its keys into their `tokens` tables.
+
+- **Constant** `KEYING_VERSION` — the keying rules as a number a sidecar's `meta.keying_version` carries; the readers pin it
+- **Constant** `MAX_EXPRESSION_WORDS` / `MAX_GAP` / `DEFAULT_GAP`; **Function** `clamp_gap`
+- **Function** `lookup_key` / `word_keys` / `scope_keys` — a word's own key and its clitic alternatives; `(position, key, peeled)` rows for a scope's printed words
+- **Function** `short_remainder` / `preposition_stems` / `is_function_word`; **Constant** `FUNCTION_WORDS`, `PREPOSITIONS`, `MIN_EXPRESSION_STEM`
+- **Function** `ordered_match` — the tightest ordered match within the gap (a contiguous occurrence after a gapped one wins)
+- **Class** `ExpressionComponent` / `ExpressionPlace` — which printed word carried which typed word; one scope holding the expression
+- **Function** `components_for` — the matched positions and components of one scope, or None when the rows and the text disagree
+- **Function** `tiered` — the units ranked: the name that IS the expression, then names holding the words in order, then the rest; function words only stand together among strangers
+
+## shared/friedman_service.py
+
+- **Function** `friedman_enabled` (Line 76) — The switch, read live; OFF unless set, because the sidecar is a candidate.
+- **Function** `default_sidecar_path` (Line 81) — Where the sidecar lives: the env var, the user's data folder, then the repository.
+- **Function** `lookup_key` (Line 94) — The normalizer's key, after the harakat a PDF stores as presentation forms are dropped.
+- **Function** `_short_remainder` (Line 113) — A two-letter candidate is a key when only proclitics were peeled off the word; after a
+- **Function** `_is_function_word` (Line 137) — True when some key of a typed word is a function word, or a preposition with a suffix.
+- **Function** `_preposition_stems` (Line 142) — The preposition a pronoun suffix was added to (בהא -> ב, עליך -> עלי), whatever its length.
+- **Function** `word_keys` (Line 147) — The keys one printed or typed word answers to: its own key first, then its clitic
+- **Function** `head_scope_text` (Line 176) — The words of a head the expression search runs over, in this order: the head without its
+- **Function** `scope_keys` (Line 183) — (position, key, peeled) for every key of every printed word of a quotation or a head:
+- **Function** `ordered_match` (Line 197) — The first ordered match of ``query`` in ``tokens`` with at most ``gap`` printed words
+- **Class** `FriedmanQuotation` (Line 237)
+- **Class** `FriedmanUnit` (Line 246)
+- **Class** `FriedmanMatch` (Line 266)
+- **Class** `FriedmanLookup` (Line 276)
+    - Property `found` (Line 286)
+- **Function** `empty_lookup` (Line 290)
+- **Class** `FriedmanComponent` (Line 296) — One typed word of an expression and the printed word that carried it in one place.
+- **Class** `FriedmanPlace` (Line 306) — One quotation or one head of a unit holding the whole expression.
+    - Property `span` (Line 316)
+    - Property `contiguous` (Line 320)
+- **Class** `FriedmanExpressionHit` (Line 325)
+- **Class** `FriedmanExpression` (Line 333)
+    - Property `word` (Line 344) — The text, under the name the panel's head reads for every dictionary's answer.
+    - Property `found` (Line 349)
+- **Function** `empty_expression` (Line 357)
+- **Function** `clamp_gap` (Line 362) — A gap a reader may ask for: an integer in 0..MAX_GAP, the default for anything else.
+- **Function** `_validate` (Line 371) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Class** `FriedmanService` (Line 397) — Read-only access to the Friedman sidecar. See the module docstring.
+    - Method `__init__` (Line 400)
+    - Property `db_path` (Line 441)
+    - Method `is_ready` (Line 444)
+    - Method `is_available` (Line 447) — Ready AND switched on. The only question a surface asks.
+    - Method `meta` (Line 451)
+    - Property `status` (Line 455)
+    - Property `credit_he` (Line 459)
+    - Method `close` (Line 462)
+    - Method `lookup` (Line 473) — What the dictionary has for one clicked or typed word. Never raises.
+    - Method `unit` (Line 488) — One unit by id, with its quotations; None when unknown or unavailable.
+    - Method `expression` (Line 501) — The units holding the typed words in order inside one quotation or one head, with at
+    - Method `_expression` (Line 523)
+    - Method `_place` (Line 589)
+    - Method `_lookup` (Line 613)
+    - Method `_match` (Line 646)
+    - Method `_unit` (Line 660)
+- **Function** `get_friedman_service` (Line 687) — The default service, created on first use (per-thread connections by default).
+- **Function** `reset_friedman_service` (Line 696) — Forget the default service (after the sidecar file is replaced).
+
+## web/components/expression_panel.py
+
+What the dictionaries' expression searches draw alike (2026-11-08): Friedman's tab and Blau's call these.
+
+- **Constant** `GAP_CLASS` / `HIT_MARK_CLASS` / `PLACE_CLASS` / `COMPONENTS_CLASS` — styled under `.gs-blau` in web/static/common.css; friedman_panel keeps the same literals
+- **Constant** `NOTHING_TOGETHER` / `GAP_LABEL` / `MATCHED_LABEL` / `MORE_PLACES` — the shared strings (owner-approved, 2026-11-08)
+- **Function** `render_marked` — the printed words with the matched ones marked (escaped; the marks are the only HTML)
+- **Function** `render_gap` — the gap control; a change runs the search again through `on_gap(gap, text)`
+- **Function** `render_components` — which printed word carried which typed word, when a clitic alternative did
+
+## web/components/friedman_panel.py
+
+- **Function** `_attr` (Line 86)
+- **Function** `_rtl` (Line 90)
+- **Function** `_render_marked` (Line 94) — The printed words, the matched ones marked (the text escaped; the marks are the only HTML).
+- **Function** `_head_label` (Line 102) — The head as the book prints it: in braces when the book lists the entry only to reject it.
+- **Function** `_render_head` (Line 107)
+- **Function** `_render_quotation` (Line 123)
+- **Function** `_render_child` (Line 135)
+- **Function** `_render_match` (Line 146)
+- **Function** `_render_credit` (Line 172) — The author's credit line verbatim (the source asks for it), linked to the host page.
+- **Function** `render_friedman_empty` (Line 178) — Friedman's tab when the dictionary has nothing for ``word`` (or no word was typed yet).
+- **Function** `_render_gap` (Line 187) — The printed words allowed between two of the expression's words; a change runs the
+- **Function** `_render_place` (Line 200) — One quotation (its words, the matched ones marked, its translation and locator) or the
+- **Function** `_render_hit` (Line 222)
+- **Function** `render_friedman_expression_empty` (Line 238) — Friedman's tab when the words were not found together: the gap control stays, so the
+- **Function** `render_friedman_expression` (Line 250) — Draw an expression search's answer into the current container. Returns False, drawing
+- **Function** `render_friedman` (Line 273) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is

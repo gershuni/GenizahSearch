@@ -1,0 +1,332 @@
+# Python stuff
+__pycache__/
+*.pyc
+venv/
+env/
+.idea/
+.vscode/
+
+# Personal local folders are ignored through .git/info/exclude (never pushed),
+# not here: a pattern in this public file names what it hides.
+
+# Local Data (Don't upload these huge files!)
+Transcriptions.txt
+Transcriptions.repaired.txt
+AllGenizah_OLD.txt
+Results/
+Genizah_Tantivy_Index/
+*.pkl
+config.pkl
+fist_data/*
+# Phase 85 SYNTH-02: synthetic_manifest.json is AUTHORITATIVE for Plan 03 —
+# must be tracked so the FJMS sidecar exporter (Plan 03) can read the
+# committed qualifying-set as its only InventoryId source. Pattern uses
+# `fist_data/*` (not `fist_data/`) so the !-exception works correctly:
+# git cannot re-include files inside an excluded *directory*, but can
+# re-include files inside an excluded *glob* pattern.
+!fist_data/synthetic_manifest.json
+nli_data/
+# PGP sidecar DB + its backup siblings. Was the single literal `pgp_data/pgp.db`,
+# which left copies like `pgp_data/pgp_backup_<date>.db` untracked-but-NOT-ignored
+# — so a repo-wide content scan enumerated them and failed closed
+# on strings that the live pgp.db carries too and that this line already excludes
+# by design (PGP scholarly metadata legitimately cites source corpora).
+# Glob-scoped to *.db only: pgp_data/full_import_report.txt and
+# pgp_data/import_report.csv REMAIN TRACKED.
+pgp_data/*.db
+FIST_DB_BACKUP/
+# FGP transcription archive (local sidecar).
+# Large (~1.5 GB, 48K files); never committed. Manifest lives inside.
+fgp_data/
+
+# Build artifacts
+dist/
+build/
+*.spec
+/Reports/*
+/reports/*
+# Phase 85 SYNTH-02: synthetic-coverage artifacts (Phase 86 audit consumes residue)
+!/reports/synthetic_ambiguity_residue.csv
+!/reports/synthetic_coverage.md
+# Phase 86 Plan 04 audit deliverables (AUDIT-01, AUDIT-02): durable artifacts
+# documenting CUDL coverage state after the CUDL-walked synthetic re-attempt.
+!/reports/cudl_coverage.md
+!/reports/cudl_coverage_post_phase86.csv
+!/reports/scan_cudl_orphans_post_phase86.txt
+!/reports/cudl_orphans_all_post_phase86.csv
+!/reports/cudl_orphans_with_neighbor_post_phase86.csv
+!/reports/preflight_dryrun_phase86.txt
+Genizah_Index/
+genizah.log
+backend.log
+web.log
+.claude/settings.local.json
+.claude/settings.local.json.*
+.claude/settings.local.*.json
+פקודת אריזה.txt
+.nicegui/
+data/*
+!data/few_shot_*.json
+!data/FEW_SHOT_NOTES.md
+# The corpus-repair manifest is the ONLY audit trail for edits to the gitignored
+# 1.4 GB Transcriptions.txt — it must be reviewable in version control.
+!data/v08_repair_manifest.json
+
+# Runtime files
+app.log
+server.log
+app.pid
+/big_data_files
+.env
+backend_legacy/
+
+# Local scratch files
+TestLLMAPIsProgram.cs
+
+# ── Root debris prevention (Phase 65 HYGN-03/HYGN-04) ──────────────
+
+# ── Intentional root assets (DO NOT ignore these) ──────────────────
+# Tracked root files verified as intentional (Phase 65 audit):
+#   libraries.csv, ie_volume_map.json, primary_ie_map.json
+#   Help.html, icon.ico, version_info.txt
+#   ANTIVIRUS_INFO.txt, CompileScriptGenizah.iss
+#   oxford_full_db.json, cambridge_genizah.json (tracked data files)
+#   All *.py source files, README.md, CHANGELOG.md, CLAUDE.md
+#   requirements.txt, ruff.toml, .gitignore
+# If adding new ignore patterns, verify they don't match these files.
+
+# Debug / scratch files (underscore-prefixed temp files)
+/_*.txt
+/_*.log
+/_*.js
+/_*.md
+/_*.json
+
+# Backup and temp files
+/*.bak
+/*.tmp.*
+/genizah_app.py.tmp.*
+
+# Translation pipeline checkpoints
+/translate_*_checkpoint.json
+/translate_*_log.txt
+
+# Performance / diagnostic reports
+/psi_*.json
+/battery-report.html
+/crash_log*.txt
+
+# Data backups and one-off imports
+/libraries_backup_*.csv
+/libraries_fixed.csv
+/libraries_translations_backup*.db
+/libraries_translations_clean.db
+/libraries_translations_new.db
+/fist_gap_*.txt
+/fist_gap_*.csv
+/fist_domains.db
+/char_merges_*.xlsx
+
+# Extension build outputs (dist/ already covered above; root zips)
+/genizah-extension-*.zip
+
+# FreeFileSync database
+/sync.ffs_db
+
+# SQLite WAL/journal artifacts (runtime-generated, not source)
+/*.db-shm
+/*.db-wal
+/*.db-journal
+
+# Large data/DB files (local-only, not tracked in git)
+/FIST.db
+/FIST_Computed_Measurements.xlsx
+/fjms_enrichment.db
+/nli_crossref.db
+/pgp.db
+/libraries_translations.db
+
+# Legacy data files (unreferenced in codebase as of Phase 65 audit).
+# bodleian_master_index.csv is tracked AND bundled by GenizahSearchPro.spec although no code
+# reads it; dropping it from the spec is an owner call (Round 2 backlog). The rule below is
+# inert for the tracked file and is negated again at the end of this file.
+/bodleian_master_index.csv
+/CrossReference_Final.csv
+/nli_crossreference.csv
+
+# Test/sample scratch files (unreferenced in code or tests)
+/sample_*.txt
+/pgp_sample_*.txt
+/test_*.txt
+/shelfmark_mismatch_report.txt
+
+# Debug/smoke scripts (development scratch — not committed)
+/debug_smoke*.py
+/debug_*.py
+
+# Scratch / working directory — review briefs, CI watch logs, probes, diffs, patches.
+# Never committed.
+/_tmp/
+
+# Local research workspace, never committed
+same_work_spike/
+
+# Local research tooling (never commit)
+corpus_mapper/
+corpus_mapper_output/
+
+# Local pattern-list file for an internal content-safety scan. NEVER commit this file.
+/.masking_patterns
+
+# Keyed attestation material for the content-safety scan. Env-held, gitignored;
+# rotating it invalidates every previously recorded attestation, so it is not
+# rotated casually.
+/.masking_attest_key
+
+# Phase 133 baked atlas asset (offline bake output). Lives OUTSIDE web/static/
+# on purpose -- the /static mount at web/main.py:740 serves web/static/
+# publicly, which would let the asset bypass the atlas-preview feature flag.
+# scp'd to the server like the other sidecar DBs; never committed.
+/atlas_data/
+
+# Phase 134 (Discovery Data Spine) built sidecar payload: discovery.db (+ any
+# schema-versioned siblings) plus the offline distillation's review/frame
+# artifacts. Never commit the built .db -- like the other sidecar DBs
+# (pgp.db, fjms_enrichment.db, atlas_data/), it is scp'd to the server /
+# bundled with the desktop installer, not tracked in git (DATA-08 deploy
+# posture: temp upload -> verify -> atomic rename -> code deploy).
+/discovery_data/
+
+# Discovery BUILD depot: the intermediate and candidate artifacts a discovery
+# bake produces (reference corpora, match databases, private/public candidate
+# sidecars, preview copies, per-run manifests). Relocated here from /_tmp/ on
+# 2026-08-16 for one reason: /_tmp/ is this repo's SCRATCH directory -- CLAUDE.md
+# and scripts/init.ps1 both describe it as "working notes" and init.ps1 lists its
+# contents as ephemera -- and the V4 depot sitting in it included the local twin
+# of the artifact production serves, 10.9 GB whose content hash matches its own
+# asset_basename. Nothing had deleted it; the point is that clearing scratch is a
+# routine act and this was not scratch. Ignored for the same reason as
+# /discovery_data/: built payloads are scp'd, never committed. NOTE this is still
+# inside the working tree, so `git clean -xfd` would remove it exactly as it
+# would /discovery_data/ and /atlas_data/.
+/discovery_builds/
+
+# discovery-v3 bake run state (module kept in the private repository). Per-run,
+# per-machine progress ledgers + their interrupted-write temp files. Already
+# covered by the /discovery_data/ and /_tmp/ rules above, but named explicitly
+# and without a leading slash so a state file written to ANY directory is
+# ignored: it is per-machine run state that must never be committed, and it
+# can carry step names and messages.
+v3_bake_state*.json
+v3_bake_state*.json.*.tmp
+*.bake_state.json
+*.bake_state.json.*.tmp
+
+# Scratch transcripts from external review tools; never committed.
+tmp/CODEX-*
+tmp/codex_*
+/tmp/
+
+# ── Local research corpora, runtime sidecars, and root scratch ──
+# Ignoring only — nothing already tracked is untracked by this block.
+
+# Saved puzzle/join documents sidecar (joins.db + its WAL/SHM).
+# NEVER TRACK THIS — it is not merely hygiene, it is a data-loss guard.
+# PuzzleService creates the dir and schema at runtime (shared/puzzle_service.py
+# mkdir at ~L97), so the repo never needs to supply it; locally it is an empty
+# scratch DB. But on the WEB SERVER this same repo-root path holds the LIVE,
+# shared, user-created join documents (web/pages/puzzle.py ~L2247), and
+# deploy.sh runs `git reset --hard origin/$BRANCH`. reset --hard spares
+# untracked/ignored files but clobbers tracked ones — so a committed joins.db
+# would wipe every join users saved since that commit, on every deploy.
+# (Frozen desktop is unaffected: it uses %LOCALAPPDATA%\GenizahSearchPro\.)
+/joins_data/
+
+# PGP raw text dump (~317 MB), sibling of the already-ignored `pgp_data/*.db`
+# above. Scoped to the subdirectory: pgp_data/full_import_report.txt and
+# pgp_data/import_report.csv REMAIN TRACKED.
+pgp_data/pgp-text/
+
+# Desktop session backup of the Tantivy index directory — carries LocalIndex/,
+# app logs, and a config.pkl holding per-user desktop state. `Genizah_Index/`
+# is ignored above (the bare `Genizah_Index/` rule); this is the differently-named backup twin.
+/Genizah_Index.session-bak/
+
+# Ad-hoc analysis output directory (per-run subfolders).
+/outputs/
+
+# Joins Lab candidate exports — regenerated on demand by the lab's XLSX export.
+/joins_lab_candidates*.xlsx
+
+# cairo-genizah-research skill runtime state (self-throttle bookkeeping).
+# Narrow by design: the state/ directory's tracked .gitkeep must survive.
+skills/*/state/throttle.json
+
+# Local passage-index build + evaluation output (parallel-search work). Multi-GB and
+# machine-local; added 2026-08-20 after a release-time `git add -A` would have staged
+# 3.6 GB of it from the repo root while a job was still writing to it.
+passage_index/
+
+# Work/author correction sheets for the private review artifact: generated from
+# the db by scripts/export_work_authors.py and scripts/report_author_issues.py,
+# edited by the owner, applied by scripts/apply_work_author_rulings.py. Every
+# applied ruling lives in the artifact's own `work_author_ruling` table, so
+# these files are working copies, not a record -- and they carry reference-work
+# titles, which do not belong in the repo.
+/work_authors*.csv
+
+# Generated by a scheduler script kept in the private repository: absolute paths to
+# ONE machine's python and repo, so it is per-machine, not shared.
+scripts/nightly_verify_review_artifact.cmd
+scripts/nightly_verify_search_combinations.cmd
+
+# ── Tracked files that an earlier blanket rule above also matches (2026-09-18) ──────
+# An ignore rule is inert for a path git already tracks, so these have been fine -- until
+# one is deleted and regenerated, or a clean clone tries to `git add` it: then the blanket
+# rule wins silently. Negating them here (after every rule that matches them) keeps them
+# addable. Verify with `git check-ignore --no-index -v <path>` (prints nothing = addable).
+!/GenizahSearchPro.spec
+!/char_merges_report.xlsx
+!/fist_gap_rows.csv
+!/fist_gap_manifest.txt
+!/bodleian_master_index.csv
+!/reports/leading_zero_collisions.csv
+!/reports/synthetic_parent_shelfmarks.csv
+!/reports/cudl_full_normalization_collisions.csv
+!/reports/cudl_resolution_changes_2026-10-29.csv
+
+# Written by deploy.sh on the server AFTER a successful restart: the revision the
+# running genizah-web actually loaded. Per-machine runtime state, never committed.
+/.deployed_revision
+
+# Blau dictionary sidecar (docs/plans/BLAU_DICTIONARY_PLAN.md): the download under
+# blau_data/download/ is untrusted third-party data fetched by hand, and blau.db is the
+# build artifact of scripts/build_blau_sidecar.py, deployed like the other *_data/ sidecars.
+blau_data/
+
+# Arabic dictionary sidecar (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md, phase A): the download
+# under arabic_data/download/ is untrusted third-party data fetched by scripts/build_arabic_sidecar.py
+# fetch, and arabic.db is its build artifact, deployed like the other *_data/ sidecars.
+arabic_data/
+
+# Friedman dictionary source archive and extraction candidates (not a served sidecar).
+friedman_data/
+
+# Catalogue text search sidecar (docs/plans/CATALOGUE_TEXT_SEARCH_PLAN.md): catalog_text.db is
+# DERIVED by scripts/build_catalog_text_sidecar.py from the FJMS and PGP sidecars, libraries.csv and
+# libraries_translations.db, rebuilt after every refresh of any of them; never committed.
+catalog_data/
+
+# Private material lives in the private repository checked out BESIDE this one, never here.
+.planning/
+GenizahSearch-private/
+# Kept in the private repository at the same path; scripts/generate_fist_gap_csv.py writes it here.
+/fist_gap_ambiguous_titles.txt
+# The owner-held discovery precision spec, copied into the checkout root on the server.
+/discovery_precision_spec.json
+# Environment files and keys: only the *.example templates are tracked.
+.env.*
+!.env*.example
+*.pem
+*.key
+id_rsa*

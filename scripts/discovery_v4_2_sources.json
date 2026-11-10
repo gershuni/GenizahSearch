@@ -1,0 +1,1098 @@
+{
+  "schema_version": "discovery-v4-sources-v1",
+  "reference_namespace": "REF6",
+  "license_allowlist": [
+    "Public Domain",
+    "CC0",
+    "CC-BY",
+    "CC-BY-SA"
+  ],
+  "minimum_hebrew_letters": 1000,
+  "note": "V4.2 REF6 source expansion (docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md), condition C7. Carries the 15 Mishneh Torah book-grain multi-text containers (w000174-w000188) plus the post-sitting (2026-08-16) private_sibling additions: rabbeinu_chananel_bava_kamma (w000463), sifrei_zuta_bamidbar (w000524), ben_sira_alfa_beta_a (w001079), and kuzari_ibn_tibbon (w000194 -- the ibn Tibbon translation is its own work identity; Sefaria's Kuzari IS that translation). The halakhot_gedolot_intro and kinyan_torah entries planned pre-sitting were WITHDRAWN by owner rulings (already covered / locus-layer decision). The owner-approved public_first sources (scripts/discovery_v4_2_public_first_identities.json) are NOT here yet: they need the identity_mode/identity_key source-map extension first. Each container's ordered child list is copied verbatim, in order, from the measured probe at discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json -- it is FROZEN; live Sefaria ToC discovery may verify membership/order at fetch time but never silently redefines it. Same schema as scripts/discovery_v4_1_sources.json plus the container/license_ruling extension. UPDATE (2026-08-16, discovery-v4.2 C7/C8/C11/C12): 31 owner-approved public_first sources appended (scripts/discovery_v4_2_public_first_identities.json, pf-1001..pf-1035 minus 4 -- see below), each identity_mode public_first / no mappings. 3 daf_pages (Zohar, per-chelek: link_prefix has NO \"דף\" token, confirmed live 2026-08-16), 17 sefaria (8 mode schema_leaves + locus_grain section, 9 direct), 2 plain hewikisource (1 ToC cluster, 1 single text page), 3 hewikisource ToC clusters with exclude_pages (the Tur trap: a Hebrew word or a live redirect twin gematria-collides with a real siman's ordinal), 5 hewikisource page_clusters (baal_haturim_torah/rashbam_torah: 5 Torah-order book clusters each; yad_rama_talmud: 2 Shas-order tractates; semag: Lo Ta'aseh then Aseh; ran_al_harif: 14 Shas-order tractates, נדרים via its own sub-index page), plus torat_haadam (single cluster + exclude_pages for the one unwritten gate, locus_grain section so the gate names survive as labels). A page_clusters source with a residual aspirational (unwritten) ToC link fails CLOSED at acquisition -- the public_first completeness gate names every missing page, and the fix is an explicit exclude_pages addition here, never a silent skip. NOT authored -- approved, no viable route 2026-08-16: pf-1013 (כפתור ופרח, ~2% of its ToC is actually written), pf-1015 (מגדל עוז, ~4% written, a 4-level structure unlike every other work here), pf-1031 (תוספות ישנים, ~8% written, thin and uneven per-tractate coverage). NOT authored -- approved, route NOT PINNABLE YET: pf-1032 (תוספות רי\"ד -- ~319 real pages exist under the long \"...על הש\"ס/<tractate>/פרק\" title scheme, but a live spot-check 2026-08-16 showed the main ToC page links NONE of them (0 selected per cluster) and the per-tractate sub-index pages link only their first perek; the work needs a dedicated route probe, possibly an apprefix-enumeration acquisition mode, before an entry can be authored).",
+  "sources": [
+    {
+      "key": "mishneh_torah_introduction",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "transmission_of_the_oral_law",
+          "source_ref": "Mishneh Torah, Transmission of the Oral Law"
+        },
+        {
+          "child_key": "positive_mitzvot",
+          "source_ref": "Mishneh Torah, Positive Mitzvot"
+        },
+        {
+          "child_key": "negative_mitzvot",
+          "source_ref": "Mishneh Torah, Negative Mitzvot"
+        },
+        {
+          "child_key": "overview_of_mishneh_torah_contents",
+          "source_ref": "Mishneh Torah, Overview of Mishneh Torah Contents"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000174"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_madda",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "foundations_of_the_torah",
+          "source_ref": "Mishneh Torah, Foundations of the Torah"
+        },
+        {
+          "child_key": "human_dispositions",
+          "source_ref": "Mishneh Torah, Human Dispositions"
+        },
+        {
+          "child_key": "torah_study",
+          "source_ref": "Mishneh Torah, Torah Study"
+        },
+        {
+          "child_key": "foreign_worship_and_customs_of_the_nations",
+          "source_ref": "Mishneh Torah, Foreign Worship and Customs of the Nations"
+        },
+        {
+          "child_key": "repentance",
+          "source_ref": "Mishneh Torah, Repentance"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000175"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_ahavah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "reading_the_shema",
+          "source_ref": "Mishneh Torah, Reading the Shema"
+        },
+        {
+          "child_key": "prayer_and_the_priestly_blessing",
+          "source_ref": "Mishneh Torah, Prayer and the Priestly Blessing"
+        },
+        {
+          "child_key": "tefillin_mezuzah_and_the_torah_scroll",
+          "source_ref": "Mishneh Torah, Tefillin, Mezuzah and the Torah Scroll"
+        },
+        {
+          "child_key": "fringes",
+          "source_ref": "Mishneh Torah, Fringes"
+        },
+        {
+          "child_key": "blessings",
+          "source_ref": "Mishneh Torah, Blessings"
+        },
+        {
+          "child_key": "circumcision",
+          "source_ref": "Mishneh Torah, Circumcision"
+        },
+        {
+          "child_key": "the_order_of_prayer",
+          "source_ref": "Mishneh Torah, The Order of Prayer"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000176"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_zemanim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "sabbath",
+          "source_ref": "Mishneh Torah, Sabbath"
+        },
+        {
+          "child_key": "eruvin",
+          "source_ref": "Mishneh Torah, Eruvin"
+        },
+        {
+          "child_key": "rest_on_the_tenth_of_tishrei",
+          "source_ref": "Mishneh Torah, Rest on the Tenth of Tishrei"
+        },
+        {
+          "child_key": "rest_on_a_holiday",
+          "source_ref": "Mishneh Torah, Rest on a Holiday"
+        },
+        {
+          "child_key": "leavened_and_unleavened_bread",
+          "source_ref": "Mishneh Torah, Leavened and Unleavened Bread"
+        },
+        {
+          "child_key": "shofar_sukkah_and_lulav",
+          "source_ref": "Mishneh Torah, Shofar, Sukkah and Lulav"
+        },
+        {
+          "child_key": "sheqel_dues",
+          "source_ref": "Mishneh Torah, Sheqel Dues"
+        },
+        {
+          "child_key": "sanctification_of_the_new_month",
+          "source_ref": "Mishneh Torah, Sanctification of the New Month"
+        },
+        {
+          "child_key": "fasts",
+          "source_ref": "Mishneh Torah, Fasts"
+        },
+        {
+          "child_key": "scroll_of_esther_and_hanukkah",
+          "source_ref": "Mishneh Torah, Scroll of Esther and Hanukkah"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000177"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_nashim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "marriage",
+          "source_ref": "Mishneh Torah, Marriage"
+        },
+        {
+          "child_key": "divorce",
+          "source_ref": "Mishneh Torah, Divorce"
+        },
+        {
+          "child_key": "levirate_marriage_and_release",
+          "source_ref": "Mishneh Torah, Levirate Marriage and Release"
+        },
+        {
+          "child_key": "virgin_maiden",
+          "source_ref": "Mishneh Torah, Virgin Maiden"
+        },
+        {
+          "child_key": "woman_suspected_of_infidelity",
+          "source_ref": "Mishneh Torah, Woman Suspected of Infidelity"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000178"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_kedushah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "forbidden_intercourse",
+          "source_ref": "Mishneh Torah, Forbidden Intercourse"
+        },
+        {
+          "child_key": "forbidden_foods",
+          "source_ref": "Mishneh Torah, Forbidden Foods"
+        },
+        {
+          "child_key": "ritual_slaughter",
+          "source_ref": "Mishneh Torah, Ritual Slaughter"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000179"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_haflaah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "oaths",
+          "source_ref": "Mishneh Torah, Oaths"
+        },
+        {
+          "child_key": "vows",
+          "source_ref": "Mishneh Torah, Vows"
+        },
+        {
+          "child_key": "nazariteship",
+          "source_ref": "Mishneh Torah, Nazariteship"
+        },
+        {
+          "child_key": "appraisals_and_devoted_property",
+          "source_ref": "Mishneh Torah, Appraisals and Devoted Property"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000180"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_zeraim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "diverse_species",
+          "source_ref": "Mishneh Torah, Diverse Species"
+        },
+        {
+          "child_key": "gifts_to_the_poor",
+          "source_ref": "Mishneh Torah, Gifts to the Poor"
+        },
+        {
+          "child_key": "heave_offerings",
+          "source_ref": "Mishneh Torah, Heave Offerings"
+        },
+        {
+          "child_key": "tithes",
+          "source_ref": "Mishneh Torah, Tithes"
+        },
+        {
+          "child_key": "second_tithes_and_fourth_year_s_fruit",
+          "source_ref": "Mishneh Torah, Second Tithes and Fourth Year's Fruit"
+        },
+        {
+          "child_key": "first_fruits_and_other_gifts_to_priests_outside_the_sanctuary",
+          "source_ref": "Mishneh Torah, First Fruits and other Gifts to Priests Outside the Sanctuary"
+        },
+        {
+          "child_key": "sabbatical_year_and_the_jubilee",
+          "source_ref": "Mishneh Torah, Sabbatical Year and the Jubilee"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000181"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_avodah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "the_chosen_temple",
+          "source_ref": "Mishneh Torah, The Chosen Temple"
+        },
+        {
+          "child_key": "vessels_of_the_sanctuary_and_those_who_serve_therein",
+          "source_ref": "Mishneh Torah, Vessels of the Sanctuary and Those Who Serve Therein"
+        },
+        {
+          "child_key": "admission_into_the_sanctuary",
+          "source_ref": "Mishneh Torah, Admission into the Sanctuary"
+        },
+        {
+          "child_key": "things_forbidden_on_the_altar",
+          "source_ref": "Mishneh Torah, Things Forbidden on the Altar"
+        },
+        {
+          "child_key": "sacrificial_procedure",
+          "source_ref": "Mishneh Torah, Sacrificial Procedure"
+        },
+        {
+          "child_key": "daily_offerings_and_additional_offerings",
+          "source_ref": "Mishneh Torah, Daily Offerings and Additional Offerings"
+        },
+        {
+          "child_key": "sacrifices_rendered_unfit",
+          "source_ref": "Mishneh Torah, Sacrifices Rendered Unfit"
+        },
+        {
+          "child_key": "service_on_the_day_of_atonement",
+          "source_ref": "Mishneh Torah, Service on the Day of Atonement"
+        },
+        {
+          "child_key": "trespass",
+          "source_ref": "Mishneh Torah, Trespass"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000182"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_korbanot",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "paschal_offering",
+          "source_ref": "Mishneh Torah, Paschal Offering"
+        },
+        {
+          "child_key": "festival_offering",
+          "source_ref": "Mishneh Torah, Festival Offering"
+        },
+        {
+          "child_key": "firstlings",
+          "source_ref": "Mishneh Torah, Firstlings"
+        },
+        {
+          "child_key": "offerings_for_unintentional_transgressions",
+          "source_ref": "Mishneh Torah, Offerings for Unintentional Transgressions"
+        },
+        {
+          "child_key": "offerings_for_those_with_incomplete_atonement",
+          "source_ref": "Mishneh Torah, Offerings for Those with Incomplete Atonement"
+        },
+        {
+          "child_key": "substitution",
+          "source_ref": "Mishneh Torah, Substitution"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000183"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_taharah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "defilement_by_a_corpse",
+          "source_ref": "Mishneh Torah, Defilement by a Corpse"
+        },
+        {
+          "child_key": "red_heifer",
+          "source_ref": "Mishneh Torah, Red Heifer"
+        },
+        {
+          "child_key": "defilement_by_leprosy",
+          "source_ref": "Mishneh Torah, Defilement by Leprosy"
+        },
+        {
+          "child_key": "those_who_defile_bed_or_seat",
+          "source_ref": "Mishneh Torah, Those Who Defile Bed or Seat"
+        },
+        {
+          "child_key": "other_sources_of_defilement",
+          "source_ref": "Mishneh Torah, Other Sources of Defilement"
+        },
+        {
+          "child_key": "defilement_of_foods",
+          "source_ref": "Mishneh Torah, Defilement of Foods"
+        },
+        {
+          "child_key": "vessels",
+          "source_ref": "Mishneh Torah, Vessels"
+        },
+        {
+          "child_key": "immersion_pools",
+          "source_ref": "Mishneh Torah, Immersion Pools"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000184"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_nezikim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "damages_to_property",
+          "source_ref": "Mishneh Torah, Damages to Property"
+        },
+        {
+          "child_key": "theft",
+          "source_ref": "Mishneh Torah, Theft"
+        },
+        {
+          "child_key": "robbery_and_lost_property",
+          "source_ref": "Mishneh Torah, Robbery and Lost Property"
+        },
+        {
+          "child_key": "one_who_injures_a_person_or_property",
+          "source_ref": "Mishneh Torah, One Who Injures a Person or Property"
+        },
+        {
+          "child_key": "murderer_and_the_preservation_of_life",
+          "source_ref": "Mishneh Torah, Murderer and the Preservation of Life"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000185"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_kinyan",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "sales",
+          "source_ref": "Mishneh Torah, Sales"
+        },
+        {
+          "child_key": "ownerless_property_and_gifts",
+          "source_ref": "Mishneh Torah, Ownerless Property and Gifts"
+        },
+        {
+          "child_key": "neighbors",
+          "source_ref": "Mishneh Torah, Neighbors"
+        },
+        {
+          "child_key": "agents_and_partners",
+          "source_ref": "Mishneh Torah, Agents and Partners"
+        },
+        {
+          "child_key": "slaves",
+          "source_ref": "Mishneh Torah, Slaves"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000186"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_mishpatim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "hiring",
+          "source_ref": "Mishneh Torah, Hiring"
+        },
+        {
+          "child_key": "borrowing_and_deposit",
+          "source_ref": "Mishneh Torah, Borrowing and Deposit"
+        },
+        {
+          "child_key": "creditor_and_debtor",
+          "source_ref": "Mishneh Torah, Creditor and Debtor"
+        },
+        {
+          "child_key": "plaintiff_and_defendant",
+          "source_ref": "Mishneh Torah, Plaintiff and Defendant"
+        },
+        {
+          "child_key": "inheritances",
+          "source_ref": "Mishneh Torah, Inheritances"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000187"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_shoftim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "the_sanhedrin_and_the_penalties_within_their_jurisdiction",
+          "source_ref": "Mishneh Torah, The Sanhedrin and the Penalties within Their Jurisdiction"
+        },
+        {
+          "child_key": "testimony",
+          "source_ref": "Mishneh Torah, Testimony"
+        },
+        {
+          "child_key": "rebels",
+          "source_ref": "Mishneh Torah, Rebels"
+        },
+        {
+          "child_key": "mourning",
+          "source_ref": "Mishneh Torah, Mourning"
+        },
+        {
+          "child_key": "kings_and_wars",
+          "source_ref": "Mishneh Torah, Kings and Wars"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000188"
+        }
+      ]
+    },
+    {
+      "key": "rabbeinu_chananel_bava_kamma",
+      "provider": "sefaria",
+      "source_ref": "Rabbeinu Chananel on Bava Kamma",
+      "locus_grain": "daf_bavli",
+      "mappings": [
+        {
+          "target_work_id": "w000463"
+        }
+      ]
+    },
+    {
+      "key": "sifrei_zuta_bamidbar",
+      "provider": "sefaria",
+      "source_ref": "Sifrei Zuta",
+      "mappings": [
+        {
+          "target_work_id": "w000524"
+        }
+      ]
+    },
+    {
+      "key": "ben_sira_alfa_beta_a",
+      "provider": "hewikisource",
+      "source_ref": "אלפא ביתא דבן סירא (נוסח א)",
+      "mappings": [
+        {
+          "target_work_id": "w001079"
+        }
+      ]
+    },
+    {
+      "key": "kuzari_ibn_tibbon",
+      "provider": "sefaria",
+      "source_ref": "Kuzari",
+      "version_title": "Sefer haKuzari - Project Ben-Yehuda",
+      "mappings": [
+        {
+          "target_work_id": "w000194"
+        }
+      ]
+    },
+    {
+      "key": "zohar_chelek_a",
+      "provider": "hewikisource",
+      "mode": "daf_pages",
+      "link_prefix": "זהר חלק א",
+      "daf_range": [
+        1,
+        250
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1021"
+    },
+    {
+      "key": "zohar_chelek_b",
+      "provider": "hewikisource",
+      "mode": "daf_pages",
+      "link_prefix": "זהר חלק ב",
+      "daf_range": [
+        2,
+        268
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1022"
+    },
+    {
+      "key": "zohar_chelek_g",
+      "provider": "hewikisource",
+      "mode": "daf_pages",
+      "link_prefix": "זהר חלק ג",
+      "daf_range": [
+        2,
+        299
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1023"
+    },
+    {
+      "key": "ohr_zarua",
+      "provider": "sefaria",
+      "source_ref": "Ohr Zarua",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1001"
+    },
+    {
+      "key": "bekhor_shor",
+      "provider": "sefaria",
+      "source_ref": "Bekhor Shor",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1006"
+    },
+    {
+      "key": "baalei_hanefesh",
+      "provider": "sefaria",
+      "source_ref": "Ba'alei HaNefesh",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1008"
+    },
+    {
+      "key": "chizkuni",
+      "provider": "sefaria",
+      "source_ref": "Chizkuni",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1010"
+    },
+    {
+      "key": "kad_hakemach",
+      "provider": "sefaria",
+      "source_ref": "Kad HaKemach",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1012"
+    },
+    {
+      "key": "machzor_vitry",
+      "provider": "sefaria",
+      "source_ref": "Machzor Vitry",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1016"
+    },
+    {
+      "key": "emunot_vedeot_ibn_tibbon",
+      "provider": "sefaria",
+      "source_ref": "HaEmunot veHaDeot",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1020"
+    },
+    {
+      "key": "sefer_hamitzvot_hebrew",
+      "provider": "sefaria",
+      "source_ref": "Sefer HaMitzvot",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1024"
+    },
+    {
+      "key": "isur_veheter_lerashi",
+      "provider": "sefaria",
+      "source_ref": "איסור והיתר לרש\"י",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1002"
+    },
+    {
+      "key": "mivchar_hapeninim",
+      "provider": "sefaria",
+      "source_ref": "מבחר הפנינים",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1014"
+    },
+    {
+      "key": "mishnat_rabbi_eliezer",
+      "provider": "sefaria",
+      "source_ref": "משנת רבי אליעזר",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1017"
+    },
+    {
+      "key": "siddur_rashi",
+      "provider": "sefaria",
+      "source_ref": "סידור רש\"י",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1019"
+    },
+    {
+      "key": "pirkei_derabbi_eliezer",
+      "provider": "sefaria",
+      "source_ref": "Pirkei DeRabbi Eliezer",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1027"
+    },
+    {
+      "key": "shibolei_haleket",
+      "provider": "sefaria",
+      "source_ref": "שבלי הלקט",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1029"
+    },
+    {
+      "key": "shulchan_shel_arba",
+      "provider": "sefaria",
+      "source_ref": "שלחן של ארבע",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1030"
+    },
+    {
+      "key": "tashbetz_katan",
+      "provider": "sefaria",
+      "source_ref": "תשב\"ץ קטן",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1034"
+    },
+    {
+      "key": "teshuvot_hageonim_harkavy",
+      "provider": "sefaria",
+      "source_ref": "תשובות הגאונים (הרכבי)",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1035"
+    },
+    {
+      "key": "drashot_haran",
+      "provider": "hewikisource",
+      "source_ref": "דרשות הר\"ן",
+      "link_prefix": "דרשות הר\"ן ",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1009"
+    },
+    {
+      "key": "seder_tannaim_veamoraim",
+      "provider": "hewikisource",
+      "source_ref": "סדר תנאים ואמוראים",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1018"
+    },
+    {
+      "key": "tur_even_haezer",
+      "provider": "hewikisource",
+      "source_ref": "טור אבן העזר",
+      "link_prefix": "טור אבן העזר ",
+      "exclude_pages": [
+        "טור אבן העזר הקדמה"
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1003"
+    },
+    {
+      "key": "tur_choshen_mishpat",
+      "provider": "hewikisource",
+      "source_ref": "טור חושן משפט",
+      "link_prefix": "טור חושן משפט ",
+      "exclude_pages": [
+        "טור חושן משפט שד"
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1004"
+    },
+    {
+      "key": "tur_yoreh_deah",
+      "provider": "hewikisource",
+      "source_ref": "טור יורה דעה",
+      "link_prefix": "טור יורה דעה ",
+      "exclude_pages": [
+        "טור יורה דעה שד"
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1005"
+    },
+    {
+      "key": "baal_haturim_torah",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/בראשית/",
+          "exclude_pages": [
+            "בעל הטורים על התורה/בראשית/ו"
+          ]
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/שמות/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/ויקרא/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/במדבר/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/דברים/"
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1007"
+    },
+    {
+      "key": "rashbam_torah",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "רשב\"ם על בראשית",
+          "link_prefix": "רשב\"ם על בראשית "
+        },
+        {
+          "toc_page": "רשב\"ם על שמות",
+          "link_prefix": "רשב\"ם על שמות "
+        },
+        {
+          "toc_page": "רשב\"ם על ויקרא",
+          "link_prefix": "רשב\"ם על ויקרא "
+        },
+        {
+          "toc_page": "רשב\"ם על במדבר",
+          "link_prefix": "רשב\"ם על במדבר "
+        },
+        {
+          "toc_page": "רשב\"ם על דברים",
+          "link_prefix": "רשב\"ם על דברים "
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1026"
+    },
+    {
+      "key": "yad_rama_talmud",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "יד רמ\"ה על הש\"ס",
+          "link_prefix": "יד רמ\"ה על הש\"ס/בבא בתרא/פרק "
+        },
+        {
+          "toc_page": "יד רמ\"ה על הש\"ס",
+          "link_prefix": "יד רמ\"ה על הש\"ס/סנהדרין/פרק ",
+          "exclude_pages": [
+            "יד רמ\"ה על הש\"ס/סנהדרין/פרק י"
+          ]
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1011"
+    },
+    {
+      "key": "semag",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "סמ\"ג",
+          "link_prefix": "סמ\"ג לאו "
+        },
+        {
+          "toc_page": "סמ\"ג",
+          "link_prefix": "סמ\"ג עשה "
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1025"
+    },
+    {
+      "key": "ran_al_harif",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/שבת/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/פסחים/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/סוכה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/ביצה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/ראש השנה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/תענית/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/מגילה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/כתובות/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על נדרים",
+          "link_prefix": "ר\"ן על נדרים/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/גיטין/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/קידושין/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/שבועות/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/עבודה זרה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/חולין/פרק ",
+          "exclude_pages": [
+            "ר\"ן על הרי\"ף/חולין/פרק ג",
+            "ר\"ן על הרי\"ף/חולין/פרק ד",
+            "ר\"ן על הרי\"ף/חולין/פרק ה",
+            "ר\"ן על הרי\"ף/חולין/פרק ו",
+            "ר\"ן על הרי\"ף/חולין/פרק ח",
+            "ר\"ן על הרי\"ף/חולין/פרק ט",
+            "ר\"ן על הרי\"ף/חולין/פרק י",
+            "ר\"ן על הרי\"ף/חולין/פרק יא",
+            "ר\"ן על הרי\"ף/חולין/פרק יב"
+          ]
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1028"
+    },
+    {
+      "key": "torat_haadam",
+      "provider": "hewikisource",
+      "source_ref": "תורת האדם",
+      "link_prefix": "תורת האדם/שער ",
+      "exclude_pages": [
+        "תורת האדם/שער הסוף"
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1033"
+    }
+  ]
+}

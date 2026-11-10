@@ -1,0 +1,7394 @@
+# Changelog
+
+All notable changes to Dicta Genizah Search Pro will be documented in this file.
+
+This repository was restarted from a single commit in November 2026. Commit ids and pull-request
+numbers cited in the entries for 9.15.0 and earlier refer to the project's earlier repository,
+which is not public.
+
+---
+
+## [9.15.0] - 2026-11-08 — Friedman's dictionary and expression search
+
+Web only (no installer, no GitHub Release). Friedman's Judeo-Arabic dictionary as a tab of the /browse
+dictionary panel, beside Blau's (#487), and the expression search in Blau's and Friedman's dictionaries
+(#488); API error messages read alike and bibliography page ranges parse correctly (#486); the desktop
+What's New dialog laid out right-to-left in Hebrew (#489, in the next installer). Two sidecars go to the
+server AFTER the code: `scripts/deploy_blau_sidecar.ps1 -Roots 3047 -Forms 12753 -Tokens 242503` (Blau
+1.1.0, the tokens table) and `scripts/deploy_friedman_sidecar.ps1 -Units 7797 -IndexRows 3292 -Tokens 198096`,
+then `FRIEDMAN_DICTIONARY_ENABLED=1` in the server's `.env`. The Help page and the tab say the text is a
+machine reading of the dictionary's files and may contain errors. Web What's New "9.15.0-friedman", shown
+once Friedman's dictionary is served; no desktop What's New.
+
+### Friedman's Judeo-Arabic dictionary (#487)
+
+
+M. A. Friedman's *Dictionary of Medieval Judeo-Arabic for the India Book documents and other
+texts* (Jerusalem 2016) as its own tab of the `/browse` dictionary panel, beside Blau's and before Lane's,
+behind `FRIEDMAN_DICTIONARY_ENABLED` (default off). A word clicked on the page finds the entries
+whose head, root or index form it matches; several selected or typed words run an expression
+search: in order, with a chosen gap of 0-5 words between them, clitic alternatives on either
+side, and the hits in tiers (the entry whose own head is the expression first, then the entries
+whose head holds its words, then the rest; an expression of function words only is shown among
+the rest only where its words stand together). Every hit says which printed word carried which
+typed word, and links to the printed page.
+
+Served from a new sidecar, `friedman_data/friedman.db`, cut by typography from the author's
+PDFs: `scripts/prepare_friedman_dictionary.py` (the archive), `scripts/friedman_units.py` (the
+units), `scripts/friedman_index.py` (the book's index of forms) and
+`scripts/build_friedman_sidecar.py`, each with a `verify` gate; `scripts/evaluate_friedman.py`
+measures the search against the book and writes a scholar's grading sheet;
+`scripts/verify_friedman_sidecar.py` is the deploy gate on the file alone and
+`scripts/deploy_friedman_sidecar.ps1` puts it on the server (owner). The data is a typographic
+candidate: a machine reading of the dictionary's files that may contain errors, as the tab and
+the Help page say.
+
+### Shared
+- `shared/friedman_service.py`: the sidecar reader (fail-closed on schema, status, normalizer
+  and recovery versions, the credit line and `quick_check`), the single-word lookup and the
+  expression search; `word_keys` and `scope_keys` key the builder and the reader one way.
+
+### Web
+- `web/components/friedman_panel.py`: the tab, the gap control, the hits with their matched
+  words marked; `web/components/blau_panel.py` and `web/pages/browse.py` give the panel its Friedman
+  tab and the gap setting; `web/static/common.css` styles it.
+
+### The expression search in Blau's dictionary (#488)
+
+Several words selected on `/browse`, or typed in the dictionary panel's box, now search Joshua
+Blau's dictionary as an expression, as they search Friedman's: every entry (or sub-entry) whose
+name or quoted citation holds the words in that order, with a chosen gap of 0-5 words between
+them and clitic alternatives on either side, in tiers (the entry whose own name is the
+expression, then the entries whose name holds its words, then the citations; an expression of
+function words only is shown among the rest only where its words stand together), every place
+saying which printed word carried which typed word, a citation with its translation, the form it
+illustrates and its locator. Before, several words found only an entry name equal to the whole
+phrase. One gap control serves both dictionaries' tabs, and the Help page's dictionary bullet
+names the dictionaries that have the search.
+
+The search runs on a `tokens` table added to the Blau sidecar (schema 1.1.0, 242,503 rows,
+keyed by `shared/ja_expression.py`, the keying and matching Friedman's sidecar uses; the gate
+`scripts/verify_blau_sidecar.py` recomputes every row and takes `--expect-tokens`). The reader
+still serves a 1.0.0 file, without the expression search, so the code goes to the server first
+and the rebuilt file after it (`scripts/deploy_blau_sidecar.ps1 -Roots 3047 -Forms 12753
+-Tokens 242503`, owner). `GENIZAH_BLAU_DB_PATH` points a dev run at a candidate file.
+
+### Shared
+- `shared/ja_expression.py` (new): the keys (`word_keys`, `scope_keys`, `KEYING_VERSION`), the
+  matcher (`ordered_match`, the tightest occurrence) and the tiers (`tiered`), moved out of
+  `shared/friedman_service.py`, which imports them; `shared/blau_service.py`: `expression`,
+  `answer` (one word a lookup, several an expression), `BlauExpression` and its records,
+  `expressions_available`, `SERVED_SCHEMA_VERSIONS`.
+
+### Web
+- `web/components/expression_panel.py` (new): the gap control, the marks on the matched words
+  and the matched-word pairs, drawn alike in Friedman's tab and Blau's;
+  `web/components/blau_panel.py` draws Blau's expression hits; `web/pages/browse.py` sends
+  several words to `BlauService.answer`; `web/pages/help.py` names the dictionaries searched.
+
+## [9.14.0] - 2026-11-05 — Dictionaries and search improvements
+
+Judeo-Arabic dictionaries on /browse behind the reader's switch: Blau's dictionary (PRs #472 #473 #475) and
+Lane's Arabic-English Lexicon in its own tab (#477 #478 #480); a go-to box in the header and the homepage box
+routing by the /search recogniser (#476); the desktop Go to and "Did you mean" (#479); shelfmark lookups at once
+(#468); NLI catalogue records and manifests kept on disk (#470); zoom in the browser (#471); shelfmarks and
+wrong-layout Hebrew in the /search box (#469); sign-in dead ends (#463); API daily and interactive budgets
+(#466); /ai leads with the MCP server (#465); developer runs send no telemetry (#464); a link-opened search
+pinned (#467); no junctions into the main checkout (#474); the findings render harness (#481); What's New
+in every version (website page, API, desktop dialog and update notes) and the header box inside the header
+(#482); before the release, the dictionaries' look-up key (D or M, Alt + a click, a phone chip, Esc), a
+denser sidebar with an icon rail in the readers' order, a keyboard-shortcuts card, one sign-in button and the
+owner's Help Center corrections (#484); the data file of the coming catalogue text search, not served yet
+(#483); maintenance: the deploy scripts reach the server by the `genizah-prod` SSH alias, CI's token is
+read-only, and the PDF test fixtures are rebuilt the same way every time (#485). Web and desktop: installer
+9.14.0. Two new web sidecars, `blau_data/blau.db` and `arabic_data/arabic.db` (schema 1.0.0 each), deployed
+by `scripts/deploy_blau_sidecar.ps1` and `scripts/deploy_arabic_sidecar.ps1` after the code; not bundled in
+the installer. Web What's New "9.14.0-dictionaries"; no desktop What's New (content version stays 9.13.0);
+web Help (EN/HE) describes the dictionaries and their keys.
+
+### What's New in every version, and the update notice shows what changed (web + desktop, PR #482)
+
+Owner, 2026-11-05: a What's New for every version from 9.0.0, on the website and in the desktop app,
+and the desktop update notice showing the changes between the reader's version and the new one.
+
+- **One history, four surfaces.** `shared/whats_new_history.py` reads and checks the entries in
+  `shared/whats_new_data.py`: per release its date, the apps it shipped to, a title and its items,
+  each a new feature, an improvement or a fix, in English and Hebrew, with the app a reader sees it
+  in. The entries for 9.0.0-9.13.1 were written from each release's approved What's New texts, its
+  GitHub notes and its CHANGELOG section. `tests/test_whats_new_history.py` fails while
+  `version.APP_VERSION` has no entry, so each release adds its own. An entry newer than the running
+  app's version is not shown anywhere (it is written with the release texts, before the bump).
+- **Website:** `/whats-new` (`web/pages/whats_new.py`), linked from the header's What's New panel
+  ("What's New in every version"; the panel is not shown on the page itself), and in the static
+  sitemap. `GET /api/whats-new?since=&upto=&app=web|desktop` serves the same entries in both
+  languages, cacheable for an hour; a malformed version or app answers 400 `invalid_request`.
+- **Desktop:** "What's New in every version" in the side menu and the ☰ menu, and "All versions" in
+  the What's New dialog, open `desktop/version_history.py::VersionHistoryDialog` on the bundled
+  history. The update bar gains "What's new?", and a manual check that finds a newer version now
+  opens the same dialog in update mode: the changes since this copy's version, read from the website
+  in `ReleaseNotesThread` (an installed copy cannot know newer entries), with Update Now / Later; if
+  the website cannot answer, it says so and links the GitHub release page.
+- **The header's search box sits inside the header.** `q-py-none` lost to the header's own 16px
+  padding, so the 64px row sat 16px low and the 40px go-to box hung over the page below the header;
+  the header now sets no vertical padding inline (`tests/render_smoke/test_header_search_render_smoke.py`).
+
+- **The dictionary panel's disclaimer** now says Blau's dictionary records *mainly* (בעיקר) meanings
+  particular to Judeo-Arabic, not *only* (רק) (owner, 2026-11-05, with the Help text).
+
+Tests: `tests/test_whats_new_history.py` (entries, readers, the API, the dialog's HTML),
+`tests/test_version_history_qt.py` (the dialog, the update notes with the fetch stubbed, the bar,
+the manual-check call site).
+
+### The dictionaries' look-up key and phone chip, a denser sidebar with an icon rail, the shortcuts card, one sign-in button (web, PR #484)
+
+Owner, 2026-11-05, before 9.14.0. The sidebar order and the shortcuts work come from the readers'
+own use (PostHog, 30 days to 2026-11-05).
+
+- **Dictionaries without the switch.** On Browse, wherever a dictionary is served (the page marks
+  the pane `data-blau-pane`; `web/static/js/blau_lookup.js`):
+  - D or M tapped arms the next click, which looks up the word under it; held with a mouse, every
+    click while it is down. The owner's first test held M on a laptop touchpad and it failed:
+    Windows ignores the touchpad while a letter key is held. So a tap is enough, and Alt + a click
+    does the same (the touchpad is not blocked for Alt). The pointer shows `help` over the text
+    while armed.
+  - Words selected and D or M looks up the selection (its first six words with Hebrew letters,
+    line numbers and punctuation dropped).
+  - On a phone, selected words show a "Look up" chip under them (`data-blau-chip`, translated).
+  - Esc closes the panel, from its own box too.
+  - D and M by name, by the Hebrew letter, or by the physical key; never while a box has the focus,
+    a dialog or menu is open, or with Ctrl/Cmd. The switch's tooltip names the key under what
+    pressing it does. `dictionary_lookup` counts `how` = `key` / `alt` / `selection` / `chip`
+    beside `word` and `box`.
+- **Sidebar.** No "NAVIGATION" / "TOOLS" titles; rows 34px apart (were about 64); 256px wide (was
+  280) with no padding of its own. The order is the readers': Home, Search, Browse by Shelfmark,
+  Find Parallels, Browse by Identification, Joins Lab, Computed Identifications, Atlas, Fragment
+  Puzzle, Community, My Lists; then Start Here, About the Genizah, AI tools, Help Center, Download
+  App, Settings, Keyboard shortcuts. A button at its top collapses it to a 64px icon rail (Quasar's
+  `mini`; tooltips name the icons there, and every row has an `aria-label`), remembered per visitor
+  (`drawer_mini`); its arrows point the same way in both languages (the sidebar is at the left in
+  both). Below 1024px the overlay drawer is unchanged.
+- **Keyboard shortcuts.** `?`, or "Keyboard shortcuts" in the sidebar (Enter or Space), opens a card
+  listing them (`web/keyboard_shortcuts.py`, `web/static/js/shortcuts.js`, loaded with the layout);
+  `/` jumps to the page's search box (/search, the homepage) or the header's go-to box. Browse's
+  buttons name their keys in their tooltips. Fixed on Browse: F now works on a Hebrew layout;
+  Ctrl+F and Ctrl++ no longer also toggle full screen and zoom the image; the arrows follow the page
+  as the buttons do (in English, → is the next page; it was the previous); 0 resets the view. No
+  key reaches the page while a dialog or menu is open.
+- **Header.** Signed out, one "Sign in" button (its dialog has the Register tab). Signed in, the
+  account icon alone: the name heads its menu and is the icon's tooltip, and the menu gains My
+  Lists.
+- **Help Center** (`web/pages/help.py`, both languages): a section after the Introduction on the
+  keys, the icon rail and the one sign-in button (`help-shortcuts`), and in "Browse by Shelfmark"
+  the dictionaries (the owner's approved release bullet) and their look-up key, shown only where a
+  dictionary is served. The Hebrew reworded in 37 places the owner approved (among them "ניקוד"
+  for a match's score, "חלופי אותיות", "ה"א הידיעה הערבית", "צפיין", the calques "בקרים",
+  "ספינרים", "מגדירים", "קבוצות שורה", and one spelling each of שאילתה and מטא-נתונים); the
+  same sentences in the desktop `Help.html` follow. The volume selector's bullet loses its
+  release-note words in both languages, and the two old 🆕 marks go. The Hebrew introduction names
+  the site אתר הגניזה של דיקטה (owner). Fixed: a list under a line of text with no blank line
+  between rendered as one run-on paragraph, in some fifteen sections of both languages; every
+  block now goes through `_md`, which adds markdown2's `cuddled-lists`.
+- **The owner's Help corrections** (tracked changes in a Word copy of the Hebrew page, mirrored in
+  English): shorter Exact, Variants, Fuzzy and search-history entries, Regex points to Responsa
+  style, "Search only in..." says its data is FGP's and incomplete, the RNL example for the
+  library filter, "N" manuscripts vs results, tags instead of chips, a "deep" search depth, and
+  some sentences dropped (among them the My Library credit line, at the owner's edit). The
+  Hebrew syntax table shows each cell in its own direction: in left-to-right cells every prefix
+  (`#מילה`, `%מילה`, `*מילה`) read as a suffix to a Hebrew reader. The rail's arrows in the
+  Hebrew text sit in `<bdi dir="ltr">`, so they show as the buttons do. A confidence tier shows
+  only what was measured: no sample line of three "not yet measured", no audit line repeating
+  its status (`_measured_sample_parts`).
+- **Labels (owner):** the phone chip says "Look up in the dictionary" (חיפוש במילון); the
+  Parallels button "Add witness text" is הוספת עד נוסח (was הוספת נוסח עד); the account menu's
+  "Logout" is התנתקות (was התנתק), in both apps.
+- New strings: 16, all approved by the owner.
+
+### Catalogue text search, part 1: the data file (web + desktop, PR #483)
+
+The data layer of a new search over what the catalogues say about each manuscript
+(`docs/plans/CATALOGUE_TEXT_SEARCH_PLAN.md`, settled by the owner 2026-11-05). Nothing is
+served yet: no search mode, no page, no API change.
+
+- `scripts/build_catalog_text_sidecar.py` builds `catalog_data/catalog_text.db` (about 730 MB,
+  3.5 minutes) from the FJMS catalogue text and its automatic translations, the PGP English
+  descriptions, `libraries.csv` titles and their English translations: one row per record and
+  manuscript, its words in a contentless FTS5 index weighted title > description > full text.
+  PGP's Hebrew translations stay out (withheld since 2026-09-21). The work-title and author
+  translations, keyed by title id and author text, go to every manuscript that carries them;
+  placeholder titles and authors ("Unknown", לא ידוע, לא מזוהה) are left out.
+- `shared/catalog_text_normalize.py`: one key for text and query (nikud and accents dropped,
+  abbreviation quote marks dropped so רמב"ם = רמב״ם = רמבם, final letters folded, English made
+  singular), Hebrew prefixes on query words, quoted phrases, and no route from the query to FTS5
+  syntax.
+- `shared/catalog_text_service.py`: the fail-closed reader (one hit per manuscript, words as
+  typed before prefixed forms, originals before automatic translations, a translations switch,
+  snippets with the matched words marked); `CATALOG_TEXT_SEARCH_ENABLED`, default off.
+- `scripts/verify_catalog_text_sidecar.py`: the gate, shown failing on ten kinds of damage.
+- `scripts/sample_fjms_translations.py` and a two-reader audit of FJMS automatic translations
+  (decision D2): translations are searched, labelled, with a switch.
+
+### A closed research pool is never reused (web, PR #478)
+
+`web/research_jobs.py::shutdown_research` now resets the research queue and its wait pool after
+closing them, so a later lifespan in the same process builds fresh ones. Before, a test that ran the
+app's lifespan left a shut-down pool behind, and any later `/api/search` or `/api/parallels` test in
+that process answered 500 ("cannot schedule new futures after shutdown"). It surfaced when CI's chunks
+reshuffled on PR #478 (`tests/test_parallels_api.py`, then `tests/test_web_saved_joins_isolation.py`,
+then `tests/test_search_api_soak.py`). The server calls it once, at exit, so serving is unchanged.
+`tests/test_research_jobs.py::test_a_shutdown_leaves_no_closed_pool_behind` pins it.
+
+### A search box in the header, and the homepage box sends words to search (web, PR #476)
+
+- **Homepage box:** only a real shelfmark (`ts 20.57`, `add 3356`, the NLI catalogue form, a library-prefixed one) goes to Browse; a corpus system number still opens that manuscript; everything else -- English words, `Psalm 23`, Hebrew typed on the English layout (`dcuk`) -- goes to `/search`, which offers "Did you mean <Hebrew>?" for the last (#469). Before, all Latin text went to Browse as a shelfmark and ended on "No manuscript found" (PostHog review 2026-11-03). `web/home_query.py::home_query_target` now routes by the /search box's own recogniser (`web/search_box_input.py::search_box_input_kind`); bare numbers that are not a corpus system number are searched, not looked up. Latin text with a digit that the rules call text is first looked up in the catalogue (`MetadataManager.has_shelfmark`, a binary search of the Shelfmark search index built at server start), so `Mingana 9` and `P. Mich. Inv. 531` still open Browse. The recogniser (shared with /search) also takes a Roman numeral with a letter (`Moss. IIIa,20`), `=` and `_`, and accented catalogue names (Codex on #476): every one of the 715,473 digit-bearing libraries.csv shelfmark strings is now recognised or found (each record's other call numbers are in the index as 64-bit hashes, ~2.4 MB).
+- **Header box:** the old "Quick search..." box (text only, unencoded URL, hidden under 768px) is replaced by a go-to box with the homepage's routing, on every page, `/` and `/search` included (owner: a way to jump to any manuscript from anywhere), with the placeholder "Search text or go to a shelfmark..." ("חפשו טקסט או עברו למספר מדף...", the owner's Hebrew). From 1024px it sits in the header; below, a search button opens it across the bar (Esc or the close button folds it). On a phone the header groups keep to one line beside the button.
+- Tests: `tests/test_home_query_routing.py`, `tests/render_smoke/test_header_search_render_smoke.py`, `tests/test_phone_layout_rules.py`.
+
+### The dictionaries switch on /browse says what it is (web, PR #480)
+
+The owner found the click-a-word dictionaries too hidden: a grey `translate` icon in the version
+row, named only in a hover tooltip a phone never shows. Option A of the discussion
+(`docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1); ruling (c) stands: the reader still turns the
+dictionaries on, and nothing is guessed from the text or the catalogue.
+
+- **The letters עع** (Hebrew ʿayin beside Arabic ʿayn, the owner's choice) replace the icon, drawn
+  as outlines from Noto Sans Hebrew Bold and Noto Naskh Arabic Bold (SIL OFL), so they look the same
+  on every device and need no Arabic font (`web/components/blau_panel.py::GLYPH_SVG`).
+- **A label from 640px**, the owner's wording: "חדש! מילונים לערבית־יהודית!" / "New! Judeo-Arabic
+  dictionaries!", highlighted in amber, until the visitor first turns the dictionaries on; then
+  "מילונים לערבית־יהודית" / "Judeo-Arabic dictionaries" for good (`ui.dictionaries_seen`, cleared by
+  `/reset-hints`). On a phone, the letters alone: amber with a dot while new. The label is also
+  the switch's spoken name.
+- **The state colours show.** The switch was a Quasar `primary` button, whose `text-primary` is
+  `!important`, so its grey "off" rule never applied; it is created without a colour now.
+- **PostHog**, beside `browse_manuscript`: `dictionary_switch` {on, was_new}, `dictionary_lookup`
+  {how: word | box, blau, lane: found something}, `dictionary_tab` {tab}. The word is never sent.
+
+### The desktop Go to box searches words, and the Search tab offers "Did you mean <Hebrew>?" (desktop, PR #479)
+
+- **Go to (Ctrl+G / Ctrl+O):** routes as the website's homepage and header boxes do (#476): a system number (either namespace) or an FL number opens in Browse as before; a real shelfmark (`ts 20.57`, `add 3356`, the NLI catalogue form, or one the catalogue holds, `Mingana 9`) opens in Browse; everything else -- English words, `Psalm 23`, a bare number, Hebrew typed on the English layout (`dcuk`) -- runs as a text search in the Search tab. Before, every Latin-script line went to Browse as a shelfmark and ended on "No manuscript found". One rule for both apps: the recogniser moved from `web/search_box_input.py` to `shared/search_box_input.py`, with `go_to_kind` shared by `web/home_query.py` and `shared/quick_open.py`. The catalogue's Shelfmark search index is built in a background thread at start (it was built on the first Browse shelfmark lookup).
+- **"Did you mean <Hebrew>?"** under a text search (Exact, Variants, Fuzzy) that found nothing, when the query reads as Hebrew on the Hebrew keyboard layout and the corpus has those words (`SearchEngine.words_occur`, asked off the UI thread): shown inside the results box, where the rows would be; the Hebrew is a link that runs it in the same mode (as the website's /search, #469). Approved strings reused; no new strings.
+- The website's /search shelfmark auto-detect ("Searched as a shelfmark.") is not on the desktop Search tab: see the PR.
+- Tests: `tests/test_quick_open.py`, `tests/test_desktop_layout_suggestion.py`.
+
+### Blau's dictionary: the reader turns it on, and can type a word (web, PR #475)
+
+The owner's rulings of 2026-11-04 on the phase-2 companion of `docs/plans/BLAU_DICTIONARY_PLAN.md`:
+the page does not guess the text's language, a reader can type a word, and close spellings
+are not offered.
+
+- **The reader's switch.** On `/browse` a dictionary button (`translate`) sits in the version
+  row beside the line-number toggle. It is OFF by default, and the choice is remembered per
+  visitor (`ui.blau_lookup`). While it is off, the pane is not marked, there is no hint, and a
+  click on a word does nothing. While it is on, the hint shows, the pane's words are looked up,
+  and a "type a word" button (`keyboard`) opens the panel with an empty box.
+- **The box.** Every panel now has a box at its top holding the word it shows. Enter, or the
+  search button, looks up what the box holds, so a misread word can be corrected and looked up
+  again. A word typed in Arabic script is looked up against the entries', sub-entries' and
+  forms' Arabic spellings (`shared/blau_service.py::arabic_key`: `normalize_arabic`, the
+  extraction's broken spacing undone, ة/ه, ى/ي and the hamza seats folded; the conjunction and
+  the article peeled). This is an index built in memory on first use: the sidecar is unchanged.
+- **The MiDRASH project is credited** on every panel, under the print credit: the digital edition
+  is MiDRASH's, funded by the European Union (ERC, MiDRASH, 101071829), linked to the site's
+  about page, which names the team.
+- **A disclaimer on every panel** (the owner's words): Blau's dictionary records only meanings
+  particular to Judeo-Arabic; to look up verbs and inflected forms, type the root or the base
+  form. The empty answer stays short.
+- **The top loading bar** no longer runs on for 15 seconds after Enter in the dictionary box or
+  in the `/search` query box: Enter inside `[data-no-loading-bar]` does not start it
+  (`web/main.py`). Both boxes do their work in the page.
+- **The dot above.** A word now also reaches an entry whose name is several words and begins with
+  it: דלך shows ذلك (the entry "ד̇לך ו") beside دلك. A word written with the dot (an apostrophe or
+  geresh after ג ד ט צ ת כ, or U+0307) lists the dotted reading first and marks the others
+  "spelled without the dot"; the box's placeholder says "ד' for ד̇".
+- **The click script** asks the server to close only when something is open (the panel shown,
+  or a word marked), so with the switch off a click on the page sends nothing.
+- **Close spellings were measured and dropped.** Trying an unknown word with one letter swapped
+  (the HTR confusion pairs of `shared/unified_variants.py`) was built and measured against the
+  PGP Judeo-Arabic editions, aligned word by word with the automatic text of the same pages
+  (`scripts/measure_blau_close_spellings.py`). About 1 offer in 20 was right, at every word
+  length and pair count: most words with no entry were read correctly, and the dictionary simply
+  lacks them. The owner dropped the feature; the script stays for a later attempt.
+
+### Blau's dictionary on /browse: click a word for its entry (web, PR #473)
+
+Phase 2 of `docs/plans/BLAU_DICTIONARY_PLAN.md`, website only (owner ruling (b), 2026-11-03).
+
+- On `/browse`, a click on a word of the transcription opens Joshua Blau's *Dictionary of
+  Mediaeval Judaeo-Arabic Texts* (2006, blau-dict.netlify.app) beside the word (a sheet at the
+  foot of a phone): one card per entry the word reaches -- the entry name, the Arabic spelling,
+  the printed page, the senses with their Hebrew and English glosses, binyan and flags, the
+  matched form first -- in the order the word's candidate stems were tried (the word, then one
+  proclitic peeled, then one pronoun suffix), with a link to the entry on the site; a word found
+  only inside the dictionary's example phrases is listed apart. The site's credit line is on
+  every panel (ruling (a)). `web/components/blau_panel.py`, `web/static/js/blau_lookup.js`.
+- `shared/blau_service.py` reads `blau_data/blau.db` read-only and fail-closed: a file that is
+  absent, of another schema version, keyed by another normalizer, without the credit line,
+  without the lookup index, with a row count that disagrees with `meta`, or that fails
+  `quick_check` is not served, and the page is then what it was before (no script, no panel).
+  Kill switch `BLAU_DICTIONARY_ENABLED=0`. The sidecar is checked once at startup.
+- Deploy: `scripts/deploy_blau_sidecar.ps1` (owner) -- the gate on the local file, upload under a
+  temporary name, the gate on the server copy, swap, restart, the gate on the served file.
+
+### Arabic dictionary sidecar, phase A: Lane, a word count and a closed-class table (ci, PR #478)
+
+Phase A of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md`, on the owner's rulings of 2026-11-04: no UI
+yet, nothing served, nothing bundled.
+
+- `scripts/build_arabic_sidecar.py` fetches its sources into an empty folder (every file pinned by
+  sha256) and builds `arabic_data/arabic.db`: Lane's *Arabic-English Lexicon* (47,855 articles
+  under 4,619 roots, from Ephraim Meiri's parse of the Perseus TEI; 35 entries the source gives no
+  root are counted and left out; a heading that joins spellings of a root is split into them),
+  Lane's 42,351 one-word headwords as a form-to-root table, an
+  OpenITI word count (808,441 rows from 247 million tokens of 2,816 texts dated 250-650 AH) and a
+  141-row closed-class table (`scripts/arabic_closed_class.json`). The Perseus credit line and
+  availability statement are checked against the source and kept in `meta`. It fails on a file
+  that differs from its pin, a count the source contradicts, an OpenITI manifest that is not the
+  whole D7 selection (recomputed from the pinned release metadata) or a closed-class row Lane
+  cannot answer, and refuses to replace a sidecar that holds more rows unless `--force`.
+- `shared/arabic_normalize.py`: a Judeo-Arabic word's Arabic readings (`readings`), the frequency
+  key (`skeleton`) and the root key (`root_key`), moved out of `scripts/measure_arabic_readings.py`.
+- `scripts/verify_arabic_sidecar.py --expect-entries 47890` is the gate: integrity, schema, counts
+  against `meta`, the frequency counts summing to the tokens counted, the texts counted against the
+  selection, every key recomputed with the running normalizer, the credit line; fails rather
+  than skips.
+- `scripts/measure_arabic_readings.py --sidecar` measures the plan's gate on the built file.
+- `arabic_data/` is gitignored; one row in `docs/architecture/DATA_LIFECYCLE.md`.
+
+### Lane's Arabic-English Lexicon in its own tab on /browse (web, PR #480)
+
+Phase B of `docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md` (§7.2). The owner passed the grading and
+approved the wording on 2026-11-05; the server needs `arabic_data/arabic.db` before Lane shows.
+
+- **One tab per dictionary** (owner, D12): the dictionary panel has a tab for Blau and one for
+  Lane, between its head and its body, so a long entry in one never hides the other. It opens on
+  the tab the reader last chose while that dictionary has something for the word, else on the
+  first that has; a tab with nothing is greyed. The panel is there when either dictionary is
+  served (one alone: no tab row, its name in the head). Its title, hint and switch name no one
+  dictionary ("Dictionaries", "Click a word to look it up in the dictionaries").
+- In Lane's tab: the clicked or typed word's Arabic
+  readings as chips, the commonest in an OpenITI word count first (a click looks another reading up
+  in the box), and the first reading's root card with Lane's entries, those whose headword is the
+  reading first, cut short and linked to the entry on semitic.lang.emeiri.org. On every Lane
+  section, the Perseus credit line verbatim, then the entries' source and the ranking's. A word
+  typed in Arabic letters is its own reading.
+- **Roots fixed after the grading (plan §5.4).** Two AI judges graded the 200-word sample, and
+  the fix follows what they found. On the same sample, the root is right 75.0% → 92.2%.
+  - The closed-class table grows from 141 to 181 rows: frequent forms filed under the wrong root,
+    such as مولاي (not مول 'wealth'), ستين (not تين 'fig'), بن (not 'coffee'), قلت and كنت.
+  - A card on a root Lane splits in two (بوع / بيع) is titled by the heading of its matched entry,
+    or else by the larger heading.
+- `shared/arabic_service.py`: the read-only, fail-closed reader of `arabic_data/arabic.db`
+  (schema and normalizer versions, tables, lookup indexes, row counts, the credit line,
+  `quick_check`); kill switch `LANE_DICTIONARY_ENABLED` (default on, read live).
+- `shared/arabic_method.py`: the method v1-v4, moved verbatim out of
+  `scripts/measure_arabic_readings.py` so the gate measures what is served (its numbers on the built
+  file are unchanged).
+- Deploy: `scripts/deploy_arabic_sidecar.ps1 -Entries 47890` (owner), as Blau's -- the gate on the
+  local file, upload under a temporary name, the digest and the gate on the server, keep the served
+  file, swap, restart, the gate on the served file; the code must be on the server first.
+- `web/components/lane_panel.py` draws Lane's tab; `web/components/blau_panel.py` draws the tabs
+  (`pick_tab` decides which opens), and `web/pages/browse.py` asks both dictionaries in one trip
+  off the event loop.
+
+### Developer runs no longer send telemetry (desktop, PR #464)
+
+pytest blanks `POSTHOG_API_KEY` for the whole process (`tests/conftest.py`, and the `scripts/run_local_tests.py` children), which stops tests such as the NLI breaker suites from emitting `nli_breaker_opened` with real keys. A desktop run from source (`not sys.frozen`) blocks every PostHog delivery path unless `GENIZAH_TELEMETRY_FORCE=1` (`shared.posthog_server.set_delivery_blocked`); the frozen `.exe` and the web app are unchanged. Guard: `tests/test_telemetry_never_leaves_dev_machine.py`.
+
+### Sign-in dead ends: "Forgot password?" and "Resend confirmation email" under the error (web, PR #463)
+
+A failed password sign-in now offers the way out: wrong email or password shows a "Forgot password?" button under the error (opens the existing recovery dialog); an unconfirmed email shows "Resend confirmation email" (one send per 60 s per dialog, one neutral answer whatever Supabase says, PostHog `confirmation_resent` without the address). New `supabase_client.resend_confirmation_email`; `auth_state.login_error_affordance`. No What's New.
+
+### Shelfmark lookups answer at once (web + desktop, PR #468)
+
+A public-API search with `search_mode=shelfmark` took 10 s or more on most calls
+(PostHog, 2026-11-03: 262 of 437 requests in 14 days, 56 of them a 504
+`core_timeout`), and the website's Shelfmark mode 3 s at the median. Two causes:
+
+- `MetadataManager.search_by_meta` normalized every one of the 255,723 catalogue
+  records on every search, 3.5-4.8 s for a lookup that returns one manuscript. The
+  catalogue is now normalized once into an index (`_ShelfmarkSearchIndex`, ~2 s,
+  ~45 MiB, built at server start in the background and on the desktop's first
+  Shelfmark search) that narrows a query to the records that can match it; the
+  old loop's rules then decide over those, so the answer is the loop's
+  (`tests/test_shelfmark_search_path.py` checks it against the loop, on a synthetic
+  catalogue that exercises every rule and on the real corpus). The NLI cache's
+  shelfmarks are normalized as they are met and kept while unchanged.
+- On the web, every search went to a research worker: a subprocess that loads the
+  catalogue (~6 s unless one was started ahead) and serves one search, behind a
+  queue with one slot by default, so a lookup waited for the worker and for whoever
+  was searching. `IsolatedEngine` now resolves a Title/Shelfmark search's manuscripts
+  in the server process and runs a lookup of up to 100 manuscripts
+  (`INLINE_METADATA_ROWS`) in the calling thread; a broader search still goes to a
+  worker, with its manuscripts, so the worker skips the catalogue too. The API's
+  response envelope and `search_mode_value` telemetry are unchanged.
+
+Measured in-process on the dev machine (the ratio is what counts; production is
+Linux): `execute_search` for 13 single-shelfmark lookups across CUL, JTS, Oxford,
+RNL, Mosseri, Halper, BL and Gaster went from 3.7-4.7 s each to 4-26 ms; the broad
+`T-S 12` (10,401 rows) from 9.9 s to 1.2 s.
+
+### A link-opened search is pinned to start before the page connects (web, PR #467)
+
+#### Tests
+- `tests/render_smoke/test_search_url_open_dispatch.py`: on the real `/search` page in a NiceGUI
+  User simulation whose socket handshake is withheld, a search opened from its address
+  (`/search?q=...`) must reach the engine before the browser connects, and a typed
+  search must reach it without a browser round trip. Pins the v9.11.1 fix (`bde98fb7`:
+  the phone fold's awaited `window.innerWidth` held every link-opened search until the
+  page had loaded and connected, +1.6 s of server time in production, ux_timing
+  2026-10-24..29). Against that code both tests fail; measured on it with the handshake
+  1 s late: 2.07 s link-opened / 1.08 s typed server time against 0.12 / 0.12 s now.
+- The 2026-11-03 PostHog review's "search by URL 2.4x slower than typed" (30-day p50) is
+  that pre-fix window: from the 10-30 deploy the `nav` server p50 is 0.99 s against
+  1.02 s typed (48 and 125 events). No page change.
+
+### Shelfmarks and wrong-layout Hebrew in the search box (web, PR #469)
+
+Two kinds of zero-result search the 2026-11-03 PostHog review found (readers with an
+English browser hit zero results 53% of the time against 33% for Hebrew-browser readers;
+every Latin-script search found nothing).
+
+#### Shelfmarks typed into the search box
+- A shelfmark typed into the /search box (`ts 20.57`, `t-s ns 307.61b`, `add 3356`,
+  `ts k2.27`, `t-s 10g4.5`, `tad c2.1`, `5559a.10`) ran as a text search and found nothing.
+  In a text mode it now runs in the page's Shelfmark mode, as the `#` prefix would, with
+  "Searched as a shelfmark." under the count and a "Search as text instead" link that runs
+  the same query as text; a corpus system number opens that manuscript in Browse, as the
+  homepage box does. The mode selector is left as it was, so the next query is text again;
+  a Hebrew query, a prefixed one, and every other mode are untouched. The recogniser is the
+  homepage box's (`web/home_query.py`: a corpus sys_id, a Hebrew or Arabic letter means
+  text), narrowed for a box that also takes words: a shelfmark must have a digit, every run
+  of four or more letters in it must be a word catalogue shelfmarks carry (`Moss`, `Misc`,
+  `Gaster`; a Roman numeral; a library name in front is taken off first) and it must have
+  the shape of one -- a dotted number or a letter-digit run, or a collection prefix (`T-S`,
+  `ENA`, `Add.`), a library name or the NLI catalogue's own form first
+  (`web/search_box_input.py::search_box_input_kind`), so `Psalm 23`, `version 1.2`,
+  `COVID19` and a bare `12` stay text. New Search clears the line with everything else.
+
+#### Hebrew typed with the keyboard still on English
+- "Did you mean <Hebrew>?" under "0 Results" for a Latin-script query that spells Hebrew on
+  the Israeli standard layout (`dcuk` = גבול, `fufch anh` = כוכבי שמי, `bghkv` = נעילה;
+  `shared/keyboard_layout.py`), offered only when the corpus holds those words
+  (`SearchEngine.words_occur`: one count query in the server process, limit 1, off the
+  loop -- never a research worker). The Hebrew is a link to the same search in the same
+  mode; the click runs it on the page. PostHog `search_suggestion` (`kind='layout'`,
+  `taken` false when shown, true when taken) measures uptake.
+
+#### Tests
+- `tests/test_keyboard_layout.py`, `tests/test_search_box_input.py` (pure);
+  `tests/render_smoke/test_search_box_input_render_smoke.py` pins the page: which mode
+  reaches the engine for which input, the notice and its link, the suggestion, its link's
+  address, the two captures, and that a Hebrew query runs as before.
+
+### /browse keeps its catalogue record and images through an NLI outage (web + desktop, PR #470)
+
+The National Library of Israel's catalogue and IIIF servers fail in streaks: PostHog
+counted 4,338 openings of the shared NLI circuit breaker in the 30 days to 2026-11-03
+(about 750 of them from local test runs, since stopped). For the whole of each
+breaker window, and on every 5xx or timeout outside one, `fetch_marc_data` and
+`fetch_iiif_manifest` answered empty, so /browse -- the most-used page -- lost the
+manuscript's catalogue record, its image labels and, for a manuscript with no other
+image source, its images, and the empty answer replaced the good one in the saved
+NLI cache.
+
+Both answers are now kept on disk once parsed, the way thumbnails and image ids
+already are: `shared/nli_metadata_store.py`, one SQLite file
+(`<INDEX_DIR>/nli_metadata.db`, `NLI_METADATA_STORE_FILE`) beside the FL-id store,
+read by both apps.
+
+- A row younger than `NLI_METADATA_STORE_TTL` (30 days) answers without a network
+  call. An older one is refreshed; when NLI cannot answer -- breaker open, negative
+  cache, 5xx, 429, timeout, connection error, or an unparseable body -- the old row
+  is served instead, marked `stale: True` with its `fetched_at`, and the breaker and
+  the per-manuscript negative cache record the failure as before.
+- Only a parse with content is written: an error page served with status 200, an
+  empty manifest or a record with no fields never replaces the last good copy. Such
+  an empty answer is no answer: it is not a breaker success, it goes into the
+  per-manuscript negative cache as a 404 does, and the stored copy is served.
+- The manifest memory cache, which had no lifetime, now ages with the same TTL: a
+  server running past it asks NLI again, and a TTL of 0 asks on every call.
+- Synthetic sys_ids reach neither the store nor the network (Phase 85 D-14); the
+  store refuses them too.
+- The file is capped at `NLI_METADATA_STORE_MAX_ROWS` (200,000, about 2 KB a row),
+  pruned oldest-fetched first at each write and at web startup; counters, row count
+  and size are in `/_internal/memstat` under `nli_metadata_store`. Safe to delete.
+- The web's /browse shows a quiet note under the image, "Catalogue details from
+  <date>", when what it is showing came from the stored copies; `enrich_metadata`
+  records the oldest such date as `nli_stale_from` and clears it once NLI answers.
+
+`tests/test_nli_metadata_store.py` pins each of these against `MetadataManager`
+with a fake session; the ten fetch-path tests fail on the previous code.
+
+### Zoom on the manuscript page answers at once (web, PR #471)
+
+#### Changed
+- **Zooming the image on `/browse`**: the + and − buttons, the + / − keys and
+  the mouse wheel now zoom in the browser itself, with no round-trip to the
+  server, and each step multiplies the level by 1.5 (100% → 150% → 225% → 338%
+  → 506% → 759% → 800%) instead of adding 25%; the range is 25%–800%. The
+  wheel zooms at the pointer; a double-click (double-tap on a phone) zooms to
+  200% at that point and, from any zoomed level, back to the whole page.
+  PostHog's 30 days to 2026-11-03 held 50 rage clicks by 19 readers on the +
+  button (9 by 8 on −, 4 by 3 on reset), the only real rage-click target on
+  the site: each click added a linear 0.25 and went through the server.
+- The page still learns the level (`browse_zoom` event, `web/pages/browse_state.py::clamp_zoom`),
+  so a page it rebuilds (Prev/Next, Show Metadata, Edit) draws the image at the
+  zoom the reader sees; a rotation never pushes a scale back (`setRotation`).
+  Where the toolbar's percentage is hidden (a phone), a badge over the image
+  shows the level for a moment after each change. The fullscreen editor's
+  image uses the same shared viewer (`createManuscriptViewer`) instead of an
+  inline copy with its own wheel step, so it pinches and double-taps too.
+- `web/static/manuscript_viewer.js` (shared with `/search` and the Compare
+  panes): `zoomBy(factor, x, y)`, `fit()`, `toggleZoomAt()`, `setRotation()`,
+  `onChange` option, `MAX_ZOOM` 8; `zoomStep` and the 0.25 steps are gone.
+  `/browse` stamps the script URL with the file's hash so a page built after a
+  deploy never runs an hour-old cached viewer.
+
+#### Tests
+- `tests/test_browse_zoom_steps.py` (the step arithmetic, the clamps, and the
+  JS and Python constants in step), `tests/test_manuscript_viewer_js.py`
+  (`tests/js/manuscript_viewer_zoom_check.js` under node: anchoring, wheel,
+  double-click/tap, pinch, debounced reporting, take-over of a rebuilt image),
+  `tests/render_smoke/test_browse_zoom_render_smoke.py` (the buttons carry no
+  server click handler; the event sets the state; a rebuilt page keeps it).
+
+### Blau dictionary sidecar: the data layer for a Judeo-Arabic companion (ci, PR #472)
+
+Phase 1 of `docs/plans/BLAU_DICTIONARY_PLAN.md`: no UI yet, nothing served, nothing bundled.
+
+- `scripts/build_blau_sidecar.py` builds `blau_data/blau.db` from the JSON published at
+  blau-dict.netlify.app (Joshua Blau, *A Dictionary of Mediaeval Judaeo-Arabic Texts*, 2006;
+  digital edition release 1.1): 3,047 roots, 3,665 sub-entries, 8,295 stems, 12,753 forms
+  (Judeo-Arabic text, Arabic spelling, Hebrew and English glosses, flags, printed page, the
+  segments for rendering), 41,970 citations with their bibliography ids, 337 sources, a `meta`
+  table (schema and source versions, digests, row counts, build time, the site's credit line)
+  and `forms_norm`, 41,932 lookup keys. The build fails on a missing, empty, truncated or
+  non-v6 download and refuses to replace a sidecar that holds more rows unless `--force`.
+- `shared/blau_normalize.py`: `normalize_ja`, the one key a dictionary form and a corpus token
+  share (combining marks, the corpus's apostrophe/geresh and brackets dropped, finals folded),
+  `normalize_arabic`, and `candidate_stems` (one proclitic layer and one pronoun suffix peeled;
+  not a lemmatizer).
+- `scripts/verify_blau_sidecar.py --expect-roots 3047 --expect-forms 12753` is the gate:
+  integrity, schema, counts against `meta`, every lookup key recomputed with the running
+  normalizer, dangling targets and sources; fails rather than skips.
+- `blau_data/` is gitignored; one row in `docs/architecture/DATA_LIFECYCLE.md`.
+
+### Public API: a daily budget per address and a concurrency budget for interactive searches (web, PR #466)
+
+After the 2026-11-03 PostHog review: one address pulled 8,036 requests through the API in six hours (7,459 `browse`, 573 `search`) at about 20 a minute, under the per-minute bucket almost throughout, and reader search p50 server time doubled that evening because the API's synchronous exact/title/shelfmark/responsa searches had no concurrency budget and stacked up in the research queue every visitor shares.
+
+#### Added
+- **`SEARCH_API_DAILY_LIMIT`** (default 2,000; 0 disables): one trailing-24 h request budget per address across `/api/search`, `/api/browse` and `/api/parallels` (`web/api_hardening.py::DailyBudget`). Over it: `429 daily_limit_reached` with `Retry-After` set to the time until enough of the oldest requests leave the window for the bucket to fall under the current limit (the oldest one normally; a later one right after the limit was lowered below a bucket's size). Checked after the per-minute limiter and before validation, so a rate-refused request and the over-budget attempt itself spend nothing, while a request later refused as invalid (400) or busy (503) still counts. Capabilities and criteria are not counted.
+- **`SEARCH_API_INTERACTIVE_CONCURRENCY`** (default 2): a semaphore budget for synchronous non-heavy `/api/search` modes, the same machinery as the heavy budget (`_InteractiveSemaphoreState`). Over it: `503 search_busy` at once, with `Retry-After`, instead of a 30 s wait for a 504. Background jobs bypass it, as they bypass the heavy budget.
+- `/api/capabilities` `limits` now carries `interactive_concurrency` and `daily_requests_per_address`, from the same resolvers the handlers use.
+- Error codes `search_busy` (503) and `daily_limit_reached` (429) in `shared/api_errors.py`.
+
+#### Not covered
+- Bulk access is outside this change; an API-key tier is an open decision.
+
+### The /ai page leads with the MCP server; the GPT is retired gracefully (web, PR #465)
+
+With `MCP_ENABLED` on, `/ai` opens with the MCP server (address, how to add it in Claude and in
+any MCP client, example questions), then the skill and the public API, and shows the GPT card
+last with a note that OpenAI retires custom GPTs on 2026-12-11. The GPT card disappears when
+its setting is off (a ChatGPT plugin live, or after the retirement); `/chatgpt` keeps redirecting
+until then. With `MCP_ENABLED` off the page is unchanged.
+
+## [9.13.1] - 2026-11-03 — Manuscript features in the Joins Lab
+
+The Manuscript features of 9.13.0 now filter the Joins Lab's candidates on both apps, and replace the
+Lab's own Material, Width and "Has dimensions" filters (PR #462); on the website their counts are ready
+when the server starts (PR #461). Web and desktop: installer 9.13.1; no data file changes. Desktop What's
+New gains a sixth bullet and stays content version 9.13.0 (owner: not shown again to today's readers); no
+web What's New. Help (both apps, EN/HE) describes the new filter dialogs.
+
+### Manuscript features in the Joins Lab (web + desktop, PR #462)
+
+The v9.13.0 Manuscript features panel is now in the Joins Lab's filter dialog
+on both apps ("More filters…" on the web, "Filter ▾" on the desktop), as a
+"Manuscript features" button that opens the same window as Search and Browse by
+Identification. Owner rulings 2026-11-02: inside the existing dialog, and one
+place for each filter.
+
+- **Filters the candidates already found**, with the candidates as the universe
+  (D20): "Not recorded" and "All except" are read among them; the window's total
+  says "N of the M manuscripts in the results match". Checked **per manuscript**:
+  every candidate page of a matching manuscript stays. The Library and Domain
+  counts follow the features.
+- **One place for each filter:** the dialogs' own Material (web, desktop), Width
+  (desktop) and "Has dimensions" / "Has dimensions data" (it went with the size
+  filters) are gone; material and size are features. The desktop's anchor
+  shortcuts fill in the features: "match material" as the measured material (the
+  value the cards showed), "width ±2 cm" as the Width range. A link or saved web
+  session with the old Material keeps it as the Material feature (measured); an
+  old "Has dimensions" is dropped (it hides nothing); the desktop's old saved
+  material row never restored, so nothing carries over.
+- **Never an empty list for an error** (rule 9): while the check runs, and when it
+  fails, every candidate shows with a note under the toolbar (web) or in the
+  status line (desktop). A stale answer for older candidates or criteria is
+  dropped. A saved feature a 5.0.0 catalogue file cannot answer is dropped with
+  the usual notice.
+- **Fixed (web):** when the catalogue data could not be read, a saved Domain
+  filter hid every candidate; it and size mismatch now stand down and the page
+  says so.
+- **Web table view** now has the grid's toolbar (count, Library, Domain, Sort,
+  More filters…), also when the filters leave nothing. The More filters… dialog
+  lives in a host the re-renders never clear, so a late answer cannot close it.
+- Desktop: features are saved in the Joins Lab session; the Joins Lab's Clear
+  removes them.
+
+Code: `web/components/criteria_panel.py` (`CriteriaControl(within=...)`),
+`web/components/candidate_grid.py` (`compute_filtered(criteria_matched=,
+catalogue_ok=)`, `candidates_toolbar`), `web/pages/joins_lab.py`,
+`web/joins_lab_link.py`, `desktop/join_workbench.py`,
+`desktop/gui_threads.py::CriteriaMatchWorker`. Tests:
+`tests/test_joins_lab_criteria.py`, `tests/test_join_workbench_criteria_qt.py`,
+render smoke in `tests/render_smoke/test_joins_lab_render_smoke.py`.
+
+### The Manuscript features counts are ready when the site starts (web, PR #461)
+
+- The value lists and "recorded for N" counts of the **Manuscript features** window are computed once at
+  server start, in the background pre-warm (`web/components/criteria_panel.py::prewarm_criteria`, called from
+  `web/main.py`): about 20-30 seconds over all 255,723 manuscripts. The first visitor after a restart used to
+  wait for them section by section, 1-8 seconds each (Measured 7.9 s on the owner's machine); afterwards they
+  came from the cache, as they do now from the start. `GET /api/criteria` reads the same cache.
+- The note under the total ("These criteria cover all N manuscripts...") and the "of M" beside every count
+  are cached too (`FjmsService.criteria_corpus_note`): each section opened ran a corpus-wide width query
+  for them, every time. A visitor who opens the window while the start is still computing waits for that
+  computation instead of running the same query beside it, while other features are still computed side by
+  side (`FjmsService._build_once`, one lock per feature; GitHub Codex on PR 461).
+
+## [9.13.0] - 2026-11-02 — Find manuscripts by features
+
+One panel of catalogue criteria — "Manuscript features" — on Browse by Identification and in "Search only
+in..." on both apps, in the public API and the MCP tools (PRs #457–#460; plan
+`docs/plans/CATALOGUE_CRITERIA_PLAN.md`). Browse by Identification lists the whole corpus. Ships with FJMS data
+file 5.1.0 (`criteria_numbers`, `criteria_values`), built from the corrected 5.0.0 file, which also brings the
+restored catalogue sources to desktop users. Web and desktop: installer 9.13.0; the data file goes to the
+server before the code. Desktop What's New 9.13.0; web `WHATS_NEW_VERSION` "9.13.0-features".
+
+### Catalogue criteria, core: Catalog Browse lists the whole corpus (web + desktop)
+
+PR 1a of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`: the shared base of the "Manuscript features" panel
+(PRs 1b web, 1c desktop, 2 API). No panel yet; what a
+reader already sees changes in three places:
+
+- **Catalog Browse lists all 255,723 manuscripts** (web and desktop), the catalogued ones first, then the
+  29,169 with no FJMS catalogue record, marked "No catalogue record" (rulings D16, D22). Filters that pick
+  something in (domain, author, work, date, catalogue text) list catalogued manuscripts only; PGP, edition
+  and library filters apply to every manuscript.
+- **A list that cannot be read is an error**, not "No manuscripts match the current filters" (rule 9).
+- **"Search only in..." with only exclusions** (Exclude domains/authors/works, catalogue text "not") now
+  searches the manuscripts with no catalogue record too (D17); before, they were silently left out.
+
+Underneath:
+
+- `shared/catalog_criteria.py` (registry, address form, matching) and `shared/catalog_numbers.py` (line,
+  column and copy-date parsing); `FjmsService.get_filter_sys_ids` / `get_browse_results` /
+  `get_browse_library_facets` take `criteria` and the corpus (`MetadataManager.corpus_sys_ids`, which never
+  hands over part of libraries.csv); Catalog Browse fails closed.
+- FJMS sidecar **5.1.0**: `scripts/migrate_fjms_criteria.py` adds `criteria_numbers` (lines, columns,
+  copy-date spans), `criteria_values` (vocalization extent, attributes), an index on `catalog_fields` and
+  `avg_line_height_mm` (which revives the Line Height filter, dead in production). The build sequence, with
+  the 'Instatution' fix after every export, is in the deployment guide. The desktop opens a
+  downloaded data file only when it is at least as new as the bundled one.
+- Fixed on the way (web Catalog Browse): removing ANY filter chip left the removed filter in the address
+  and the saved session -- the refresh's `ui.run_javascript` ran in the chip's own, just-deleted
+  context and raised. It now goes through the page's client.
+
+### Manuscript features on the website: one panel for Catalog Browse and "Search only in..." (web)
+
+PR 1b of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`. One **Manuscript features** button
+(`web/components/criteria_panel.py`) replaces the date range, the script lists, the pre-search
+Measurements group and the "Script and size" card on `/catalog-browse`, `/search` and `/parallels`.
+It opens a window over the page (full screen on a phone): the ten sections beside their controls
+(period of copy, language and script, script, vocalization, columns, lines, physical status,
+material, attributes, computer generated data), value lists with counts and a filter box, "only
+these / all except these", catalogue / measured / either, "or: not recorded", each criterion's
+coverage, a live total and Clear section / Clear all / Apply. A badge counts the criteria; a chip per
+criterion removes it.
+
+- Catalog Browse: the address carries one parameter per criterion (D8: `style=Square`,
+  `region=!Oriental`, `lines=meas:20..25`, `columns=2..2,_none`); an unknown or malformed parameter
+  is dropped and named in a notice. The domain tree gains "No catalogue record (N)". "Search in these
+  results" and "Parallel search in these results" hand the criteria on unchanged. The "16-19" period
+  button sets 1500-1899 (it set 1600-1999).
+- `/search`, `/parallels`: the criteria are saved (`{prefix}_filter_criteria`), counted, sent with the
+  search, kept in history entries and runs; a saved date range is read in as the period of copy
+  (D18); saved measurement filters are not restored, and the rows saved with them are dropped so the
+  search runs again (R2).
+- `/search` post-search Measurements mean what the panel means (D20): width, height and lines from
+  the catalogue or a measured page, every measured range on one page, material from either source
+  (`FjmsService.match_result_criteria`). A lookup that cannot run leaves the rows and says so.
+- A 5.0.0 catalogue file disables the criteria it cannot answer and drops them, with a notice, from a
+  saved session or an address (rule 9).
+- Shared (also used by the desktop, PR 1c): chip text (`criteria_chips`, `criteria_summary`,
+  `FjmsService.criteria_chips`), `match_result_criteria`, `period_from_dates`, `NEW_TABLE_KEYS`;
+  fixed `match_criteria` failing every "all except" search when the corpus came as a frozenset.
+
+### Catalogue criteria, desktop: the Manuscript features window (desktop)
+
+PR 1c of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`: the desktop surfaces of the catalogue criteria
+(released together with the web panel and the API, ruling D11).
+
+- **"Manuscript features" / "מאפייני כתב היד"**: one window, the same on the Catalog tab, in "Search only
+  in..." and for the post-search Measurements filter. Sections on the side (period of copy, language and
+  script, script, vocalization, columns, lines, physical status, material, attributes, computer-generated
+  data), each section's controls beside them; every list sorted by count, then Unknown, Cannot be
+  determined, Not recorded, with "only these / all except these", and a filter box on long lists; ranges
+  with "or: not recorded"; a catalogue / measured / either choice for lines, size and material. The total
+  updates as you choose, and says how many of an "all except" list have nothing recorded.
+- **Catalog tab**: the date fields, century buttons, "Include undated" and "Script and size..." are now
+  inside the window; its choices show as chips above the list. The domain tree no longer collapses to two
+  rows when the column is full (it keeps 240 px and the column scrolls), and it shows "No catalogue record
+  (N)" beside "Unclassified".
+- **Focus Search** (the "Search only in..." window): the date range, script lists and Measurements group are
+  replaced by the one button; chips and the history summary name the chosen features.
+- **Post-search Measurements** filter by the window's rules (ruling D20): either source, one measured page.
+- **Saved searches**: a saved date range becomes Period of copy (D18, which now matches a copy span that
+  overlaps the range). Old measurement filters are not restored, and the stored results of a search saved
+  with them are not shown: search again (ruling R2).
+- On a 5.0.0 catalogue data file, the criteria that need 5.1.0 are shown disabled with a note, and saved
+  ones are removed with a notice (rule 9).
+- **Startup tips**: three new tips for the Manuscript features (Focus Search, Browse by Identification,
+  and hunting joins by script, lines and line height), shown next after the strongest five. Once every tip
+  has been shown a new round starts (they used to stop for good, and **Next tip** on the last one closed the
+  strip); tips for features already in use stay skipped. **Settings > Show all tips again** starts one round of
+  every tip from the first, those for features in use too, and shows the first at once.
+
+### Manuscript features in the API and the MCP tools (web)
+
+PR 2 of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`. The public API and the MCP server filter by the same
+manuscript features as the website's panel.
+
+- `filters.criteria` on `POST /api/search` and `POST /api/parallels` (their background jobs, the
+  `/api/chatgpt` facade and the MCP tools too -- the ChatGPT app is the MCP plugin; the custom GPT,
+  retiring 2026-12-11, keeps its Actions schema unchanged): one entry per criterion, as the panel stores them — lists
+  with `values`, `mode` ("only" / "except") and `source`, ranges with `min`, `max`, `not_recorded`
+  and `source`; "_none" is Not recorded. The request model is built from the registry
+  (`web/criteria_models.py`). The corpus is the universe, so "not recorded" and "all except" reach
+  the 29,169 manuscripts with no catalogue record, as on the website.
+- `GET /api/criteria`: every section and criterion with its kind, sources, unit and coverage, and a
+  list's values with corpus counts (per source for material); a criterion a 5.0.0 file cannot answer
+  is `available: false`. Built once per process (about 20 s cold on the full file).
+  `FjmsService.criteria_vocabulary`.
+- Checks: a malformed entry is 400 `invalid_request`; a value the catalogue does not record under the
+  chosen source is 400 `unresolvable_filter_value` (values are checked over the corpus, exactly as
+  `GET /api/criteria` lists them); a criterion the file cannot answer, or any criterion (`materials`
+  and the dates included) before the corpus list has loaded, is 503 `filter_unavailable`.
+- Older keys: `materials` is read as Material from the catalogue (unchanged results); `date_from` /
+  `date_to` as Period of copy, so they now match a copy-date span overlapping the range (1000-1200:
+  4,702 manuscripts, 4,561 by start year). Either one beside its criterion is 400
+  `invalid_combination`. The unreleased `script_styles` / `script_places` are refused.
+- MCP: a read-only tool `list_manuscript_features` (`GET /api/chatgpt/criteria`) and `criteria` in
+  every tool's `filters`; the server instructions (and the Claude and Gemini packages) point filters
+  at it. `/api/capabilities` lists `/api/criteria` and its rate-limit bucket.
+- `docs/SEARCH_API.md`: the endpoint, the `filters.criteria` shape, the changed date meaning, and the
+  corrected `materials` examples (`Paper`, `Vellum`; `paper` / `parchment` were always a 400).
+- Tests: `tests/test_criteria_api.py` (real endpoints over the fixture sidecar), MCP and facade tests,
+  the documented-example gate.
+
+## [9.12.1] - 2026-10-30 — Keyboard shortcuts, round two
+
+Ctrl+A ticks the Search results again (in 9.12.0 it raised an error and ticked nothing); going back to
+Search or Composition Search -- by Ctrl+1 / Ctrl+2 or a click on its tab or side-menu entry -- puts the
+cursor in its results when it has any; Ctrl+R goes to the results list of the section in front; and the
+fixes from two Codex review rounds of the 9.12.0 keys (Composition Search's tree, popups under the
+Hebrew layout, the Manuscript Viewer's Find, image buttons after a My Library document, tooltips, the
+card and Help). Desktop only: installer 9.12.1; the desktop What's New stays 9.12.0, its third bullet
+corrected (owner approved the Hebrew). Released without a PR (owner).
+
+### Ctrl+A ticks the results again; back to a search lands in its results; Ctrl+R (desktop)
+
+### Fixes
+- **Ctrl+A in the Search results raised a TypeError and ticked nothing (9.12.0).** The header box is a
+  `CheckBoxHeader`, whose `isChecked` is a field and whose `setChecked` only repaints; `_tick_all_results`
+  called `isChecked()` and relied on a `toggled` that never comes. It now sets the header's look and ticks
+  the rows itself (`on_search_select_all_toggled`). Each press had written a "Crash at" entry to
+  `crash_log.txt`. The test now uses the real `CheckBoxHeader`, not a QCheckBox stand-in.
+
+### Improvements
+- **Going back to Search or Composition Search lands in its results** (owner, 2026-10-30): Ctrl+1 / Ctrl+2,
+  a click on their tab or on their entry in the side menu put the cursor in the results list when it
+  shows rows -- the current row, or the first -- and in the search box only when there are none
+  (`_open_section`, `_land_in_results`; a click on the tab already in front changes nothing).
+- **Ctrl+R** puts the cursor in the results list of the section in front -- Search, Composition Search,
+  Browse by Identification, Personal Lists -- and does nothing when it shows no row or the section has
+  no list (`_focus_section_results`, `_focus_results_view`); also by the physical key in a Hebrew layout.
+  On the keyboard shortcuts card and in Help.
+
+### Fixes from the Codex review of the keys
+- A click on Search's or Composition Search's tab or side-menu entry with no results puts the cursor in
+  its search box, as Ctrl+1 / Ctrl+2 do (`_land_after_click`); before, it stayed where Qt left it.
+- In Composition Search's tree the cursor lands on the first result that shows, not on a group heading
+  ("Main Results"), which Enter cannot open, nor on a result left current under a group the user collapsed.
+- With the Hebrew keyboard layout, Ctrl+R, Ctrl+F, Ctrl+G and the other physical-key shortcuts no longer
+  act behind an open popup such as the search history (`LayoutProofShortcuts`).
+- Manuscript Viewer: Ctrl+F brings the text back when its toggle hid it beside the image; after a one-page
+  My Library document in an all-sources list, the next Genizah result's image buttons (and Ctrl+PgDown /
+  Ctrl+PgUp) work again -- they stayed disabled; A− and A+ name their keys, as on Browse by Shelfmark.
+- The card and Help say that in a text box, such as Find, Ctrl with the arrows moves word by word, as in
+  any text box, and that Ctrl+A ticks the Search results only.
+
+## [9.12.0] - 2026-10-30 — Keyboard shortcuts
+
+The desktop app works from the keyboard: the cursor is in the search box from the moment the window shows
+and moves to the results when a search finds them, where Space ticks a result, Enter opens it and Ctrl+Enter
+or Ctrl+B opens it in Browse; Ctrl+1 .. Ctrl+7 open a tab with the cursor in its search box, Ctrl+E and Ctrl+O join
+Ctrl+F and Ctrl+G, the Manuscript Viewer and Browse move between results, images and manuscripts with Ctrl
+and the arrow and page keys, and Ctrl+/ shows every key on one card. On the website, the
+Parallels Word export marks the matched words (GS-21, PR #456). Installer 9.12.0; desktop What's New 9.12.0,
+no web What's New.
+
+### Keyboard shortcuts and where the cursor goes (desktop)
+
+- **At launch** the cursor is in the open section's search box from the moment the window
+  shows (`_focus_on_launch`), so typing works while the index loads. After the session restore
+  the restored words are selected (`_refocus_after_restore`), unless the user has typed or
+  pasted there (`textEdited`), opened another section, or moved the cursor meanwhile.
+- **Ctrl+1 .. Ctrl+7** open a section with the cursor in its search box (`_open_section`),
+  the same field Ctrl+F picks. A click on a tab leaves the cursor where it was.
+- **Ctrl+E** puts the cursor in the search box as Ctrl+F does (File Explorer's and Outlook's
+  key for it). On **Browse by Shelfmark** with no manuscript open, both go to the shelfmark
+  box rather than Find; in **PGP Tags** mode, to the tag box.
+- **When a search finds results** (a text search or a PGP tag search) the cursor moves to the
+  results table, on the first shown row, so the list's keys work at once
+  (`_focus_results_after_search`). Only on the Search tab and only while
+  the cursor is still where the search was asked for (`_focus_at_search_start`; a search that
+  waits for the filter lookup keeps its own in `_deferred_search_focus`, so a running search and
+  a queued one never share it): a field or section the user went to meanwhile keeps it. No shown
+  row (no results, the all-terms filter, exclusions) leaves it in the box, and the rest of the
+  first page gets a second look; a session restore does not move it.
+- **Keys of the result lists** (owner, 2026-10-30): in the Search results **Space** ticks or unticks
+  the current result, in any column (Ctrl+Space and Shift+Space do nothing; Space no longer pages,
+  Page Down does), **Enter** opens it in the Manuscript Viewer as 👁 does and **Ctrl+Enter** or
+  **Ctrl+B** (as in the viewer) in Browse by Shelfmark as 📖 does -- their tooltips name the keys -- and
+  **Ctrl+A** ticks every shown result, or unticks them all (`_results_table_key`, `_open_action`).
+  Enter / Ctrl+Enter / Ctrl+B also in Composition Search's results
+  (`_comp_tree_key`; `on_comp_item_double_clicked(browse=True)`) and Personal Lists
+  (`_lists_table_key`). **Ctrl+Enter** in Composition Search's source text runs it (`_comp_text_key`;
+  Enter alone stays a new line), and **Esc** stops a running search on the Search tab, as it already
+  did on Composition Search.
+- **Manuscript Viewer** (`ResultDialog._install_shortcuts`): **Ctrl+Right / Ctrl+Left** the next /
+  previous result and **Ctrl+Shift+arrow** the next / previous manuscript -- mirrored in Hebrew, where
+  Ctrl+Left goes forward (`shortcuts_dialog.arrow_keys`) -- **Ctrl+PgDown / Ctrl+PgUp** the next /
+  previous image, **Ctrl+B** Browse, **Ctrl+F** the Find box, **Ctrl+= / Ctrl+- / Ctrl+0** the text
+  size. Each presses its button (a disabled one does nothing) and the button's tooltip names the key;
+  Ctrl+B and Ctrl+F answer to the physical key in a Hebrew layout too. **Browse by Shelfmark** takes the
+  same image and manuscript keys.
+- The startup tip about Space paging is replaced by one about these keys, under a new key
+  (`result_keys`), so whoever read the old one sees it.
+- **Ctrl+O** opens Go to, as Ctrl+G does.
+- **Keyboard shortcuts** (`desktop/shortcuts_dialog.py`): every key on one card, in sections by
+  where it works (`shortcut_sections`), from Ctrl+/, an entry in the ☰ menu and the side menu, and
+  a ⌨ button beside A− in the tab layout's top row. Its list is checked against the keys the
+  program binds. Reviewed by Codex (round 1:
+  six MEDIUM and one LOW; round 2: five P2 edge cases; rounds 3-5: two, one and one P2
+  regressions of those fixes, the last closed by keeping a queued search's place apart; all
+  fixed).
+- Ctrl+O, Ctrl+E and Ctrl+/ also answer to the physical key on a Hebrew layout
+  (`LayoutProofShortcuts`). Help (both languages) names the new keys. Pinned in
+  `tests/test_quick_open.py`.
+
+### The Parallels Word export marks the matched words (web)
+
+- **The Parallels Word export now marks the matched words, as its Excel export does (GS-21).** Since
+  2026-08-23 the Excel export has shown each match in red and bold in both Source Context and Manuscript
+  Match, but the Word export removed the marks and printed both texts plain. For a short source text the two
+  read almost the same, and the two downloads of one search disagreed about what matched. The Word export
+  now shows the marked words in bold with a yellow highlight, as the web search's Word export already does
+  (`web/export_service.py::export_parallels_word`).
+
+## [9.11.1] - 2026-10-30 — Cambridge links fixed
+
+Which Cambridge Digital Library (CUDL) item a record links to is now one decision, made by comparing the item's
+label with the record's catalogue names letter by letter and number by number, and every surface in both apps
+follows it: 1,916 records gain a direct CUDL link and 15 others are corrected
+(`reports/cudl_resolution_changes_2026-10-29.csv`); the sidecar is unchanged. On the website, Quick View offers the
+version chooser on a page without automatic text, Browse and Quick View count the pages of such a manuscript, and a
+search opened from a link starts at once (PRs #453-#455). Installer 9.11.1; web deployed from `master-main`.
+
+### Cambridge links: the right item, by structure (web + desktop)
+
+- **Cambridge (CUDL) links were missing for renamed and bracketed shelfmarks, and some opened another
+  fragment.** Reported 2026-10-29 by Adiel Breuer. A record was matched to CUDL through a lossy normalized key that
+  drops every other dot of a number run and all brackets: T-S Ar.18(1).6 and Or.1080 3.45 never matched their own
+  items (the green box offered a CUDL search instead), while T-S NS 318.41/.42 and T-S Ar.7.31/.32 opened 318.4.1/.4.2
+  and 7.3.1/.3.2 -- other fragments, images included. The desktop tried only its cached name, which for an entry first
+  fetched from NLI is NLI's old one ("Ms. T-S Loan Collection 180" for T-S Misc.36.180), and a fallback read any
+  "Ms. <Roman> N" as Mosseri, so eight AIU and JTS records opened Mosseri items.
+- Now one decision per record (`shared/cudl_identity.py`, through `MetadataManager.resolve_cambridge`): a CUDL item
+  is the record's only when its label has the same letters and numbers in the same order as one of the record's
+  catalogue names (`Ja` = `J-A`, zero padding and separators aside; `T-S F 6.1` is not `T-S 6F1`); only CUL and
+  Mosseri records; the main name decides, the other names when it names nothing; a name with characters it cannot
+  read, or a number range, names nothing; the NLI catalogue's own link (MARC 856) is used when the names name
+  nothing, never against them. Candidates come from the existing `cambridge_manifests` key, so the sidecar is
+  unchanged. Against CUDL's list and `libraries.csv`: 1,916 records gain a direct link, 4 are corrected, 11 lose a
+  wrong one (`reports/cudl_resolution_changes_2026-10-29.csv`). A Mosseri second-series record made of several
+  first-series items keeps linking the first of them (63 records), flagged for a later chooser -- an interim
+  choice a reviewer judged reasonable; how to present these records is still the owner's decision.
+- Every surface follows that decision: the availability flag (`get_image_sources` no longer probes the table), the
+  green-box library link (now the item, not a search), Browse's Cambridge chip (no URL built from the shelfmark), the
+  desktop's Cambridge button, viewer and result dialog (no MARC fallback), Joins Lab's details link. The desktop
+  header shows the catalogue's name.
+- Cached state cannot bring an old link back: `enrich_metadata` drops what an earlier run derived from Cambridge
+  (link, images, alignment, credit) before deciding again; each decision carries `RESOLVER_REVISION`, and the image
+  shortcuts (`resolve_external_images`, the image routes, Visual Similarity, the desktop reading desk) re-enrich an
+  entry without a current one; `/api/cambridge_image` URLs carry `cv=`, its server cache is at version 3, and the
+  Puzzle's disk cache is keyed by the CUDL item. A catalogue still loading is never cached as "no Cambridge item".
+- Review fixes before release: `enrich_metadata` builds the entry on a copy and publishes it whole (in place, a
+  concurrent request saw the new decision beside the old item's images, and the Puzzle cached those pixels under
+  the new item); the desktop result dialog re-enriches an entry cached before the decision (it reused any entry with
+  MARC data); every `/api/puzzle_ext_image` URL carries `cv=` (the browser kept the old bytes for up to an hour).
+  Then: the decision is checked on the cache entry the images and links come from (`cudl_identity.fresh_external_entry`,
+  `entry_decision_stale`) -- a second read could return a newer entry whose current decision vouched for the first
+  read's old images, which the memory cache and the Puzzle's disk copy then kept under the new item; the memory and
+  disk caches keep only what a final decision produced, the disk name carries the revision, and `get_thumbnail` sets
+  its fields on the entry current at the moment of writing, in one locked step (`_BoundedLRUCache.merge_fields`), so
+  it cannot put an older entry over a published enrichment. An image made under a provisional decision is sent
+  `Cache-Control: no-store` by both the Cambridge and the Puzzle image routes (the route wrapper keeps a route's own
+  `no-store`).
+
+- Tests and tools: `tests/test_cudl_identity.py` (fixture table built with the importer's own key; real CUDL labels from both sides of
+  every collision). `tests/fixtures/cudl_baseline_resolved.csv`: the 8 rows that pinned the four wrong items corrected,
+  listed in `tests/fixtures/cudl_baseline_ledger.csv`. `scripts/audit_cudl_saved_work.py` lists saved and published
+  joins that reference a corrected or removed record.
+
+### Web: Quick View on pages without an automatic transcription (web)
+
+- **Quick View now offers the version chooser on a page without an automatic transcription**, as Browse has since
+  2026-10-27. Such a page is reached in Quick View by paging from a hit on another page of the manuscript, or from
+  a shelfmark or title search for a manuscript with no automatic text at all. Quick View already showed an edition
+  of such a page as its text, but with no label saying whose it was, no way to switch versions, and no Edit,
+  Comment or Joins: it built them only when the page had an automatic text. It now takes Browse's decision
+  (`web/pages/browse_state.py::page_has_reading_view`, through
+  `web/pages/search_results.py::_quick_view_has_reading_view`): the chooser names the edition shown (FGP or PGP)
+  and offers the others, and Edit starts from the empty automatic text, as in Browse (GS-277). A page with nothing
+  to show says "No text available": paging there from a hit used to show the hit page's snippet as if it were that
+  page's text. A catalogue-only record still gets none of these. Quick View has no citation of its own (the "How to
+  cite" chip sits beneath dialogs), so nothing there is cited.
+
+### Web: the page count of a manuscript without automatic text (web)
+
+- **Browse and Quick View showed "Page 1 / 0" for a manuscript without any automatic transcription, and could not
+  page on.** The index holds no pages of such a manuscript, so its page came with no count; Browse's only fallback
+  read an `fl_id` the NLI crossref folios never carry (Cambridge images aside), and Quick View had none. Next was
+  disabled, so only the first image could be seen (T-S NS 243.145 has 4). Both now count its images
+  (`web/page_count.py`): the NLI crossref folio list, else the NLI image list the image route already pages
+  through (`web/api.py::nli_fl_ids`, the same 30-day cache; the manifest is fetched only for a manuscript the
+  crossref does not know; a later volume is counted from its own manifest, the one its images come from). An
+  external image list Browse shows first (Manchester, JTS, CUDL) keeps its own count, as before. Neither view waits
+  for a manifest: past half a second the page renders without a total
+  and gains it when the count comes. Browse keeps the count across Next/Previous while its enrichment reruns; a
+  count that cannot be known is left out rather than shown as 0.
+
+### Web: a search opened from its address starts at once (web)
+
+- **A `/search?q=` search no longer waits for the page to connect before it starts** (PR #453). The phone-layout fold
+  (v9.8.3) awaited `ui.run_javascript('window.innerWidth')` first, and in NiceGUI 3 an awaited call waits for the
+  client to connect; the fold now runs beside the search (`web/pages/search.py`), still after `is_running` is set.
+  Locally, on the same queries, 1.98 / 2.53 s -> 1.52 / 1.52 s server time; at phone width the form still folds.
+- Tests: `tests/test_cudl_identity.py`'s two image-route tests take the canvases by position, as CI does, so they pass
+  beside a real `nli_crossref.db`.
+
+## [9.11.0] - 2026-10-29 — FGP transcriptions from FGP's own files
+
+The Friedberg Genizah Project transcriptions are rebuilt from the files FGP keeps for each transcription (the
+original Word file, and the per-line text of the position data) instead of the PDF copies. One file serves the
+website and the desktop installer (fgp_data/fgp_transcriptions.db, version 2.0.0, 59,062 rows).
+
+- About 14,600 new transcriptions (14,578: 12,992 whole-document, 1,586 per image).
+- About 27,800 existing transcriptions read more cleanly (27,849), 176 of them the Yerushalmi team's, now with the
+  team's completions, doubtful letters, deletions and interlinear additions marked.
+- Letters restored in about 1,900 transcriptions that keep their PDF text (1,779 read from the PDF fonts' glyph
+  names, 88 final letters by vocabulary).
+- About 550 entries withdrawn: 391 XML editions that could not be matched to their own record, 97 held by the
+  identity and credit rules (FGP's do-not-publish note, its not-to-display flag, files missing from the delivery,
+  XML of the wrong region, another edition, unconfirmed links), 50 duplicates FGP retired, 9 test files and
+  keyboard noise, 3 empty files.
+- Held back, each with a recorded reason: 4,506 earlier versions FGP has replaced, 3,666 entries the
+  one-edition-per-page chooser cannot show yet, 1,136 whose image the library gallery lists under another
+  manuscript, 782 Word files whose rendering differs from FGP's PDF, 322 with no manuscript, 50 translations whose
+  FIST status is unresolved, a personal contact list and three other non-manuscript files, and smaller groups.
+- The homepage "Scholarly transcriptions" number becomes 33,050 (was 27,593): the PGP editions together with
+  FGP's, now that FGP's own files add editions for more manuscripts.
+- Validation: gates 1-4 of docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md (gate 3 digest dc28650e, 81 checks; gate 4
+  digest 12ccd77a, 86 checks with the declared expectations); scripts/check_fgp_sidecar.py,
+  scripts/deploy_fgp_sidecar.ps1 -Rows 59062.
+
+Also: the website opens the FGP or PGP edition of a page with no automatic transcription, and in the Joins Lab and
+Visual Similarity the Library and Domain filters show only or hide what you choose (PR #450). Installer 9.11.0;
+web deployed from `master-main`.
+
+### FGP: letters restored by reading the PDF fonts' own glyph names (web + desktop)
+
+- **Letters restored in 1,779 FGP transcriptions that keep their PDF text** (GS-276). FGP's PDFs name every glyph
+  in their embedded fonts, but most carry no Unicode map, so extraction showed final letters, vowel points and Arabic
+  letters as boxes, left whitespace-coded letters out, or showed wrong symbols. Gate 3 now decodes each drawn glyph by
+  its font and byte code -- through a reviewed glyph-name registry (`scripts/fgp_glyph_registry.py`) and an exact
+  outline match against pinned reference fonts -- re-extracts a repaired copy of the PDF and checks every change glyph
+  by glyph (`scripts/fgp_glyph_reread.py`; checks T11-T14). The owner's rulings of 2026-10-28 read a glyph whose
+  typeface is not installed by its name, a plain letter tied with its variants as the plain one, and accept rows
+  whose lines decoding turns right-to-left. 91.4% of the Hebrew letters missing from these texts are
+  recovered; against the Word texts the decoded letters agree 99.97%. Pointed letters are stored as letter plus points,
+  Arabic as plain letters. Rows the checks cannot clear keep today's text with the vocabulary repair of the entry
+  below (88 rows) or as they were. Rules: `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §9; candidate sidecar rebuilt
+  (gate 3 `dc28650e`, gate 4 `12ccd77a`, sha256 `0afd5b06…`, 59,062 rows); gate 4 attaches a re-read only to the
+  stored text and the PDF gate 3 read. The gates now read today's sidecar from `--fgp-db` and refuse a candidate
+  passed as today's (`scripts/fgp_association_inventory.py::refuse_candidate_as_today`).
+
+### FGP: final letters restored in the transcriptions that keep their PDF text (web + desktop)
+
+- **Final letters restored in 1,174 FGP transcriptions** (GS-276). FGP's PDF copies left the final letters
+  ך ם ן ף ץ as control characters, so readers saw boxes; the rows with no Word or line text kept them. Gate 3 now reads
+  each row's code-to-letter mapping off the row's own words against the vocabulary of the clean FGP texts
+  (`scripts/fgp_final_letters.py`) and applies a code only on clear evidence (at least two votes, 70% of them);
+  measured on the 5,392 rows that exist both ways, 6,421 of 6,426 applied codes are right (check T10, every run).
+  1,967 codes (119,522 occurrences) are restored; codes with weaker evidence and codes standing inside words (vowel
+  points and dots) stay as typed. Rules: `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §8. On most of these rows the
+  glyph re-read of the next entry now replaces the vocabulary repair; 88 keep it.
+
+### FGP: the Yerushalmi team's transcriptions with their completions and doubtful letters (web + desktop)
+
+- **The Yerushalmi team's FGP transcriptions now come from its Word files, with their markings** (GS-276; plan
+  `docs/plans/FGP_TEAM_1350001_MARKINGS_PLAN.md`, rules `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §10). The team (FGP
+  folder 1350001) marks its text by formatting, and its PDF copies lost the hollow (doubtful) letters altogether. Gate 3
+  now reads that team's Word files with completions in square brackets (`[לא]`), each doubtful letter followed by
+  U+05AF HEBREW MARK MASORA CIRCLE (`עבד֯`), deleted letters in `⟦ ⟧`, interlinear additions in `\ /` (`\יהא/`) and
+  letters in the Rashi font set apart in `⸤ ⸥`. A row is accepted when its letters agree with the PDF reading (at
+  least 99% of the PDF's letters found, at most 10% more; check T15), not by the line diff. 176 transcriptions switch
+  to the marked Word text and 6 new ones enter; 4 below the letter bar keep their PDF reading.
+  Latin shelfmarks the team typed in right-to-left mode (`B.M. Or. 6581,2 [1154,2] + TS 12.183`, which plain text
+  reversed to `12.183 TS + [1154,2] 6581,2 .Or .M.B`) keep Word's display: an RLM at each edge of a stretch of
+  right-to-left runs in a paragraph that mixes them with a Latin word (owner, 2026-10-29).
+
+### A legend for FGP's transcription marks; the desktop keeps `<…>` marks (web + desktop)
+
+- **A "?" beside a Genuzot transcription opens the team's legend of marks** (GS-274, option A), on the website
+  (the version selector) and on the desktop (Browse and the Manuscript Viewer). The Genuzot team types its
+  marks into the text (`?ב?` a doubtful letter, `@…@` a piyyut, `<…>` a line filler, …); the legend shows the
+  team's two lists, for prayer and piyyut fragments (2024) and for Talmud fragments transcribed for Hachi Garsinan
+  (2014). One source serves both apps: `shared/fgp_marks_legend.py`. The text itself is unchanged; drawing the marks (option B) waits on FGP.
+
+- **The version chooser shows no text of an FGP transcription** (owner, 2026-10-27). It named each FGP entry by
+  its opening words, which for many Genuzot texts is a line of lacuna dots; now entries that would read alike are
+  numbered ("FGP Transcription 1", "2", …), on the website and the desktop (`shared.fgp_service.number_repeated_labels`,
+  replacing `fgp_incipit`).
+
+### Fixed
+- **Desktop: `<…>` marks in PGP and FGP editions are shown again** (GS-275). The text went to Qt's `setHtml`
+  unescaped, so every `<…>` was read as a tag and dropped with its contents: FGP's line fillers (`<רא>`, 9,729 of
+  the FGP rows) and a PGP editor's added letters (`מיב<מ>נא` read `מיבנא`, 315 PGP transcriptions). All
+  text-to-HTML sites in Browse, View All and the viewer now escape first (`desktop.widgets.text_lines_to_html`),
+  and a test fails any new site that does not; the visual-similarity preview shows its text as plain text.
+- **FGP's stored HTML entities are decoded once, for every surface** (GS-60). The sidecar keeps `&deg;` where the
+  Genuzot team typed its margin sign `°`; the website's Quick View decoded it, its Browse showed `&deg;`, and the
+  desktop decoded it only through the bug above. `shared.fgp_service` now decodes well-formed entities when it
+  reads a row (`decode_stored_entities`), so all show `°`.
+
+### Web: editions on pages without an automatic transcription (web)
+
+- **A page without an automatic transcription now opens its FGP or PGP edition.** The reading view built its
+  version menu -- and its Edit, Comment, Notes and Joins buttons -- only when the page had an automatic text, so on
+  such a page an edition could not be reached at all (T-S NS 243.146, page 1). The page's automatic text is now
+  taken as empty: the menu is always there, the usual default rule chooses the edition when there is one, and the
+  page's citation credits that edition. Edit there starts from the empty text and is saved as the reader's own
+  version, as elsewhere (the question of editing an edition itself is GS-277). A catalogue-only record without a
+  page still gets none of these (`web/pages/browse_state.py::page_has_reading_view`). Plan and the owner's
+  decisions: `docs/plans/EDITIONS_WITHOUT_AUTOMATIC_TEXT_PLAN.md`.
+
+### Joins Lab and Visual Similarity: Library and Domain shown only or hidden, the domain tree, counts that follow each other (web + desktop, PR #450)
+
+- **The Library and Domain filters can hide what you choose, and take several values everywhere.** Each list now
+  opens with a **Show only | Hide** switch: Show only keeps the candidates in the chosen libraries or domains, as
+  before; Hide leaves them out and keeps the rest, a candidate with no library or domain included. Nothing chosen
+  still shows every candidate.
+- **Domains are a tree** (owner, after trying the desktop): the FJMS hierarchy, parent → domain → sub-domain, in
+  its canonical order (`shared/domain_hierarchy.py`, as the search page's filter); choosing a parent takes in its
+  whole branch. A fragment is still placed by its first domain, as its card shows it.
+- **Each filter counts what the others keep**: choosing or hiding domains updates the library counts, and the
+  other way round; every value keeps its row, at (0) when none is left.
+  - Website Joins Lab: the switch sits at the top of the toolbar's Library and Domain lists and applies with the
+    picks when the list closes; while values are hidden the label reads "Library · Hiding" / "Domain · Hiding"
+    above their names. The Domain list is indented by level. The choices (`libraries_mode` / `domains_mode` in the
+    filter state) are kept in the saved session and in a copied link; a link from before them shows only.
+  - Website Visual Similarity window: the same switch and nested Domain list, applied at once, like its picks;
+    the other list's counts follow at once. The Hebrew UI now lists domains in the tree's order, as the English.
+  - Desktop Joins Lab: the Filter dialog's Library and Domain are checklists (Domain the tree; a parent checked,
+    partly checked or not by its branch), each with **Select All / Select None** and the Show only / Hide choice,
+    and their counts change as you check, before Apply. Under the results toolbar a row of **chips** names every
+    filter that is on (text, material, library, domain, dimensions, triage, width); each chip removes its filter,
+    "Clear all" removes them all, and the Filter button shows how many are on ("Filter (2) ▾"). The chip is the
+    search filter dialog's, now shared: `desktop/widgets/filter_chip.py`.
+  - One rule for all three: `shared.joins_lab` (`filter_passes`, `path_passes`, `domain_path`,
+    `domain_tree_options`, `facet_rows`).
+
+### Joins Lab: the width-filter note says what turning the filter on does (desktop, PR #451)
+
+- **Joins Lab "Filter ▾" dialog: the note under "Filter by width (cm)" now says what the filter does.** The
+  English UI showed the literal text "Size filter note": the string was looked up by a placeholder key, and
+  `tr()` returns the key itself in English. The Hebrew note ("סינון גודל הוא אופציונאלי — מידות מוצגות כרמז
+  בלבד.") was unclear. Both now give the one fact a user needs before turning the filter on: "With this on,
+  fragments with no recorded width are hidden too." / "כשהסינון פעיל, מוסתרים גם קטעים שאין להם רוחב רשום."
+  The key is the English sentence, following the convention that keys are the English text.
+
+### The open-issues tracker rebuilt: one line per defect, a backlog, details by ID (ci, PR #449)
+
+- `docs/OPEN_ISSUES.md` had grown to 179 KB: 256 paragraph-long rows in insertion order, a
+  10 KB log of count changes, hand-kept counts that had drifted (P2 48 claimed, 45 marked
+  open), and sections for milestones long closed. Every open row, and the 18 discovery items
+  parked in `docs/archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md` on 2026-10-23, was re-checked
+  against the code at `ca809c56` (eleven agents, one batch each; every "fixed" verdict had to
+  cite code, and each closure was confirmed by a second reading before it moved).
+- Result: 9 rows closed into `docs/archive/OPEN_ISSUES_ARCHIVE.md` (fixed or overtaken by
+  v9.8-v9.10 work, each with its evidence), 158 open defects in the tracker (P1 0, P2 38,
+  P3 120) at 40 KB, and 109 items in the new `docs/BACKLOG.md` -- deferred defects, code debt,
+  test gaps, ideas, server and owner tasks. One new defect found by the triage and reproduced:
+  list sync fails scenario invariant 14 on seeds 11362 and 11917 (an edit made during an upload
+  can lose a website entry).
+- Every row has a stable ID (`GS-<n>`), sits under its priority and area, and links to its
+  full text in the new `docs/ISSUE_DETAILS.md` (each old row quoted verbatim, then its triage
+  note). The Summary is generated: `scripts/open_issues_model.py` defines the form,
+  `scripts/collect_open_issues.py` folds fragments in (new fragment form `## P3 search:
+  headline`, `Where:`, details; the old form is still accepted) and with `--check` reports
+  drift, `scripts/archive_closed_issues.py` moves a `✅` row and its details to the archive and
+  never reuses an ID. `tests/test_open_issues_fragments.py` fails CI when the three files
+  disagree or a count, an order or a heading drifts.
+- `scripts/check_docs.py`: the tracker's ceiling is lowered from 180,000 to 80,000 bytes, and a
+  line-number citation of `BACKLOG.md` or `ISSUE_DETAILS.md` fails like one of the tracker.
+
+## [9.10.0] - 2026-10-25 — Desktop UI improvements
+
+The desktop gets an optional side menu, Go to (Ctrl+G) with the last manuscripts opened, saved
+searches, a text size for the result lists, startup tips, more keyboard shortcuts, an account menu,
+and a window that reopens where it was closed. On the website every account has a public name (an
+alias, and a one-time question), the admin Users tab names every account and Delete User deletes
+the account itself, and Responsa notes with numbers appear in the visitor's language. PRs #447 and
+#448. Installer 9.10.0; web deployed from `master-main`.
+
+### A side menu as an option, Go to, saved searches, startup tips, text size, shortcuts, and an account menu (desktop)
+
+Owner, 2026-10-24: "move the menu to one of the app sides, remove the V tick boxes, and add also the
+puzzle, joins lab and settings to the menu", then "Keep the tabs. Offer an option to change them to
+the side menu", "option to change the size of the texts in search etc windows", and "Move the
+menu button to the extreme right or left"; 2026-10-25: recent manuscripts and saved searches
+("star icon on the list"), usable tooltips in Composition Search, and remembering the window's
+size and position.
+
+- **Two menu layouts.** Settings > Menu: *Tabs at the top* (the default, as before) or *Side menu*
+  (`desktop/widgets/side_nav.py`), a column on the window's start side -- right in Hebrew, left in
+  English -- with the seven sections, Fragment Puzzle and Joins Lab, and at its foot Settings, the
+  account, the language switch, GenizahSearch.com and the version. The choice applies at once and is
+  kept (`nav_layout` in config.pkl). The tab layout's ☰ menu offers *Move the menu to the side*, and
+  the side menu has its opposite in view, *Move the menu to tabs* (also on its right-click menu).
+- **The ☰ menu without tick boxes**, now with Fragment Puzzle, Joins Lab and Settings after the
+  sections. The current section is bold; the old menu drew an empty checkbox beside every other one.
+- **The side menu:** the current section has an accent bar; ☰ shows or hides the labels (remembered).
+  On a narrow window (a 1080p screen at 300% is 640 px wide) it shows icons only and ☰ opens the full
+  list; a short window scrolls it rather than being made taller by it.
+- **☰ at the window's edge**, before the first tab: far right in Hebrew, far left in English. It was
+  between the tabs and the Login button.
+- **Go to (Ctrl+G)**, also in the menus: type a shelfmark or system number to open the manuscript in
+  Browse from anywhere; Hebrew or Arabic words are searched instead (the website homepage's rule,
+  `shared/quick_open.py`). Under the box, the last ten manuscripts opened (from Recently Viewed, one
+  row per manuscript): Down and Enter open one, and typing narrows the list. An FL number still
+  works but is no longer offered (owner: nobody types one).
+- **Saved searches.** Each row of the Search and Composition Search history menus has a ☆: a saved
+  search is listed first, under *Saved searches*, and is kept whatever its age -- the history limit
+  counts only the rest, and *Clear history* leaves it (`pinned` on the entry in
+  `search_history.json`; `shared/session_persistence.set_history_pinned`).
+- **Composition Search tooltips in plain words**: what Chunk, Max Freq, Filter >, Min chunks, the
+  three modes, the variant slider, *Sort by shelfmark only*, the corpus choice and the buttons do,
+  and which way to turn them. Help's *Min chunks*
+  now says page: the count is per page, as the engine applies it.
+- **Startup tips** (`desktop/startup_tips.py`): from the second start, one tip at each start in a
+  strip under the top bar, about a feature that is easy to miss; 55 tips, written and approved by the
+  owner in English and Hebrew, the strongest five first. Show me opens the feature and rings the
+  control; a tip that needs the letter-level index or an account invites to it instead (builds the
+  index, opens the login). Each tip is shown once, tips about features already in use are skipped,
+  five closes in a row turn them off; Settings > *Show a tip when the program starts*.
+- **The window opens where, and as large as, it was closed** (`main_window_geometry` in
+  config.pkl); the first start is maximized, as before.
+- **More keys:** F1 opens Help at the section in front (Help is now in the menus too), Ctrl+, opens
+  Settings, and Ctrl+F puts the cursor in the section's own search or find box.
+- **Ctrl+1 .. Ctrl+7** open the sections in their order, in either layout; each tab's tooltip and
+  each menu entry shows its key. **Ctrl+8** opens the Fragment Puzzle and **Ctrl+9** the Joins Lab.
+  On Windows, Ctrl+G, Ctrl+F and Ctrl+, also answer to the physical key
+  (`side_nav.LayoutProofShortcuts`): the owner found Ctrl+G dead while its menu entry worked, and a
+  keyboard layout whose letter keys type Hebrew is the likely cause.
+- **An account menu.** Logged in, the Login button shows your name with ▾ and opens *Sync lists now*
+  (enabled when the Lists tab's button is) and *Logout*. One click on your name used to log you out.
+- **Text size.** Settings > *Text size in result lists*: Normal, Large, Larger or Largest, for the
+  Search, Composition Search, Browse by Identification and Personal Lists results (the headings keep
+  their size); Ctrl+= / Ctrl+- step it, and so do A- / A+ beside the tabs and in the side menu;
+  Ctrl+0 resets it. The Browse tab gains the Manuscript
+  Viewer's A- / A+ beside Find, and the two now share one transcription size (changing it in either
+  changes both); on the Browse tab the same keys size the transcription.
+- **Settings > Cancel** no longer undoes settings changed outside the dialog since the program
+  started: the dialog is built once, and it kept the startup snapshot. It now takes one each time it
+  opens.
+- Help (English and Hebrew): a Menu section (layouts, the side menu, the shortcuts, Go to, the window
+  size), recent and saved searches on the Search tab, and the Login and Joins Lab passages say where
+  they are in each layout.
+
+### Everyone has a public name: aliases and a one-time question (web)
+
+- After the 2026-10-21 hardening took the email out of the username, 164 of 193 accounts had no
+  public name, and every page that credits a contribution -- corrections, comments, joins, the
+  citation of a corrected text -- showed them as "Unknown" (38 of the 51 visible corrections).
+- `migrations/profiles_public_aliases.sql` gives each of them an alias such as "Curious Scribe" or
+  "Patient Copyist" (40 adjectives x 40 Genizah-world trades and callings, then "of <city>" on a
+  clash), and new sign-ups without a username of their own get one at sign-up. Every surface,
+  installed desktop versions included, already falls back to the username, so all of them show
+  it. Undo statement at the end of the file; dry run as written.
+- The website asks each person with an alias once, on any page after sign-in: "How should your
+  name appear?" -- their own name (prefilled with the name in their sign-in data: Google's, or
+  the one typed at an email sign-up; never published unless they choose it) or the alias.
+  "Use my name" sets the full name; "Use the alias" keeps the alias. Both are remembered
+  in the new `profiles.public_name_confirmed`, so the question is asked once per account, on
+  any device (`web/public_name.py`). Nothing is asked before the migration runs.
+- Author lookups that ignored the username now use it: published joins on browse
+  (`web/components/joins_panel.py`, `shared/puzzle_publish_service.py::resolve_author_profiles`,
+  which also returned None for a profile without a full name) and the pending list on
+  /corrections.
+- Pinned by `tests/test_public_name.py` (the real dialog, off-loop write with the visitor's
+  client) and `tests/test_profiles_public_aliases_sql.py`; verification on the live project:
+  `scripts/verify_profiles_public_aliases.sql`.
+
+### Admin Users tab names every account (web)
+
+- Since the 2026-10-21 hardening took the email out of `profiles.username`, most accounts had
+  no name and no username left, and /admin -> Users listed them as "Unknown". Each row now shows
+  the public name, then the name the account signed in with (Google's, or the one typed at an
+  email sign-up; for the admin's eyes, not published) and the email, read from `auth.users`
+  through an admin-only function, `public.admin_list_user_emails()`
+  (`migrations/admin_list_user_emails.sql`, re-run 2026-10-25 for the sign-in name): it answers
+  only a caller whose profile has role `admin`, and `profiles` stays free of addresses. No line
+  repeats the name above it.
+- A lookup that fails says why above the list: no signed-in session on the server (seen
+  2026-10-25: signing in again cured it), not an admin in the database, the function missing,
+  or another error; the log line carries the error code.
+- The tab's "Search users..." box and role filter were never connected; they now filter the
+  list (name, username, sign-in name, email, affiliation; role).
+- Pinned by `tests/test_admin_user_emails.py` (the rendered tab) and
+  `tests/test_offloaded_readers.py` (the lookup gets the admin client).
+
+### Admin "Delete User" deletes the account (web)
+
+- "Delete User" on /admin -> Users deleted only the profile row. The person could still sign
+  in, with no profile: no public name, never asked for one, and My Profile unable to save (two
+  such accounts found 2026-10-25). It now calls `public.admin_delete_user()`
+  (`migrations/admin_delete_user.sql`), which deletes the sign-in account itself, and only for
+  an admin; it refuses the admin's own account and other admins' (change the role first), and
+  says which link blocks a delete. The menu no longer offers it on admin rows.
+- The confirmation says what happens: the person can no longer sign in, their lists and votes
+  go with the account, and their corrections, comments and joins stay without a name.
+- Pinned by `tests/test_admin_delete_user.py`.
+
+### Responsa notes with numbers in the visitor's language (web)
+
+- A Hebrew results line no longer ends in English. The engine writes its notes in English on
+  the website (the API and MCP want them so), and the page looked each note up as it was: a
+  note whose numbers were already in it ("a query with * reached 5,252 manuscripts, more than
+  the 2,000 ...") never matched its key, and "Matches across a page break could not be
+  searched; the list may be incomplete." was split at its own "; ". The page now recognises
+  the engine's numbered messages (`shared/search_engine.py::FILLED_MESSAGE_TEMPLATES`: the two
+  page-break notes and the Responsa guard's refusal) and writes them in the visitor's language
+  with the same numbers (`web/translations.py::tr_engine_message`), in the results line and in
+  the refusal message. The desktop translated these before filling them in and is unchanged.
+- Pinned by `tests/test_engine_message_translation.py`, which also fails a new numbered
+  message that is not registered.
+
+## [9.9.0] - 2026-10-23 — True wildcards in Responsa
+
+Responsa search reads `*` as the Bar-Ilan Responsa Project does: any letters, none included,
+anywhere in a word and as often as typed, so `מאמ* קור*` finds `מאמתי קורין` and `*נים *לים`
+finds `כהנים גדולים`. Every Responsa word is a whole word, `#word#` searches all its forms, a
+bracketed word is found, and on a rebuilt index the matches across page breaks of every
+multi-word search come from a new seam index. The index format is 2 (seams and a reversed-words
+field): the website's index is rebuilt by the owner, and the desktop offers a one-time rebuild
+that now runs beside the index in use, with progress in the main window and a "Rebuild when I
+exit" answer. Also: Back restores a website search as the page showed it, the Joins Lab and
+Personal Lists on a phone, and the found words centred in the desktop's Snippet and Context
+cells. PRs #432–#446. Installer 9.9.0; web deployed from `master-main`.
+
+### Responsa search: whole words, every grammatical form, and bracketed words found (web + desktop, PRs #432 and #433)
+
+Phase 1 of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md`: one meaning of a Responsa query on every
+search path -- the main search, the line search (`|`), My Library, both together, and the complete
+pass that search-within relies on.
+
+- **Every word is a whole word**, the first and the last included, by the same rule as Exact:
+  `כהנים גדול` finds `כהנים גדול` and no longer `כהנים גדולים`; a lone `ספר` finds the word ספר,
+  not `מספרים`. The rule holds inside each `AND` word, in both directions of a bidirectional
+  search, and at each line's edges; with flexible spacing it bounds the joined words as one unit.
+  Result counts of existing searches change accordingly (owner decision 8, 2026-10-21).
+- **`#word#` searches every combination of prefixes and suffixes** (600 forms per word): the
+  limit that dropped the suffixes now counts the terms a search really looks up, measured on the
+  real index, and is 5,000 (`Config.MAX_EXPANDED_TERMS`). When a search has to turn an option off,
+  the note stays beside the result count (it was a five-second message).
+- **A word with a bracket inside it is found**: `שלום` finds `של[ו]ם`, on the website, the desktop
+  and in My Library, and the bracket stays in the highlight.
+- **Excluded words read the page the match is on**, in every mode (a Responsa `-word` and the
+  "Exclude Words" box of Exact, Variants and Fuzzy): a result is no longer hidden because the word
+  appears on another page of the same manuscript (owner decision 7). In My Library, excluded words
+  now apply to every search.
+- A `*` inside a word, a word made only of `*`, and other shapes with several `*` are not searched
+  yet: the website, the desktop, Joins Lab (both sides) and the API say so (API: 400
+  `responsa_unsupported_star`), instead of showing no results. `*word`, `word*` and `*word*` work as
+  before.
+- Website: the expanded result text highlights words written with an ASCII quote (`ר"ת`): it is
+  now matched before it is escaped.
+- Line search results mark the matched words, not their whole lines.
+- `shared/responsa_match.py`: the word compiler. Retrieval per index (each word's scored terms,
+  ORed with a bracket- and Hebrew-mark-tolerant pattern lookup of the same forms); the check
+  pattern; the highlight pattern. Its gate, `scripts/verify_responsa_wildcards.py`, compares the
+  engine with an independent reading of `Transcriptions.txt` on the real index: all nine Phase 1
+  queries agree, page and span (2026-10-22).
+
+### Search index format 2: page-break documents and a word-ending lookup (web + desktop, PRs #438 and #440)
+
+Phase 2 of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (design: §6.1). A rebuilt index carries
+two additions the coming wildcard search (`*` as any letters, Phase 3) reads; nothing searches
+through them yet, so results are unchanged.
+
+- **Seam documents**: one small document for each place where one page of a manuscript runs on
+  into the next in reading order (the same transcription, the same volume, the next page
+  number), holding the 30 words on each side, with where each slice stands in its page. Oxford
+  parts also join the last page of one folio to the first of the next. 1,541,186 seams over the
+  V0.8 and V0.7 files; they live in their own index inside `tantivy_db/seams/`, so nothing that
+  reads the main index meets them.
+- **A reversed copy of every word** (`content_rev`) on every document, so a word's ending is a
+  fast lookup.
+- **A format marker**, `tantivy_db/index_format.json`, written last. An index without it (every
+  index built before this) is searched exactly as today; the desktop's Settings says which
+  format the index has, and rebuilding stays the user's click.
+- `build_index.py main --index-dir <folder>` builds into a new folder beside the live one (with
+  `--corpus-v8`, `--corpus-v7`, `--v08-only`, `--caches-from`, `--no-seams`, `--no-reversed-field`);
+  the deployment guide has the server's rebuild, swap and rollback.
+- New checks in `scripts/measure_responsa_wildcards.py`: `seam-plan`, `index-sample`,
+  `seam-topology`, `reversed-check`, `crossing-diff`.
+
+### Responsa search: `*` finds any letters at the end of a word or inside it (web + desktop, PR #442)
+
+Phase 3, first part, of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (§7, "Phase 3, settled before
+building"). It works on today's index, on the website and on every desktop.
+
+- **A `*` stands for any letters inside one word, none included**, at the end of a word or inside
+  it, as many times as typed, as in the Bar-Ilan Responsa Project: `מאמ* קור*` finds `מאמתי
+  קורין`, `כ*נים` finds `כהנים`, `כוהנים` and `כנים`. A star never reaches past a space, a digit
+  or punctuation, and every star word is a whole word. Spelling variants, Judeo-Arabic, `%` and `#`
+  apply to the letters around the star. A star word is looked up through the index's pattern
+  search, so it is quick on today's index too.
+- **Matches across a page break** are found for star searches: on a rebuilt index from the seams,
+  on today's index from each manuscript's page breaks when the manuscripts holding the words are few
+  enough to read in time; when they are not, the count shows "+" and the results line says which
+  matches were not searched. Search within such a list searches within the shown results.
+- **Responsa reads the pages first**, then the matches that run across pages, and reads up to
+  150,000 candidate pages (it was 50,000), so a broad star search shows its full list. A search whose
+  every word has a star is ordered by the matches on each page, then by shelfmark. The results line
+  counts a star word as a pattern.
+- Counts change: a `word*` search now finds every word that begins with the letters, not only the
+  word with its 25 grammatical suffixes.
+- A `*` at the start of a word works as before for now (`*word` with the grammatical prefixes,
+  `*word*` as `#word#`); a word that begins with `*` and holds another `*`, a word made only of
+  `*`, and a star word with punctuation inside are refused with a message (API: 400
+  `responsa_unsupported_star`). A star word with only one or two letters of its own carries a note
+  that its list may be cut.
+- `Config.RESPONSA_PAGE_LIMIT` (150,000) and `Config.RESPONSA_STAR_AGGREGATE_LIMIT` (2,000); the
+  cut-off signal gains `partial` / `limited` for matches left out by rule
+  (`RefinementStep.result_partial`); seam rows have `scope` `seam` and carry the pages they cover.
+
+### Responsa search: `*` at the start of a word; page-break matches from the seams (web + desktop, PR #443)
+
+Phase 3, second part, of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (§7, "Phase 3, settled
+before building", decision 10), on top of the first part (`*` at the end of a word or inside it).
+
+- **A `*` at the start of a word stands for any letters too**, as it does everywhere else in a
+  word: `*נים *לים` finds `כהנים גדולים`, `*כהנ*` finds every word that holds `כהנ`, and
+  `*כ*ה*נים` finds `הכוהנים`. On a rebuilt index it is looked up from the end of each word,
+  quickly; on an older index it reads the index's whole word list, several seconds a word.
+- **Matches across a page break come from the seams on a rebuilt index**, for every search of
+  several words (Exact, Variants, Fuzzy and Responsa, up to 30 words on a side): only pages
+  that follow each other in a manuscript are joined, and every such match is found, not only a
+  manuscript's first. A longer phrase reads the whole manuscripts, as before.
+- Counts change: `*word` now finds every word that ends with the letters (the word with its 24
+  grammatical prefixes is `#word`), `*word*` is searched as typed rather than as `#word#`, and on
+  a rebuilt index a page-break match is read only where the pages follow each other.
+- Desktop: on an index built by an earlier version, a notice after startup offers a rebuild once
+  ("Rebuild now" opens the usual rebuild and its confirmation; "Later" is remembered for that
+  index). Nothing rebuilds by itself.
+- `scripts/verify_responsa_wildcards.py --phase 3` holds the leading-star queries and compares
+  finite words' crossings in full on a rebuilt index; `scripts/measure_responsa_wildcards.py`
+  gains `missing-pages --via-engine` and a `crossing-diff` that checks the engine against the
+  seams' simulation.
+
+### The search index rebuilds beside the one in use (desktop, PR #446)
+
+Rebuilding the desktop's search index (Settings, or the offer an index of an earlier format
+gets after startup) used to delete the index first and build in its place: for the twenty-odd
+minutes of the build nothing could be searched, the main window showed nothing of it (the only
+progress bar is in the Settings dialog), and a crash left no index at all.
+
+- **Built beside, swapped at the end.** When the disk has room for a second index (about the
+  current index's size plus 1.5 GB), `Indexer.create_index(beside=True)` builds into
+  `tantivy_db.new` (its own seams and marker, the browse map into `browse_map.pkl.new`) while
+  the open index keeps serving searches. At the end the app closes its index, renames the
+  folders (`shared/index_swap.py::swap_in_staged_index`), reopens the new one, updates the
+  Settings line and removes the old folder in the background (retried: on Windows the old
+  memory-mapped files refuse deletion until released; what refuses goes at the next start).
+  Without the room the build runs in place as before, and the confirmation says so, with the
+  figures. A build interrupted by a crash or a shutdown is cleaned up at the next start before
+  the index opens (`recover_index_dirs`: an interrupted swap is finished, a half-built
+  `tantivy_db.new` discarded), so a user is never left without an index. `build_index.py
+  --index-dir` keeps working unchanged.
+- **Progress where the user looks.** A line at the top of the main window
+  (`desktop/index_rebuild_bar.py`): "Rebuilding the search index: 37%, about 14 minutes left.
+  Searching uses the current index meanwhile." The phases after the corpus lines (the
+  whole-manuscript documents, the commit and merges, the seam index) now report progress too
+  (`Indexer.create_index(phase_callback=)`), weighted into one bar and one estimate
+  (`shared/index_build_progress.py`), where the Settings bar used to sit at the last line for
+  minutes. For an in-place build the line says searching is unavailable until the build ends,
+  and the Search and Analyze buttons are disabled with that sentence as their tooltip.
+- **"Rebuild when I exit."** The offer's third answer, beside "Rebuild now" and "Later"; its
+  text names what each does, in English and Hebrew. Recorded for that index like "Later"; the
+  close path then hides the main window, runs the build in a small modal progress window and
+  quits when it is done. Its Cancel keeps the index you have (the build runs beside it). A
+  build already running when the program is closed goes to the same window instead of being
+  thrown away. Cancel of a running build (`IndexerThread.request_cancel`,
+  `Indexer.create_index(cancel=)`) removes what the build wrote and nothing else.
+
+### Back to a search shows what the page showed, in every mode (web, PR #436)
+
+Measured before (local server, built-in browser, open a result in the same tab,
+press Back): a Responsa search ran again from scratch (in production on
+2026-10-22 one 45 s search ran three times for one visitor); a finished
+25,320-row Exact search came back as 250 rows ("250+"); a search left before it
+finished started again, while the abandoned one ran on and the new one waited
+behind it. Causes: the Back check refused any address with a `mode`; the page
+reads its saved state while it is built, before the browser's socket connects,
+so NiceGUI's per-tab storage was never readable there and every restore fell
+back to the 250-row copy every tab shares; and the address was stamped only when
+a search completed.
+
+Now every search writes its address when it starts: the query, the page's mode,
+the Responsa options and a random run code (`run=`). `web/search_runs.py` keeps,
+per browser and code, the running search and then the page's snapshot (up to
+1,000 rows and the filters shown with them), in memory and bounded (30 minutes
+after last use, 5 runs per browser, 100 in all). Back to the address:
+
+* a finished run is restored from it -- all its rows up to 1,000, its own
+  pre-search filters (saved with the run) and display filters (PGP, library,
+  printed, exclusions; updated as they change), never another tab's; a run that
+  found nothing shows "0 results" instead of searching again;
+* a run still running is followed: the page shows its progress and clock and
+  its rows when it ends, and Stop stops it -- no second search;
+* a stopped run comes back as the partial rows the page showed;
+* with the run not kept (a restart), the shared copy is used when it is that
+  run's, else the address searches again, in its mode.
+
+`web/search_bootstrap.py::matches_saved_run` is the match (code, query, mode,
+Responsa options, and the run's filters); a typed or pasted link without the code
+searches again, as a link should. Only the page that owns a run saves it (a page
+left mid-search still finishes it, and must not add a second history entry).
+Addresses without a mode, stamped before this, keep the old query-only Back.
+NiceGUI's tab storage is no longer used by the search page.
+
+Tests: `tests/test_search_runs.py` (the registry: per browser, bounds, running /
+done / failed), `tests/test_search_bootstrap.py` (the match in every mode, rejoin,
+an empty run, each way it must not match, the run's snapshot and filters, and the
+page's call sites: the address stamped before the job is awaited, Stop on a page
+following a run, the owner-only save, no local named `run` -- that shadowed
+NiceGUI's `run` module and broke every search's enrichment until the browser
+check caught it). Checked in the browser on a local server: the five cases above.
+
+### Joins Lab and Personal Lists on a phone (web, PR #439)
+
+Owner's screenshots, 2026-10-22, at 390px: the Joins Lab builder's controls lay across the
+anchor's transcription while the page scrolled under it, and the Personal Lists tree was a
+97px column with its heading wrapped and its three buttons stacked.
+
+### Fixed
+
+- **Joins Lab under 1024px.** The anchor pane (image, transcription, known joins) was a 380px
+  sticky column with its own scroll at every width, which left the builder and the candidates
+  10px on a phone. The pane now sits above the work column, each at the full width and the pane
+  no longer sticky; on a phone the transcription keeps a bounded scroll (45vh) so the builder
+  stays within reach, the viewer's control bar is one row of 32px buttons (in the page and in
+  Compare; on a 320px phone its zoom group takes a second row rather than being clipped), and
+  the Compare window's two panes stack, anchor above candidate. The
+  label the page rendered below everything for a narrow-screen anchor strip that was never
+  built (empty, then the sys_id in monospace) is gone.
+- **Personal Lists under 769px.** The My Lists tree was the splitter's 25% panel. The splitter
+  now stacks, the tree above the list at the full width with a bounded scroll, the page scrolls
+  instead of a fixed-height shell, choosing a list scrolls it into view, and an item card's
+  action icons are a row under the text (as a column beside it they were one icon per line
+  and the card 700px tall). On a small phone
+  (480px) dialog cards also drop their 400px / 500px minimum width, which made the create-list,
+  trash and edit dialogs wider than the screen.
+- The hooks are pinned in `tests/test_phone_layout_rules.py`.
+
+### Joins Lab on a phone: Compare shows the two images, and the anchor stays in view (web, PR #444)
+
+The Lab's job on a phone is "anchor vs candidate", and the one screen built for that was the
+one that failed at it (owner, 2026-10-23): with the Compare window's panes stacked, each pane
+was a head, an image capped at 40vh and the whole transcription, so the candidate's image sat
+several screens below the anchor's and the two were never on the screen together.
+
+### Fixed
+
+- **Compare on a phone shows the two images alone.** Below 641px each pane's head keeps only
+  the role, the shelfmark and the badges on one row; the title, details and info rows and both
+  transcriptions hide; and each image is capped at 32vh (31dvh), so the anchor and the candidate
+  are on the screen together with the verdict bar. A new "Show text" button in the window header
+  brings the transcriptions and details back for as long as the window is open. The header
+  stays one row on a phone: the "Compare" title goes, and Add as Join and Add to Puzzle go
+  icon-only and dense.
+- **A phone on its side compares side by side.** On any screen under 521px tall the panes sit
+  beside each other (two 420px panes on an 844px phone, wider than the desktop's 380px anchor
+  pane; two 312px panes on a 640px-wide phone, where the phone rule had stacked them), the text
+  hides the same way, and each image takes the height the window header, the head, the control
+  bar and the verdict bar leave.
+- **The anchor stays in view while candidates scroll.** Under 1024px the anchor pane stacks above
+  the work column and scrolled away with the candidates. Once it has left the screen, a strip
+  under the header shows the anchor's thumbnail and shelfmark, moves to the top while the
+  header's reveal has hidden it, and a tap scrolls back up
+  (`web/static/js/joins_lab_anchor_strip.js`). The narrow-screen strip the Phase-119 design named
+  was never built; this is it.
+- The hooks are pinned in `tests/test_phone_layout_rules.py`.
+
+### The found words in the middle of the Snippet and Context cells (desktop, PR #445)
+
+- The Search tab's Snippet column shows the found words in the middle of the cell. The cell
+  showed the end of the snippet: Qt centres a paragraph only while it fits its label, and a
+  longer right-to-left line is laid out from the label's left edge, so a match cut 60
+  characters in from either side stood at the cell's right edge, cut, or beyond it whenever
+  the snippet was wider than twice the column -- in the app's font, most rows. The cell is
+  now `desktop/ui_widgets.py::MatchCentredSnippet`: the label at its natural width, slid so
+  the marked words are centred, never past either end of the text. Several marks are centred
+  as one span; a match at the start or end of a page is shown with that end of the text at the
+  cell's edge; a snippet that fits is shown whole, as before. Text selection in the cell is
+  unchanged.
+- The Composition tab's Context and MS Context columns centre the matched chunk the same
+  way (`ContextSnippet`). They were `HiddenScrollArea`, a scroll area whose scrollbar was set
+  from the chunk's share of the text's characters, so the chunk stood near the middle only as
+  the letters' widths allowed, after a 10 ms timer per cell and per column resize. Kept from
+  it: the bold dark-red marks, the whole text as the tooltip, the 5 px gap between the two
+  columns, the mouse wheel sliding the text sideways, and the MS Context cell centring on the
+  chunk the Context cell shows. New: HTML in the text (`<`, `&`) is shown as text.
+- Pinned by `tests/test_match_centred_cells.py`, which reads where the red pixels land.
+
+### The local test runner cleans up after itself (ci, PR #437)
+
+- `scripts/run_local_tests.py` now writes each run's `tmp_path` files into a folder of the run's own
+  under `%TEMP%\genizah-test-lanes\`, and removes it when the run passes. A full run used to leave
+  about 18 GB there until the next run started. A failed run keeps its folder for inspection; any
+  later run removes it once it is a day old.
+- Two runs at once no longer delete each other's files: a run used to start by wiping the one
+  shared folder (133 errors in a second run, 2026-09-20).
+
+## [9.8.3] - 2026-10-22 — A compact layout at every width
+
+The website was laid out for one width: on a phone the search controls took most of
+the screen and the results scrolled in a small pane, on a laptop the search form was
+three rows and each result card about 400 px. Search, browse, the expanded result and
+the quick view are now compact at every width, from the owner's mockups: one stylesheet,
+breakpoints at 640, 1023 and 1440, nothing a separate page. Measured on a 1280 px screen
+the search form went from 229 px to 94 px and a result row from about 400 px to 106 px;
+on a 390 px phone the browse image begins 619 px down the page instead of 958 px.
+Web-only: no installer and no GitHub Release; no What's New banner (owner: the change
+is visible). PR #434, with #431's test fix. Deployed from `master-main`.
+
+### A compact layout for phones, tablets, laptops and wide screens (web, PR #434)
+
+The site below 640px was the desktop layout stacked, not a phone layout
+(owner, 2026-10-22, with phone screenshots). Measured at 390x844 before this
+change: on `/browse` the manuscript image began 958px down the page (1,042px
+in English); on `/search` the open form and the toolbar left 300px of the
+screen to results and one result card was 400px; the English header wrapped
+its login group out of its 64px bar; `/catalog-browse` kept a 280px sidebar
+beside a results column about 60px wide.
+
+#### Header
+- The header row no longer wraps. Login and Register are icon buttons on a
+  phone (`phone-icon-only`, the name kept in `aria-label` and the tooltip);
+  wider screens see the same text buttons as before.
+
+#### Search
+- On a phone the page scrolls instead of a results pane inside a fixed-height
+  shell, so the header and the browser's address bar hide on scroll.
+- The form folds into its one-line strip when a search starts (the width check
+  runs in the browser; the strip's own button brings the form back).
+- The results toolbar is one line: count and filter buttons scroll sideways,
+  the export icons are a menu, a filter that is not yet available takes no
+  space (it still reserves its space on wide screens), the pagination
+  placeholder goes, and cards lose their desktop padding and spacing.
+
+#### Browse
+- Hidden on a phone: the page title, the lookup card's decorative icon, the
+  image panel's title, the zoom figure, the rotation slider and the
+  separators. Search for Parallels and Show Metadata are icon-only there
+  (`browse-icon-collapse`, text kept in the tree).
+- The image sets the height of its box (no dark bands above and below it);
+  the brightness/contrast/gamma sliders sit behind a `tune` button; the
+  transcription is part of the page instead of a pane that scrolls inside it.
+
+#### Catalog browse
+- Under 768px the filter sidebar is hidden behind a Filters button and stacks
+  above the results; the table keeps its columns and scrolls sideways.
+
+#### Every width (the owner's mockups, 2026-10-22)
+- Search: the form is one row on a laptop (two on a tablet) with Advanced
+  Options and "Search only in..." as buttons that open their panels; the
+  results toolbar carries a density toggle and one menu for the post-filters
+  and the exports. Rows are compact by default (one header line, a two-line
+  snippet, actions on hover), remembered per visitor; "comfortable" restores
+  the older card.
+- An expanded result shows the full text in the snippet's place beside a
+  150 px thumbnail, with one action line; on a phone the thumbnail drops
+  under the text.
+- Quick view: one info line on a laptop, the image sliders behind a `tune`
+  button, catalog and PGP details as collapsed bars at the foot; on a phone
+  the view is three tabs, Text, Image and Info, with prev and next in the
+  header.
+- Browse: the page title is for screen readers, the lookup is a slim row,
+  the green card is one line on a laptop when it fits (the title is cut to
+  the width; the rest wraps beside the drawer), the image sliders sit behind
+  `tune` at every width; a tablet gets the overlay drawer (breakpoint 1023).
+  Transcription type scales by width and content caps at 1600 px on wide
+  screens.
+- The manuscript viewer takes touch: two fingers pinch-zoom, one finger pans
+  a zoomed image (a pinch that drops to one finger goes on as a pan), and an
+  unzoomed image leaves the page free to scroll.
+
+#### Fixed in review (five Codex rounds on #434, each pinned in `tests/test_phone_layout_rules.py`)
+- A double-click or a repeated Enter could run two searches over one result
+  state: the phone fold awaited the browser before the running guard was set.
+- The expanded card's Browse Full Manuscript link dropped the matched folio
+  (`fl_id`, `volume_ie`, page, highlight) and opened the first folio of the
+  first volume.
+- The quick view's PGP / FJMS buttons did nothing on a phone, where their
+  sections are the Info tab; they now select the tab and open the section
+  from Python.
+- The browse metadata button's aria-label said "Show Metadata" while its
+  text said "Hide Metadata".
+- The "Search only in..." badge did not count measured materials or a text
+  position; it now names every filter the predicate and the chip bar know.
+- A fold of the search form left the "Search only in..." panel open with its
+  header hidden: every fold closes it, and the panel has a close button of
+  its own for the fold the browser performs on scroll.
+- The viewer added a fresh set of touch handlers on every `init()`; they are
+  bound once per viewer.
+- The green browse card, forced onto one line from 1024 px, overflowed beside
+  the 280 px drawer; it wraps when it must.
+- `common.css` gained two physical direction properties after the findings
+  mobile rule (CI's guard): now `margin-inline` and `padding-inline`.
+
+### The /browse correction tests stop depending on timing (ci, PR #431)
+
+`tests/test_browse_correction_off_loop.py` (from #430) failed in two ways that
+said nothing about the website:
+
+- **CI on 0fb81585**: `test_two_quick_save_draft_clicks...` raised
+  `IndexError: pop from empty list` at its own `with client:`. A page task an
+  earlier test left pending inside `with client:` on its closed loop (the log
+  names the joins button's `_runner`) was garbage-collected during this test,
+  and its `with` exit popped the slot stack of the task then running -- NiceGUI
+  keys slot stacks by task id. Reproduced with a probe; the `editor` fixture now
+  runs `gc.collect()` before the test opens any slot.
+- **Run alone on Windows with NiceGUI 3.18**, the typed-during-save test failed
+  every time: the loop was busy for ~0.35 s at the start of the save, so its
+  `sleep(0.1)` typed after a 0.3 s write. Every step that must happen "while the
+  write runs" (typing, a page turn, the second click) now waits until the fake
+  write is running in its worker, and the write answers only after that step.
+
+Each test still fails when the code it guards is broken: no lock on Save Draft
+or Submit, typed text marked Saved, a late draft id on the new page.
+
+## [9.8.2] - 2026-10-22 — Downloads and thumbnails
+
+Desktop downloads (Excel, Word, text) write the page each result row shows, and the Source
+column marks V0.7 transcriptions in the installed app. On the website, NLI page thumbnails are
+kept on the server's disk and the NLI image-id cache keeps its 30 days, so Visual Similarity
+grids load steadily; saves run off the event loop, /browse page turns keep the page in view, and
+open tabs reload spread out after a restart. Also the Responsa true-wildcard plan with its Phase 0
+measurements, and new tracker rows as fragment files. Desktop: installer 9.8.2. PRs #426-#430.
+
+### Desktop downloads write the page, and the Source column shows V0.7 (desktop, PR #426)
+
+Two desktop-only faults found by comparing the same Responsa search,
+`*כהנים *גדולים`, on the desktop and on the website. Each fix has a
+regression test that fails on the old code.
+
+#### Fixed
+- **Excel "Full Text"** is the text of the page the row shows, as on the
+  website. A row found through a whole manuscript held that manuscript's whole
+  text, cut at 32,000 characters.
+  The **Word and text** downloads had the same fault: the passage around a hit
+  could come from another page of the manuscript.
+- **Excel line breaks** no longer glue the words on either side together. The
+  Snippet marks a line break with ` ‖ ` and Full Text replaces it with a space,
+  as the website does.
+- **The Source (מקור) column** shows whenever a result is a V0.7 transcription
+  (or a My Library hit). It was shown only when `AllGenizah_OLD.txt` sat beside
+  the program, which the installed app's folder does not have, although its
+  index holds V0.7 pages. V0.8-only results now hide it.
+
+### NLI thumbnails kept on the server, image ids kept 30 days (web, PR #427)
+
+Owner report: in the Visual Similarity thumbnail grid some cards showed the
+crossed-out image icon, and different ones after each size switch. The images
+exist. Each card whose manuscript the server had not resolved needed an NLI
+manifest download, only 8 run at once with a 1-second wait, and the rest
+answered 404; a failure is not cached, so each redraw asked again for exactly
+the failed cards. Reproduced: 12 of 20 cards lost when a manifest takes 1.5 s.
+
+#### Fixed
+- **The NLI image-id cache keeps 30 days, as it was meant to.** Every save
+  rewrote `nli_fl_ids_cache.json` from the memory cache, which keeps an entry 5
+  minutes, so the "30-day" file held the last 5 minutes. It is now a SQLite file,
+  `<INDEX_DIR>/nli_fl_ids.db`, written one entry at a time and read when memory
+  misses: a manuscript anyone opened in the last 30 days needs no manifest and
+  takes none of the 8 slots. A list from the MARC fallback (used when the
+  manifest fails; it usually names only the first image) stays in memory for 5
+  minutes as before and is never stored, or later pages would show the first
+  image for a month. For the same reason the old JSON file is not read: it
+  mixes the two kinds of list (Codex review). It is safe to delete.
+
+#### Added
+- **Thumbnails on disk** (`web/nli_image_store.py`): the NLI image proxy keeps
+  each page image it gets from NLI's IIIF server at the grid width (300 px) in
+  `<INDEX_DIR>/nli_thumbs/` and serves it from there afterwards, also during an
+  NLI outage (it is read before the circuit breaker). Only the requested page's
+  own IIIF JPEG is kept, never a Rosetta stand-in or another page's image; the
+  folder stops at 10 GB, and at 2 GB of free disk. After a restart nothing is
+  written until the folder has been measured, and two requests for one thumbnail
+  write and count it once (Codex review). Settings:
+  `NLI_THUMB_CACHE_DIR`, `NLI_THUMB_CACHE_WIDTHS`, `NLI_THUMB_CACHE_MAX_MB`,
+  `NLI_THUMB_CACHE_MIN_FREE_MB`, `NLI_FL_ID_STORE_FILE` (docs/guides/ENV_VARS.md). Counters in
+  `/_internal/memstat` under `nli_image_store`.
+
+#### Not yet
+- The first view of manuscripts nobody opened in 30 days can still lose cards
+  in a large grid. Fetching thumbnails ahead of time, and whether the desktop
+  asks the server for thumbnails: docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md.
+
+### A freer event loop: saves off the loop, lighter /browse page turns, one GC freeze, spread-out reloads after a restart (web, PR #430)
+
+The website serves every visitor from one event loop, and the 2026-10-20
+reliability review measured four things that held it: Supabase writes made on
+the loop, /browse rebuilding its whole content area two or three times per page
+turn, full garbage collections walking the startup data, and the reload burst
+open tabs set off after a restart. Each is changed here; none of it touches
+search.
+
+#### Fixed
+- **Saving no longer stops the site for everyone else.** List writes (create,
+  rename, move, delete, restore, empty trash, add, remove, notes, tags,
+  projects), comments, and /browse corrections and drafts ran their Supabase
+  round trip (~150 ms, Oregon to Frankfurt) on the event loop. They now run in
+  a worker with the visitor's own client, built on the loop. "Add all results to
+  a list" is one insert instead of one per row. A second Save Draft or Submit
+  waits for the first save and then runs, so a double click no longer writes two
+  drafts; a double-clicked comment posts once.
+- **A /browse page turn rebuilds the page twice, not three or four times.** The
+  spinner no longer clears the page: the previous page stays under it, dimmed
+  and inert, and the spinner floats over it without moving it. Phase B fills its
+  placeholders once (the version selector and its default-source choice ran
+  twice), and the whole manuscript's letters are counted once. Measured on the
+  test page: opening /browse cleared the content area 4 times, now 2; a Next
+  click 3 times, now 2. The line-number button no longer disappears when Phase
+  B lands.
+- **Element builds about a third faster on NiceGUI 3.18.** NiceGUI asked
+  `inspect.signature` for the same three functions on every element it built;
+  the answer is now remembered (1,204 elements: 102-110 ms to 64-67 ms median on
+  the dev box).
+- **Full garbage collections stop walking the startup data.** Once the startup
+  loaders finish, the site runs `gc.collect(); gc.freeze()` once, so the 0.6-0.84
+  M startup objects leave the collector (a full collection took 465-534 ms on
+  the loop in a real /browse run). `GENIZAH_GC_FREEZE=0` turns it off;
+  `/_internal/objgraph` reports the freeze count and can unfreeze for a leak
+  hunt (docs/guides/ENV_VARS.md).
+
+#### Added
+- **Reconnect backoff.** After a restart every open tab used to reload within
+  the same 5 seconds. A small script in every page's head now delays the reload
+  after a refused handshake, or after a second connect timeout, by a jittered
+  1.5 s, doubling per consecutive reload up to 60 s; a background tab waits
+  until it is viewed. NiceGUI's first timeout, its switch to long polling, is
+  untouched, and a page that reconnects is not reloaded for an old timeout.
+  Checked in headless Chromium against socket.io 4.8.1 with NiceGUI's own
+  connection code: with websockets hanging, 30 of 30 tabs connect over polling
+  with no reload, as without the script; hidden tabs whose handshake is refused
+  all reload when viewed. Settings: `RECONNECT_BACKOFF_ENABLED`,
+  `RECONNECT_BACKOFF_BASE_MS`, `RECONNECT_BACKOFF_CAP_MS`,
+  `RECONNECT_DELAY_MAX_MS` (unset: socket.io's own retry schedule). Handshake
+  outcomes are counted in `/_internal/memstat` under `handshakes` (a warning
+  when more than 30 unknown clients arrive in a minute), and the browser sends
+  a PostHog `reload_scheduled` event when it schedules a reload.
+
+#### Not yet
+- Phase B of a /browse page still rebuilds the whole content area once, instead
+  of filling only its own containers.
+- The /corrections page's save, approve and reject, the lists' `*_sync` helpers
+  and the comment dialog's shelfmark picker still call Supabase on the loop.
+- Found while reviewing, not changed: after a page turn in edit mode, the
+  correction editor keeps the previous page's text and draft (tracker, P2).
+- None of the above has been measured on the server yet. After the deploy: the
+  `[init] gc.freeze:` line, perf_watch's loop-lag lines, and, during the next
+  restart, `handshakes` in `/_internal/memstat` and `/browse` latency.
+
+### Responsa wildcard plan; new tracker rows as fragment files (ci, PR #428)
+
+- `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (Codex SHIP after four rounds): Responsa `*` as any
+  sequence of letters inside a word through the index's pattern lookup, `#` kept as the grammatical
+  list, whole words at the query's edges, `#word#` keeping its suffixes, pages first. Measured on
+  the local index. Decided by the owner: counts may change, and excluded words are checked on the
+  matched page only, in every mode; still provisional, pending Phase 0's numbers: how a word that starts with a star is
+  looked up (accept the cost, a reversed field, or a word list beside the index) and where
+  page-break matches come from under a star (seam documents, or none with a notice). No product
+  code.
+- `docs/open_issues.d/`: a newly found P1/P2/P3 bug is written as a file of its own, as
+  `changelog.d/` does for the changelog, so open PRs stop conflicting on the tracker's counts and
+  notes. `scripts/collect_open_issues.py --apply` folds the files in (rows, Quick Summary counts,
+  one count note); `tests/test_open_issues_fragments.py` validates every file; `scripts/init.ps1`
+  lists the pending ones. First fragment: the website's expanded result text highlights after
+  HTML-escaping (P3).
+- `scripts/run_local_tests.py` no longer crashes printing a failing chunk's Hebrew output on a
+  cp1252 console (the Windows CI runner), which had hidden the name of the failing test.
+
+### Responsa wildcards, Phase 0: the measurements (ci, PR #429)
+
+- `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` gains §3.6, "Phase 0 results": a number, the command
+  that produced it, the machine and the wall time for each of the seven items of §7 Phase 0 -- the
+  reversed word list beside the index, bracket- and mark-tolerant pattern lookups and the pattern
+  size limit, scored term queries with 600 and 1,200 forms, the pages a brute-force scan finds for
+  `*נים *לים` that the index path misses, the junctions inside whole-manuscript and part documents
+  that are not consecutive pages, today's desktop timings for the §8 query set on both regex
+  engines, and the Hebrew-block punctuation kept inside index tokens. §9 records the owner's answers
+  to all nine decisions (2026-10-21, from those numbers): the reversed-words field and the seam
+  documents on one index rebuild, seams before true `*`; results ordered by the finite words' score;
+  150,000 candidate pages; bare stars refused; variants apply to star words; a star matches zero
+  letters. §7 is resequenced: Phase 1 whole words, Phase 2 the index format, Phase 3 true `*`. No
+  product code: nothing under `shared/`, `web/` or `desktop/` changes.
+- `scripts/measure_responsa_wildcards.py`: the measurement script, one subcommand per item, so the
+  owner can rerun it on a Linux worker (`--index-dir`, `--corpus-file`). Read-only on the index and
+  the corpus file; Hebrew goes to UTF-8 files, never to the console; the `*נים *לים` oracle is written
+  by hand (Exact's word predicate, a letters-only star) and imports neither `build_regex_pattern` nor
+  the compiler, as §8 gate 1 requires.
+
+## [9.8.1] - 2026-10-21 — Reliability and sign-up
+
+Sign-up follows email confirmation on both apps, and a new account's username is never its
+email address. The website moves to NiceGUI 3.18 with a round of reliability and latency fixes
+and a new `ux_timing` measurement; the public API's `exact` matches whole words. The desktop
+recognises your own corrections by account id and gets four smaller fixes. Desktop: installer
+9.8.1. PRs #418-#425.
+
+### Reliability fixes and user-perceived latency (web, PR #423)
+
+A review of visitor isolation, the NiceGUI 3.18 upgrade and web latency
+(2026-10-20/21). Every finding acted on was reproduced first and checked by a
+second reviewer; each fix has a test that fails on the old code, run on NiceGUI
+3.8.0 and 3.18.0. Two changes are deliberate, by owner decision on 2026-10-21:
+the public API's (and MCP's and the ChatGPT app's) `exact` search mode now
+matches whole words, as the website's Exact does, and a new account's public
+username is never its email address (a database change, applied separately).
+No request or response shape and no data-access permission changed.
+
+#### Fixed
+- **English visitors saw Hebrew library names and image credits** on /browse
+  (header, Library field, Quick View, print plate, "How to cite") and in the
+  Joins Lab / Compare viewers. Since the UI language became per visitor, a
+  worker thread had no language and took the process default.
+  `web.translations.in_visitor_language` carries only the language into it.
+- **A website Responsa downgrade notice reached another caller's
+  /api/search response** (and MCP/ChatGPT) on the same wait thread, with a
+  stale `responsa_options_effective`. Each call now clears the signal first.
+  The old regression test could not fail; it now stages the signal on the
+  right thread.
+- **Fragment Puzzle "Add from list" said "No lists found" to every signed-in
+  user**: it read the lists in a worker thread as the anonymous client. The
+  client is now built on the loop, and the account is checked again on every
+  pick in the open picker. A guard test flags any user-scoped Supabase helper
+  offloaded without a client.
+- **Web sign-up ignored email confirmation**, which production requires. After
+  Register, every new visitor saw the English error "Email not confirmed"
+  (someone re-registering an address saw "Invalid login credentials"), and the
+  username, name and affiliation they typed were never saved. Register now
+  answers "check your inbox" (the same for an address that already has an
+  account, so the form does not reveal who is registered), and the two common
+  sign-in errors are translated and say what to do next. The typed fields
+  travel in the sign-up metadata and the database writes them when the account
+  is created (below).
+- **Hardening: a new account's username is what the person typed, or empty --
+  never the email address** (`migrations/profiles_no_email_username.sql`, run
+  in the Supabase SQL editor, with `scripts/verify_profiles_no_email_username.sql`
+  before and after). Existing usernames that were email addresses are replaced
+  the same way: the username typed at sign-up where the account's metadata
+  has one, otherwise empty; each change is recorded so it can be undone.
+  Pages that show an author fall back to their usual placeholder ("Unknown",
+  "Anonymous") for an empty username instead of showing "None".
+- **The "How to cite" chip stopped following the page after a network blip**:
+  it was forgotten on every disconnect, and on NiceGUI 3.18 the page survives
+  the reconnect. It is now forgotten when the client is deleted.
+- **One stale `/_nicegui/<old version>/...` request stopped user-storage
+  pruning for a minute** (a session-less 404 client made `prune_user_storage`
+  raise). Such 404s are answered without a NiceGUI client.
+- **Six async pages answered a 3 s stall with a reload loop (3.8) or a 500
+  page (3.18)**, /auth/callback after signing the user in. They now wait up to
+  20 s (`ASYNC_PAGE_RESPONSE_TIMEOUT`).
+- **`/api/puzzle_process` and `/api/puzzle_export` ran image work on the event
+  loop** (up to ~3 s and ~6 s per request). Both now run it in a thread;
+  the export also gets the puzzle rate limit, a 20-fragment cap and a 400 for a
+  malformed body.
+- **The `browse_manuscript` event arrived for about one page view in ten**:
+  sent through `ui.run_javascript` from a task with no page. `posthog_capture`
+  takes the page's client; the password-recovery events go out inside the page.
+- **A signed-in /browse page turn waited for 3-4 Supabase round trips** (the
+  Recently Viewed write) before it showed, blocking every visitor meanwhile.
+  It now runs after the page shows, in a thread, one write at a time per
+  account across its tabs, and a write that waited is dropped if the browser
+  has switched account.
+- **Building a signed-in Supabase client re-read the CA bundle four times on
+  the event loop** (1.56 s -> 0.17 s per build locally): httpx's default SSL
+  context is built from the bundle read once.
+- **A search started from the URL** (the homepage box) no longer waits a fixed
+  0.5 s before it starts.
+- **A test overwrote the developer's real `browse_map.pkl`**
+  (`tests/test_browse_map_atomic_write.py` faked the dedupe before redirecting
+  the path). The order is fixed and guarded.
+- **Deploys installed whatever Starlette / python-socketio / engineio was
+  newest**: `requirements.txt` now pins them to the lock CI tests, and
+  `deploy.sh` installs with the lock as constraints, so transitive packages
+  match CI too.
+
+#### Added
+- **`ux_timing`** (PostHog): the user-perceived time of a Browse page turn or
+  first page, a search's first visible rows, a Quick View, an add-to-list and a
+  comment, from the click (or the navigation) to the next paint, split into
+  server, transport and render time, with the page image apart. Low-cardinality
+  properties only. `UX_TIMING_ENABLED` (default on) and
+  `UX_TIMING_SAMPLE_RATE` (default 1.0); docs/guides/ENV_VARS.md.
+
+#### Changed
+- **The public API's `exact` (and MCP, the ChatGPT app, and the web Joins
+  Lab's single-line Exact) now matches whole words, as the website's Exact
+  does** (owner decision 2026-10-21). A word inside a longer one is no longer
+  matched and a phrase across a page break is found; on the real index the
+  old `exact` returned up to 2.5 times the rows (all matches inside longer
+  words) and ran about five times slower at the API's cap. Every response
+  field still says `"exact"`; `/api/parallels` and the Joins Lab's
+  Responsa-style search are unchanged. docs/SEARCH_API.md, Changelog.
+
+### Desktop accounts without a username, and sign-up under email confirmation (desktop, PR #424)
+
+The desktop side of the 2026-10-21 `profiles` username hardening: a username is
+now what the person typed at an email sign-up, or empty (every Google sign-up,
+and the accounts whose username was their email address), and the production
+project requires email confirmation. Each fix has a regression test that fails
+on the old code.
+
+#### Fixed
+- **Your own corrections** (draft, pending, rejected) show in the version
+  selector of the Manuscript Viewer and of the Browse tab again for an account
+  with no username, and for a sign-in saved before the change. The author is
+  now recognised by account id, never by username. The client had also never
+  kept a correction's author id, so every author without a username shared one
+  entry and only the newest of them was shown, to reviewers too. A reviewer
+  still sees everyone's; nobody sees anyone else's unpublished corrections.
+- **Register** no longer says "You can now login" before the account is
+  confirmed. It says to open the confirmation link sent to that address (the
+  website's approved text, in Hebrew too), and no longer tries to write the
+  profile with no session; the new-user trigger writes it from the sign-up
+  form's fields, which are still sent.
+- **Signing in before confirming** shows the website's approved message, in
+  Hebrew too (it was English only).
+- **The account name** in the corner button, the Community header and the
+  corrections status line is the username, else the full name; never "None".
+
+### NiceGUI 3.18 and Starlette 1.9 (web, PR #422)
+
+The web app moves from NiceGUI 3.8.0 to 3.18.0. NiceGUI 3.14 and later need
+Starlette 1.x, so Starlette goes from 0.52.1 to 1.9.0, with python-socketio
+5.17.0, python-engineio 4.14.0, python-multipart 0.0.32, multidict 6.9.1,
+anyio 4.14.2, aiohttp 3.14.3 and Pygments 2.21.0 (plus tinycss2 and
+webencodings, new NiceGUI dependencies). The desktop app does not use NiceGUI.
+
+#### Changed
+- **Clearing a page no longer slows with every other open tab.** NiceGUI 3.15
+  indexes bindings by object. Measured: clearing 50 bound elements with 40,000
+  other elements live took 54 ms on 3.8, 9.2 ms with our backport, 0.22 ms on
+  3.18. The backport (`framework_patches._patch_binding_remove`) stands down on
+  3.15 and later; it stays for a rollback to 3.8.
+- **A dropped websocket reconnects without reloading the page** (NiceGUI 3.12).
+  On 3.8 every reconnect reloaded silently. A server restart still reloads each
+  open tab once; there is still no reconnect backoff upstream.
+
+#### Fixed
+- **The web app would not start on Starlette 1.x**: `web/research_api.py` used
+  `add_event_handler`, which Starlette 1.x removed. The `/api` sub-app's job
+  cleanup now runs from the main app's shutdown, as the ChatGPT jobs' does
+  (before, as a mounted sub-app, it never ran).
+- **Sessions keep their rolling 14-day expiry.** Starlette 1.x re-sends the
+  session cookie only when the session changes, which would have signed every
+  visitor out 14 days after the first visit. The cookie is re-issued on each
+  request as before, and a signed cookie whose body is not a JSON object starts
+  a fresh session instead of an HTTP 500.
+
+#### Framework patches
+- Audited against 3.18.0 (`_PATCH_AUDIT_THRESHOLD`). The ESM directory guard
+  stands down (fixed upstream). The `<html lang="he">` patch handles the 3.14
+  template, which otherwise sends `dir="ltr"` and no `lang`.
+
+### Background work stays in its page; each visitor's own language (web, PR #419)
+
+NiceGUI keeps the current page per asyncio task, and a task the page starts
+(`asyncio.ensure_future`, `create_task`) begins with none. Every site below did
+page work from such a task and swallowed the error, so the work silently did
+not happen. Found from the tracker's /catalog-browse row and a sweep of every
+task-spawn site under `web/`.
+
+#### Fixed
+- **/catalog-browse** shows its first page of results again without a filter
+  being picked (it opened with no results; confirmed on the live site
+  2026-10-07). A browser that does not answer the saved-filter read in time now
+  gets the unfiltered page instead of none.
+- **The reading view's "How to cite" chip** follows the version shown by
+  default (a PGP or FGP edition, a user correction); it kept the citation of
+  the automatic transcription it replaced, disagreeing with the printed sheet
+  and the Word export.
+- **The correction editor** keeps auto-saving the draft every 30 s; it saved
+  once and stopped.
+- **Fragment Puzzle** keeps the canvas positions in the tab, so a reload or a
+  return to /puzzle puts fragments back where they were (they came back
+  stacked at the default spot). A fragment not drawn yet keeps its last
+  position.
+- **Fragment Puzzle auto-save works.** An edit of an open saved join (moving,
+  nudging or rotating a fragment, cropping, adding, removing, changing folio,
+  title or notes) is saved a moment later; it never saved. Opening or
+  reloading a join writes nothing. A fragment whose image did not load keeps
+  its saved place; an empty canvas never empties a saved join. A join opened
+  from a link replaces the canvas the tab held before, and a reload brings
+  that join back rather than the older canvas.
+- **Fragment Puzzle crops are kept.** Save wrote a crop the visitor had
+  confirmed as uncropped, and a reload lost any crop on an unsaved canvas.
+- **Joins Lab**: the address bar follows an anchor set from a card's pin, a
+  Known Joins pin or a list (a reload or a copied address reopened the old
+  anchor); Retry after a failed export downloads the file; adding candidates
+  to a list confirms it, and picking a fragment from a list in the picker runs
+  in the page.
+- **Search results**: Retry after the full text failed to load runs in the page.
+- **The UI language is each visitor's own.** It was one value per process,
+  set by every page render, so text drawn after an await and the library
+  names in the search Word export, the list Excel export and both Parallels
+  exports could come out in the previous visitor's language. `get_language()`
+  now answers from the page, the task the page started, or the request
+  (saved choice, else the browser's language); see `web/translations.py`.
+
+#### Changed
+- **Element cleanup no longer slows with the number of open tabs.** NiceGUI
+  3.8's `binding.remove` (run by every `element.clear()`) walked a marker for
+  every bindable property of every element on every open page; it now removes
+  the binding links only, as NiceGUI 3.15 does (`web/framework_patches.py`,
+  stands down on 3.15+). Synthetic benchmark, one 300-element clear: 0.5 /
+  2.7 / 44 ms with 1,000 / 10,000 / 100,000 other elements live before,
+  0.04-0.09 ms after. This was
+  the `binding.remove` under `browse.py` `clear()` seen during the post-restart
+  reload loops (2026-10-07); the reload loops themselves stay open.
+
+### Six quick fixes from the tracker (web + desktop, PR #421)
+
+Six open rows of `docs/OPEN_ISSUES.md`, picked as the most pressing of the
+quick ones. Each has a regression test that fails on the old code.
+
+#### Fixed
+- **Desktop discoveries list** no longer shows the author of an anonymous
+  discovery. It printed the username the client fetched from `profiles`, and a
+  new account's username is its email address. The detail dialogs already hid
+  it.
+- **Quitting the desktop app** waits at most 2 s for a metadata loader stuck in
+  an NLI request (it waited without limit, so the process and its single-copy
+  lock stayed alive and the app could not be opened again). No `terminate()`:
+  the exit's own thread settling holds a loader still running.
+- **AND, OR and NOT in a text** are searched as words. Passed into the Tantivy
+  query bare, they were a parse error: Composition Search and Parallels (web
+  and `POST /api/parallels`) dropped the chunk while reporting success, and an
+  Exact search for them returned nothing. Hebrew text was unaffected; Latin
+  headers, shelfmarks and apparatus were not.
+- **`crash_log.txt`** is written to the data folder, next to
+  `faulthandler_dump.txt`. An installed copy tried to write it under Program
+  Files, which is read-only, so a crash with telemetry declined left no trace.
+- **Web Fragment Puzzle:** Delete no longer says "Deleted" when the delete ran
+  and removed nothing; it shows the failure message and the document stays.
+- **Desktop Excel export** writes "N+" in the Result count row for a list the
+  search cut off or Stop ended, as the website has since 2026-10-06. The "+"
+  is now added in one place (`shared/export_dossier.py`), for both apps.
+
+### A discovery release can no longer lose live identifications silently (web, PR #418)
+
+- New deploy gate `scripts/verify_append_preservation.py` (OPS-02, v9.0.0 audit C3): it compares a candidate discovery artifact with the one production serves and fails if any live main-pool identification is deleted or demoted, unless the owner has ruled on exactly that set of losses for exactly those two files. Each loss gets one cause from a closed list, and `--report-html` gives one row per loss for the owner to review. Step three of `docs/specs/discovery-deploy.md` §2.1 (dev box) and §2.4 (web box, before the manifest swap).
+- First run, on V4 -> V4.2: 654 losses -- the 131 deletions counted in August, plus 523 demotions out of the main pool that the August review did not count. The owner accepted those on 2026-10-20; they stay in the second list.
+
+### Fragment Puzzle publish test waits for its dialogs (ci, PR #425)
+
+`tests/render_smoke/test_puzzle_export_render_smoke.py`: the Save and Publish
+steps slept a fixed 0.3 s before clicking the button in the dialog they open.
+Both dialogs are built only after the page's handler has been to a worker
+thread, and on a slow Windows runner that took longer: the publish test failed
+with `AssertionError: 0` (no Publish button yet) on PR #424, which changed no web
+code. The test now waits, up to 15 s, for the dialog's button to exist, and for
+the save to have recorded the document's id before it clicks Publish. Clicking
+still requires exactly one such button. No product change.
+
+## [9.8.0] - 2026-10-19 — Joins Lab upgrades
+
+The Joins Lab sorts and filters by library and domain, has three card sizes, and a fuller
+Compare window, on the website and in the app. On the website a link reopens the Lab's screen
+and Browse opens in a new tab. The homepage search box opens shelfmarks and system IDs, the
+Browse page's buttons carry icons, and Visual Similarity has thumbnail sizes. Desktop: installer
+9.8.0. PRs #403-#416.
+
+### Joins Lab, website and desktop
+
+- **Sort and filter by library and domain** (PRs #412, #416), as in the website's Visual
+  Similarity window. Sort keeps the search's order (Rank) or groups the candidates by Library or
+  by Domain; within a group the search's order is kept, and candidates with no library or domain
+  come last. A fragment's domain is the first of its domains in the FJMS data, in Hebrew in the
+  Hebrew interface. Cards show the domain (website) or "library · domain" (desktop).
+  - Website: Library and Domain sit in the results toolbar, next to Sort. Each list shows every
+    value in the results with its count and takes several values; a value kept from an earlier
+    search that the new results do not have stays listed with a count of 0, so it can be cleared.
+    The other filters are under "More filters…", which shows how many of them are on. When the
+    filters leave no candidates, the toolbar stays, with "No candidates match these filters.", so
+    they can be undone.
+  - Desktop: Sort is next to "Table view", for both views, and is kept in the Lab session.
+    Library and Domain are in the Filter dialog, one value each, like Material. Clear resets
+    Library, Domain and Sort.
+- **Card sizes** (PR #411): Small / Medium / Large in the grid view, remembered. Website: Medium
+  is the grid as it was; Small puts four cards in a row on a wide screen, Large two, with taller
+  thumbnails. Desktop: five, four (as before) or three cards in a row.
+- **A fuller Compare window** (PR #407). Each side has a copy button by the shelfmark; one short
+  line: library · domain · date · size · material; and links to Ktiv, the holding library's own
+  viewer, the Princeton Geniza Project and, on the desktop, genizahsearch.com. The details come
+  from local data only (`shared/fragment_details.py`, one rule for both apps).
+- **Fixed in Compare:** the FJMS/PGP buttons kept pointing at the first candidate after
+  Prev/Next; the anchor never showed its title; on the desktop the anchor's info line was empty;
+  on the website both Browse icons were white on a light background.
+
+### Joins Lab, website
+
+- **Copy Link** (PR #408), in the toolbar and in the Compare window's header, copies an address
+  that reopens the same screen for anyone: the fragment and its page, the search (both sides, the
+  type, Variants and the options), Visual Similarity, the filter, Grid or Table, the page of
+  results, and the pair when Compare is open. Opening a link runs the search again; in a tab that
+  already holds that search, the results come back at once. The address bar follows the screen
+  without adding entries to the browser history.
+  - Marks go into a link only when "Include my marks" is ticked (off by default). The recipient
+    sees them for that visit only, with a note saying so, and they are never saved; the
+    recipient's own marks take precedence.
+  - A link is checked, capped and size-limited before anything in it is used
+    (`web/joins_lab_link.py`); one whose screen cannot be read still opens its fragment, with a
+    note.
+- **Browse in a new tab** (PR #407): the Browse icon on a candidate card and on a Known Joins row
+  is a real link that opens the fragment in a new tab, so the Lab stays as it was. Ctrl+click,
+  middle-click and "Open in new tab" work too.
+- The Filter dialog's lists take the dialog's width and show their names (PR #415).
+- Decisions: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`.
+
+### Website
+
+- **The homepage search box** (PR #406) goes where the input belongs: Hebrew or Arabic text runs
+  a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and
+  anything else is looked up as a shelfmark by the Browse page. The placeholder reads "Text,
+  shelfmark or system ID". Routing: `web/home_query.py::home_query_target`.
+- **Icons on the Browse page's buttons** (PR #410): Go, Submit, the image-source chips, the
+  external links, and the Bib. FJMS / Bib. Ktiv / Catalog rec. / Measurements / Visual Similarity
+  chips. On a phone no row gets wider: Go and Submit show the icon alone and keep their name for
+  screen readers, and the chips and links show the text alone. A chip that opens a library's
+  viewer carries the icon itself, so the separate icon-only button beside it is gone.
+- **Visual Similarity** (PRs #404, #411): Small / Medium / Large thumbnails, and a button that
+  enlarges the original to about half the window and back, both remembered for the visitor;
+  domain names in Hebrew in the Hebrew interface, and a count on each Library and Domain option.
+- **Fragment images can be cached** (PR #409): the six library image routes no longer set the
+  session cookie, and their images are kept a week (`Cache-Control: public, max-age=604800`, new
+  `IMAGE_HTTP_MAX_AGE`; was 600 s). A 404, "no image", an error or the Oxford redirect is
+  `no-store`. The in-memory image cache holds 2048 entries (was 512) under the same 256 MB cap.
+  Cloudflare keeps them only once a Cache Rule makes these paths eligible.
+
+### Internal
+
+- CI: the tests job runs as three shards per OS, with one combined `tests` check; superseded PR
+  runs are cancelled (PRs #403, #414).
+- Changelog entries go in `changelog.d/`, one file per PR, and `scripts/collect_changelog.py
+  --apply` folds them in at release (PR #414).
+- A failing render-smoke test now fails in seconds instead of hanging its lane (PR #413); the
+  Browse-icons render test no longer reads a local `nli_crossref.db`.
+- The issue tracker was trimmed (PR #405).
+
+---
+
+## [9.7.0] - 2026-10-19 — Conditions in Composition Search, and letter-level search in My Library
+
+Composition Search's letter-level method takes conditions; letter-level search works in My
+Library; shelfmarks as the NLI catalogue writes them are found everywhere; the website's Visual
+Similarity window shows thumbnails. Desktop: installer 9.7.0. PRs #397-#402.
+
+### Desktop: conditions in Composition Search (PR #399)
+
+- **Up to four extra texts**, each "must appear" or "must not appear", on the same image, on an
+  adjacent image, or anywhere in the same manuscript. A search can set aside the works that quote
+  it (Halakhot Gedolot and the Rif when searching the Talmud), ask for two texts on neighbouring
+  images, or ask for several texts in one manuscript. Conditions apply to the Genizah corpus.
+- **One "Filter texts" menu** — Quoted texts... / Quoting texts... / Add condition... — replaces
+  the "Filter Text" button. Quoting texts... has its own dialog, with the Sefaria library browser
+  under "Load from Sefaria..." (a book, then the passage), custom texts and files; it defaults to
+  "On the same image", and each text keeps its own name.
+- **Own text:** a quoting text removes a page only where it has at least 40 letters of its own
+  there that the main text does not also cover, so a work that cites the main text itself (the
+  Rif quoting the Talmud) leaves the main text's own manuscripts in place.
+- **Removed pages, and pages a condition could not fully check**, are shown in their own groups,
+  each with its reason; a page that was not fully checked is never counted as clean.
+- Results keep every page, also where two image sets of one manuscript share a page number.
+- Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`.
+
+### Desktop: letter-level search in My Library (PR #397)
+
+- Based on a prototype by Yehudah Seewald. My Library gets its own letter-level index, built in the
+  background from the texts it has already extracted: Settings > "Build / Rebuild Letter-Level
+  Index for My Library" shows the page count and disk space first, then progress and Cancel.
+- Composition Search can search **Genizah, My Library or All**; All merges the two lists by score.
+  My Library rows show Src `LOCAL` with the file name and page; the viewer highlights the match,
+  Word exports carry page labels, and the rows can be promoted to witnesses, in auto-expand and
+  Recursive search too.
+- After a scan that changes My Library, a notice says the index needs rebuilding; it never
+  rebuilds by itself.
+- Owner rulings (2026-10-16): the Genizah page checks (the 80-letter floor, target sheets, library
+  stamps) are off for My Library builds; Genizah-side restrictions such as the library filter do
+  not apply to its rows; conditions stay Genizah-only (the search asks you to switch to Genizah or
+  remove them). Duplicate-photograph demotion is off for My Library rows, since a library often
+  holds near-identical pages.
+- Fixed on the way: promoting checked Genizah results to witnesses; a cancelled Genizah index
+  build that had already finished keeps its index.
+
+### Both: shelfmarks as the NLI catalogue writes them (PRs #400, #402)
+
+- `Cambridge University Library, Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402` and
+  `Library of the Hungarian Academy of Sciences, Ms. 06` find their records on every shelfmark
+  input: Shelfmark search (also `/api/search` and MCP), the exclusion lists, the Fragment Puzzle,
+  Joins, Share a Discovery, the reading desk and the Joins Lab load box.
+- One fallback (`shared/catalog_shelfmark.py`) runs only after the resolver found no exact match,
+  so every shelfmark that resolved before resolves to the same record (1,219 recorded inputs), and
+  the fallback keeps to a library named in the input.
+- Where a form fits more than one record, a picker asks instead of taking the first; Cancel adds
+  nothing. An ambiguous exclusion line stays unresolved; the Joins Lab `?shelfmark=` link loads
+  the first match. Autocomplete is unchanged. Plan: `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`.
+- **A library named at the start of a shelfmark** (`Halper 77`, `The University of Manchester
+  Library, Ms. P 45`) now narrows the exact answer to that library's records, and adds records
+  that store the whole typed text; where nothing in that library carries the typed numbers, the
+  answer is the same as before. Shelfmarks without a library name are unchanged (PR #402; plan
+  `docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md`).
+
+### Website: Visual Similarity (PR #401)
+
+- The browse page's Visual Similarity window can show its look-alikes as a grid of low-resolution
+  thumbnails (List / Thumbnails, remembered for the visitor); the image opens the fragment in a
+  new tab. Sort, Library and Domain now apply, in both views. From a researcher's request.
+
+### Also
+
+- **Letter-level search (desktop)** lists every manuscript it finds, in single, batch, conditions
+  and All searches and after a witness is removed.
+- **Duplicate photographs:** among copies of one photograph, a record's own image set is kept
+  over a microfilm reel attached to many records (three RNL reels). The website's passage method
+  shares this.
+- **Hebrew Word exports** are flush right on the desktop and the website; the desktop's carry the
+  full MiDRASH citation, and desktop exports ask when the file is open in Word or Excel.
+- **Qt's own buttons and menus** (Yes / No / OK / Cancel, the text-field menu) are Hebrew in the
+  Hebrew UI.
+- **Help:** Help.html and the website's Help page were checked against the programs in both
+  languages (about 90 places), with new sections for Filter texts, letter-level search in My
+  Library, Personal Lists and the Community tab. Hebrew running text says "הספרייה המקומית" (the
+  tab keeps "הספרייה שלי"). Without Help.html the desktop now shows a short notice linking to the
+  website's Help. The website's Hebrew Help follows `WEB_PUZZLE_ENABLED`, and the Joins Lab
+  "Triage state" choices are in Hebrew.
+- **Settings:** turning telemetry on starts it in the same session (PR #398).
+
+---
+
+## [9.6.2] - 2026-10-12 — Faster Extended and Maximum on the desktop; GenizahSearch in ChatGPT
+
+The desktop app checks pages with Python's own fast matcher for the searches it builds itself, so
+Extended and Maximum searches run many times faster with the same results; a word-gap limit for
+the plain modes; GenizahSearch is an app in ChatGPT. Desktop: installer 9.6.2.
+
+### Desktop: Extended and Maximum, many times faster
+
+- **Each page is checked about sixty times faster** in Exact, Variants (Basic single forms,
+  Extended, Maximum) and Fuzzy searches, and in Composition Search by chunks: patterns the app
+  builds itself from plain words now match with Python's own `re` engine; a user's Regex,
+  Responsa and any gap above 0 keep the interruptible engine. Results are identical (checked page
+  by page on the real index). Very long documents, and pages with a quote or a mark between two
+  letters in long multi-word queries, still take the slower route.
+- **Stop answers at once**, even in the middle of a long page.
+- **A huge document no longer ends the search**: before, one document that took over 10 seconds
+  to check stopped the whole search with an error.
+- **Word gap: at most 10 in Exact, Variants and Fuzzy** searches, where a larger gap made the
+  search slower than it was worth; Responsa (`[N]`) and Regex take any gap. A saved search with a
+  larger gap is not run again, and says so; nothing is changed silently.
+- **Composition Search: the Variant intensity slider is hidden in letter-level search**, which
+  does not use it.
+
+### Website and AI assistants
+
+- **GenizahSearch in ChatGPT**: the app is published; "Add to ChatGPT" on
+  [genizahsearch.com/ai](https://genizahsearch.com/ai) and the homepage. The GPT remains until
+  2026-12-11.
+- **Public API and MCP**: the same word-gap rule (`gap` at most 10 except for `responsa`,
+  answered 400); a request the server refuses at the door on `/api/search/jobs` now gets the same
+  answer as on `/api/search` instead of a 500.
+
+### Internal
+
+- Plan and review record: `docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md` (a panel of five agents
+  and six Codex rounds before implementation, four after).
+
+## [9.6.1] - 2026-10-11 — Faster Extended and Maximum
+
+Extended and Maximum variant searches run many times faster on both apps, and on the website they stop
+at the 3-minute limit with what they found. Also: AI assistants can run the composition search, the
+public API offers the Extended level, and the website is steadier when a step is interrupted.
+Desktop: installer 9.6.1.
+
+### Extended and Maximum: much faster (both)
+
+- **Extended and Maximum search many times faster.** Each word's thousands of spellings are now written as a compact tree that matches the same text: preparing a four-word Maximum search takes about 4 s instead of about 22 s, and each page is checked tens of times faster (Extended: about 0.3 s instead of 2.3 s to prepare). Basic is unchanged.
+- **Website: Extended and Maximum searches, and Extended and Maximum composition searches, stop at the 3-minute limit with what they found**, as Basic does: a search finishes the page it is checking (or the passage it is preparing), then stops, usually within a few seconds. Other visitors' searches keep running meanwhile.
+- **Desktop: Stop answers sooner during a slow Extended, Maximum or composition search.**
+
+### AI assistants and the public API (web)
+
+- **AI assistants connected to GenizahSearch (MCP) can run the website's composition (chunk) search**,
+  with a chosen chunk size (`find_chunk_parallels`; exact, variants or fuzzy).
+- **The Extended variant level** in the public API (`search_mode=variants_extended`, background jobs
+  only: `/api/search/jobs`) and for AI assistants, with the website's defaults. Maximum stays on the
+  website only, for now.
+
+### Website: steadier when a step is interrupted (web)
+
+- **Pages keep working when a search, filter or lookup is interrupted** -- by a newer search, a closed
+  tab or a server restart. The website now stops that step quietly instead of carrying on with half an
+  answer; all 141 such places were checked.
+- **Joins Lab: a search that runs past its time limit says "Search timed out".**
+- **Operators:** nginx can log and pass on each visitor's own address behind Cloudflare
+  (`scripts/genizah_cloudflare_realip.conf`, refreshed by `scripts/refresh_cloudflare_realip.py`);
+  the install steps are in the deployment guide.
+
+## [9.6.0] - 2026-10-07 — Search fixes
+
+Search fixes on both apps: Regex mode searches every page its pattern can match, Num Changes
+works in every variant level, Composition Search searches short texts and every word, and a
+list that reached the search's limit says so ("N+"). On the website the first results appear
+while the search runs, settings and language are kept per visitor, and a search stops after 3
+minutes with what it found. Desktop: installer 9.6.0.
+
+### Web search: first results while it searches, and faster (web)
+
+- **The first results appear while the search runs**, as on the desktop: up to a page of rows
+  under "Still searching", then the full list. Stop keeps the rows already shown.
+- **Every search starts about 6 seconds sooner.** Each search runs in its own worker process;
+  the next worker now loads the catalogue before the search arrives instead of after.
+- **Exact searches are faster and match whole words, as on the desktop.** A phrase is found by
+  its words' pairs, a single word on pages only, and a phrase that runs across a page break is
+  found there too. A word inside a longer word (שלום in ושלום) is Responsa mode's job.
+- Operators: `GENIZAH_RESEARCH_PRESTART` (default on) and the worker-count trade-offs are in
+  `docs/search-matching-timeouts.md`.
+
+### The website's language follows the visitor's browser (web)
+
+- **A visitor who has not chosen a language sees the website in their browser's language:**
+  Hebrew when the browser's first language is Hebrew, English otherwise. A choice made with
+  the language button still wins.
+- **The language button switches from the language its own page shows.**
+- The Excel download's sheet direction follows the same rule.
+- A page requested with no language preference, as search engines' crawlers request it, is
+  in English (it was in Hebrew).
+
+### Variant and Lab settings are kept per visitor (web)
+
+- **Settings are now kept per visitor.** The variant level, Num Changes and everything on the
+  Settings page (short-word limit, Aggressive Mode, the slider, custom letter pairs, Lab
+  minimum score) are kept with the visitor's own browser session and sent with that
+  visitor's searches. A refined search replays each step with the settings it first ran with.
+- **Defaults for a visitor who changed nothing:** the Basic / Extended / Maximum buttons (the
+  slider is a choice in Settings), short words (two letters or fewer) get one letter change
+  (Aggressive Mode in Settings lifts this), and the website's custom letter pairs.
+- **API:** `variants` searches use these website defaults (Basic, 30 pairs), so an API search
+  and a website search with default settings give the same results.
+- The Settings page's Lab tab keeps Min Score; Candidate Limit, Display Limit and Default Chunk
+  Size are removed (the website's Lab searches do not read them).
+
+### Regex search checks every page the pattern can match (both)
+
+- **Regex mode finds every page its pattern matches.** Before the pattern runs, the index now
+  narrows the pages only by what the pattern requires: `שלום|שדה` reads pages with either word,
+  `ה?מלך` pages where מלך stands inside a longer word too, and with nothing fixed every page is a
+  candidate (up to the reading limit). On the desktop a list that reaches the reading limit shows "N+", and search within
+  results completes it first. Applies to My Library as well.
+- A pattern that does not start at the beginning of a word takes a few seconds longer: the index
+  looks for its letters inside every word.
+- With a POSIX class inside a set (`[a[:alpha:]]`) every page is a candidate (up to the reading
+  limit): the desktop's matcher and the index read such a set differently.
+- **A list that exactly reaches the reading limit no longer shows "N+"** (every mode, both
+  apps): the search now looks one candidate further to know whether any was left out. On the
+  desktop, a cut-off search that found nothing says "No results found. (Partial results)".
+
+### Website: a cut-off list says "N+", and search within completes it first (web)
+
+- **A result list that reached the search's reading limit now shows "N+"** on the website, as
+  on the desktop (a very common word reads 50,000 candidate pages, then stops). The count
+  keeps its "+" after a reload.
+- **Search within results reads the whole list first.** Before searching inside a cut-off
+  list, the website reads every match of it (with progress and Stop), so the search within
+  covers every manuscript the first search matched, not only the shown ones. The "Only
+  results with all terms" filter does the same; if that cannot finish, the filter stays off
+  and says so.
+- **Stop keeps the rows found so far, marked "N+"**, and a search within them completes the
+  list first. Searching within again later keeps the completed list.
+- **After a reload, the search runs again exactly as it ran** -- with its NOT-words, position
+  and Responsa options -- when search within needs the complete list.
+- The "+" stays on the count after display filters, in the pages and in the Excel download.
+- **API:** `/api/search` adds a `results_cut_off` warning when `total` is a lower bound.
+
+### Website searches stop after 3 minutes and show what they found (web)
+
+- A website search -- and an API background job -- stops after 3 minutes and shows the
+  results it found so far, marked "N+", with "The search stopped after 3 minutes". The next
+  search no longer waits behind a very long one. The desktop has no limit.
+- This holds for every kind of search: Lab Mode searches, Parallels searches (word-level
+  and letter-level, which now stops between witnesses and while checking candidates), and
+  a search the website has to stop itself keeps the results it had already shown. Running a
+  chain of searches within again (after a reload, or to complete it) takes 3 minutes in all,
+  not 3 minutes per step. An API
+  Parallels job stopped this way answers with `results_cut_off`: more parallels may exist.
+
+### Num Changes (×1–×3) works in every variant level (both)
+
+- **Num Changes now sets how many letters in each word may be swapped, in every level.**
+- **Each level keeps its own value:** by default ×1 for Basic and ×2 for Extended and
+  Maximum. A value saved before this change carries into Extended and Maximum; Basic starts
+  at ×1. Responsa, composition and Joins use Basic's value; Fuzzy uses ×2. The one-change
+  limit for short words (two letters, by default) applies to each spelling separately: a
+  short word's two-letters-for-one spelling of three letters or more gets the level's value
+  like any other word, so אב at Maximum ×3 has 3,573 spellings.
+- **Desktop: `?`, `??` and `???` select Basic, Extended and Maximum** (they ran at the level
+  the slider happened to show).
+- **A higher Num Changes never drops a spelling a lower one finds.** Spellings with up to two
+  changes, and the two-letters-for-one spellings, come first; a third change only fills the
+  room left in the spelling budget. A word whose spellings do not all fit marks the count
+  "N+", and a composition search "Partial results".
+- **Desktop Extended and Maximum now run at ×2, as the website's always did: they find more
+  and are much slower.** Measured on the desktop engine, whole Genizah (searches stopped
+  after 5 minutes):
+
+  | והמשפטים | ×1 | ×2 | ×3 |
+  |---|---|---|---|
+  | Basic (30 pairs) | 3.2 s | 7.1 s | 48 s |
+  | Extended (70) | 2.6 s | 75 s | over 5 min |
+  | Maximum (150) | 13.9 s | over 5 min | over 5 min |
+
+  | ישראל | ×1 | ×2 | ×3 |
+  |---|---|---|---|
+  | Basic (30 pairs) | 8.8 s | 17.7 s | 73 s |
+  | Extended (70) | 8.0 s | 114 s | over 5 min |
+  | Maximum (150) | 37.2 s | over 5 min | over 5 min |
+
+  Before, the desktop ran every level at ×1 (the first column). The new defaults are ×1
+  Basic and ×2 Extended/Maximum. Responsa with variants on והמשפטים: 38 s at ×1, about 5
+  minutes at ×2 and ×3. A 5-word composition search: 1.1 s, 1.6 s, 4.2 s. (One run each on
+  the real index, 2026-10-07; a website search stops after 3 minutes.)
+- **Desktop:** a Composition, Joins Lab or refinement search runs with its own level and Num
+  Changes, so starting one while another search runs no longer changes that search's.
+- **Website:** Settings has one Num Changes value per level. **API:** `variants` runs at
+  ×1 (Basic, as before) and `fuzzy` at ×2.
+
+### Composition search: short texts, every word, honest filters (both)
+
+- **A text shorter than the chunk size is searched** as one chunk of all its words, with a
+  notice. Lab Mode searches a window ending on the last word, so the end
+  of a text is always searched, and "Min. chunk matches" higher than the text can give (in
+  Lab Mode: than the chunks it searches) is lowered, with a notice. The API adds `text_shorter_than_chunk_size` / `text_too_short`
+  warnings (additive).
+- **A catalog filter that cannot be applied says so** and the search is not run. The API
+  answers 503 `filter_unavailable` for a filtered request it cannot apply (it used to answer
+  200 unfiltered). Line Height is hidden until the catalog carries it; a
+  saved Line Height filter is removed with a notice (in Focus Search too).
+- **Search history keeps its filters (web):** removing a filter chip, or adding a term, after
+  restoring a search from history -- or after a reload -- no longer changes the saved history
+  entry.
+
+### API usage counted by surface (web, operators)
+
+- The public API's PostHog event `search_api_request` has a `channel` property: `api` and
+  `api_job` for direct calls and background jobs, `chatgpt` and `chatgpt_job` for the
+  GenizahSearch GPT's calls, so GPT use can be counted apart from direct API use. Searches
+  from the Claude skill use `/api/*` and count as `api`.
+
+## [9.5.0] - 2026-10-04 — Faster, complete search
+
+A desktop installer and a web deploy. Search is much faster, and its results are more
+comprehensive, also in searches with many results. The desktop shows the first results while
+a search runs, and Exact and Variants searches take a fraction of the time. Search within
+results and Parallels filters search the whole set directly, at any size. Exact, Variants and
+Fuzzy match whole words, and Fuzzy finds near spellings. The two web Fragment Puzzle sections
+below went live on 2026-09-29.
+
+### Search: faster, more comprehensive, whole words (desktop and web)
+
+- **The first results appear while the search runs (desktop).** For example, the first rows
+  of שלום show after 48 ms; Variants שמעון הצדיק after 0.2 s. The full list follows.
+  Sorting, filters, export and search within become available when it is complete.
+- **Much faster searches.** Measured on the desktop:
+
+  | Search | Before | Now |
+  |---|---|---|
+  | Exact הצדיק | 5.0 s | 0.2 s |
+  | Exact שלום | 10.1 s | 1.7 s |
+  | Exact אהרן כהן | 8.7 s | 0.7 s |
+  | Variants הצדיק | 33 s | 1.9 s |
+  | Variants שמעון הצדיק | 11.1 s | 3.5 s |
+  | Variants אהרן הכהן | 89 s | 8.2 s |
+
+  Every search, on the desktop and the website, now builds each row's snippet from the
+  match it has already found: about twice as fast per row.
+- **Whole words.** Exact (desktop), Variants and Fuzzy (desktop and web) match whole words:
+  שלום finds שלום, not בשלום or ולשלום, and ברוך אתה יי does not match ברוך אתה ייי. A
+  Latin letter or digit next to a word counts as part of it. Variants searches with every
+  spelling form of each word, for fuller results. On the website and in the API, Exact keeps its current
+  behaviour in this release.
+- **Fuzzy finds near spellings.** A Fuzzy match is a whole word one letter different, or
+  two letters in words of five or more: a letter added, dropped or changed, or two
+  neighbouring letters swapped. A prefix letter counts as one, so ושלום is found for שלום.
+  The help pages and the API description explain it. Desktop and web.
+- **More comprehensive results in large searches.** Search within results searches the
+  whole set directly, at any size, and so does Parallels / Composition Search with filters.
+  Desktop and web.
+- **Long result lists (desktop).** When a list is shortened for display, its count shows
+  "N+". Search within and "Only results with all terms" then work on the full list, with
+  progress, Pause and Stop.
+- **Text position** considers every occurrence on a page, so more pages are found. **Words with brackets**
+  (של[ו]ם) are found and highlighted whole, also across a page break. Desktop and web.
+- Desktop:
+  - A search-within chain that is replayed (session restore, removing a step, changing
+    the scope) runs each step with its own settings.
+  - "Search completed in ..." clears when a new search starts.
+  - My Library searches match whole words too.
+  - Shelfmarks are fetched for every row on the first page.
+
+### Desktop: no crash on exit while background loads are still running
+
+- **Closing the app no longer crashes now and then.** When a background task was still running at exit --
+  most often a thumbnail load of a closed Joins Lab -- Windows could report that the program stopped
+  working ("QThread: Destroyed while thread is still running"). Everything had been saved by then; the
+  crash came afterwards. The app now gives such tasks up to 1.5 seconds to finish after its windows have
+  closed and leaves any still running untouched, so the exit is clean. `desktop/qthread_exit.py`;
+  `tests/test_kept_qthreads_exit_cleanly.py`, which failed about one run in twenty, is now deterministic.
+
+### Web: Fragment Puzzle follow-ups (web deploy)
+
+- **Publishing works again.** The website sent the join's images to storage without the signed-in
+  user's token, so storage refused the upload (a row-level policy error) and every publish from /puzzle failed; unpublishing likewise left the old images in storage. The upload now carries
+  the user's token.
+- **Signing in keeps your work.** Drafts saved in this browser while signed out move into the account you
+  sign in to, and the canvas you had open comes back as that same draft. The canvas could also come back
+  empty after a page load (most often right after signing in): the page read it before the browser had
+  connected. It now waits for the connection.
+- **"Open in Puzzle" on Computed Identifications no longer saves a copy on every click.** It opens the
+  published join as an unsaved canvas, as a shared link does; a copy is saved only when you press Save.
+
+### Web: Fragment Puzzle saved joins are kept per visitor (web deploy)
+
+- **Saved joins are private until published.** The "Saved joins" drawer on /puzzle lists only your own
+  drafts: those of your account when you are signed in, of this browser when you are not. Publishing still
+  requires sign-in, and published joins stay public and are edited only by their author. A link to a join
+  you do not own opens its published version as a new canvas; saving it creates your own copy. Joins saved
+  on the website before this change are no longer listed while they are reviewed; nothing was deleted.
+- **Fragment images.** Images uploaded by signed-in visitors (the browser extension) are shared with
+  everyone, as before, and each is recorded with its uploader; images uploaded while signed out are kept for
+  that browser only. A cached image is never replaced by a later upload, and moving the threshold slider no
+  longer removes other cached images. The PNG export is sent straight to the browser that asked for it.
+- **Parallels: Sefaria filter texts are cached per reference.** Two references whose names differ only in
+  letters the file name cannot hold (for example Hebrew references) no longer share one cached text. Each
+  reference is fetched from Sefaria once more after the update. The desktop Filter Text dialog gets the same
+  fix in the next installer.
+- Removed: the unused `/api/puzzle_documents`, `/api/puzzle_document` (GET/POST/DELETE),
+  `/api/puzzle_thumbnail` and `/api/puzzle_upload_derivative` routes; the page itself never called them.
+  Owner tool: `scripts/assign_puzzle_draft_owners.py`.
+
+## [9.4.0] - 2026-09-28 — Data integrity
+
+A desktop release carrying the data-integrity work of the 2026-09-25 improvement sweep (saving,
+list sync, the Fragment Puzzle and the Joins Lab), with the web /lists fixes deployed alongside.
+The web hotfix and database hardening below went live on 2026-09-25.
+
+### Desktop: the Fragment Puzzle and the Joins Lab keep your work (2026-09-27)
+
+Reaches users with the next desktop installer (together with the desktop sections below).
+
+- **The Fragment Puzzle asks before it drops work.** New, opening another saved join (from the list,
+  from search results, Discoveries or community Joins) and quitting the app now ask to Save, Discard
+  or Cancel when the puzzle has unsaved work, with the buttons in the interface language. A Save
+  that did not happen (cancelled, blank title, or the write refused) no longer clears the canvas.
+  Pending autosaves are written first, including when the app quits (closing the window only hides
+  it). A failed autosave shows a red line that stays until the next save, and one message box.
+- **Fragments whose images could not be loaded stay in the join.** Opening a saved join while an
+  image cannot be downloaded (offline, a library server down) used to save the join back without
+  that fragment a moment later. Now such fragments are kept in every save and in Publish, the
+  Details list names them, and the rest of the join autosaves normally.
+- **Delete asks when several fragments are selected, and Ctrl+Z undoes the last delete.** The Delete
+  key acts only when the canvas has focus. Moving a fragment onto a folio of the same manuscript that
+  is already in the puzzle is refused with a message instead of silently losing track of one of them.
+- **The Joins Lab no longer crashes when you turn pages quickly**, and a slow earlier folio can no
+  longer replace the text or image of the folio you moved on to. A closed Lab still shows its images
+  when reopened. A running update check is never dropped, and it stays quiet while the app closes.
+- **Quitting with unsaved puzzle work asks first, before anything is stopped**: Cancel leaves a running
+  search, a multi-witness batch and a pending language restart untouched.
+
+### Desktop: list sync in the background, removals that reach your account (2026-09-27)
+
+Ships in the same desktop installer as the two desktop sections below it, "list sync keeps every
+list's entries, pages and notes" and "saved work stays saved". It needs the migration that section
+names: removals use the DELETE permission its second verify query checks.
+
+- **List syncs no longer freeze the window.** Download, Upload, Merge and the check of your
+  account at log-in now run in the background, as the automatic uploads do, and every list sync
+  runs one at a time. A sync asked for while another runs waits its turn ("Waiting for the list
+  sync that is already running..."), and the progress dialog has Cancel. A cancelled Download
+  changes nothing on this computer; a stopped upload keeps what it sent and says the rest has not
+  reached your account yet.
+- **Every list edit is uploaded.** Each change to your lists (an entry added, removed, moved or
+  edited; a list renamed, recoloured, moved to a project or to the Trash) is followed by one
+  upload, and edits made while it runs go up with the next one. Before, an edit made within two
+  seconds of an automatic upload, or while one ran, waited for a later edit to be uploaded, and
+  several kinds of edit never asked for an upload at all. Skip in the sync choice now says what it
+  does: nothing is downloaded, and your lists still upload after each change until you log out or
+  close the program (it promised a way to sync later from Settings, which does not exist).
+- **"Sync lists now"** on the Lists tab, under Trash, opens the Download / Upload / Merge choice
+  whenever you are logged in, even when the lists look in sync. Before, the only way back to it
+  was to log out and in again. A Download sends nothing, so when this computer still holds
+  changes that are not in your account, one upload now follows it.
+- **Logging out and closing don't wait.** Logout returns at once: the last upload runs in the
+  background, and the log-out finishes when it ends or after 10 seconds. The log-out notice says
+  that list changes did not upload only when some were known not to be in your account (it names
+  the lists when it knows them), and mentions notes that still differ from your account or are too
+  long for it. Logging out here ends this computer's session only; the website and your other
+  computers stay logged in. Closing the program during a sync or a log-out no longer waits on the
+  server; what did not upload stays on this computer for the next log-in.
+- **A log-in saved from the last session syncs from startup.** After a restart the app checks
+  your account, offers the sync choice when the lists differ, and uploads your edits, as after an
+  explicit log-in. If that check fails, one status-bar line says so and list sync stays on. Before, lists
+  edited after a restart stayed off the website until you logged out and in again.
+- **Removals and moves made on this computer reach your account.** Removing an entry from a list,
+  deleting a list for good and emptying the Trash now delete the entry's row in your account at
+  the next upload. A removal that cannot be sent (offline, or a failed request) is kept, across
+  restarts too, and sent later, and a Download never brings back an entry waiting for its removal.
+  Moving an entry, and Clean up duplicate lists, move its row, with its note, to the list it went
+  to. Only rows this computer has recorded are deleted, and a row another computer moved to
+  another list is left there. Before, a removal stayed on this computer and the next Download put
+  the entry back.
+- **Putting an entry back keeps the website's copy.** Adding an entry back to the list it was
+  removed from, before the removal was sent, cancels the removal: the row in your account stays,
+  with any note added to it there.
+- **Entries removed on the website are offered, never removed silently.** After a sync, a prompt
+  ("Entries removed on the website") lists each entry removed from a list on genizahsearch.com,
+  with its shelfmark, page and list, and a choice per entry: "Decide later" (the default), "Remove
+  from this computer too", or "Keep it (and add it back on the website)"; two buttons choose for
+  every entry at once. Closing the prompt decides nothing, and until you choose, the entry stays on
+  this computer and is not uploaded again. An automatic sync offers each entry once a session; a
+  Download, Upload or Merge you choose offers every one still waiting. The prompt waits while
+  another dialog is open, during a log-out, and while the lists cannot be saved.
+- **A colour, project or Trash change made here is kept until it uploads.** As a rename already
+  was, a list's colour, project or Trash state changed on this computer since its last upload is
+  kept by a Download, which still takes the website's value of the parts not changed here. Before,
+  a Download that ran after an upload could put back the old colour, project or Trash state, and
+  the next upload then sent that old value to the website.
+- **Projects are read in full.** Your account's projects are read page by page, as the lists
+  are. Under a server row cap, every upload lost track of the projects past the first page and
+  created a second copy of each on the website.
+- **Each step shows in the progress dialog:** "Syncing lists..." when a waiting sync's turn comes,
+  "Downloading list N of M..." and "Uploading list N of M...", and "Removing entries from your
+  account..." while removals are sent. The sync choice's list summary ("N items", "... and N
+  more") is now in Hebrew too. While your lists cannot be saved on this computer, no sync message
+  says a change is saved or kept here, and the status line and every sync result end by saying
+  that the lists are not being saved.
+- **Two known edge cases.** Putting an entry back in the few seconds its removal is being sent
+  still deletes the website's copy, with any note added to it there; the entry itself stays in the
+  list on this computer and is uploaded again. Starting the app offline with a saved log-in shows
+  you logged out until the next start online; the saved log-in is kept.
+- Internal: the scenario gate (`tests/list_sync_scenarios.py`) now also covers removals, moves and
+  uploads on a copy of the store. Its desktops sync as the new runner does (an upload on a copy
+  while the user edits, a Download fetched and then applied), with new steps (the website-removal
+  prompt, putting an entry back, log-out, a close or a kill during an upload, offline passes) and
+  four more invariants, fourteen in all. `--mix removals` weights the steps toward removals, moves
+  and put-backs, and the suite checks that the gate fails when any of three removal rules is
+  reverted.
+
+### Desktop: list sync keeps every list's entries, pages and notes (2026-09-27)
+
+Reaches users with the next desktop installer. That installer carries this change, "saved work
+stays saved" below and the second half of the list-sync repair (above) together: the three ship
+in one installer, not separately. **Before it ships, the owner applies
+`migrations/add_list_item_page_column.sql`** in the Supabase SQL Editor and runs the file's two
+verify queries: the first must show `page | text` and `tags | jsonb` (the desktop's tag checks are
+written for a jsonb column; if `tags` is not jsonb, do not release), the second SELECT, INSERT,
+UPDATE and DELETE for `authenticated`.
+
+- **An entry in two lists keeps both cloud copies.** Each list an entry is in now has its own row
+  in your account, and this computer remembers which row belongs to which list. Before, the entry
+  ended with one row, in whichever of its lists was uploaded last.
+- **Two pages or folios of one manuscript no longer overwrite each other.** Rows are matched by
+  manuscript, folio and page (the new `page` column), so uploading one page no longer replaces
+  another page's row, and a Download no longer drops one of them.
+- **An upload never overwrites a note that differs.** It replaces the note or tags in your account
+  only when this computer is the only side that changed them since the last sync, and only if the
+  account still holds the value it read. Otherwise both are left as they are and the sync result
+  says so. Lists restored from an older backup therefore no longer push their older notes over
+  newer ones in your account.
+- **Merge and Download keep both versions.** A note that differs becomes the note on this computer,
+  then a line `--- from the cloud ---` (`--- מהענן ---` in Hebrew), then the account's text; a
+  text the note already holds is not added again. The tags of both sides are combined.
+- **My Library entries are never sent with list sync.** Until now an upload could send a My
+  Library entry's internal id, its note and tags, and a shelfmark you typed for it; the document
+  itself and its text were not uploaded. Such entries are now neither uploaded nor downloaded; rows
+  that earlier versions uploaded stay in the account until removed (`docs/guides/SUPABASE_GUIDE.md`
+  gives the query that counts them). Help's line on local items and list sync now says what the
+  app does.
+- **A list renamed on the website keeps its new name.** The desktop takes the website's name at its
+  next Download and its uploads no longer rename the list back -- unless the list was renamed on
+  this computer since an upload last sent its name; then this computer's name stands and is
+  uploaded. A list renamed on this computer now also shows its new name in the English interface.
+- **One list sync at a time.** Two syncs (for example the log-out upload and an automatic upload)
+  no longer run alongside each other: a sync asked for while another runs waits its turn (see "list
+  sync in the background" above).
+- **Long lists are read in full.** Rows are read page by page, so a list with more rows than one
+  server response holds (1,000 by default) is no longer read short.
+- **An entry removed on the website is not uploaded again.** It stays on this computer until you
+  choose, in the prompt described above, to remove it here too or keep it (a sync never removes it
+  from this computer on its own).
+- **The sync result says what it left.** After a Download, Upload or Merge, successful or not, the
+  message adds how many notes now hold both versions, how many entries had their tags combined, how
+  many notes differ and were left as they are, and how many notes were too long to update safely
+  in your account (they stay on this computer).
+- Internal: `tests/list_sync_scenarios.py` is a seeded scenario gate (two desktops and the website
+  on one stateful fake Supabase, random edits, syncs and injected failures, ten invariants checked
+  after every step); `tests/test_list_sync_scenarios.py` runs 500 seeds of 60 steps in the suite.
+  `supabase_setup.sql` gains the `page` column.
+
+### Web: /lists (2026-09-27)
+
+**Deploy order (owner-run).** Deploy this **with or after** the desktop installer above, not
+before: desktops older than that installer overwrite a note edited on the website at their next
+upload, and report an entry removed on the website as a failed upload on every sync. The read-only
+"Page N" display and Browse link may go earlier (they are safe before and after the migration).
+
+- **Editing an entry's note or tags and removing an entry now work.** For the entries of an
+  ordinary list the page passed no row id, so these changes never reached your account (since the
+  2026-09-25 hotfix the page said the change could not be saved; before it, nothing said so).
+- **An entry for one page shows "Page N"**, and its Browse button opens that page. Entries without
+  a page look as before, and a shelfmark that already ends with its page (as the website's own
+  "Add page to list" writes it) is not labelled twice.
+- **Saving a note no longer splits a tag that contains a comma:** the tag field is read back only
+  when you changed it.
+- The edit dialog names the entry as its card does (library, shelfmark, page).
+
+### Desktop: saved work stays saved (2026-09-25)
+
+Reaches users with the next desktop installer.
+
+- **New no longer deletes the session file.** Pressing New on the Search or Composition tab
+  deleted `session.json`, which dropped the saved Joins Lab anchor, query inputs and Yes/Maybe/No
+  marks whenever the Joins Lab had not been opened since the app started. New now overwrites the
+  file with the cleared state straight away.
+- **Add Comment offers only what is saved.** It no longer offers "Post anonymously" or a comment
+  type: neither was ever saved, and comments always showed your name on genizahsearch.com. You can
+  edit or delete your comments on the website (Corrections, My Comments). Comment badges now say
+  "Page N" or "Entire manuscript" in the interface language, and the All Comments list no longer
+  labels every comment "by Anonymous".
+- **Lists, settings and the language choice are saved safely.** Each save writes a new file and
+  swaps it in, so a crash or power cut mid-save no longer leaves a cut-off file. If `lists.pkl`
+  cannot be read at startup, the app loads the newest readable backup (`.bak1`-`.bak3`), says so,
+  and keeps the unreadable file as `lists.pkl.unreadable-<time>`. Backups now rotate once per
+  session instead of on every save, so a bad start can no longer push out every good copy within
+  three manuscript views. Before each cloud sync a snapshot is kept (`lists.pkl.pre-download`,
+  `lists.pkl.pre-upload`); a download that cannot take its snapshot does not run, and a Merge
+  whose download fails no longer uploads. If the start-of-session backup cannot be made, the
+  save waits (the next save tries again) rather than replacing `lists.pkl` without one. If list
+  changes stop reaching the disk (for example another program holds `lists.pkl`), the app now
+  says so once and keeps a note on the status bar until a save lands again.
+- **One copy at a time.** Opening a second copy on the same data folder now says the app is
+  already open and exits, instead of the two copies overwriting each other's lists and settings.
+  Changing the language restarts the app only after the old window has finished saving; if the
+  app cannot restart itself, it stays open (or says so) and the new language applies next time.
+- **Excluded manuscripts stay excluded.** "Exclude this manuscript" in the results menu now works
+  for Genizah results: the menu passed an empty id, so it did nothing, and View Document, Submit
+  Correction, Add Comment, View Corrections, View Comments and Share Discovery on that menu had the
+  same problem. An exclusion hides every row of the manuscript and holds through filters, loading
+  more rows, later searches and restarts, until New. The Search tab's Exclude Manuscripts list now
+  applies to every search, and the status line says how many rows are hidden. Exporting a view in
+  which every row is hidden now says there is nothing to export instead of exporting every result.
+  When the visible rows fit without scrolling and more results remain, a "Load more results"
+  button appears under the table.
+
+### Hardening: the database enforces privilege and moderation columns (2026-09-25)
+
+Applied to the production Supabase project on 2026-09-25 and verified there with
+`scripts/verify_privileged_column_guards.sql`: 74 checks, all as expected, 0 skipped (the
+endorsement resets below were re-applied the same day; before that run, the four checks covering
+them failed as they should). No app change.
+
+- Triggers on `profiles`, `corrections`, `discoveries` and `fragment_joins`
+  (`migrations/add_privileged_column_guards.sql`) now decide which values a signed-in client may
+  write, instead of the apps alone: roles and reputation are admin-only; a reviewed correction is
+  frozen; pinning, un-hiding, closing and featuring discoveries and confirming joins are
+  admin-only; editing a pinned or featured discovery, or what a confirmed join asserts, removes
+  the endorsement.
+- Corrections can be deleted only as drafts (by their author) or by an admin.
+- `scripts/fix_rls_policies.sql` no longer recreates the any-status delete policy, and
+  `supabase_setup.sql` points to the migration.
+- Verification script: `scripts/verify_privileged_column_guards.sql`; rules and rollback in
+  `docs/guides/SUPABASE_GUIDE.md` ("Column guards").
+
+### Web hotfix: lists privacy, hardening and correctness (2026-09-25)
+
+**Deploy order (owner-run).** Put `GENIZAH_STORAGE_SECRET` (32+ characters; generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`) in the server `.env` **before**
+this code is deployed: the web app now refuses to start without it, and systemd would restart it
+every 5 s. The new secret signs every web user out once.
+
+- **Lists need an account.** Web lists are now kept only in your account; anonymous lists are
+  retired. Stars, Add to List, bulk Add, Add from List, the join picker and `/lists` ask anonymous
+  visitors to sign in, and the "Move to account" card is gone. The server's old anonymous store
+  (`lists.pkl`) is no longer read or written; the owner deletes it on the server after this
+  deploy. Star icons show as outline for everyone for now; their filled state had come from that old store.
+- **Hardening:** the web storage secret is read from the environment (`GENIZAH_STORAGE_SECRET`,
+  required); session id validation.
+- Removed the unused `/api/visual_similarity_db` download route.
+- Corrections page: deleting a draft and editing or deleting your own comment now really take
+  effect, and when nothing changed the page says so instead of reporting success. The same check
+  now covers the admin deletes on `/discoveries`, join deletes and the Joins Lab remove.
+- Browse "Related Fragments" and the `/api/search` / `/api/parallels` filter lookups no longer
+  block the web server's event loop; the public joins read has a 5 s timeout.
+- Quick View and the Browse whole-document view show transcription notation such as
+  `<upside down>` literally, and search highlights no longer break the text or each other.
+- Copy buttons copy the exact text (backslash sequences included) and say "copied" only when the
+  browser confirms it; Quick View copies the version on screen.
+- `/lists`: renaming a list and editing an item's note or tags now really save (the page started
+  those writes without awaiting them, so they never ran), and every list action reports a failure
+  instead of success when nothing was saved. Search's bulk "Add to List" no longer reports
+  "0 items added" as a success.
+
+## [9.3.0] - 2026-09-24 — Fresh PGP data, small screens, and urgent fixes
+
+**Desktop release.** The web side of this work (the PGP sidecar and the homepage count) went
+live on 2026-09-22; everything below reaches the desktop with this installer.
+
+**Fresh Princeton Geniza Project data.** The bundled PGP data had been frozen since April
+2026. It is rebuilt from upstream `princetongenizalab/pgp-metadata` (36,642 documents), and
+the share of PGP fragments with a linked IIIF image rose from 57.5% to 87.0%. The refresh pipeline behind it (#355–#358) now runs
+as one script that stops at the first failure, verifies every input by hash, and refuses to
+ship a sidecar that still carries the withheld Hebrew translations.
+
+**The desktop fits small screens and high display scaling.** At 300% Windows scaling, or on
+a low-resolution screen, toolbars used to clip or push the window off the screen. Now:
+
+- Toolbars compact in stages: buttons first shrink to their icons, and only then do the
+  least-used controls move into a **More** menu (Previous/Next, the language and settings
+  buttons always stay). Text rows wrap onto a second line instead of widening the window.
+- The main window's minimum size follows the screen it is on, so it can always be dragged
+  and resized fully.
+- The Manuscript Viewer opens inside the visible screen area, title bar included, and
+  switches to its compact header when even the full header cannot fit.
+- The image toolbar compacts before it scrolls; the image adjustment sliders fold behind a ⚙
+  button on small screens.
+- Search and Composition results fit their columns to the window, with no horizontal scroll;
+  a **Columns** menu hides and restores columns and re-fits them. Dragging a column border
+  now resizes the column you grabbed (the header's checkbox used to swallow the press).
+
+**New in the Manuscript Viewer and the Browse tab.**
+
+- **Open on the website** and **Copy link** (📋) open or copy the same page on
+  genizahsearch.com, including its volume for multi-volume manuscripts. Hidden for My
+  Library documents, which are not on the website.
+- **A− / A+** change the transcription text size, remembered between sessions.
+- A **text toggle** (📄) next to the image toggle shows or hides the transcription, replacing
+  "Image only".
+- The results strip (category, position, filters, Back to results) moved into the
+  navigation row, saving a line of height.
+
+**The Manuscript Viewer follows your Composition result filters (#360).** Opened from a
+filtered result list, the viewer now steps only through results the list shows, shows each
+result's category (main, filtered, appendix) and the active filters, and "Back to results"
+returns to the Composition tab.
+
+### Bug Fixes
+
+- **Composition xlsx export:** under "Library" the Report View printed the shelfmark and
+  under "Shelfmark" the library; the manuscript headings show the shelfmark again (#361).
+- **Flat view showed no filtered results as filtered:** the category was visible only in the
+  grouped view. Flat rows now carry a "{n} filtered" / "{n} excluded" marker (#361).
+- **Manuscript Viewer opened with its title bar above the screen** (reported on 9.2.1), so it
+  could not be moved; only Maximize helped (#361).
+- **Joins Lab "other side of the leaf" search never returned anything:** the worker handed
+  the search engine the query object instead of its text, and the error was swallowed.
+  Narrow now narrows and Widen widens; a newer search is no longer overwritten by an older
+  one, and closing the Lab stops a running scan (#359).
+- **Focus Search material names** (paper, vellum, papyrus, mixed, wood) were English in the
+  Hebrew interface (#359).
+- **Composition shelfmark exclusions** judged only part of the visible rows (#360).
+- **Composition Search forgot a letter-level choice on every restart:** the index finished
+  loading before the session was restored, so the stored choice was never applied and the
+  next save recorded chunk as the user's choice. It is now applied either way (#363).
+  Sessions already saved with that chunk stay on chunk until letter-level is picked once.
+
+### Internal
+
+- Repo structure Rounds 1 and 2 (#344–#354): the root alias stubs are gone; `desktop/` and
+  `shared/` hold every moved module. Their notes follow, as part of this release.
+
+### Internal -- repo structure Round 1, stage 2: the cross-app modules and the dev-server CLI (2026-09-20; no behaviour change)
+
+- **Four modules moved into `shared/`** behind alias stubs, consumers rewritten: `sefaria_utils.py`,
+  `pgp_tag_translations.py`, `unified_variants.py` (generated) and `lists_sync.py`. **The dev-server
+  CLI moved to `scripts/server.py`** with no stub, since nothing imported it.
+- **`lists_sync`'s logger changed name with the module** (`getLogger(__name__)`), and three tests
+  filter `caplog` on that name; they now filter on `shared.lists_sync`. Without that edit the log
+  records vanish from the fixture and the tests fail rather than silently pass.
+- **`scripts/server.py` now anchors the repository root two levels up.** It `chdir`s there before
+  launching `python -m web.main` with output to DEVNULL, so a one-level anchor would have made the
+  child die with `ModuleNotFoundError: web` and reported only "not running".
+- **The installer no longer bundles `pgp_tag_translations.py` by name.** After the move that tuple
+  would have shipped the four-line alias stub into `_internal/`, which is on `sys.path` in a onedir
+  build -- putting the old top-level name back inside the frozen app. The real module ships with the
+  rest of `shared/`. A new test fails if any spec entry names a stub.
+- `scripts/generate_unified_variants.py` writes to `shared/unified_variants.py` by default.
+
+### Internal -- repo structure Round 1, stage 2: the desktop-only root modules (2026-09-20; no behaviour change)
+
+- **Six modules moved into `desktop/`** behind four-line alias stubs, every consumer rewritten to the
+  dotted name in the same commit: `gui_threads.py`, `corrections_ui.py`, `corrections_client.py`,
+  `supabase_corrections_client.py`, `filter_text_dialog.py`, `list_filter_dialog.py`.
+- **Two silent-failure sites fixed on the way.** `desktop/join_workbench.py` imports Qt and the worker
+  module inside one `try`, whose handler sets `_QT_AVAILABLE = False` and undefines the whole Join
+  Workbench UI; `desktop/corrections_client.py::get_corrections_client` catches `ImportError` and
+  downgrades to the REST client. Both now have gates: no tracked file may import a moved module by its
+  old name (`tests/test_root_alias_stubs.py`), and `_QT_AVAILABLE` must be true under PyQt6
+  (`tests/test_stage2_move_invariants.py`).
+- **The few-shot prompt path was repaired for the dev tree.** `gui_threads` anchored `data/` on its own
+  directory, which the move turned into `desktop/data`; it is now the named
+  `few_shot_data_dir()`, climbing to the repository root and pinned by a test. (The frozen build still
+  bundles no `data/` at all -- a separate, recorded defect.)
+- **`supabase_corrections_client` stopped putting `<root>/web` on `sys.path`**: the hack resolved
+  nothing, and after the move it pointed at a directory that does not exist. Its now-unused `os` and
+  `sys` imports went with it.
+
+### Internal -- repo structure Round 1, stage 2 trial (2026-09-19; one module moved behind an alias stub; no behaviour change)
+
+- **`column_filter_dialog.py` -> `desktop/column_filter_dialog.py`** (43 lines, one importer). A
+  four-line alias stub stays at the old path, so `import column_filter_dialog` still yields the same
+  module object; `genizah_app.py` imports the `desktop.` name. `tests/test_root_alias_stubs.py` pins
+  the identity and the stub's shape; `tests/test_canonical_module_locations.py` points at the new path
+  and keeps `genizah_app.py::_SELF_TEST_IMPORT_MODULES` equal to its table.
+- **Frozen import self-test.** `GenizahSearchPro.exe --self-test-imports` imports every canonical app
+  module by its dotted name inside the frozen process and prints `IMPORTS_OK`;
+  `tests/test_local_pyinstaller_smoke.py` now runs it. `GENIZAH_PACKAGING_EXE=<path>` points the
+  packaging tests at a build made with `--distpath` elsewhere, so a baseline or trial build never
+  overwrites `dist/`.
+- The remaining ten root-module moves stay in the Round 1 plan; the owner chose the trial only.
+
+### Internal -- repo structure Round 1, stage 1 (2026-09-18; docs, gates, archiving; no behaviour change)
+
+- **Instruction files agree.** `AGENTS.md` is the tool-neutral command sheet (bounded test runner,
+  `ruff==0.15.10`, layout rules); `CLAUDE.md`, `CONTRIBUTING.md`, `.cursorrules`, `README.md`,
+  `tests/README.md` and the release skill follow it: Python 3.11, no `pytest tests/` as one process,
+  "the standalone backend process was removed" rather than "FastAPI was removed".
+- **Authoritative architecture pages.** `docs/architecture/OVERVIEW.md` (where code lives, the guard
+  tests, who owns which state, a decision for every top-level directory and root file),
+  `docs/architecture/DATA_LIFECYCLE.md` (one row per data artifact), `docs/decisions/` (nine binding
+  decisions). `CLAUDE.md` points at them instead of carrying the diagram and file list;
+  `docs/FILE_INDEX.md` and the 2026-02 GSD codebase map are archived with banners.
+- **Gates.** `tests/test_instruction_files_agree.py`; registry-completeness checks in both back-edge
+  guards (5 desktop and 77 shared modules were unguarded); `tests/test_canonical_module_locations.py`;
+  `scripts/check_docs.py` scans the root instruction files; `pyproject.toml` `testpaths`;
+  `.gitignore` negations for nine tracked assets a blanket rule matched. The packaging smoke looked
+  for the EXE at a path the build never writes and skipped for months; repaired, made fail-not-skip
+  under `GENIZAH_PACKAGING_SMOKE=1`, and the frozen `--self-test-pymupdf` now finds its fixture from
+  the current directory (the only change outside tests and docs).
+- **Archived, nothing deleted:** `start_servers.sh`, `web_pilot.py`, `image.png`,
+  `char_merges_all/filtered.xlsx`, `web/Transcriptions_part.txt`, the phase-84 CUDL scans and
+  `verification/`, all under `docs/archive/` with README banners.
+- The module moves proposed for stage 2 are not part of this entry; they wait for the owner's decision.
+
+---
+
+## [9.2.1] - 2026-09-17 — The viewer is its own window, a hint for stray Local searches, honest Oxford images
+
+**On the web, deployed the same day (#338–#342, merged from the cloud).** *Ask the Genizah
+in ChatGPT*: the GenizahSearch GPT searches the corpus, reads pages, finds letter-level
+parallels across several witnesses and returns manuscript details (FJMS bibliography, catalog
+records, source credits) through a bounded API facade with background jobs and paginated
+results. A new **AI tools** page at `/ai` links the GPT, the research skill for other AI
+assistants (portable installation guide, `details` command) and the API guide. Long research
+searches run in isolated, resource-limited workers with background API jobs (submit, poll,
+fetch, cancel) and no time cutoff for interactive use; bounded regex work stops one heavy query
+from stalling the site (a clear error and API `504 core_timeout` instead of a hang); pattern
+compilation is about 7x faster and matching in supervised workers accelerated; Responsa
+tabular "Within Document" matches its components anywhere in the transcription.
+
+**The Manuscript Viewer is a window of its own.** Minimizing it used to make the whole
+app vanish. It never minimized: the viewer was an application-modal dialog owned by the
+main window, so it hid with no taskbar button of its own while the disabled main window
+was buried behind the next application. A user asked to see the search panel while
+reading results, so the viewer is now an unparented, non-modal window with its own
+taskbar button and min/max buttons; the main window stays usable beside it, one viewer at
+a time, and it closes with the app. Opened from the Corrections, Discoveries or My
+Comments dialogs it still nests as before. Its background workers are now stopped on
+every way out, including Esc — the old design let them outlive the window harmlessly,
+the new one could not.
+
+**A hint when a Local search finds nothing.** Picking "Local" in the corpus scope by
+accident made manuscripts seem missing. After a completed zero-result Local search, a
+light-orange strip above the empty results offers the same search in the Genizah corpus
+in one click. It never shows for "ALL", after a cancelled run, or once you start a new
+search, change scope, press New or run a tag search.
+
+**Composition Search opens on letter-level search when its index is built — for real.**
+v9.1.0 made letter-level the default once an index exists, never over a stored choice.
+In practice the default never fired for anyone: the session autosave stored the live
+method on every save, and the restore read any stored method as a choice, so every
+session carried a `chunk` nobody had picked. The session now records whether the method
+was actually clicked, and only that outranks the default. A user who deliberately picked
+chunk before 9.2.1 lands on letter-level once and re-picks; from then on the choice
+sticks.
+
+### Bug Fixes
+- Composition Search: the search-type and frequency controls stayed disabled after
+  switching from Letter-level back to Chunk search.
+- Manuscript Viewer: closing the app left the viewer open; a cancelled Local search
+  showed the hint; a stale hint survived New, tag searches and history restore; a viewer
+  opened from a corrections dialog could delete its caller (all found in review, none
+  shipped).
+
+### Internal
+- Seven Codex review rounds (three on GitHub, four unsandboxed against the worktree)
+  found eleven defects beyond the three reported; the last round returned SHIP.
+- Real-Qt lifetime tests drive the viewer's teardown through reject, accept, done, Esc and
+  close; AST pins guard the hint's reset paths; mutation runs prove each test can fail.
+
+### Oxford images on the desktop: an honest failure state, in Hebrew too (2026-09-07)
+
+The Bodleian's Genizah Fragments host still answers every non-browser request with its
+bot-challenge page, and since early September the NLI no longer delivers its Ktiv copies of
+the Bodleian-held folios either (IIIF 500, Rosetta stream 401, and a generic 94×73 "no image"
+PNG from the Rosetta thumbnail endpoint). So an Oxford folio has no image any app can fetch,
+and the 2026-09-02 Oxford→NLI fallback lands on nothing.
+
+- **The notice strip is translated.** "Oxford image unavailable — showing the NLI image
+  instead" and its link showed in English inside the Hebrew UI; the key was missing from
+  `genizah_translations.py`. A source-text test now pins every notice key to the table.
+- **The Bodleian link is offered in every failure state**, not only when an NLI list exists:
+  when the part has no NLI list, and when the NLI copy fails as well — in which case the
+  strip stops claiming an NLI image is on screen and says the copy could not be loaded. The
+  link is host-pinned to `hebrew.bodleian.ox.ac.uk`; a transient notice is retired by the
+  next image that renders, and the standing fallback notice returns when an NLI page does.
+- **The loader rejects Rosetta's placeholder.** `ImageLoaderThread`'s third attempt accepted
+  any `image/*` body, so the 1,615-byte "no image" icon decoded and was displayed as if it
+  were the manuscript. `shared/metadata_manager.py::ROSETTA_PLACEHOLDER_MAX_BYTES` (2000,
+  the ceiling `web/api.py` already used) now turns it into a failure.
+- Desktop-only. Showing the Oxford image *inside* the desktop is still open: it needs an
+  embedded browser engine or a Bodleian allowlist (`docs/OPEN_ISSUES.md`, Bodleian row).
+
+### One definition of a sys_id, and 97 is not a corpus prefix (2026-08-25)
+
+A manuscript `sys_id` was parsed out of a `raw_header` by ~24 hand-rolled regexes in two
+incompatible dialects. They are now one shared definition in `shared/sys_id_patterns.py`,
+and a repo lint fails CI if a new site spells its own.
+
+- **The two dialects were answering different questions.** `99` is the Genizah corpus
+  namespace; `97` is the LOCAL "My Library" namespace (Phase 95) — a user's own files,
+  generated on the desktop, never a corpus record. Measured on `libraries.csv`: 255,723 of
+  255,723 records begin `99`, including all 473 NLI rows. So the corpus-facing sites were
+  right to be 99-only and the four wide ones were the drift; three were narrowed and the
+  two desktop LOCAL-aware parsers stay namespace-agnostic on purpose.
+- **The narrow pattern was not merely narrow — it mis-matched.** `re.search` scans anywhere,
+  so `(99\d{8,})` applied to a LOCAL header could match a `99` inside the LOCAL id's random
+  digits and return a truncated, wrong sys_id: 6.36% of LOCAL ids, measured. Both shared
+  patterns are now anchored on a digit boundary, so a LOCAL header misses cleanly instead.
+  **Correction to an earlier draft of this entry:** it claimed the mis-match was a live
+  defect on the desktop LAB path. It was not. `shared/lab_engine.py` does meet LOCAL headers,
+  but it tests the extracted id against `excluded_set`, which holds resolved CORPUS sys_ids —
+  always 18 digits — while a mis-match inside an 18-char LOCAL id is at most 16, so the test
+  could never be true. Old and new leave a LOCAL row unexcluded alike, and on corpus headers
+  the two patterns are identical (0 differences over 50,000 generated headers). No reachable
+  consequence was found at any migrated site. This is hardening that removes a trap, not a
+  bug fix.
+- **A drift guard, proven able to fail.** `tests/test_sys_id_patterns.py` pins the wiring,
+  the anti-corruption property and the Phase 95 regression; three mutations (re-widening a
+  site, un-anchoring the pattern, over-narrowing a desktop parser) each fail it distinctly.
+  `scripts/check_sys_id_prefixes.py` re-takes the measurement, since the corpus grows.
+- **The witness panel's pattern came in with the multi-witness merge and was narrowed too.**
+  `web/pages/parallels.py::WITNESS_SYS_ID_RE` had consolidated three copies on that page into
+  one — the right fix — but chose the wide dialect on the premise that 97-prefixed
+  *manuscripts* exist. They do not. And once the engine it deliberately mirrors
+  (`shared/passage_parallels.py`) became corpus-only, staying wide would have recreated the
+  divergence pointing the other way: the page admitting a witness the engine cannot resolve.
+  The page's own "exactly one pattern" guard is kept and strengthened — it now asserts the
+  page holds no pattern of its own at all.
+- **The verification script's index walk was broken, and a review caught it.** Two defects,
+  both on the one path nothing ever executed: the repo root was missing from `sys.path`, so
+  the documented `--index` invocation died on `ModuleNotFoundError`; and the walk called
+  `Searcher.segment_readers()`, which the Tantivy Python binding does not expose. It now
+  pages a match-all query through the supported API, and refuses to report a clean result off
+  a short walk — a partial scan is indistinguishable from a corpus with no 97 in it. Covered
+  now by tests that build a real index and run the script as documented.
+- **Then the completeness guard itself turned out to have two holes, found by a second review
+  pass.** Both made the script answer "no new prefix here" without having looked. It counted a
+  document as inspected *before* reading it, so an index whose schema lacks `full_header`
+  balanced its own books and reported clean off zero headers. And it detected prefixes using
+  the very constants it exists to check — a 99/97 pattern cannot match a `98`, so an index of
+  nothing but 98-prefixed records also reported clean. Prefix detection is now deliberately
+  independent of those constants, every document lands in exactly one of
+  classified/unreadable/unparsed and the three must sum to the index total, and the shared
+  corpus pattern is additionally cross-checked against every real header it should match. A
+  walk with any hole in it can no longer come back clean.
+
+### Download the computed identifications as a spreadsheet (2026-08-21)
+
+`/computed-identifications` now has a download control. It returns **the reader's whole
+filtered set** — not just the page on screen — as a bilingual xlsx, with the matched
+passages on the finding's own row.
+
+- **The evidence travels with the claim.** Five columns carry the manuscript passage, the
+  edition passage and their notes, with the matched words in **red and bold** — the same
+  highlighting the parallels export uses. The first draft put the passages on a second
+  sheet, which meant judging any single match required joining two sheets on a shelfmark
+  that repeats.
+- **"One row per work" and "one row per manuscript" now export what their expander opens
+  onto.** Those views are grouped, so the grouped row itself carries no manuscript and no
+  text — on the page you open it, but a spreadsheet has nothing to open. The export takes
+  its ORDER from the grouping and its ROWS from the identifications underneath, so the
+  grouping survives as columns you can sort and pivot on.
+- **A warning before a large download, and a card that clears after it.** Above 2,000 rows
+  the control asks first — with a different sentence for the grouped views, where a row
+  count would be the wrong number. The "Preparing your file" card now clears on every
+  outcome, including the failures.
+- **The file says where it came from.** An About sheet names the artifact it was built
+  from, credits the MiDRASH automatic transcriptions (Stoekl Ben Ezra et al., 2025) rather
+  than carrying thousands of lines of someone else's dataset anonymously, and marks which
+  passages are machine-read rather than a scholar's transcription. Where the artifact had
+  already abbreviated a passage, the sheet says so instead of leaving an unexplained
+  ellipsis inside a quotation.
+
+No confidence score, band or precision figure reaches a cell: the only number in the file
+is page coverage in matched letters, with its qualifier attached, exactly as the page
+renders it. Measured against the real artifact — 28,635 rows in 66 s, a 5.8 MB file.
+
+### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
+
+Four fixes to the discovery deploy path and its benchmark, none of them runtime code.
+
+- **A readiness smoke that takes a second.** `docs/specs/discovery-deploy.md` §2.6 told the
+  operator to run `scripts/bench_discovery.py --sample 50 --warm-passes 1`. Neither flag
+  bounds `bench_findings_page()`, which is invoked unconditionally and expands to ~15,363
+  filter/unit/sort combinations x 5 repeats — about **76,815 timed statements, one to two
+  hours**. On 2026-08-19 that hung the V4.2 deploy until the ssh connection reset, and the
+  deploy was recorded as **failed** when steps 0–7 had succeeded and the swap was live and
+  healthy. New `scripts/smoke_discovery_readiness.py` answers the actual question — can the
+  app load what it now serves, and does that asset answer real reads — through the real
+  `load_discovery_state()` and `web.discovery` paths, including a citation-range read over
+  the heaviest locus-bearing work. §2.7's "or read the benchmark's added RSS" is gone too;
+  the RSS comes from `/proc/<pid>/status`.
+- **Every statement in the benchmark is now wall-clock bounded.** Nothing in that file
+  bounded any query, which is how one pathological statement became an unbounded job. A
+  `BoundedConnection` installs a `set_progress_handler` deadline, so all four connection
+  sites are covered rather than each of eighteen `conn.execute` calls. `--query-timeout-s`
+  defaults to **30 s and is ON**; an abort raises a named `QueryBudgetExceeded`, distinct
+  from a cap breach — a cap breach means the statement finished, only too slowly.
+- **ssh keepalive.** Both deploy-script helpers pass `ServerAliveInterval=15
+  ServerAliveCountMax=8`. A silent reset is indistinguishable from a real failure, which is
+  precisely how the V4.2 outcome was misread.
+- **The benchmark's bucket picks now match the population it times.** They were drawn with a
+  hand-written `di.main_pool = 1` while the timed queries applied the default divergence
+  filter, which removes **12.6%** of the main pool and **38.8%** of "more". A pick could
+  therefore be emptied by the real query and the loud F14 abort would name a probe bug as an
+  asset fact. Picks now come from `_build_findings_filter`. `_state_skip`'s skip table also
+  gained `suppressed` and `sys_id`, which had been falling through its single-axis carve-out
+  entirely unverified.
+
+7 tests; 9 mutations each watched failing. One mutation exposed a gap in the tests
+themselves — asserting the new helper in isolation left the caller free to stop using it — so
+a behavioural test builds an asset whose raw-heaviest work is not its divergence-filtered
+heaviest and asserts the pick chooses the latter.
+
+### A CI timing gate that was a coin flip on Windows (2026-08-20)
+
+`tests/test_local_indexer_incremental.py::test_second_scan_fast` failed CI on a commit that
+changed one SQL predicate and one comment, neither of which that module imports. Its budget
+was `max(first_scan * 0.05, 0.5s)`; the Windows runner measured a 1.100 s second scan against
+the 0.5 s floor while taking **23m21s** for the suite versus ubuntu's **5m36s**. Both halves
+of that budget were wrong for a slow filesystem: per-scan overhead the cache cannot remove
+(opening the Tantivy index, the commit, 100 stat calls) does not shrink, so a percentage of a
+quick first scan falls below the fixed floor, and the 0.5 s constant was chosen against one
+machine's speed. The mechanism is proven deterministically by the same test's existing
+`indexed == 0` / `skipped == 100` assertions; the stopwatch only needs to catch pathology, so
+it is now `max(first * 0.75, 5.0)`.
+
+### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
+
+> Measured on production after deploy, through the real loader and service: the locus-filtered
+> read answers in **97 ms** (`status=ok`, 1,231 of 2,433 rows; a one-sided bound returns 366),
+> the journal carries no error signatures, and the owner confirmed the filter and the row
+> expansion in a browser.
+
+Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
+one work. Code only: no artifact rebuild, no manifest change.
+
+- **The citation-range filter returned nothing on every heavy work, every time.** It was not
+  slow — it was non-functional. The locus predicate in
+  `shared/discovery_service.py::_build_findings_filter` was a **correlated** `EXISTS`, so
+  SQLite re-ran an interval search once per candidate row. Measured on the served artifact
+  for תנ"ך, תהלים over half its chapters: **10,478 ms against a 5.0 s findings timeout**, so
+  the reader always got "This took longer than expected." Pre-existing, and worse than one
+  slow page: `run_in_executor` threads cannot be cancelled, so a read that gave up at 5 s
+  kept its heavy worker for the remaining ~5–14 s, and four concurrent range readers pushed
+  other heavy reads to `busy`. Rewritten as an **uncorrelated `IN (SELECT …)`** driven from
+  `locus_unit` — `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, evaluated once:
+  **61.3 ms, byte-identical result sets** across 15 probed work × bound-shape cases. The
+  predicate stays inside the `WHERE` clause, so the parameter order and every call site are
+  unchanged. A `WITH … AS MATERIALIZED` CTE measured the same (62.6 ms) and was rejected: it
+  cannot live in the filter, and its placeholders would precede the SELECT-list params — an
+  un-spliced params list returned wrong result sets on 6 of those 15 cases and silently
+  correct ones on the other 9, because those were empty.
+
+- **A range-filtered row expanded into children that ignored the range.**
+  `web/pages/findings.py::_fetch_children` never read `locus_from` / `locus_to` back out of
+  the child state, though `_child_state` copies them and its docstring promises "every axis
+  is carried over unchanged … its count and the rows underneath it come from ONE predicate
+  and cannot contradict each other". So a parent counted under a range opened onto an
+  unfiltered list. This was unreachable until now only because the parent query timed out
+  first — fixing the query above is what exposed it, and shipping that fix alone would have
+  turned a broken feature into a silently wrong one.
+
+Nine new tests. The three semantic ones cannot distinguish the two SQL forms by design, so
+the gate is a structural check that the subquery references the outer row nowhere, plus a
+query-plan and a wall-clock guard on the served artifact. All six mutations in the matrix
+were watched failing — reverting to the correlated form ran that test set for **3m28s**,
+which is the outage reproducing itself inside the gate.
+
+### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
+
+A rebuilt discovery artifact. **708 works / 58,602 computed identifications /
+30,528 in the main pool / 51,571 passage excerpts**; the corpus-wide figure a reader
+sees on the homepage goes 555 → 646. Frame hash unchanged from the previous
+candidate, which is the point: everything below changes what a reader is *told*, not
+which manuscripts were matched. Deployed by the owner (`_tmp/deploy_v42_discovery.sh`);
+this entry records the build, not a live change.
+
+- **14 owner-approved works were silently missing, including all three Tur sections, the
+  SeMaG and all three parts of the Zohar.** The reconcile build script (kept in the private repository) wrote the
+  ACQUISITION PROVIDER into `source_label`, a column that holds a provider-agnostic
+  code frozen to a small set of internal source categories. It survived two appends because 35 of the
+  append's 50 providers are literally named `sefaria`; the 15 Hebrew Wikisource sources
+  arrived as `hewikisource`, the consumer rejected the value, and a bare `continue`
+  discarded **9,715 claims and 5,517 tier-A witnesses — about 30% of the append — at exit
+  code 0**. The release verifier passed, because the artifact was internally consistent; it
+  simply lacked 14 works. `load_approved_works` now counts and prints every exclusion, and
+  an exclusion meaning a build INPUT disagrees with this consumer is fatal and names the
+  lost ids. Restored: Tur Yoreh Deah 91 identifications / 36 main pool, SeMaG 408/75, the
+  Zohar 416/320 across its three parts.
+
+- **A citation no longer repeats the work title printed beside it.** A fragment witnessing
+  nine passages of the Tur rendered `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט
+  קנז; …` — the title once per run, with the citation buried in it. Measured over the
+  artifact: **107 of 679 works with citation addresses, 4,708 identifications, and 44 of
+  those works have been live since the REF4 append** — so this was never specific to the
+  works restored above. `shared/discovery_locus.py::strip_work_title_prefix` removes the
+  title on the way into the asset, which fixes both the composed citation and the findings
+  page's address-range filter (they read the same column). The prefix is computed once per
+  work from what all its units share, never per label: a per-label draft corrupted the
+  Zohar, where `ג` is a word of `ספר הזוהר, חלק ג` and the one daf out of 596 that happened
+  to *be* ג rendered as a bare column letter.
+
+- **A range no longer repeats an address level.** `shorten_range_tail` now treats `/` as a
+  word boundary, so `ויקרא/כ–ויקרא/כג` reads `ויקרא/כ–כג`. It also slices the original
+  tokens instead of rejoining words with a space, fixing a latent bug that would have
+  flattened `א/ד/ה` to `א ד ה` — a different address, silently.
+
+- **Two work-display rulings.** Tur Orach Chaim is renamed `ארבעה טורים, אורח חיים` so the
+  four sections of one work are named the same way, and the Zohar's authorship line is
+  cleared rather than shortened (383 of 708 works already carry no author, so this is
+  the normal shape). Both applied through the approved review CSV's `owner_title` / `author`
+  columns, so no pinned build input moves.
+
+- **Composition dates for the restored works.** 14 owner-ratified years — four inheriting a
+  year already recorded for the same work or author, ten scholarly dates with no precedent.
+  Unresolved date comparisons fall **694 → 6** (the six pre-existing undated Tosefta
+  tractates). The SeMaG alone accounted for 543 of the 694.
+
+- **The novelty axis is cleaner than the previous candidate.** `verdict_entries_failed_closed`
+  377 → 0 and fingerprint mismatches 377 → 0. Two producer defects behind that:
+  the novelty production-run script (kept in the private repository) merged its whole checkpoint into its output,
+  including answers for pairs that are no longer candidates — and its coverage assertion
+  compares counts, so a surplus of stale keys could mask a deficit of real ones. The output
+  is now restricted to the current candidate set with every drop counted.
+
+- **Gates.** Nine mutations of the new guards, each caught by a named test; the assertions
+  read the built asset's own stored labels rather than a helper's return value. Two stale
+  test assertions were found and closed in passing — one still pinned the `source_label`
+  defect, one pinned the pre-ratification date count.
+
+### Pause/Resume for desktop searches (2026-08-19, desktop)
+
+A long search can now be parked and picked back up instead of being thrown away.
+A **Pause** button sits beside Search on the Search tab and beside Analyze on the
+Composition tab, appears only while a run is in flight, and covers all four
+workers — regular search, composition scan, and both Lab Mode variants.
+
+- **The button never claims more than it can do.** Clicking Pause shows a
+  disabled "Pausing…" until the worker actually reaches a checkpoint and
+  acknowledges; only then does it become "Resume". Grouping runs on a different
+  thread that is not pausable, so the button is hidden for that phase rather
+  than shown greyed-out beside a live Stop.
+- **Elapsed time and the composition ETA now exclude parked time**, and are
+  computed from `time.monotonic()`. They were `time.time() - start`, so a pause
+  inflated elapsed and halved the reported chunk rate — and a wall-clock base is
+  wrong regardless, since an NTP or DST step moves it under a running search.
+  The ETA is derived from elapsed, so one fix corrects both.
+- **New `shared/pause_gate.py`** — `PauseGate`, plain stdlib, no Qt and no
+  policy: it blocks and returns a bool, leaving the `InterruptedError` raise in
+  `gui_threads` beside every other cancel. `PausableSearchMixin` adds
+  `pause()` / `resume()` / `request_cancel()` and a `_checkpoint()` called as the
+  first statement of each progress callback, so a parked worker publishes no
+  progress and the bar freezes where it was.
+- **`request_cancel()` is now the single stop entry point** for all six cancel
+  paths: it sets the flag *and* un-parks in one call. A parked worker never
+  reaches the code that reads `cancel_flag`, so a flag alone would have left it
+  parked until the `wait()` budget expired and `QThread.terminate()` fired.
+
+**Fixed along the way** (each was live before this change):
+
+- **Lab Mode searches were never cancellable.** `LabSearchThread` had no
+  `cancel_flag`, so Stop set a dead attribute; `lab_search`'s `batch_cb`
+  swallowed the cancel in a bare `except Exception` (`InterruptedError` is an
+  `OSError` subclass); and a non-deep Lab search never ticked progress at all.
+- **The LOCAL (My Library) passes ignored Stop entirely** — `_query_local_index`
+  and the two LOCAL post-passes had no callback and no cancel check. Stopping one
+  now keeps the hits it had already materialised, like every other mode; an
+  earlier revision of this branch re-raised instead and cost the user every LOCAL
+  row under a label reading "(Partial results)".
+- **A stopped Title/Shelfmark search discarded its partial results.**
+  `_execute_metadata_search` was the one loop with no `try/except`, so the raise
+  escaped and became an empty result set, unlike every other mode.
+- **`perf_signal` fired for cancelled runs**, contradicting its own comment: the
+  core swallows `InterruptedError` and returns normally, so that line was
+  reached anyway.
+- **`closeEvent`'s `comp_thread.requestInterruption()` was a no-op** since it was
+  written — the composition threads only ever polled `cancel_flag`. The mixin's
+  `requestInterruption()` override repairs that call site in place.
+- The LOCAL phase now reports on a dedicated `phase_signal` and switches the bar
+  to indeterminate, instead of pushing unrelated hit counts down the numeric
+  channel (which rewinds the bar) or pinning at `(total, total)` (which reads as
+  100% complete while a long phase is still running).
+
+**Stop itself is unchanged.** It still blocks briefly and still falls back to a
+hard thread kill for a worker caught *between* checkpoints; a paused worker is
+specifically never in that state, and the wider non-blocking-stop rework is
+recorded in `docs/OPEN_ISSUES.md` rather than smuggled in here.
+
+Tests: `test_pause_gate.py`, `test_pause_ack_epoch.py`, `test_pause_elapsed_math.py`,
+`test_pause_resume_ui.py`, `test_pause_phase_signal.py`, `test_pause_core_ticks.py`,
+`test_pause_worker_wiring.py`, `test_pause_stop_lifecycle.py`,
+`test_pause_resume_i18n.py` (all Qt-free), plus `test_pause_integration_qt.py`
+in the `gui` lane for what needs a live event loop — thread affinity,
+queued-vs-direct delivery, a stale acknowledgement crossing a run boundary, and
+real `wait()` timing. New EN/HE keys: Pause / Resume / Pausing… / Paused.
+
+### Web memory — allocator-ratchet attribution + remediation (2026-07-08, web)
+
+The web process's memory growth was traced, with live probes under load, to allocator high-water: memory freed by Python but kept by the allocator, driven by an SEO crawler requesting `/browse` around the clock. Remediation shipped in two tiers:
+
+- **Server (2026-07-08):** SEO-tool crawlers are refused at the proxy, with a static robots.txt; allocator and cache limits set for the web service.
+- **New: `web/malloc_trim.py`** — periodic glibc `malloc_trim(0)` daemon thread (started from `app.on_startup` only). Env knobs `GENIZAH_MALLOC_TRIM_SECONDS` (default 300; 0 disables) + `GENIZAH_MALLOC_TRIM_MIN_GROWTH_MB` (default 64 — adaptive: trims only when RssAnon grew that much since the last trim). Stats (runs/skips/duration/freed) surface in `/_internal/memstat` via the runtime-cache registry (new public alias `web/api.py::register_runtime_cache_stats`). Linux-only; graceful no-op elsewhere.
+- **SEO-bot policy in app code:** `web/crawler_visibility.py` gains `SEO_TOOL_USER_AGENT_TOKENS` / `SEO_TOOL_ROBOTS_AGENTS` / `is_seo_tool_crawler()` / `should_block_seo_tool_request()`; the noindex middleware in `web/main.py` returns a cheap 403 for SEO-tool UAs before any page render, with `/robots.txt` exempt (RFC 9309: a 4xx robots.txt means "allow all" — crawlers must read their Disallow group to deregister); `web/api.py::robots_txt` now emits the Disallow group. nginx remains the primary enforcement; the app layer is defense-in-depth.
+- **`.nicegui` storage-user retention:** `GENIZAH_STORAGE_RETENTION_DAYS` (default 90; 0 disables) in the startup compaction pass (`web/export_state.py`) deletes `storage-user-*.json` files untouched for the window (delete-before-parse, loaded-session guard, `files_deleted`/`bytes_deleted` counters). Old files had accumulated. Note: a browser absent longer than the window is logged out on return (`auth_session` lives in the file); Supabase-side data unaffected.
+- Tests: `tests/test_seo_bot_block.py`, `tests/test_malloc_trim.py`, `tests/test_storage_retention.py` (52 new) + existing crawler/export/openapi regressions green.
+
+### Audit tail — a11y statement wording + stale-index diagnostics (2026-06-25, PR #314)
+
+Closes the last code items of the 2026-06-23 product-quality audit. **#27 (web /accessibility):** softened the over-claims to match reality after SEED-014 — "fully navigable using a keyboard" → "Most of the site can be navigated…", "clearly visible on all interactive elements" → "visible on interactive elements", "have appropriate alternative text" → "are given… where applicable"; bumped the stale "February 2025" date to June 2026 (EN + HE re-keyed in lockstep). **SEED-019 #28 (stale-index diagnostics, `genizah_core.py`):** extended SEED-006's one-shot reload warning into a reusable `content_search_staleness_messages()` helper + a queryable `SearchEngine.index_staleness_report()` (genizah/local/stale/messages) + LOCAL-side parity warning; ASCII-only messages (cp1255-console-safe). Standalone Codex APPROVE WITH NITS (nit fixed); 20 tests in `tests/test_audit_27_28_a11y_statement_and_stale_index.py`. Also (#31) `/_tmp/` added to `.gitignore` (scratch dir). **Planning:** SEED-020 god-file decomposition opened as GSD milestone **v8.3.0** (Phases 122–127, roadmap-only — execution deferred).
+
+### SEED-023 — Homepage corpus stats + catalog PGP/Editions filters (2026-06-24, web)
+
+**Part A — Homepage stats band (shipped):** five hardcoded headline numbers on the homepage — Manuscripts (255,723), Catalog entries (731,354), Images (1,019,886), Scholarly transcriptions (27,424), Automatic transcriptions (232,450). Constants live in `web/stats_service.py` (`CORPUS_STATS`); `compute_live_stats()` regenerates them from the sidecars after a data refresh (with `libraries.csv` / `browse_map.pkl` fallbacks so it works headless). Rendered synchronously (no per-request big-table COUNT, CLS-free) in `web/pages/home.py`.
+
+**Part B — Catalog "Browse by identification" availability filters:** two 3-state filter buttons (PGP: all / Has PGP / No PGP — link presence, "has PGP info"; Scholarly Transcriptions: all / Has Scholarly Transcription / No Scholarly Transcription — PGP `%Edition%` ∪ FGP `Digital Edition`, editions-only) in the catalog sidebar, each with a tooltip, removable chips, and persistence via the `safe_storage` chokepoint (Phase 87). Filters are pushed DOWN into `shared/fjms_service.py::get_browse_results` — each materializes a per-thread TEMP table of AlmaIds (built once, reused; works on the read-only connection) and adds an `[NOT] EXISTS` clause applied BEFORE `COUNT(DISTINCT AlmaId)` and pagination, so `total` + paging reflect the full filtered set (not the visible page). New helpers: `document_service.get_all_pgp_link_sys_ids()` / `get_sys_ids_with_editions(sys_ids=None)`, `fgp_service.get_sys_ids_with_fgp_editions(sys_ids=None)` (both dual-mode: list or full corpus). The corpus-wide membership sets are computed once per process, lock-protected, shared read-only. PGP badge, `/search` `pgp_filter`, and SEED-022 are untouched. Tests: `tests/test_seed023_catalog_filters.py` (10).
+
+### Phase 97.3 — My Library UAT Stability (2026-05-26 — internal hotfix, no version bump)
+
+Closes the six post-Phase-97.2 UAT defects reported 2026-05-26 against the desktop My Library tab. Internal hotfix on the v7.14 chain (97.1 → 97.2 → 97.3); no public release, no GitHub tag.
+
+**R97.3-A — UI-thread freeze on folder selection (Bug A).** Replaced the synchronous recursive walk in `_UnifiedFileTreeWidget._populate_node` with an async tree-worker design. `FolderWalkWorker` (Phase 97 U-03, previously unwired) now powers the tree fill: it walks with `os.walk(folder, followlinks=False)`, pre-filters by `_SUPPORTED_EXTENSIONS` imported from `shared/local_indexer.py` (single source of truth — also closes R97.3-N), runs `_canonical_filepath` inside the worker thread, and emits 4-tuples `(filepath, canonical, mtime_ns, size)` plus a monotonic generation token. All three worker signals (`batch_emitted`, `finished_signal`, `error_signal`) carry the token; stale payloads from a cancelled or superseded worker are dropped at the UI slot. `_UnifiedFileTreeWidget` gained `_tree_token`, `_tree_worker`, `_cancel_existing_tree_worker`, `_ensure_dir_node`, `_on_tree_batch`/`_on_tree_finished`/`_on_tree_error` slots. Tree now starts collapsed (no `expandAll()` — D-04). Cancel mid-populate clears the tree entirely (D-05).
+
+**R97.3-A — `prior_status` cache (Codex Critique #2 v7.14 blocker).** Added `MyLibraryTab._prior_status_cache` populated at `_init_indexer` and `_invalidate_prior_status_cache()` called BEFORE `_refresh_folder_list_ui` in `_on_worker_finished`, `_on_worker_error`, `_perform_reset`, folder-add, and folder-remove (D-12 ordering invariant — late clearing would leave the post-scan tree showing pre-scan status because `_refresh_folder_list_ui` calls `populate_for_folder` at line 1995 which reads the cache). The click path now never issues a `local_files` DB query.
+
+**R97.3-B — Reset button accessible after a crash (Bug B).** Simplified `_update_reset_button_state` to a single condition: enabled when `self._worker is None or not self._worker.isRunning()`. The Phase-97.2 `start_recovery_probe()` check is gone — orphan `scan_runs.status='running'` rows are exactly what Reset is supposed to clean up. `LocalIndexer.reset_my_library()`'s own 7-step protocol (path-safety pre-check + handle-close + retry-rename + LAB-rollback + fail-loud + deferred-GC) remains the load-bearing safety; the UI guard does not duplicate it. Phase 97.2 `test_reset_my_library_full_cycle` and `test_reset_my_library_lab_rename_failure_rolls_back_local` still GREEN.
+
+**R97.3-C — MuPDF stderr noise silenced (Bug C).** `shared/local_indexer.py` calls `fitz.TOOLS.mupdf_display_warnings(False)` at module import, wrapped in `try/except Exception` with `logger.debug` fallback (broad exception per Codex Critique #2 — a future PyMuPDF API change must not crash module import). User's smoke folder went from 624× "MuPDF error: ... unknown keyword: 'TF'" stderr lines to zero.
+
+**R97.3-D — Recovery-Skip suppresses same-launch auto-rescan (Bug D).** New one-shot `_skip_startup_rescan_once: bool` flag on `MyLibraryTab`. Initialised `False` before the recovery-modal call path. Set `True` in the Skip branch of `_show_recovery_modal`. Read-and-cleared at the entry of `_auto_rescan_on_startup`. Resume and Restart branches do NOT set the flag (both intentionally trigger a fresh scan). D-25 silent rescan on the no-modal path is unchanged. Bilingual status-bar message ("Recovery skipped. Use Refresh to rescan. / ההתאוששות דולגה. לחץ Refresh לסריקה מחדש.") auto-fades after 5 seconds.
+
+**R97.3-E — "Discovering files…" status during scan enumeration (Bug E).** `LocalIndexerWorker` emits new `status_updated(str)` signal with bilingual "Discovering files… / מאתר קבצים…" before `scan_all` enters its enumeration loop. `_start_worker` puts `QProgressBar` in indeterminate (busy) mode via `setRange(0, 0)`. First `progress_updated` signal flips back to determinate `setRange(0, 100)` and clears the status message. Finish/cancel/error all reset the range to `(0, 100)` so a future scan does not inherit busy state (D-21).
+
+**R97.3-N — UI tree shows the full supported-extensions set (Bug N3).** The UI-side `SUPPORTED = {'.pdf', '.docx', '.txt'}` literal at `desktop/my_library_tab.py:227` is DELETED. `FolderWalkWorker` imports `_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}` from `shared/local_indexer.py:81` (single source of truth). `.html`/`.xlsx`/`.csv` now appear in the opt-out tree; mixed-case (`.PDF`, `.Pdf`) is normalized via `.lower()`.
+
+**Tests added.** Seven new test files covering D-13 (token guard), D-14 (no canonicalize of unsupported), D-15 (no junction recurse via `mklink /J`), D-19 (cache invalidation ordering), D-20 (tri-state preservation across async populate), D-21 (progress range round-trips), D-22 (100ms responsiveness via `time.perf_counter()` + `QTimer.singleShot(0, marker)` + `QApplication.processEvents()`). Existing `tests/test_folder_walk_worker.py` extended for the 4-tuple + token signal shape.
+
+**Codex review trail.** `97.3-CODEX-CRITIQUE.md` (Area 1 sub-decisions — revised Option B + worker pre-filter; flagged the `prior_status` preload risk) and `97.3-CODEX-CRITIQUE-2.md` (full decision-set — surfaced D-11 broad-exception, D-12 cache ordering, D-16..D-22 + the inverted wave order for risk locality) both addressed before plan execution.
+
+**No version bump.** `version.py`, `version_info.txt`, `CompileScriptGenizah.iss`, `README.md`, `tests/test_release_artifacts.py` UNTOUCHED. Phase 97.3 rides the v7.14 internal-hotfix chain (97.1 → 97.2 → 97.3); the next user-facing release that bundles all three is a separate decision.
+
+### Phase 97.2 — LOCAL Recovery Cascade Fix + Reset My Library (internal; 2026-05-26)
+
+Internal closeout — not yet a user-facing release. Bundles the 97.1 MAX_PATH +
+non-blocking cancel hotfix (commit `2e1b846e`, 2026-05-25) with the 97.2 8-bug
+recovery cascade fix and the new "Reset My Library" / "אפס ספריה שלי" toolbar
+action in the desktop My Library tab.
+
+**Trigger:** 2026-05-26 cascade on the first post-97.1 run. User stopped a scan
+of a 100K-file folder mid-run, restarted the app, clicked "Remove
+folder" — console emitted `Schema error -> LockBusy x3 -> 'Field scan_run_id is
+not defined' -> 'NoneType has no delete_documents'`. Codex critique identified
+the missing `.schema_version` marker check (Bug 6 / R97.2-F) as the actual root
+cause: Phase 95 installs have `meta.json` but no `.schema_version`, so the
+existing `actual_marker is not None and actual_marker != expected_marker` guard
+failed to trip the rebuild path on upgrade.
+
+**8 fixes landed in `shared/local_indexer.py` + `genizah_core.py`:**
+- R97.2-F (Bug 6) — schema-marker absence triggers rebuild in BOTH files
+- R97.2-A (Bug A) — redundant `tantivy.Index(...)` reopen deleted at
+  `local_indexer.py:1147`; temp-indexer in `genizah_core.py:6878-6896` now
+  explicitly closes via `_close_internal_writer_index()` in `try/finally`
+- R97.2-B (Bug B) — explicit `fresh_writer = None; fresh_index = None;
+  gc.collect()` at `:2745-2748` replaces `del` (Windows: `del` is weak,
+  Rust drop is delayed, `os.rename` then races a live lock file)
+- R97.2-C (Bug C) — `discard_run` step 2 introspects schema for
+  `scan_run_id` field; on absence (Phase 95 schema) falls back to per-uid
+  `delete_documents("unique_id", uid)` loop joined from
+  `local_pages × processed_files WHERE scan_run_id=?`
+- R97.2-G (Bug C2) — explicit `_del_writer = None; gc.collect()` in
+  `discard_run` step 2 `finally:` before step 5 reopens `self._writer`
+- R97.2-H (Bug C3) — `discard_run` raises `LocalIndexerError` BEFORE the
+  SQLite delete transaction when Tantivy delete fails; prevents
+  orphaned-docs state (SQLite empty, Tantivy still has the rows)
+- R97.2-D (Bug D) — new `LocalIndexerError(RuntimeError)` exception class
+  + new `_ensure_writer()` helper (fail-loud: raises on schema mismatch
+  or LockBusy, NO silent retry past `__init__`'s 3-attempt loop); wired
+  at `_delete_file`, `remove_folder`, `_recover_pending_deletes` call
+  sites
+- R97.2-E (Reset My Library) — new
+  `LocalIndexer.reset_my_library(close_searcher_cb, reload_searcher_cb)`
+  7-step protocol (close handles -> 7 path-safety pre-checks (basenames
+  must equal `LocalIndex`/`LocalLabIndex`, parents match, not root, etc.;
+  raise `LocalIndexerError` before any filesystem mutation) -> rename-aside
+  LOCAL to `.reset-quarantine-<ts>` -> rename-aside LAB with **rollback of
+  LOCAL on failure** -> recreate empty dirs -> schedule deferred cleanup
+  via `pending_dir_cleanup` (Phase 97 R-02 infrastructure; falls back to
+  best-effort `shutil.rmtree(ignore_errors=True)` only if the SQLite INSERT
+  fails) -> `__init__` reinit triggers migration ladder -> reload searcher).
+  New toolbar button in `desktop/my_library_tab.py` with destructive red
+  styling, bilingual EN/HE strings, proactive active-scan guard
+  (`_update_reset_button_state()` toggles `setEnabled` + tooltip on worker
+  lifecycle signals), and a custom `QDialog` two-step typed confirm
+  (`RESET` / `אפס` both accepted regardless of `CURRENT_LANG`). Enabled-state
+  tooltip explicitly reassures that source files and the Genizah corpus
+  are preserved.
+
+**97.1 work bundled in this entry:**
+- MAX_PATH long-path prefix (commit `2e1b846e`) — Windows-only handling
+  of paths > 260 chars via the `\\\\?\\` prefix
+- Non-blocking cancel + per-file cancel check — addressed UI freeze and
+  `WinError 3` storm during cancel on large folders
+
+**Reset scope:** LOCAL_INDEX_DIR + LOCAL_LAB_INDEX_DIR only. pgp.db,
+fjms_enrichment.db, nli_crossref.db, libraries.csv, Genizah_Index/ are NEVER
+touched by Reset. Source files (user's own .txt/.docx/.pdf) are NEVER touched.
+
+**5 RED tests (each landed RED before its fix):**
+- `tests/test_phase_97_2_schema_marker_absence.py` (R97.2-F)
+- `tests/test_phase_97_2_writer_handle_leak.py` (R97.2-A + R97.2-B)
+- `tests/test_phase_97_2_discard_writer_lifecycle.py` (R97.2-C + R97.2-G)
+- `tests/test_phase_97_2_sqlite_vs_tantivy_consistency.py` (R97.2-H)
+- `tests/test_phase_97_2_reset_my_library_full_cycle.py` (R97.2-E)
+
+**Origin trace:** the phase's critique and brief (planning record, private
+repository). CONTEXT D-02 adopted Codex's expanded 5->8 bug list.
+
+**Deferred (out of scope):**
+- Centralized `try_open_or_rebuild()` helper (Codex recommended; deferred
+  to a future refactor phase per CONTEXT D-01).
+- Defensive stale-lockfile cleanup (Codex recommended conservatively;
+  deferred per CONTEXT D-06 — Bug A fix removes the actual lock-leak
+  vector).
+
+**Verification:**
+- `pytest tests -k phase_97_2 -x` — all 5 new tests pass
+- `pytest tests/test_phase_97_invariants.py tests/test_scan_run_id.py -x` — no regression
+- `pytest tests/test_phase_87_no_raw_storage_access.py -x` — web multitenant invariant unaffected
+- `python -m ruff check .` — clean
+
+(desktop — LOCAL is desktop-only per Phase 95 invariant; web LIBRARY_CODES `[]` unaffected)
+
+### Phase 98 — NLI Resilience (internal; 2026-05-25)
+
+Internal closeout — not yet a user-facing release.
+
+**Resilience hardening for NLI/IIIF code paths.** All 10 NLI fetch sites
+guarded by a new shared circuit breaker (`shared/nli_circuit_breaker.py`)
+that trips after 3 consecutive failures and short-circuits further calls
+for 60s. Per-call timeouts dropped from 15-30s to 3-5s via 6 new env knobs
+(`NLI_CIRCUIT_THRESHOLD=3`, `NLI_CIRCUIT_WINDOW=60`, `NLI_CONNECT_TIMEOUT=3`,
+`NLI_IIIF_READ_TIMEOUT=5`, `NLI_MARC_READ_TIMEOUT=3`,
+`NLI_IMAGE_READ_TIMEOUT=5`). `NLI_SEMAPHORE_TIMEOUT` default dropped 20→1.
+PostHog telemetry on breaker open/close via factored
+`shared/posthog_server.py`.
+
+Worst-case per-request blocking budget: 45s → ~9s. After 3 consecutive
+failures the breaker stays open for 60s and subsequent NLI fetches return
+empty in microseconds (negative-cache short-circuit). The Nyquist test in
+`tests/test_nli_circuit_breaker.py::TestNliCircuitBreakerConcurrency`
+proves 20 saturating threads complete in <10s wall time.
+
+Wired into all 10 NLI fetch sites: 4 in `web/api.py`
+(`fetch_fl_ids_from_nli`, `nli_image`, `_fetch_nli_image_bytes`,
+`proxy_image` — host-conditional for non-NLI), 3 in puzzle
+(`PuzzleImageService._fetch_iiif_image`, `_fetch_direct_url`
+host-conditional, `web/pages/puzzle.py::_resolve_folios`), 4 in
+`genizah_core.py` (`fetch_iiif_manifest`, `fetch_marc_data` migrated +
+new wirings at `_fetch_single_worker`, `_fetch_fl_ids`); legacy
+class-attribute breaker REMOVED (RESEARCH Pitfall 5).
+
+**Origin:** 2026-05-25 production hang — see
+`docs/INCIDENT-2026-05-25-nli-iiif-hang.md` +
+`docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md`. Closes the Minimum Ship
+Patch from the Codex critique.
+
+**Deferred (out of scope):** Async refactor to `httpx.AsyncClient`,
+event-loop watchdog, multi-worker uvicorn (CONTEXT D-05).
+
+**Production canary verification:**
+`curl -w "%{time_total}\n" https://genizahsearch.com/api/fl_ids/990001458630205171`
+10× in sequence. Expected: first 1-3 calls slow (1-5s), remaining < 0.1s.
+Journal pattern `Failed to fetch FL IDs` should appear at most 3 times
+per 60s window per sys_id.
+
+134/134 Phase 98 tests pass across 6 test files
+(`test_posthog_server.py`, `test_nli_circuit_breaker.py`,
+`test_api_nli_breaker_integration.py`,
+`test_puzzle_nli_breaker_integration.py`,
+`test_genizah_core_nli_breaker_migration.py`,
+`test_nli_breaker_cross_module_invariants.py`).
+
+(both web + desktop — desktop releases next milestone)
+
+---
+
+## [9.2.0] - 2026-09-06 — Citations, Princeton links, and a round of repairs
+
+Three strands, and the release is mostly the third.
+
+**Attribution.** The apps show MiDRASH automatic transcriptions alongside
+Princeton and Friedberg editions, translations and community corrections — and
+several surfaces credited MiDRASH for all of them. One shared decision now
+drives the printed sheet, the "How to cite" chip, Word exports, the desktop
+citation bar and the new Cite buttons, so a citation copied from the screen,
+printed on paper or exported to .docx cannot disagree about who made the text.
+
+**Reaching Princeton.** PGP links now appear in the desktop reading dialog, on
+the Browse toolbar, and as a real link on the `PGP` badge in the results table —
+shown only where a link actually exists, since that column is nullable.
+
+**Repairs.** The Search and Composition Search tabs no longer share one Exclude
+Manuscripts list; composition header sorting works again (it had never fired);
+two composition crashes are fixed; Oxford images no longer fail silently; and a
+crawler can no longer take `/browse` down.
+
+### New Features
+
+- **Princeton Geniza Project links on three desktop surfaces** — the reading
+  dialog, the Browse toolbar, and the `PGP` badge in the results table.
+- **"How to cite" chip** on every web page — the site citation by default, plus a
+  folio-specific one on a manuscript, ready to paste.
+- **Print / Save as PDF** on the web reading view: this folio, or the whole manuscript.
+- **"Cite this page"** on the desktop Browse toolbar and in the result window.
+- **Separate Exclude Manuscripts lists** for the Search and Composition Search tabs.
+
+### Improvements
+
+- Citations name **whoever made the text you are reading** — MiDRASH for the
+  automatic transcription, otherwise Princeton, Friedberg, the translator or the
+  community corrector.
+- Citations carry the **full MiDRASH author list**, not "et al.".
+- The desktop cites **Dicta Genizah Search Pro** and its version, not the website:
+  a reader running a program never fetched an address on a date.
+- Dates read as dates — "Sept. 6, 2026" / "6 בספטמבר, 2026".
+- Calmer homepage: one dismissible strip instead of four overlays, clearer buttons,
+  and a search box that says what it searches.
+- Bodleian (Oxford) images carry a prominent link to their site, and the credit
+  uses the licence wording.
+
+### Bug Fixes
+
+- **The Search and Composition Search tabs silently shared one exclusion list** —
+  each "New" wiped the other's.
+- **Composition header-click sorting never fired at all**: `setHeader()` discarded
+  every width, resize mode, hidden state and signal connection.
+- **The composition tree crashed on a mid-load clear**, and **"Full Recursive
+  Search" crashed in letter-level mode**.
+- **Browse showed search hits as literal asterisks**, and lost them on a V0.8
+  switch-back; an editorial `*note*` is no longer rendered as a red hit.
+- **Oxford images died silently**; the NLI proxy now falls back to a Rosetta
+  thumbnail.
+- **A crawler could take `/browse` down** — anonymous requests rewrote the shared
+  recent-history, and notes/version reads blocked every concurrent request.
+- **`/api/browse` no longer 504s in bursts** after a restart.
+- **The default transcription could be an unrelated excerpt.**
+- Word exports contained the automatic transcription while crediting the selected
+  scholar.
+- An FGP translation was labelled a transcription.
+- The desktop credited MiDRASH for Princeton and Friedberg editions — the usual
+  case, since those are what the Browse tab prefers by default.
+- Citation links opened the manuscript at its first folio rather than the cited one.
+- "Print this page" printed the whole manuscript in Full Manuscript View, and the
+  editor while editing.
+- A page with no transcription at all was still offered a citation crediting MiDRASH.
+- 165 dead entries in the Hebrew translation table; for 43 keys the site showed a
+  string nobody had chosen.
+
+### The detailed notes behind the summary above
+
+### Changed — Homepage calm, honest hero wording, and a printable reading view (web, 2026-09-04)
+
+Three owner reports, all about the first thirty seconds a visitor spends on the site.
+
+- **One dismissible strip on arrival, not four overlays.** A first visit to `/` opened
+  a blocking MiDRASH-citation modal, a "What's New" toast, an OCR-caveat toast and the
+  citation footer — simultaneously, with the modal and the footer saying the same thing.
+  The modal is gone; the reasoning it carried (why citations matter to the MiDRASH team,
+  which the strip never said) now lives at `/about#citing-midrash`, linked from the
+  "How to cite" chip that replaced that strip later in the same release. The citation
+  requirement, the full citation and the copy button are all in the chip.
+- **"What's New" is a header button with an unread dot** instead of a card floating over
+  the page that deleted itself after 30 seconds. The news is now still there when you go
+  looking for it. It is visible on phones — the neighbouring Help button is hidden below
+  768px, and this site's readers are mostly on phones.
+- **The OCR caveat is a line in the hero,** not a toast with its own close button. It is a
+  standing caveat about every result on the site, so it should read the same on the
+  hundredth visit as on the first.
+- **Dismiss buttons look like buttons.** Every X was a ~20px half-transparent glyph; they
+  are now 36px with a hover ring.
+- **The homepage search box says what it does.** "Search manuscripts…" read as "search
+  *for* a manuscript", so people typed shelfmarks into what is a full-text search over the
+  MiDRASH transcriptions. It now reads "Type a word or phrase to search the manuscripts…".
+- **Print / Save as PDF on the reading view.** A new button beside "Export Word" on
+  `/browse`, backed by the site's first print stylesheet: the app chrome comes off, the
+  whole transcription prints rather than the one screenful that happened to be scrolled
+  into view, and the sheet carries its own masthead — library, shelfmark, title, folio and
+  the citation — because all of those live in chrome that printing removes. The image
+  credit stays with the plate, as the licences require.
+- **Homepage spacing tightened** by about 6% of page height; no section was removed.
+- **The printed sheet credits whoever actually made the text on it.** The site and its
+  address appear on every sheet. MiDRASH is cited when you print the automatic
+  transcription — and only then; print an FGP or Princeton Geniza Project edition, a
+  translation, or a community correction and the sheet credits those people instead.
+  It follows the version you have chosen, so switching versions changes the credit.
+  Labels follow the interface language; the scholarly citations themselves stay as
+  published, which is how a citation has to be quoted.
+- **Print this page, or the whole manuscript.** The printer icon on the reading-view
+  toolbar opens a short menu: print the folio you are on, or every folio of the
+  manuscript in one go. The all-pages sheet carries its own heading — library,
+  shelfmark, title, page count and the citation.
+- **Notes and comments no longer print.** They are working notes around a document,
+  not part of it.
+- **A "How to cite" chip replaces the citation strip at the foot of every page.** It is
+  small, always there, and opens to a ready-made citation you can copy — the site, its
+  address, the date you looked, and the Zenodo citation for the MiDRASH transcriptions.
+  On a manuscript page it also offers a citation for that folio specifically: library,
+  shelfmark, folio, and whoever made the transcription you are reading. In Hebrew or
+  English, following the interface.
+- **Word exports credit the transcription you exported.** Export a Princeton or
+  Friedberg edition, a translation or a community correction and the document credits
+  those people, with the date of retrieval. Search-result and parallels exports are
+  unchanged.
+- **Dates in citations read as dates** — "Sept. 4, 2026" in English, "4 בספטמבר, 2026"
+  in Hebrew — rather than the numeric form.
+
+### Changed — citations name every author, and the result window can cite (2026-09-05)
+
+- **The citation you copy now lists all seventeen MiDRASH authors,** not "Stoekl Ben
+  Ezra et al." A citation you paste into a bibliography should be the one you can
+  publish. Where a Word export used to print that list twice — once in the sentence,
+  once in the rows below it — it now prints it once.
+- **The desktop citation bar shows an ellipsis when the citation does not fit.** It
+  used to simply stop, so a citation cut off mid-author-list looked complete. The
+  full text is on the tooltip and on the Copy button, which were never affected.
+- **A Cite button in the desktop result window.** That window opens on top of
+  everything else, which meant the citation bar along the bottom could not be reached
+  while you were reading a folio in it. The button offers the same two citations: this
+  page, or the site.
+
+### Fixed — the desktop citation bar credited the wrong people (desktop, 2026-09-04)
+
+The bar along the bottom of the desktop app showed one fixed citation — the MiDRASH
+automatic transcriptions — on every tab, and "Copy Citation" gave you that. But the
+Browse tab prefers a Princeton or Friedberg edition whenever one exists, so most of
+the time you were reading an edition by a named scholar while the bar credited a
+machine transcription for it.
+
+It now follows what is on screen. The bar itself carries the citation for the site as
+a whole — which names Dicta Genizah Search, the address, and the MiDRASH dataset — and
+"Copy Citation" offers two: this folio, or the site. The folio citation names the
+library, the shelfmark, the folio and whoever made the transcription you are actually
+reading, with the date you read it. In Hebrew or English, following the interface; the
+bar had been English-only regardless of language.
+
+Both citations come from the same code the website uses, so a citation copied in the
+desktop app and one copied on the site cannot disagree about who is owed credit.
+
+### Fixed — 165 dead entries in the Hebrew translation table (2026-09-04)
+
+The translation table declared 141 keys more than once. Python keeps the last value
+and discards the rest in silence, so for 43 of those keys the site was showing a
+Hebrew string nobody had chosen, and the entry a translator had edited was dead
+code. The shadowed entries are gone and the values that were already winning are
+unchanged, so nothing on screen moves. A new test refuses any future duplicate.
+
+### Fixed — Oxford viewer, transcription default, credits (web + desktop, 2026-09-02)
+
+Started from one report (search "תקום רבה דיניך" → MS heb. g.2/27: no image, an
+unrelated FGP transcription, no highlight). Session record: kept in the private
+repository.
+
+- **Oxford images no longer die silently.** The Bodleian's Genizah Fragments host
+  now answers every image URL with an HTTP 200 bot-challenge page instead of JPEG
+  bytes. The desktop loader rejects a non-image Content-Type and auto-falls back
+  to the NLI image list for the same folio side, with a notice and a clickable
+  link to the folio on the Bodleian site; the web page offers the same link in the
+  image header and in the "Image not available" placeholder. No challenge bypass
+  was implemented — the site licence frames use as "on or through the website".
+- **Web NLI proxy falls back to NLI's Rosetta thumbnail** when the IIIF image
+  server fails (it answered HTTP 500 for every FL id of this manuscript), matching
+  the desktop's existing fallback.
+- **Search-hit highlight survives switching versions** on desktop: the cached
+  V0.8 text kept a post-render plain-text snapshot; it now keeps the marked text.
+- **Switching image source keeps the folio side** (recto/verso mapping instead of
+  resetting to the first image when the lists differ in length).
+- **The default transcription can no longer be an unrelated excerpt.** Whole-document
+  FGP rows that share no vocabulary with the displayed folio (word-overlap floor) are
+  demoted below V0.8, and every FGP menu entry carries an incipit so ten look-alike
+  rows are tellable apart (MS heb. g.2 ships the same 10 catalogue excerpts under all
+  82 of its parts — upstream data).
+- **SEED-033 Option A.** When a reader arrives from a search, the reading view
+  defaults to whichever source (PGP, FGP, V0.8) actually contains the matched
+  phrase; PGP-first stays the rule for cold browsing. One shared policy
+  (`shared/fgp_service.py::choose_default_source`), both apps render-only.
+- **Oxford part badge** shows `[fol. 27]` for a folio inside a whole-codex part
+  instead of an empty `[part ]`.
+- **Oxford credit** now uses the licence wording, "Image provided by the Bodleian
+  Libraries, University of Oxford" (EN/HE), on every surface; the erroneous
+  "CC BY-NC 4.0" label is gone; the web footer links to the folio on the Genizah
+  Fragments site and switches to the NLI credit when the NLI image is what is shown.
+- **Dark-mode highlights are readable** on the browse page and the search page's
+  inline reader.
+- **`/api/browse` no longer 504s in bursts after a restart.** The first page
+  resolution pays an 18 s cold browse-map load; while the map is still loading the
+  core budget widens (`SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT`, default 45 s), and a
+  core timeout logs one warning line instead of a traceback.
+- **Tests:** six new files (image-source fallback, highlight persistence, part
+  label, Rosetta fallback, credit + dark highlight, browse core warm-up) plus 18 new
+  cases in `tests/test_fgp_default_coverage.py`; every fix has a test that fails
+  without it.
+
+### Fixed — crawler-triggered `/browse` outage (web, 2026-08-31)
+
+- **Anonymous browse requests no longer rewrite the shared recent-history
+  store.** The anonymous session used the process-wide local lists store, so
+  recording every viewed manuscript caused cross-user history leakage and a
+  backup plus multi-megabyte pickle rewrite on the single event-loop thread.
+  Recent manuscripts are now persisted only for signed-in users.
+- **Notes and version reads no longer block every concurrent web request.**
+  Comment, approved-correction, and pending-correction Supabase/PostgREST reads
+  now capture the current authentication context before running in an I/O
+  worker. Slow upstream responses therefore do not freeze the event loop or
+  prevent the server from accepting unrelated requests.
+- **Added regression coverage** for anonymous and authenticated browse-history
+  behavior, authentication-context propagation, and event-loop offloading for
+  notes and version data.
+- **Production mitigation:** nginx now rejects the exact anonymous crawler
+  signature that triggered the corpus-wide sweep. The independent synchronous
+  connected-fragments fetch remains tracked in `docs/OPEN_ISSUES.md` and is not
+  claimed as fixed here.
+
+### Added — Princeton Geniza Project links on three desktop surfaces (desktop, 2026-09-03)
+
+The web app offers a PGP link wherever a manuscript has one; on the desktop the
+only route was an anchor buried in the extended-info panel.
+
+- **Reading dialog and Browse toolbar** each gained a `View on PGP` button — the
+  reading dialog also on its compact bar, so compact mode does not lose the link.
+- **The green `PGP` badge in the search results table is now a real link**:
+  underlined, hand cursor on hover, the URL in its tooltip, opened by a single
+  click. Double-click still opens the result everywhere else, but is suppressed
+  on a linked badge so one gesture opens one thing.
+- **Shown only where a link actually exists.** `pgp_url` is nullable in the
+  sidecar, so "this manuscript is in PGP" is not "this manuscript has a PGP
+  URL"; the buttons stay hidden without one and such a row keeps its plain,
+  un-underlined badge.
+- **Each row links to the document it actually shows.** A manuscript can be
+  linked to several PGP documents (1,845 of 34,171 are; one to 104). A PGP-tag
+  hit links to its own tagged document; an ordinary hit resolves by the row's
+  page, through the same rule `get_document_for_fragment` uses — so a verso hit
+  on the 144 manuscripts with separate recto and verso documents no longer opens
+  the recto one. That page-selection rule now exists in exactly one place.
+
+### Fixed — desktop defects from two owner UAT rounds (desktop, 2026-09-03)
+
+- **Composition tree header lost every setting to `setHeader()`.**
+  `QTreeWidget.setHeader()` destroys the outgoing header and resets the incoming
+  one, and the tree configured its header first — so column widths, resize modes,
+  the Witnesses hidden state, the sort indicator and the `sectionClicked`
+  connection were all discarded, meaning **header-click sorting never fired at
+  all**. Its sort map also still used pre-Library column indices. Every column is
+  now user-resizable and sorting is live.
+- **Browse showed search hits as literal asterisks.** The tab had no `*…*` → bold
+  conversion anywhere, and its V0.8 snapshot was captured before marking, so a
+  version switch-back dropped the highlight.
+- **Highlights now survive every re-render**: both display helpers re-derive the
+  markers from the search pattern instead of depending on a marked copy having
+  been captured earlier, and the PGP-edition pane applies them at all for the
+  first time.
+- **"Full Recursive Search" crashed in letter-level mode** on a spin box owned by
+  the Witnesses dialog, which that path never opens.
+- **The composition tree crashed on a mid-load clear** (a deleted
+  `QTreeWidgetItem`), and — found in passing — its batched load never reached its
+  completion branch, so checkboxes stayed inert and filters were never re-applied.
+- **Search and Composition now have independent Exclude Manuscripts lists.** They
+  had silently shared one; both status labels were written with the same text and
+  each tab's "New" wiped the other's list. The composition session snapshot's
+  exclusion keys were also written but never read back. An exclusion added without
+  a source (the results-table "exclude and compose" action) no longer restores
+  with a blank label while still filtering.
+- **An editorial `*note*` is no longer rendered as a red search hit.** Highlight
+  markers are inserted only after neutralizing a page's own asterisks, and the
+  render paths convert them only inside a search — 17 of 7,112 PGP transcriptions
+  contain a literal `*`. Two residues of the in-band `*` marker contract are
+  tracked in `docs/OPEN_ISSUES.md`.
+
+Six navigation paths that would have shown a stale PGP link were found by an
+audit and fixed before release, and the PR closed six further defects across five
+Codex review rounds. Still open and tracked, not regressions from this work:
+Focus Search remains one scope shared by both tabs, Lab Mode composition ignores
+it entirely, and a stale badge worker can blank the PGP column of a tag-results
+table.
+
+## [9.1.0] - 2026-08-27
+
+### Desktop — Several Witnesses of One Work
+
+Letter-level search shipped in 9.0.0 searching one text at a time. One text is
+not enough: a work survives in many manuscripts and no single copy of it
+retrieves every other.
+
+Measured through the shipped code against the 614 Birkat Hamazon census
+manuscripts that have any indexed text — the only denominator a search can be
+held to — the best **single** witness finds **348 (56.7%)**, while the same
+seventeen searched **separately and merged** find **455 (74.1%)**. Quote the
+count and its denominator, never the bare percentage.
+
+#### New Features
+
+- **A Witnesses dialog**, opened from a button beside the letter-level
+  options, so the list stays off the main window. Add
+  other copies of the work by pasting them one at a time, or paste a whole
+  file split on blank lines with a preview of what the split found — and a
+  count of anything dropped as too short. Each witness is searched on its own
+  and the results are merged into one list. Witnesses can be removed
+  individually or all at once, and a failed one can be retried.
+- **Promote manuscripts straight from your own results.** Tick the rows you
+  want and press *Search with these too*; the text comes from the pages that
+  actually matched, not from the manuscript record.
+- **Auto-expand (optional)** — seed, then top-K, then repeat. Measured on
+  Megillat Antiochus: frontier coverage 2 → 4 → 7 → **9 of 20** over three
+  rounds, monotone, with all fifteen promoted witnesses graded positive. The
+  cost is the first page: returned rows go from 191 to 2,795 and positives in
+  the top 100 fall from 48 to 32. Reach up, precision down — which is why it
+  is an explicit control with the trade-off written beside it.
+- **A Witnesses column** saying how many distinct witnesses point at each
+  manuscript, with a tooltip naming them, plus two new orderings: by combined
+  score and by number of witnesses. The fused order becomes the default the
+  moment there is a fusion to order by.
+- **Full Recursive Search now works in letter-level mode**, where it had been
+  disabled. It runs rank-fused expansion there and keeps concatenating in
+  chunk search, because concatenation is correct for the chunk engine and
+  wrong for this one.
+
+#### Stop, and what it can honestly promise
+
+A single letter-level search still cannot be interrupted — the engine has no
+mid-search cancel hook, and 9.0.0's ruling was to ship the depth axis and
+accept the wait. A **batch** is different: it is a loop, and the boundary
+between two witnesses is a real checkpoint.
+
+- **Stop now ends a multi-witness run** at the next witness boundary. The
+  witness already running finishes first (up to ~19 s at Deepest) and
+  everything found so far is kept. Pause and Resume work at the same points.
+- **"New" never terminates a running batch.** It asks it to stop and clears
+  once it has, because killing a thread that holds live memory mappings is an
+  access violation rather than a catchable error.
+- Because Stop works, the witness limit is a **flat 25 at every depth** rather
+  than the web's 25/8/4 — the web scales by depth because a witness there
+  costs a slot of a pool shared with every other visitor, and a desktop shares
+  nothing but the user's own wall clock.
+
+#### Never concatenated
+
+Joining witnesses into one query starves the engine's per-query posting
+budget. The seventeen Birkat Hamazon witnesses joined into one 33,180-character
+query admit **2.4%** of their own postings and reach **48.2%** — *worse than
+the best single witness* — against 74.1% fused. Fusion is by **rank**
+(reciprocal rank fusion, k=60), not score: a passage score counts matched
+*query* letters, so a long witness mechanically outscores a short one for
+reasons unrelated to match quality.
+
+This is a property of letter-level search specifically. On the chunk engine
+concatenation and union were measured to return the identical manuscript set
+(392 both ways, empty difference in both directions), which is why chunk
+search's own recursive search is unchanged.
+
+#### Letter-level search is now the default, and says so only once
+
+- **Letter-level search is selected by default** once the index exists on this
+  computer -- but only for someone who has never chosen. A stored method is a
+  decision and outranks the default, `chunk` included, so the last search
+  state is never overridden. The combo still starts on chunk, because at
+  construction the index has not finished loading and "not built" is
+  indistinguishable from "not answered yet"; the default is applied at the two
+  moments the question first has a true answer -- when the index finishes
+  loading, and when a build finishes.
+- **The orange "New" markers appear once and never again.** Both the accent on
+  the method selector and a new one on the Witnesses button are one-shot: they
+  show until they have been seen once or the feature has been used, whichever
+  comes first, and are recorded in the app config rather than the session, so
+  declining session restore does not start the announcement over. An accent
+  that returns every launch stops reading as "this is new" and starts reading
+  as a control stuck in a warning state.
+
+#### Under the hood
+
+- The fusion arithmetic is the **same module the web and the public API
+  already share** (`shared/passage_fusion.py`), now with a third caller. The
+  witness-resolution rules moved to `shared/passage_witness_source.py` for the
+  same reason.
+- Each witness is searched **uncapped** and the 200-group cap is applied once
+  to the fused list, ordered by fusion score. Capping per witness first would
+  fuse already-truncated lists and drop exactly the contributors a rare
+  witness supplies.
+- The index generation is pinned for the duration of a batch: if a rebuild
+  installs a new index mid-run, the batch is abandoned rather than published,
+  because ranks from two different artifacts were never comparable.
+- Witness lists survive a restart and are recorded in search history, so
+  re-running a saved multi-witness search re-runs the witnesses rather than
+  the seed alone. Exports name the witness count and carry a per-manuscript
+  column.
+
+#### The manuscript viewer
+
+- **Letter-level matches are now highlighted there.** They were not, and the
+  reason is worth recording: the viewer does not render the excerpt a result
+  carries — it fetches the whole page and re-marks it from a regular
+  expression — and a letter-level result had no expression to re-mark it
+  with, so a match opened as an unmarked wall of text. Every accepted span
+  now travels with the literal text it matched, on both sides. The
+  composition pane is marked with the **query** side rather than the
+  manuscript's, because approximate matching means the two sides matched
+  different text and one pattern cannot mark both. Where even the query-side
+  pattern finds nothing — a promoted manuscript, or another witness that was
+  never the text in the box — the pane falls back to the excerpt that does
+  show what matched.
+- **Prev / Next Manuscript.** A composition result list is pages, so several
+  results in a row can belong to one fragment and *Next Result* walks through
+  a manuscript already read before reaching the next one. The new buttons go
+  to the nearest result, that way, that belongs to a **different**
+  manuscript — exactly where pressing Prev/Next Result repeatedly would land,
+  minus the pages in between. They appear only when the list actually has
+  that shape; where every result is its own manuscript they would merely
+  repeat the two buttons beside them.
+
+## [8.6.0] - 2026-08-20 — Pause/Resume, and Stop that actually stops (desktop)
+
+> **Desktop release.** It continues the desktop line from v8.5.2. When it shipped, 9.0.0 below
+> it was a web-only release with no desktop build — which is why this section sits above it by
+> date and below it by number. 9.0.0 has since shipped a desktop build as well (2026-08-26), so
+> the desktop line now runs v8.5.2 → v8.6.0 → v9.0.0.
+
+### New Features
+
+- **Pause and Resume for long searches** — regular, Lab Mode and Composition. A pause takes
+  effect at the next checkpoint, keeps everything found so far, and Resume continues from exactly
+  that point; nothing is re-scanned. Paused time is excluded from the elapsed clock and from the
+  composition ETA, and a paused search releases the keep-awake block so the machine can sleep.
+  A paused search lives in memory only — closing the program ends it.
+
+### Bug Fixes
+
+- **Stop never worked in Lab Mode**, from three independent causes: the Lab worker had no cancel
+  flag, a bare `except Exception` swallowed the cancellation, and a non-deep Lab search had no
+  checkpoint at all. A cancel could also surface as an error dialog instead of stopping.
+- **Stopping a search discarded its results** in Title, Shelfmark and My Library searches — every
+  row was thrown away while the results header said "Partial results".
+- **My Library searches ignored Stop entirely**; the local scan loop had no checkpoint.
+- **The progress bar rewound to zero** when the My Library pass began. It now names the stage and
+  goes indeterminate.
+- **Elapsed time was read from the wall clock**, so an NTP or DST step could add minutes to the
+  displayed time and to the composition ETA. It is now monotonic.
+- **Escape and window-close during a composition scan** called an interruption request the
+  composition threads never polled — a no-op since it was written.
+- **Starting a search while one was paused could crash** with "QThread: Destroyed while thread is
+  still running"; it now declines and says so.
+- **Performance timings recorded cancelled runs as completed.**
+- **The search toolbar drew on top of itself** on smaller screens — the second row needed 1423 px
+  on a 1440 px display. Gap moved up beside the search box, three redundant labels were dropped,
+  and Search/Stop and Pause now share one fixed-width slot so no button moves when a search starts.
+
+### Web (incidental)
+
+- Stop during a Lab Mode search on genizahsearch.com discarded every hit and logged it as a search
+  error. Fixed by the same shared-engine change; no web deploy is part of this release.
+
+---
+
+## [9.0.0] - 2026-08-16 (web) · 2026-08-26 (desktop) — Computed Identifications & the Visual Atlas (web); Letter-Level Search (desktop)
+
+> **At a glance.** 55,250 computed identifications across 596 works on 39,341 manuscripts (of
+> ~255,000 records in total — this is the portion the matching has reached, not the collection);
+> 48,270 of those identifications can show the matched passage on both sides. The atlas draws
+> 62,645 manuscripts and 437,373 textual connections in 12,922 clusters, from one precomputed
+> 2.2 MB asset. Atlas figures are read from the baked asset whose content hash matches the one
+> production serves; identification figures are read from the deployed V4 build.
+
+> **Two releases under one number.** The web half shipped 2026-08-16 and deliberately created
+> no GitHub Release object — the desktop polls `/releases/latest`, and a release with no
+> installer would have prompted every desktop user to update to a page they cannot install
+> from. The desktop half shipped 2026-08-26, carries an installer, and does create one. The
+> desktop changes are in their own section at the end of this entry.
+>
+> **"Public beta" is meant literally.** The surfaces below are live to every visitor and are still
+> being refined.
+
+### LIVE (beta) — discovery read surfaces (web)
+
+- **`DISCOVERY_ENABLED` was turned ON in production on 2026-08-08, and both surfaces are now
+  publicly visible.** This heading and the paragraph below previously read "Built and deployed,
+  NOT public … the flag is unset, so they hide completely"; that was accurate until the flip and is
+  corrected here rather than left to read as current state. The gate itself is unchanged and still
+  fail-closed: the flag is necessary but not sufficient
+  (`web/discovery_assets.py::discovery_available()` also requires a startup-validated,
+  content-hash-matched sidecar of the right audience), the nav entry is gated on the same predicate,
+  and `/computed-identifications` returns 404 whenever either half is missing.
+
+- **Every link from a discovery surface opens the folio the match is on, not the manuscript's first
+  page** (2026-08-08/09). Four link sites were affected and all four now build their target through
+  one shared builder (`web/components/discovery_links.py`): the findings row's shelfmark and its
+  preview, and the connections panel's "other manuscripts carrying this work" and "show more
+  possible matches" rows. 46% of identifications match on more than one folio and most do not match
+  on folio 1, so a reader landed on an unrelated opening and could only conclude that the
+  identification was wrong. No re-bake was needed — every contributing page id was already in the
+  served artifact on `discovery_evidence.a_page_id`, aggregated away only at the identification
+  grain, so the folio is resolved at read time. The folio and its volume are added **together or not
+  at all**: folio numbering is per volume, so a folio number alone addresses a different page in each
+  volume of a multi-volume manuscript (988 identifications span volumes), and the panel's
+  candidate-alignment rows had been emitting exactly that half-address. Where a folio cannot be fully
+  resolved the link degrades to the manuscript and the row's own note says so, so no sentence
+  promises more than its link delivers.
+  - A **connections panel** on the browse page, opened by a "Computed identifications / זיהויים
+    מחושבים" control, listing a manuscript's computed same-work matches in two buckets — a main pool
+    and a "more matches" bucket — with the relation stated on each row, matched-letter coverage
+    labelled as such, and match framing throughout. No precision percentage, no confidence scale and
+    no human-review badge appear anywhere.
+  - A corpus-wide **findings page** at `/computed-identifications` with its own nav entry: three
+    selectable row units, a domain/author/work facet cascade computed on the *identified work* rather
+    than the manuscript's catalogue domain, a candidacy filter, server-side pagination, and a
+    permanently visible caveat. Bilingual EN/HE with RTL.
+  - The **methods page** (`/help`) was rewritten qualitatively: the tiers are explained in words
+    together with the non-percentage facts about how they were graded. Every precision percentage,
+    confidence interval, weighted estimate and strata table was removed, in both languages.
+  - Reader-facing honesty is enforced by a shared six-detector gate rather than by review, and a
+    cross-surface content-safety sweep scans rendered output, JSON payloads, copy paths and error paths for
+    sensitive strings, with a positive control per class and a fail-closed pattern set.
+  - The public artifact is a projected, audience-gated sidecar; a public loader can only ever resolve
+    a public artifact, and a private, partial, corrupt or absent one fails closed identically.
+
+### Post-launch discovery refinements (web, 2026-08-11 through 2026-08-14)
+
+- **Catalogue-divergent identifications are no longer hidden behind a toggle, and the browse panel
+  collapsed from four disclosure levels to two** (2026-08-13, `01b313e6`). The old posture hid any
+  identification that does not correspond to the catalogue behind a bottom "show more" toggle — and
+  it failed live on launch day: a main-pool, two-folio, full-coverage identification on one
+  manuscript was invisible in the panel while the manuscript pane advertised the same work ungated
+  on the same screen. Measured scope: **3,570 main-pool identifications, 12.5% of the main pool**,
+  sat behind that toggle — and they are precisely the ones a cataloguer would most want to look at.
+  A catalogue-divergent claim now routes through the same eligibility tests as every other claim and
+  carries a neutral per-row chip instead ("Does not correspond to the catalogue — not adjudicated",
+  the same wording the findings page already shipped). The system still takes no side: which reading
+  is correct stays a human annotation and is never asserted by the software. Separately, the
+  manuscript pane's "Elsewhere in this manuscript" heading became **"In this manuscript"** — the
+  pane lists every work in the manuscript including the open folio, so the old header asserted
+  something false whenever a work covered the page the reader was already on; work chips now carry
+  an "includes this page / כולל דף זה" marker instead. Five stacked regions were three too many on
+  a surface where roughly two-thirds of readers are on a phone.
+
+- **The relation a reader sees on a computed identification is now driven by one frozen precedence
+  matrix instead of scattered per-surface logic** (2026-08-12/13,
+  `76a4844d`/`a59ce38f`/`17b2acdd`/`8c0bc49a`/`bff6a8a7`/`a419f76f`/`3c220e52`/`debaa4cf`,
+  extended `a7d47698`/`b2d5bb04`). The rendered states — "Matches this work" / "Shares text with
+  this work" / "Includes a quotation" / "Needs review" — replace an earlier "Direct match" /
+  "Partial match" pair, the second of which had drifted into a genuine misnomer;
+  `shared/discovery_relation_matrix.py`'s single six-rule precedence table is now the only place any
+  of the four surfaces that render a relation (the findings-page chip, the connections-panel claim
+  rows, the manuscript pane, and the "show more possible matches" expansion pane) may read one from,
+  closing off four call sites that had independently drifted — the expansion pane, for one, had been
+  labelling 35,754 router-declined rows as if they were direct matches. The matrix's input
+  population is measured and frozen (`scripts/emit_population_lock.py`) so a later data change
+  cannot silently reweight it. This is a wording/consistency correction, not a new claim: no
+  precision percentage, confidence interval or human-review badge was added anywhere in the process.
+  Tests: `tests/test_discovery_relation_matrix.py` (49),
+  and a wiring test kept in the private repository.
+  - Merged and unconditional, behind the same discovery flag that has been on in production since
+    2026-08-08 — the wording is live for any reader who opens a computed identification. Whether the
+    specific sidecar rebuild carrying the frozen population lock has itself reached the production
+    server in this window could not be confirmed from git (sidecar swaps are a manual, gitignored
+    deploy step); the code path is ready either way.
+
+- **`/help`'s qualitative methods section came back after a merge had silently deleted it**
+  (2026-08-13, `44855a13`, `72a529a7`). An earlier merge had dropped both language call sites of the
+  confidence-bands write-up, including the disclosure that a low single-digit *share* — not a
+  percentage — of computed identifications is misattributed. Restored, shortened, and extended with
+  a new subsection specifically about the `/computed-identifications` **page** (the restored text
+  previously covered only the browse-page panel's disclosure). Gated on the same
+  `discovery_available()` predicate as before; static copy, no data dependency, so this is live now
+  with no further deploy needed.
+
+- **The corpus-wide findings page gained a "Part of work" (חלק מן החיבור) range filter** (2026-08-14,
+  `d4d9818d`, merge `f5bb5341`), letting a reader who has picked a specific work narrow results to a
+  From/To span inside it — a Bavli daf range, a Yerushalmi halakha range, a Targum chapter range, or
+  a Judeo-Arabic work's own internal hierarchy — instead of seeing every identification against that
+  work at once. The address computation behind it — book/chapter/daf/halakha/page addressing per
+  work, taken from the edition rather than inferred — is a four-day offline builder
+  (`shared/discovery_locus.py`, ~30 commits on 2026-08-10) that reached no reader-facing surface
+  until this filter shipped four days later. The filter control itself is unconditional code, live
+  under the same discovery gate; whether a given work's identifications actually carry locus data in
+  the production sidecar is a data-completeness question rather than a code gate — a 2026-08-12
+  `docs/OPEN_ISSUES.md` entry recorded that no production consumer existed for the locus table as of
+  that date, and no later commit in this window confirms the follow-up rebuild reached the server. A
+  work with no locus data yet reads as having no addressable units, rather than failing.
+
+- **The "Part of work" picker stopped showing a page number where a structural label was wanted**
+  (2026-08-15, `7f249d15`, merged via PR #320). A Judeo-Arabic unit's full label carries its page
+  (for example `פרק יז, עמ' 219`), which is right beside a finding but noise inside a From/To
+  control, where it made the structural label hard to scan. The range picker now shows the
+  structural part alone; the citation shown beside the finding itself is unchanged. Fails soft — an
+  empty structural label keeps its page, since a blank option would be worse than a noisy one.
+
+### The evidence/excerpt view — "View text match" (web, 2026-08-13)
+
+- **Every computed identification now has a "View text match" disclosure** (`74702fa8` and
+  follow-ups `8f6df14d`, `aeec21a1`, `c83c59b6`, `16279c4d`), on both the `/computed-identifications`
+  findings page and the browse-page connections panel. Opening it shows the manuscript's own passage
+  beside the identified work's edition passage with the words the router actually matched
+  highlighted on both sides — a concrete answer to "what did it actually match on", not only a
+  relation label. The text is baked in advance, not read live, by a build script kept in the
+  private repository, which freezes short plain-text spans (before/span/after, on both
+  the fragment side and the work side) per identification into a new `discovery_excerpt` sidecar
+  table. For identifications matched against a reference edition whose text is not shipped, the
+  bake re-projects the passage onto the corresponding public-domain Bible text instead, for the
+  large majority of that population, so the matched passage can still be shown; the aligned span
+  is used only as an in-memory key and never reaches the rendered page. A follow-up fix
+  (`aeec21a1`) was needed because NiceGUI 3.x's client-side sanitizer was stripping the highlight
+  markup on arrival.
+  - Same caveat as the refinements above: merged and reading from the already-live discovery
+    surfaces; the shipping commit's own language ("shipped same day for the beta launch") indicates
+    the underlying sidecar table deployed same-day, but no separate ops/deploy commit in this window
+    confirms that independently.
+
+### The guided Start Here experience and homepage (web, 2026-08-12/13)
+
+- **A new `/start` page** (`c413d5e9`, refined through several follow-up commits) gives a first-time
+  visitor a guided way in: curated manuscripts, a handful of prepared searches, catalogue works,
+  worked examples of computed identifications, gated entry points into the research tools, and
+  collapsible background on the Genizah itself. Bilingual, registered with no feature flag — live now.
+- **The homepage gained direct entry points into the discovery surfaces** (`fcb1eb8e`): a "Computed
+  Identifications" chip, live since the discovery flag is on in production, and a "The Visual Genizah
+  Atlas" chip. Both are gated on their respective availability predicates
+  (`discovery_available()` / `atlas_preview_available()`), and both flags are set in production —
+  `ATLAS_PREVIEW_ENABLED=1` since 2026-07-21, independently re-confirmed live on 2026-07-29.
+- The homepage hero's mobile layout bug (`7ed9ac15`) is covered under Mobile/layout below.
+
+### Community identification reviews (beta, web, 2026-08-13)
+
+- **Readers can submit a verdict on any computed identification** (`7268a7eb`, moderation refined
+  same day in `b7618f5a`): matches this work / includes a quotation / shares a source / the work
+  quotes the manuscript / not meaningful / other-unsure, plus (for direct-witness rows) a novelty
+  verdict. Submitted reviews are held pending; approved ones surface back on the findings page and
+  the browse-panel connections view. All writes go through Supabase RPCs
+  (`submit_identification_review_beta`, `moderate_identification_review_beta_v2`,
+  `get_published_identification_reviews_beta[_batch]`) that carry their own validation, a per-target
+  cooldown and an hourly write cap — the Python layer never writes the table directly, and the
+  migration includes the explicit `GRANT`s the Data API needs. An anonymous visitor can take part
+  too: identity is a one-way, domain-separated SHA-256 hash of the session id, so no session
+  identifier ever leaves the process; a signed-in reader's review keys off their account instead.
+  Moderation (approve/reject/edit before publishing) is restricted to admin accounts.
+  - **New flag, default ON:** `IDENTIFICATION_REVIEWS_ENABLED`.
+  - This is a beta; nothing about it changes a band, a percentage, or a certified identification
+    anywhere else on the site, and no promise is made here about how votes will ultimately be
+    counted or displayed in aggregate.
+  - **Known gaps against the eventual full design**, recorded so the beta is not mistaken for the
+    finished feature: a changed vote overwrites the previous one rather than appending a superseding
+    event, so vote history is not retained; reviews render one row per approved review rather than
+    as an aggregate; and moderation mutates status columns on the same row rather than writing
+    separate append-only moderation events.
+  - Live now — code is unconditional other than the default-true flag. Whether the Supabase
+    migration itself (`scripts/create_identification_reviews_beta.sql`) has been run against the
+    production project could not be confirmed from git; the feature falls back to the existing
+    email-contact channel if it has not, so there is no user-visible failure mode either way.
+
+### Fixed — search & browse folio-link correctness (web, 2026-08-13)
+
+- **A search hit's Browse button could land on a different folio than the one that actually
+  matched** (`48506010`). The deep link was built from `raw_header` alone and silently fell back to
+  a bare `?sys_id=` (folio 1) on any parse failure — landing a reader on the wrong page of a
+  multi-volume manuscript. It now falls back to the self-encoding `uid` (which carries
+  `ie_id`/`p_num`/`fl_id` on its own), and `&page=`/`&volume_ie=` are now carried on all four Browse
+  link sites. The same commit fixed an independent duplicate-result bug in `_deduplicate` (a stale
+  V0.7-vs-V0.7 comparison could keep two copies of the same hit).
+- This closes out, for ordinary search results, the same folio-link defect the 2026-08-08/09 fix
+  above (under "LIVE (beta)") had only fixed for the discovery surfaces — both now route through the
+  same shared `web/components/discovery_links.py` builder and its AST guard.
+
+### Fixed — citation footer, mobile navigation, and homepage layout (web)
+
+- **The citation footer no longer flashes on every load for a reader who dismissed it once**
+  (2026-08-05, `098c0b03`). It used to render expanded, then a post-hydration script read
+  `localStorage` and hid it — so a returning reader watched it paint and vanish on every page. A
+  blocking `<head>` script now applies the right display class before first paint. Dismissing it
+  also no longer **deletes** it (which used to remove the only copy-citation button along with it):
+  it now collapses to a compact one-line form that keeps its own copy button, and that line's own
+  dismissal is session-only, so the reminder returns on the reader's next visit.
+- **The mobile nav drawer no longer covers the page on load** (2026-08-04, `2065290c`). It used to
+  mount open and close itself roughly half a second later via a client round-trip that could fail
+  silently — CI measured the backdrop still intercepting taps five seconds after load, ten times the
+  intended wait. It now mounts closed and lets Quasar's own `show-if-above` decide desktop-vs-mobile
+  at first paint, with no round-trip, while still respecting an explicit prior desktop
+  close-preference.
+- **The homepage hero collapsed to one word per line on phones, beside a large empty gap**
+  (2026-08-13, `7ed9ac15`). The text column had `flex-1 min-w-0`, which let the row shrink it to
+  nothing while the stats column kept its full width; it now has a real minimum width
+  (`flex: 1 1 20rem; min-width: min(100%, 20rem)`).
+
+### Performance (web)
+
+- **Search load is now bounded, and static assets no longer force a session cookie on every
+  response** (2026-08-13, `ab064ff9`). UI search is capped at 3 concurrent core searches and 2
+  concurrent enrichment batches process-wide — a non-blocking cap that degrades rather than queues,
+  so a burst fails fast instead of piling up threadpool workers. Favicon, `/static/*`, versioned
+  bundle assets, and the content-hashed Atlas binary now bypass the session-cookie middleware
+  entirely, so they can actually be cached by a CDN or a browser; ordinary page HTML, the APIs, and
+  auth keep normal session behavior unchanged. This is a **partial** fix for the
+  `Set-Cookie`-on-every-response Cloudflare BYPASS problem (see "Still open" in the v8.5.2 section
+  below) — it removes the cookie cost specifically for cacheable static assets, not for ordinary
+  page requests, so the broader issue is unchanged. Web is not continuous-deploy, and no commit in
+  this window explicitly confirms this change reached production.
+- **The slow-request log stopped over-attributing every slow request to the event loop**
+  (2026-08-04, `ce4f8d99`). Its canned "the event loop was blocked" explanation used to fire
+  unconditionally; it now only blames the loop when the measured loop-lag is actually comparable to
+  the request's own duration, and otherwise points at upstream I/O. The same pass documented,
+  without yet fixing, a sixth unbatched synchronous Supabase call inside browse rendering
+  (`fetch_connected_fragments`, `browse.py`) that the v8.5.2 event-loop sweep had missed — left open
+  deliberately, since a blind off-loop wrap would silently anonymize a user-scoped read.
+
+### Internal — test-suite and CI guard fixes (tests, scripts)
+
+- **A UTF-8 BOM silently disabled five guard tests, including two that guard the authentication
+  boundary** (2026-08-13, `d4ce07fa`). A commit the previous evening (`78347009`) had saved
+  `tests/test_discovery_suppression.py` with a leading BOM; Python imports the file fine, but the
+  repo-wide `ast.parse()` guard tests all failed outright on it — silently taking down the guards
+  against anonymous reads on authenticated Supabase tables and against `set_session` calls outside
+  the OAuth path, along with three other list/state guards. Nobody noticed because the full test
+  suite already segfaults partway through on an unrelated PyQt6 marker gap, so the run never reaches
+  its own summary and reports exit 0 regardless. Fixed by stripping the three BOM bytes.
+- **Two CI-only NiceGUI test-harness bugs fixed** (2026-08-04, `bda0a203`, `886353a3`): a stale
+  closed event loop left on NiceGUI's module-level `core.loop` was corrupting later tests in the
+  same run, a DOM-ancestor walk in a render-smoke test didn't stop at a dead slot, and the
+  discovery module needed reloading in place rather than re-imported.
+- **The Atlas content-safety CI tool was passing while doing almost none of its job**
+  (2026-08-04, `d11cc054`). The browser-driven script that scans rendered Atlas pages for
+  sensitive strings was waiting on the wrong selector, treated every failed interaction as a
+  non-fatal warning rather than a failure, and never actually exercised the Hebrew interface (it
+  toggled into Hebrew, then dumped the same Hebrew DOM twice while reporting "EN + HE" coverage) —
+  so its first run against live production passed without meaningfully testing either language.
+
+### Data & ops
+
+- **Discovery artifact lineage.** The public artifact behind `/computed-identifications` and the
+  browse-page connections panel today is an **additive** rebuild of the discovery-v2 dataset
+  (deployed to production before 2026-08-05; `DISCOVERY_ENABLED` flipped on 2026-08-08). Everything
+  built after that — the relation-matrix population and locus tables (2026-08-11/12), and a further,
+  from-scratch "discovery-v3" evidence-pipeline rebuild (code-approved 2026-08-07, assembled through
+  2026-08-09) — is validated locally but **not deployed as a new artifact** as of this writing;
+  discovery-v3 in particular is explicitly not deployed per its own bake-plan record, with owner
+  decisions still open before a release-quality run.
+- **A "V4" public-reference expansion pipeline was built** (2026-08-15, PR #320, merge `51ff2bd2`;
+  spec `docs/specs/discovery-v4-public-reference-expansion.md`). It acquires public Sefaria and
+  Hebrew Wikisource editions for work identities that had already passed owner review, so that more
+  matched passages can be shown from a publicly reusable edition rather than withheld. It
+  deliberately does **not** infer new work identity from title similarity: every acquired source is
+  mapped explicitly to one existing work id in a reviewed, tracked source map. A 2026-08-14 audit
+  selected 45 identities across 43 containers; 41 were acquired, yielding 43 reference streams, and
+  two too-short sources were quarantined. The reference corpus is an append-only extension of its
+  predecessor — the earlier prefix must compare equal after unpickling — every consuming command
+  verifies a full SHA-256 before reading its input, and the verifier additionally proves each
+  readable public text reproduces its matcher stream exactly. Generated text, audit snapshots and
+  match databases stay in the ignored data depot; only the deterministic transformations and the
+  reviewed source map are tracked. Yalkut Shimoni's two identities are dropped from the public
+  projection by a 2026-08-14 owner ruling — they stay in the private bake as routing competitors,
+  but their claims and evidence are removed before works, identifications, loci, excerpts, counts
+  and graph closure are recomputed. **Built, and deployed to production**: the expanded reference
+  set is live, so passages that previously could not be shown from a reusable edition now can be.
+- **The V4 deploy is now recorded; for a day it was not** (2026-08-16). Like the 2026-08-08 flag
+  flip, the promotion was a manual operational step, so nothing in the tree named the artifact
+  production had been serving since 2026-08-15 — `discovery_data/manifest.deploy.json` and
+  `discovery_data/live/` both still named the beta-launch build, and so did the render sweep's
+  scan record, which meant the one un-waived REL-01 obligation was pointed at a superseded file.
+  All three were repointed at `discovery-v1-528f6d36…` after it was verified rather than assumed:
+  its SHA-256 matches both its filename and its manifest, `audience=public`, `frame_content_hash`
+  agrees, `PRAGMA integrity_check` returns `ok`, and the shipped fail-closed loader
+  (`web/discovery_assets.py`) loads it to `ready=True` under its full validation matrix. The
+  four-mode content-safety scan was re-run over it — clean, 52 s — and shown non-vacuous by planting three
+  values read out of that artifact, one of them from `discovery_identification`, a table the
+  2026-08-05 scan record never reached. The repo manifest `discovery_data/manifest.json` was
+  deliberately **not** repointed: a test kept in the private repository resolves the frozen
+  CERT-01 artifact through it, so moving it would silently redirect an unrelated gate.
+- **Staging the real artifact locally exposed a test that had been wrong since Phase 136.**
+  `tests/render_smoke/test_atlas_four_surface.py` identified the atlas nav item by the
+  `nav-item-badge` class, on the written premise that the atlas was the only badged nav item. Phase
+  136 added a second one — the badged "Computed Identifications" entry — so in the two
+  atlas-unavailable states the check reported the atlas nav item as present when it was not there.
+  It kept passing on a dev box only because the artifact staged in `discovery_data/live` predated
+  the `rendered_relation` column, the loader refused it, and the second badged item never rendered;
+  staging a current artifact turned it red. The helper now identifies the atlas by its own nav row.
+- **The beta-launch artifact is no longer a usable rollback target**, which nothing recorded.
+  `web/discovery_assets.py::_REQUIRED_COLUMNS` has required
+  `discovery_identification.rendered_relation` since the 2026-08-12 C-track batch, and
+  `e9365edc…` (2026-08-03) predates it — staged alone, the loader logs the missing column and
+  clean-hides every discovery surface. Deploying it as a rollback would have been an outage.
+  The rollback target is `ef3a79fd…` (2026-08-14, in the build depot): same 596 works / 55,250
+  identifications, differing only in the Judeo-Arabic range-picker label. It follows that
+  production served some intermediate artifact between the C-track deploy and V4 that no copy on
+  this box corresponds to; that gap is recorded, unresolved, in the V4 spec.
+- **A genre-vocabulary coverage test was too broad, and the V4 artifact was the first to prove it.**
+  V4 is the first shipped build whose `works.genre` carries the `Unassigned` sentinel, and the
+  live-FJMS coverage check reported it as an English string with no Hebrew name — which on a
+  Hebrew-default site would be a real defect. It is not one: `genre_display_label` routes the
+  sentinel through its own `tr("Unclassified")` branch before the vocabulary is consulted, and
+  renders `לא מסווג`. The check now exempts the sentinel and, rather than trusting the exemption,
+  asserts that the dedicated branch really does return Hebrew — deleting that branch fails the test.
+- **Local `master-main` and `origin/master-main` had diverged 6/6** and were reconciled on
+  2026-08-16 (merge `629f4bb6`). The V4 work above was merged upstream through PR #320 while the
+  corpus-repair commits landed only locally, so for a day neither branch was a complete picture and
+  a reachability check against the local branch alone reported the V4 commits as unmerged. They
+  were not.
+- **The 2026-08-08 flag flip itself was an unrecorded operational action** — an env-var edit
+  directly on the production box, not a commit or a scripted deploy step. It was confirmed after the
+  fact, not simply remembered: commit `04434714` checked that `/computed-identifications` actually
+  returned 200 in production before correcting CHANGELOG.md and `docs/OPEN_ISSUES.md`, which had
+  both still said the flag was unset.
+- **A cross-manuscript text-misattribution bug is repaired in the corpus file but not yet visible in
+  search.** A corpus-wide scan (2026-08-14, `c61fed65`) found the shape at scale: a multi-item
+  system-number record's ingest had, in a handful of cases, appended the next item's folio text onto
+  the previous record's, so a search hit could resolve to entirely the wrong manuscript. An
+  8-record, SHA-256-guarded repair manifest was built and applied (2026-08-15, `318cf117`; 3 records
+  re-filed under their own identifiers, 4 stripped, 1 de-duplicated) — including the case reported
+  as SEED-033, where a phrase search resolved to Heidelberg Hebr. **18** when the matching folio
+  actually belongs to Heidelberg Hebr. **19**. **The repair is live on genizahsearch.com as of
+  2026-08-16** (`7fda9107`): that phrase now returns exactly one hit and it is Heidelberg Hebr. 19,
+  and its browse page renders — the harm was the entity link, not the recall. The manifest was
+  applied on the server against production's own corpus rather than by uploading the local result
+  (all 8 entries matched by SHA-256, 0 skewed), and the file it produced is byte-identical to the
+  local repair, so the two derivations agree without either trusting the other; the original is
+  retained and archived. The index rebuild took 869s and moved the corpus from 1,161,479 to
+  1,161,484 documents. A first attempt had been rolled back after the site degraded to 30-second
+  page loads — diagnosed not as the file swap but as page-cache eviction, with `materialize_ms`
+  going from 1.2s to 62.6s while Tantivy itself stayed healthy — so the rebuild was re-run from a
+  guarded, non-service-restarting script (`scripts/rebuild_index.sh`) in the site's measured
+  quietest hour. Three further identified pairs are **deliberately left unrepaired**: each scores
+  well below the three accepted, and two would require inventing a manuscript that `libraries.csv`
+  has no row for — creating an entity on thin evidence is the same failure the repair exists to
+  undo. The upstream ingest bug is **not** fixed and sits with the MiDRASH team, which is why every
+  manifest entry is hash-guarded and skips rather than blind-patches: a future corpus drop can
+  reproduce the shape at different records.
+
+### New Features
+- **Connections Atlas (beta, web).** A new claim-free preview page at `/atlas` that renders
+  an interactive, algorithmically laid-out overview map of the textual connections across the
+  connected Cairo Genizah corpus (zoom/pan, title/shelfmark search, a domain↔library color
+  toggle, a click-to-focus constellation, and click-through to the manuscript in Browse). A
+  standing honesty banner makes clear that positions and clusters are algorithmically derived
+  from textual similarity — **not** physical provenance — and the page carries no
+  identification claims. The map is drawn client-side from a single offline-baked,
+  content-hashed binary asset (Brotli-negotiated, served with an immutable cache behind a
+  revalidated manifest pointer). The beta is behind the `ATLAS_PREVIEW_ENABLED` flag
+  (default **OFF**) and is `noindex`; when enabled it also surfaces a nav link and a homepage
+  teaser, all gated on the same availability predicate so a not-yet-ready beta hides cleanly
+  everywhere. Bilingual EN/HE.
+
+### Post-launch refinements (2026-07-21) — enabled in production
+- **Enabled on genizahsearch.com** (`ATLAS_PREVIEW_ENABLED=1`) with the baked asset served
+  from the gitignored `atlas_data/`.
+- **Renamed** to **The Visual Genizah Atlas** (nav: *The Genizah Atlas*; HE אטלס הגניזה החזותי /
+  אטלס הגניזה); retired the "Connections Atlas" name in user-facing strings.
+- **Search scopes the domain labels** — while a search is active only labels matching the query
+  stay up. **Full-screen** control. **Hide/Show domain labels** toggle. **Declutter** — labels
+  are placed biggest-cluster-first and colliding ones are skipped (more reveal on zoom-in).
+  **Readable labels** on a dark backing plate (legible over the bright cluster cores).
+- **In-atlas browse pane** — clicking a manuscript opens it in a drawer via an `?embed=1`
+  bare-viewer iframe (Close / Open-full-browse), instead of leaving the atlas.
+- **Mobile** — one-finger pan + two-finger pinch-zoom (revised 2026-07-29, see below); the
+  browse drawer goes full-width on narrow screens.
+- **Elaborated bilingual intro** describing the map and how to read it; a prominent, claim-free
+  homepage launch announcement (alongside the existing subtle teaser).
+
+### Fixed — mobile scroll trap (2026-07-29)
+- **The atlas no longer traps the page scroll on phones.** Following complaints from mobile
+  users: the reserved canvas was a flat `720px` on every viewport, which on a phone is taller
+  than the visible area — and because the renderer sets `touch-action: none` on the canvas to
+  own pan/pinch, every vertical swipe panned the map instead of scrolling the page, so readers
+  could not scroll past the atlas at all. This mattered far more than the desktop-first design
+  assumed: **mobile is 68% of `/atlas` pageviews (1,587 of 2,364) and 972 of 1,447 people**,
+  driven by the homepage/Facebook announcement, and only 6% of mobile loads ever entered
+  full-screen where that gesture model would have been appropriate.
+  - **Touch-primary devices** cap the reserved box at `min(720px, 60vh)`, so there is always
+    page above and below the map to grab. The cap is a stylesheet rule gated on
+    `(hover: none) and (pointer: coarse)` — **mouse/trackpad layouts are untouched at any
+    size**, and the inline reservation stays a flat 720px, so the CLS reservation still holds.
+    (Gating on viewport *height* instead would have shrunk nearly every desktop — `60vh` is
+    below 720px for any viewport under 1200px tall, i.e. 648px at 1920×1080 and 461px on a
+    1366×768 laptop. Gating on *width* would have missed landscape phones and tablets, the
+    worst geometry of all. Plain `vh`, not `dvh`: `dvh` is unparseable on iOS < 15.4, which
+    drops the declaration and collapses the box.)
+  - On any device **with a touchscreen**, outside full-screen, vertical panning is handed back
+    to the browser with `touch-action: pan-y`: a one-finger swipe scrolls the page as expected,
+    while horizontal drags still pan the map and two-finger pinch still zooms it. Full-screen —
+    reached from the toolbar — restores full gesture ownership, which is the right model once
+    there is no page to scroll. Re-derived on full-screen change and on resize.
+  - The gesture gate uses `(any-pointer: coarse)` — **wider** than the height cap's
+    touch-primary query, deliberately. `touch-action` constrains touch/pen input only and never
+    affects mouse-driven pointer events, so the wide gate costs a touchscreen laptop's mouse
+    users nothing while covering **hybrids** (touchscreen laptops, Surface, iPad with a
+    trackpad) whose *primary* pointer is fine and which the narrower query would strand in the
+    trap. Height cannot use the wide gate — it is global to the layout, so it would shrink the
+    canvas for those same mouse users. The two conditions are nested (touch-primary implies
+    any-coarse-pointer), so every device that gets the shorter canvas also gets page-scroll.
+  - A **canceled pointer is no longer treated as a tap.** Under `pan-y` the browser claims a
+    one-finger swipe and fires `pointercancel`, usually before the finger has travelled the
+    2px that marks a drag — which would otherwise have focused a cluster under the reader's
+    finger on every page scroll.
+  - **Intro copy revised:** it previously recommended viewing the atlas on a computer, which
+    addressed the majority of its readers as second-class; it now points them at the
+    Full screen control (EN + HE).
+  - Tests: `tests/test_atlas_mobile_gestures.py` (15 guards, including a regression guard
+    against each of the three wrong gates code review rejected — a viewport-relative inline
+    height, the `state.narrow` width proxy, and the primary-pointer-only query for the gesture
+    — plus one pinning the nesting of the two remaining queries so a future "unify these"
+    refactor cannot collapse them in either direction). The two existing CLS guards keep
+    asserting the flat pixel reservation, which the final design leaves in place.
+
+### Web — Letter-Level Parallels Search (Phases 141–145)
+
+The method the desktop section describes arrived here first, over four pull requests. It is the
+same engine, reached from `/parallels` and from the public API.
+
+**Live on genizahsearch.com as of this release**, with `PASSAGE_PARALLELS_ENABLED` and
+`PASSAGE_MULTI_WITNESS_ENABLED` both switched on. Each flag stays necessary but not sufficient:
+`web/passage_assets.py::passage_available()` also requires the index to have opened cleanly at
+startup, so a flag-on/index-missing window hides the surface completely rather than half of it.
+The index is built on the server from the same corpus the site already serves — it is not shipped
+in the repository, and `scripts/build_passage_index.py` is how it gets made.
+
+#### The method, on the site and in the API
+
+- **A method selector on `/parallels`** — *Letter-level search* or *Chunk search*. Unlike the
+  desktop, the web **selects letter-level by default when its index is available**. The display
+  name is owner naming from 2026-08-23; `method='passage'` is the stable wire value, and API
+  clients should never parse the display name.
+- **`method='chunk'|'passage'` on `POST /api/parallels`**, defaulting to `chunk` so every existing
+  caller is unaffected. The passage path gets its **own** budget rather than a share of the chunk
+  path's — `SEARCH_API_PASSAGE_TIMEOUT` (30 s) and `SEARCH_API_PASSAGE_CONCURRENCY` (4), each
+  backed by a dedicated thread pool, because two semaphores over one pool are two names for one
+  budget. Over the cap the API returns 503 `passage_search_busy` with a `Retry-After`, never a
+  queue that quietly grows.
+- **Paging, and exports that are no longer capped** — one change, because once results page, the
+  cap had no job left to do.
+- **A reload restores the search configuration, not just its rows.** Method, policy and filters
+  come back with the results they produced, so a restored page cannot label one search's rows with
+  another's settings.
+- **Hide canonical works by the catalogue** — one option serving both methods, which demotes
+  rather than deletes.
+
+#### Search depth, the third control axis
+
+The per-query posting budget was starving long queries silently. At the shipped default a
+6,000-letter query admits roughly **5%** of its own postings — the engine was not searching most of
+what it had been given, and nothing said so.
+
+- **New "Search depth" control** — *Normal* / *Deep* / *Deepest*, raising posting budget, verify
+  cap and candidate cap together. Measured on a 5,979-letter query: **0.6 s / ~8 s / ~19 s**,
+  against **76% / 81% / 84%** of the witnesses the graded deck knows about.
+- Three coupled knobs behind one control, for the same reason passage length is: raising the budget
+  alone just leaves the verify cap as the new ceiling.
+- Two alternatives were measured and are **dead**: loosening the density threshold, and locus
+  tiers. Neither bought recall.
+
+#### Passage length, the second control axis (2026-08-24)
+
+The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
+second, and a parameter that had been deciding results invisibly.
+
+- **`verify_margin` is now policy.** Verification extends a match by 30 letters each side before
+  scoring edit density. At a span floor of 40 that is harmless overhead; below ~25 it *is* the
+  result — a true 9-letter shared run gets scored across ~70 letters of unrelated flanking text
+  and rejected at ~0.85 density. Consequence, measured: **lowering `min_span` alone does
+  nothing**, because the floor is checked against the margin-extended window. The two move
+  together or not at all.
+- **New "Passage length" control** — *Normal passages* (40, 30) or *Also short passages*
+  (28, 12) — beside the existing Match width. On the Antiochus query against an 83-positive
+  adjudicated deck, `short` takes widest-40 from 56 manuscripts at 100% precision / 67% recall to
+  104 at 61% / 72%: five more graded positives, plus one witness **no method had found before**,
+  word-chunk matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach
+  cross-language witnesses, and it roughly doubles what you skim.
+- **Two selects, not sliders.** `min_span` and `verify_margin` are one coupled decision; a slider
+  on the floor alone would visibly do nothing and read as broken. Each offered combination stays
+  a named, content-hashed policy, and passage length now forms part of the search identity used
+  by preserve/recover.
+- **The anchor-evidence tier is removed.** It was measured twice against the same deck and failed
+  both times — 4% then 1% precision inside the tier, recovering 4 then 1 of the 20 witnesses it
+  was built for. Counting shared grams ranks by record length, and rarity-gating merely resampled
+  the same noise. The negative result is kept in the spec (section 10.4) so it is not reinvented.
+- Pre-existing presets keep byte-identical behaviour and `policy_id`s.
+
+#### Several witnesses of one work (2026-08-24)
+
+One text per work is not enough, and no budget increase fixes that. Measured through the shipped
+code against the 614 Birkat Hamazon census manuscripts that have any indexed text: the best single
+witness finds **348 (56.7%)**, while the same 17 searched **separately and merged** find
+**455 (74.1%)**. On
+Megillat Antiochus, a seed plus three rounds of promoted witnesses took frontier coverage from 2 to
+9 of 20.
+
+- **A Witnesses panel on `/parallels`**, letter-level only. Add copies of the work by pasting
+  them (one at a time, or a whole file split on blank lines with a preview of what the split
+  found — and a count of anything dropped as too short), or promote manuscripts straight from
+  your own results. Each witness is searched on its own and the results are merged into one
+  re-sortable list that says which witnesses point at each manuscript.
+- **`witnesses[]` on `POST /api/parallels`** (`method='passage'`), with `sort` over the fused
+  groups and a `witness_fusion` block on each result. An entry is either a pasted `text` or a
+  `raw_header` the server resolves — so a recursive request stays small.
+- **Auto-expand (optional)**: seed → top-K → repeat. Measured frontier coverage 2 → 4 → 7 → 9 of
+  20 over three rounds, monotone, with all 15 promoted witnesses graded positive. It is an
+  explicit button with the trade-off written beside it, never folded into "Find Parallels": the
+  cost is the first page — rows go from 191 to 2,795 and positives in the top 100 fall from 48 to
+  32. Reach up, precision down.
+- **Never concatenated.** Joining witnesses into one query starves the engine's per-query posting
+  budget. The 17 witnesses joined into one 33,180-character query admit 2.4% of their own postings
+  and reach **48.2%** — *worse than the best single witness* — against 74.1% fused; every
+  concatenated Antiochus recursion round likewise scored below the seed alone. Fusion is by
+  **rank** (RRF, k=60), not score — a
+  passage score counts matched *query* letters, so a long witness mechanically outscores a short
+  one for reasons unrelated to match quality.
+- **Scoped to letter-level, as a measurement rather than an assumption.** On the chunk engine,
+  concatenation and union return the identical manuscript set (392 both ways, empty difference in
+  both directions), so there is no budget to starve — desktop's recursive composition search is
+  correct as it stands — and multi-witness there buys +2 positives of 74 with zero frontier gain
+  at 4–6× the time. The witness panel stays hidden for chunk, cross-paragraph and combined.
+- **Fixed while passing through**: the results list's group order was hard-coded to top score
+  regardless of the sort control, so two of its three options — *Sort by shelfmark* and *Sort by
+  matches* — had never had any visible effect.
+
+Behind `PASSAGE_MULTI_WITNESS_ENABLED` (ANDed with the existing passage readiness check), with
+`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) as the cost control. Full contract in
+`docs/SEARCH_API.md`; the measurements and their scope in
+`docs/specs/passage-matching-algorithm.md` §10.2b.
+
+#### What the measurements do and do not say
+
+Letter-level search is dramatically faster: **391 ms against 14,565 ms** on the same 120 queries,
+about 37×.
+
+On **recall@50 there is no demonstrated difference** between the two methods at that sample size,
+once the incumbent's own chunk size is swept. At `chunk_size=5` chunk scores 0.575 and the
+intervals separate; at `chunk_size=3` it scores **0.708 [0.622, 0.782]** against passage's **0.750
+[0.666, 0.819]**, and they overlap heavily — passage's lower bound sits below chunk's point
+estimate. Reporting the `c5` result alone would have claimed a decisive win the evidence does not
+support, which is exactly why both methods were swept.
+
+Where letter-level does separate is in **ranking** rather than retrieval: recall@1 **0.592 against
+0.467**, MRR **0.639 against 0.533** — the right manuscript higher up the same list, on the same
+queries, at a fraction of the time.
+
+The two methods are complementary and neither supersedes the other. Per the owner ruling of
+2026-08-21 the wording on user-facing surfaces stays qualitative and hedged — no precision
+percentages, no certified claims. The figures above are recorded here; they are not asserted there.
+
+### Desktop — Letter-Level Search (2026-08-26)
+
+A second way to search for parallels, beside the existing chunk search. It matches on sequences of
+letters rather than blocks of words, which makes it fast and cheap to run against the whole corpus.
+The two methods are complementary and neither replaces the other; chunk search remains the default.
+
+**Where it comes from.** This is the matching engine built for Computed Identifications, turned
+around. That system indexes the known works and asks of each Genizah manuscript which work it
+carries. Here the same character-level matching runs the other way: the *corpus* is indexed, and
+any text you paste becomes the query. Same machinery, opposite direction — which is why a feature
+this size arrived as one phase rather than a milestone.
+
+#### New Features
+
+- **Letter-level search in the Composition Search tab**, chosen from a new *Search method* selector.
+  It is much faster than chunk search and returns far fewer unrelated results. Chunk search keeps
+  what letter-level search does not offer — Exact / Variants / Fuzzy modes and cross-paragraph
+  filtering — and stays selected by default.
+- **Three controls over how far the search reaches.** *Match width* — how far a manuscript may
+  drift from your text and still count. *Passage length* — whether a short shared passage counts as
+  a match. *Search depth* — how much of the corpus to examine. All three start at a fast setting.
+  Deep and Deepest take seconds longer and reach damaged or reworked copies that a fast pass misses;
+  once started they cannot be interrupted, and the control says so.
+- **An index built on your own computer**, from the transcriptions already on it — nothing to
+  download. About ten minutes, about 11 GB free while it runs, about 3.5 GB when finished. The
+  program offers to build it once, and it can be built or rebuilt at any time from Settings. Free
+  space is checked *before* you are asked to approve the build, not after — being refused inside the
+  worker would mean having consented to something that could never start.
+- **A build can be cancelled at any point and never damages what you already have.** The new index
+  is built alongside the old one, validated, and only then swapped in. Every failure path — a bad
+  build, a corpus that changed while building, a file still held open by another window — restores
+  the previous index and leaves it working. A crash mid-build cannot leave a broken index behind:
+  the next start validates before it promotes, and falls back to the last index that opens.
+- **Letter-level search covers the Genizah corpus.** My Library and combined scopes stay on chunk
+  search and say why; Full Recursive Search likewise stays on chunk search, because joining several
+  texts into one query works for chunk search and measurably harms letter-level search.
+- Sessions and history remember the method and its three settings. A saved result set is
+  re-displayed only when it matches the method and scope it was produced under, so a restored window
+  never labels one search's results with another's settings.
+
+#### Bug Fixes
+
+- **A composition report exported from a letter-level search described a chunk search.** The xlsx
+  and docx settings block listed a chunk size, max frequency, search mode and Lab state belonging to
+  a search that never ran. It now reports the method actually used and its own three settings.
+- **Closing the program during a build, a scan or a re-index now waits for that work** instead of
+  terminating the thread underneath it.
+- **New: `scripts/rebuild_browse_map.py`.** A damaged browse map shows up as manuscripts with no
+  text and an image counter stuck at 0 — in the reading view, in Browse, and in search results. The
+  tool rebuilds it from the corpus in under a minute without re-indexing, and is built to survive
+  the exact damage it repairs.
+
+
+---
+
+## [8.5.2] - 2026-07-31 — Composition Filter Fix & Web Responsiveness
+
+Patch release (both apps). Two unrelated fixes that landed together: a desktop Composition
+Search filter that never actually filtered, and a web change that stops one slow database
+read from stalling every other request on the site.
+
+### Fixed — Composition Search printed filter (desktop, #318)
+- **"Only printed" hid everything and "Exclude printed" hid nothing.** The Composition Search
+  results tree keeps the manuscript record and the preview text in two *different* Qt data
+  roles, but the filter code read the preview role as though it held the record. Every row
+  therefore looked unidentified — so the three-state Printed column filter, and "Exclude
+  printed" on a standard Composition Search, silently did nothing. Filtering now reads the
+  record role, falls back to the rendered column text for Library / Shelfmark / Title, and
+  keeps the preview role for the two context columns.
+- **Filters now reach fragment rows.** A child row inherits its parent manuscript's title for
+  the Title filter and its `sys_id` for the printed lookup, so matching fragments are no
+  longer hidden merely because the child row carries no title of its own.
+- **Focus Search could run unrestricted.** The dialog let you press OK before its background
+  manuscript-count finished, passing `None` as the restriction — a search over the whole
+  corpus when you had asked for a narrow scope. OK is now disabled while the count runs, and a
+  generation token discards results from a superseded calculation when filters change quickly.
+- Tests: `tests/test_composition_printed_filters.py` (11).
+
+### Fixed — one slow read no longer stalls the whole site (web, #319)
+- **Context: uvicorn runs a single worker** and NiceGUI calls page builders directly on the
+  event loop, so one blocking network call stalls *every* concurrent request, including
+  unrelated static assets. Waiting on I/O burns no CPU, so this never appeared in load average
+  (the box read `0.03` during multi-second responses) — which is why an earlier "the app is
+  fast, only the network is slow" reading was wrong.
+- **Five `await <sync function>()` sites.** Python evaluates the call first, so the whole
+  blocking body ran on the loop and only *then* did `await None` raise a `TypeError` that a
+  bare `except Exception: pass` swallowed. The data still appeared — the body had run — so the
+  bug was invisible while the "deferred" loader blocked everyone. Each now builds the Supabase
+  client on the loop, reads via `run.io_bound`, and renders back on the loop.
+- **`/corrections` was the slowest route in real-user monitoring** (p75 LCP 5981 ms / FCP
+  6998 ms). Its "batch-fetch" was one profiles query plus up to 20 *sequential* count queries,
+  run during page construction before any HTML was returned. Now off-loop, bounded to 4
+  concurrent reads, and deferred until the Leaderboard tab is actually opened.
+- **Reads keep their auth context.** `run.io_bound` goes through `loop.run_in_executor`, which
+  does not propagate contextvars — a naive off-loop wrap would have found no request context
+  and silently degraded to *anonymous* reads: your own pending corrections, your private
+  comments and your recent items would have come back empty, with no error. The five
+  user-scoped readers therefore take an explicit `client=` built on the loop.
+- **Teardown guards** around all post-I/O rendering, including the error branch, so closing a
+  tab mid-fetch cannot raise.
+
+### Fixed — same-day hotfix: deferred renders never ran (web, `b3faedd8`)
+- **`/corrections` sat on "Loading your edits..." forever**, and My Comments, the homepage
+  Recently Viewed panel and discovery replies never populated. The teardown guard added above
+  read `container.client.has_been_deleted` — **not a NiceGUI attribute** (checked against 3.8.0)
+  and never one. It raised `AttributeError` on *every* call, not just on teardown; each caller's
+  `except Exception` swallowed it, so the render never ran and the spinner stayed up. The
+  leaderboard was worse: its error branch re-read the same dead attribute, so that one escaped
+  as an unhandled traceback.
+- Two of the nine sites **predate this release** (`c39838c3`); the perf work copied the name
+  onto four main-path loaders, turning a latent bug into total failure of those surfaces.
+- **Fix:** all nine now call `web/client_guard.py::client_gone()`, which tests membership in
+  `Client.instances` — the public signal `Client.delete()` actually manipulates. Deliberately
+  *not* `has_socket_connection`, which is `False` during initial page construction and would
+  skip the first render of every page (the same bug mirrored).
+- **`show_load_error()`** added: a swallowed failure now replaces the spinner with a visible
+  bilingual notice, so a broken loader can no longer present as a merely slow one.
+- **Why CI missed it:** the regression tests asserted the *string* `'has_been_deleted'` appeared
+  in the loader source — they pinned the misspelling and passed. Nothing ever executed a guard
+  against a real `Client`, and a `Mock()` answers to any attribute name.
+  `tests/test_client_guard.py` now drives it with genuine `Client` objects (13 tests), plus an
+  AST guard forbidding the dead attribute across `web/`.
+
+### Added — latency instrumentation (web)
+- **New `web/perf_watch.py`**, on by default and deliberately quiet. nginx logs the default
+  `combined` format (no `$request_time`) and the only in-app timing was `/lists`-scoped and
+  flag-gated, so a nine-second response previously left **no server-side trace at all**. Adds
+  per-request slow-request logging plus an **event-loop lag monitor** — the one signal load
+  average cannot show. Knobs: `GENIZAH_PERF_WATCH`, `GENIZAH_SLOW_REQUEST_MS`,
+  `GENIZAH_LOOP_LAG_MS`, `GENIZAH_LOOP_LAG_INTERVAL`, `GENIZAH_PERF_SUMMARY_SECONDS`.
+
+### Also carried by this version (web, already deployed since v8.5.1)
+- Password-reset recovery links work again (the Supabase `Client` is bound at render time).
+- The OAuth callback no longer logs live credentials.
+- The Visual Genizah Atlas no longer traps page scroll on phones.
+
+### Still open
+- **The CDN half of the slowness is not fixed.** Every response carries a `Set-Cookie` header,
+  so Cloudflare caches nothing — 100% `BYPASS`/`DYNAMIC`, including assets already sending
+  `max-age=31536000, immutable`. Tracked in `docs/OPEN_ISSUES.md` with the traps found while
+  diagnosing it (an ordinary `@app.middleware("http")` cannot strip that cookie; a Cloudflare
+  "Eligible for cache" rule alone would risk session fixation).
+
+---
+
+## [8.5.1] - 2026-07-21 — Browse doubled-folios fix (desktop)
+
+### Fixed
+- **Desktop:** Browse no longer shows doubled folios for single-IE manuscripts (e.g. CUL
+  T-S AS 2.3). `shared/browse_map_utils.dedupe_browse_map` now deduplicates single-IE browse
+  maps by `(ie_id, p_num)` — matching the multi-IE path — so the desktop-built map, which
+  previously skipped dedup assuming a single inventory entry, can no longer emit each page
+  twice. The web app was unaffected (its rebuilt map is already clean, so the dedup is a
+  no-op there). Test: `tests/test_browse_map_dedup_single_ie.py`.
+
+---
+
+## [8.5.0] - 2026-07-14 — Smarter Default Transcription (both apps)
+
+### Improvements
+- **Smarter default transcription (SEED-030, both apps).** When a manuscript's FGP
+  transcription covers only a small part of the displayed folio (a brief selected excerpt),
+  the "Manuscript Text" panel now shows the fuller **MiDRASH (V0.8)** transcription by
+  default instead of the partial FGP text. The FGP transcription stays one click away in the
+  version chooser, tagged "shorter than V0.8". Manuscripts where FGP is a full transcription
+  (the majority) are unchanged — FGP still shows by default there. Coverage is measured per
+  folio by base-Hebrew-letter ratio; **whole-document** FGP transcriptions (no per-image
+  folio) are weighed against the **whole manuscript** so a comprehensive one is kept while a
+  selective excerpt (e.g. many Firkovich transcriptions, ~a few % of the manuscript) is
+  demoted. Applies across search, browse, and the reading views on web and desktop. New
+  shared policy `shared/fgp_service.py::choose_default_source` (threshold env-tunable via
+  `FGP_DEFAULT_MIN_COVERAGE`, default 0.33). Origin: reader feedback.
+- **Respectful telemetry re-ask on update (SEED-031, desktop).** The anonymous-usage-stats
+  invitation is no longer a one-time, first-launch-only prompt. If you dismissed it once
+  without opting in, the app now gently re-invites you via a small **non-modal** bar on a
+  later version update — at most a few times, never more than once a month, with a "Don't ask
+  again" button that stops it permanently. Opting in stays entirely your choice; the app still
+  never transmits your searches or your library, and telemetry can be turned off any time in
+  Settings.
+
+---
+
+## [8.4.1] - 2026-07-01 — Public API Dual-Mode (web)
+
+Web point-release. The public **Search API** counterpart to the v8.4.0 dual-mode library
+filter: programmatic callers can now express "**hide** these libraries" as well as "**only**
+these". Deployed on top of the 8.4.0 build (web only — the desktop app does not consume the
+public API and stays at 8.4.0).
+
+### New Features
+
+- **`library_filter_mode` on `POST /api/search` and `POST /api/parallels`** — an optional
+  filter field alongside `filters.library`, taking `"include"` (allowlist, the default) or
+  `"exclude"` (denylist). `exclude` scopes results to the complement — manuscripts whose
+  `library_code` is **not** in the given set — intersected into the same `restrict_sys_ids`
+  path the UI uses. Mirrors the v8.4.0 Show-only / Hide semantics for automation and the
+  `cairo-genizah-research` AI skill.
+- **Skill `--library` / `--library-mode` flags** — the `cairo-genizah-research` skill's
+  `search.py` and `parallels.py` clients gained first-class `--library CUL,JTS` and
+  `--library-mode {include,exclude}` flags (merged into `filters`; explicit `--filters-json`
+  still wins).
+
+### Compatibility
+
+- **Fully backward-compatible.** An omitted `library_filter_mode` behaves byte-for-byte like
+  today (include / allowlist) — the field is absent from requests that don't set it, so
+  existing callers and request echoes are unchanged.
+- An invalid `mode` value is rejected with the standard **400** `invalid_request` envelope
+  (fail-closed), consistent with existing filter validation.
+
+### Documentation
+
+- `docs/SEARCH_API.md` and the skill `references/api_contract.md` document the include/exclude
+  mode, the omitted-mode default, and the exclude/complement semantics.
+
+---
+
+## [8.4.0] - 2026-07-01 — Dual-Mode Library Filter (Show-only / Hide)
+
+Public release (both apps). Evolves the v8.3.0 inclusion-only library filter into a
+**dual-mode** filter — "**Show only** these libraries" *or* "**Hide** these libraries" —
+persisted across searches, at full web + desktop parity, with several usability upgrades
+driven by testing feedback.
+
+### New Features
+
+- **Show-only / Hide library modes** *(both)* — the library filter now expresses two
+  intents: show only the libraries you pick (allowlist), or hide the ones you pick
+  (denylist). In Hide mode a newly-appearing library stays visible unless you've hidden
+  it, so a "hide RNL" choice sticks as new results come in. The chosen mode and set
+  persist across searches and reloads. Available on web `/search`, "Browse by
+  Identification" (web + desktop), and — new this release — the web `/parallels` page.
+- **`/parallels` library filter** *(web)* — the parallels page gains its own dual-mode
+  library filter, scoping results the same way search does (closes a v8.3.0 deferred gap).
+- **Per-library counts, sorting & type-to-find** *(both)* — the library dialog shows how
+  many manuscripts each library holds, updating live as you toggle other filters
+  (PGP-only, editions, domain). Sort by count or A–Z and type to filter the list. The
+  desktop catalog dialog now matches the web at parity.
+- **Searchable library codes** *(both)* — each library row shows its English code (e.g.
+  *ספריית האוניברסיטה של קיימברידג' (CUL)*), in both the Hebrew and English interface, so
+  you can type "CUL" to find Cambridge.
+
+### Improvements / Fixes
+
+- Libraries with zero manuscripts in the corpus no longer appear in the filter list on any
+  surface.
+- Existing (v8.3.0) saved library selections migrate automatically to Show-only mode —
+  nothing to re-enter.
+- Fixed: typing in the library search box no longer collapses the rows from line-by-line
+  onto one continuous line.
+
+### Security
+
+- STRIDE audit of the parity surfaces: 24/24 threats verified closed
+  (fixed `EXISTS`/`NOT EXISTS` SQL keyword — no interpolation; `sanitize_library_codes` +
+  inline `'LOCAL'` guards on every filter path; `safe_storage` chokepoint; pre-export Hide
+  filtering).
+
+### Notes
+
+- The matching public-API `mode` (include/exclude) parameter is deferred to **v8.4.1**.
+
+---
+
+## [8.3.0] - 2026-06-29 — Search & Browse: Library Filter + Space-Scroll
+
+Public release (both). Two new search/browse features at full web + desktop parity — a
+**library filter** and **keyboard page-scrolling** — plus Joins Lab viewer and parity
+improvements, more resilient desktop image loading, and a large *invisible* internal
+refactor (the two "god files" split into cohesive modules with zero behavior change).
+
+### New Features
+
+- **Filter by library** *(both + API)* — narrow search results and the "Browse by
+  Identification" catalog to one or more holding libraries (Cambridge/CUL, JTS, Oxford,
+  RNL, Manchester, BL, and the rest). On web `/search` it applies over the full result set
+  before paging and shows a removable chip; on Browse-by-Identification it pushes the
+  filter down into the query so totals and pagination stay correct; the desktop catalog
+  tab has the same checkbox dialog at parity. The public API gains a `filters.library`
+  parameter on `POST /api/search` and `POST /api/parallels`. *(SEED-026)*
+- **Press Space to scroll results** *(both)* — on the search-results view, **Space** pages
+  down through results and **Shift+Space** pages up — unless a result control holds the
+  focus (a checkbox, an expand/collapse toggle, a link, or an open dialog), in which case
+  Space performs that control's action as before. *(SEED-025)*
+- **Rotate & fullscreen in the Joins Lab** *(both)* — the Joins Lab anchor pane and the
+  side-by-side Compare viewers gain Rotate Left / Rotate Right / Reset and a Fullscreen
+  toggle, on both web and desktop. *(SEED-017)*
+- **Desktop Joins Lab: full search-mode parity + candidate export** *(desktop)* — the
+  desktop Joins Lab now offers the web's search modes (Responsa-style, Exact, Variants,
+  Fuzzy, Regex), edits the variant / Judeo-Arabic / flexible-spacing / bidi options inline,
+  and exports its candidate list (selection, else all shown) to the shared 4-sheet Excel
+  workbook. A **Stop** button cancels a running search and keeps the candidates already
+  found. *(SEED-024)*
+
+### Improvements
+
+- **Desktop: resilient image loading during an NLI outage** *(desktop)* — desktop image
+  fetches now share the app's NLI circuit breaker (host-gated to the NLI image servers),
+  fail fast on a dead host instead of hanging, and restrict the relaxed-TLS path to NLI
+  hosts only — so an NLI outage can no longer stall Cambridge/Oxford image loads. *(SEED-015)*
+
+### Internal
+
+- **God-File Decomposition** *(both, zero behavior change)* — the two oversized source
+  files, `genizah_app.py` (desktop, ~28k lines) and `genizah_core.py` (shared, ~12.5k
+  lines), were split over six phases (122–127) into cohesive `shared/` + `desktop/` modules
+  behind permanent re-export facades. No user-visible change; search, browse, Responsa,
+  joins, lists, and composition all behave exactly as before, with back-edge import guards
+  keeping the layering honest.
+- Audit tail: softened over-claims in the accessibility statement to match reality after
+  the a11y pass, extended stale-index diagnostics into a reusable helper, and moved local
+  scratch files under a gitignored `_tmp/`.
+
+---
+
+## [8.2.2] - 2026-06-24 — FGP Credits, Homepage Stats, Catalog Filters & Audit Polish
+
+Roll-up release (both) of everything merged since v8.2.1: proper scholarly attribution for FGP transcriptions, a homepage corpus-statistics band, catalog availability filters, a "has manual transcription" indicator, an accessibility/RTL pass, and a product-quality audit batch (resilience, observability, cleanup).
+
+### New Features
+
+- **Bilingual, per-transcription FGP credits** *(both)* — every FGP transcription now shows its own scholarly credit in the language of the interface (Hebrew under the Hebrew UI, English under the English UI; catalogues and printed editions keep their single published citation). About **97%** of the 45,034 FGP transcriptions are credited at the responsible team-head level — e.g. *FGP Judeo-Arabic Halakhic Literature team (David Sklare, Head)* / *צוות FGP לספרות ההלכה בערבית-יהודית (דוד סקליר, ראש הצוות)* — preserving the individual transcriber's name where it is recorded (e.g. the Firkovitch team). The previous credit was single-language and derived from a manuscript's *aggregate* sources, so it could mix in unrelated catalogues; credits are now derived from each transcription's own source identity.
+- **Homepage corpus-statistics band** *(web)* — the homepage now shows live corpus counts (manuscripts, transcriptions, and more). *(SEED-023 Part A)*
+- **Catalog availability filters** *(both)* — the catalog "Browse by Identification" view gains 3-state filters for PGP and scholarly editions ("Filter Scholarly Transcriptions" / "Has" / "No"), on web (with tooltips) and at parity on the desktop tab. *(SEED-023 Part B)*
+- **"Has manual transcription" indicator** *(both)* — a source-agnostic indicator (PGP ∪ FGP) on web search results, and a matching scholarly-transcription column in the desktop results table. *(SEED-022)*
+
+### Improvements
+
+- **Accessibility & RTL/bidi pass** *(web)* — semantic expand/collapse on results, `aria-label` coverage, RTL isolation for shelfmarks and mixed-script rows, and Hebrew-UI i18n fixes for the Quick View expansion headers / Collapse. *(SEED-014)*
+- **Image-fetch observability + desktop viewer polish** *(both)* — clearer image-fetch logging/metrics and small desktop viewer refinements. *(SEED-021)*
+- **Resilience** *(web)* — `shared/`→`web/` layering cleanup, and a bounded executor for browse-enrichment fan-out so slow NLI no longer pins the shared thread pool. *(SEED-016)*
+
+### Bug Fixes
+
+- **Desktop: stylesheet warnings** — invalid `QScrollArea` stylesheets that logged "Could not parse stylesheet" are fixed.
+- Audit-batch Codex review fixes on the layering/accessibility PRs (executor-semaphore lifetime, aria/lazy-load).
+
+### Internal
+
+- Defensive guards, exception hygiene, and mechanical cleanup across the core; export utilities moved under `shared/`; candidate-grid triage glyphs de-duplicated. *(SEED-013 / SEED-018)*
+
+---
+
+## [8.2.1] - 2026-06-23 — Recently Viewed fixes
+
+Patch release (both). Fixes to the **Recently Viewed** list on both platforms, plus the search "Filter PGP" button polish previously deployed to web.
+
+### Bug Fixes
+
+- **Web: Recently Viewed & General list names now localized** — under the Hebrew UI the "Recently Viewed" and "General" list names leaked English; they now read "נצפו לאחרונה" / "כללי". Root cause: render sites only translated system lists (`is_system`), but "General" is the *default* list (`is_default`); the fix is a shared `localize_list_name()` helper applied at every render site (sidebar, lists header, Joins-Lab picker, add-to-list dialog) — generic for all app-managed list names.
+- **Web: Recently Viewed list no longer empty** — when opened from the sidebar/lists page or the Joins-Lab picker the list was keyed by its numeric Supabase id and read the (empty) `list_items` table instead of the `recent_items` source (the add-to-joins "Recent activity" tab worked because it used the literal `'recent'` source). The recent list now routes its reads to `recent_items` regardless of how it is addressed.
+- **Web: Recently Viewed count badge** — the badge showed "(0)" on a full list because the warm batched-count path counted `list_items` rows (zero for the recent list). The recent list now routes through the recent-aware count at every render site.
+- **Desktop: Recently Viewed order & duplicates** — the list was sorted by library instead of by recency and showed true duplicate rows. It now lists most-recent first and collapses true duplicates by `(sys_id, image)` keeping the most-recent occurrence; distinct per-image views are preserved.
+- **Web: "Filter PGP" button polish** *(previously deployed to web)* — three display-only fixes to the post-search "Filter PGP" button on `/search`: it no longer lingers during a search (all three post-search filter buttons hide at search start and reappear together), it keeps `color=primary` in its default state to match the other filter buttons' blue, and a matching `min-height` brings the icon-less button level with its icon-bearing siblings.
+
+---
+
+## [8.2.0] - 2026-06-22 — Web Joins Lab, FGP Transcriptions & Hebrew Search
+
+This release brings the **Joins Lab to the web** at parity with the desktop
+workbench, adds **Friedberg Genizah Project (FGP) transcriptions** as a selectable
+source on both platforms, and substantially **improves Hebrew search retrieval** so
+that words attached to punctuation or carrying diacritics are findable. The web
+platform is **Dicta Genizah Search**; the desktop app is **Dicta Genizah Search Pro**.
+
+### New Features
+
+- **Web Joins Lab (web)** — The desktop Joins Lab is now on the web at `/joins-lab`:
+  a human-in-the-loop workbench for hunting **physical joins** (fragments once part of
+  the same leaf or codex, now scattered across collections). Pin a fragment as the
+  **anchor** (image + numbered transcription), build a line-by-line query for the text
+  you expect on the joining fragment — with per-line modifiers (negation, plene/
+  defective, prefixes/suffixes, wildcards, line-position anchors) and global
+  spelling-variant / Judeo-Arabic / flexible-spacing / bidirectional toggles — and
+  triage candidates **Yes / Maybe / No**. Candidates can be browsed, **compared side by
+  side** with the anchor (per-pane zoom + synchronized verdicts), re-anchored, added as
+  a confirmed join, sent to the **Fragment Puzzle**, or saved to a list. Built-in
+  **Visual Similarity** surfaces look-alikes. Open it from the sidebar, the **Find
+  joins** button on Browse, or any search result. Works without logging in; bilingual
+  EN/HE with full RTL; your builder, triage and view state survive a page refresh.
+- **FGP transcriptions (web + desktop)** — Transcriptions from the **Friedberg Genizah
+  Project (FGP)** are now available as a distinct, selectable source in the version
+  chooser, alongside the existing editions. Each transcription is shown on its own
+  manuscript image (aligned by folio label) and rendered faithfully from FGP's
+  structured XML (exact spacing and sigla preserved). On by default; a graceful no-op
+  where the FGP data is absent.
+
+### Improvements
+
+- **Hebrew search retrieval — punctuation- and diacritic-attached words are now
+  findable (web + desktop)** — Previously, searching `בסגן` would not find a page whose
+  text was `בסגן,` (the word immediately followed by a comma), because the search index
+  split text only on spaces and indexed the word *with* its trailing punctuation. The
+  index now tokenizes Hebrew correctly (splitting on commas, periods, colons,
+  parentheses, slashes and brackets while keeping letters, marks, apostrophes and
+  bracketed forms together), so `בסגן` finds `בסגן,`. In addition, a diacritic-folded
+  search field means a Judeo-Arabic word written with an upper dot is found whether you
+  type the plain letters or a geresh — e.g. searching `צמאן` or `צ'מאן` now finds the
+  corpus spelling that carries a dot above the צ. Displayed text is unchanged (dots and
+  brackets still visible). Applies to the main Genizah search and (desktop) My Library.
+  *(Requires the search index rebuilt with the new schema: the **web** Genizah index is
+  rebuilt on deploy; the **desktop My Library** rebuilds itself automatically; the
+  **desktop Genizah** index is rebuilt on demand via **Settings → Build / Rebuild
+  Index** — recommended, mainly for Judeo-Arabic.)*
+- **Responsa operators over My Library (desktop)** — Responsa-style operators now work
+  when searching your **Local Library** ("My Library"): `#` (grammatical prefix/suffix),
+  `*` (wildcard), `%` (plene/defective spelling) and inline alternation `(א/ב)`.
+  Previously these returned nothing over local documents and only worked against the
+  Genizah corpus. *(The `|` line-break operator over local documents remains a
+  Genizah-only feature and falls back gracefully.)*
+
+### Bug Fixes
+
+- **My Library re-index no longer crashes after the search-quality upgrade (desktop)** —
+  Rebuilding My Library (or letting it auto-rebuild after the Hebrew-search schema
+  change) could abort with `LOCAL index handle is gone — restart the app or use Reset My
+  Library`. The migration path tried to reopen the old index under the new schema before
+  rebuilding; it now rebuilds cleanly from the cached document text. Your documents are
+  preserved across the rebuild.
+- **Fragment Puzzle crashed on open under a per-machine install.** Opening the Fragment Puzzle (e.g. from the Join Lab) raised an uncaught `PermissionError` on the main thread when the app was installed per-machine (under `Program Files`, not writable for a standard user). The puzzle's saved-document list calls `get_puzzle_service()`, whose first use created the `joins_data/` SQLite sidecar dir under an auto-detected "project root" that, in the frozen build, resolves to the read-only install dir — and that directory creation was not guarded. `joins.db` now falls back to a writable per-user location (`%LOCALAPPDATA%\GenizahSearchPro\joins_data`) when the install dir isn't writable, and the service can no longer crash the caller (it degrades to unavailable). Per-user installs and the web app are unaffected; existing users keep their saved puzzles. Found via the crash telemetry above; Codex-reviewed (APPROVE). `shared/puzzle_service.py`, `tests/test_puzzle_service.py`.
+- **Crash telemetry made actionable in the shipped EXE.** Desktop `desktop_crash` events labeled every crash `exc_module='external'` with a useless line number, because the in-app frame classifier matched traceback frames by `os.path.realpath()` equality against import-time paths — which never match in a frozen PyInstaller build (a frame's `co_filename` is the build host's path; the runtime module lives under `_MEIPASS`). Found in a PostHog review: a real main-thread `PermissionError` opening the Fragment Puzzle on v8.1.0 came through as `PermissionError:external:1116`. The classifier now matches by path segment (`/desktop/`, `/shared/`, plus distinctive top-level module basenames), so crashes report the real module and line (e.g. `PermissionError:puzzle.py:NNN`) and group correctly — identically from source and from the frozen `.exe`. Also closed a cross-platform privacy gap (D-07): `os.path.basename` does not split a Windows `\` path on a POSIX host (Linux CI), which could have leaked a full path into `exc_module` and the fingerprint — a host-independent basename helper now guarantees only a basename ever leaves the process. Reviewed by Codex over two passes (REQUEST CHANGES → APPROVE). `desktop/telemetry.py`, `tests/test_crash_payload.py`.
+
+---
+
+## [8.1.0] - 2026-06-16 — Desktop Telemetry & API Enhancements
+
+This release adds **opt-in, privacy-respecting telemetry** to the desktop app, brings the **public Search API and the Cairo Genizah Research AI skill** to desktop users (a new Help section + a What's New note), and bundles the **public Search API enhancements** below that were deployed continuously to the web platform since v8.0.0. The desktop app is **Dicta Genizah Search Pro**; the web platform keeps the name **Dicta Genizah Search**.
+
+### New Features
+
+- **Use Dicta Genizah Search from Claude and AI agents (desktop)** — The desktop app now advertises the **Cairo Genizah Research** skill and the public API. Drive the search engine conversationally from Claude — or other AI engines, including local ones — to find phrases, parallels and candidate witnesses (for a phrase, piyyut, responsum, letter or composition), returning the transcription text, library attribution and image links. A new bilingual "Public API & AI Tools" section in the desktop Help documents the skill and the developer API.
+- **Opt-in desktop telemetry (desktop)** — You can now consent to anonymous usage statistics and crash reports that help improve the app. It is **off by default**; a one-time consent prompt appears on the first launch after updating, and the choice can be changed anytime in Settings/About. Telemetry uses an anonymous identifier and **never** transmits search queries or any "My Library" content (file paths, names or text).
+- **Public Search API — `fuzzy` search mode (web)** — `POST /api/search` now accepts `search_mode: "fuzzy"` (approximate / maximum-variant matching), previously available only on `/api/parallels`. It is the slowest mode and is bounded by the new core timeout (below).
+
+### Improvements
+
+- **Public Search API rate limit raised 30 → 120 requests/minute per endpoint** (per IP; `/api/search`, `/api/browse`, `/api/parallels` each keep an independent bucket), so API-driven research no longer hits the throttle under normal use. The bundled `cairo-genizah-research` skill's self-throttle rose 24 → 96 rpm to match.
+- **`/api/search` core-execution timeout** — the search now runs in a thread-pool worker wrapped in a configurable wall-clock timeout (`SEARCH_API_CORE_TIMEOUT`, default 30s); a query that exceeds it returns a `504 core_timeout` envelope instead of tying up the server. This also moves search execution off the event loop, improving responsiveness during slow queries across all modes.
+- **Per-mode timeout tiering for heavy search modes** (P9X, 2026-06-16, web) — variants/fuzzy/parallels no longer share the 30s interactive timeout; they get their own ceilings: variants→60s (`SEARCH_API_VARIANTS_TIMEOUT`), fuzzy→300s (`SEARCH_API_FUZZY_TIMEOUT`), parallels→300s (`SEARCH_API_PARALLELS_TIMEOUT`). Interactive modes (exact/title/shelfmark/responsa) keep the 30s baseline unchanged. The `fuzzy` mode is now actually usable in production (a 3-word name query takes ~195s, well within 300s). All ceiling knobs are re-read per request, no restart needed.
+- **Heavy-mode concurrency cap with 503 fast-fail** (P9X, 2026-06-16, web) — a new `asyncio.Semaphore` gates variants/fuzzy/parallels requests to `SEARCH_API_HEAVY_CONCURRENCY` (default 2) concurrent slots. When the budget is exhausted, new heavy requests return `503 heavy_search_busy` + `Retry-After: 5` immediately instead of queuing indefinitely and starving the Starlette threadpool. The slot is always released in a `finally` block — timeouts and exceptions cannot strand it. Interactive modes bypass the semaphore entirely.
+- **Raised fuzzy result cap** (P9X, 2026-06-16, web) — fuzzy searches can now return up to `SEARCH_API_FUZZY_MAX_LIMIT` (default 500, hard cap 2000) results. Previously the 100-result cap was silently dropping true hits like חאיא (T-S Misc.28.43) that rank past position 100. Non-fuzzy modes keep MAX_LIMIT=100. A fuzzy request with no explicit `limit` auto-widens to 250. Skill client default timeout raised 30s → 320s to match (so the server's 504 wins over a socket timeout).
+- **Deferred (not in P9X)**: async job pattern (POST→202+poll); index-time skeleton/matres-lectionis normalization for fuzzy precision.
+- **"What's New" and OCR-disclaimer banners** — converted from inline page bars to fixed-position toasts (so they never shift page content), with auto-dismiss extended from 10s to 30s for comfortable reading.
+
+### Bug Fixes
+
+- **Eliminated severe layout shift (CLS) on Search, Parallels and the home page** — these scored a Cumulative Layout Shift p75 of ~0.9 (well into "poor"; also a Google ranking signal) while Browse was unaffected. Three causes fixed: top-of-page banners that deleted themselves on a timer (reflowing the whole page), result thumbnails that reserved width but not height (jumping as images loaded), and async-populated containers (Parallels results, home "Recent activity") that grew from zero height. All now reserve their space.
+
+### Internal
+
+- Web analytics events are now tagged with a `platform=web` super-property so desktop and web usage can be compared in PostHog (the desktop telemetry above sends `platform=desktop`).
+
+---
+
+## [Web Hotfix] - 2026-06-12 — Parallels Lab crash & link-click fixes
+
+Web-only deploy on top of v8.0.0 (no version bump, no installer). Two production bugs found in the live server log, both root-caused via `/gsd-debug` and cross-reviewed by Codex (gpt-5.5).
+
+### Bug Fixes
+
+- **Web: Lab deep-scan composition search no longer crashes** — Running a composition search in Lab mode with Deep Scan on the Parallels page aborted with "Parallels Error" as soon as the batched scan emitted its first text status. The core's progress callback uses a dual protocol — numeric `(current, total)` updates *and* single-string status messages — which the desktop has always handled but the web callback didn't (`TypeError: missing 1 required positional argument: 'total'`). The web callback now handles both protocols, and the core's string-status call is guarded so a misbehaving callback can degrade progress text but never abort a long search (cancellation still propagates). Regression tests pin the contract on both sides.
+- **Web: links inside clickable rows no longer trigger the parent's click action** — Four nested links called a non-existent server-side `stop_propagation()` (or had no shield at all), so every click logged an `AttributeError` *and* leaked through to the parent handler: the Visual Similarity dialog's shelfmark link and open-in-new button also toggled the row's expand/collapse, and the version selector's "View on PGP" links also switched the displayed version. Propagation is now stopped client-side (`js_handler`), preserving native link behavior (Ctrl/Cmd-click, middle-click, new tab). A static AST guard now forbids server-side `stop_propagation()` anywhere under `web/`.
+
+---
+
+## [8.0.0] - 2026-06-09 — Dicta Genizah Search Pro: Joins Lab & enhanced Local Library
+
+The first major release under the new desktop name **Dicta Genizah Search Pro**.
+Headlined by the **Joins Lab** — a dedicated workspace for hunting physical joins —
+and by extending **Composition Search** (and its export) to your own **Local
+Library**. The rebrand applies to the desktop app only; the web platform keeps the
+name **Dicta Genizah Search**. Also includes a web memory fix.
+
+### New Features
+
+- **Joins Lab (desktop)** — A dedicated workspace for hunting **physical joins**: fragments once part of the same leaf or codex, now scattered across collections. Pin a fragment as the **anchor**, build a line-by-line query for the text you expect on the joining fragment (with per-line modifiers — negation, plene/defective spelling, prefixes/suffixes, wildcards, position anchors — plus spelling-variant, Judeo-Arabic, flexible-spacing and bidirectional toggles), and triage candidates **Yes / Maybe / No**. Candidates can be browsed, compared side by side with the anchor, re-anchored, added as a confirmed join, sent to the Fragment Puzzle, or saved to a list. The window is **modeless** — it stays open beside the main window, can be re-anchored at any time, and remembers its state across restarts. Open it from the toolbar corner, the **Find joins** button on Browse, or any search result / Browse page. Built-in **Visual Similarity** surfaces look-alikes (alone or combined with a text query), and a **size-mismatch flag** marks candidates whose physical dimensions differ from the anchor's.
+- **Composition Search over your Local Library (desktop)** — The Composition tab now carries a corpus selector — **Genizah / Local / ALL** — so a composition search can run across your own indexed documents ("My Library"), the Genizah corpus, or both together. The choice persists across sessions.
+- **Local Library composition export (desktop)** — Exporting a composition run that includes Local hits now produces a LOCAL-aware report across **xlsx, CSV, TXT and DOCX** — local documents are shown by filename / parent folder with appropriate credits, and don't leak into Genizah-only metadata columns.
+
+### Changed
+
+- **Desktop app renamed to "Dicta Genizah Search Pro"** — The desktop application's display name is now **Dicta Genizah Search Pro** everywhere it is shown to users: the window title, the About dialog (English + Hebrew), the updater dialog, the credits written into exported files (CSV / TXT / DOCX headers, the xlsx "Credits and Info" sheet, and the puzzle-image footer), the Windows executable metadata, and the installer (Start-menu / desktop shortcut and Add/Remove Programs). The web platform keeps its own name, **Dicta Genizah Search**. (Internal file names — `GenizahSearchPro.exe`, the installer artifact, and the data folders — are unchanged, so existing installs upgrade in place and auto-update keeps working.)
+
+### Improvements
+
+- **Hebrew interface coverage** — Added Hebrew translations for ~250 interface strings that previously showed in English to Hebrew users across both apps: the Reading Desk, image-viewer and browse controls (rotate / zoom / fullscreen / page navigation / library image toggles), the Projects & Lists panel, cloud-sync and data-update dialogs, search/variant/measurement filter controls, corrections / discoveries / comments actions, and export prompts. The My Library confirm dialogs (e.g. remove folder) now show localized Yes / No / Cancel buttons. Surfaced by a pre-release internationalization audit.
+
+### Bug Fixes
+
+- **Hebrew text no longer leaks into the English interface** — Fixed three places where Hebrew strings appeared for English users: the Visual Similarity dialog header, the "copy info" labels for items not in a list, and the Parallels "Category:" label. Also fixed a Help-page link that pointed at a non-existent repository branch.
+- **Web: bounded the NLI metadata cache** — `MetadataManager.nli_cache` is now a thread-safe LRU with a fixed ceiling, so it can no longer grow without bound on the long-running web process.
+
+---
+
+## [7.16.0] - 2026-05-31 — Hebrew PDF Text Quality
+
+A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dramatically improving search of typeset Hebrew scholarly books, plus new file-management actions for LOCAL hits. Desktop only.
+
+### New Features
+
+- **Open file location (desktop)** — LOCAL "My Library" hits now have an **Open file location** action that opens the containing folder in the OS file manager with the file selected, alongside the existing **Open file**. Available in the ResultDialog, the Browse panel, and the right-click menu on search results.
+- **File-aware right-click menu for LOCAL hits (desktop)** — Right-clicking a LOCAL search result now shows file actions — **Open file**, **Open file location**, **Copy file location**, **Copy filename** — instead of the Genizah cloud-community actions (View Document, corrections, comments, discoveries) that don't apply to your own documents.
+- **Per-folder opt-out checkboxes in My Library (desktop)** — Each folder row in the My Library list carries its own checkbox (`[x]` included / `[ ]` excluded), so a whole folder's files can be toggled in or out of search in one click directly from the folder list.
+
+### Improvements
+
+- **Hebrew PDF text quality — letter-spacing & word-boundary rewrite (desktop)** — A large rewrite of the LOCAL PDF Hebrew text extractor, dramatically improving search of typeset Hebrew scholarly books. Many books shattered emphasised/justified Hebrew into single letters (e.g. `אוצר הגאונים` indexed ~74% one-letter "words", so `פירוש המשנה` became `פירו ש ה מ ש נה` and was unsearchable), while tightly-set books fused whole phrases into one token. Word boundaries are now detected per line from the actual inter-letter spacing (an adaptive valley between within-word and between-word gaps), plus the embedded space glyph where a heading or citation is set with no visible gap. Measured on identical pages: `אוצר הגאונים` one-letter tokens 74% → ~5%, tightly-set books' word-fusion 16% → ~0%.
+  - **Vowel/cantillation handling** — Hebrew combining marks (nikud and te'amim) are now classified by Unicode category, so the maqaf (`־`), sof-pasuq and similar punctuation are kept as real characters instead of being stripped as vowels (which had corrupted ranges like `סב־סג` and joined `דו־שיח`).
+  - **Numbers read correctly** — Years and page numbers embedded in right-to-left text are no longer reversed (`1977` is `1977`, not `7791`; ranges like `194-256` stay intact).
+  - **Garbled text layers flagged** — PDFs whose embedded text layer is unrecoverable garbage are now detected and marked in the My Library tree, so you know which files would need OCR rather than silently indexing noise.
+  - **To benefit, run "Re-index All" (אנדקס מחדש הכל)** in the My Library tab — these improvements apply to newly-extracted text, so existing libraries must be re-indexed once (`extraction_format_version` 2 → 3). The HTML / XLSX / CSV fixes below also apply on the same Re-index All.
+- **Less UI-thread work after a LOCAL search (desktop)** — File-path lookups for results are now fetched in one batched query instead of one-per-row, and the Genizah metadata-enrichment workers (domain / PGP / printed / measurement) are skipped for LOCAL hits they never applied to.
+- **HTML / CSV / XLSX text quality (desktop)** — `.html` transcription files no longer show literal `&nbsp` where a space was meant; `.xlsx` files whose cells are all formulas (no cached values) are now searchable; UTF-16 (Excel "Unicode Text") `.csv` files are decoded correctly instead of as garbled single-byte text.
+
+### Bug Fixes
+
+- **Unchecking a folder in My Library now actually removes its files from results (desktop)** — Unchecking a folder updated the folder's checkbox but never propagated to the files inside it, so the opt-out had no effect on search. A folder's checked/unchecked state now cascades to every file under it.
+- **`.html` `&nbsp` entities no longer leak into indexed text (desktop)** — Hand-authored transcription HTML often writes `&nbsp` without a trailing semicolon, which the HTML parser left as the literal text `&nbsp`. These (and other un-decoded entities) are now decoded and the non-breaking spaces folded to regular spaces.
+- **`.xlsx` files with formula-only cells are now searchable (desktop)** — A workbook whose cells are all formulas with no cached values read as empty under the value-only pass and indexed as "no text", making it invisible to search. The extractor now falls back to reading the stored cell content so such files are searchable, and no longer creates blank pages from all-empty rows.
+- **UTF-16 `.csv` files decoded correctly (desktop)** — A `.csv` saved as UTF-16 (e.g. Excel "Unicode Text") was mis-decoded as single-byte Hebrew into garbage; the encoding chain now detects the UTF-16 byte-order mark first.
+- **`.html` / `.xlsx` / `.csv` LOCAL files can now be opened (desktop)** — The "Open file" button refused to open these three formats even though My Library indexes them; the extension gate now uses the same supported-set as the indexer (centralized in `desktop/file_actions.py`, no longer a duplicated literal).
+- **Every search froze the app for ~20–30 seconds (desktop)** — Each search (and each restored search at startup) hung the window for tens of seconds, regardless of how many results it returned or which corpus was searched. The cause was the search-history file: every past search saved a full snapshot of its results (up to 5,000 hits each), so `search_history.json` had grown to **~778 MB**, and the app re-read and rewrote that entire file on every search. Search history now stores only the lightweight search definition (query, options, filters); **clicking a past search re-runs it** instead of restoring a stored snapshot. Existing oversized history files are shrunk automatically on next launch (one affected file went from 778 MB to 0.08 MB).
+- **Large My Library folders no longer freeze the app on startup (desktop)** — Opening the app (or the My Library tab) with a big indexed folder froze the window for tens of seconds, flickering on "Discovering files…". Building the folder's file tree refreshed every folder's opt-out checkbox once per 100-file batch, and each refresh re-queried the whole index — so a ~16,000-file folder did roughly 165 × (full index scan per folder) on the UI thread (~15s), repeated ~3× by an unrelated index-reload, for a ~45s freeze. The checkbox refresh now runs once after the tree finishes loading (measured ~15s → 0.1s). Small folders were never affected.
+- **The local search-quality (LAB) index now rebuilds correctly and in the background (desktop)** — A latent bug aborted every rebuild of the local "LAB" relevance index (it called a helper that lived on the wrong object), so the index was treated as out-of-date and a doomed rebuild was re-attempted on every launch (harmless but noisy, and the repeated index reloads were the "×3" amplifier of the freeze above). The rebuild now succeeds and runs on a background thread, so it never blocks startup.
+- **Restoring a refined search at startup no longer freezes the app (desktop)** — When a previous session had a "search within" refinement chain, restoring it on launch re-ran every step of the chain on the UI thread (each step is a full search), freezing the window once per step. The chain is now replayed on a background thread, so the window stays responsive and the restored results are visible while the refinement state rebuilds.
+- **App launch no longer freezes after an interrupted "Re-index All" (desktop)** — If a bulk re-index was interrupted, the next launch could hang before the window appeared because every pending file was re-extracted synchronously on the UI thread. Recovery now defers that work to the background worker, so the app opens immediately and re-extracts in the background.
+- **Four silent / crash-class bugs** from a code audit are fixed (error-handling and edge-case hardening across the indexer and a shared service path).
+
+### Known Limitations
+
+- Some PDFs encode a maqaf or word-space as a drawn graphic or omit it entirely from the text layer (e.g. certain abbreviation-table cells where `כתבי־יד` was typed as `כתבייד`). Such cases cannot be recovered from text extraction — they would require OCR — and are extracted faithfully to the PDF's actual content.
+- The xlsx/Word/JSON **export** is still tuned for Genizah corpus results and is not yet adapted to LOCAL hits (deferred to a follow-up; LOCAL search shipped in v7.14 and export was never adapted).
+
+### Internal
+
+- Phase 102: `extract_pdf_pages` rewritten onto a rawdict-primary path with pure RTL glyph-trace reconstruction helpers (`shared/local_indexer_rtl.py`), Unicode-`Mn` nikud classification, per-line 1-D Otsu word-gap valley, and a `_ltr_damage_guard` RTL-trust fix. Nikud is stripped once in `_write_page_doc` for all formats (searchable). `corrupt_encoding` status + SQLite migration 2→3. 4-wave execution, 5 plans, ~150 new/updated tests.
+- New `desktop/file_actions.py` centralizes LOCAL open/reveal/copy-path actions (gated on the shared `_SUPPORTED_EXTENSIONS`); `reveal_local_file` reveals the file via `explorer /select,` with the path passed as a separate argv entry (the combined `/select,<path>` form breaks for paths containing spaces). Unit-tested in `tests/test_file_actions.py`.
+- LOCAL UAT follow-ups (post-Phase-102): `extract_html_pages` now post-decodes entities via `_clean_html_text` (html.unescape + NBSP fold); `extract_xlsx_pages` guards all-empty rows and falls back to `data_only=False` when the value pass yields nothing; `extract_csv_pages` detects the UTF-16 BOM (+ NUL-ratio guard) before the cp1255 fallback. New `LocalIndexer.get_filepaths(sys_ids)` batches the per-hit path lookup behind a per-result-set cache (`_local_filepath_cache`) primed in `on_search_finished` / composition finish. `_UnifiedFileTreeWidget._on_item_changed` cascades a folder's definite check state to its leaves (`_set_descendant_leaves_check_state`), and a tri-state master checkbox drives/reflects the aggregate. Tests: `test_html_extraction`, `test_xlsx_extraction`, `test_csv_extraction`, `test_local_get_filepaths_batch`, `test_my_library_tab_optout_cascade`.
+
+---
+
+## [7.15.0] - 2026-05-28
+
+### New Features
+
+- **PDF page image in My Library (desktop)** — When viewing a LOCAL PDF search result, the actual scanned/typeset PDF page is now shown alongside the extracted text in both the ResultDialog and the Browse panel. Navigation (prev/next result, prev/next page) keeps the image in sync with the text. Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) remain text-only by design.
+- **Re-index All button (desktop)** — New button in the My Library tab that forces re-extraction of every committed file via the background worker. Use it to pick up extractor improvements (such as the RTL and reflow fixes in this release) without losing your library or opt-out preferences.
+
+### Scalability & Indexing Reliability
+
+- **Indexes large folders without UI freezes (desktop)** — Folder enumeration runs on a background worker (responsive within 100ms), tree population is async, and the progress bar shows indeterminate "Discovering files…" status while enumerating, then switches to determinate progress during indexing. Previously, large folder selections could freeze the UI for minutes.
+- **Resume interrupted indexing (desktop)** — If indexing is interrupted (app crash, hard kill, system reboot, power loss), the next launch detects the orphaned scan and offers three choices: **Resume**, **Restart**, or **Skip**. Resume picks up where it left off via the new `scan_runs` lifecycle table — no more starting over from zero.
+- **Reset My Library button (desktop)** — Two-step typed-confirm destructive action (accepts `RESET` or `אפס`) that performs a 7-step atomic teardown of the LOCAL index. Use when the index is in an unrecoverable state and a clean start is the fastest path forward.
+
+### Improvements
+
+- **Hebrew PDF text quality (desktop)** — Two extractor fixes dramatically improve LOCAL search of Hebrew scholarly books:
+  - **Word-order RTL fix** — On PDFs whose content stream emits words in left-to-right visual order, Hebrew sentences were previously indexed last-word-first. Word tokens are now reversed via directional-run analysis; embedded Latin shelfmarks like `T-S 12.123` stay adjacent.
+  - **Intra-block reflow** — PyMuPDF's bidi engine sometimes splits Hebrew paragraphs into one-fragment-per-line output (characters, commas, even quotation marks on their own line). LOCAL PDF extraction now collapses these intra-paragraph line breaks into continuous prose. Paragraph boundaries from PyMuPDF are still preserved.
+- **PDF page rendering architecture (desktop)** — Page images are rendered lazily and on-demand via a shared `PdfRenderWorker` background thread, backed by a bounded LRU of open document handles. No on-disk image cache; only currently-viewed pages live in memory, so the corpus is never bulk-rendered.
+
+### Bug Fixes
+
+- **LOCAL/Genizah header field leak in ResultDialog (desktop)** — In ALL search mode, navigating prev/next between LOCAL and Genizah results would leak the prior result's library/shelfmark/title into the new one. LOCAL hits now populate the same `lbl_shelf` + `lbl_title` widgets Genizah hits use, so navigation cannot carry stale values.
+- **Graceful PDF render failures (desktop)** — Missing files, corrupt/encrypted PDFs, out-of-range pages, and render exceptions now show a placeholder with a logged error instead of hanging the UI.
+
+### Internal
+
+- New `desktop/pdf_image_controller.py` (`PdfImageController` + token + latest-wins + 150ms debounce + ~8s watchdog) coordinates render requests from both UI surfaces.
+- New `shared/local_indexer.py::_collapse_intra_block_newlines` + `_fix_sort_true_rtl_line` / `_fix_sort_true_rtl_page` helpers for the Hebrew extraction fixes.
+- New `LocalIndexer.mark_all_pending_for_reindex()` helper backs the Re-index All button by flipping `processed_files.status='committed'` → `'pending'`.
+- v7.15 milestone closed: 3 phases (99, 100, 101), 7 plans, 6/6 PDFIMG-* requirements satisfied.
+## [vNEXT] - Phase 97 Wave F Gap Closure - 2026-05-25
+
+### Phase 97 Wave F — My Library Gap Closure (desktop)
+
+- **D-NEW-2 Network drive semantics**: `_check_folder_reachable` with
+  errno-discriminated retry — `ETIMEDOUT`/`EAGAIN` → 3× retry with 2s backoff
+  → `status='timeout'`; `ENOENT`/`EACCES` → `status='unreachable'`. All
+  auto-rescan skip-sets updated to `('unavailable', 'unreachable', 'timeout')`.
+- **D-NEW-3 TOCTOU detection**: Pre+post `os.stat` bracket around
+  `_index_one_file`. On mtime_ns or size mismatch → `status='changed_during_index'`,
+  re-queued for next scan (max 3 retries per scan_run).
+- **D-NEW-4 Extension gate**: `_SUPPORTED_EXTENSIONS` check at INSERT site
+  prevents new unsupported-format rows from entering the index.
+- **D-NEW-5 chunk_locator per format**: PDF pages now carry `'p. N'` locator;
+  DOCX chunks carry `'paragraphs N-M'`. Result dialog LOCAL hit header shows
+  `folder/file.pdf — p. 3` format.
+- **D-NEW-6 Privacy disclosure**: Bilingual EN+HE disclosure for the zstd
+  cleartext cache added to Help page and About dialog.
+- **D-NEW-7 AST CI guards**: 4 fail-fast tests covering cloud-write gates,
+  web `LIBRARY_CODES` allowlist, `is_local_sys_id`, and RRF merge order.
+
+---
+
+## [vNEXT] - My Library Phase 96 Polish - 2026-05-24
+
+### v7.14.x / v7.15.0 — My Library Phase 96 Polish (Phase 96)
+
+Desktop My Library improvements shipped after v7.14.0 UAT rounds.
+
+### Bug Fixes (desktop)
+
+- **UX redesign**: Replaced QSplitter + separate opt-out tree + status
+  table with a single unified `_UnifiedFileTreeWidget` (3 columns:
+  Filename checkbox / Pages / Status). Per-file opt-out checkboxes and
+  indexing status now live in one coherent view.
+- **P2 persistence race**: Opt-outs now survive close+reopen — added
+  `flush_pending()` call in `closeEvent` before `_save_session()`,
+  flushing the 150 ms debounce timer synchronously.
+- **P1 Enter focus**: `ResultDialog` nav buttons now have
+  `autoDefault=False`; `spin_page` receives focus after a LOCAL result
+  loads, so Enter jumps pages instead of firing Prev Result.
+- **P1 Browse at page 1**: `_open_local_browse()` now coerces `p_num`
+  to `int` (was stored as string from header parsing), so a hit on page
+  7 opens Browse at page 7.
+- **P2 LOCAL widget leak**: LOCAL Browse nav widgets are now hidden
+  when loading a non-LOCAL (Genizah) manuscript in Browse.
+- **BLOCKER-5**: Converted 10 stale `pytest.skip("Phase 96 … not yet
+  implemented")` markers to positive assertions across 4 test files
+  (`test_local_filter_cascade`, `test_local_hit_highlighting`,
+  `test_local_nav_page_chunk`, `test_local_optout_persistence`).
+
+### Previously deferred items now closed
+
+D-F1 folder drill-down with file checkboxes ✅ (plan 96-04/05/06) ·
+D-F4 PDF one-word-per-line extraction ✅ (plan 96-02) ·
+D-F5 LOCAL search-term highlighting ✅ (plan 96-03)
+
+D-F2 PDF OCR · D-F3 side-by-side PDF page rendering remain open
+for v7.15+. (desktop)
+
+---
+
+## [7.14.0] - My Library: Local Document Search - 2026-05-24
+
+### v7.14.0 — My Library (Phase 95)
+
+Desktop adds **My Library** — a 7th tab that indexes your own
+`.docx` / `.pdf` / `.txt` folders into a separate Tantivy
+side-index merged inline into Search, Composition Search, and
+Parallels with a blue `LOCAL` badge. Personal corpora never leave
+the device: three regression tests pin the cloud-write boundaries
+(API search, lists sync, corrections submit — gates at the TOP of
+each function per Codex D-30 P0).
+
+### New Features (desktop)
+
+- **My Library tab** with multi-folder management, per-file status,
+  mid-scan cancel, and a 5,000-file / 2 GB pre-scan ceiling
+- **Pre-search corpus dropdown** (`Genizah` / `Local` / `ALL`,
+  default `Genizah`) next to the Search button
+- **Post-search 3-state LOCAL filter** on Search, Composition, and
+  Parallels surfaces
+- **Double-click LOCAL hit** → `ResultDialog` with text + blue
+  **Open file** button (`os.startfile`); Browse tab also supports
+  LOCAL text via "View in Browse"
+- LOCAL `Library` column shows `parent/folder`; `Shelfmark` column
+  shows the filename
+
+### Improvements
+
+- RRF k=60 merge *after* `_deduplicate()` (Codex D-08 P0) — LOCAL is
+  never silently dropped
+- Per-thread SQLite via `threading.local()` (no
+  `check_same_thread=False`)
+- Tantivy writer retry with exponential backoff on Windows `os error 5`
+- D-37 corrupt-index fallback (search continues Genizah-only on LOCAL
+  index open failure)
+- 28 new Hebrew translations for MyLibraryTab UI strings
+
+### Documentation & Packaging
+
+- Help (web + desktop) + About (both) gain bilingual My Library
+  section with D-33 cleartext-on-disk disclosure
+- About credits Yehuda Seewald's `GenizahLocal` prototype in the
+  contributors paragraph (EN + HE; HE spelling: יהודה זייבלד)
+- PyMuPDF (`fitz`) added as desktop dep (~25 MB installer growth);
+  `collect_all('pymupdf')` in `.spec` + `--self-test-pymupdf` smoke
+- `shared/export_dossier.py` `skip_local` kwarg: desktop xlsx
+  includes LOCAL, web xlsx excludes
+- Static AST guard `tests/test_web_library_options_no_local.py`
+  pins web LIBRARY_CODES invariant
+
+### Deferred to v7.15+ (`docs/OPEN_ISSUES.md`)
+
+D-F1 folder drill-down with file checkboxes · D-F2 PDF OCR ·
+D-F3 side-by-side PDF page rendering · D-F4 PDF extraction quality
+audit (one-word-per-line manifestation) · D-F5 LOCAL search-term
+highlighting
+
+Inspired by Yehuda Seewald's external GenizahLocal prototype. (both)
+
+---
+
+## [7.13.0] - 2026-05-21
+
+Bundles v7.13 milestone work (Research-Grade Downloads & PGP Filter), the
+homepage About + FAQ additions, and a desktop sync-merge bug fix.
+
+### Added — Phase 94: Research-Grade Export Metadata (web + desktop)
+
+- **`shared/export_dossier.py` module** (94-01) — single source of truth for
+  citation-grade xlsx export data shaping. 4 lookup helpers
+  (`pgp_subset_for_sys_id` / `nli_subset_for_sys_id` /
+  `catalog_summary_for_sys_id` / `bibliography_for_sys_id`), 2 row emitters
+  (`build_manuscript_row` / `build_bibliography_rows`), 2 header constants
+  (`MANUSCRIPT_HEADERS` 14-col / `BIBLIOGRAPHY_HEADERS` 8-col), and the
+  `build_rich_snippet_cell` helper extracted from desktop's prior inner closure
+  for the `*...*` red-bold snippet rendering. Codex MUST-FIX 1-4 folded in
+  (real FJMS field names, `NLI Catalog Entry` naming, narrow `get_catalog_records`
+  query — never the `get_catalog_detail` variant which loads `full_texts`,
+  bibliography off the `build_manuscript_row` path). (both)
+- **Bilingual headers + source-language metadata** (94-04 smoke round-1,
+  D-04 REVERSED 2026-05-20). 4 new bilingual helpers in `shared/export_dossier.py`
+  (`main_header_row(lang)` / `manuscript_header_row(lang)` /
+  `bibliography_header_row(lang)` / `sheet_titles(lang)`). All 3 dossier
+  helpers thread `lang` and prefer Hebrew when `lang='he'` (with English
+  fallback per field); English when `lang='en'` (with Hebrew fallback).
+  `pgp_translations` table consulted via
+  `TranslationService.get_pgp_translations_by_sys_ids` only on `lang='he'`.
+  (both)
+- **4-sheet workbook** (94-03 web + 94-04 desktop + smoke round-2). Web and
+  desktop xlsx exports now produce 4 sheets:
+  1. **Search Results** (renamed from `Genizah Results` in smoke round-2;
+     bilingual via `sheet_titles(lang)`) — 12-col main sheet with per-row
+     metadata: System ID / Library / Shelfmark / Title / Image/Page / Source
+     / Snippet / Full Text / Has PGP / Is Printed / Domains / Image URL.
+     Snippet column emits rich-text `*...*` matches in red+bold. Image URL
+     (originally locked as the empty `IIIF Manifest` column per D-13) was
+     renamed and populated in Phase 94.1 (2026-05-21) with per-folio
+     `https://genizahsearch.com/api/.../?page=N` proxy URLs — clickable
+     openpyxl hyperlinks; synthetic sys_ids emit empty cell.
+  2. **Manuscripts** — one row per unique sys_id (first-occurrence dedupe).
+     14 columns including PGP URL / Library Viewer URL / GenizahSearch URL
+     (all clickable hyperlinks with blue-underline styling after smoke round-4).
+  3. **Bibliography** — one row per FJMS bib entry, joinable to Manuscripts
+     by System ID. 8 columns.
+  4. **Credits and Info** (NEW in smoke round-2) — search metadata
+     (Query / Mode / Gap / generated_at / result count) + clickable
+     GenizahSearch.com hyperlink + Creator credit. Parity across web and
+     desktop.
+  Conditional RTL view-direction on all 4 sheets per UI language. (both)
+- **Web JSON additive per-item flags** (94-02). The `/api/search` JSON
+  envelope's per-item dict gains 3 keys: `has_pgp` (bool), `is_printed` (bool),
+  `domains` (list). Opt-in semantics (MUST-FIX 94-02-B): keys are omitted
+  on the public `/api/search` path (preserves D-11 stable response shape)
+  and emitted on the JSON export path. Envelope `schema_version` stays `1`
+  (Phase 83 additive-change commitment). Parallels JSON envelope unchanged
+  (D-10 negative invariant pinned by `tests/test_parallels_envelope_no_pgp_keys.py`).
+  (web)
+- **Web state plumbing** (94-02). `web/export_state.set_search_export(...)`
+  extended with 3 enrichment kwargs (`transcription_sys_ids`, `printed_ids`,
+  `result_domains`); new sibling helper `update_search_export_enrichment(...)`
+  with independent-field patch semantics. 5 call sites in `web/pages/search.py`.
+  History-restore branch flags restored snapshots via the
+  `metadata_incomplete_restored_from_history` warning marker. (web)
+- **Desktop xlsx parity** (94-04, EXPORT-META-09). New module-level pure-function
+  helper `_build_search_results_xlsx_bytes(...)` at `genizah_app.py:2473`
+  (Qt-free, fully unit-testable offline) consumed by the rewritten xlsx branch
+  of `export_results('xlsx')`. Cross-app parity invariant pinned by
+  `tests/test_export_xlsx_cross_parity.py` (identical sheet names + headers
+  across web and desktop on identical input at `lang='en'`). Desktop CSV / TXT
+  / DOCX branches at `genizah_app.py:18294+` are byte-identical to pre-Phase-94
+  (xlsx-only scope). (desktop)
+- **Web Credits and Info sheet metadata** (smoke round-3): web `web/api.py`
+  Credits-and-Info labels route through `tr()` for the same Hebrew/English UX
+  as desktop. Web search metadata cells (Query / Mode / Gap / generated_at /
+  result count) match desktop's Credits-and-Info structure exactly. (web)
+
+### Added — Phase 93: PGP Filter on `/search` (web only, shipped 2026-05-19)
+
+- Post-search 3-state filter button in the search results toolbar (`Filter PGP`
+  default → `Has PGP` only-PGP → `No PGP` hide-PGP → back to `Filter PGP`).
+  Same `outline dense no-caps` styling as the existing `printed_filter` button.
+  Hidden until the current result set contains at least one PGP-tagged hit.
+  Stacks AFTER `printed_filter` in the render cascade (verified by
+  `tests/test_pgp_filter_cascade.py` static AST guard). Choice persisted via
+  `persist_value('search_pgp_filter', ...)` routed through the
+  `web/safe_storage.py` chokepoint (Phase 87 invariant preserved). Hebrew
+  translations: `סנן PGP` / `PGP בלבד` / `ללא PGP` / `סנן לפי כיסוי PGP`.
+  PGP-FILTER-03 (active-filter chip) was originally planned but superseded
+  by user smoke direction 2026-05-19 — the colored button label already
+  conveys filter state, so the chip was redundant. (web)
+
+### Added — Homepage About + FAQ (web)
+
+- **Bilingual About + FAQ sections on the homepage** — new to the site
+  (added during SEO work; not previously published). Links to MiDRASH,
+  FGP, PGP, NLI, CUDL, the Responsa Project, and Manchester. The visible
+  FAQ accordion also provides FAQPage JSON-LD.
+- **Manuscript JSON-LD** on manuscript pages.
+- **Title/meta length cleanup, image alt text, and llms.txt.**
+- **Favicon shrunk 401 KB → 9 KB** (44× reduction).
+
+### Added — Help page (web)
+
+- Help page documents the new 4-sheet xlsx export and the JSON export
+  format, and adds a new **Public API & AI Tools** section linking to
+  the Search API endpoints and the `cairo-genizah-research` Claude skill.
+
+### Fixed
+
+- **Desktop list-merge no longer duplicates items** — when the app
+  prompts to merge differences between the web list and the desktop
+  list, items previously appeared twice in the desktop list while
+  staying single in the web list. Pre-existing duplicates from past
+  syncs now clean up automatically on the next merge. (desktop)
+- **"Important" translation-disclaimer callout is readable in dark
+  mode** — light text on a light fallback background. Now themed
+  properly. (web)
+
+### Internal
+
+- **Cross-app parity test** (`tests/test_export_xlsx_cross_parity.py`):
+  pins identical sheet names + identical 12-col main / 14-col Manuscripts
+  / 8-col Bibliography headers across web and desktop on identical input at
+  `lang='en'`. Survives the 2026-05-20 D-04 reversal (which made headers
+  + sheet titles lang-dependent — identical when both apps pick the same lang).
+- **6 rounds of smoke-verification regression tests** added across
+  `tests/test_export_bilingual.py` / `test_credits_sheet.py` /
+  `test_smoke_round2_gaps_a_d.py` / `test_smoke_round3_label_realignment.py`
+  / `test_manuscripts_urls_clickable.py` / `test_domains_dedupe.py` /
+  `test_image_page_int_coercion.py`. Each round shipped as an atomic commit
+  pair (production fix + matching regression test).
+- Final test count after Phase 94 closure: **2316 passed / 20 skipped /
+  2 xfailed** across the full test suite. Ruff clean across all touched
+  production + test files.
+- **Phase 87 multitenant invariant unaffected:** zero raw `app.storage.user.*`
+  accesses introduced under `web/` across all 4 Phase 94 plans + 6 smoke
+  rounds. Allowlist remains `[]`. `tests/test_no_raw_storage_access.py`
+  green throughout.
+
+---
+
+## [7.12.0] - Multitenant Safety and Line Numbering - 2026-05-18
+
+Bundles the v7.12 Path B multitenant architecture refactor with two
+user-visible features (line numbering, web folio chip).
+
+The architectural work is invisible to individual users but
+load-bearing for concurrent use: the web app can no longer leak one
+user's data (search results, exports, lists, auth state, etc.) into
+another user's browser session. The cross-user xlsx export filename
+leak fixed in v7.11.1 was one instance of this bug class; v7.12
+makes the whole class structurally impossible.
+
+### New Features
+
+- **Line numbering on transcription text** — a right-side (RTL
+  leading-edge) line-number gutter appears next to every transcription,
+  on both web and desktop. Numbers correspond to source-text lines
+  (matching the existing `L<N>:word` Responsa search syntax). Lines
+  restart at 1 for each folio/page. Copy-paste from the body never
+  picks up the numbers — the gutter is structurally separate from the
+  text. Toggle via the `format_list_numbered` button in the
+  transcription header (web) or the `# Lines` button in the find row
+  (desktop); default ON; persisted per user. Surfaces covered: web
+  Browse single-page view, web Quick View dialog, web Full Manuscript
+  View, desktop Browse tab, desktop ResultDialog. (both)
+- **Folio chip on web search result cards** — each web search result
+  card now shows the page/image number inline after the shelfmark (the
+  same field desktop's `COL_IMG` shows). You no longer need to open
+  Quick View to know which folio a hit came from. Theme-aware chip;
+  Hebrew/English tooltip "Image number" / "מספר תמונה". (web)
+
+### Improvements
+
+- **NLI image cache resilience** — the persistent image-FL-ID cache
+  no longer fails with `[WinError 5]` on Windows when two requests
+  finish writing simultaneously. Added a process-wide lock and
+  retry-with-backoff on `os.replace`. (web)
+
+### Bug Fixes
+
+- **Memory leak in search export payload** — long-running web server
+  processes were accumulating RSS at ~300 MB/hour because
+  `export_search_payload` retained the full unbounded result list
+  per user. Now capped at 5,000 results with `truncated` metadata so
+  downstream UX can advise "showing first 5K of N" if needed. RSS
+  dropped from 7.5 GB → 1.78 GB after deploy. (web)
+- **4 P2 UI/UX bugs surfaced during line-numbering smoke checks** —
+  chip overflow on long shelfmarks, Distance field overflow on small
+  viewports, redundant Distance fields appearing twice, bright-mode
+  ResultDialog white-on-white text, bright-mode dark toolbars. (both)
+
+### Internal — Multitenant Architecture (Path B)
+
+A web-only architectural refactor across 6 core phases (87-92) plus
+two inserted sub-phases (92.1, 92.2). 49/49 requirements satisfied
+across 28 plans. Zero net user-visible behavior change beyond the
+two features listed under New Features above, plus the cross-user
+leak class closure.
+
+- **`web/safe_storage.py` is now the chokepoint for all per-user
+  state.** 131 raw `app.storage.user` accesses across 14 files
+  migrated through it. The allowlist of permitted raw accesses is
+  empty (`allowed_raw_access: []`); a permanent CI guard
+  (`tests/test_no_raw_storage_access.py`) rejects any new raw
+  access at lint time.
+- **State separation by deletion, not migration.** 10 per-user mirror
+  fields on `AppState` physically deleted; `web/export_state.py` is
+  the only path for per-user export state. The `_TEST_BACKEND` shim
+  is gone (tests use `SimpleNamespace` fixture injection through
+  `web.safe_storage.app` monkeypatching).
+- **Lists cache rewritten per-request.** `UserListsManager` singleton
+  attribute + 10-second TTL plumbing all deleted; per-request
+  instantiation. Cross-user list cache leak structurally impossible.
+- **Auth caching rewritten without process-wide cache.** Request-scoped
+  auth via local header mutation. NO `auth.set_session()` mid-flight
+  (Codex finding: `gotrue_client.py:713` `set_session()` is networked,
+  not local). Refresh-only locking keyed by stable `_session_uuid`
+  (token-keyed locks rotate when tokens rotate).
+- **Server-side `sign_out` revocation.** `throwaway.auth.admin.sign_out(jwt, "global")`
+  actually revokes the user's token at Supabase before local keys are
+  popped. The anonymous singleton could not have done this.
+- **Atomic auth state writes.** `set_auth` returns `bool` with symmetric
+  2-key rollback on partial-write failure; `do_login` and OAuth callback
+  apply defensive 3-key caller-level cleanup. `set_auth(profile=None)`
+  clears stale `auth_profile` (closes a role-confusion security leak
+  caught by Codex).
+- **Reader-client RLS retrofit.** 12 reader functions in
+  `web/supabase_client.py` migrated from anonymous singleton to
+  authenticated `get_user_client()` so `TO authenticated` SELECT
+  policies return rows for logged-in users.
+- **Architecture reference:** `docs/guides/MULTITENANT.md` (~2150
+  words, 8 sections) is the canonical doc for future contributors
+  touching per-user state.
+
+---
+
+## [7.11.2] - Composition Search Bug Fixes - 2026-05-15
+
+Desktop-only patch addressing two user-reported bugs in composition
+search (find Genizah manuscripts that match a long source text).
+Reported by a power user after the v7.11.1 desktop release. No new
+features; pure correctness fixes.
+
+### Bug Fixes
+
+- **`Min chunks ≥ N` filter inflated when source repeats a phrase** — if
+  the source text contained the same phrase multiple times (e.g.
+  "ברוך אתה יי" recurring through benedictions and prayers, or two
+  versions of the same text pasted together), the system counted each
+  repetition as a separate chunk match. A manuscript that actually
+  matched the phrase only once could pass `Min chunks = 2`. Internal
+  Tantivy segment duplication on the same manuscript inflated the count
+  too. The chunk counter is now derived post-hoc from unique chunk
+  *contents*, not raw Tantivy hits, so the filter does what users
+  expect. Affects both the standard composition search and the Lab
+  composition search; the Lab path's full-mode filter was also latently
+  broken (always rejected everything when min ≥ 1 — the item dict never
+  surfaced the counter it was filtering on). (desktop; shared code
+  also benefits web)
+- **Expanded result view didn't scroll to the highlighted match** —
+  opening a composition result by double-click loaded the source and
+  manuscript text panes from the top, with the highlight somewhere far
+  below. For 70-page source texts (common with prayer-book collections
+  or Responsa volumes) the view was effectively unusable. Both panes
+  now scroll to the first match automatically, and the manuscript pane
+  re-anchors when navigating between pages. (desktop)
+
+### Internal
+
+- **v7.12 Path B foundations bundled** — internal multitenant-state
+  refactor (Phases 87, 88, 89: session UUID + safe_storage chokepoint,
+  AppState export-field deletion, per-request UserListsManager). Zero
+  user-visible change. Web deploy still gated behind the rest of the
+  Path B milestone (Phases 90-92); this desktop release is independent.
+
+---
+
+## [7.11.1] - Desktop Catch-up Release - 2026-05-13
+
+A small release that brings the desktop installer up to par with what
+shipped to web. The web app has been running v7.11.0 (CUDL Coverage)
+plus six post-release hotfixes since 2026-05-12; this release packages
+all of that into a desktop installer.
+
+The 5 commits past `242664d3` on master-main (cross-user lists cache,
+safe-storage wrapper, auth resurrection guard, persist_value, more
+safety reads) are intentionally NOT in this release — they are partial
+fixes superseded by the v7.12 Multitenant Architecture (Path B)
+milestone now in flight.
+
+### New on Desktop (from v7.11.0, never previously distributed to desktop users)
+
+- **108 CUDL-only manuscripts** — Cambridge CUDL classmarks that have no
+  NLI Alma record at all (including the originating user-reported case
+  `T-S NS 329.96`, plus ~100 Mosseri and CUL entries) now appear in
+  search results, the catalog browser, and the metadata viewer. Images
+  load from CUDL canvases; catalog, source, and bibliography panels
+  populate from FJMS data. No transcription text — these are
+  image+metadata-only records.
+- **Cambridge shelfmark normalization bridge** — alternative shelfmark
+  forms (`Moss. III,27O` ↔ `mosseriiii27o`, Cambridge `Or.` numeric
+  variants, leading-zero collisions, slash/comma/dot handling) now
+  resolve to the same record. Shelfmark search recovers thousands of
+  CUDL classmarks that previously appeared "missing" because of form
+  differences.
+- **"View on CUDL" link fixed** — works for previously-orphan Mosseri
+  and CUL shelfmarks that used to fall through to a slug-fallback that
+  404'd.
+- **Browse pagination for synthetic manuscripts** — Next/Prev navigation
+  on CUDL-only manuscripts (which have image pages but no transcription)
+  now works correctly.
+
+### Bug Fixes
+
+- **Desktop comments save** — 4 of 5 comment-type dropdown values
+  (`Question`, `Scholarly Note`, `Suggestion`, `Issue`) silently failed
+  to save with a `comments_scope_check` database error; only `General`
+  worked. Fixed by deriving `scope` from `page_number` presence
+  (matching the web client's behavior). (desktop)
+- **`/help` 500 error** — chained `set_visibility` calls on `ui.card()`
+  were breaking the `with` statement because `set_visibility` returns
+  `None`. (web)
+- **Cross-user export filename leak** — User A's saved search query
+  name appeared as the suggested `.xlsx` filename in User B's export
+  dialog. Search/parallels export endpoints were reading from a
+  process-wide singleton; routed all 5 `/api/export/*` handlers through
+  per-session app storage. (web)
+- **`/browse` 500 on pruned-session race** — stopping a search and then
+  opening a result on `/browse` raised an `AssertionError` when the
+  session_id had been evicted from NiceGUI's `_users` cache by the 10s
+  prune scheduler. Snapshot read/write helpers now degrade to defaults
+  instead of raising. (web)
+- **Browse Phase B enrichment silently failing on production** —
+  expanded manuscript panel was missing PGP description, FJMS catalog
+  records, bibliography, and measurements. A JS dispatch during the
+  detached `load_page` task was bubbling up a slot-lifecycle exception
+  that the enrichment gate was treating as an error. Wrapped the
+  dispatcher and extended the slot-race exception filter. (web)
+- **Lists "Sync Now" UX clarification** — renamed misleadingly-named
+  button to "Move to account" (it only migrated browser-localStorage
+  anonymous lists into the cloud account, NOT cloud→view), added a new
+  "Refresh from Cloud" button on the lists header for logged-in users,
+  reworded surrounding copy as a one-way browser→account move. (web)
+
+---
+
+## [7.11.0] - CUDL Coverage & Synthetic Inventories - 2026-05-12
+
+A 3-phase milestone (Phases 84, 85, 86) closing the gap between CUDL's ~141K
+classmark catalogue and GenizahSearch's libraries.csv. The originating
+user-reported case was `T-S NS 329.96` — present in CUDL with 2 image canvases,
+missing from libraries.csv because its FJMS inventory has no NLI Alma record at
+all. The milestone splits into normalization (recovering thousands of CUDL
+classmarks already represented in libraries.csv under different forms) and
+synthetic rows (a new 18-digit `99…000000` sys_id format for the small residue
+of truly-orphan FJMS inventories with no NLI counterpart).
+
+**Milestone outcome:**
+
+- **Phase 84** (CUDL Shelfmark Normalization) — `shared/fist_cudl_bridge.py`
+  bridge module with normalizers for Mosseri label form (`Moss. III,27O` ↔
+  `mosseriiii27o`), Cambridge Or. numeric collapse, leading-zero collision
+  audit, slash/comma/dot bug fixes. Wires into `get_image_sources`, browse
+  enrichment, shelfmark search fallback, and CUDL link builder.
+
+- **Phase 85** (Synthetic Infrastructure) — helper module
+  `shared/synthetic_sys_id.py`, generation script, FJMS sidecar UNION-ALL
+  pattern in export, browse hide-NLI gates, `is_synthetic` field on /api
+  responses + PostHog events, corrections-write reject. The initial Phase 85
+  POPULATION (5,035 bibliography-only rows) was reverted by `3c75a9bc` during
+  UAT — the infrastructure stays active but produces zero rows until Phase 86
+  re-attempts with image-bearing criteria.
+
+- **Phase 86** (CUDL Coverage Audit + Synthetic Re-attempt) — **108 image-bearing
+  synthetic manuscripts** including the originating case `T-S NS 329.96`. The
+  CUDL-walked qualifier requires (a) a CUDL manifest in `cambridge_manifests`,
+  (b) no real-Alma children, (c) unambiguous bridge resolution. AUDIT-02 5-tier
+  coverage report shows 96.23% phase84_hit + 2.39% phase86_existing_alma_candidate
+  + 0.08% phase86_synthetic + 1.13% phase86_residue. The 1,599-row residue
+  (29.99% of original 5,325 truly-orphan CUDL classmarks) is documented in
+  the Phase 86 residue-pattern notes (planning record, private repository)
+  with 6 pattern families analyzed and REJECTED — they need human-in-loop
+  adjudication, not new auto-rules.
+
+**Phase 85 background (kept for context):** The original Phase 85 attempt
+shipped INFRASTRUCTURE but reverted POPULATION during 2026-05-09 UAT. Plan
+02's "inclusive coverage stance" qualified InventoryIds on ANY FJMS signal,
+but the resulting 5,035 rows had only bibliography pointers (no text, no
+image, no catalog description) — not actionable for research without the
+underlying manuscript. Additionally, 175 of those rows shadowed real-Alma
+series-children (e.g. synthetic `T-S NS 161` shadowed 1,009 real
+`T-S NS 161.x` rows). User decision: revert the data, keep the
+infrastructure dormant, re-attempt in Phase 86 with image-bearing-only
+criteria. **Phase 86 delivered on that decision.**
+
+### Infrastructure landed (active in code, no production data)
+
+- `shared/synthetic_sys_id.py` helper module (Phase 85 SYNTH-01): pure functions
+  `is_synthetic_sys_id`, `encode_inventory_sys_id`, `decode_inventory_id`. Single
+  source of truth — repo-grep lint enforces no hand-rolled string slicing.
+- `scripts/generate_synthetic_rows.py` (Phase 85 SYNTH-02): regeneration script
+  with marker-fenced libraries.csv block, authoritative manifest, idempotent
+  `--dry-run` / `--apply` modes. Currently produces an empty manifest because
+  `libraries.csv` synthetic block was emptied. Phase 86 will tighten qualification.
+- `scripts/export_fist_enrichment.py` UNION-ALL pattern (Phase 85 SYNTH-05):
+  synthetic-AlmaId rows merged with real-Alma rows in 12 enrichment tables at
+  export time. Currently a no-op because manifest is empty.
+- Browse page hides KTIV link, NLI source toggle, NLI bibliography chips, and NLI
+  image source when `is_synthetic_sys_id(sys_id)` is true (Phase 85 SYNTH-04).
+  CUDL becomes the default image source when a Cambridge IIIF manifest is
+  available. Web + desktop parity. No-op in production until Phase 86 re-attempts.
+- `is_synthetic: bool` field on `/api/search`, `/api/browse`, and `/api/parallels`
+  response items (top-level, NOT nested under `locator`). Additive change —
+  `schema_version` stays `1` per the Phase 83 stability commitment. Always `false`
+  in production until Phase 86 re-attempts.
+- `is_synthetic` PostHog event property on `/api/search` and `/api/browse` events
+  (intentionally OMITTED from `/api/parallels` events — parallels takes `text`,
+  not `sys_id`, so there is no canonical seed sys_id to tag).
+- Corrections-write rejects synthetic sys_ids at the client-side write entry points
+  (`CorrectionsClient.create_correction` and
+  `SupabaseCorrectionsClient.create_correction`) with the message
+  `synthetic_corrections_disabled: ...`. Web and desktop "Edit" buttons are also
+  hidden as defense-in-depth. (REVIEWS-MODE iteration 1 B1+B2: there is no
+  `POST /api/corrections` HTTP route in this codebase — gating happens at the
+  client-class level.) No-op in production until Phase 86 re-attempts.
+
+### Deferred to Phase 86 (CUDL Coverage Audit + Synthetic Re-attempt)
+
+- **Synthetic re-attempt with image-bearing-only criteria.** Plan 02's "any FJMS
+  signal" qualification produced 5,035 bibliography-pointer-only rows that didn't
+  help researchers. Phase 86 will tighten `_build_qualifying_inventories` to
+  require: (a) a CUDL manifest in `nli_crossref.db.cambridge_manifests`, (b) no
+  real-Alma children of the synthetic's leaf shelfmark in libraries.csv (filter
+  from `reports/synthetic_parent_shelfmarks.csv`), and optionally (c) relax D-05a
+  STRICT for unambiguous multi_signature cases (so the originating user case
+  T-S NS 329.96 — 12 SignatureIds for one shelfmark — can be synthesized when
+  all 12 resolve to the same canonical_shelfmark + library_code). Expected
+  output: ~100-500 image-bearing synthetic rows (instead of 5,035 bib-only).
+- **Originating user case (T-S NS 329.96) and ~10,689 multi_signature peers.**
+  Logged to `reports/synthetic_ambiguity_residue.csv`. Phase 86 will triage and
+  decide which to admit under the relaxed D-05a.
+- **175 parent-shelfmark false synthetics shadowing 10,949 real-Alma children.**
+  Logged to `reports/synthetic_parent_shelfmarks.csv` (e.g. `T-S NS 161` had
+  1,009 real-Alma `161.x` children but was synthesized as a series-container).
+  Phase 86's "no real-Alma children" filter handles this.
+- **Corrections-write on synthetic rows.** `page_number` semantics undefined for
+  image-less synthetic inventories. Client-side write entries reject with
+  explicit error code; UI buttons hidden. A future plan will define proper
+  `page_number` semantics if image-bearing synthetics admit corrections.
+- **AUDIT-01, AUDIT-02, AUDIT-03** — Phase 86 re-runs `scripts/scan_cudl_orphans.py`
+  and produces `reports/cudl_coverage.md` confirming closure of the CUDL coverage
+  gap from Phase 84 normalization. Phase 85 carries forward the residue artifacts
+  (`reports/synthetic_ambiguity_residue.csv`,
+  `reports/synthetic_parent_shelfmarks.csv`, `fist_data/synthetic_manifest.json`)
+  for Phase 86 to consume.
+
+### Phase 84 — CUDL Shelfmark Normalization (active)
+
+- **`shared/fist_cudl_bridge.py`** — bridge module with FIST↔CUDL normalizers.
+  `lookup_fist_by_cudl`, `explain_fist_by_cudl`, `build_fist_alias_index`,
+  Mosseri label normalizer (`Moss. III,27O` ↔ `mosseriiii27o`), Cambridge Or.
+  numeric collapse, ambiguity-policy guard against leading-zero collisions.
+- **`shared/shelfmark_bridge.py`** — `build_alias_index()` + `lookup_cudl()`
+  wired into `genizah_core.resolve_system_by_shelfmark` as fallback for shelfmark
+  search misses, and into `get_image_sources()` so CUDL manifest URLs surface in
+  browse for previously-orphan shelfmarks.
+- **6 bridge wiring call sites** across `genizah_core.py`, `web/services.py`,
+  `web/pages/browse_enrichment.py:208`, image-source resolution, CUDL link
+  builder, and orphan-scanner unification. Web browse `View on CUDL` button
+  resolves correctly for Mosseri + CUL-CUDL shelfmarks that previously fell
+  through to lossy slug-fallback 404s.
+- **3-layer regression guard:** `cudl_must_resolve` fixture (positive tests),
+  `cudl_baseline_resolved` snapshot (regression detection), unit tests on
+  ambiguity policy. `scripts/build_cudl_fixture.py` regenerates from real data.
+
+### Phase 86 — CUDL Coverage Audit + Synthetic Re-attempt (active)
+
+- **108 image-bearing synthetic manuscripts** in `libraries.csv`, including
+  the originating user case `T-S NS 329.96` (sys_id `990065549106000000`). All
+  108 have CUDL canvas images accessible via the FIST↔CUDL bridge. Distribution:
+  101 CUL + 7 Mosseri. The synthetic block is marker-fenced in libraries.csv
+  for idempotent regeneration.
+- **Surgical DB injection** (`scripts/phase86_inject_synthetic_to_main_db.py`):
+  3,264 catalog rows + 103 FTS5 docs across 11 base tables in
+  `fjms_enrichment.db`, leaving the 7 supplemental tables (translations,
+  measurements, blank_images, extra_info, computed_measurements, import_meta,
+  fjms_translations) untouched. `catalog_sizes` skipped per Codex review
+  (schema drift — main has v7.3.0 measurements columns, worktree had v6.5 form).
+  Backup via `.backup()` API + full gzip CRC kept at
+  `_tmp/phase86_backups/fjms_enrichment.db.pre-inject.*.bak.gz`.
+- **Browse pagination for synthetic sys_ids** — synthetic rows have CUDL
+  canvases but no Tantivy transcription pages, so `total_pages=0` from the core
+  search engine. Fix derives `total_pages` from `cambridge_images` (web) and
+  enriched image lists (desktop) so Next/Prev work and the page combo populates.
+  Bypasses Tantivy for synthetic via `is_synthetic_sys_id` short-circuit,
+  preserves requested `p_num` through metadata-only fallback, tolerates NiceGUI
+  slot-lifecycle race during Phase A re-render.
+- **AUDIT-02 5-tier coverage report** (`reports/cudl_coverage.md`):
+  phase84_hit 96.23%, phase86_existing_alma_candidate 2.39%,
+  phase86_synthetic 0.08%, phase86_residue 1.13%, multi_inventory_ambiguous 0.18%.
+- **Residue patterns adjudication** — 6 pattern families analyzed in
+  the Phase 86 residue-pattern notes (planning record, private repository).
+  All marked REJECTED with carry-forward note: the residue (1,599 rows) reflects
+  EXISTING-rule over-aggressiveness, not missing rules. Human-in-loop
+  adjudication required, not new auto-rules.
+- **NLI attribution regression guard** — `scripts/audit_nli_attribution.py` +
+  `tests/fixtures/v7_9_4_nli_flipped_sys_ids.txt` (461-row golden fixture from
+  `git show 29fd3044`) confirm Phase 86 work did not regress the v7.9.4
+  Oxford→NLI library_code flip.
+
+### Browse Bug Fixes (Web + Desktop)
+
+- **Synthetic-row pagination** — `_get_metadata_only_browse_page` accepts
+  `p_num` / `absolute_index` / `next_prev` and produces a moving target page
+  clamped to ≥ 1. `browse_render_page` derives `total` from the largest of
+  `_browse_folio_images`, `images_ext`, or `images_nli` when `metadata_only`
+  and `total_pages==0`. Combo, page-count label, and viewer.set_page all sync
+  to the image-driven page count.
+
+### Other Fixes
+
+- **fix(search):** remove duplicate top-toolbar "Exclude manuscripts" button
+  (the filter panel already has one — the results bar entry was a stray
+  carry-over from an earlier UX iteration). Reduces visual noise.
+- **fix(search):** reset Text Position dropdown (Anywhere / Start / End /
+  Line starts / Line ends) on New Search + show active-state chip when not
+  set to default. Previously persisted across sessions and caused stealth
+  "why aren't my results showing up" confusion.
+- **fix(ci):** remove unused `pytest` imports flagged by ruff F401 across
+  Phase 86 test files.
+
+### Database Refresh
+
+- **`fjms_enrichment.db`** rebuilt with 3,264 synthetic rows + 103 FTS5 docs
+  added via surgical INSERT-only migration. All 7 supplemental tables
+  preserved. Backup retained on server as
+  `fjms_enrichment.db.pre-phase86-20260512`.
+
+### Migration Notes
+
+- **Deploy posture established:** scp DBs FIRST, then push code. The
+  2026-05-11 incident (deployed code without DB sync → catalog/PGP/bib data
+  loss → reverted to `6ce42522`) is now codified as the standard runbook.
+- **Web auto-deployed** 2026-05-12 via `deploy.sh` after scp of
+  `fjms_enrichment.db` + atomic systemd swap. Old DB preserved on server.
+- **Desktop installer** rebuilt and bundled with updated `libraries.csv`
+  (108 synthetic rows) + `fjms_enrichment.db` (3,264 synthetic rows). No
+  user-data migration required.
+
+---
+
+## [7.10.0] - Search API Public Release - 2026-05-05
+
+The v7.10 milestone (Phases 77–83 — 8 phase entries: 77, 78, 79, 80, 81A, 81B, 82, 83 — spanning serializer foundation, search/browse/parallels endpoints, hardening, contract expansion, reference Claude skill, internal docs, and public release) ships a public HTTP/JSON search-helper API over the existing Genizah corpus. Three endpoints — `POST /api/search`, `GET /api/browse`, `POST /api/parallels` — together let a research consumer execute keyword/Responsa search, drill down to a single manuscript page with PGP/FJMS/NLI enrichment, and run composition-parallels detection over arbitrary input text. The API is documented, OpenAPI-spec'd at `/api/openapi.json` with interactive Swagger UI at `/api/docs`, and publicly accessible. A reference Claude skill (`cairo-genizah-research`) demonstrates the full workflow.
+
+### New Features
+
+- **`POST /api/search`** — Keyword, variant, Responsa, Title, and Shelfmark search modes. Returns ranked manuscript results with locators for drill-down. Phase 78 / 81A.
+- **`GET /api/browse`** — Stateless manuscript drill-down from a search locator. Returns PGP transcription (when available), FJMS/NLI metadata, and image URLs. Phase 79.
+- **`POST /api/parallels`** — Composition-parallels detection using sliding-window chunk matching. Returns ranked parallel-witness groups with per-chunk match evidence. Phase 80.
+- **OpenAPI spec at `/api/openapi.json`** — Auto-generated from Pydantic models with explicit `openapi_extra` metadata; scoped to the 3 search-helper endpoints (legacy `/api/*` proxies excluded). Phase 83.
+- **Swagger UI at `/api/docs`** — Interactive endpoint explorer with try-it-now and full request/response schema documentation. Phase 83.
+- **JSON export toolbar buttons** — `/search` and `/parallels` pages have a download button for the current result set in the Claude-friendly JSON format. Phase 77.
+
+### Security & Hardening (web)
+
+- Per-IP rate limiting (30 req/min default, independent bucket per endpoint, configurable via `SEARCH_API_RATE_LIMIT`). Phase 78.
+- `SEARCH_API_MODE` env-var gate (`open` / `localhost-only` / `disabled`), flippable without restart. Phase 78.
+- Uniform error envelope `{"error": {"code": ..., "message": ...}}` across all three endpoints. Phase 78.
+- XFF spoofing protection via trusted-proxy allowlist and rightmost-non-trusted resolution. Phase 78.
+- Fail-closed filter validation — unknown filter values rejected at 400, not silently dropped. Phase 78.
+- Responsa expansion cap (`MAX_EXPANDED_TERMS=500`) guards against adversarial query expansion. Phase 78.
+- HMAC-hashed IP telemetry in PostHog with `POSTHOG_IP_SALT` persistence. Phase 78.
+- Phase 83 security audit (`83-SECURITY.md`): all Phase 78–81B mitigations re-verified load-bearing pre-deploy; Post-Deploy Verification checklist (7 items) re-run against production.
+
+### Documentation (web)
+
+- `docs/SEARCH_API.md` — Reframed from internal-only to a public API reference: request/response shapes, error codes, rate-limit architecture, env vars, curl examples with JSON response excerpts, Stability statement, Quick Start, Attribution, Changelog. Phase 82/83.
+- Stability statement: additive changes any time; breaking changes only on major-version releases announced in `CHANGELOG.md`. Phase 83.
+- `README.md` "## API" section added linking to the public docs. Phase 83.
+
+### Internal
+
+- `shared/search_serializer.py` — Single source of truth for JSON envelope shape (search, browse, parallels). Phase 77.
+- `skills/cairo-genizah-research/` — Reference Claude skill consuming all 3 endpoints with file-locked token-bucket throttling, tiered ranking, and browse-honesty annotations. Phase 81B.
+- Phase 81A: `search_mode` enum (`exact` / `variants` / `responsa` / `title` / `shelfmark`) + `responsa_options` flag bag + `request` echo block on all responses. Breaking change from Phase 78 `mode` field (announced at Phase 81A deploy).
+
+### Release Mechanics
+
+- Web-only release. NO desktop installer rebuilt or distributed (`bump_version.py` updates `CompileScriptGenizah.iss` as housekeeping only).
+- NO GitHub Release object created (desktop polls `releases/latest` for update prompts; a no-installer release would prompt every desktop user).
+- NO `v7.10.0` git tag (consistent with prior web-only release pattern in `CLAUDE.md` "Recently Changed" history).
+- Release identity lives in `version.py` + this CHANGELOG entry + the master-main commit SHA.
+- Rollback: `SEARCH_API_MODE=disabled` env-var flip on production kills the public surface in seconds (zero-downtime).
+
+---
+
+## [7.9.4] - NLI Library Code Fix - 2026-05-04
+
+A tiny data-only patch correcting library attribution for 461 National Library of Israel manuscripts that were rendering as Oxford in browse.
+
+### Bug Fixes
+
+- **NLI manuscripts shown as Oxford**: 461 rows in `libraries.csv` had `library_code=Oxford` despite the call_numbers containing only NLI shelfmarks (`The National Library of Israel Ms. Heb. ...` or `JER NLI Heb`). Browse routing keys off `library_code`, so external links and source toggles rendered as Oxford. Bad data has been present since `libraries.csv` was first introduced (commit `68dc0e99`); just surfaced now via a user report on `sys_id=990025143260205171`. Fixed via `scripts/fix_nli_oxford_mislabel.py` flipping the 461 unambiguous rows to `library_code=NLI`. (both apps)
+
+### Internal
+
+- New script `scripts/fix_nli_oxford_mislabel.py` retained for future audits — preserves CRLF line endings and only flips rows where call_numbers contain an NLI signal but no Oxford signal (Allony/Harkavy/HAS cross-listings deliberately untouched).
+
+---
+
+## [7.9.3] - Visual Similarity Dialog Fixes - 2026-04-24
+
+A small web-only patch fixing three usability bugs in the Visual Similarity dialog, all surfaced by the same user report.
+
+### Bug Fixes
+
+- **Firefox: `Show more` unreachable past 20 results**: the right-pane Quasar `scroll_area` did not scroll reliably in Firefox, so the pagination control below the initial 20 suggestions could not be reached (Chrome was unaffected). Replaced the wrapper with a plain `div` using `overflow-y: auto; height: 100%`. (web)
+- **Ctrl/Cmd-click and middle-click opened in the same tab**: shelfmarks and the `open_in_new` icon were `ui.button`s navigating programmatically via `ui.navigate.to()`, so browser-native modifier-click never fired. Converted shelfmarks to real `ui.link('/browse?sys_id=...')` anchors and wrapped the `open_in_new` icon in `ui.link(..., new_tab=True)`. (web)
+- **Shelfmarks missing from copy-paste**: Quasar's `q-btn` sets `user-select: none`, so manually selecting the suggestion list excluded the shelfmark column — the most important field. `ui.link` uses a plain anchor with `user-select: text`, so shelfmarks now copy with the rest of the row. (web)
+
+### Internal
+
+- Remaining per-row action buttons (Add to Puzzle, Add to List, Add as Join) moved to `click.stop` handlers so they don't also trigger the row-expansion toggle. (web)
+
+---
+
+## [7.9.2] - PGP Data Refresh - 2026-04-22
+
+Refreshes our bundled Princeton Geniza Project metadata (last imported February). Plus two small post-7.9.1 fixes.
+
+### Data
+
+- **PGP metadata refresh**: re-imported from [princetongenizalab/pgp-metadata](https://github.com/princetongenizalab/pgp-metadata). +147 documents, +159 source editions/translations, +211 footnotes, +345 fragment links. `pgp.db` rebuilt (148.6 MB).
+
+### Bug Fixes
+
+- **Web browse source buttons**: Oxford and NLI source-toggle buttons on `/browse` restored (regressed post-7.9.1). (web)
+- **Desktop Cambridge nav**: fixed undefined `page_idx` in the Cambridge nav helper (ruff F821). (desktop)
+
+---
+
+## [7.9.1] - Catalog Attribution & Reading Desk Polish - 2026-04-22
+
+Data-quality fixes across FJMS source attribution, JTS and Cambridge image alignment, plus Reading Desk UX polish on the desktop. Also ships Phase 64/65 code-review follow-ups, security hardening, and web log hygiene.
+
+### Bug Fixes
+
+- **FJMS empty catalog dialogs**: ~30K manuscripts that previously rendered empty `Catalog Information` dialogs (source label was `Instatution` — an export typo suppressed by 5 of 6 `GENERIC_SOURCE_NAMES` consumers) now show real institutional attributions. Local `CODE_Institution` join rewrote 267,104 `catalog` rows and 47,800 `catalog_free_desc` rows across 8 SubIds — top by volume: GRU – Cambridge (161K), Schocken-Zulay (51K), Fleischer Piyut Project (30K), Yad Harav Herzog (15K), Uri Ehrlich (8K). 100% resolution; 4 new regression tests. (both apps)
+- **JTS browse source-switch button**: ENA manuscripts like `ENA 1052.1` (sys_id 990053572370205171) couldn't toggle to Princeton DPUL images. Stack of 4 bugs: (1) MARC 942$z parser now prefers first non-numeric value, avoiding FGP photo-ID clobber of the real shelfmark; (2) new `_jts_shelfmark_variants` helper tolerates `Ms.`/`MS.` prefix mismatch; (3) new `get_jts_urls_for_sys_id(sys_id)` resolves via `nli_images.Shelfmark ↔ jts_dpul.shelfmark` JOIN in one query, replacing up to 16 variant lookups; (4) NLI IIIF/MARC/Figgy timeouts tightened 10s→5s + per-sys_id negative cache + class-level circuit breaker (3 consecutive NLI failures → 60s skip), cutting JTS navigation lag ~25s → ~5s per hop. (both apps)
+- **CUL CUDL/NLI image alignment**: Bifolio, binding-canvas, and count-matched-but-order-mismatched CUDL manifests (e.g., T-S NS 158.112 with 14 transcription pages vs 12 CUDL canvases; Or.2245 with same-count but index-2 divergence) could display a wrong-leaf image. New `classify_cambridge_alignment()` helper returns `aligned | misaligned | unknown` + reason; `enrich_metadata` computes the verdict once and 5 previously-duplicated decision sites consume it, defaulting the whole manuscript to NLI when misaligned. CUL-only scope preserves non-CUL Cambridge (Mosseri, Gaster, private CUDL). 7 new regression tests. (both apps)
+- **CUL paired-leaf folio labels**: `_FOLIO_PATTERN` now accepts `L{first}_{second}F...S{side}` bifolio notation — bifolio CUL manuscripts now show folio labels (1r, 1v, 2r, 2v) in the picker instead of flat page numbers. (both apps)
+- **Desktop past-CUDL auto-fallback**: Viewer auto-flips to NLI images when navigating past the last CUDL page, auto-restores CUDL on return. Also disambiguates `folio_num` vs 1-indexed `page_num` across 6 image-index call sites. 18 regression tests. (desktop)
+- **Reading Desk "No images available"**: Fragments added from a list, the top shelfmark field, or the green-bar input that hadn't been browsed earlier in the session showed no images, because the viewer reads from `meta_mgr.nli_cache[sid]` which is only populated by metadata enrichment. New `_browse_rd_enrich_entry(sys_id, volume_ie=None)` helper launches enrichment on add and re-renders on completion. Threads deduped in a sys_id-keyed dict with `wait(1500)`-then-terminate on exit and window close. Volume-aware: when the added fragment matches the currently-browsed manuscript, its `volume_ie` is carried through so multi-IE fragments backfill the correct volume. (desktop)
+- **Reading Desk green toolbar too tall**: Green bar used to stretch vertically because its `QWidget` used the default size policy. Now `QSizePolicy(Preferred, Fixed)` pins it to its inner scroll-row height; margins/padding also slimmed. (desktop)
+- **Reading Desk "Add to View" ignored typed input**: Clicking Add to View with a new shelfmark typed in the top bar silently re-added the currently-loaded manuscript. Now resolves typed shelfmark/sys_id via `resolve_system_by_shelfmark` (with multi-match dialog + not-found warning) and adds that target. (desktop)
+- **Reading Desk field empty on entry**: Green toolbar's shelfmark input was empty when the desk opened. Now pre-populates with the last-added entry so the user can tweak and press Enter to add a variant. (desktop)
+- **What's New dialog RTL alignment**: Hebrew bullet paragraphs were left-edge aligned. Now the wrapping `<div>` carries `dir='rtl' align='right'` and the `QLabel` is set to `AlignRight | AlignTop` in Hebrew. (desktop)
+- **Banner auto-dismiss ordering**: Site-wide "What's New" banner and `/home` OCR disclaimer previously persisted the dismissed flag before deleting the banner, so navigating away within 10s permanently hid the banner on next reload without user interaction. Now the flag is persisted only on successful `.delete()`. (web)
+
+### Improvements
+
+- **FJMS catalog within-source dedup**: Duplicate rows from the same SourceName no longer appear as separate entries. (desktop)
+- **Web `/_nicegui/` framework assets marked noindex**: `X-Robots-Tag: noindex` header so internal ESM/module URLs don't surface as Search Console "pages". Still crawlable for rendering. (web)
+- **Journalctl log hygiene**: 3 `ui.timer()` callsites in ephemeral containers (What's New banner, OCR disclaimer, `/home` carousel) converted to `asyncio.call_later` / `ensure_future`, eliminating recurring `RuntimeError: The parent slot of the element has been deleted` spam. (web)
+
+### Security
+
+- **PostgREST `.or_()` ilike sanitization**: Added `_sanitize_ilike_pattern(value)` helper that strips PostgREST filter separators (`,` `(` `)` `*`), LIKE wildcards (`%` `_`), backslashes, and newlines. Applied at 4 `supabase_corrections_client.py` callsites: `list_corrections`, `get_connected_fragments`, `list_all_fragment_joins`, `list_user_fragment_joins`. Closes Phase 64 CR-02. (desktop)
+- **Supabase config unified via shared provider**: `supabase_corrections_client.py` now imports `SUPABASE_URL` / `SUPABASE_ANON_KEY` from `shared/supabase_provider.py`. Provider opportunistically calls `load_dotenv()` at import (non-fatal if missing), so desktop entry points pick up `.env` without their own call. Closes Phase 64 CR-01. (desktop)
+
+### Data
+
+- **`fjms_enrichment.db` upload** (1.6 GB, 2026-04-21 build): bundles the Instatution migration above plus Shivtiel transliteration fix (ת→ט across 14,608 rows), Sussmann Supplement translation (111 rows), and 36 empty "צוות 500" placeholder records removed.
+
+### Internal
+
+- **`/_internal/memstat`** diagnostic endpoint (gated by `MEMSTAT_SECRET` header) added for leak investigation post-v7.9.0. (web)
+- **Phase 65 code-review cleanup**: WR-01 `import re as _re` moved to top of `web/main.py`; WR-02 misleading exception comment in `puzzle_tokens.py:verify_upload_token` corrected; IN-01 redundant `except (AssertionError, Exception)` simplified in `auth_state.py`; IN-02 NiceGUI upgrade threshold extracted to `_PATCH_AUDIT_THRESHOLD` constant with module-load WARNING on exceed.
+
+---
+
+## [7.9.0] - Structural Foundation + Decomposition - 2026-04-19
+
+Bundles the two internal GSD milestones `v7.8` (Structural Foundation, 2026-04-15) and `v7.9` (Decomposition, 2026-04-17) into a shippable release, plus a back-navigation bugfix caught during Phase 75 verification and a CUL paired-leaf folio-label fix. Zero user-visible behavior changes except the two bug fixes below.
+
+### Bug Fixes
+- **Back-navigation state loss**: browser Back from `/browse` to `/search` now restores the saved snapshot; regression introduced 2026-03-27 (commit `829cd7cf`) and fixed 2026-04-17 (commit `8f9c5ef3`). Caught during Phase 75 non-regression verification.
+- **CUL paired-leaf folio labels**: `parse_folio_label` now handles paired-leaf bifolio `ImageName` patterns (e.g., T-S NS 158.112), so image-text alignment is correct for these manuscripts.
+
+### Internal: v7.9 Decomposition (milestone complete 2026-04-17)
+10 phases, 23 plans. Zero user-visible behavior changes.
+- **Desktop split**: `ResultDialog`, filter/scholarly dialogs, image viewers (`ManuscriptViewerWidget`, `FullscreenImageWindow`), puzzle canvas, VS cache, and shared widgets extracted into a new `desktop/` package — `genizah_app.py` slimmer (though remaining core still ~22.5K lines per external review)
+- **Web split**: `web/pages/search.py` decomposed into `search_state.py` + `search_results.py`; `web/pages/browse.py` decomposed into `browse_state.py` + `browse_enrichment.py`
+- **Page-scoped state refactor**: reduced `app.storage.user` sprawl and detached `asyncio.ensure_future` usage in search and browse pages
+- **Documentation**: `docs/CODE_INDEX.md` v7.9 section regenerated via new `scripts/gen_code_index_section.py` AST generator; `check_docs` green
+
+### Internal: v7.8 Structural Foundation (milestone complete 2026-04-15)
+4 phases, 9 plans, 64 commits, 173 files changed (+6,269/-828 lines). Zero user-visible behavior changes. 12/12 requirements satisfied.
+- **CI safety net**: GitHub Actions with Ubuntu + Windows matrix running `ruff` + `check_docs` + `pytest` (`.github/workflows/ci.yml`)
+- **Dependency pinning**: `requirements.txt` (14 direct) + `requirements-lock.txt` (115 transitive) for reproducible builds
+- **Supabase auth migration**: deprecated `gotrue` error surface replaced with `supabase_auth`; PKCE-only OAuth flow
+- **Silent-exception audit**: 205+ `except: pass` handlers reviewed across 76 first-party files
+- **Framework-patch isolation**: NiceGUI monkey-patches moved into `web/framework_patches.py` with version guards and logging
+- **Repo hygiene**: `.gitignore` 50 → 126 lines; untracked root files 67 → 1; CODE_INDEX / OPEN_ISSUES / DEVELOPER_GUIDE docs refreshed
+
+### Build / Release Tooling
+- **`scripts/bump_version.py`**: added README installer-filename regex so `GenizahSearchPro_V<X.Y.Z>_Setup.exe` stays in sync on future bumps. Closes long-standing drift (filename had been stale since v6.1.1, eight releases).
+
+---
+
+## [7.7.2] - PageSpeed Quick Wins (A11y + Perf) - 2026-04-13
+
+### Accessibility
+- **Valid html lang attribute**: Fixed Lighthouse "Document does not have a valid `lang` attribute" by passing full Quasar lang pack (with `isoName`) to `Quasar.lang.set()` instead of partial `{rtl: false}` object, which caused `<html lang="undefined">`. Added JS belt-and-braces guard + NiceGUI template patch at startup (web)
+- **Aria-labels**: Added descriptive `aria-label` to 10 icon-only buttons (help, dismiss, theme toggles, citation copy/close, OCR banner dismiss, hero search) (web)
+- **Color contrast (WCAG AA)**: Light-theme `--text-muted` `#94a3b8` → `#64748b` (2.34:1 → 4.63:1); global link color `--primary-700` replaces Quasar default `#5898d4` (3.06:1 → 5.44:1); dark-theme overrides for `--text-muted`, `--primary-600/700`, and Quasar primary/secondary/accent tokens so inline links and badges meet AA on dark backgrounds (web)
+- **Heading hierarchy**: Homepage "What is the Cairo Genizah?" promoted from `h3` to `h2` (web)
+
+### Performance
+- **font-display: swap**: Starlette middleware injects `font-display: swap` into NiceGUI's `fonts.css` response, preventing ~1200ms of invisible text on slow connections (web)
+- **Conditional iiif preconnect**: `<link rel="preconnect" href="https://iiif.nli.org.il">` now only emitted on routes that actually load manuscript images (`/search`, `/browse`, `/puzzle`) instead of every page (web)
+
+### Results (Lighthouse desktop, homepage)
+- Accessibility: 85 → 96 (target ≥95)
+- Performance: 90 → 98 (target ≥93)
+- SEO: 100 (unchanged)
+- Remaining: 13 parchment-theme color-contrast warnings (same root cause as dark-theme fix, deferred — a11y still above target)
+
+---
+
+## [7.7.1] - SEO Round 2 - 2026-04-13
+
+### Improvements
+- **Bilingual meta tags**: Default title now bilingual (English brand + Hebrew search phrase + Hebrew brand) so the site can rank for Hebrew queries like "חיפוש בגניזה הקהירית" while preserving English brand identity. Description, keywords, and JSON-LD alternateName also include both languages (web)
+- **Per-page titles**: Indexable pages (`/browse`, `/catalog-browse`, `/about`) use English-leading bilingual format; manuscript pages stay shelfmark-first; low-intent pages (`/help`, `/download`, `/accessibility`) restored to original concise English (web)
+- **Homepage h1**: Updated to "אתר הגניזה של דיקטה — חיפוש בגניזה הקהירית" (in Hebrew UI mode) so target search phrases appear in visible above-the-fold content for crawlers (web)
+- **Structured data**: Added Organization JSON-LD on homepage and BreadcrumbList JSON-LD on browse manuscript pages. Also added Sitelinks Search Box (SearchAction) markup — note: Google deprecated this surface in November 2024, but markup is harmless and may be used elsewhere (web)
+- **Performance**: PostHog analytics deferred past first paint via requestIdleCallback; dns-prefetch hints added for analytics CDNs (web)
+- **Title consistency fix**: Client-side intra-app navigation on `/browse` no longer overrides server-rendered title to a different format (web)
+
+### Known Limitations
+- Real performance measurement (Lighthouse / PageSpeed Insights / Search Console) was NOT performed in this release — placeholder analysis only. Schedule a follow-up with real Search Console URL Inspection and PSI runs after deploy.
+- Site is single-URL bilingual (no `/he/` vs `/en/` routes, no hreflang). Google sees Hebrew as the default rendered language because UI defaults to Hebrew. Future phase: per-language URLs with hreflang.
+- Browse and catalog page bodies are mostly empty until WebSocket hydration — limits crawlable text content. Tracked in `docs/OPEN_ISSUES.md`.
+
+---
+
+## [7.7.0] - Volume-Aware Browse - 2026-04-01
+
+### New Features
+- **Volume-aware browsing**: 3,193 multi-IE manuscripts now show a volume selector, allowing users to switch between different microfilm scans (IEs) with correct text and images per volume (both apps)
+- **Volume-specific community data**: Corrections and comments are tagged with the active IE, so notes on Volume 2 only appear when browsing Volume 2 (legacy data with no IE tag still shows everywhere)
+- **Auto-default to external image sources**: Manchester LUNA, Cambridge IIIF, and JTS/Princeton DPUL images now auto-load when available, instead of waiting for manual source switching (web)
+
+### Improvements
+- **Volume-correct external images**: Manchester and Oxford images properly offset by volume — Volume 2 shows the correct folio, not Volume 1's images (both apps)
+- **Desktop external image filtering**: Manchester/Cambridge/JTS canvases filtered to active volume's pages instead of showing all volumes' images (desktop)
+- **Volume page counts**: Volume selector shows actual transcription page count per volume instead of total IIIF manifest pages (both apps)
+- **Thread-safe browse_map loading**: `threading.Lock` replaces boolean flag to prevent concurrent pickle read/write race conditions
+- **Browse_map IE repair**: Automatically restores pages from non-primary IEs that were lost by pre-v7.7 deduplication, with UID format correction for Tantivy index compatibility
+
+### Bug Fixes
+- **Multi-IE image/text mismatch**: Browse page showed images from Volume 1 regardless of which volume's text was displayed — now each volume shows its own matching images
+- **Browse_map pickle corruption**: Multiple SearchEngine instances loading simultaneously no longer causes "pickle data was truncated" errors
+- **Notes/comments ie_id gap**: `create_notes_panel` and `create_notes_button` now pass volume IE to comment queries
+
+---
+
+## [7.6.0] - Visual Similarity Suggestions - 2026-03-31
+
+### New Features
+- **Visual Similarity browse dialog**: New "Visual Similarity" button in the browse page opens a side-by-side workbench showing ranked image-similarity partners from FJMS SVM analysis (~15.5M pairs). Each suggestion shows a thumbnail, shelfmark, domain, library, and score — with Browse, Puzzle, and "Add as Join" action buttons (both apps)
+- **Search in visual suggestions**: From the VS dialog, restrict a text search to the suggestion partner pool. Supports union (any manuscript's partners) and intersection (shared partners only) modes for multi-manuscript selection (both apps)
+
+### Improvements
+- **VS text snippet preloading**: First 20 suggestions preload text snippets in the background for instant preview
+- **VS performance**: 4 regressions fixed from Codex audit — batch enrichment, lazy loading, query optimization
+- **Exclusion dialog "Active exclusions" section**: Clicking the "Exclude Manuscripts" button now shows currently active sources with per-source remove buttons and "Clear all"
+- **New Search clears exclusions**: The reset button now properly clears exclusion sources and their persisted storage
+
+### Bug Fixes
+- **Exclusion chip persisted after New Search**: "Exclude Manuscripts (N)" button remained visible after clicking "New Search" — now properly cleared
+- **VS dialog scrolling**: Fixed web VS dialog right pane not scrolling to show all suggestions
+- **VS dark mode**: Fixed background colors and search URL parameters in dark mode
+- **Desktop VS puzzle integration**: Fixed add_to_puzzle method call from VS dialog
+
+---
+
+## [7.5.0] - Exclude Known Manuscripts - 2026-03-29
+
+### New Features
+- **Exclude known manuscripts**: Hide already-reviewed manuscripts from search results using saved lists, imported shelfmark files (TXT/CSV), or pasted shelfmarks. Multi-source tracking with per-source clear, collapsible excluded section showing what was hidden and why, resolution report table with per-row status (found/not found/duplicate). Available in both web and desktop apps
+- **Web exclusion dialog**: Tabbed picker with "Paste Shelfmarks" (default), "From List" (expandable with per-manuscript checkboxes), and "From File" (upload with resolution preview). Three entry points: results header button, post-search filter panel, and "Search only in..." pre-search panel
+- **Desktop exclusion dialog**: Enhanced ExcludeDialog with QTabWidget — "From File / Manual" tab with resolution report table and "From List" tab with "Load to Editor" workflow for review before applying
+
+### Improvements
+- **Desktop exclusion by row hiding**: Uses QTableWidget `setRowHidden()` to instantly toggle visibility without re-rendering — preserves enrichment state (domain badges, printed indicators, scroll position)
+- **Export respects exclusions**: Both desktop and web exports (Excel/CSV/Word) now only include visible (non-excluded) manuscripts (WYSIWYG export)
+- **Session persistence**: Exclusion sources survive page navigation and session restore, with backward compatibility for legacy exclusion state
+- **38 Hebrew translations**: Full bilingual coverage for all exclusion UI strings
+
+### Bug Fixes
+- **Bracket-aware search**: Searching `נשתנה` now finds `]נשתנה` (bracket-transparent matching)
+
+---
+
+## [7.4.0] - Search Within Results - 2026-03-29
+
+### New Features
+- **Search within results**: Progressive refinement — run a second query restricted to manuscripts from your current result set. Breadcrumb chip chain shows refinement history with per-chip removal, cross-mode support (text, Responsa, Title, Shelfmark), "Only results with all terms" page-level filter, and chain-aware snippet highlighting
+- **Lightweight browse first-render**: Browse page first paint now uses only Tantivy + csv_bank (zero SQLite calls). Crossref, Oxford, Cambridge, and attribution data load asynchronously in Phase B enrichment — faster first content for users and 255K sitemap URLs for crawlers
+
+### Improvements
+- **Thread-safe SQLite services**: All shared services (FJMS, NLI, PGP, Translation) now use per-thread connections for safer concurrent access
+- **NiceGUI ESM handler hardening**: Patched ESM static file handler to reject directory path traversal
+
+### Bug Fixes
+- **Bracket-aware search**: Searching `נשתנה` now finds `]נשתנה` (bracket-transparent matching). Searching `]נשתנה` still matches only the bracketed form (literal match). Two-layer fix: Tantivy OR-expansion with bracket variants for candidate recall, plus conditional bracket stripping in regex phase. Correctly handles Responsa `[N]`/`[|N]` gap operators, position filters (start/end/line), and composition search
+- **csv_bank race condition**: Fixed `dictionary changed size during iteration` error in metadata search under concurrent access
+- **Browse stale enrichment guard**: Generation counter re-checked after deferred Oxford translation fetch to prevent stale state on rapid navigation
+- **Metadata-only page state**: Records without transcription text now correctly show page 1 with folio label after enrichment (was stuck at page 0)
+
+---
+
+## [7.3.1] - SEO Foundation & Shareable Browse URLs - 2026-03-27
+
+### New Features
+- **Shareable browse URLs**: Browser URL bar now updates to reflect the current manuscript and page (e.g., `/browse?sys_id=...&page=2`) as you navigate, so links can be copied and shared. Preserves highlight terms within the same manuscript, clears them on manuscript change
+- **Share button**: New share icon in the manuscript header toolbar copies the current URL to clipboard with visual toast feedback
+
+### Improvements
+- **Per-page metadata**: Every web route now has a unique title, description, canonical URL, and OG/Twitter tags (replaced global META_TAGS that pointed every page's canonical at the homepage)
+- **Manuscript-specific metadata**: Browse pages with sys_id resolve the real shelfmark for title/description/canonical (e.g., "T-S 12.123 — Manuscript | Dicta Genizah Search")
+- **Manuscript sitemap**: Sitemap index with ~255K manuscript URLs in 40K-per-file chunks, replacing the previous 11-URL static sitemap
+- **Indexability policy**: Search, parallels, lists, settings, corrections, admin, and profile pages marked `noindex, follow`; robots.txt aligned
+- **Homepage structured data**: WebSite JSON-LD with publisher, bilingual name, and languages
+- **Performance hints**: Preconnect for NLI IIIF server, DNS prefetch for Cambridge CUDL
+
+---
+
+## [7.3.0] - Manuscript Measurements, Bibliography Cleanup & Desktop Stability - 2026-03-26
+
+### New Features
+- **Manuscript Measurements dialog**: New "Measurements" button in browse (web + desktop) opens a detailed dialog showing physical dimensions, margins, line counts, text density, material, and DPI quality — per-image data from 434K computed measurements and 179K catalog size records across 231K manuscripts
+
+### Improvements
+- **Bibliography dedup**: Removed ~401K duplicate bibliography entries (828K → 427K, 48.4% reduction) via exact and near-dupe merge passes
+- **55K new Hebrew translations**: English free descriptions (FreeDesc) now available in Hebrew via Dicta Translation, with hallucination filtering
+- **Persistent NLI FL-ID cache**: Cache survives service restarts, reducing repeated IIIF manifest lookups
+- **NLI concurrent fetches**: Default bumped from 4 to 8 for faster image loading
+
+### Bug Fixes
+- **Desktop browse tab crash**: Fixed crash when rapidly navigating between manuscripts — added 150ms navigation debounce, generation guard, and proper QThread lifecycle for image loaders
+- **Desktop image thread lifecycle**: Threads now properly terminate on teardown instead of being dropped, preventing orphaned workers
+- **ResultDialog image threads**: Wait-or-terminate pattern prevents thread leaks when closing dialogs
+- **Profiles FK join**: Reverted broken foreign key join in community comments/responses, using batch lookup instead
+
+---
+
+## [7.2.4] - JTS Image Upgrade + Shelfmark Search Fixes - 2026-03-25
+
+### New Features
+- **Princeton DPUL as primary JTS image source**: JTS manuscripts now auto-default to Princeton Digital PUL images (36,283 items via full DPUL catalog import v2), replacing unreliable manifest-based loading
+- **Desktop "Printed" badge**: ResultDialog info row and browse tab now show "Printed"/"דפוס" badge for printed materials, with per-session FJMS cache
+- **Blue mat auto-detection**: Background removal now auto-detects blue conservation mats across all libraries instead of hardcoding CUL only
+
+### Improvements
+- **Enhanced shelfmark lookup**: Strips full library names ("Cambridge University Library", "British Library") not just codes; ENA-MS/ENA MS normalized to ENA for JTS variant matching
+- **FJMS bibliography enrichment**: 8 new FIST fields (JournalVolumeTxt, Hebrew title support), fixed volume source attribution
+- **Deduplicated catalog descriptions**: FJMS catalog free descriptions no longer show duplicates in get_catalog_detail()
+- **Search performance**: Removed duplicate search enrichment pass and redundant background FJMS prewarm
+- **Shared JS extraction**: Filter panel and manuscript viewer JavaScript extracted into reusable modules (~1,050 lines deduplicated)
+
+### Bug Fixes
+- **Browse shelfmark search**: Fixed slot context, stale content, and async caller issues
+- **PostHog UX & auth**: Rageclick prevention (immediate button disable), OAuth implicit flow fix, login tracking enrichment, login dialog for anonymous write actions
+- **JTS external link**: Now points to DPUL catalog page instead of raw manifest URL
+- **Puzzle from ResultDialog**: Fixed add-to-puzzle using correct viewer image list, proper shelfmark/fl_id, and auto-close dialog
+- **Puzzle external fragments**: Fixed session restore, metadata persistence, NLI timeout skip for non-NLI libraries, NiceGUI context loss on add-from-browse
+- **Puzzle extension banner**: Fixed English text showing in Hebrew UI
+- **Image viewer**: Guarded viewer.init() call in handleImageError for viewers without init
+
+### Tests
+- Fixed puzzle model tests (join_type default changed to 'physical')
+- Fixed responsa explosion guard tests (Hebrew tr() warning assertions)
+
+---
+
+## [7.2.3] - Chrome Extension Live + Puzzle Enabled - 2026-03-20
+
+### New Features
+- **Chrome Web Store install link**: Puzzle extension install banner now includes a clickable "Install Extension" / "התקינו את התוסף" button linking to the live Chrome Web Store listing
+- **Puzzle enabled by default**: `WEB_PUZZLE_ENABLED` now defaults to `True` — the Fragment Puzzle page is available on all deployments without setting an environment variable
+
+### Improvements
+- **Banner text escaping**: Switched from manual `.replace()` to `json.dumps()` for safer JS string injection in puzzle banner texts
+
+---
+
+## [7.2.2] - Desktop Browse Tab Polish - 2026-03-20
+
+### Improvements
+- **Browse button icons**: All browse tab buttons now have emoji icons matching ResultDialog style (Puzzle, Parallels, List, Info, View on Ktiv, View Corrections, Add to View)
+- **Reorganized action row**: Action buttons (Puzzle, Parallels, List) moved from crowded top bar to dedicated ext_info_row alongside Info, Bibliography, and Catalog buttons
+- **External library links**: New button shows Cambridge/Oxford/Manchester/Princeton link dynamically based on manuscript source, with globe icon
+- **Compact translations toggle**: Translations ON/OFF replaced with a colored icon button (green when ON, grey when OFF) with tooltip
+- **Cross-shelfmark page navigation**: Prev/Next page buttons no longer disable at manuscript boundaries — navigating past last page wraps to first page of next shelfmark, and vice versa (matching ResultDialog behavior)
+- **Extended info state preserved**: Extended info panel open/close state remembered when navigating between shelfmarks
+- **ResultDialog image toggle**: Hide/show image state preserved when navigating between search results
+- **Fullscreen image viewer**: New fullscreen mode for manuscript images (both Browse and ResultDialog) — zoom/pan, rotation, brightness/contrast/gamma/invert, page navigation with arrow keys or buttons, Escape to close
+
+### Bug Fixes
+- **Enrichment race condition**: Fixed stale Oxford metadata appearing on RNL manuscripts — `browse_load()` did not clear `current_browse_part_id` when loading non-Part manuscripts, causing Oxford Part context to leak into subsequent enrichment callbacks
+- **Centralized enrichment launch**: All 4 browse enrichment paths consolidated into `_start_browse_enrichment()` with generation counter to reject stale queued cross-thread signals
+- **Lambda disconnect fix**: Stored lambda slot reference for proper `disconnect()` instead of trying to disconnect bare method (no-op)
+- **Ext-info restore flag lifecycle**: Flag survives from enrichment to PGP callback for PGP-only manuscripts; cleared unconditionally at final async step to prevent forward leak
+
+---
+
+## [7.2.1] - Search UX Overhaul - 2026-03-19
+
+### New Features
+- **Hero search bar**: Prominent search input on home page below "What is the Cairo Genizah?" card, with Hebrew translation ("חיפוש בכתבי יד...")
+- **Inline accordion results**: Replaced the 35/65 splitter layout with full-width results. Clicking a result expands an inline accordion showing manuscript thumbnail image + highlighted full text with original line breaks
+- **Result card action buttons**: Browse, Quick View (renamed from Advanced View / מבט מהיר), Add to List, and Catalog Records buttons directly on each result card
+- **Citation footer auto-collapse**: Full citation shows for 10 seconds, then collapses to a compact single line with copy button
+- **Thumbnail images**: New `width` parameter on `/api/nli_image_by_sysid/` endpoint — accordion requests 300px thumbnails instead of 2000px full images
+- **Lazy text loading**: On session restore, full text loads on first accordion expand via `get_browse_page()`
+- **Clickable thumbnails**: Clicking the accordion image opens Quick View dialog
+- **Progressive image loading**: All web image viewers (browse standard/fullscreen, Quick View normal/fullscreen) now show a spinner → 400px thumbnail → 2000px full resolution. CSS `.img-loading-container` spinner + JS `progressiveLoad()` upgrade chain. Desktop already had this pattern.
+
+### Bug Fixes
+- **Homepage search stuck**: `_after_delay()` deferred tasks ran in a separate asyncio task without NiceGUI slot context, causing silent `RuntimeError`. Fixed by capturing `ui.context.client` at page creation
+- **Status duplication**: Merged "Search completed in X — N Results" into results header ("588 Results · 0:18"), eliminated duplicate timer-based status messages
+- **Browse rotation slider**: Removed JS string handler passed to `.on('update:model-value')` where NiceGUI expects a Python callable — Python `on_change` already handles rotation
+
+### Technical
+- Web: `progressiveLoad()` JS function in VIEWER_STYLES — loads `?width=400` thumbnail, preloads full via hidden `Image()`, swaps `src` on completion
+- CSS: `.img-loading-container` animated spinner, `.img-loaded` hides it
+- NiceGUI: `_page_client = ui.context.client` captured at page creation, entered with `with _page_client:` in deferred async tasks
+- API: `/api/nli_image_by_sysid/` accepts `width` param (100-2000, default 2000), IIIF requests use `full/{width},/0/default.jpg`
+
+---
+
+## [7.2.0] - Image Adjustment Controls - 2026-03-19
+
+### New Features
+- **Image adjustment controls**: Brightness, contrast, gamma sliders and invert toggle on all image viewers — web browse (standard, fullscreen, reading desk), web search advanced view, and desktop ManuscriptViewerWidget
+- **Desktop export with adjustments**: Right-click Copy Image and Save Image As export the adjusted (filtered) image, not the raw original
+- **Icon-based toolbar**: Compact icon labels (sun, half-circle, curve, ±, reset arrow) with translated tooltips replacing text labels
+
+### Bug Fixes
+- **Browse page crash**: Fixed `RuntimeError: slot stack empty` — async `load_page()` called `ui.run_javascript()` outside NiceGUI slot context, killing the entire page render
+- **Desktop image race condition**: Stale debounce timer from previous image could fire after new image loaded, reverting the display. Fixed by cancelling timer in `set_image()`
+- **Desktop thumbnail race**: Stale thumbnail callback overwrote new image when switching manuscripts with same page index. Fixed with `_load_generation` counter
+
+### Technical
+- Web: CSS `filter` property for brightness/contrast/invert (native) + SVG `feComponentTransfer` for gamma. Per-viewer SVG filter IDs for reading desk multi-image isolation
+- Desktop: QImage LUT-based pixel processing with 80ms QTimer debounce. 256-entry lookup table applied via `bits()` direct byte access
+- Hebrew translations: בהירות, ניגודיות, גמא, הפוך צבעים, איפוס תמונה
+
+---
+
+## [7.1.0] - FIST Gap Fill & Expanded Catalog - 2026-03-19
+
+### New Features
+- **38,673 new manuscript records**: FIST.db gap records merged into libraries.csv (216,942 → 255,615 records, +17.8%). Manuscripts from 52 libraries now browsable, searchable by shelfmark/title, and enrichable via FJMS catalog data and NLI images
+- **7 new library codes**: Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman — with Hebrew translations
+- **Metadata-only search**: Title and shelfmark search now returns records without transcription text. Results carry a `metadata_only` flag; page navigation hidden for text-less records
+- **Metadata-only browse**: Browse page shows metadata, NLI images, FJMS enrichment, and external links for records without Tantivy text (instead of "No text available" error)
+- **Shelfmark normalization**: Yevr→EVR (Russian National Library) and Halper→Genizah (CAJS) aliases with Halpern guard
+
+### Bug Fixes
+- **Mosseri CUDL images**: Mosseri collection images now load via Cambridge Digital Library fallback path (both apps)
+- **Puzzle auto-fit**: Canvas auto-fits view only on document load, not when adding individual fragments
+- **Server heartbeat**: Status heartbeat survives transient failures; removed JS ping in favor of server-state-only checks
+- **Server init ordering**: Engine marked ready before FJMS pre-warm to prevent premature "loading" state
+- **JWT auto-retry**: Browse guards against deleted Supabase client; automatic retry on JWT expiry
+
+### Data
+- Generation script: `scripts/generate_fist_gap_csv.py` (repeatable with `--dry-run` and `--validate-only`)
+- Stats report: `docs/FIST_GAP_FILL_STATS.md`
+- Gap manifest: `fist_gap_manifest.txt` (38,673 AlmaIds for validation)
+
+---
+
+## [7.0.1] - Web Puzzle Browser Extension - 2026-03-18
+
+### New Features
+- **GenizahSearch Image Helper extension**: Chrome/Firefox extension fetches NLI manuscript images via user's browser, bypassing datacenter IP blocks. Submitted to Chrome Web Store and Firefox AMO
+- **Server derivative cache**: Processed images cached on server disk; once cached, available to all users without extension
+- **Unified image loader**: Single `_loadImageWithFallbacks()` function replaces 4 separate fallback chains (add/reload/folio/restore)
+- **HMAC upload tokens**: Secure cache writes — server issues signed tokens on cache miss, uploads require valid token
+- **Extension install banner**: Bilingual dismissible banner when extension not detected; green "Extension active" indicator when present
+- **Cache key versioning**: `PROCESSING_VERSION` in cache keys for automatic invalidation when bg removal algorithm changes
+- **Privacy policy page**: `/privacy-extension` route for Chrome Web Store listing requirement
+
+### Security
+- `POST /api/puzzle_process` hardened with token verification, 10MB size limit, content-type validation, rate limiting (60/min/IP)
+- New `POST /api/puzzle_upload_derivative` endpoint with same protections
+- Extension validates URL origin (only `iiif.nli.org.il`) and message origin (only `genizahsearch.com`)
+
+### Bug Fixes
+- **Manchester LUNA recto/verso**: Both recto and verso showed the same (recto) image because each Manchester page has its own luna_id but only the first was fetched. New `get_manchester_canvases()` resolves ALL crossref images directly to individual IIIF canvas entries, bypassing the single-manifest approach (both apps)
+- **Library attribution credit lines**: All non-Oxford manuscripts showed NLI default attribution. Now each library gets proper credit: Manchester (CC BY-NC-SA 4.0), Oxford (CC BY-NC 4.0), Cambridge/JTS (from IIIF manifest), and NLI-digitized collections (BL, RNL, AIU, Gaster, Mosseri, etc.) acknowledge both holding institution and NLI digitization. Web credit footer links to correct library website (both apps)
+
+### Infrastructure
+- Nginx: removed stale `location /api/` block that proxied to dead port 8000 (old FastAPI)
+- `WEB_PUZZLE_ENABLED=true` set on production via `.env` for staged rollout
+
+---
+
+## [7.0.0] - Fragment Puzzle & Community Publishing - 2026-03-17
+
+### New Features — Fragment Puzzle (Phases 47-51)
+
+- **Fragment Puzzle canvas**: Visual workspace for arranging manuscript fragments side-by-side to reconstruct physical joins. HSV-based automatic background removal, zoom/rotate/crop controls, folio navigation (prev/next page), multiple background modes (dark gray/black/white/checkerboard/light table/grid) (both apps)
+- **Save/Load puzzle arrangements**: Persistent "join documents" in local `joins.db` SQLite sidecar. Documents include title, notes, and all fragment positions/transforms. Auto-save after canvas changes (both apps)
+- **Composite PNG export**: Full-resolution RGBA PNG with transparent background and metadata banner. Desktop offers draft (1000px) / standard (2000px) / full (3000px) resolution choices with progress dialog. Web downloads directly
+- **Recto/Verso**: Automatic verso view generation from recto arrangement with correct verso images (both apps)
+- **Bring Forward / Send Backward**: Layer ordering controls for overlapping fragments — toolbar buttons and desktop context menu (both apps)
+- **Fragment selector combobox**: Dropdown showing all fragments on canvas, syncs with canvas selection. Browse button opens selected fragment in browse view (both apps)
+- **Add from Lists / Known Joins**: Quick-add fragments from personal lists or from known FJMS/PGP joins for the current manuscript (both apps)
+- **Saved Joins panel** (desktop): Side panel with thumbnails, details editing, delete, rename
+- **Saved Joins dialog** (web): Modal dialog with load/delete/metadata editing
+
+### New Features — Community Publishing (Phase 52)
+
+- **Publish puzzle joins**: Share fragment arrangements with the research community. Publish button turns green when published, share dialog with copyable deep link (`/puzzle?doc={id}`) (both apps)
+- **Discoveries Center integration**: Published puzzle joins appear in the community feed with composite thumbnails, author names, and shelfmark badges. "Published Puzzles" stat card in stats row
+- **Fork & Open**: "Open in Puzzle" creates a local copy of any published join and opens it in the puzzle canvas (both apps)
+- **Community Puzzle Joins panel**: When browsing a manuscript, see all published puzzle joins containing that fragment (both apps)
+- **All Puzzles / My Puzzles tabs**: Browse and manage published puzzle joins in the community Joins section (both apps)
+- **Clickable shelfmark badges**: Shelfmark badges on published joins navigate to the browse page for that manuscript
+- **Admin soft-delete**: Admins can hide published puzzle joins from the community feed
+- **Auto-unpublish on delete**: Deleting a local join automatically removes it from the community
+
+### Improvements
+
+- **Desktop toolbar compacted**: Text buttons replaced with emoji icon buttons (28px) with translated tooltips
+- **Save dialog with notes**: Title and notes fields (was title-only)
+- **Theme-aware web dialogs**: CSS variables for light/dark mode compatibility
+- **Stats cards layout**: 7 stat cards fit in one responsive row on Discoveries page
+- **Saved joins list dedup**: Hides shelfmarks line when it duplicates the title (handles reversed order, fork prefixes)
+- **Help Center updated**: New Fragment Puzzle and Community Publishing sections in both web and desktop help (bilingual)
+- **Hebrew translations**: 50+ new strings for all puzzle and community features
+
+### Bug Fixes
+
+- **Web puzzle page crash**: `ui.left_drawer` replaced with `ui.dialog` modal
+- **Export position accuracy**: Fixed per-fragment `coord_scale` drift — uses single global scale factor
+- **Export bg-removal fidelity**: Reuses same 800px processed image shown on canvas
+- **Desktop export UI freeze**: Export moved to background thread with progress dialog
+- **CUL blue conservation mat**: Two-pass background detection for colored conservation mats
+- **Web publish button invisible**: Removed `flat` prop when published so green background shows
+- **Fork button RuntimeWarning**: Async fork coroutine was not being awaited
+- **Desktop discovery stats all zeros**: `get_discovery_stats()` now queries all relevant tables
+- **BrowseState.meta_mgr AttributeError**: Guarded with `getattr` in joined view Oxford detection
+- **Reading Desk from joined view**: Added `meta_mgr.resolve_system_by_shelfmark()` as fallback for fragment resolution
+- **Desktop corrections showing anonymous**: Added profile batch-fetch to `get_my_corrections` and `get_all_corrections`
+- **Index rebuild fails on Windows (WinError 5)**: Tantivy memory-mapped files were locked by the live searcher during rebuild. Now releases index before `shutil.rmtree` and reopens after
+- **Publish broken joins**: `publish_join()` now fails fast if composite image generation returns None, with storage rollback on partial upload failure
+- **Stale fragment selector after folio nav**: Fragment combobox now refreshes on folio prev/next and meta updates (both apps)
+- **Web puzzle reload loses document identity**: `current_doc_id` now persisted to session storage and restored on page reload
+
+---
+
+## [6.5.4] - 2026-03-16
+
+### Performance
+
+- **Staged search enrichment**: Search results now appear immediately after core search completes, before metadata (domains, transcription badges, catalog counts, printed flags, translations) finishes loading. Enrichment runs in three progressive stages: title translations first (~1ms), then visible page (50 IDs), then remaining results in background chunks (200 IDs each)
+- **FJMS build-time indexes**: 6 database indexes previously attempted at runtime (silently failing on read-only connection) are now pre-built in `fjms_enrichment.db` during export. Requires sidecar rebuild
+- **Search generation guard**: New searches immediately cancel stale background enrichment from previous searches, preventing data overwrites
+- **Performance instrumentation**: Timing spans added to search logger (`first_render_ms`, `visible_enrichment_ms`, `background_enrichment_ms`) for regression tracking
+
+---
+
+## [6.5.3] - 2026-03-15
+
+### Improvements
+
+- **Desktop image viewer — right-click menu**: Added context menu to the manuscript image viewer (both ResultDialog and Browse by Shelfmark) with "Copy Image" and "Save Image As..." options. Supports PNG, JPEG, and BMP export. Rotation is preserved in both copy and save
+
+---
+
+## [6.5.2] - 2026-03-15
+
+### Improvements
+
+- **Desktop ResultDialog — icon+text buttons**: Converted cluttered text-only buttons to compact icon+short text format across action row (📖 Browse, 🔍 Parallels, ⭐ List, ℹ️ Info, 📚 Bib, 📋 Catalog, 🌐 Trans), community row (📝 Corrections), and image toolbar (↩️ Reset, 🔗 External/Ktiv). All buttons include full-text tooltips
+- **Web language toggle**: Moved language switch button from sidebar footer to header bar for better visibility
+
+---
+
+## [6.5.1] - 2026-03-14
+
+### Improvements
+
+- **Desktop session persistence — browse tabs**: Browse by Shelfmark restores the last viewed manuscript (text + images) on restart. Browse by Identification restores domain tree selection, date range, text filter chips, and undated checkbox
+- **Desktop session persistence — composition search**: Composition search restores results (flat view), summary bar, sort mode, and appendix threshold
+- **Desktop session persistence — active tab**: The last active tab is restored on restart (previously always returned to Search tab)
+
+### Bug Fixes
+
+- **Desktop composition search — ResultDialog navigation**: Fixed missing next/prev navigation when opening filtered (high-frequency) results. The tree traversal now recursively descends through all levels including filtered reason sub-groups and lazy-loaded appendix groups
+- **Desktop composition search — lazy appendix ordering**: Lazy appendix groups are now sorted before being added to the ResultDialog navigation list, matching the order shown when groups are expanded in the tree
+- **Web parallels page — parent_slot crash**: Fixed "The parent slot of the element has been deleted" RuntimeError by replacing all `ui.timer()` calls with `asyncio` patterns that don't attach to NiceGUI parent slots. The repeating progress timer and one-shot init timers no longer crash when users navigate away from the page
+- **Web Hebrew UI — first-load drawer bootstrap**: Fixed the cold-start race where the drawer could paint on the wrong side on the first load and only settle after navigation/reload. The web bootstrap now resolves the persisted UI language before layout creation and retries Quasar RTL activation until the framework is ready
+
+---
+
+## [6.5.0] - 2026-03-13
+
+### Milestone: Search UX & Filtered Search
+
+Focused search by manuscript properties, ~924K catalog & metadata translations, line-boundary search for join detection, and cumulative improvements from 6.2.1–6.2.4.
+
+#### Focused Search — Pre-Search Filtering (Phase 45)
+- **Focused search panel**: Filter manuscripts by domain, author, work, date range, and material type before searching — narrows the corpus to a specific subset (both apps)
+- **Removable chip bar**: Active filters shown as color-coded removable chips above results (purple=domain, blue=author, teal=work, orange=date, red=material)
+- **Real-time manuscript count**: Filter panel updates matching manuscript count as filters are selected
+- **All search modes**: Filters apply across Exact, Variants, Responsa, and Parallels search modes
+- **Per-result word search exclusion**: Individually exclude manuscripts from word search results
+- **Parallels filter parity**: Full filter panel on Parallels page with auto-exclude source manuscript, per-manuscript exclude buttons, and import exclusions from word search
+- **Browse-to-search navigation**: Domain and author labels on Browse page link directly to a focused search (both apps)
+- **Filter-aware search history**: Filters saved and restored with search history entries
+- **Session persistence**: Filter state preserved across restarts
+
+#### Dicta Translation — Multilingual Catalog Data (Phase 46)
+- **~924K machine translations**: All catalog data, titles, and scholarly descriptions translated Hebrew↔English via Dicta Translation API with scholarly few-shot templates across 3 rounds
+  - Libraries: 184,514 title translations (bilingual extraction + Dicta HE→EN)
+  - PGP: 34,954 document description translations (EN→HE)
+  - FJMS catalog fields: 3,830 translations across 6 categories (titles, authors, persons, genizah_titles)
+  - FJMS free descriptions: 254,835 scholarly description translations (HE→EN)
+  - FJMS running titles: ~134K translations (EN→HE)
+  - FJMS full texts: ~71K scholarly description translations (EN→HE)
+  - FJMS textual frames: ~84K translations (HE→EN)
+  - Round 3 gap-closing: 206K additional translations for previously untranslated fields
+- **Translation toggle**: Show Translations sidebar toggle enables translated text in search results, browse views, and catalog dialogs (both apps)
+- **Translated/Original badge**: Clickable badge on each translated text to toggle between translated and original
+- **Subtitle display**: When Hebrew title is short (<15 chars), English subtitle shown alongside (desktop)
+- **Per-record RunningTitle translation**: Web catalog dialog uses per-record lookup matching desktop behavior
+- **Translation QA**: Heuristic quality checks (length ratio, script mismatch, number drift, truncation), stratified audit sampling, user-facing "Report translation issue" dialog
+- **Data quality fixes**: 12,827 translation rows fixed (stuttering, hallucinations, collapsed text), 34 gibberish rows deleted
+- **Extraction fix**: MARC semicolon split improved — 87K records fixed, 58K Hebrew values improved
+- **Dicta-powered translate buttons**: Individual translate buttons now use Dicta API instead of MyMemory
+
+#### Source Attribution (Phase 46)
+- **FJMS contributor attribution**: 6,655 catalog records credited to the FJMS contributors who wrote them
+- **Source name cleanup**: "Site User" → "FJMS Site User", Hebrew source labels, Fleischer Piyut Project (1,716 rows)
+- **Handlist source fix**: 43,233 NULL SourceName records fixed with proper handlist/team labels
+
+#### Citation Reminder
+- **One-time citation popup**: Reminds users to cite MiDRASH when publishing material from the site (web + desktop, bilingual)
+
+#### Line-Boundary Search (6.2.3)
+- **Text position dropdown**: Search for words at Start of text, End of text, Line starts, or Line ends — useful for join detection between fragments
+- **Per-word line constraints**: In Responsa mode, `|word` (start of line) and `word|` (end of line) with tabular builder checkboxes
+- **Line-break syntax**: `word1 | word2` for cross-line search, `[|N]` for line gap notation
+- **Snippet indicator**: `‖` (U+2016) shows line breaks in search snippets (both apps)
+
+#### Cumulative Fixes (6.2.1–6.2.4)
+- Search progress bar fixes (desktop): stuck "Restoring", elapsed timer, processing phase
+- Pre-search domain filter parity: language-conditional display, "Other" disambiguation, sub-sub-domains
+- Parallels search critical fix: stale branch + min-chunks filter bug
+- Small-screen layout fix: browse button visibility, result card browse buttons
+- Data quality: 1,144 shelfmark-SysID mismatches fixed in libraries.csv
+- 30+ new Hebrew translation keys
+
+---
+
+## [6.2.4] - 2026-03-10
+
+### Data Quality Fix: Shelfmark-SysID Mismatches
+- **Fixed 1,144 records** in libraries.csv where a single NLI system number was incorrectly mapped to multiple different shelfmarks from the same series
+- Primarily affects RNL (1,012), CUL (91), JTS (18), Oxford (10), BL (6)
+- Added 36 new records for orphaned shelfmarks with their own correct sys_ids
+- Added `scripts/fix_shelfmark_sysid_mismatch.py` for reproducible correction using NLI crossref as authoritative source
+- Reported by a reader
+
+---
+
+## [6.2.3] - 2026-03-06
+
+### Line-Break Search & Search Progress UX
+
+#### Line-Break Search (| syntax)
+- **Consecutive-line search** in Responsa mode: `|word` (line starts with), `word|` (line ends with), `word1 | word2` (cross-line)
+- **Line gap notation** `[|N]` for skipping N lines between groups
+- **Tabular builder** "Lines" scope with start/end-of-line modifier checkboxes
+- **Multiline regex** matching via `_build_line_break_regex()` for accurate filtering and highlighting
+
+#### Snippet Line-Break Indicator
+- **`‖` (U+2016)** replaces invisible newline flattening in all search snippets (desktop + web)
+- Styled gray/bold — visually distinct from query `|` and parallels segment breaks
+- Dark theme support in web CSS
+
+#### Search Progress Bar Fixes (Desktop)
+- **Stuck "Restoring" message** — progress bar format now resets when a new search starts
+- **Elapsed timer** updates every 1 second via independent QTimer (no longer freezes between progress callbacks)
+- **"Processing" phase** — after Tantivy loop completes, progress bar shows `מעבד תוצאות...` with running clock during result rendering
+- **Accurate "Search completed in"** — total time now includes post-processing and row rendering
+
+#### Multiline Regex Re-highlighting
+- ResultDialog and web expanded view now add `re.MULTILINE` flag when the highlight pattern contains `^` or `\n` anchors
+- Fixes broken highlighting when opening line-break search results in detail view
+
+#### Desktop Snippet Column
+- Column is now **resizable** (Interactive mode, 600px default) — was previously locked to Stretch
+
+#### Hebrew Translations
+- Position dropdown: Text Position, Anywhere, Start/End of text, Line starts/ends
+- Processing indicator, constraint tooltip, Position label (10 new keys)
+
+---
+
+## [6.2.2] - 2026-03-05
+
+### Bug Fixes: Parallels Search & Small-Screen Layout
+
+#### Parallels Search Fix
+- **Critical: parallels search returning "No results"** — Two bugs combined to break all parallels searches:
+  1. Server was on stale branch missing `restrict_sys_ids` parameter, causing silent `TypeError` on every search
+  2. "Min. chunk matches" filter was incorrectly filtering on paragraph boundary crossings (always 0 for most input text), discarding all results even when matches existed
+- **Missing `web/analytics.py`** — PostHog analytics module was never committed, causing server startup failure after deployment
+
+#### Small-Screen Layout Fix
+- **Browse button visibility** — ~40% of users (viewport height <700px) couldn't see the "Browse Full Manuscript" button, which was buried below tabs at the bottom of the right panel
+- **Result card browse button** — Added green browse (📖) button directly on each search result card for one-click manuscript access
+- **Right panel header actions** — Moved Browse, Find Parallels, and Advanced View buttons to the header row (always visible), removed old bottom action section
+- **PGP tag viewer** — Same fix applied to PGP tag result viewer
+
+---
+
+## [6.2.1] - 2026-03-03
+
+### Bug Fix: Pre-Search Domain Filter Parity
+
+- **Language-conditional display**: Pre-search domain dropdown now shows only the current UI language (Hebrew or English), matching post-search filter behavior (web + desktop)
+- **"Other" disambiguation**: Ambiguous child domains like "Other" now display with parent prefix (e.g., "Other (Bible)" / "אחר (מקרא)") in both dropdown and chip bar
+- **Sub-sub-domain support**: 3rd-level domains now appear in pre-search filter tree/dropdown (previously only 2 levels shown)
+- **Recursive checkbox propagation**: Desktop domain tree now propagates check/uncheck to all descendants (grandchildren), matching post-search filter
+- **Chip bar display fix**: Web chip bar strips only trailing count `(N,NNN)` instead of all parenthesized text, preserving qualified domain names
+- **Chip bar refresh**: Web chip bar re-renders after deferred filter init completes, showing proper display names
+- **Qualified-name SQL filtering**: `get_filter_sys_ids()` now handles qualified domain names like "Other (Bible)" correctly, generating parent-scoped SQL queries
+
+---
+
+## [6.2.0] - 2026-03-02
+
+### Milestone: Power-User UX — Search Workflow, Session & Notifications
+
+Major UX overhaul driven by power-user feedback: composition search workflow improvements, session persistence, search history, desktop notifications, and Hebrew library names.
+
+#### Composition Search UX (Phase 42)
+- **Elapsed timer**: Real-time search duration display (both apps)
+- **Chunk count display**: Shows number of chunks processed during composition search
+- **Summary line**: Persistent search stats after completion (duration, matches, exclusions)
+- **Min-chunks filter**: Filter regular search results by minimum chunk match count
+- **Cancel with partial results**: Cancelling mid-search preserves results found so far, displayed in a collapsible "excluded" section with reason sub-headers
+- **Printed badge**: Manuscripts identified as printed editions marked with badge in search results, composition tree, and catalog browse (both apps)
+- **3-state printed filter**: All / Manuscripts only / Printed only toggle in both desktop and web, including composition tree
+- **Responsive cancel**: Progress callback checked every chunk for immediate cancel response
+- **Excluded items clickable**: Click excluded items in web to navigate to manuscript detail
+- **Full Hebrew translations**: All Phase 42 UI strings translated
+
+#### Session Persistence & Search History (Phase 43)
+- **Session persistence service**: New `shared/session_persistence.py` module saves and restores full search state (query, mode, results, exclusions) across app restarts
+- **Desktop session restore**: Automatic save on exit with restore prompt on startup; configurable via settings (Ask / Always / Never)
+- **Web session persistence**: Search and parallels state preserved in browser sessionStorage
+- **Search history dropdowns**: Dropdown arrow (▼) inside search bar with last 20 searches, showing mode indicator and result count (both apps, both search and composition)
+- **Keyboard navigation**: Down arrow opens history from search bar, arrow keys navigate, Enter selects, Delete removes entries
+
+#### Notification, Copy & Hebrew Names (Phase 44)
+- **Desktop search notifications**: Taskbar flash when search completes while app is in background
+- **Sleep prevention**: Prevents Windows sleep during long-running searches
+- **Copy context menu**: Right-click to copy cell text from desktop search results table
+- **Hebrew library names**: Full Hebrew names for all 81 library codes displayed when UI language is Hebrew (both apps)
+
+#### Web & Performance
+- **Home page redesign**: Compact notices section, hero banner, and 5 action cards for quick navigation
+- **Sidebar RTL fix**: Correct positioning in RTL mode, improved Core Web Vitals
+- **Lazy imports**: Faster desktop startup via deferred module loading
+- **PostHog EU endpoint**: Fixed analytics endpoint to match account region; logged-in user identification
+- **Language toggle fix**: Resolved bug when switching UI language
+
+---
+
+## [6.1.1] - 2026-03-01
+
+### Performance: Catalog Browse & Domain Queries
+
+Massive performance optimization for catalog browse domain filtering and async desktop UI.
+
+#### Query Optimization (35s -> 0.8s)
+- **100x faster domain-filtered queries**: Replaced JOIN+OR domain filter with IN(UNION) subquery for proper SQLite index utilization
+- **Pre-dedup CTE pattern**: Deduplicate catalog rows in CTE then COUNT(*) instead of expensive COUNT(DISTINCT) on 685K-row table with 3x duplicates
+- **Benchmarks** (Halakhic Literature, 20,951 manuscripts): Authors 30s->0.27s, Works 4.4s->0.29s
+
+#### Async Desktop Catalog Browse
+- **Non-blocking UI**: All catalog browse operations (domain/author/work select, pagination, text/date filters) now run in background QThread
+- **Module-level QThread class**: Fixes PyQt6 signal delivery for locally-defined thread classes
+- **Thread-safe FjmsService**: Default `thread_safe=True` for read-only sidecar connections
+
+#### Domain Hierarchy Enhancements
+- **3-level domain nesting**: Sub-sub-domains shown in web search filter and catalog browse (both apps)
+- **Canonical FJMS ordering**: Domain tree sorted by Friedberg classification system order
+- **Browse cache v2**: Versioned disk cache invalidates stale pre-nesting caches
+
+---
+
+## [6.1.0] - 2026-02-27
+
+### Milestone: Catalog Browse & Navigation (Phase 41)
+
+Added faceted catalog browsing by domain, author, and work in both apps, with free-text filtering, FIST v5.0.0 enrichment, and cross-links between browse pages.
+
+#### Catalog Browse Pages (Plans 41-01 through 41-04)
+- **Web catalog browse page**: New `/catalog-browse` page with domain hierarchy tree, author/work search dropdowns, combined filtering, pagination, and deep linking via URL params
+- **Desktop catalog browse tab**: New "Browse by Identification" tab with matching domain tree, author/work filtering, and result navigation
+- **Cross-links**: Domain and author labels on manuscript browse pages are clickable links to catalog browse filtered by that value (both apps)
+- **Sidebar/tab navigation**: "Browse by Shelfmark" and "Browse by Identification" entries in both apps
+
+#### Free Text Filter
+- **FTS5-based catalog search**: ALL/ANY/NOT modes for filtering catalog browse results by text across titles, descriptions, and identifications
+- **Hybrid FTS5 + domain LIKE**: Domain name searches (e.g., "פילוסופיה") return results via UNION query combining FTS5 catalog fields with domain table LIKE search
+- **Filter chips**: Color-coded removable chips (blue=ALL, green=ANY, red=NOT) with button-style removal to avoid NiceGUI slot issues
+- **sessionStorage persistence**: Text filter state preserved across page navigation
+
+#### FIST v5.0.0 Enrichment
+- **3 new tables**: genizah_persons (2,286 historical people), genizah_titles (775 works), code_values (3,440 decoded field values)
+- **20 new catalog columns**: GenizahTitleId, Author, CopyToDate, CreationTypeCode, Comment, Colophon, CopyName, and more
+- **Structured author/work browsing**: 801 authors (was 204) and 663 works via FK path through genizah_persons/genizah_titles
+- **Graceful fallback**: `_has_persons_titles` flag enables v4 sidecar compatibility
+
+#### Translations & Tests
+- **15 new Hebrew translations** for catalog browse UI strings
+- **Test updates**: Browse author/work tests updated for new dict key format; 72 FJMS tests passing
+
+---
+
+## [6.0.0] - 2026-02-22
+
+### Milestone: Local Data Architecture
+
+Migrated all PGP reference data from Supabase to a local SQLite sidecar, added FJMS catalog descriptions as a scholarly resource, stabilized the app with crash fixes and pagination, and optimized performance across both apps.
+
+#### PGP Sidecar Migration (Phase 35-36)
+- **pgp.db sidecar**: All PGP data (35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments) exported to local SQLite (147MB)
+- **PgpService rewrite**: `document_service.py` reads from SQLite instead of Supabase -- sub-millisecond local queries replace 50-200ms API calls
+- **JSON preservation**: Tags and sections stored as TEXT JSON, queried with `json_each()` for full parity with Supabase GIN queries
+- **Both apps updated**: Web shim and desktop imports all point to local pgp.db
+- **Zero Supabase dependency**: All PGP reference data served locally; Supabase retained only for community features (auth, corrections, lists)
+
+#### FJMS Catalog Descriptions (Phase 37)
+- **Enriched export**: fjms_enrichment.db extended to v3.0.0 with 4 new tables (running_titles, size_field, catalog_free_desc, genizah_titles) adding ~1.7M rows
+- **Catalog dialog**: Dedicated 5-section scholarly layout (content identification, physical metadata, running titles, free descriptions, genizah titles) in both apps
+- **Source attribution**: Each catalog entry shows which scholarly catalog or scholar produced the description
+- **Batch catalog counts**: Search results show catalog source count on button labels for quick reference
+
+#### Distribution & Offline (Phase 38)
+- **Desktop bundling**: pgp.db included in installer via `build_app.bat` -- no separate download needed
+- **LOCALAPPDATA resolution**: User-updated sidecars stored in AppData, separate from bundled install directory
+- **Sidecar update mechanism**: SidecarUpdateThread checks for newer sidecar versions at startup with sequential download queue
+- **About screen**: Data Sources section showing versions of all 3 sidecars (pgp.db, fjms_enrichment.db, nli_crossref.db)
+- **Offline verification**: 12 tests confirming zero network dependency for all 3 sidecar services
+- **Desktop offline PGP browsing**: Full metadata, transcriptions, footnotes, and fragment navigation without internet (images excluded)
+
+#### Bug Fixing & Cleanup (Phase 39)
+- **Desktop crash fixes**: `sip.isdeleted()` guards on all Qt lifecycle crash sites (set_status_message, update_text_pos) -- eliminates all known crash-on-navigate bugs
+- **Paginated search results**: PAGE_SIZE=50 replaces the 200-result hard cap; prev/next navigation with scroll-to-top; storage persistence cap raised to 1000
+- **PostHog analytics**: Integrated alongside Google Analytics (env-var gated via `POSTHOG_API_KEY`); maskAllInputs + identified_only for privacy
+- **Domain filter performance**: Cached domain hierarchy eliminates ~5s lag when opening domain filter dialog (double-checked locking for thread safety)
+- **E2E test infrastructure**: Custom NiceGUI Screen fixture, app-level E2E via runpy, selenium as dev dependency with skip logic for CI
+- **CSS extraction**: Inline styles moved to static CSS file for maintainability
+- **Lazy login dialog**: Login dialog created on-demand instead of at page load, improving navigation speed
+- **Parallel page queries**: asyncio.gather + run.io_bound for search enrichment, batch FJMS for browse, async discoveries
+
+#### Performance Optimization (Phase 40)
+- **Parallel NLI fetch**: ThreadPoolExecutor for concurrent MARC + IIIF manifest calls, halving browse metadata load time
+- **Desktop async domain enrichment**: DomainEnrichmentWorker thread loads domain data after results display (~200ms); catalog detail fetched lazily on click
+- **Browse crossref parallelization**: 3 independent crossref queries via ThreadPoolExecutor (catalog entry, collection/storage, physical metadata)
+- **FL ID O(1) index**: Dictionary-based lookup for browse-by-FL-ID replacing linear scan (with fallback during startup window)
+- **Variant cache unification**: Pre-compute variants at REGEX_VARIANTS_LIMIT (8000) before per-term loops; Tantivy slices from superset cache
+
+#### Pre-Ship Cleanup
+- **IsNotGenizah badge removed**: Orange "Not Genizah" badge removed from both apps' browse pages and Reading Desk (data preserved in nli_crossref.db)
+
+---
+
+## [5.9.0] - 2026-02-16
+
+### Milestone: Multi-Source Image & Metadata Integration
+
+Import of NLI crossreference data (815K image-level records) and Cambridge IIIF manifests (141K URLs) into a second SQLite sidecar, plus Manchester LUNA and JTS/Princeton Figgy integration, enabling direct image access across 75+ libraries, physical metadata, scholarly bibliography, and library-specific viewer links in both apps.
+
+#### Data Infrastructure (Phase 29)
+- **NLI crossref sidecar** (`nli_crossref.db`): 815K image-level records from NLI crossreference CSV with 253K distinct AlmaIds, plus 141K Cambridge IIIF manifest URLs
+- **Shared NliCrossrefService**: 16 query methods (images, folio labels, physical metadata, relationships, library URLs, Manchester/JTS lookups)
+- **Thread-safe SQLite**: Read-only URI mode with thread safety for NiceGUI concurrent requests
+- **Graceful degradation**: All methods return empty results when sidecar is missing
+
+#### Direct Image Access (Phase 30)
+- **Cambridge local resolution**: Cambridge manuscripts load images via pre-stored CUDL IIIF manifest URLs, bypassing NLI entirely (141K records)
+- **Fallback chain preserved**: Memory cache -> sidecar -> network for all image resolution
+
+#### Image Navigation & Indicators (Phase 31)
+- **Folio navigation**: Page-level navigation using scholarly notation (1r, 1v, 2r, etc.) in both apps
+- **Source availability indicators**: Colored chips showing which digital image sources exist (NLI, Cambridge, Manchester, JTS)
+- **Source switching**: Toggle between NLI and external image sources in the browse viewer
+- **Cambridge IIIF proxy**: Server-side proxy endpoint for Cambridge image serving
+
+#### Metadata Display (Phase 32)
+- **Physical metadata**: Material type (paper/parchment) and folio count on browse page (both apps)
+- **NLI catalog link (KTIV)**: Clickable link to NLI KTIV viewer for manuscripts
+- **Library collection links**: Clickable links to holding library digital collections (CUDL, Manchester LUNA, JTS DPUL, BL, Oxford)
+- **Hebrew translations**: Material types and metadata labels translated for Hebrew UI
+
+#### Metadata Enrichment (Phase 33)
+- **FIST bibliography**: 542K denormalized bibliography references with scholar attribution, mention type badges, and transcription/translation availability (both apps)
+- **Catalog cross-references**: 64K entries across 80 scholarly catalogs displayed as structured references (both apps)
+- **Neubauer-Cowley catalog numbers**: 27K Oxford entries displayed alongside shelfmark
+- **IsNotGenizah badge**: Orange visual badge for 304K flagged items in corpus
+- **Collection & storage**: NLI collection names and physical storage references (box/volume/folio)
+- **Scholarly source names**: FJMS source attributions with generic name filtering
+- **FJMS sidecar extended**: fjms_enrichment.db upgraded to v2.0.0 with bibliography, catalog_refs, and reference tables
+
+#### Library IIIF Integration (Phase 34)
+- **Manchester LUNA**: 27,940 LUNA IDs pre-imported via API pagination; detail page links (not search); IIIF manifests as image source with pink source chip
+- **JTS/Princeton Figgy**: 453 validated ARK IDs + Figgy manifest URLs via DPUL catalog search; catalog page links; IIIF manifests as image source with orange source chip
+- **BL deferred**: British Library links use searcharchives.bl.uk (BL IIIF API still down from cyber attack)
+
+---
+
+## [5.8.0] - 2026-02-15
+
+### Milestone: FJMS Integration
+
+Integration of scholarly metadata from the Fragment of the Jewish Manuscript Studies (FJMS) database into both web and desktop apps via a SQLite sidecar database. Adds subject-based filtering, scientific join groups, and catalog enrichment for manuscripts.
+
+#### Data Infrastructure (Phase 25)
+- **SQLite sidecar database** (`fjms_enrichment.db`): 762K rows exported from 13GB FIST.db with domains, joins, catalog tables, and FTS5 full-text index
+- **Shared FjmsService**: 8 query methods accessible from both web and desktop apps
+- **Thread-safe SQLite**: Read-only URI mode with thread safety for NiceGUI concurrent requests
+- **Graceful degradation**: All methods return empty results when sidecar is missing
+
+#### Scientific Joins (Phase 26)
+- **FJMS join groups** in Related Fragments panel: scholarly join identification with scholar name and join type (Physical Join, Codex Join, etc.)
+- **Three-source merge**: FJMS joins merged as third source after user and PGP joins with full deduplication
+- **Purple badge** for FJMS source visual distinction (user=none, PGP=blue, FJMS=purple)
+- **Navigation**: Click join group members to navigate to that fragment in both apps
+
+#### Domain Classifications (Phase 27)
+- **Domain badges** on browse page: clickable subject classification links (e.g., Piyyut, Bible, Letters)
+- **Domain search filtering**: hierarchical multi-select with type-ahead, OR logic for multi-domain queries
+- **Standalone domain browsing**: browse manuscripts by domain without text query (capped at 500)
+- **Post-search dynamic filtering**: Domains button with checkbox tree dialog for excluding domains from results
+- **Domain indicators** on result cards: primary domain + "+N more" pattern with tooltip
+
+#### Catalog Enrichment (Phase 28)
+- **FJMS catalog titles**: Hebrew and English titles with language-aware display
+- **Author information**: Scholar/author attribution from FJMS catalog records
+- **Copy date and place**: Manuscript dating and origin information with sentinel value filtering
+- **Content identifications**: Parsed TextualFrame entries with category and source attribution
+- **FJMS description alongside PGP**: Separate sections, not replacing existing PGP metadata
+- **Cross-app parity**: All catalog fields display in both web and desktop (Browse tab + ResultDialog)
+
+---
+
+## [5.7.2] - 2026-02-11
+
+### Cleanup & Polish
+
+- Removed deprecated AI Search feature code (AIManager, AIDialog, AIWorkerThread, Settings panel, button, help references)
+- Removed `google-genai` dependency
+
+### Search Normalization
+
+- Combining diacritical marks (U+0300-U+036F) stripped from search queries at query time
+- Hebrew geresh (U+05F3) and gershayim (U+05F4) stripped from search queries
+- ASCII apostrophe and curly quote variants normalized in search
+- Mark-tolerant search highlighting (matches through interleaved combining marks in source text)
+- All existing search modes unaffected (normalization globally safe)
+- Regex mode exempt from normalization (users control their own patterns)
+
+### Test Suite
+
+- Fixed 17 pre-existing test failures (export filenames, boundary search, responsa integration, shelfmark normalization)
+- Deleted 3 obsolete backend test files (test_api_flow.py, test_corrections_api.py, test_corrections_integration.py)
+- Full green suite: 447 tests passing, 0 failures
+
+### PGP Transcription Sections
+
+- Structural HTML section parser for PGP transcriptions from pgp-text repository
+- Canvas-based parsing (h3 inside data-canvas divs) replaces fragile regex-only approach
+- New `sections` JSONB column on document_sources with `source_language` and `source_direction`
+- Recto/verso/margin sections correctly display alongside manuscript images in both apps
+- Language-based translation ordering (Hebrew first, English second) consistent across both apps
+- Import script: clones pgp-text repo, parses HTML, populates structured section data
+
+## [5.7.0] - 2026-02-10
+
+### Milestone: Responsa Search
+
+Advanced search capabilities inspired by the Responsa Project, available in both web and desktop apps. Researchers can now use Responsa-Project style syntax, grammatical expansion, Judeo-Arabic support, and a visual query builder to search the Genizah corpus with fine-grained control.
+
+#### Responsa Core Engine (Phase 14)
+- **Responsa syntax**: `#word` (prefix expansion), `word#` (suffix expansion), `#word#` (both), `*word`/`word*` (wildcards), `%word` (plene/defective variants), `(a/b)` (OR alternatives), `[N]` (gap notation)
+- **Hebrew grammatical expansion**: 24 prefix forms (single + compound: ו,ה,ב,כ,ל,מ,ש + combinations) and 25 suffix forms per word
+- **Judeo-Arabic article expansion**: 8 forms per word using simplified al- model (no sun letter assimilation)
+- **Plene/defective variants**: Bidirectional ו/י insertion/removal for spelling variations
+- **Sofit letter conversion**: Final forms (ם,ן,ץ,ף,ך) normalized before suffix expansion
+- **Combinatorial explosion guard**: MAX_EXPANDED_TERMS=500 with 6-step downgrade cascade (variants basic -> off -> JA off -> plene off -> suffixes off -> prefixes off -> error)
+- All Responsa logic in shared `genizah_core.py` -- no search logic in UI code
+
+#### Search UI (Phase 15)
+- **Responsa as dropdown mode**: "Responsa (R)" appears as a first-class option in the Mode dropdown/combo in both apps
+- **Sub-option checkboxes**: Variants, Judeo-Arabic, Flexible Spacing, Bidirectional Gap -- visible only when Responsa mode is selected
+- **Syntax legend**: Quick reference for Responsa operators shown below the search field
+- **Keyboard shortcut**: Type `R ` (R+Space) to switch to Responsa mode
+- **URL state persistence**: Web URLs include `?mode=responsa&variants=1&ja=1&flex_spaces=1&bidirectional=1`
+- **PGP Tags interaction**: Responsa sub-options hidden when PGP Tags mode is active
+- **Desktop defaults**: Checkboxes reset to defaults on each app startup
+
+#### Tabular Query Builder (Phase 16)
+- **Visual query construction**: Dialog with 2-4 component columns for building complex Responsa queries without memorizing syntax
+- **Per-word modifiers**: Checkboxes for prefix (#), suffix (#), wildcard (*), plene (%), and negation per word
+- **Distance control**: Per-pair gap spinners with [N] notation between components
+- **Live preview**: Real-time syntax preview updates as you modify the query
+- **One-way sync**: "Apply" inserts generated syntax into the search field and triggers search
+- **Web**: Dialog opened via "Query Builder" button in Responsa sub-row
+- **Desktop**: QDialog opened via "Query Builder" button with full RTL layout
+
+#### Integration Testing & Polish (Phase 17)
+- **221 automated Responsa tests**: 68 core engine + 31 parity + 20 edge cases + 30 regression + 5 performance + 36 additional
+- **Cross-app parity**: All 16 checkbox combinations verified to produce identical results
+- **Non-Responsa regression**: 30 tests confirming all existing search modes (Exact, Variants, Fuzzy, Regex, Shelfmark, Title, PGP Tags) work unchanged
+- **Bug fixes**: R+Space shortcut sub-options visibility, WebSocket crash on large results (200 cap), sofit-aware wildcard regex, explosion guard cascade expanded from 3 to 6 steps, ValueError surfaced to user via toast notification, desktop tabular builder unconditional RTL
+
+---
+
+## [5.6.1] - 2026-02-10
+
+### Bug Fixes — User Authentication & Corrections
+
+#### Web: Singleton Supabase Client Fix
+- **Critical fix**: Web app used a shared singleton Supabase client for all users. When multiple users were logged in, the auth session belonged to whoever signed in last — causing RLS policy failures for all other users' write operations (corrections, comments, discoveries, lists, etc.)
+- Added `get_user_client()` — creates a per-user Supabase client from session tokens stored in NiceGUI's per-user storage
+- All 28+ write functions now use the per-user client; read-only functions remain on the efficient singleton
+- Session tokens are stored during email login and Google OAuth, and refreshed automatically when expired
+
+#### Web: Admin Panel Corrections
+- Fixed admin panel not showing pending corrections — the PostgREST join between `corrections` and `profiles` failed silently because there is no direct FK between the tables (both reference `auth.users` independently). Replaced with separate queries.
+- Fixed admin unable to approve/reject corrections — added RLS policies allowing admins to update/delete corrections, comments, discoveries, and fragment joins from any user
+- Admin write operations now use per-user client instead of singleton
+
+#### Web: Correction Submission UX
+- Fixed "parent element deleted" error after submitting a correction — the async handler's UI slot was destroyed by `update_content()` during the submit flow. Removed all `update_content()` calls from the async handler; all feedback now uses slot-independent `ui.notify()`
+- Added success notification when correction is submitted
+- RLS errors (42501) now show "Session expired — please log out and log back in" instead of raw Supabase error
+
+#### Web: Profile Password Change
+- Fixed password change using singleton client — could silently fail or change wrong user's password. Now uses per-user client.
+
+#### Desktop: Login Error Messages
+- Improved error messages for common login failures:
+  - "Invalid email or password" for wrong credentials
+  - "Email not confirmed" for unverified accounts
+  - "No account found" for non-existent emails
+  - Network-specific errors for connection issues
+
+---
+
+## [5.6.0] - 2026-02-09
+
+### Milestone: Desktop Parity & PGP Integration
+
+Full integration of Princeton Geniza Project (PGP) data across both web and desktop apps.
+
+#### PGP Data (Phases 8-9)
+- Imported 35,839 PGP documents with full metadata, 9,364 sources, 22,757 footnotes, 36,155 fragment links
+- Shared document_service.py for Supabase access from both apps
+
+#### Desktop PGP Core (Phase 10)
+- PGP transcriptions and metadata in desktop Browse and Result dialogs
+- Per-source directionality (editions RTL, English translations LTR)
+
+#### Virtual Reading Desk (Phase 11)
+- Multi-manuscript synchronized viewer in both web and desktop apps
+- Stacked images + stacked texts with fragment-level sync scrolling
+- Per-fragment version selector, zoom/rotate controls, lazy loading
+
+#### Desktop PGP Discovery (Phase 12)
+- PGP badges and tag display in search results
+- PGP column sorting (click to show PGP-linked manuscripts first)
+- PGP joins visible in desktop JoinsDialog
+- Tag-based search as a search mode in both apps
+
+#### PGP Tag Search UX
+- "PGP Tags" as a search mode in the Mode dropdown (both apps)
+- Desktop: hides query row, shows tag combo in Mode row
+- Web: tag select replaces query input when PGP Tags mode selected
+- Tag click navigation from result dialogs and browse pages
+- 251 PGP tags with curated Hebrew translations and category grouping
+- 16 categories: Document Types, Law & Society, Medicine, Trade, India Book, etc.
+- Language-aware display: Hebrew UI shows "עברית (English)", English UI shows English only
+- Category headers as visual separators in tag dropdowns
+
+#### Phase 13 Deferred
+- Transcription Search (full-text search in PGP transcriptions) was implemented but reverted
+- Reason: Tantivy index build too slow for desktop distribution
+- Will revisit with server-side index architecture in a future milestone
+- Full documentation preserved in docs/archive/PHASE_13_TRANSCRIPTION_SEARCH_DEFERRED.md
+
+---
+
+## [5.5.0] - 2026-02-04
+
+### New Feature: In-App Software Updates
+
+The desktop application can now download and install updates without leaving the app.
+
+#### How It Works
+1. When a new version is available, a notification bar appears at the top
+2. Click "Update Now" to start the update process
+3. A progress dialog shows download progress
+4. After download, the installer runs automatically in silent mode
+5. The app restarts with the new version
+
+#### Technical Details
+- Downloads the official installer from GitHub Releases
+- Uses Inno Setup's silent mode (`/VERYSILENT /RESTARTAPPLICATIONS`)
+- Installer automatically closes the running app, updates files, and restarts
+- UAC prompt will appear (same as manual install) since app is in Program Files
+- Falls back to opening browser if installer not found in release
+
+#### Files Changed
+- `gui_threads.py` - New `UpdateDownloaderThread` class for downloading with progress
+- `genizah_app.py` - New `UpdateProgressDialog` for update UI
+- `CompileScriptGenizah.iss` - Added `CloseApplications` and `RestartApplications` settings
+
+---
+
+## [5.4.1] - 2026-02-03
+
+### Enhancement: "Remember Me" Login Feature
+
+Both the desktop and web applications now support saving login credentials.
+
+#### Desktop Application
+- **"Remember me" checkbox**: New checkbox in the login dialog to opt-in to credential saving
+- **Secure storage**: Password stored in Windows Credential Manager (via `keyring` library) - not in plain text files
+- **Persistent across updates**: Credentials survive software updates since they're stored in user profile, not application folder
+- **Easy to disable**: Uncheck "Remember me" to clear saved credentials
+
+#### Web Application
+- **"Remember me" checkbox**: New checkbox in the login dialog
+- **Email remembered**: Email address saved in browser localStorage for convenience
+- **Session persistence**: Login session already persists via Supabase cookies
+
+---
+
+## [5.4.0] - 2026-02-03
+
+### New Feature: Library/Holding Institution Display
+
+Every manuscript record now shows which library or collection holds the original document.
+
+- **Coverage:** 99.99% of ~217,000 records have library codes assigned (only 14 records with missing source data)
+- **Libraries identified:** 70+ institutions including Cambridge (CUL), JTS, National Library of Russia, Bodleian (Oxford), Manchester, British Library, Alliance Israélite, Library of Geneva, Senckenberg (Frankfurt), Schocken Institute, and many more
+
+#### Web Application
+- Library badge with code (e.g., "CUL") displayed in search results with full name tooltip
+- Library field in Advanced View metadata cards
+- Library field in browse page metadata panel
+- Library column in all Excel exports (Search, Lists, Parallels)
+
+#### Desktop Application
+- New "Library" column in search results table
+- Filterable/sortable like other columns
+- Library column in Excel/Word exports
+
+#### Technical Details
+- New `library_code` column in `libraries.csv`
+- New functions: `LIBRARY_CODES` constant, `get_library_display()`, `get_library_for_id()`
+- Backward compatible with old CSV files (gracefully handles missing column)
+
+### Enhancement: Nikud (Vowel Mark) Removal in Parallels Search
+
+Parallels search now automatically strips Hebrew vowel marks (nikud) and cantillation marks from text before matching. This ensures consistent results whether the input text contains nikud or not.
+
+- Affects both Lab Mode and Standard parallels search
+- Also strips nikud from filter/exclude text for consistent filtering
+- New function: `strip_nikud()` in `genizah_core.py`
+
+### Enhancement: Advanced View Dialog Improvements
+
+The Advanced View dialog (opened from search results) has been significantly enhanced:
+
+#### Navigation & Viewing
+- **Fixed navigation bug**: Results now navigate in-place without closing/reopening the dialog
+- **Page navigation**: Browse pages within a manuscript using prev/next buttons
+- **IIIF image viewer**: Side-by-side image panel with zoom, rotate, and pan controls
+- **Fullscreen mode**: Distraction-free view with compact navigation bar
+- **Image toggle**: Show/hide image panel as needed
+
+#### Inline Editing
+- Edit text directly in the Advanced View (same as Browse page)
+- Save drafts, submit for review, or publish immediately (for editors/admins)
+- Visual feedback: orange border for unsaved changes, green for saved
+- Notes field for correction comments
+
+#### Bug Fixes
+- Fixed "Unknown" author display in version selector (now joins profiles table)
+- Fixed script tag error in edit dialog (NiceGUI compatibility)
+
+### Files Changed
+- `genizah_core.py` - Core library functions, CSV loading, nikud removal
+- `genizah_app.py` - Desktop table columns
+- `web/services.py` - Data classes and page retrieval
+- `web/pages/search.py` - Library badge display, Advanced View dialog enhancements
+- `web/pages/browse.py` - Metadata panel
+- `web/components/text_editor.py` - Fixed script tag in HTML
+- `web/supabase_client.py` - Added profiles join to get_corrections()
+- `web/export_service.py` - Export functions
+- `libraries.csv` - Added library_code column
+
+---
+
+## [5.3.1] - 2026-02-03
+
+### Bug Fixes
+
+- **RTL navigation arrows:** Fixed all directional icons (arrows, chevrons, skip buttons) that were reversed in Hebrew UI mode. Icons now correctly flip direction based on language setting.
+- **Removed directional icons from action buttons:** Removed `send` arrow icons from Submit/Share/Reply buttons and `arrow_forward` from Go button, as these looked incorrect in RTL mode.
+- **Missing title metadata in search results:** Fixed bug where title and other metadata wasn't displayed in search results. The `get_display_data()` method now uses proper fallback logic (CSV bank → NLI cache) matching the browse page behavior.
+- **Search panel auto-collapse:** Fixed scroll-based auto-collapse that wasn't working. Added proper class targeting for the results scroll area and improved JavaScript detection.
+- **Search panel collapse/expand visibility:** Fixed panels not showing/hiding properly by using explicit styles with `!important` flags.
+- **Advanced Options inside search panel:** Moved the Advanced Options expansion inside the collapsible search panel so it hides when the search bar collapses.
+- **Search results layout overflow:** Fixed text getting cut off when zooming or resizing window. Removed `max-width` restrictions and added proper flex wrapping and word-wrap styles.
+- **Removed Edit/Comment buttons from result cards:** Cleaned up search result cards by removing Edit and Send Comment buttons (still available in the detailed viewer).
+
+### Enhancements
+
+- **Full Text pane highlighting:** Added search term highlighting to the Full Text tab in search results, matching the highlighting in the Match pane.
+
+### Files Changed
+
+- `genizah_core.py` - Fixed `get_display_data()` metadata fallback
+- `web/pages/search.py` - Search panel collapse, Advanced Options placement, result card layout, Full Text highlighting
+- `browse.py` - Page/shelfmark navigation, Go button, Back buttons, Submit buttons
+- `document.py` - Back button, page navigation
+- `home.py` - Start Search, Find Parallels, Browse, View All buttons
+- `discoveries.py` - Back buttons, Reply/Share buttons
+- `comment_dialog.py` - Back button, Submit button
+- `joins_panel.py` - Navigation indicator, Back button
+- `text_editor.py` - Submit Correction button
+
+---
+
+## [5.3.0] - 2026-02-02
+
+### New Feature: Cross-Paragraph Search
+
+A new parallel search mode that finds manuscripts with text spanning paragraph boundaries, now available on **both Web and Desktop**.
+
+- **Why it's useful:** Text within paragraphs often contains citations (Mishnah, Talmud, known phrases). Text that crosses paragraph boundaries is unlikely to be a citation, effectively filtering out noise.
+
+- **Three search modes:**
+  - **Full search** - All results (default)
+  - **Cross-paragraph only** - Only matches that span paragraph breaks
+  - **Combined** - All results, with boundary-crossing matches boosted
+
+- **Customizable delimiters:** Line break, blank line (paragraph), period, colon
+
+- **Visual indicators:**
+  - Web: Amber "Cross-paragraph" badge; red `|` at boundary points in matched text
+  - Desktop: 🔗 emoji prefix on scores; tooltips showing match count
+
+- **Advanced settings:** Configurable boost factor (1.0-3.0), minimum boundary matches filter, minimum delimiter distance
+
+- **Real-time feedback:** Desktop shows boundary count and crossing chunks before search
+
+### Bug Fixes
+
+- **Duplicate results fix:** Fixed bug where same manuscript appeared multiple times in Standard search when found by overlapping chunks routed to different filter maps
+- **Boundary detection:** Improved to require words on BOTH sides of the boundary (not just touching)
+- **Desktop boundary stats:** Fixed silent exception handling, now logs errors properly
+- **Desktop translation:** Fixed fragmented translation string for cross-paragraph tooltips
+- **Anonymous display bug:** Fixed discoveries showing as "Anonymous" even when user didn't check anonymous - now fetches profile data properly
+- **Dialog Esc key:** Fixed Share Discovery dialog flickering when pressing Esc (removed 'persistent' prop)
+- **Simplified Share Discovery:** Removed superfluous "Related manuscripts" section from dialog
+- **Database constraint:** Updated discoveries type constraint to include 'identification' and 'note' types
+
+### Technical Changes
+
+- `CompositionThread` and `LabCompositionThread` now accept boundary parameters
+- `LabSettings` stores boundary preferences (mode, delimiter, boost, min matches, min distance)
+- Added temporary storage fallback for settings when `lab_engine` not initialized
+
+### Documentation
+
+- Updated help page with cross-paragraph search documentation (English and Hebrew)
+- Updated BOUNDARY_SEARCH_SPEC.md with completed desktop implementation details
+
+---
+
+## [5.2.0] - 2026-02-01
+
+### Documentation
+
+- **Help Center rewrite:** Comprehensive bilingual help page covering Search, Parallels, Browse, Lists, and Export features
+- **File index:** New `docs/FILE_INDEX.md` with comprehensive listing of all project files
+
+### Codebase Cleanup
+
+- **Root directory cleanup:** Removed unused directories (`backend/`, `backend_legacy/`, `frontend_web/`, `build/`, `Reports/`, `Results/`)
+- **Scripts organization:** Moved utility scripts to `scripts/` folder (cleanup, verify, debug scripts)
+- **Branch cleanup:** Deleted 25 stale/merged git branches
+
+### UX Improvements
+
+- **Search spinners:** More prominent animated spinners (bars instead of dots, larger size, pulsing text)
+- **Parallels search feedback:** Spinner and status now visible in control panel without scrolling
+- **Stop button:** Added to regular search (swaps with search button during search), shows partial results when stopped
+- **Filter sources badge:** Shows count of enabled filter sources on the expansion header
+- **Filter tooltip:** Explains filter feature in both English and Hebrew
+
+### Header Branding
+
+- **Dicta branding:** Header now shows "Dicta Genizah Search" with Hebrew subtitle "אתר הגניזה מבית דיקטה"
+- **Mobile optimization:** Header hides on scroll down, reveals on scroll up (mobile only)
+- **Responsive logo:** Text hidden on small screens, only icon shows
+
+### Backend Migration: Supabase
+
+- **Complete Supabase migration:** Replaced FastAPI backend with direct Supabase integration
+- All authentication now handled by Supabase Auth
+- User lists, corrections, and comments stored in Supabase
+- Built-in rate limiting and security features
+
+### Authentication Fixes
+
+- **OAuth flow:** Fixed Google OAuth to use Supabase's `sign_in_with_oauth` method with proper state parameter
+- **Session handling:** Implicit flow tokens properly extracted from URL hash on callback
+- **Forgot password (desktop):** Added password reset link to desktop app login dialog for OAuth users
+- **OAuth user guidance:** Web Google signup now shows note about setting password for desktop app login
+
+### Row Level Security (RLS) Fixes
+
+- **RLS policies:** Fixed all INSERT/UPDATE/DELETE policies to use `authenticated` role instead of `public`
+- **Column naming:** Updated queries to use correct column names (`author_id` for comments/corrections, `user_id` for others)
+- **Profile joins removed:** Removed `profiles` table joins from queries that failed without FK relationships
+- **SQL script:** Added `scripts/fix_rls_policies.sql` for bulk RLS policy updates
+
+### Community Feed & Comments
+
+- **Feed loading:** Fixed `get_feed_items` to properly load discoveries, corrections, comments, and joins
+- **Comments display:** Fixed comments to appear on browse pages (removed failing profiles join)
+- **Profile page:** Fixed to load data from profile storage instead of auth user
+
+### Lists & Projects Management
+
+- **Management mode toggle:** New "Manage lists" button reveals edit controls
+- **Icon-based actions:** Replaced dropdown menus with direct action buttons (rename, move to project, delete)
+- **Improved UI:** Cleaner interface with actions hidden by default
+- **Auto-sync:** Lists automatically sync between devices for logged-in users
+- **Soft delete support:** Lists can be recovered after deletion
+
+### Bug Fixes
+
+- **Register button:** Fixed bug where clicking "Register" opened login dialog instead of register
+- **Dependencies:** Added missing `gotrue` and `python-dotenv` to requirements.txt
+
+### Documentation
+
+- **English translation:** PRE_LAUNCH_CHECKLIST.md translated from Hebrew to English
+- **Documentation reorganization:** New `docs/` structure with guides, plans, and specs
+
+---
+
+## [5.1.0] - 2026-01-27
+
+### Web Platform: Dicta Genizah Search (אתר הגניזה של דיקטה)
+
+The web platform has been rebranded to **"Dicta Genizah Search"** (אתר הגניזה של דיקטה), reflecting our partnership with DICTA. The desktop application remains "Genizah Search Pro".
+
+### Accessibility Compliance (WCAG 2.0 / IS 5568)
+
+- Full compliance with Israeli Standard 5568 and WCAG 2.0 AA accessibility guidelines
+- Improved Hebrew RTL layout and text alignment
+- Semantic headings with proper sizing
+- Enhanced keyboard navigation support
+
+### New Features
+
+- **Automatic Text Source Filtering:** Intelligent filtering based on Sefaria text database
+- **Enhanced Variant Search:** Improved letter variation handling (multi-character, 2-to-1 letters)
+- **Fullscreen Edit Mode:** Image controls with splitter for side-by-side viewing
+- **Fragment Joins System:** Connect related fragments via Discovery Center
+- **Exclude Words UI:** Exclude specific words from search results
+- **Citation Footer:** Dismissible footer with publishing guidelines
+
+### Browse & Viewer Improvements
+
+- Side-by-side layout for browse page
+- Image drag, rotate, and wheel zoom in manuscript viewer
+- Image credits/attribution for NLI and Oxford sources
+- Title truncation with tooltips for long titles
+
+### UI/UX Improvements
+
+- Desktop app download page with website integration
+- SEO metadata for social sharing
+- Dark mode fixes across multiple pages
+- Dismissible transcription disclaimer banner
+- Creator credit in sidebar footer
+
+### Technical Improvements
+
+- Migrated to google-genai SDK (gemini-3-flash-preview)
+- SSL certificate verification for all HTTPS requests
+- Build optimizations for faster packaging
+- Antivirus false positive documentation
+- Server-side index building support
+
+### Bug Fixes
+
+- Fixed NLI and Oxford image loading issues
+- Fixed version comparison for different component lengths
+- Fixed RTL layout overlap and alignment issues
+- Fixed theme toggle functionality
+- Fixed fullscreen edit image loading
+
+---
+
+## [5.0.0] - 2026-01-19
+
+### Major Release: Web Platform & Community Features
+
+Version 5.0 marks the launch of the **Genizah Search Pro Web Platform** and introduces comprehensive **Community Features**, transforming the software into a collaborative research environment.
+
+---
+
+### Web Platform
+
+- **Public Web Application:** Full-featured web interface accessible from any browser at [genizahsearch.com](https://genizahsearch.com)
+- **Mobile Responsive Design:** Optimized experience for tablets and phones with adaptive layouts
+- **User Authentication:** Registration, login, and profile management
+- **Offline Mode:** Community features work offline and sync when reconnected
+
+### Community Features
+
+- **Discovery Center:** Share and explore research discoveries with the community
+  - Voting system for discoveries
+  - Pin important discoveries
+  - Mark discoveries as answered/resolved
+  - Multiple shelfmark references per discovery
+  - Document lookup from discovery dialog
+- **Comments System:** Add comments to manuscripts with page-specific references
+  - Public and private comments
+  - Draft support for work-in-progress notes
+- **Corrections & Contributions:** Submit corrections to transcriptions
+  - Review workflow for submitted corrections
+  - Track your contributions in "My Edits & Comments" page
+
+### Admin Features
+
+- User management panel with role assignment
+- Corrections review system for approving/rejecting submissions
+- Profile editing capabilities for users
+
+### Desktop App Integration
+
+- New dialogs for comments and text editing
+- Improved synchronization between desktop and web data
+- Consistent page number handling across platforms
+- Full offline mode for community tab
+
+### Stability & Performance
+
+- Fixed infinite timer issues causing connection problems
+- Improved CSS performance for faster page loads
+- Better error handling for offline scenarios
+- Disabled reload mode for improved stability
+
+---
+
+## [4.1.1] - 2026-01-12
+
+### Fixes
+- Corrected star icon alignment in search results
+- Fixed list preview image loading
+
+---
+
+## [4.1.0] - 2026-01
+
+### Personal Lists Management
+- New tab for creating and organizing personal manuscript lists
+- Browse by list: side panel in Browse tab for navigating custom lists
+- List filtering: filter search results based on personal lists
+
+### Interface Refinements
+- Compact context view at the bottom of the interface
+- Reports saved to user's Documents directory
+- Resolved duplicate search results issue
+
+---
+
+## [4.0.0] - 2025
+
+### Major Update: From Search Engine to Research Suite
+
+### Integrated Visual Analysis (IIIF)
+- In-app viewer for high-resolution manuscript images
+- Direct integration with National Library of Israel and Cambridge University Library
+- Sequential page and manuscript navigation
+- Built-in zoom and rotation controls
+
+### Oxford Bodleian Integration
+- Full support for Oxford Bodleian Library manuscripts
+- Neubauer catalog integration
+- Part-based and folio-based navigation
+
+### Lab Mode (Experimental)
+- Parallel detection algorithm based on Shmidman, Koppel, and Porat (2016)
+- Rare letter encoding for spelling variation tolerance
+
+### Additional Features
+- Cross-page search
+- Enhanced export (Excel, CSV, DOCX)
+- Find in text with highlighting
+- Composition search for parallel detection
+
+---
+
+## [3.6.0] and earlier
+
+See previous release notes for historical changes.

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source": "browse",
+  "generated_at": "2026-05-04T12:00:03.000Z",
+  "locator": {"uid": "990005555550205171_001r", "sys_id": "990005555550205171", "volume_ie": "IE55555", "p_num": 1, "fl_id": "MS Heb c 57.1r"},
+  "shelfmark": "MS Heb c 57",
+  "title": "Halakhic fragment",
+  "library_code": "Oxford",
+  "library_name": "Bodleian Libraries",
+  "text": "בשם רחמנא שאלה ששאל ר' יצחק הכהן בדין הגט שנכתב ביום ונמסר בלילה",
+  "text_source": "pgp_transcription",
+  "text_truncated": false,
+  "metadata": {
+    "pgp": {"pgpid": 67890, "description": "Responsum on get law"},
+    "fjms": null,
+    "nli": null
+  },
+  "image": {
+    "url": null,
+    "provider": null,
+    "sources": []
+  },
+  "warnings": []
+}

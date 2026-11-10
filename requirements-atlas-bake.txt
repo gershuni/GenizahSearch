@@ -1,0 +1,14 @@
+# Bake-time-only dependencies for scripts/build_atlas_asset.py (Phase 133
+# Visual Atlas Preview, ATLAS-01). This tooling NEVER runs inside the web
+# process -- it is an offline batch script -- so these packages are
+# DELIBERATELY NOT added to requirements.txt / requirements-lock.txt.
+#
+# Install locally with:
+#   pip install -r requirements-atlas-bake.txt
+#
+# All three versions verified live against the PyPI registry + slopcheck
+# during Phase 133 research (133-RESEARCH.md "Package Legitimacy Audit"):
+# networkx [OK], python-louvain [OK], Brotli [OK]. No SUS/SLOP findings.
+networkx==3.6.1
+python-louvain==0.16
+Brotli==1.2.0

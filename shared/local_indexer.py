@@ -1,0 +1,4880 @@
+# -*- coding: utf-8 -*-
+"""Phase 95 LOCAL indexer (REQ-1, REQ-3, REQ-4, REQ-5, D-01..D-44).
+
+Qt-free. Owns: PyMuPDF/python-docx/TXT extraction, LOCAL Tantivy side-index
++ LOCAL LAB side-index builders, SQLite cache (folders / processed_files /
+local_pages / local_files), incremental re-extract, delete-by-uid, two-phase
+commit with crash recovery.
+
+Critical divergences from main Tantivy index (CONTEXT D-08 / D-13 / D-20 / D-21
++ RESEARCH Pitfall #2):
+  - unique_id field uses tokenizer_name="raw" (main index omits this kwarg).
+    Required because LOCAL deletes-by-term on rescan; main never deletes.
+  - One Tantivy doc per PDF page (D-03), 20-paragraph chunk for DOCX (D-04).
+  - LOCAL hits never write to shared corpus files (Seewald's prototype patched
+    the shared corpus - we don't; SPEC Constraint #6).
+
+Per CONTEXT D-02: _fix_rtl_line, _fix_rtl_page, _join_fragmented_lines are
+PORTED VERBATIM from seewald_addition/genizah_make_index.py:67-105 but NEVER
+invoked at runtime. They exist as a regression-prevention contract for the
+future fallback path (pdfplumber/pypdf). Tests in tests/test_local_indexer.py
+exercise the helpers in isolation.
+
+HIGH-3 review fix: _delete_file uses crash-safe THREE-STEP protocol:
+  1. Mark pending_delete=1 in SQLite
+  2. Tantivy delete + commit
+  3. SQLite final DELETE
+Startup recovery calls _recover_pending_deletes() to replay steps 2-3 for
+any rows left with pending_delete=1 from a previous crash.
+
+HIGH-4 review fix (option b LOCKED): page text for LAB rebuild is read from
+main LOCAL Tantivy content stored field by UID - NOT from SQLite (this plan's
+schema stores metadata only).
+
+MEDIUM-2 review fix: TXT extraction tries utf-8-sig with errors=strict; on
+UnicodeDecodeError, attempts cp1255 (legacy Windows Hebrew); on both failures,
+the file is marked extraction_status='encoding_error'.
+"""
+from __future__ import annotations
+
+from shared.local_index_leases import index_swap
+
+import datetime
+import errno
+import gc
+import hashlib
+import html
+import json
+import logging
+import os
+import re
+import sqlite3
+import threading
+import time
+import unicodedata
+from typing import Callable, Iterator, Optional
+
+# Phase 97 F-02 — neutralize XML-bomb / XXE primitives before openpyxl loads.
+# defuse_stdlib() patches xml.etree.ElementTree and friends. Best-effort:
+# if defusedxml is somehow missing in a dev install, log a warning and proceed.
+try:
+    import defusedxml
+    defusedxml.defuse_stdlib()
+except ImportError:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "Phase 97: defusedxml not installed; XML-bomb defense degraded"
+    )
+
+import fitz  # PyMuPDF - D-01
+
+# Phase 97.3 R97.3-C (D-11): silence PyMuPDF stderr warnings + errors for
+# malformed PDF operators (e.g. "unknown keyword: 'TF'" — 624× in user's UAT
+# folder). Broad except Exception per Codex Critique #2 — suppression is
+# non-critical; a future PyMuPDF API change must NOT crash module import
+# (which would break the entire desktop app).
+#
+# Deviation from PLAN literal text (Rule 2 — critical functionality): the
+# 624× UAT noise lines were "MuPDF error: ..." (errors, not warnings), so
+# mupdf_display_warnings(False) alone does not satisfy SPEC R97.3-C
+# acceptance ("zero MuPDF error: lines on stderr"). mupdf_display_errors
+# was added alongside — both APIs exist in PyMuPDF 1.23+ and are the
+# documented mechanism for suppressing PyMuPDF's own stderr channel. The
+# broad except Exception keeps both calls non-critical at import time.
+try:
+    fitz.TOOLS.mupdf_display_warnings(False)
+except Exception as _mupdf_suppress_exc:  # noqa: BLE001
+    logging.getLogger(__name__).debug(
+        "Phase 97.3 R97.3-C: mupdf_display_warnings suppression call "
+        "unavailable in this PyMuPDF version: %s", _mupdf_suppress_exc,
+    )
+try:
+    fitz.TOOLS.mupdf_display_errors(False)
+except Exception as _mupdf_suppress_exc:  # noqa: BLE001
+    logging.getLogger(__name__).debug(
+        "Phase 97.3 R97.3-C: mupdf_display_errors suppression call "
+        "unavailable in this PyMuPDF version: %s", _mupdf_suppress_exc,
+    )
+
+from docx import Document as _DocxDoc  # python-docx - D-04
+import tantivy
+
+# Phase 102 D-11: disable image data in rawdict to keep memory bounded.
+# TEXTFLAGS_RAWDICT includes TEXT_PRESERVE_IMAGES by default (~4.5× baseline);
+# clearing that bit drops to ~1.68×. If TEXTFLAGS_RAWDICT is absent in the
+# installed build (unlikely — PyMuPDF >= 1.18), fall back to TEXTFLAGS_DICT.
+try:
+    _RAWDICT_FLAGS: int = fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES
+except AttributeError:
+    _RAWDICT_FLAGS = fitz.TEXT_PRESERVE_IMAGES ^ fitz.TEXT_PRESERVE_IMAGES  # no-op fallback
+
+from shared.local_sys_id import (
+    is_local_sys_id,  # noqa: F401
+    generate_local_sys_id,
+    _canonical_filepath,
+)
+from shared.local_indexer_rtl import (
+    rtl_ratio,
+    group_lines_by_baseline,
+    despace_line_to_word_units,
+    line_text_from_word_units,
+    reorder_word_units_rtl,
+    fix_visual_brackets_rtl,
+    normalize_punctuation_spacing,
+)
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}
+
+
+def is_office_temp_file(filename: str) -> bool:
+    """True for MS Office / LibreOffice lock & owner files (e.g. ``~$report.docx``).
+
+    These are transient files Word/Excel/PowerPoint create while a document is
+    open. They are NOT real documents and not valid zip containers, so they
+    would otherwise be logged as ``zip_bomb_suspected`` ("not a valid
+    zip-container file") and shown forever in the opt-out tree. Skipped during
+    enumeration so they never reach indexing, status tables, or the tree.
+    """
+    return os.path.basename(filename).startswith("~$")
+
+
+# Phase 97 D-NEW-4 — error statuses that keep a row even for unsupported extensions
+# Phase 102 Plan 03: added 'corrupt_encoding' (D-08 surface 1 — future-OCR candidate).
+# NOTE: 'encoding_error' (TXT decode failure) is a DISTINCT legacy status — it is still
+# classified as 'indexed' in surface 2 scan classification (pre-existing behavior preserved).
+_ERROR_STATUSES_KEPT = {
+    "oversized", "error", "encoding_error",
+    "changed_during_index", "zip_bomb_suspected",
+    "unreachable", "timeout", "corrupt_encoding",
+}
+_DOCX_CHUNK_PARAGRAPHS = 20            # D-04
+_SCANNED_PDF_CHAR_THRESHOLD = 50       # D-05
+_EMPTY_PAGE_CHAR_THRESHOLD = 10        # D-06
+_COMMIT_BATCH_SIZE = 25                # D-21 — Phase 95 dead-code per D-02 preservation;
+                                       # Phase 95 D-21 — superseded by Phase 97 _CommitTriggers below.
+                                       # Kept as dead-code constant per D-02 preservation.
+_MAX_COLLISION_RETRIES = 4             # D-19
+_UNIQUE_ID_PREFIX = "LOCAL"            # D-34
+_DEFAULT_TXT_ENCODING = "utf-8-sig"    # D-07 starting policy
+
+# ---------------------------------------------------------------------------
+# Phase 97 C-02 / C-05 constants + commit trigger + zip-bomb helpers
+# ---------------------------------------------------------------------------
+# Phase 97 C-02 — heap-sampling branch DROPPED per RESEARCH Issue #1
+# (tantivy-py 0.25.1 has no writer.get_memory_usage()); the heap_size= arg
+# to index.writer() is a memory ceiling, not a commit trigger.
+# TODO(tantivy >= 0.26): add a heap-size trigger when get_memory_usage() exists.
+
+# Phase 97 C-05 size/zip-bomb constants
+_MAX_FILE_SIZE = 100 * 1024 * 1024            # raw 100 MB hard skip
+_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024   # zip-container 500 MB
+_MAX_CELLS_PER_SHEET = 100_000                # 100K cells (consumed by Wave C XLSX extractor)
+_MAX_CHARS_PER_CHUNK = 1_000_000              # 1 MB per chunk (consumed by Wave C extractors)
+_XLSX_ROW_WINDOW = 500                        # F-02: rows per Tantivy chunk in XLSX extractor
+_CSV_ROW_WINDOW = 200                         # F-03: rows per Tantivy chunk in CSV extractor
+_CSV_ENCODINGS = ("utf-8-sig", "cp1255", "utf-16-le")  # F-05: encoding chain for CSV
+
+
+class XlsxZipBombSuspected(Exception):
+    """Phase 97 C-05 — raised by _check_zip_bomb or XLSX extractor when limits exceeded."""
+
+
+class _PhaseAwareETA:
+    """Phase 97 U-01 — separate EWMA smoothing for 4 sub-phases.
+
+    compose_overall_eta returns sum() of remaining-phase ETAs because phases
+    are sequential (walk -> extract -> commit -> rebuild). Codex MEDIUM #5
+    resolved: test and code agree on sum composition.
+    """
+
+    PHASES = ("walking", "extracting", "committing", "rebuilding_lab")
+    ALPHA = 0.2  # EWMA weight for new samples
+
+    def __init__(self) -> None:
+        import time as _time
+        self._bytes_per_sec: dict = {p: 0.0 for p in self.PHASES}
+        self._remaining_bytes: dict = {p: 0 for p in self.PHASES}
+        self._last_sample: dict = {p: _time.monotonic() for p in self.PHASES}
+
+    def record(self, phase: str, bytes_done: int) -> None:
+        """Feed a new bytes_done observation into the EWMA for the given phase."""
+        import time as _time
+        now = _time.monotonic()
+        dt = max(now - self._last_sample[phase], 1e-6)
+        rate = bytes_done / dt
+        self._bytes_per_sec[phase] = (
+            self.ALPHA * rate + (1 - self.ALPHA) * self._bytes_per_sec[phase]
+        )
+        self._last_sample[phase] = now
+
+    def set_remaining(self, phase: str, bytes_remaining: int) -> None:
+        """Set the estimated remaining bytes for a phase."""
+        self._remaining_bytes[phase] = bytes_remaining
+
+    def phase_eta_seconds(self, phase: str) -> float:
+        """Return ETA in seconds for a single phase."""
+        rate = self._bytes_per_sec[phase]
+        if rate <= 0:
+            return float("inf") if self._remaining_bytes[phase] > 0 else 0.0
+        return self._remaining_bytes[phase] / rate
+
+    def compose_overall_eta(self) -> float:
+        """Sequential composition — sum of remaining phase ETAs (Codex MEDIUM #5 fix).
+
+        Returns the sum of per-phase ETAs for all phases that still have
+        remaining bytes. Returns 0.0 when no bytes remain.
+        """
+        etas = [
+            self.phase_eta_seconds(p)
+            for p in self.PHASES
+            if self._remaining_bytes[p] > 0
+        ]
+        return sum(etas) if etas else 0.0
+
+
+class _CommitTriggers:
+    """Phase 97 C-02 — byte/count/time commit triggers.
+
+    Fires when ANY of the following is reached:
+      - Source bytes in this batch >= 200 MB (BYTES_THRESHOLD)
+      - Files processed in this batch >= 100 (FILES_THRESHOLD)
+      - Seconds elapsed since last commit >= 60 (SECONDS_THRESHOLD)
+
+    Heap-sampling path DROPPED per RESEARCH Issue #1: tantivy-py 0.25.1 has
+    no writer.get_memory_usage() method. The heap_size= arg to index.writer()
+    is a memory ceiling, not a commit trigger.
+    TODO(tantivy >= 0.26): add heap trigger when get_memory_usage() exists.
+    """
+
+    BYTES_THRESHOLD = 200 * 1024 * 1024  # 200 MB
+    FILES_THRESHOLD = 100
+    SECONDS_THRESHOLD = 60.0
+
+    def __init__(self) -> None:
+        self._batch_bytes = 0
+        self._batch_files = 0
+        self._batch_start = time.monotonic()
+
+    def record_file(self, source_size: int) -> None:
+        """Record that one file of source_size bytes was processed."""
+        self._batch_bytes += int(source_size or 0)
+        self._batch_files += 1
+
+    def should_commit(self) -> bool:
+        """Return True if any commit threshold has been crossed."""
+        return (
+            self._batch_bytes >= self.BYTES_THRESHOLD
+            or self._batch_files >= self.FILES_THRESHOLD
+            or (time.monotonic() - self._batch_start) >= self.SECONDS_THRESHOLD
+        )
+
+    def reset(self) -> None:
+        """Reset all counters after a commit."""
+        self._batch_bytes = 0
+        self._batch_files = 0
+        self._batch_start = time.monotonic()
+
+
+def _check_zip_bomb(filepath: str) -> str | None:
+    """Phase 97 C-05 — pre-check zip-container files for uncompressed-size bombs.
+
+    Iterates zipfile.ZipInfo.file_size records and sums uncompressed sizes.
+    Returns a reason string if the total exceeds _MAX_UNCOMPRESSED_BYTES (500 MB),
+    or if the file is not a valid zip container. Returns None if safe.
+
+    Apply ONLY to .docx / .xlsx — PDF/TXT/CSV/HTML use raw-size cap only.
+    This check runs BEFORE handing the file to openpyxl/python-docx, so a
+    maliciously crafted zip claiming 600 MB uncompressed is rejected in < 1 ms
+    without allocating any decompression memory (Codex MEDIUM #1).
+    """
+    import zipfile as _zipfile
+    try:
+        with _zipfile.ZipFile(filepath, "r") as zf:
+            total_uncompressed = sum(info.file_size for info in zf.infolist())
+            if total_uncompressed > _MAX_UNCOMPRESSED_BYTES:
+                return (
+                    f"uncompressed size {total_uncompressed} "
+                    f"exceeds limit {_MAX_UNCOMPRESSED_BYTES}"
+                )
+    except _zipfile.BadZipFile:
+        return "not a valid zip-container file"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# EncodingError (MEDIUM-2 review fix)
+# ---------------------------------------------------------------------------
+class EncodingError(Exception):
+    """Raised by extract_txt when both utf-8-sig and cp1255 fail (MEDIUM-2)."""
+    pass
+
+
+class LocalIndexerError(RuntimeError):
+    """Phase 97.2 R97.2-D / R97.2-H — raised when discard_run aborts due to
+    Tantivy failure, or when a writer cannot be acquired (schema mismatch /
+    LockBusy). UI catches and offers a Reset My Library CTA.
+    """
+    pass
+
+
+# ---------------------------------------------------------------------------
+# RTL helpers - DEAD CODE per D-02.
+# Ported VERBATIM from seewald_addition/genizah_make_index.py:67-105.
+# These helpers are NEVER invoked in v1 runtime. They exist as a
+# regression-prevention contract for a future pdfplumber/pypdf fallback path.
+# NOTE: the LIVE Phase 101 RTL fix for PyMuPDF sort=True output lives in
+# _fix_sort_true_rtl_line / _fix_sort_true_rtl_page below — those use
+# DIRECTIONAL-RUN reversal, NOT the char-reversal these dead helpers do.
+# ---------------------------------------------------------------------------
+
+def _rtl_ratio(text: str) -> float:  # pragma: no cover
+    """Fraction of RTL chars among alpha chars. DEAD CODE per D-02."""
+    alpha = [c for c in text if c.isalpha()]
+    if not alpha:
+        return 0.0
+    rtl = sum(1 for c in alpha if unicodedata.bidirectional(c) in ("R", "AL", "AN"))
+    return rtl / len(alpha)
+
+
+def _fix_rtl_line(line: str) -> str:  # pragma: no cover
+    """Reverse a pdfplumber mirror-reversed RTL line. DEAD CODE per D-02."""
+    s = line.strip()
+    if not s or _rtl_ratio(s) <= 0.4:
+        return line
+    lead = len(line) - len(line.lstrip())
+    tail = len(line) - len(line.rstrip())
+    core = s[::-1]
+    return line[:lead] + core + (line[len(line) - tail:] if tail else "")
+
+
+def _fix_rtl_page(text: str) -> str:  # pragma: no cover
+    """Apply per-line RTL fix + re-glue punctuation. DEAD CODE per D-02."""
+    if not text:
+        return text
+    lines = [_fix_rtl_line(ln) for ln in text.splitlines()]
+    result = "\n".join(lines)
+    result = re.sub(r"(\w)\s+([,.])", r"\1\2", result)
+    result = re.sub(r"([,.])\s+(\w)", r"\1 \2", result)
+    return result
+
+
+def _join_fragmented_lines(text: str) -> str:  # pragma: no cover
+    """Join pages where each word is on its own line. DEAD CODE per D-02."""
+    lines = text.splitlines()
+    non_empty = [line for line in lines if line.strip()]
+    if len(non_empty) < 4:
+        return text
+    single = sum(1 for line in non_empty if len(line.split()) <= 1)
+    if single / len(non_empty) < 0.60:
+        return text
+    paragraphs, current = [], []
+    for line in lines:
+        s = line.strip()
+        if s:
+            current.append(s)
+        elif current:
+            paragraphs.append(" ".join(current))
+            current = []
+    if current:
+        paragraphs.append(" ".join(current))
+    return "\n\n".join(paragraphs)
+
+
+# ---------------------------------------------------------------------------
+# Phase 101: sort=True RTL word-order fix (LIVE — not dead code).
+# The dead-code _fix_rtl_* helpers above char-reverse pdfplumber output; the
+# live PDF path instead reverses WORD-TOKEN RUN ORDER for PyMuPDF sort=True
+# output (USER-DEC-1 / S-1: directional-run reversal).
+# ---------------------------------------------------------------------------
+
+def _fix_sort_true_rtl_line(line: str) -> str:
+    """Reverse word-token RUN ORDER for sort=True RTL fallback output (S-1, REVISED).
+
+    PyMuPDF get_text('text', sort=True) sorts words by ascending x-coordinate
+    (LTR visual order), which reverses Hebrew/Arabic reading order. This helper
+    groups consecutive tokens by predominant directionality (RTL vs non-RTL via
+    per-token _rtl_ratio > 0.4), then:
+      1. Reverses the SEQUENCE of runs (so a trailing-Hebrew → leading-Hebrew flip
+         happens at the line level).
+      2. Reverses tokens INSIDE each RTL run (so pure-RTL lines — which collapse
+         to a single RTL run — actually flip word order; this is the case Codex
+         REVIEWS round 2 HIGH #5 surfaced).
+      3. PRESERVES the internal order of non-RTL runs, so shelfmarks like
+         'T-S 12.123', folio numbers, inline Latin sigla, and date references
+         stay adjacent in their natural left-to-right sub-order.
+
+    Letters within each word are already in correct logical Unicode order and
+    must NOT be reversed (we reverse TOKENS, not characters).
+
+    No-op on lines with _rtl_ratio <= 0.4 (LTR/numeric/empty/mixed-LTR).
+
+    Whitespace normalization is intentional (REV-2e). Tokenizing via
+    line.split() collapses runs of whitespace and strips leading/trailing
+    whitespace; the resulting text uses single-space delimiters. This repairs
+    reading order for extracted plain text (which feeds search indexing), not
+    layout fidelity. PDFs with tab-separated columns or aligned poetry are
+    uncommon in the sort=True fallback branch (which is itself triggered only
+    by single-word-per-line pathological output), so this trade-off is
+    acceptable.
+    """
+    if _rtl_ratio(line) <= 0.4:
+        return line
+    tokens = line.split()
+    if len(tokens) <= 1:
+        return line
+    runs: list[tuple[bool, list[str]]] = []
+    current: list[str] = []
+    current_is_rtl: bool | None = None
+    for tok in tokens:
+        tok_is_rtl = _rtl_ratio(tok) > 0.4
+        if current_is_rtl is None or tok_is_rtl == current_is_rtl:
+            current.append(tok)
+            current_is_rtl = tok_is_rtl
+        else:
+            runs.append((current_is_rtl, current))
+            current = [tok]
+            current_is_rtl = tok_is_rtl
+    if current:
+        runs.append((current_is_rtl, current))
+    # Reverse the SEQUENCE of runs; within each RTL run also reverse tokens
+    # (so pure-RTL → single run → token reversal still flips word order).
+    # Non-RTL runs preserve internal order so embedded Latin shelfmarks /
+    # folio numbers / digit groups stay adjacent.
+    return ' '.join(
+        tok
+        for is_rtl, run in reversed(runs)
+        for tok in (list(reversed(run)) if is_rtl else run)
+    )
+
+
+def _fix_sort_true_rtl_page(text: str) -> str:
+    """Apply _fix_sort_true_rtl_line (directional-run reversal) to each line.
+
+    Joins per-line results with '\\n'. PyMuPDF get_text('text', sort=True)
+    always emits '\\n' line terminators on all platforms, so the join is
+    round-trip safe (REV-2f).
+    """
+    # REV-2f: '\n' is the canonical PyMuPDF line terminator — safe across OS.
+    return '\n'.join(_fix_sort_true_rtl_line(ln) for ln in text.splitlines())
+
+
+# ---------------------------------------------------------------------------
+# Phase 101 follow-up (2026-05-28): intra-block newline collapse for PyMuPDF
+# blocks output.
+# ---------------------------------------------------------------------------
+# PyMuPDF get_text("blocks") returns blocks that roughly correspond to logical
+# paragraphs, but '\n' inside each block is the source PDF's column-wrap layout
+# artifact — and on RTL Hebrew text the bidi engine is even worse, putting
+# individual characters / commas / quote marks on their own line within a
+# block. Hillel's UAT (2026-05-28) showed a single Hebrew paragraph extracted
+# as ~30 short fragment-per-line entries. Inter-block boundaries already mark
+# true paragraph breaks via the '\n\n' join in extract_pdf_pages, so we can
+# safely collapse ALL intra-block newlines to a single space.
+#
+# Guidance per Hillel: "Join is better than divide if any problem exists" —
+# when in doubt about whether a break is meaningful, join.
+
+def _collapse_intra_block_newlines(block_text: str) -> str:
+    """Collapse all internal '\\n' (and surrounding whitespace) within a single
+    PyMuPDF block to a single space. Strips leading/trailing whitespace.
+    Empty/whitespace-only blocks return ''.
+    """
+    stripped = block_text.strip()
+    if not stripped:
+        return ''
+    if '\n' not in stripped:
+        return stripped
+    return re.sub(r'\s*\n\s*', ' ', stripped)
+
+
+# ---------------------------------------------------------------------------
+# Phase 96 D-F4: detect pathological one-word-per-line PDF extraction
+# ---------------------------------------------------------------------------
+# This is the LIVE detection used by extract_pdf_pages (NOT dead code, unlike
+# its dead-code cousin _join_fragmented_lines above). We use 0.70 (vs the
+# dead-code's 0.60) per RESEARCH §2 — more conservative threshold preserves
+# documents with legitimate one-word paragraphs (chapter numbers, table cells).
+
+_SINGLE_WORD_RATIO_THRESHOLD = 0.70  # Phase 96 D-F4, RESEARCH §2
+_SINGLE_WORD_MIN_SAMPLE = 5          # below this, do not trigger detection
+
+
+def _detect_single_word_per_line(text: str) -> bool:
+    """Phase 96 D-F4: return True if `text` looks like pathological
+    one-word-per-line output from PyMuPDF's `get_text("blocks")` mode.
+
+    Heuristic:
+      - split on newlines, keep non-empty lines after .strip()
+      - if fewer than 5 non-empty lines: return False (small-sample guard;
+        could be a title page or table cell)
+      - compute single_word_ratio = (# lines with <= 1 word) / (# non-empty lines)
+      - return True iff ratio >= 0.70
+
+    Examples:
+        >>> _detect_single_word_per_line("")
+        False
+        >>> _detect_single_word_per_line("one\\ntwo\\nthree\\nfour\\n")
+        False
+        >>> _detect_single_word_per_line("one\\ntwo\\nthree\\nfour\\nfive\\nsix\\n")
+        True
+        >>> _detect_single_word_per_line("the quick brown fox\\njumps over the\\nlazy dog under\\nthe bright morning\\nsun rises\\nslowly today")
+        False
+    """
+    if not text:
+        return False
+    lines = text.splitlines()
+    non_empty = [ln for ln in lines if ln.strip()]
+    if len(non_empty) < _SINGLE_WORD_MIN_SAMPLE:
+        return False
+    single = sum(1 for ln in non_empty if len(ln.split()) <= 1)
+    ratio = single / len(non_empty)
+    return ratio >= _SINGLE_WORD_RATIO_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# Phase 102 D-07: corrupt-encoding detector (codepoint-garbage ratio).
+# Conservative — requires strong evidence on sufficient text.
+# ---------------------------------------------------------------------------
+
+def _detect_corrupt_encoding(text: str) -> bool:
+    """Return True if `text` shows strong evidence of a broken cmap (D-07).
+
+    Counts codepoints that are definitively garbage (U+FFFD, Private Use Area,
+    Unicode noncharacters, illegal C0/C1 controls) and codepoints that are
+    word-like (letters, digits, whitespace).  Flags ONLY with strong evidence
+    so legitimate Arabic, Greek, Hebrew presentation forms, math, bidi marks,
+    and broad punctuation are NOT misidentified.
+
+    Conservative thresholds (Codex MED-7):
+      - Length guard: if len(text) < 100, return False (need enough evidence).
+      - Flag if garbage_ratio > 0.05, OR (wordlike_ratio < 0.40 AND
+        garbage_ratio > 0.02).
+    """
+    if len(text) < 100:
+        return False
+
+    garbage = 0
+    wordlike = 0
+    for ch in text:
+        cp = ord(ch)
+
+        # Allowlisted ranges — do NOT count as garbage even if unusual:
+        #   Arabic: 0x0600-0x06FF, Arabic Supplement 0x0750-0x077F
+        if 0x0600 <= cp <= 0x06FF or 0x0750 <= cp <= 0x077F:
+            if ch.isalpha():
+                wordlike += 1
+            continue
+        #   Greek: 0x0370-0x03FF
+        if 0x0370 <= cp <= 0x03FF:
+            if ch.isalpha():
+                wordlike += 1
+            continue
+        #   Hebrew presentation forms (Heb A-B): 0xFB1D-0xFB4F
+        if 0xFB1D <= cp <= 0xFB4F:
+            wordlike += 1
+            continue
+        #   Bidi marks: LRM, RLM, LRE/RLE/PDF/LRO/RLO, LRI/RLI/FSI/PDI
+        if cp in (0x200E, 0x200F) or 0x202A <= cp <= 0x202E or 0x2066 <= cp <= 0x2069:
+            continue
+        #   Broad Unicode punctuation categories (Pc, Pd, Pe, Pf, Pi, Po, Ps)
+        cat = unicodedata.category(ch)
+        if cat.startswith("P"):
+            continue
+        #   Common math operators (Sm category) — allow
+        if cat == "Sm":
+            continue
+
+        # Garbage codepoints:
+        #   U+FFFD replacement character
+        if cp == 0xFFFD:
+            garbage += 1
+            continue
+        #   Private Use Area (BMP PUA, Plane 15, Plane 16)
+        if 0xE000 <= cp <= 0xF8FF:
+            garbage += 1
+            continue
+        if 0xF0000 <= cp <= 0xFFFFD or 0x100000 <= cp <= 0x10FFFD:
+            garbage += 1
+            continue
+        #   Unicode noncharacters (0xFDD0-0xFDEF, and any U+nFFFE/U+nFFFF)
+        if 0xFDD0 <= cp <= 0xFDEF or (cp & 0xFFFE) == 0xFFFE:
+            garbage += 1
+            continue
+        #   Illegal C0/C1 controls (excluding \t \n \r which are legitimate)
+        if (cp < 0x20 and ch not in "\t\n\r") or (0x80 <= cp <= 0x9F):
+            garbage += 1
+            continue
+
+        # Word-like: letters, digits, whitespace
+        if ch.isalpha() or ch.isdigit() or ch.isspace():
+            wordlike += 1
+
+    total = len(text)
+    garbage_ratio = garbage / total
+    wordlike_ratio = wordlike / total
+
+    return garbage_ratio > 0.05 or (wordlike_ratio < 0.40 and garbage_ratio > 0.02)
+
+
+# ---------------------------------------------------------------------------
+# Phase 102 D-09: cheap multi-column-suspected detector (detect + log only).
+# ---------------------------------------------------------------------------
+
+def _detect_multicolumn_suspected(page_lines_x: list[tuple[float, float]]) -> bool:
+    """Return True if the page's x-bbox distribution looks strongly bimodal (D-09).
+
+    Input: list of (line_min_x, line_max_x) bbox pairs for all text lines on a page.
+    Heuristic: split lines by whether their start (min_x) is left or right of the
+    page midpoint; if BOTH clusters each contain >= 25% of lines and there is a
+    clear horizontal gutter between the right edge of the left cluster and the
+    left edge of the right cluster, return True.
+
+    This is a cheap single-pass detector — it only drives a log marker, never reflow.
+    Returns False for a single-column or empty page.
+    """
+    if len(page_lines_x) < 4:
+        return False
+
+    all_min_x = [mn for mn, _ in page_lines_x]
+    all_max_x = [mx for _, mx in page_lines_x]
+    if not all_min_x:
+        return False
+
+    page_mid = (min(all_min_x) + max(all_max_x)) / 2.0
+
+    left_lines = [(mn, mx) for mn, mx in page_lines_x if mn < page_mid]
+    right_lines = [(mn, mx) for mn, mx in page_lines_x if mn >= page_mid]
+
+    total = len(page_lines_x)
+    if len(left_lines) < total * 0.25 or len(right_lines) < total * 0.25:
+        return False
+
+    # Check for a clear gutter: the rightmost edge of left-column lines
+    # should not overlap with the leftmost start-x of right-column lines.
+    left_max_x = max(mx for _, mx in left_lines)
+    right_start_x = min(mn for mn, _ in right_lines)
+    return right_start_x > left_max_x
+
+
+# ---------------------------------------------------------------------------
+# SEED-006: shared Hebrew-aware "hebword" tokenizer registration. Defined in the
+# dependency-light shared.search_tokenizer module so the web process can
+# register it without importing this PyMuPDF-bearing module.
+# ---------------------------------------------------------------------------
+from shared.search_tokenizer import register_search_tokenizers  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Schema builders
+# ---------------------------------------------------------------------------
+
+def build_local_schema() -> tantivy.Schema:
+    """LOCAL Tantivy side-index schema (REQ-3).
+
+    CRITICAL DIVERGENCE: unique_id uses tokenizer_name="raw" (main index at
+    genizah_core.py:5125 omits this kwarg). Required for delete_documents()
+    to work on rescan - RESEARCH Pitfall #2 / tantivy-py #297.
+
+    Without tokenizer_name="raw", writer.delete_documents("unique_id", uid)
+    SILENTLY does nothing on rescans and doubles the page-row count on every
+    modify. Schema-divergence comment is required per PATTERNS.md.
+    """
+    builder = tantivy.SchemaBuilder()
+    # CRITICAL: tokenizer_name="raw" - main index at genizah_core.py:5125 omits this
+    # and is rebuilt from scratch so the bug stays latent. For LOCAL where incremental
+    # delete IS the central operation, raw is mandatory. tantivy-py issue #297.
+    builder.add_text_field("unique_id", stored=True, tokenizer_name="raw")
+    # SEED-006 Stage 1: searchable content uses the hebword tokenizer so
+    # punctuation-attached words (בסגן, -> בסגן) become retrievable. Stored
+    # value is the ORIGINAL text (display intact). content_head/tail and
+    # line_starts/line_ends stay on whitespace — they carry L{n}:word colon
+    # markers that hebword would shatter.
+    builder.add_text_field("content", stored=True, tokenizer_name="hebword")
+    builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
+    builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
+    builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
+    builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
+    # SEED-006 Stage 2: additive, non-stored, diacritic-folded retrieval field
+    # (= strip_search_diacritics(content), hebword-tokenized) so a query like
+    # צמאן / צ'מאן finds the corpus form צ̇מאן (U+0307). Used only as a
+    # lower-weighted OR fallback at word-search retrieval sites; display still
+    # reads stored `content`.
+    builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
+    builder.add_text_field("source", stored=True)
+    builder.add_text_field("full_header", stored=True)
+    builder.add_text_field("shelfmark", stored=True)
+    builder.add_text_field("scope", stored=True)
+    builder.add_text_field("boundaries", stored=True)
+    # Phase 97 LD-1 — two new fields defined once here; Waves E/F populate, do NOT add more.
+    # U-02: raw tokenizer REQUIRED so writer.delete_documents("scan_run_id", run_id)
+    # matches; default tokenizer would tokenize the UUID and never hit a Term lookup.
+    builder.add_text_field("scan_run_id", stored=True, tokenizer_name="raw")
+    # D-NEW-5: human-readable per-chunk display string; stored only, no search.
+    builder.add_text_field("chunk_locator", stored=True)
+    return builder.build()
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 LD-1: schema marker helpers (detect schema drift, trigger rebuild)
+# ---------------------------------------------------------------------------
+
+def _compute_schema_marker(schema_fn=None) -> str:
+    """Return a short hex hash of build_local_schema source.
+
+    When build_local_schema() changes (new fields added), the marker changes
+    and triggers atomic rebuild so old on-disk indexes with wrong field sets
+    are replaced rather than silently opened with a mismatched schema.
+
+    Uses inspect.getsource for simplicity — acceptable because the schema
+    function body is stable between minor commits and any meaningful field
+    change bumps the marker as intended.
+    """
+    import hashlib
+    import inspect
+    fn = schema_fn if schema_fn is not None else build_local_schema
+    src = inspect.getsource(fn)
+    return hashlib.sha256(src.encode("utf-8")).hexdigest()[:16]
+
+
+def _read_schema_marker(index_dir: str) -> str | None:
+    """Read the .schema_version marker from index_dir; returns None if absent."""
+    p = os.path.join(index_dir, ".schema_version")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_schema_marker(index_dir: str, marker: str) -> None:
+    """Write .schema_version marker file alongside the index dir."""
+    os.makedirs(index_dir, exist_ok=True)
+    with open(os.path.join(index_dir, ".schema_version"), "w", encoding="utf-8") as f:
+        f.write(marker)
+
+
+# Phase 101 D-04 ROLLED BACK 2026-05-28 post-UAT: the extractor-version marker
+# + auto-flip-on-init mechanism (formerly _CURRENT_EXTRACTOR_VERSION /
+# _read_extractor_version / _write_extractor_version + UPDATE block in
+# LocalIndexer.__init__) was removed because it weaponized the synchronous
+# startup_recovery() Pass B re-extraction path — a 12K-PDF library froze app
+# launch for hours. The RTL fix in extract_pdf_pages still applies to all new
+# scans; existing LOCAL libraries need a manual Reset My Library + re-scan to
+# pick up the fix. A proper "auto-self-heal via background worker" lands in a
+# future phase (D-04 deferred). See docs/OPEN_ISSUES.md row "Phase 101 D-04
+# rollback" for the recovery procedure.
+
+
+def build_local_lab_schema() -> tantivy.Schema:
+    """LOCAL LAB side-index schema (D-09).
+
+    Same raw-tokenizer divergence on unique_id as the main LOCAL schema.
+    fingerprint_dyn computed at build time using current LAB dynamic_rank_map.
+    """
+    builder = tantivy.SchemaBuilder()
+    # CRITICAL: tokenizer_name="raw" - same divergence as build_local_schema().
+    builder.add_text_field("unique_id", stored=True, tokenizer_name="raw")  # Pitfall #2
+    builder.add_text_field("text_normalized", stored=True, tokenizer_name="simple")
+    builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace")
+    # NOTE: main LAB uses self.LAB_FINGERPRINT_FIELD; we mirror as "fingerprint".
+    builder.add_text_field("fingerprint", stored=False, tokenizer_name="simple")
+    builder.add_text_field("fingerprint_dyn", stored=False, tokenizer_name="simple")
+    builder.add_text_field("full_header", stored=True)
+    builder.add_text_field("shelfmark", stored=True)
+    builder.add_text_field("source", stored=True)
+    builder.add_text_field("content", stored=True, tokenizer_name="simple")
+    return builder.build()
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 R-03: zstd cached_text compression helpers
+# ---------------------------------------------------------------------------
+
+_ZSTD_LEVEL = 3  # Phase 97 R-03 — balance per RESEARCH benchmark (3-5 typical)
+
+
+def compress_cached_text(text: str) -> tuple[bytes, int]:
+    """Compress text with zstd for storage in local_pages.cached_text.
+
+    Returns (zstd_compressed_bytes, uncompressed_len_in_bytes).
+    zstandard must be importable (pinned in requirements.txt as of Phase 97).
+    """
+    import zstandard
+    payload = text.encode("utf-8")
+    compressed = zstandard.ZstdCompressor(level=_ZSTD_LEVEL).compress(payload)
+    return compressed, len(payload)
+
+
+def decompress_cached_text(blob: bytes) -> str:
+    """Decompress zstd-compressed bytes back to text string."""
+    import zstandard
+    return zstandard.ZstdDecompressor().decompress(blob).decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# SQLite schema init (D-35)
+# ---------------------------------------------------------------------------
+
+def init_sqlite(db_path: str) -> sqlite3.Connection:
+    """Create tables per D-35 (Phase 95 baseline) + Phase 97 columns and return an open connection.
+
+    Tables:
+      - folders: registered source folders with status tracking (+ Phase 97 counter cols)
+      - processed_files: narrow mtime-cache; status for two-phase commit (+ scan_run_id, mtime_ns)
+      - local_pages: per-page UID tracking + Phase 97 cached_text + chunk_locator
+      - local_files: rich metadata for Browse panel + per-file status panel
+      - scan_runs: Phase 97 R-01 lifecycle table (replaces _pending_cleanup sentinel)
+      - pending_dir_cleanup: Phase 97 R-02 GC table for .old-<ts> rebuild dirs
+
+    Phase 97 LD-2: Fresh installs get the FULL Phase 97 schema directly (user_version=2).
+    Pre-existing Phase 95 DBs at user_version=0 are migrated by local_indexer_migrations.run()
+    called in LocalIndexer.__init__ immediately after init_sqlite().
+    """
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")  # Pitfall #6 mitigation
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS folders (
+            folder_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            path             TEXT    UNIQUE NOT NULL,
+            added_at         REAL,
+            last_scanned_at  REAL,
+            status           TEXT    NOT NULL DEFAULT 'active',
+            indexed_count    INTEGER NOT NULL DEFAULT 0,
+            error_count      INTEGER NOT NULL DEFAULT 0,
+            pending_count    INTEGER NOT NULL DEFAULT 0,
+            oversized_count  INTEGER NOT NULL DEFAULT 0,
+            last_aggregate_at REAL
+        );
+        CREATE TABLE IF NOT EXISTS processed_files (
+            filepath     TEXT    PRIMARY KEY,
+            mtime        REAL,
+            size         INTEGER,
+            sys_id       TEXT,
+            status       TEXT    NOT NULL DEFAULT 'committed',
+            scan_run_id  TEXT,
+            mtime_ns     INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS local_pages (
+            sys_id                      TEXT    NOT NULL,
+            uid                         TEXT    NOT NULL,
+            page_num                    INTEGER NOT NULL,
+            cached_text                 BLOB,
+            cached_text_codec           TEXT    NOT NULL DEFAULT 'zstd',
+            cached_text_uncompressed_len INTEGER,
+            extraction_format_version   INTEGER NOT NULL DEFAULT 1,
+            chunk_locator               TEXT,
+            PRIMARY KEY (sys_id, page_num)
+        );
+        CREATE TABLE IF NOT EXISTS local_files (
+            file_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            sys_id            TEXT    NOT NULL UNIQUE,
+            filepath          TEXT    NOT NULL,
+            folder_id         INTEGER NOT NULL REFERENCES folders(folder_id),
+            display_title     TEXT,
+            original_filename TEXT    NOT NULL,
+            file_extension    TEXT    NOT NULL,
+            page_count        INTEGER NOT NULL DEFAULT 0,
+            file_size_bytes   INTEGER NOT NULL,
+            extraction_status TEXT    NOT NULL,
+            last_indexed_at   REAL    NOT NULL,
+            sha256_full       TEXT,
+            error_msg         TEXT,
+            pending_delete    INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS scan_runs (
+            scan_run_id  TEXT PRIMARY KEY,
+            started_at   REAL NOT NULL,
+            ended_at     REAL,
+            status       TEXT NOT NULL CHECK (status IN ('running', 'completed', 'canceled', 'discarded'))
+        );
+        CREATE TABLE IF NOT EXISTS pending_dir_cleanup (
+            path        TEXT PRIMARY KEY,
+            kind        TEXT NOT NULL,
+            created_at  REAL NOT NULL DEFAULT (strftime('%s','now'))
+        );
+        -- get_folder_filepaths / _folder_optout_aggregate filter local_files by
+        -- folder_id; without this index each call is a full table scan (a 17K-row
+        -- library scanned once per registered folder). IF NOT EXISTS so it is
+        -- created on existing DBs on next open without a migration.
+        CREATE INDEX IF NOT EXISTS idx_local_files_folder_id
+            ON local_files(folder_id);
+    """)
+    conn.commit()
+    # Phase 97 LD-2 (updated Phase 102): stamp target user_version on fresh (empty) DBs
+    # so they skip the migration ladder on first open.
+    # Pre-existing Phase 95 DBs already have data so this guard yields False
+    # for them — LocalIndexer.__init__ will call migrations.run(conn) for those.
+    # Phase 102 bumped _LATEST_VERSION from 2 → 3; this literal matches.
+    existing_files = conn.execute("SELECT COUNT(*) FROM processed_files").fetchone()[0]
+    if existing_files == 0:
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+    # else: leave user_version at 0; LocalIndexer.__init__ calls migrations.run(conn).
+    return conn
+
+
+# ---------------------------------------------------------------------------
+# Folder overlap detection (D-17 + D-42)
+# ---------------------------------------------------------------------------
+
+def check_folder_overlap(
+    candidate: str,
+    existing_paths: list[str],
+) -> Optional[str]:
+    """Return the conflicting existing path if candidate overlaps, else None.
+
+    Overlap = same path, ancestor, or descendant.
+    Uses _canonical_filepath + os.path.normcase + os.path.commonpath per D-17.
+    """
+    cand = _canonical_filepath(candidate)
+    for existing in existing_paths:
+        exist = _canonical_filepath(existing)
+        if cand == exist:
+            return existing
+        try:
+            common = os.path.normcase(os.path.commonpath([cand, exist]))
+        except ValueError:
+            # Different drives on Windows
+            continue
+        if common == cand or common == exist:
+            return existing
+    return None
+
+
+# ---------------------------------------------------------------------------
+# UID + full_header builders (D-34)
+# ---------------------------------------------------------------------------
+
+def _make_uid(sys_id: str, page_num: int) -> str:
+    """Construct the Tantivy unique_id for a LOCAL page doc (D-34)."""
+    return f"{_UNIQUE_ID_PREFIX}_{sys_id}_P{page_num}"
+
+
+def _make_full_header(sys_id: str, page_num: int, file_id: int) -> str:
+    """Construct the full_header stored field value for a LOCAL page doc (D-34)."""
+    return f"{sys_id}_LOCAL_P{page_num}_F{file_id:04d}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 102 D-03: LTR-damage guard (token-count / Jaccard comparison).
+# ---------------------------------------------------------------------------
+
+def _ltr_damage_guard(rawdict_text: str, blocks_text: str) -> str:
+    """Return blocks_text if rawdict lost or scrambled too much content (D-03).
+
+    For low-Hebrew/LTR pages: compare rawdict reconstructed output against the
+    old blocks extraction via token-count ratio and Jaccard similarity on the
+    token set. Fall back to blocks_text for that page if rawdict:
+      - is empty (no reconstructed text), OR
+      - has token count < 70% of blocks_text token count, OR
+      - has Jaccard(token-set) < 0.5 while the page is low-Hebrew
+        (rtl_ratio(blocks_text) <= 0.4) — a sign rawdict scrambled LTR content.
+
+    For RTL/Hebrew pages (rtl_ratio > 0.4): only fall back on empty output;
+    blocks may have scrambled RTL content so we trust rawdict.
+    """
+    rawdict_stripped = rawdict_text.strip()
+    blocks_stripped = blocks_text.strip()
+
+    # Always fall back if rawdict produced nothing.
+    if not rawdict_stripped:
+        return blocks_stripped
+
+    rawdict_tokens = rawdict_stripped.split()
+    blocks_tokens = blocks_stripped.split()
+
+    if not blocks_tokens:
+        # blocks also empty — prefer rawdict (may still have something)
+        return rawdict_stripped
+
+    page_is_rtl = rtl_ratio(blocks_stripped) > 0.4
+
+    # RTL/Hebrew pages: trust rawdict beyond the empty-check above. The blocks
+    # path SHATTERS justified/letter-spaced Hebrew into single letters, so it
+    # legitimately has MORE tokens than the (correctly de-spaced) rawdict output.
+    # A token-count or Jaccard comparison would therefore wrongly flag the GOOD
+    # rawdict text as "damaged" and revert to the shattered blocks text — which
+    # is exactly what regressed after the 2026-05-31 edge-gap de-space made
+    # rawdict merge shards into whole words (count_ratio dropped below 0.70).
+    # The count/Jaccard heuristics only make sense for LTR content (HIGH-? D-03).
+    if page_is_rtl:
+        return rawdict_stripped
+
+    # LTR pages only — token-count check: if rawdict lost >30% of blocks tokens,
+    # the rawdict reconstruction scrambled or dropped LTR content.
+    count_ratio = len(rawdict_tokens) / max(len(blocks_tokens), 1)
+    if count_ratio < 0.70:
+        logger.debug(
+            "_ltr_damage_guard: rawdict token-count ratio %.2f < 0.70 on LTR "
+            "page — falling back to blocks", count_ratio
+        )
+        return blocks_stripped
+
+    # LTR pages only — Jaccard similarity on token sets.
+    rawdict_set = set(rawdict_tokens)
+    blocks_set = set(blocks_tokens)
+    union = rawdict_set | blocks_set
+    intersection = rawdict_set & blocks_set
+    jaccard = len(intersection) / len(union) if union else 1.0
+    if jaccard < 0.5:
+        logger.debug(
+            "_ltr_damage_guard: Jaccard %.2f < 0.50 on LTR page — falling back "
+            "to blocks", jaccard
+        )
+        return blocks_stripped
+
+    return rawdict_stripped
+
+
+# ---------------------------------------------------------------------------
+# Per-format extractors
+# ---------------------------------------------------------------------------
+
+def extract_pdf_pages(
+    filepath: str,
+    page_flags: "dict | None" = None,
+) -> Iterator[tuple[int, str, str]]:
+    """Extract text page-by-page using PyMuPDF rawdict (Phase 102 D-01..D-11).
+
+    Yields the frozen (page_num, text, title) 3-tuple. The optional
+    ``page_flags`` out-param receives per-page detection results when supplied:
+        page_flags[page_num] = {"corrupt": bool, "multicolumn": bool}
+    This allows Plan 03 to buffer pages and make the file-level corrupt
+    decision BEFORE any _write_page_doc call (HIGH-2 detect-before-write).
+    Callers that omit page_flags see the unchanged positional 3-tuple.
+
+    The yielded ``text`` is NIKUD-BEARING (D-06 FINAL). The single nikud-strip
+    site is Plan 03's _write_page_doc, applied to ALL LOCAL formats uniformly.
+    There is NO strip_nikud call in this function.
+
+    Pipeline per page (D-01 through D-11):
+      1. get_text("rawdict", flags=_RAWDICT_FLAGS) — image data disabled (D-11).
+      2. _attach_nikud_page() — re-attach detached nikud BEFORE metric math.
+      3. PER-BLOCK iteration (M2): iterate blk["type"]==0 blocks, call
+         group_lines_by_baseline per block (baseline/font-size grouping, D-02).
+      4. RICHER GLYPH FLATTEN (HIGH-4/HIGH-5): flatten spans preserving original
+         rawdict reading order, annotating each glyph with span_id/original_order
+         + carrying font/size from the originating span. NO up-front x-sort.
+      5. Classify each row RTL vs LTR via rtl_ratio(). LTR rows: emit rawdict
+         text unchanged (D-01 pass-through). RTL rows: despace -> reorder ->
+         bracket-fix -> punctuation-normalize (D-04/D-05 pipeline).
+      6. Join block's rows with "\\n", blocks with "\\n\\n" (M2 block separation).
+      7. D-03 LTR-damage guard: compare rawdict_text vs blocks fallback per page.
+      8. Record corrupt + multicolumn flags into page_flags if supplied (HIGH-2).
+      9. D-09 multicolumn log. Skip empty pages. Yield (page_num, text, title).
+
+    The old blocks path (_extract_blocks_text) survives ONLY as the D-03
+    comparison/fallback net. _fix_sort_true_rtl_page is no longer the primary
+    path; it may still be called inside the blocks fallback net (not removed).
+    """
+    doc = fitz.open(filepath)
+    try:
+        title = (doc.metadata or {}).get("title") or os.path.basename(filepath)
+        for page_num, page in enumerate(doc, start=1):
+            try:
+                final_text = _extract_one_page_rawdict(page, filepath, page_num)
+            except Exception:
+                logger.exception(
+                    "extract_pdf_pages: error on page %d of %s — skipping",
+                    page_num, filepath,
+                )
+                continue
+
+            if len(final_text.strip()) < _EMPTY_PAGE_CHAR_THRESHOLD:
+                continue  # D-06: skip empty pages
+
+            # Detect-before-write flags (HIGH-2).
+            if page_flags is not None:
+                # Collect per-line x-bbox data for multicolumn detection.
+                try:
+                    raw_d = page.get_text("rawdict", flags=_RAWDICT_FLAGS)
+                    line_x_ranges: list[tuple[float, float]] = []
+                    for blk in raw_d.get("blocks", []):
+                        if blk.get("type") != 0:
+                            continue
+                        for ln in blk.get("lines", []):
+                            bb = ln.get("bbox")
+                            if bb:
+                                line_x_ranges.append((bb[0], bb[2]))
+                except Exception:
+                    line_x_ranges = []
+
+                page_flags[page_num] = {
+                    "corrupt": _detect_corrupt_encoding(final_text),
+                    "multicolumn": _detect_multicolumn_suspected(line_x_ranges),
+                }
+                if page_flags[page_num]["multicolumn"]:
+                    logger.info(
+                        "multi-column suspected in %s page %d", filepath, page_num
+                    )
+
+            yield page_num, final_text, title
+    finally:
+        doc.close()
+
+
+def _extract_blocks_text(page) -> str:
+    """Extract text via old blocks path (kept as the D-03 fallback net only).
+
+    This was the Phase 95/96/101 primary path. Phase 102 keeps it alive
+    exclusively as the comparison baseline for _ltr_damage_guard (D-03).
+    """
+    try:
+        blocks = page.get_text("blocks")
+        text_parts = [
+            _collapse_intra_block_newlines(b[4])
+            for b in blocks
+            if b[6] == 0 and b[4].strip()
+        ]
+        text_parts = [p for p in text_parts if p]
+        text = "\n\n".join(text_parts)
+
+        # Apply sort=True fallback for single-word-per-line pages (Phase 96 D-F4).
+        if _detect_single_word_per_line(text):
+            try:
+                fallback_text = page.get_text("text", sort=True)
+                if fallback_text and fallback_text.strip():
+                    text = _fix_sort_true_rtl_page(fallback_text)
+            except Exception:
+                pass
+        return text
+    except Exception:
+        return ""
+
+
+def _extract_one_page_rawdict(page, filepath: str, page_num: int) -> str:
+    """Inner per-page rawdict extraction pipeline (D-01..D-09, Phase 102).
+
+    Returns the nikud-bearing reconstructed page text. Raises on unrecoverable
+    errors (caught by the caller extract_pdf_pages per-page try/except).
+    """
+    # Step 1: rawdict with image data disabled (D-11).
+    page_dict = page.get_text("rawdict", flags=_RAWDICT_FLAGS)
+
+    # Step 2: re-attach detached nikud BEFORE any metric math.
+    try:
+        from ephraim_meiri_pdf_converter.pdf_to_docx import _attach_nikud_page
+        _attach_nikud_page(page_dict)
+    except Exception:
+        pass  # Module may not always be present; metric math still works.
+
+    # Step 3+4+5+6: PER-BLOCK iteration (M2), richer glyph flatten, RTL pipeline.
+    block_texts: list[str] = []
+    span_counter = 0  # monotonic span_id counter across the whole page
+
+    for blk in page_dict.get("blocks", []):
+        if blk.get("type") != 0:
+            continue  # skip image blocks
+
+        block_lines = blk.get("lines", [])
+        if not block_lines:
+            continue
+
+        # D-02: group lines by baseline/font-size (per-block, NOT globally).
+        row_groups = group_lines_by_baseline(block_lines)
+
+        row_texts: list[str] = []
+        glyph_order = 0  # monotonic original_order within the block
+
+        for row_line_dicts in row_groups:
+            # Flatten all glyphs from this row's spans, preserving rawdict order.
+            # Annotate each glyph with span_id + original_order + font/size (HIGH-4/HIGH-5).
+            glyphs: list[dict] = []
+            for line_dict in row_line_dicts:
+                for sp in line_dict.get("spans", []):
+                    sp_font = sp.get("font", "")
+                    sp_size = sp.get("size", 0.0)
+                    sp_id = span_counter
+                    span_counter += 1
+                    for ch in sp.get("chars", []):
+                        glyphs.append({
+                            "c": ch.get("c", ""),
+                            "bbox": list(ch.get("bbox", [0.0, 0.0, 0.0, 0.0])),
+                            "font": sp_font,
+                            "size": sp_size,
+                            "span_id": sp_id,
+                            "original_order": glyph_order,
+                        })
+                        glyph_order += 1
+
+            if not glyphs:
+                continue
+
+            # Step 5: classify RTL vs LTR.
+            line_text_raw = "".join(g["c"] for g in glyphs)
+            row_rtl = rtl_ratio(line_text_raw) > 0.4
+
+            if not row_rtl:
+                # LTR/numeric: emit rawdict natural text unchanged (D-01 pass-through).
+                ltr_text = line_text_raw.strip()
+                if ltr_text:
+                    row_texts.append(ltr_text)
+            else:
+                # RTL pipeline: de-space -> reorder -> bracket-fix -> punct-normalize.
+                units = despace_line_to_word_units(glyphs)           # D-04/D-05/M3
+                units = reorder_word_units_rtl(units, line_text_raw)  # adapted Meiri
+                row_line = line_text_from_word_units(units)
+                row_line = fix_visual_brackets_rtl(row_line)           # F-C
+                row_line = normalize_punctuation_spacing(row_line)      # F-B
+                if row_line.strip():
+                    row_texts.append(row_line)
+
+        if row_texts:
+            block_texts.append("\n".join(row_texts))
+
+    # M2: join blocks with "\n\n" to preserve block/paragraph boundaries.
+    rawdict_text = "\n\n".join(t for t in block_texts if t.strip())
+
+    # Step 7: D-03 LTR-damage guard — compare against old blocks path per-page.
+    blocks_text = _extract_blocks_text(page)
+    final_text = _ltr_damage_guard(rawdict_text, blocks_text)
+
+    return final_text
+
+
+def extract_docx_pages(
+    filepath: str,
+) -> Iterator[tuple[int, str, str]]:
+    """Extract text in 20-paragraph chunks from a DOCX file (D-04).
+
+    Yields (chunk_num, text, title).
+    D-04: fixed 20-paragraph windows (NOT Seewald's contains_page_break heuristic).
+    """
+    doc = _DocxDoc(filepath)
+    basename = os.path.basename(filepath)
+    try:
+        title = doc.core_properties.title or basename
+    except Exception:
+        title = basename
+
+    paragraphs = [p.text for p in doc.paragraphs]
+    chunk_num = 0
+    for start in range(0, max(len(paragraphs), 1), _DOCX_CHUNK_PARAGRAPHS):
+        chunk_num += 1
+        chunk_paras = paragraphs[start : start + _DOCX_CHUNK_PARAGRAPHS]
+        text = "\n".join(p for p in chunk_paras if p.strip())
+        if text.strip():
+            yield chunk_num, text, title
+
+
+def extract_txt(filepath: str) -> Iterator[tuple[int, str, str]]:
+    """TXT extraction (D-07 + MEDIUM-2 review fix: strict utf-8-sig + cp1255 fallback;
+    encoding_error on both failures - no silent replacement-character indexing).
+
+    Encoding policy:
+      1. Try utf-8-sig with errors='strict'.
+      2. On UnicodeDecodeError, try cp1255 with errors='strict' (legacy Windows Hebrew).
+      3. On second UnicodeDecodeError, raise EncodingError - caller (LocalIndexer._index_one_file)
+         catches and sets local_files.extraction_status = 'encoding_error'. No docs emitted.
+
+    DO NOT use errors='replace'. The replacement character (U+FFFD) silently corrupts
+    the index and breaks search for the affected files (MEDIUM-2 review fix).
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8-sig", errors="strict") as f:
+            text = f.read()
+    except UnicodeDecodeError as utf8_err:
+        try:
+            with open(filepath, "r", encoding="cp1255", errors="strict") as f:
+                text = f.read()
+            logger.info(
+                "extract_txt fallback to cp1255 for %s (utf-8-sig failed: %s)",
+                filepath,
+                utf8_err,
+            )
+        except UnicodeDecodeError as cp1255_err:
+            raise EncodingError(
+                f"Cannot decode {filepath} as utf-8-sig or cp1255: "
+                f"utf-8 error: {utf8_err}; cp1255 error: {cp1255_err}"
+            ) from cp1255_err
+    yield (1, text, os.path.basename(filepath))
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-01: HTML encoding detection helper
+# ---------------------------------------------------------------------------
+
+def _detect_html_encoding(raw_bytes: bytes) -> str:
+    """F-01 encoding chain: <meta charset> -> utf-8 byte-sniff -> cp1255 fallback.
+
+    Reads up to 1 KB of ASCII chars to find a <meta charset> declaration.
+    If not found, tries strict UTF-8 decode on the first 4 KB.
+    Falls back to cp1255 (legacy Windows Hebrew) if UTF-8 also fails.
+    """
+    head = raw_bytes[:1024].decode("ascii", errors="ignore").lower()
+    m = re.search(r'<meta[^>]+charset\s*=\s*["\']?([\w-]+)', head)
+    if m:
+        return m.group(1).strip()
+    try:
+        raw_bytes[:4096].decode("utf-8", errors="strict")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+    return "cp1255"
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-01: HTML extractor (lxml.html, NOT BeautifulSoup)
+# ---------------------------------------------------------------------------
+
+def _clean_html_text(s: str) -> str:
+    """Decode entities libxml2 left literal, and fold NBSP to a regular space.
+
+    v7.16 fix: libxml2's HTML parser does NOT decode entity references that lack
+    a trailing semicolon (e.g. ``&nbsp`` instead of ``&nbsp;``) — common in
+    hand-authored Hebrew transcription files — so they survive ``text_content()``
+    as the literal text ``&nbsp``. ``html.unescape`` decodes both the proper and
+    the semicolon-less legacy forms (``&nbsp`` → U+00A0); we then fold the
+    resulting non-breaking spaces to plain spaces so they tokenize for search and
+    do not render as stray glyphs. Applied to already-parsed strings (not raw
+    HTML), so proper entities lxml already decoded are untouched.
+    """
+    if not s:
+        return s
+    return html.unescape(s).replace("\u00a0", " ")
+
+
+def extract_html_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool]]:
+    """Phase 97 F-01. Yields (chunk_num, text, title, chunk_locator, is_rtl).
+    F-06: NO _fix_rtl_* calls — lxml.html returns logical-order strings already.
+
+    Chunking strategy:
+      - Semantic: chunk at h1/h2 boundaries when len(headings) >= 3 AND
+        avg paragraphs-per-heading >= 5.
+      - Fallback: 20-paragraph windows when sparse.
+
+    Encoding chain: <meta charset> -> utf-8 byte-sniff -> cp1255.
+    is_rtl: True when <html dir="rtl"> or <body dir="rtl">.
+    """
+    import lxml.html
+
+    with open(filepath, "rb") as f:
+        raw = f.read()
+
+    encoding = _detect_html_encoding(raw)
+    try:
+        text = raw.decode(encoding, errors="replace")
+    except LookupError:
+        text = raw.decode("cp1255", errors="replace")
+
+    tree = lxml.html.fromstring(text)
+
+    # Strip script and style content before chunking
+    for tag in tree.iter("script", "style"):
+        parent = tag.getparent()
+        if parent is not None:
+            parent.remove(tag)
+
+    # Extract title from <title> element
+    title_elem = tree.find(".//title")
+    doc_title = (
+        (_clean_html_text(title_elem.text_content()) or os.path.basename(filepath)).strip()
+        if title_elem is not None
+        else os.path.basename(filepath)
+    )
+
+    # Detect RTL from html or body dir attribute
+    html_dir = tree.get("dir", "") or ""
+    body_elem = tree.find(".//body")
+    body_dir = (body_elem.get("dir", "") or "") if body_elem is not None else ""
+    is_rtl = html_dir.lower() == "rtl" or body_dir.lower() == "rtl"
+
+    headings = list(tree.iter("h1", "h2"))
+    paragraphs = list(tree.iter("p"))
+    avg_inter = (len(paragraphs) / max(len(headings), 1)) if headings else 0
+    use_semantic = len(headings) >= 3 and avg_inter >= 5
+
+    if use_semantic:
+        for chunk_num, h in enumerate(headings, start=1):
+            heading_text = _clean_html_text(h.text_content() or "").strip()
+            buf = [heading_text] if heading_text else []
+            sib = h.getnext()
+            while sib is not None and sib.tag not in ("h1", "h2"):
+                content = _clean_html_text(sib.text_content() or "")
+                if content.strip():
+                    buf.append(content)
+                sib = sib.getnext()
+            chunk_text = "\n".join(s.strip() for s in buf if s.strip())
+            if not chunk_text:
+                continue
+            if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
+                chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
+            locator_heading = heading_text[:40] if heading_text else f"section {chunk_num}"
+            yield chunk_num, chunk_text, doc_title, f"§ {locator_heading}", is_rtl
+    else:
+        chunk_num = 0
+        for start in range(0, max(len(paragraphs), 1), 20):
+            chunk_paras = paragraphs[start: start + 20]
+            texts = [
+                t
+                for t in (_clean_html_text(p.text_content() or "").strip() for p in chunk_paras)
+                if t
+            ]
+            chunk_text = "\n".join(texts)
+            if not chunk_text:
+                continue
+            if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
+                chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
+            chunk_num += 1
+            end = min(start + 20, len(paragraphs))
+            yield chunk_num, chunk_text, doc_title, f"¶ {start + 1}-{end}", is_rtl
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-02: XLSX extractor (openpyxl streaming + zip-bomb pre-check)
+# ---------------------------------------------------------------------------
+
+def extract_xlsx_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool]]:
+    """Phase 97 F-02. Yields (chunk_num, text, title, chunk_locator, is_rtl).
+    F-06: NO _fix_rtl_* calls — openpyxl returns logical-order strings already.
+
+    Pre-check: _check_zip_bomb() rejects bombs before openpyxl opens the file.
+    Chunking: one Tantivy doc per (sheet, _XLSX_ROW_WINDOW) window.
+    is_rtl: True when sheetView.rightToLeft is set on the sheet.
+    F-04: uniform row text as 'cell1 | cell2 | cell3 | ...' (no header assumption).
+    """
+    from openpyxl import load_workbook
+
+    bomb_reason = _check_zip_bomb(filepath)
+    if bomb_reason:
+        raise XlsxZipBombSuspected(bomb_reason)
+
+    title = os.path.basename(filepath)
+
+    # Pre-read RTL metadata from a non-streaming open (read_only=True worksheets
+    # lack sheet_view in openpyxl; metadata-only open is fast — no cell data loaded).
+    rtl_map: dict[str, bool] = {}
+    try:
+        wb_meta = load_workbook(filepath, read_only=False, data_only=True)
+        try:
+            for sn in wb_meta.sheetnames:
+                ws_meta = wb_meta[sn]
+                sv = getattr(ws_meta, "sheet_view", None)
+                rtl_map[sn] = bool(getattr(sv, "rightToLeft", False)) if sv is not None else False
+        finally:
+            wb_meta.close()
+    except Exception:
+        pass  # If metadata read fails, is_rtl stays False for all sheets
+
+    def _stream(data_only: bool) -> Iterator[tuple[int, str, str, str, bool]]:
+        """Stream non-empty (sheet, row-window) chunks. data_only=True reads cached
+        cell VALUES; data_only=False reads the stored content (formula strings for
+        formula cells, literals otherwise) — used as a fallback when the value pass
+        is empty."""
+        wb = load_workbook(filepath, read_only=True, data_only=data_only)
+        try:
+            chunk_num = 0
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                is_rtl = rtl_map.get(sheet_name, False)
+                rows_in_window: list[str] = []
+                cells_seen = 0
+                window_start_row = 1
+                for row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                    cell_strs = [str(c) if c is not None else "" for c in row]
+                    cells_seen += len(cell_strs)
+                    if cells_seen > _MAX_CELLS_PER_SHEET:
+                        raise XlsxZipBombSuspected(
+                            f"cells_seen {cells_seen} exceeds _MAX_CELLS_PER_SHEET "
+                            f"{_MAX_CELLS_PER_SHEET} in sheet {sheet_name!r}"
+                        )
+                    # v7.16: a row is empty when ALL cells are blank. Test the
+                    # cells, NOT the joined line — " | ".join(['','']) is ' | '
+                    # whose .strip() is '|' (truthy), which would wrongly index a
+                    # blank row AND mask the all-empty-file fallback below.
+                    if any(cs.strip() for cs in cell_strs):
+                        rows_in_window.append(" | ".join(cell_strs))
+                    if (row_num - window_start_row + 1) >= _XLSX_ROW_WINDOW:
+                        # v7.16: only emit a doc when the window has text. An
+                        # all-empty window (e.g. uncached formulas that data_only
+                        # reads as None) must NOT create a blank searchable page.
+                        if rows_in_window:
+                            chunk_num += 1
+                            chunk_text = "\n".join(rows_in_window)[:_MAX_CHARS_PER_CHUNK]
+                            locator = f"{sheet_name}!R{window_start_row}:R{row_num}"
+                            yield chunk_num, chunk_text, title, locator, is_rtl
+                        rows_in_window = []
+                        window_start_row = row_num + 1
+                # Flush trailing partial window
+                if rows_in_window:
+                    chunk_num += 1
+                    last_row = window_start_row + len(rows_in_window) - 1
+                    chunk_text = "\n".join(rows_in_window)[:_MAX_CHARS_PER_CHUNK]
+                    locator = f"{sheet_name}!R{window_start_row}:R{last_row}"
+                    yield chunk_num, chunk_text, title, locator, is_rtl
+        finally:
+            wb.close()
+
+    produced = False
+    for chunk in _stream(data_only=True):
+        produced = True
+        yield chunk
+    if not produced:
+        # v7.16 fix (BUG-2): the value pass produced no text — the workbook is
+        # likely all uncached formulas (data_only=True yields None for those, so
+        # every row was empty and the file would index as 'no_text_layer' and be
+        # invisible to search). Retry reading the stored content so the formula
+        # strings themselves become searchable.
+        yield from _stream(data_only=False)
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-03 + F-05: CSV extractor (csv.Sniffer + encoding chain)
+# ---------------------------------------------------------------------------
+
+def extract_csv_pages(filepath: str) -> Iterator[tuple[int, str, str, str]]:
+    """Phase 97 F-03 + F-05. Yields (chunk_num, text, title, chunk_locator).
+    F-06: NO _fix_rtl_* calls — csv.reader returns logical-order strings already.
+
+    Encoding chain: utf-8-sig -> cp1255 -> utf-16-le.
+    Delimiter detection: csv.Sniffer over first 4 KB; fallback to csv.excel.
+    Chunking: one Tantivy doc per _CSV_ROW_WINDOW (200) rows.
+    F-04: uniform row text as 'cell1 | cell2 | cell3 | ...' (no header assumption).
+    Total decode failure raises EncodingError.
+    """
+    import csv as _csv
+
+    title = os.path.basename(filepath)
+    chosen_encoding = None
+    sample_text = None
+
+    # v7.16 (BUG-3): detect a UTF-16 BOM BEFORE the single-byte cp1255 fallback.
+    # cp1255 decodes almost any byte sequence without raising, so a UTF-16 CSV
+    # (e.g. Excel "Unicode Text" export) would otherwise be mis-decoded into
+    # NUL-polluted garbage before the utf-16 fallback is ever reached. Excel
+    # always writes a BOM for UTF-16, so this covers the common case reliably;
+    # the NUL-ratio guard below catches BOM-less UTF-16LE as a backstop.
+    with open(filepath, "rb") as _bf:
+        bom = _bf.read(2)
+    encodings = list(_CSV_ENCODINGS)
+    if bom in (b"\xff\xfe", b"\xfe\xff"):
+        encodings = ["utf-16", *encodings]  # utf-16 codec strips BOM + picks endianness
+
+    for enc in encodings:
+        try:
+            with open(filepath, "r", encoding=enc, newline="") as f:
+                sample_text = f.read(4096)
+        except (UnicodeDecodeError, UnicodeError, LookupError):
+            continue
+        # Reject a cp1255 read that is actually mis-decoded UTF-16 — a genuine
+        # cp1255 Hebrew CSV has ~no NUL chars, but UTF-16-as-cp1255 is riddled
+        # with them. Skip to the utf-16 fallback in that case.
+        if (
+            enc == "cp1255"
+            and sample_text
+            and sample_text.count("\x00") > len(sample_text) * 0.05
+        ):
+            continue
+        chosen_encoding = enc
+        break
+
+    if chosen_encoding is None:
+        raise EncodingError(
+            f"CSV decode failed across all encodings {_CSV_ENCODINGS}: {filepath}"
+        )
+
+    try:
+        dialect = _csv.Sniffer().sniff(sample_text, delimiters=",;\t")
+    except _csv.Error:
+        dialect = _csv.excel  # fallback to comma-delimited
+
+    rows_in_window: list[str] = []
+    window_start = 1
+    chunk_num = 0
+    row_num = 0  # track last row number for trailing-flush locator
+
+    with open(filepath, "r", encoding=chosen_encoding, newline="") as f:
+        reader = _csv.reader(f, dialect=dialect)
+        for row_num, row in enumerate(reader, start=1):
+            cell_strs = [str(c) if c is not None else "" for c in row]
+            line = " | ".join(cell_strs)
+            if line.strip():
+                rows_in_window.append(line)
+            if (row_num - window_start + 1) >= _CSV_ROW_WINDOW:
+                chunk_num += 1
+                chunk_text = "\n".join(rows_in_window)
+                yield chunk_num, chunk_text, title, f"rows {window_start}-{row_num}"
+                rows_in_window = []
+                window_start = row_num + 1
+
+    # Flush trailing partial window — use row_num (last row seen) for the locator
+    if rows_in_window:
+        chunk_num += 1
+        chunk_text = "\n".join(rows_in_window)
+        yield chunk_num, chunk_text, title, f"rows {window_start}-{row_num}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 D-NEW-2 — folder reachability helper (module-level, called from scan_all)
+# ---------------------------------------------------------------------------
+
+def _check_folder_reachable(folder_path: str, max_retries: int = 3) -> tuple[bool, str]:
+    """Phase 97 D-NEW-2: errno-discriminated reachability check with retry/backoff.
+
+    Returns (reachable: bool, status_label: str).
+    status_label is one of {'active', 'unreachable', 'timeout'}.
+
+    ENOENT / EACCES -> non-retryable 'unreachable' (no sleep).
+    ETIMEDOUT / EAGAIN -> retry up to max_retries times with 2.0s backoff,
+                          then 'timeout' if all attempts fail.
+    Any other OSError is re-raised unchanged.
+    """
+    for attempt in range(max_retries):
+        try:
+            if os.path.isdir(folder_path):
+                return True, "active"
+            # os.path.isdir returned False without raising — folder does not exist
+            return False, "unreachable"
+        except OSError as exc:
+            if exc.errno in (errno.ETIMEDOUT, errno.EAGAIN):
+                # Transient network timeout — retry with 2s backoff
+                if attempt < max_retries - 1:
+                    time.sleep(2.0)
+                    continue
+                return False, "timeout"
+            if exc.errno in (errno.ENOENT, errno.EACCES):
+                # Non-retryable (missing or permission denied)
+                return False, "unreachable"
+            raise
+    return False, "timeout"
+
+
+# ---------------------------------------------------------------------------
+# SEED-006 P1 — LOCAL SQLite sidecar path resolution
+#
+# The DB must live in the PARENT of the atomically-swapped Tantivy index dir,
+# NEVER inside it. `rebuild_main_index_atomic` / `reset_my_library` rename the
+# index dir wholesale: a DB inside it would (a) be locked on Windows (an open
+# SQLite handle blocks os.rename -> PermissionError(13)) and (b) on POSIX be
+# silently carried into the GC'd `.old-*` quarantine -> the cached_text /
+# processed_files data is destroyed on the next cleanup pass. So the DB lives
+# one level up (Config.INDEX_DIR in production — a stable container that is
+# never swapped).
+# ---------------------------------------------------------------------------
+
+def local_db_path_for(index_dir: str) -> str:
+    """Canonical external path for the LOCAL SQLite sidecar (in index_dir's parent)."""
+    parent = os.path.dirname(os.path.abspath(index_dir))
+    return os.path.join(parent, "local_index.sqlite3")
+
+
+def migrate_legacy_local_db(index_dir: str) -> str:
+    """Move a legacy in-dir ``local_index.sqlite3`` (+ ``-wal`` / ``-shm``) out
+    to the parent and return the canonical external path.
+
+    Idempotent, and MUST run before any SQLite connection is opened on either
+    path. If the external path already exists, a legacy in-dir file is left
+    untouched (newer-wins; never clobber live data).
+
+    A move FAILURE (when the external DB is missing and a legacy DB exists) is
+    FATAL — raising LocalIndexerError rather than returning ``new_path`` (Codex
+    P1). Returning would let the caller open a fresh EMPTY DB at the external
+    path, after which future migrations no-op (external exists) and the real
+    legacy ``cached_text`` / ``processed_files`` is permanently stranded.
+    The sidecars (``-wal`` / ``-shm``) are moved BEFORE the main DB so the
+    invariant "external main DB exists ⇔ migration completed" holds: on a
+    mid-way failure the main DB stays at the legacy path and a retry resumes.
+    """
+    import shutil
+    new_path = local_db_path_for(index_dir)
+    legacy = os.path.join(os.path.abspath(index_dir), "local_index.sqlite3")
+    if os.path.abspath(legacy) == os.path.abspath(new_path):
+        return new_path  # already external (e.g. a test rooting the DB at the parent)
+    if not os.path.exists(new_path) and os.path.exists(legacy):
+        # Sidecars first, main DB LAST (see docstring invariant).
+        for suffix in ("-wal", "-shm", ""):
+            src, dst = legacy + suffix, new_path + suffix
+            if os.path.exists(src) and not os.path.exists(dst):
+                try:
+                    shutil.move(src, dst)
+                except Exception as exc:
+                    raise LocalIndexerError(
+                        f"Failed to migrate legacy LOCAL DB {src!r} -> {dst!r}: {exc}. "
+                        "Aborting so a fresh empty DB is NOT created over your existing "
+                        "library (the legacy DB is left intact for a retry)."
+                    ) from exc
+    return new_path
+
+
+def _assert_db_outside_index_dir(db_path: str, index_dir: str) -> None:
+    """Guard: the SQLite sidecar must NOT live inside the atomically-swapped dir.
+
+    Raised at the dir-swap sites (rebuild / reset) so a future mis-wiring fails
+    loud rather than locking (Windows) or silently destroying the DB (POSIX).
+    """
+    abs_db = os.path.abspath(db_path)
+    abs_idx = os.path.abspath(index_dir)
+    try:
+        inside = os.path.commonpath([abs_db, abs_idx]) == abs_idx
+    except ValueError:
+        inside = False  # different drives (Windows) -> definitely outside
+    if inside:
+        raise LocalIndexerError(
+            "LOCAL SQLite sidecar must not live inside the atomically-swapped "
+            f"Tantivy index dir (db_path={db_path!r} is under index_dir={index_dir!r}); "
+            "a schema rebuild / reset renames that dir wholesale, which would lock "
+            "or destroy the DB. Use migrate_legacy_local_db()/local_db_path_for()."
+        )
+
+
+# ---------------------------------------------------------------------------
+# LocalIndexer class
+# ---------------------------------------------------------------------------
+
+class LocalIndexer:
+    """Qt-free LOCAL indexer engine (REQ-1, REQ-3, REQ-4, REQ-5).
+
+    Owns:
+      - Tantivy LOCAL side-index (build_local_schema)
+      - SQLite metadata sidecar (folders / processed_files / local_pages / local_files)
+      - Per-format extraction (PDF / DOCX / TXT)
+      - Incremental re-extract on mtime change
+      - Crash-safe delete via pending_delete two-phase protocol (HIGH-3)
+      - Startup crash recovery (_recover_pending_deletes + pending inserts)
+      - Folder overlap detection
+      - Cooperative cancellation hooks
+
+    Constructor:
+        index_dir: Directory for LOCAL Tantivy side-index files.
+        lab_index_dir: Directory for LOCAL LAB side-index files (may be unused by Plan 03).
+        db_path: Path to SQLite sidecar (local_index.sqlite3 or any path).
+        progress_cb: Optional callable(current_index, total, filename) for per-file progress.
+        file_finished_cb: Optional callable(filename, status, pages, error_msg).
+    """
+
+    def __init__(
+        self,
+        index_dir: str,
+        lab_index_dir: str,
+        db_path: str,
+        progress_cb: Optional[Callable] = None,
+        file_finished_cb: Optional[Callable] = None,
+        defer_schema_rebuild: bool = False,
+    ) -> None:
+        # SEED-006 HIGH-5: when True, a schema-marker mismatch does NOT rebuild
+        # synchronously inside __init__ (which, on the desktop, runs on the UI
+        # thread and would freeze launch while every page is re-added from
+        # cached_text). Instead __init__ flags `needs_schema_rebuild` and leaves
+        # the indexer not-ready; the caller runs `run_deferred_schema_rebuild()`
+        # on a background thread (its own per-thread SQLite connection) and gates
+        # search until it completes. Default False preserves the synchronous
+        # behaviour for every other caller (CLI / tests / SearchEngine's own
+        # background StartupThread rebuild path).
+        self.needs_schema_rebuild: bool = False
+        self._defer_schema_rebuild = defer_schema_rebuild
+        self._index_dir = index_dir
+        self._lab_index_dir = lab_index_dir
+        self._db_path = db_path
+        self._progress_cb = progress_cb
+        self._file_finished_cb = file_finished_cb
+
+        # Thread-local SQLite connections (D-threading-fix).
+        #
+        # Python's sqlite3 module ties each connection to the thread that
+        # created it (check_same_thread=True by default). LocalIndexer is
+        # constructed on the main/GUI thread but scan_all() runs inside
+        # LocalIndexerWorker(QThread) — a different thread. Using a single
+        # shared connection therefore raises:
+        #   sqlite3.ProgrammingError: SQLite objects created in a thread can
+        #   only be used in that same thread.
+        #
+        # Fix: each thread gets its own connection opened lazily via the
+        # _conn property (see below). Do NOT use check_same_thread=False —
+        # that bypasses Python's safety guard and risks corruption when
+        # multiple threads write concurrently. Per-thread connections are
+        # safe here because the QMutex in MyLibraryTab (D-25) ensures only
+        # one thread is writing at any given time.
+        self._thread_local = threading.local()
+
+        # Eagerly open a connection on the constructing thread so that
+        # startup work (init_sqlite + _recover_pending_deletes) runs
+        # immediately without requiring callers to prime the thread-local.
+        _conn = init_sqlite(db_path)
+        _conn.row_factory = sqlite3.Row
+        self._thread_local._conn = _conn
+
+        # Phase 97 LD-2: run idempotent migration ladder (0->1->2).
+        # Called here, before any Tantivy work, so the schema additions
+        # (cached_text, scan_run_id, chunk_locator, etc.) are present for
+        # _write_page_doc in the same session.
+        from shared.local_indexer_migrations import run as _run_migrations
+        _run_migrations(self._thread_local._conn)  # Phase 97 D-NEW-1 ladder
+
+        # Phase 97 LD-3 (Wave E placeholder): scan_run_id defaults to None
+        # until _begin_scan_run sets it (Task 4).
+        self._current_scan_run_id: str | None = None
+
+        # Tantivy LOCAL side-index
+        schema = build_local_schema()
+        os.makedirs(index_dir, exist_ok=True)
+
+        # R97.2-A: pre-initialize _writer = None so the post-rebuild gate
+        # `if self._writer is None:` below can check it. rebuild_main_index_atomic
+        # may populate self._writer via _reopen_internal_writer_index() — in
+        # that case the gate skips the retry loop. Without this attribute
+        # initialization, the gate raises AttributeError on first __init__.
+        self._writer = None
+
+        # Determine if this is a fresh dir (no meta.json = normal first-run),
+        # a schema-mismatch (marker file present but hash changed), or a
+        # genuine corruption (open raises on an existing index).
+        _meta_exists = os.path.isfile(os.path.join(index_dir, "meta.json"))
+        _schema_mismatch = False
+        if _meta_exists:
+            expected_marker = _compute_schema_marker(build_local_schema)
+            actual_marker = _read_schema_marker(index_dir)
+            if actual_marker != expected_marker:
+                _schema_mismatch = True
+
+        if not _meta_exists:
+            # Fresh directory — create index from scratch (normal first-run)
+            self._index = tantivy.Index(schema, path=index_dir)
+            register_search_tokenizers(self._index)  # SEED-006: hebword + builtins
+            _write_schema_marker(index_dir, _compute_schema_marker(build_local_schema))
+        else:
+            # Existing index — open and check for corruption/schema mismatch
+            _needs_rebuild = _schema_mismatch
+            _open_exc_captured = None
+            if not _needs_rebuild:
+                try:
+                    self._index = tantivy.Index.open(index_dir)
+                    register_search_tokenizers(self._index)  # SEED-006
+                except Exception as _open_exc:
+                    logger.warning(
+                        "LOCAL Tantivy index open failed: %r — attempting atomic rebuild",
+                        _open_exc,
+                    )
+                    _needs_rebuild = True
+                    _open_exc_captured = _open_exc
+
+            # SEED-006 HIGH-5: defer a *schema-mismatch* rebuild off the UI
+            # thread. Only the marker-mismatch case is deferrable — a genuine
+            # open failure (corruption) still rebuilds inline so the object is
+            # never handed back broken. Leaves the indexer not-ready
+            # (_index/_writer = None); the caller must run
+            # run_deferred_schema_rebuild() before using it.
+            if _needs_rebuild and _schema_mismatch and self._defer_schema_rebuild:
+                logger.info(
+                    "LOCAL schema marker mismatch — deferring rebuild off the UI thread"
+                )
+                self.needs_schema_rebuild = True
+                self._index = None
+                self._writer = None
+                # Do NOT return — fall through so _pending_filepaths /
+                # _commit_triggers are still initialised; the writer-acquisition
+                # loop and pending-delete recovery below are gated on
+                # `needs_schema_rebuild` and run after run_deferred_schema_rebuild().
+            elif _needs_rebuild:
+                if _schema_mismatch:
+                    logger.warning(
+                        "LOCAL schema marker mismatch — attempting atomic rebuild"
+                    )
+                import uuid as _uuid
+                _recovery_run_id = _uuid.uuid4().hex
+                try:
+                    # SEED-006 fix: do NOT seed self._index by opening index_dir with
+                    # the NEW schema — on a schema MIGRATION the dir still holds the
+                    # OLD-schema index, so tantivy.Index(new_schema, path=index_dir)
+                    # raises "An index exists but the schema does not match", which
+                    # dead-ended every migration into "rebuild from cached_text failed".
+                    # rebuild_main_index_atomic builds a fresh .rebuild-<id> dir from
+                    # cached_text (SQLite) and reopens the live dir AFTER the swap; it
+                    # needs no valid self._index at entry, and _close_internal_writer_
+                    # index() tolerates None.
+                    self._index = None
+                    self.rebuild_main_index_atomic(
+                        _recovery_run_id,
+                        close_searcher_cb=lambda: None,
+                        reload_searcher_cb=lambda: None,
+                    )
+                    # R97.2-A: NO redundant tantivy.Index(...) reopen here.
+                    # rebuild_main_index_atomic already calls
+                    # _reopen_internal_writer_index() at :2799 which sets BOTH
+                    # self._index and self._writer. A second reopen would leak
+                    # the writer lock (LockBusy in the 2026-05-26 cascade).
+                except Exception as _rebuild_exc:
+                    logger.error("LOCAL atomic rebuild failed: %r", _rebuild_exc)
+                    raise RuntimeError(
+                        "LOCAL index corrupt and rebuild from cached_text failed. "
+                        "Use 'Reset My Library' in Advanced settings to delete the cache and rescan."
+                    ) from _rebuild_exc
+        # Bug-1 fix: retry writer acquisition with backoff.
+        # On Windows, after a language-switch restart the previous process may
+        # still hold the Tantivy writer lock for a brief moment (the old process
+        # is still exiting when the new process calls __init__).  Three retries
+        # with exponential back-off (250 ms / 1 s / 2 s) cover the typical
+        # process-exit window without blocking the UI for more than ~3 s.
+        #
+        # R97.2-A: gate the retry loop on `self._writer is None` so it skips
+        # when rebuild_main_index_atomic already populated self._writer via
+        # _reopen_internal_writer_index(). Without the gate this loop would
+        # try to acquire a second writer on top of the rebuild's writer ->
+        # LockBusy (the literal LockBusy in the 2026-05-26 cascade).
+        if self._writer is None and not self.needs_schema_rebuild:
+            _writer_retries = 3
+            _writer_delays = [0.25, 1.0, 2.0]
+            for _attempt in range(_writer_retries + 1):
+                try:
+                    self._writer = self._index.writer(heap_size=15_000_000)
+                    break
+                except Exception as _exc:  # noqa: BLE001
+                    if _attempt < _writer_retries:
+                        logger.warning(
+                            "LocalIndexer: writer lock attempt %d/%d failed (%s); "
+                            "retrying in %.1fs",
+                            _attempt + 1, _writer_retries, _exc,
+                            _writer_delays[_attempt],
+                        )
+                        time.sleep(_writer_delays[_attempt])
+                    else:
+                        raise
+
+        # Batch tracking for two-phase commit (D-21)
+        self._pending_filepaths: list[str] = []
+
+        # Phase 97 C-02 — byte/count/time commit trigger (supersedes fixed 25-file batch)
+        self._commit_triggers = _CommitTriggers()
+
+        # Phase 101 D-04 ROLLED BACK 2026-05-28 post-UAT — the extractor-version
+        # auto-flip-on-init that lived here weaponized startup_recovery() Pass B
+        # (synchronous UI-thread re-extraction) on existing libraries with many
+        # PDFs. Removed entirely. New scans still get the RTL fix from
+        # extract_pdf_pages; existing libraries need manual Reset + re-scan.
+
+        # HIGH-3 review fix: run pending-delete recovery at init.
+        # SEED-006: skipped while a schema rebuild is pending (no writer yet);
+        # run_deferred_schema_rebuild() runs it once the index is ready.
+        if not self.needs_schema_rebuild:
+            recovered = self._recover_pending_deletes()
+            if recovered:
+                logger.info("LocalIndexer init: recovered %d pending deletes", recovered)
+
+    def run_deferred_schema_rebuild(self) -> bool:
+        """SEED-006 HIGH-5: perform a schema-mismatch rebuild deferred from __init__.
+
+        Call this from a BACKGROUND thread (not the UI thread) when the indexer
+        was constructed with ``defer_schema_rebuild=True`` and reported
+        ``needs_schema_rebuild``. It opens its own per-thread SQLite connection
+        (via the ``_conn`` property), so it is safe off the constructing thread.
+
+        Idempotent + race-tolerant: re-reads the on-disk marker first, because a
+        concurrent path (e.g. SearchEngine's own background rebuild) may already
+        have rebuilt + rewritten it. Returns True if the indexer is ready
+        afterwards. Never raises for the "already current" case; a genuine
+        rebuild failure propagates so the caller can fail-open the search gate.
+        """
+        if not self.needs_schema_rebuild:
+            return self._index is not None
+
+        expected = _compute_schema_marker(build_local_schema)
+        actual = _read_schema_marker(self._index_dir)
+        if actual == expected:
+            # Another path already rebuilt — just open + wire the live handles.
+            self._reopen_internal_writer_index()
+        else:
+            import uuid as _uuid
+            # SEED-006 fix: do NOT seed self._index from the live dir with the new
+            # schema — on a migration the dir still holds the OLD-schema index, so
+            # the open raises "schema does not match". rebuild_main_index_atomic
+            # builds a fresh .rebuild-<id> dir from cached_text and reopens the live
+            # dir after the swap; None is correct here (close tolerates it).
+            self._index = None
+            self.rebuild_main_index_atomic(
+                _uuid.uuid4().hex,
+                close_searcher_cb=lambda: None,
+                reload_searcher_cb=lambda: None,
+            )
+
+        self.needs_schema_rebuild = False
+        # Now that the index/writer are live, run the recovery that __init__
+        # skipped while the rebuild was pending.
+        try:
+            self._recover_pending_deletes()
+        except Exception:
+            logger.exception("run_deferred_schema_rebuild: pending-delete recovery failed")
+        return self._index is not None
+
+    # ------------------------------------------------------------------
+    # Thread-local connection property (D-threading-fix)
+    # ------------------------------------------------------------------
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Return the SQLite connection for the current thread.
+
+        Creates a new connection (via init_sqlite) the first time any thread
+        accesses this property. The constructing thread pre-populates its slot
+        in __init__ so startup work (init_sqlite tables + _recover_pending_deletes)
+        runs immediately.
+
+        Each thread owns its own sqlite3.Connection. This is safe for concurrent
+        reads from the main/UI thread while the QMutex-serialised worker thread
+        performs writes, because SQLite WAL mode allows one writer + many readers
+        without blocking.
+        """
+        conn = getattr(self._thread_local, "_conn", None)
+        if conn is None:
+            conn = init_sqlite(self._db_path)
+            conn.row_factory = sqlite3.Row
+            self._thread_local._conn = conn
+        return conn
+
+    # ------------------------------------------------------------------
+    # Folder management
+    # ------------------------------------------------------------------
+
+    def add_folder(self, path: str) -> bool:
+        """Normalize path, check for overlap with existing folders, and INSERT.
+
+        Returns True if added, False if already present or overlapping.
+        Raises ValueError with an explanatory message on overlap.
+        """
+        canonical = _canonical_filepath(path)
+        existing = self._get_folder_paths()
+        conflict = check_folder_overlap(canonical, existing)
+        if conflict is not None:
+            raise ValueError(
+                f"Folder '{path}' overlaps with existing registered folder '{conflict}'"
+            )
+        now = time.time()
+        try:
+            self._conn.execute(
+                "INSERT INTO folders (path, added_at, status) VALUES (?, ?, 'active')",
+                (canonical, now),
+            )
+            self._conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Already exists (UNIQUE constraint)
+            return False
+
+    def remove_folder(self, folder_path: str) -> int:
+        """Synchronous delete: remove all files in folder, then delete the folder row.
+
+        Returns the number of files removed.
+        """
+        canonical = _canonical_filepath(folder_path)
+        row = self._conn.execute(
+            "SELECT folder_id FROM folders WHERE path = ?", (canonical,)
+        ).fetchone()
+        if row is None:
+            return 0
+        folder_id = row["folder_id"]
+        # Get all sys_ids + filepaths for this folder
+        files = self._conn.execute(
+            "SELECT sys_id, filepath FROM local_files WHERE folder_id = ?",
+            (folder_id,),
+        ).fetchall()
+        count = 0
+        for f in files:
+            # commit=False: defer the Tantivy commit until ALL deletes are queued,
+            # then do ONE retry-protected commit below. Per-file commits on a
+            # bulk delete fight with the live LOCAL searcher's handle on Windows
+            # (os error 5) — used to log hundreds of warnings + freeze the UI.
+            self._delete_file(f["sys_id"], f["filepath"], commit=False)
+            count += 1
+        # Single retry-protected commit for the entire batch.
+        commit_succeeded = False
+        if files:
+            self._ensure_writer()
+            try:
+                self._commit_writer_with_retry()
+                commit_succeeded = True
+            except Exception as exc:
+                logger.warning(
+                    "remove_folder: Tantivy commit failed after retries: %s — "
+                    "pending_delete rows will be retried by _recover_pending_deletes "
+                    "on next launch", exc,
+                )
+        # Step 3 batched cleanup (only if Tantivy commit succeeded). We do this
+        # inline rather than calling _recover_pending_deletes() because that
+        # helper commits per-row, re-introducing the contention we just avoided.
+        if commit_succeeded:
+            try:
+                self._conn.execute(
+                    "DELETE FROM local_pages WHERE sys_id IN ("
+                    "  SELECT sys_id FROM local_files WHERE folder_id = ?"
+                    ")",
+                    (folder_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM processed_files WHERE sys_id IN ("
+                    "  SELECT sys_id FROM local_files WHERE folder_id = ?"
+                    ")",
+                    (folder_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM local_files WHERE folder_id = ?", (folder_id,)
+                )
+                self._conn.commit()
+            except Exception as exc:
+                logger.warning(
+                    "remove_folder: SQLite batch cleanup failed: %s — recovery "
+                    "will complete on next launch via _recover_pending_deletes",
+                    exc,
+                )
+        # Delete folder row
+        self._conn.execute("DELETE FROM folders WHERE folder_id = ?", (folder_id,))
+        self._conn.commit()
+        return count
+
+    def get_filepath(self, sys_id: str) -> Optional[str]:
+        """Return the canonical filepath for a LOCAL sys_id, or None if not found.
+
+        Used by the Browse panel 'Open file' button (D-28) to obtain the source
+        file path so os.startfile() can launch the OS default application.
+        """
+        row = self._conn.execute(
+            "SELECT filepath FROM local_files WHERE sys_id = ?", (sys_id,)
+        ).fetchone()
+        return row["filepath"] if row else None
+
+    def get_filepaths(self, sys_ids) -> dict:
+        """v7.16 BUG-6: batch sys_id -> canonical filepath lookup in ONE query.
+
+        Replaces N per-row get_filepath() round-trips on the UI thread (the cause
+        of the ~10s freeze when a LOCAL search returns many hits). Chunks the
+        IN(...) list under SQLite's variable limit. Returns a dict; missing
+        sys_ids are simply absent.
+        """
+        out: dict = {}
+        ids = [s for s in dict.fromkeys(sys_ids) if s]  # de-dup, preserve order, drop falsy
+        if not ids:
+            return out
+        CHUNK = 900  # stay under SQLITE_MAX_VARIABLE_NUMBER (default 999)
+        for i in range(0, len(ids), CHUNK):
+            batch = ids[i:i + CHUNK]
+            placeholders = ",".join("?" * len(batch))
+            cur = self._conn.execute(
+                f"SELECT sys_id, filepath FROM local_files WHERE sys_id IN ({placeholders})",
+                batch,
+            )
+            for r in cur.fetchall():
+                out[r["sys_id"]] = r["filepath"]
+        return out
+
+    def list_all_filepaths(self) -> list:
+        """Phase 96 D-F1: enumerate every on-disk filepath in the index.
+
+        Used by MyLibraryTab._on_worker_finished to prune stale opt-outs after
+        a rescan completes. Returns canonical filepaths from the local_files
+        SQLite table (preferred over direct _conn access from the tab).
+
+        Per 96-08-WIRING-NOTES.md §LocalIndexer public API: Option (A) —
+        recommended public method over direct _conn access (Option B).
+        """
+        cur = self._conn.execute("SELECT filepath FROM local_files")
+        return [row[0] for row in cur.fetchall()]
+
+    def get_file_status_for_folder(self, folder_path: str) -> dict:
+        """Phase 96 fix-2: return prior scan status for all files in folder_path.
+
+        Called by _UnifiedFileTreeWidget.populate_for_folder so that Pages and
+        Status columns are populated immediately on tab open (not only after a
+        new scan). Without this, the tree opens with all status columns empty,
+        which made the previous QSplitter+status_table look the same.
+
+        Returns a dict mapping canonical filepath -> {'pages': int, 'status': str}
+        for every file that has been indexed for this folder. Files not yet
+        indexed (pending) are absent from the dict.
+        """
+        from shared.local_sys_id import _canonical_filepath
+        canonical = _canonical_filepath(folder_path)
+        row = self._conn.execute(
+            "SELECT folder_id FROM folders WHERE path = ?", (canonical,)
+        ).fetchone()
+        if row is None:
+            return {}
+        folder_id = row["folder_id"]
+        rows = self._conn.execute(
+            "SELECT filepath, page_count, extraction_status "
+            "FROM local_files WHERE folder_id = ? AND pending_delete = 0",
+            (folder_id,),
+        ).fetchall()
+        return {
+            r["filepath"]: {"pages": r["page_count"], "status": r["extraction_status"]}
+            for r in rows
+        }
+
+    def get_folder_filepaths(self, folder_path: str) -> list:
+        """v7.16 BUG-5: canonical filepaths of every indexed file under *folder_path*.
+
+        Used by the per-folder opt-out checkboxes in the My Library folders list
+        to bulk include/exclude a whole folder from search. Returns [] for an
+        unknown folder.
+        """
+        from shared.local_sys_id import _canonical_filepath
+        canonical = _canonical_filepath(folder_path)
+        row = self._conn.execute(
+            "SELECT folder_id FROM folders WHERE path = ?", (canonical,)
+        ).fetchone()
+        if row is None:
+            return []
+        rows = self._conn.execute(
+            "SELECT filepath FROM local_files WHERE folder_id = ? AND pending_delete = 0",
+            (row["folder_id"],),
+        ).fetchall()
+        return [r["filepath"] for r in rows]
+
+    def list_folders(self) -> list[dict]:
+        """Return all registered folders ordered by added_at (D-15 / D-16).
+
+        Each dict has keys: folder_id, path, added_at, last_scanned_at, status.
+        Used by MyLibraryTab to populate the folder list widget and by
+        prescan_count_all for the W8 aggregate ceiling check.
+        """
+        rows = self._conn.execute(
+            "SELECT folder_id, path, added_at, last_scanned_at, status "
+            "FROM folders ORDER BY added_at"
+        ).fetchall()
+        return [
+            {
+                "folder_id": row["folder_id"],
+                "path": row["path"],
+                "added_at": row["added_at"],
+                "last_scanned_at": row["last_scanned_at"],
+                "status": row["status"],
+            }
+            for row in rows
+        ]
+
+    def prescan_count_all(self) -> tuple[int, int]:
+        """W8: aggregate prescan across all registered, available folders.
+
+        Iterates every registered folder; folders with status in
+        ('unavailable', 'unreachable', 'timeout') OR whose path is not a
+        directory (D-40) are excluded from the sum.
+        Used by MyLibraryTab Refresh per D-16 multi-folder support.
+        The aggregate is the input to the D-26/D-41 ceiling-check dialog —
+        thresholds apply to the AGGREGATE, not per-folder.
+
+        Returns: (total_file_count, total_bytes)
+        """
+        total_files = 0
+        total_bytes = 0
+        for folder in self.list_folders():
+            path = folder["path"]
+            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
+            if folder["status"] in ("unavailable", "unreachable", "timeout"):
+                continue
+            if not os.path.isdir(path):
+                continue  # treat as unavailable
+            f, b = self.prescan_count(path)
+            total_files += f
+            total_bytes += b
+        return total_files, total_bytes
+
+    def _get_folder_paths(self) -> list[str]:
+        rows = self._conn.execute("SELECT path FROM folders").fetchall()
+        return [r["path"] for r in rows]
+
+    # ------------------------------------------------------------------
+    # 2026-05-28 — force-re-extract: flip committed rows to 'pending' so the
+    # next scan_all() re-runs extraction. Used by the My Library "Re-index
+    # All" button to recover existing libraries after extractor improvements
+    # (RTL word-order, intra-block newline collapse, etc.).
+    #
+    # Important: this writes to SQLite only. The actual re-extraction MUST
+    # happen via the background LocalIndexerWorker (scan_all on a QThread) —
+    # NOT via startup_recovery() on the UI thread (cf. Phase 101 D-04
+    # rollback: 12K rows in Pass B froze app launch for hours).
+    # ------------------------------------------------------------------
+
+    def mark_all_pending_for_reindex(self) -> int:
+        """Flip every 'committed' row in processed_files to 'pending'.
+
+        Other statuses ('error', 'oversized', 'zip_bomb_suspected',
+        'encoding_error', 'no_text_layer', 'unsupported', 'pending') are left
+        untouched — they have their own lifecycle and re-extracting them now
+        would either fail again or fight the file-size/zip-bomb guards.
+
+        Returns the number of rows flipped. Caller should follow up with a
+        normal scan_all() run via the worker; rows in 'pending' miss the
+        cache-hit branch in scan_all() and get re-extracted.
+        """
+        cur = self._conn.execute(
+            "UPDATE processed_files SET status = 'pending' "
+            "WHERE status = 'committed'"
+        )
+        affected = cur.rowcount
+        self._conn.commit()
+        return affected
+
+    # ------------------------------------------------------------------
+    # Scan
+    # ------------------------------------------------------------------
+
+    def scan_all(self, cancel_check: Callable[[], bool] = lambda: False) -> dict:
+        """Scan all registered folders; return summary dict.
+
+        Returns: {"indexed": N, "skipped": N, "errors": N, "cancelled": bool}
+
+        Phase 97 LD-6: inserts a scan_runs row with status='running' at start;
+        updates to 'completed' at clean exit or 'canceled' on cancellation.
+        Exceptions (crashes) leave the row at 'running' so start_recovery_probe()
+        detects it on next startup.
+        """
+        # Phase 97 LD-6: begin scan_run lifecycle tracking.
+        run_id = self._begin_scan_run()
+        try:
+            result = self._scan_all_impl(cancel_check)
+        except Exception:
+            # Leave status='running' so recovery probe fires on next startup.
+            raise
+        if result.get("cancelled"):
+            self._end_scan_run(run_id, "canceled")
+        else:
+            self._end_scan_run(run_id, "completed")
+        # SEED-006 (Codex MED #5): GC orphaned .old-<ts> / .reset-quarantine-<ts>
+        # dirs here — scan_all always runs on the background LocalIndexerWorker
+        # thread, never the UI thread (avoids the Phase-101 D-04 UI-freeze class).
+        # The cleaner had no production caller before this. Best-effort: a cleanup
+        # failure must never fail the scan.
+        try:
+            self.clean_pending_rebuild_dirs()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("scan_all: clean_pending_rebuild_dirs failed: %r", exc)
+        return result
+
+    def _scan_all_impl(self, cancel_check: Callable[[], bool] = lambda: False) -> dict:
+        """Internal implementation of scan_all (split out for scan_run lifecycle wrapper)."""
+        result = {"indexed": 0, "skipped": 0, "errors": 0, "cancelled": False}
+        # Phase 97 D-NEW-3: per-scan retry counter + re-queue list (allocated fresh per scan_run).
+        # _scan_run_retries[filepath] = number of times this file was marked 'changed_during_index'
+        # during this scan_run. Max 3 retries; 4th attempt gives up.
+        self._scan_run_retries: dict[str, int] = {}
+        self._re_queue: list[str] = []
+        folders = self._conn.execute(
+            "SELECT folder_id, path, status FROM folders"
+        ).fetchall()
+
+        for folder in folders:
+            if cancel_check():
+                result["cancelled"] = True
+                break
+
+            folder_path = folder["path"]
+            folder_id = folder["folder_id"]
+
+            # Phase 97 D-NEW-2 — errno-discriminated reachability check + retry.
+            # D-40 extended: ENOENT/EACCES -> 'unreachable' (non-retryable);
+            # ETIMEDOUT/EAGAIN -> 'timeout' (3-retry × 2s backoff).
+            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
+            # Pre-check: if already marked 'unreachable'/'timeout', skip _check_folder_reachable
+            # on auto-rescan (user must manually Refresh to retry unreachable folders).
+            if folder["status"] in ("unavailable", "unreachable", "timeout"):
+                # Already known unreachable — skip without re-probing on auto-rescan.
+                # User can trigger a manual Refresh to retry.
+                continue
+            reachable, status_label = _check_folder_reachable(folder_path)
+            if not reachable:
+                self._conn.execute(
+                    "UPDATE folders SET status = ? WHERE folder_id = ?",
+                    (status_label, folder_id),
+                )
+                self._conn.commit()
+                logger.info(
+                    "Phase 97 D-NEW-2: folder '%s' status=%s — preserving existing rows",
+                    folder_path, status_label,
+                )
+                continue
+
+            # Mark folder as active + update last_scanned_at
+            self._conn.execute(
+                "UPDATE folders SET status = 'active', last_scanned_at = ? WHERE folder_id = ?",
+                (time.time(), folder_id),
+            )
+            self._conn.commit()
+
+            # Build set of current files on disk
+            disk_files: dict[str, int] = {}  # canonical_path -> file_size
+            for filepath, file_size in self._iterate_supported_files(
+                folder_path, cancel_check
+            ):
+                disk_files[filepath] = file_size
+
+            if cancel_check():
+                result["cancelled"] = True
+                break
+
+            # Get cached files for this folder (D-NEW-8: include mtime_ns for exact comparison)
+            cached = {
+                row["filepath"]: row
+                for row in self._conn.execute(
+                    "SELECT pf.filepath, pf.mtime, pf.mtime_ns, pf.size, pf.sys_id, pf.status "
+                    "FROM processed_files pf "
+                    "JOIN local_files lf ON pf.sys_id = lf.sys_id "
+                    "WHERE lf.folder_id = ?",
+                    (folder_id,),
+                ).fetchall()
+            }
+
+            # Detect deleted files (in cache but not on disk)
+            for cached_path, cached_row in list(cached.items()):
+                if cached_path not in disk_files:
+                    if cancel_check():
+                        result["cancelled"] = True
+                        break
+                    sys_id = cached_row["sys_id"]
+                    if sys_id:
+                        self._delete_file(sys_id, cached_path)
+
+            if result["cancelled"]:
+                break
+
+            # Index new / modified files
+            total_files = len(disk_files)
+            for idx, (filepath, file_size) in enumerate(disk_files.items()):
+                if cancel_check():
+                    result["cancelled"] = True
+                    break
+
+                cached_row = cached.get(filepath)
+                try:
+                    stat = os.stat(filepath)
+                    mtime = stat.st_mtime
+                    mtime_ns = stat.st_mtime_ns   # D-NEW-8: nanosecond precision
+                    fsize = stat.st_size
+                except OSError as exc:
+                    logger.warning("scan_all: stat failed for %s: %s", filepath, exc)
+                    result["errors"] += 1
+                    continue
+
+                # D-NEW-8: cache-hit comparison uses integer mtime_ns (exact) instead of
+                # float mtime with 0.01s tolerance. Legacy Phase 95 rows have mtime_ns=NULL;
+                # (cached_row["mtime_ns"] or 0) evaluates to 0 for NULL, which is never
+                # equal to any real mtime_ns (which is always > 0 for real files since epoch).
+                # This correctly forces a cache miss for all Phase 95 legacy rows on first
+                # Phase 97 scan, allowing mtime_ns to be populated.
+                if (
+                    cached_row is not None
+                    and cached_row["status"] == "committed"
+                    and (cached_row["mtime_ns"] or 0) == mtime_ns
+                    and (cached_row["size"] or 0) == fsize
+                ):
+                    # Phase 97 U-02 (RESEARCH Issue #4 LOCK): scan_run_id NOT set on cache-hit skip.
+                    # The cached_row keeps its prior scan_run_id (possibly NULL for legacy rows or
+                    # some prior committed UUID). Setting it here would cause discard_run(current_run)
+                    # to wrongly delete previously committed rows that this run merely visited.
+                    # Pinned by tests/test_scan_run_id.py::test_no_run_id_on_skipped.
+                    result["skipped"] += 1
+                    continue
+
+                # Fire progress callback only for files actually being indexed/re-indexed
+                # (not for cache hits) — matches D-23 "per file being processed" semantics
+                if self._progress_cb:
+                    self._progress_cb(idx, total_files, os.path.basename(filepath))
+
+                # Phase 97 C-05 raw-size hard skip (LD-9 — write to BOTH tables)
+                if fsize > _MAX_FILE_SIZE:
+                    now = time.time()
+                    sys_id_for_status = generate_local_sys_id(_canonical_filepath(filepath))
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO processed_files "
+                        "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
+                        "VALUES (?, ?, ?, ?, ?, 'oversized', ?)",
+                        (filepath, mtime, mtime_ns, fsize, sys_id_for_status,
+                         self._current_scan_run_id),
+                    )
+                    # LD-9: also write local_files.extraction_status so the UI tree shows it.
+                    self._upsert_local_files_status(
+                        sys_id_for_status, filepath, folder_id, "oversized", fsize, now
+                    )
+                    self._conn.commit()
+                    if self._file_finished_cb:
+                        try:
+                            cb_path = _canonical_filepath(filepath)
+                        except Exception:
+                            cb_path = filepath
+                        self._file_finished_cb(cb_path, "oversized", 0, "")
+                    result["oversized"] = result.get("oversized", 0) + 1
+                    # Phase 97 C-02 — record for commit trigger even on skip
+                    self._commit_triggers.record_file(fsize)
+                    if self._commit_triggers.should_commit():
+                        self._commit_batch()
+                        self._commit_triggers.reset()
+                    continue
+
+                # Phase 97 C-05 zip-bomb defense — only for zip-container formats
+                ext_lower = os.path.splitext(filepath)[1].lower()
+                if ext_lower in (".docx", ".xlsx"):
+                    bomb_reason = _check_zip_bomb(filepath)
+                    if bomb_reason:
+                        now = time.time()
+                        sys_id_for_bomb = generate_local_sys_id(_canonical_filepath(filepath))
+                        self._conn.execute(
+                            "INSERT OR REPLACE INTO processed_files "
+                            "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
+                            "VALUES (?, ?, ?, ?, ?, 'zip_bomb_suspected', ?)",
+                            (filepath, mtime, mtime_ns, fsize, sys_id_for_bomb,
+                             self._current_scan_run_id),
+                        )
+                        # LD-9: also write local_files.extraction_status
+                        self._upsert_local_files_status(
+                            sys_id_for_bomb, filepath, folder_id,
+                            "zip_bomb_suspected", fsize, now, error_msg=bomb_reason,
+                        )
+                        self._conn.commit()
+                        logger.warning(
+                            "Phase 97 C-05: skipping %s — %s", filepath, bomb_reason
+                        )
+                        if self._file_finished_cb:
+                            try:
+                                cb_path = _canonical_filepath(filepath)
+                            except Exception:
+                                cb_path = filepath
+                            self._file_finished_cb(cb_path, "zip_bomb_suspected", 0, bomb_reason)
+                        result["zip_bomb_suspected"] = result.get("zip_bomb_suspected", 0) + 1
+                        self._commit_triggers.record_file(fsize)
+                        if self._commit_triggers.should_commit():
+                            self._commit_batch()
+                            self._commit_triggers.reset()
+                        continue
+
+                # Need to index (new or modified)
+                if cached_row is not None and cached_row["sys_id"]:
+                    # Modified: delete old docs first (D-36)
+                    self._delete_file(cached_row["sys_id"], filepath)
+
+                # Phase 97 D-NEW-3: record pre-extraction stat for TOCTOU detection.
+                # Take a fresh stat IMMEDIATELY before extraction to minimise the window.
+                _pre_mtime_ns = mtime_ns
+                _pre_size = fsize
+                try:
+                    _pre_stat = os.stat(filepath)
+                    _pre_mtime_ns = _pre_stat.st_mtime_ns
+                    _pre_size = _pre_stat.st_size
+                except OSError:
+                    pass  # use values from earlier stat if re-stat fails
+
+                status, pages = self._index_one_file(filepath, folder_id, cancel_check)
+
+                # Phase 97 D-NEW-3: post-extraction stat — detect file changed during indexing.
+                _changed_during_index = False
+                try:
+                    post_stat = os.stat(filepath)
+                    if (post_stat.st_mtime_ns != _pre_mtime_ns or post_stat.st_size != _pre_size):
+                        # File changed during indexing — re-queue (max 3 retries per scan_run)
+                        retries = self._scan_run_retries.get(filepath, 0)
+                        if retries < 3:
+                            self._scan_run_retries[filepath] = retries + 1
+                            self._re_queue.append(filepath)
+                            self._conn.execute(
+                                "INSERT OR REPLACE INTO processed_files "
+                                "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
+                                "VALUES (?, ?, ?, ?, "
+                                "(SELECT sys_id FROM processed_files WHERE filepath = ?), "
+                                "'changed_during_index', ?)",
+                                (filepath, mtime, mtime_ns, fsize, filepath,
+                                 self._current_scan_run_id),
+                            )
+                            self._conn.commit()
+                            logger.info(
+                                "Phase 97 D-NEW-3: %s changed during index (retry %d/3)",
+                                filepath, retries + 1,
+                            )
+                            _changed_during_index = True
+                        else:
+                            logger.warning(
+                                "Phase 97 D-NEW-3: %s changed during index 3× — giving up",
+                                filepath,
+                            )
+                except OSError:
+                    pass  # post-stat failure is non-fatal — proceed with indexed status
+
+                if _changed_during_index:
+                    # Remove from pending so _commit_batch won't overwrite 'changed_during_index'
+                    # with 'committed'. The Tantivy doc for this file may be partial, but it
+                    # will be re-indexed on the next scan_run (re-queued above).
+                    try:
+                        canonical_fp = _canonical_filepath(filepath)
+                        if canonical_fp in self._pending_filepaths:
+                            self._pending_filepaths.remove(canonical_fp)
+                        if filepath in self._pending_filepaths:
+                            self._pending_filepaths.remove(filepath)
+                    except (ValueError, AttributeError):
+                        pass
+                    result["errors"] += 1
+                    continue  # skip _commit_batch + _file_finished_cb for this file
+
+                # D-08 (Phase 102 Plan 03): 'corrupt_encoding' is NOT added to this
+                # tuple — it falls through to the else branch and counts as an error
+                # (future-OCR candidate, unfixable without OCR).
+                # 'encoding_error' is a PRE-EXISTING legacy status (TXT decode failure)
+                # that deliberately remains in the indexed bucket — do NOT reclassify.
+                if status in ("ok", "no_text_layer", "encoding_error", "unsupported"):
+                    result["indexed"] += 1
+                else:
+                    result["errors"] += 1
+
+                if self._file_finished_cb:
+                    # Phase 96 fix-7 (Codex P1.2): emit canonical filepath so
+                    # update_file_status can do an exact dict lookup — basename
+                    # alone was ambiguous when two folders contain same filename.
+                    # [Rule 1 fix] Removed local `from shared.local_sys_id import
+                    # _canonical_filepath` — it's a module-level import (line 71).
+                    # The local import caused UnboundLocalError at the earlier
+                    # usage on the oversized/zip-bomb branch (Python hoists local
+                    # variable assignment to the function scope top).
+                    try:
+                        cb_path = _canonical_filepath(filepath)
+                    except Exception:
+                        cb_path = filepath
+                    self._file_finished_cb(cb_path, status, pages, "")
+
+                # Phase 97 C-02 — byte/count/time trigger (supersedes Phase 95 D-21 fixed
+                # 25-file batch). _COMMIT_BATCH_SIZE is kept as dead-code constant per D-02.
+                self._commit_triggers.record_file(fsize)
+                if self._commit_triggers.should_commit():
+                    self._commit_batch()
+                    self._commit_triggers.reset()
+
+        # Final commit
+        if not result["cancelled"] and self._pending_filepaths:
+            self._commit_batch()
+
+        return result
+
+    def prescan_count(
+        self,
+        folder_path: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> tuple[int, int]:
+        """Fast count of supported files + total bytes for D-26 ceiling dialog.
+
+        Phase 97 C-03: accepts optional cancel_check callable so PrescanWorker
+        can abort the os.walk mid-scan when the user presses Cancel.
+        Returns (-1, -1) when cancelled.
+        """
+        file_count = 0
+        total_bytes = 0
+        try:
+            for dirpath, _dirs, files in os.walk(folder_path, followlinks=False):
+                if cancel_check is not None and cancel_check():
+                    return -1, -1
+                try:
+                    for fname in files:
+                        if is_office_temp_file(fname):
+                            continue
+                        ext = os.path.splitext(fname)[1].lower()
+                        if ext in _SUPPORTED_EXTENSIONS:
+                            fpath = os.path.join(dirpath, fname)
+                            try:
+                                total_bytes += os.path.getsize(fpath)
+                                file_count += 1
+                            except OSError:
+                                pass
+                except OSError as exc:
+                    logger.warning("prescan_count: OSError in %s: %s", dirpath, exc)
+        except OSError as exc:
+            logger.warning("prescan_count: OSError walking %s: %s", folder_path, exc)
+        return file_count, total_bytes
+
+    def estimate_index_size(self) -> int:
+        """Phase 97 C-06 — sum sizes of all files under index dir.
+
+        Used by MyLibraryTab._update_disk_indicator() to compute the current
+        LOCAL Tantivy index footprint for the merge-headroom warning.
+        Recursively sums Tantivy segment files + SQLite sidecar.
+        """
+        total = 0
+        try:
+            for root, _dirs, files in os.walk(self._index_dir):
+                for name in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, name))
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+        return total
+
+    # ------------------------------------------------------------------
+    # Startup recovery
+    # ------------------------------------------------------------------
+
+    def startup_recovery(self, reextract_pending: bool = True) -> dict:
+        """Two-pass startup recovery (D-21 + HIGH-3 review fix).
+
+        Pass A (HIGH-3): recover any crash-interrupted deletes (_recover_pending_deletes).
+        Pass B (D-21): re-extract files with status='pending'.
+
+        ``reextract_pending`` (2026-05-31): when False, SKIP Pass B's synchronous
+        re-extraction and leave the pending rows for the caller's background
+        worker to process. Pass B re-extracts every pending PDF inline — fine for
+        the handful left by a crash-interrupted single scan, but catastrophic
+        when a bulk "Re-index All" (which flips committed->pending) was
+        interrupted: the leftover pending backlog froze app launch on the UI
+        thread (same failure mode as the rolled-back Phase 101 D-04 auto-flip).
+        The desktop caller (MyLibraryTab._init_indexer) passes False because its
+        _auto_rescan_on_startup background worker re-extracts pending rows anyway
+        (they miss scan_all's cache-hit branch) — cancellable + progress-tracked,
+        off the UI thread. Tests keep the default True to exercise the recovery.
+
+        Returns: {'pending_deletes_recovered': N, 'pending_inserts_recovered': M,
+                  'pending_inserts_deferred': K}
+        """
+        # Pass A: HIGH-3 - finish any interrupted deletes
+        deletes_recovered = self._recover_pending_deletes()
+
+        # Pass B: D-21 - re-extract pending inserts (UNLESS deferred to the
+        # caller's background worker — see reextract_pending docstring).
+        if not reextract_pending:
+            deferred = self._conn.execute(
+                "SELECT COUNT(*) FROM processed_files WHERE status = 'pending'"
+            ).fetchone()[0]
+            if deferred:
+                logger.info(
+                    "startup_recovery: deferring re-extraction of %d pending "
+                    "file(s) to the background worker (not the UI thread)",
+                    deferred,
+                )
+            return {
+                "pending_deletes_recovered": deletes_recovered,
+                "pending_inserts_recovered": 0,
+                "pending_inserts_deferred": deferred,
+            }
+
+        pending_rows = self._conn.execute(
+            "SELECT filepath, sys_id FROM processed_files WHERE status = 'pending'"
+        ).fetchall()
+        inserts_recovered = 0
+        for row in pending_rows:
+            filepath = row["filepath"]
+            sys_id = row["sys_id"]
+            if not os.path.exists(filepath):
+                # File gone - clean up
+                if sys_id:
+                    self._delete_file(sys_id, filepath)
+                else:
+                    self._conn.execute(
+                        "DELETE FROM processed_files WHERE filepath = ?", (filepath,)
+                    )
+                    self._conn.commit()
+                continue
+            # Delete stale data and re-extract
+            if sys_id:
+                self._delete_file(sys_id, filepath)
+            # Find folder_id for this file
+            folder_row = self._conn.execute(
+                "SELECT f.folder_id FROM folders f WHERE ? LIKE f.path || '%'",
+                (filepath,),
+            ).fetchone()
+            folder_id = folder_row["folder_id"] if folder_row else 1
+            self._index_one_file(filepath, folder_id, lambda: False)
+            inserts_recovered += 1
+
+        if self._pending_filepaths:
+            self._commit_batch()
+
+        return {
+            "pending_deletes_recovered": deletes_recovered,
+            "pending_inserts_recovered": inserts_recovered,
+            "pending_inserts_deferred": 0,
+        }
+
+    def _recover_pending_deletes(self) -> int:
+        """HIGH-3 review fix: replay Tantivy delete + SQLite cleanup for pending rows.
+
+        Called at __init__ AND from startup_recovery() Pass A.
+        Idempotent: re-deleting already-deleted Tantivy UIDs is a no-op.
+
+        Returns: count of completed deletes.
+        """
+        pending_rows = self._conn.execute(
+            "SELECT sys_id FROM local_files WHERE pending_delete = 1"
+        ).fetchall()
+        n = 0
+        for row in pending_rows:
+            sys_id = row["sys_id"]
+            # Step 2: Tantivy delete-by-uid loop + commit (idempotent)
+            uid_rows = self._conn.execute(
+                "SELECT uid FROM local_pages WHERE sys_id = ?", (sys_id,)
+            ).fetchall()
+            for uid_row in uid_rows:
+                uid = uid_row["uid"]
+                self._ensure_writer().delete_documents("unique_id", uid)
+            try:
+                self._ensure_writer().commit()
+            except Exception as exc:
+                logger.warning(
+                    "_recover_pending_deletes: Tantivy commit failed for sys_id=%s: %s",
+                    sys_id, exc,
+                )
+                continue
+            # Step 3: SQLite final cleanup
+            self._conn.execute("DELETE FROM local_pages WHERE sys_id = ?", (sys_id,))
+            self._conn.execute("DELETE FROM local_files WHERE sys_id = ?", (sys_id,))
+            self._conn.execute(
+                "DELETE FROM processed_files WHERE sys_id = ?", (sys_id,)
+            )
+            self._conn.commit()
+            n += 1
+        logger.info("HIGH-3 recovery: completed %d pending deletes", n)
+        return n
+
+    # ------------------------------------------------------------------
+    # Internal indexing helpers
+    # ------------------------------------------------------------------
+
+    def _iterate_supported_files(
+        self,
+        folder_path: str,
+        cancel_check: Callable[[], bool],
+    ) -> Iterator[tuple[str, int]]:
+        """Yield (canonical_filepath, file_size) for ALL files in folder.
+
+        Note: unsupported extensions are included so _index_one_file can record
+        them with extraction_status='unsupported'. The extension check happens
+        inside _index_one_file, not here.
+        """
+        try:
+            for dirpath, _dirs, files in os.walk(folder_path, followlinks=False):
+                if cancel_check():
+                    return
+                try:
+                    for fname in files:
+                        # Phase 97.1: per-file cancel check (was per-directory only).
+                        # For directories with hundreds of files, the prior
+                        # outer-only check meant cancel latency was one full
+                        # directory of file processing.
+                        if cancel_check():
+                            return
+                        if is_office_temp_file(fname):
+                            continue
+                        fpath = os.path.join(dirpath, fname)
+                        canonical = _canonical_filepath(fpath)
+                        try:
+                            fsize = os.path.getsize(canonical)
+                        except OSError:
+                            fsize = 0
+                        yield canonical, fsize
+                except OSError as exc:
+                    logger.warning(
+                        "_iterate_supported_files: OSError in %s: %s", dirpath, exc
+                    )
+        except OSError as exc:
+            logger.warning(
+                "_iterate_supported_files: OSError walking %s: %s", folder_path, exc
+            )
+
+    def _index_one_file(
+        self,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[str, int]:
+        """Index a single file: extract pages, write Tantivy docs, mark pending.
+
+        Returns (extraction_status, page_count).
+        """
+        canonical = _canonical_filepath(filepath)
+        ext = os.path.splitext(filepath)[1].lower()
+
+        # Generate sys_id with collision retry
+        sys_id = None
+        for slot in range(_MAX_COLLISION_RETRIES):
+            candidate = generate_local_sys_id(canonical, slot=slot)
+            # Check for collision (another file already owns this sys_id)
+            existing = self._conn.execute(
+                "SELECT filepath FROM local_files WHERE sys_id = ?", (candidate,)
+            ).fetchone()
+            if existing is None or existing["filepath"] == canonical:
+                sys_id = candidate
+                break
+            logger.warning(
+                "_index_one_file: sys_id collision at slot %d for %s, retrying",
+                slot, canonical,
+            )
+        if sys_id is None:
+            logger.error(
+                "_index_one_file: exhausted %d collision slots for %s",
+                _MAX_COLLISION_RETRIES, canonical,
+            )
+            return ("error", 0)
+
+        try:
+            _stat = os.stat(canonical)
+            file_size = _stat.st_size
+            mtime = _stat.st_mtime
+            mtime_ns = _stat.st_mtime_ns   # D-NEW-8: nanosecond precision
+        except OSError as exc:
+            logger.warning("_index_one_file: cannot stat %s: %s", canonical, exc)
+            return ("error", 0)
+
+        basename = os.path.basename(canonical)
+
+        # Mark as pending BEFORE extraction (two-phase commit step 1)
+        # D-NEW-8: write mtime_ns alongside mtime so cache-hit check can use int comparison.
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO processed_files
+                (filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (canonical, mtime, mtime_ns, file_size, sys_id, self._current_scan_run_id),
+        )
+        self._conn.commit()
+
+        # WR-01 FIX: pre-insert local_files row with status='pending' BEFORE
+        # extraction so _write_page_doc can read the real file_id and bake
+        # it into the per-page full_header (D-34 unique F-suffix per file).
+        # The row gets UPDATEd to its final state by _finish_file once
+        # extraction completes. Use INSERT OR IGNORE so re-index runs don't
+        # clobber an existing row (the modified-file path already called
+        # _delete_file at scan_all line ~725 to clear stale rows).
+        now = time.time()
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO local_files (
+                sys_id, filepath, folder_id, display_title,
+                original_filename, file_extension, page_count,
+                file_size_bytes, extraction_status, last_indexed_at,
+                sha256_full, error_msg, pending_delete
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'pending', ?, NULL, NULL, 0)
+            """,
+            (
+                sys_id, canonical, folder_id, basename,
+                basename, ext, file_size, now,
+            ),
+        )
+        self._conn.commit()
+
+        # Extract pages
+        if ext not in _SUPPORTED_EXTENSIONS:
+            return self._finish_file(
+                sys_id, canonical, folder_id, basename, ext,
+                0, file_size, "unsupported", None, mtime,
+            )
+
+        pages_written = 0
+        extraction_status = "ok"
+        error_msg = None
+        display_title = basename
+
+        try:
+            if ext == ".pdf":
+                pages_written, extraction_status, display_title = self._extract_and_write_pdf(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+            elif ext == ".docx":
+                pages_written, extraction_status, display_title = self._extract_and_write_docx(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+            elif ext == ".txt":
+                pages_written, extraction_status, display_title = self._extract_and_write_txt(
+                    sys_id, canonical, folder_id
+                )
+            elif ext == ".html":
+                pages_written, extraction_status, display_title = self._extract_and_write_html(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+            elif ext == ".xlsx":
+                pages_written, extraction_status, display_title = self._extract_and_write_xlsx(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+            elif ext == ".csv":
+                pages_written, extraction_status, display_title = self._extract_and_write_csv(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+        except XlsxZipBombSuspected as exc:
+            extraction_status = "zip_bomb_suspected"
+            error_msg = str(exc)
+            logger.warning("_index_one_file: zip_bomb_suspected for %s: %s", canonical, exc)
+        except EncodingError as exc:
+            extraction_status = "encoding_error"
+            error_msg = str(exc)
+            logger.info("_index_one_file: encoding_error for %s: %s", canonical, exc)
+        except Exception as exc:
+            extraction_status = "error"
+            error_msg = str(exc)
+            logger.warning("_index_one_file: extraction error for %s: %s", canonical, exc)
+
+        return self._finish_file(
+            sys_id, canonical, folder_id, basename, ext,
+            pages_written, file_size, extraction_status, error_msg, mtime,
+            display_title=display_title,
+        )
+
+    def _finish_file(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        basename: str,
+        ext: str,
+        page_count: int,
+        file_size: int,
+        extraction_status: str,
+        error_msg: Optional[str],
+        mtime: float,
+        display_title: Optional[str] = None,
+    ) -> tuple[str, int]:
+        """Upsert local_files row. Returns (extraction_status, page_count).
+
+        WR-01 FIX: _index_one_file now pre-INSERTs a placeholder row before
+        extraction so _write_page_doc can read the real file_id.  Therefore
+        _finish_file UPDATEs the existing row instead of INSERT OR REPLACE
+        (which would DELETE+INSERT and reassign file_id, breaking the
+        already-written full_header).  If for some reason the pre-INSERT
+        was missed, fall through to INSERT.
+        """
+        now = time.time()
+        cursor = self._conn.execute(
+            """
+            UPDATE local_files
+               SET filepath = ?, folder_id = ?, display_title = ?,
+                   original_filename = ?, file_extension = ?, page_count = ?,
+                   file_size_bytes = ?, extraction_status = ?, last_indexed_at = ?,
+                   sha256_full = NULL, error_msg = ?, pending_delete = 0
+             WHERE sys_id = ?
+            """,
+            (
+                filepath, folder_id, display_title or basename,
+                basename, ext, page_count,
+                file_size, extraction_status, now,
+                error_msg,
+                sys_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            # Fallback — no pre-existing row to update (shouldn't normally
+            # happen since _index_one_file always pre-INSERTs).
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO local_files (
+                    sys_id, filepath, folder_id, display_title,
+                    original_filename, file_extension, page_count,
+                    file_size_bytes, extraction_status, last_indexed_at,
+                    sha256_full, error_msg, pending_delete
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0)
+                """,
+                (
+                    sys_id, filepath, folder_id, display_title or basename,
+                    basename, ext, page_count,
+                    file_size, extraction_status, now,
+                    error_msg,
+                ),
+            )
+        self._conn.commit()
+        # Track for batch commit
+        self._pending_filepaths.append(filepath)
+        return (extraction_status, page_count)
+
+    def _upsert_local_files_status(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        extraction_status: str,
+        file_size: int,
+        now: float,
+        error_msg: Optional[str] = None,
+    ) -> None:
+        """Phase 97 LD-9 — write extraction_status to local_files (UI source of truth).
+
+        For statuses set BEFORE _index_one_file's pre-INSERT runs (oversized,
+        zip_bomb_suspected), we UPSERT via INSERT ... ON CONFLICT(sys_id) DO UPDATE.
+        This ensures the UI tree (which reads local_files.extraction_status) shows
+        the correct status even when _finish_file is never reached.
+
+        LD-9 rationale: Wave D folder counter aggregation reads local_files.extraction_status.
+        Writing only processed_files.status leaves the UI blind to these states.
+        """
+        basename = os.path.basename(filepath)
+        ext = os.path.splitext(filepath)[1].lower()
+        self._conn.execute(
+            """
+            INSERT INTO local_files (
+                sys_id, filepath, folder_id, display_title,
+                original_filename, file_extension, page_count,
+                file_size_bytes, extraction_status, last_indexed_at,
+                sha256_full, error_msg, pending_delete
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, ?, 0)
+            ON CONFLICT(sys_id) DO UPDATE SET
+                extraction_status = excluded.extraction_status,
+                error_msg = excluded.error_msg,
+                file_size_bytes = excluded.file_size_bytes,
+                last_indexed_at = excluded.last_indexed_at
+            """,
+            (sys_id, filepath, folder_id, basename, basename, ext,
+             file_size, extraction_status, now, error_msg),
+        )
+
+    def _write_page_doc(
+        self,
+        sys_id: str,
+        page_num: int,
+        text: str,
+        title: str,
+        folder_id: int,
+        chunk_locator: str = "",
+    ) -> str:
+        """Write one Tantivy doc for a page and record in local_pages. Returns uid.
+
+        WR-01 FIX: _index_one_file now pre-INSERTs the local_files row with
+        status='pending' BEFORE extraction, so file_id is populated on
+        first index too. The `else 0` branch is kept as a defensive
+        fallback only — under normal flow file_id is always non-zero here.
+
+        Phase 97 LD-3 (LOAD-BEARING per Codex HIGH #2): also writes
+        cached_text (zstd-compressed), cached_text_codec, cached_text_uncompressed_len,
+        extraction_format_version, and chunk_locator into local_pages in the same
+        write. scan_run_id from self._current_scan_run_id (set by _begin_scan_run
+        in Task 4; defaults to "" for Wave A compatibility).
+
+        Existing callers (PDF/DOCX/TXT extractors) pass chunk_locator="" by default;
+        Wave F D-NEW-5 will pass real locator strings.
+        """
+        # Get file_id from local_files (pre-inserted by _index_one_file).
+        file_row = self._conn.execute(
+            "SELECT file_id FROM local_files WHERE sys_id = ?", (sys_id,)
+        ).fetchone()
+        file_id = file_row["file_id"] if file_row else 0
+
+        uid = _make_uid(sys_id, page_num)
+        full_header = _make_full_header(sys_id, page_num, file_id)
+        basename = os.path.basename(
+            self._conn.execute(
+                "SELECT filepath FROM processed_files WHERE sys_id = ?", (sys_id,)
+            ).fetchone()["filepath"]
+        )
+        # D-06 FINAL (Phase 102 Plan 03): strip nikud ONCE at this shared write site for
+        # ALL LOCAL formats (PDF, DOCX, TXT, HTML, XLSX, CSV). The lazy import (function-
+        # local) keeps shared/local_indexer.py free of a module-top genizah_core import
+        # (L1 — round-2 requirement). Plan 02 extract_pdf_pages now yields NIKUD-BEARING
+        # text; the strip is here, applied uniformly to every format. content == cached_text
+        # == stripped (no divergence). SEED-004 defers nikud display for non-PDF formats.
+        from shared.text_normalize import strip_nikud, strip_search_diacritics  # noqa: PLC0415 — intentional lazy import (L1)
+        stripped = strip_nikud(text)
+
+        # Build content_head / content_tail for snippet generation (derived from stripped)
+        words = stripped.split()
+        head = " ".join(words[:50]) if words else ""
+        tail = " ".join(words[-50:]) if words else ""
+
+        # Phase 97 LD-1: Tantivy doc now includes scan_run_id + chunk_locator
+        doc = tantivy.Document(
+            unique_id=[uid],
+            content=[stripped],
+            content_search=[strip_search_diacritics(stripped)],  # SEED-006 Stage 2
+            content_head=[head],
+            content_tail=[tail],
+            line_starts=[""],
+            line_ends=[""],
+            source=["LOCAL"],
+            full_header=[full_header],
+            shelfmark=[basename],
+            scope=["page"],
+            boundaries=[""],
+            # Phase 97 LD-1: empty string when scan_run_id is None (Wave A; Wave E populates)
+            scan_run_id=[self._current_scan_run_id or ""],
+            chunk_locator=[chunk_locator or ""],
+        )
+        self._writer.add_document(doc)
+
+        # Phase 97 LD-3: compress text and write ALL Phase 97 columns in the SINGLE
+        # canonical Tantivy write site (Codex HIGH #2 / ADVICE LD-3).
+        # D-06 FINAL: compress the STRIPPED text — cached_text == content == stripped.
+        # extraction_format_version: 1=pre-Phase-102, 2=Phase-102 rawdict reorder,
+        # 3=2026-05-31 edge-gap + Mn de-space revision (existing libraries need a
+        # manual "Re-index All" to pick up the improved letter-spacing de-collapse).
+        cached_bytes, uncompressed_len = compress_cached_text(stripped)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO local_pages "
+            "(sys_id, uid, page_num, cached_text, cached_text_codec, "
+            " cached_text_uncompressed_len, extraction_format_version, chunk_locator) "
+            "VALUES (?, ?, ?, ?, 'zstd', ?, 3, ?)",
+            (sys_id, uid, page_num, cached_bytes, uncompressed_len, chunk_locator or ""),
+        )
+        self._conn.commit()
+        return uid
+
+    def _extract_and_write_pdf(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Extract PDF pages and write Tantivy docs. Returns (pages_written, status, title).
+
+        Phase 102 Plan 03 HIGH-2 / HIGH (Codex round-3) / M5 — buffer-then-decide:
+
+        1. BUFFER phase: accumulate yielded pages into a list while checking
+           page_flags for per-page corruption flags.  Cancellation DURING buffering
+           (HIGH — Codex round-3) calls self._rollback_partial(sys_id) to clean up
+           the processed_files AND local_files rows that _index_one_file pre-inserted
+           BEFORE this function was called.  Without that rollback, _commit_batch
+           would later flip the pending processed_files row to 'committed' → an
+           inconsistent committed-but-empty cancelled PDF.
+
+        2. FILE-LEVEL CORRUPT DECISION (D-07 conservative ≥50% threshold): if ≥50%
+           of yielded pages are flagged corrupt, return (0, 'corrupt_encoding', title)
+           WITHOUT calling _write_page_doc — HIGH-2 detect-before-write fix.  The
+           pre-inserted pending rows are left for the caller's _finish_file / status-
+           finalize path (NOT cancelled — no rollback here).
+
+        3. WRITE phase: write buffered pages one by one.  Cancellation INSIDE the
+           write loop (M5) calls self._rollback_partial(sys_id) and returns
+           'cancelled' so no partial rows remain.
+        """
+        display_title = os.path.basename(filepath)
+
+        # --- Step 1: BUFFER (check cancellation; collect page_flags for corrupt decision) ---
+        page_flags: dict = {}
+        buffered: list[tuple[int, str, str]] = []
+        for page_num, text, title in extract_pdf_pages(filepath, page_flags=page_flags):
+            if cancel_check():
+                # HIGH (Codex round-3): _index_one_file pre-inserted a 'pending'
+                # processed_files row AND a local_files row for sys_id BEFORE this
+                # function was called.  No page has been written during buffering, but
+                # those rows persist and _commit_batch would later flip the pending row
+                # to committed → committed-but-empty cancelled PDF.  Roll them back.
+                self._rollback_partial(sys_id)
+                return (0, "cancelled", display_title)
+            display_title = title
+            buffered.append((page_num, text, title))
+
+        # --- Step 2: FILE-LEVEL CORRUPT DECISION (D-07 ≥50% threshold) ---
+        if buffered:
+            corrupt_count = sum(
+                1 for p in buffered if page_flags.get(p[0], {}).get("corrupt", False)
+            )
+            if corrupt_count >= len(buffered) * 0.5:
+                # ≥50% of yielded pages are corrupt.  Do NOT write any pages.
+                # Return corrupt_encoding; pre-inserted pending rows are finalized
+                # by the caller via the normal status-update path (NOT a cancel).
+                return (0, "corrupt_encoding", display_title)
+
+        # --- Step 3: WRITE phase (M5 — check cancel before each write) ---
+        pages_written = 0
+        total_chars = 0
+        for page_num, text, title in buffered:
+            if cancel_check():
+                # M5: pages may already have been written; roll them back.
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            total_chars += len(text)
+            # Phase 97 D-NEW-5: PDF locator — "p. N" (1-based page number).
+            self._write_page_doc(
+                sys_id, page_num, text, title, folder_id,
+                chunk_locator=f"p. {page_num}",
+            )
+            pages_written += 1
+
+        if total_chars < _SCANNED_PDF_CHAR_THRESHOLD and pages_written == 0:
+            return (0, "no_text_layer", display_title)
+
+        return (pages_written, "ok", display_title)
+
+    def _extract_and_write_docx(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Extract DOCX chunks and write Tantivy docs. Returns (pages_written, status, title)."""
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title in extract_docx_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            # Phase 97 D-NEW-5: DOCX locator — "paragraphs N-M" (1-based, _DOCX_CHUNK_PARAGRAPHS window).
+            _para_start = (chunk_num - 1) * _DOCX_CHUNK_PARAGRAPHS + 1
+            _para_end = chunk_num * _DOCX_CHUNK_PARAGRAPHS
+            self._write_page_doc(
+                sys_id, chunk_num, text, title, folder_id,
+                chunk_locator=f"paragraphs {_para_start}-{_para_end}",
+            )
+            pages_written += 1
+
+        return (pages_written, "ok", display_title)
+
+    def _extract_and_write_txt(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+    ) -> tuple[int, str, str]:
+        """Extract TXT and write a single Tantivy doc. Returns (pages_written, status, title)."""
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for page_num, text, title in extract_txt(filepath):
+            display_title = title
+            self._write_page_doc(sys_id, page_num, text, title, folder_id)
+            pages_written += 1
+
+        return (pages_written, "ok", display_title)
+
+    def _extract_and_write_html(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Phase 97 F-01: Extract HTML chunks and write Tantivy docs.
+
+        Yields (chunk_num, text, title, locator, is_rtl) from extract_html_pages.
+        is_rtl is logged at DEBUG level (stored in-memory only for Phase 97;
+        Wave F D-NEW-5 can persist as a column if needed downstream).
+        Returns (pages_written, status, title).
+        """
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title, locator, is_rtl in extract_html_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            self._write_page_doc(sys_id, chunk_num, text, title, folder_id, chunk_locator=locator)
+            pages_written += 1
+            logger.debug(
+                "Phase 97 F-06 is_rtl=%s for sys_id=%s chunk=%d", is_rtl, sys_id, chunk_num
+            )
+
+        return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
+
+    def _extract_and_write_xlsx(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Phase 97 F-02: Extract XLSX chunks and write Tantivy docs.
+
+        XlsxZipBombSuspected propagates to _index_one_file's except clause (LD-9 dual write).
+        Returns (pages_written, status, title).
+        """
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title, locator, is_rtl in extract_xlsx_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            self._write_page_doc(sys_id, chunk_num, text, title, folder_id, chunk_locator=locator)
+            pages_written += 1
+            logger.debug(
+                "Phase 97 F-06 is_rtl=%s for sys_id=%s chunk=%d", is_rtl, sys_id, chunk_num
+            )
+
+        return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
+
+    def _extract_and_write_csv(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Phase 97 F-03 + F-05: Extract CSV chunks and write Tantivy docs.
+
+        EncodingError propagates to _index_one_file's except clause (LD-9 dual write).
+        Returns (pages_written, status, title).
+        """
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title, locator in extract_csv_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            self._write_page_doc(sys_id, chunk_num, text, title, folder_id, chunk_locator=locator)
+            pages_written += 1
+
+        return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
+
+    def _rollback_partial(self, sys_id: str) -> None:
+        """Roll back partial page docs for a file that was cancelled mid-extraction.
+
+        Phase 102 Plan 03 HIGH (Codex round-3): also deletes local_files rows for
+        sys_id so that a buffer-phase cancel (before any _write_page_doc call) leaves
+        NO pre-inserted rows behind.  _index_one_file pre-inserts both processed_files
+        (:status='pending') AND local_files BEFORE calling _extract_and_write_pdf; a
+        buffer-phase cancel that does NOT clean up local_files would leave an orphan
+        that _commit_batch later flips to 'committed' → committed-but-empty cancelled PDF.
+
+        This method is idempotent (DELETE WHERE sys_id = ?) and safe with zero pages
+        written (uid_rows will be empty; DELETE statements on absent rows are no-ops).
+        """
+        # Remove any local_pages rows added so far for this sys_id
+        uid_rows = self._conn.execute(
+            "SELECT uid FROM local_pages WHERE sys_id = ?", (sys_id,)
+        ).fetchall()
+        for uid_row in uid_rows:
+            self._writer.delete_documents("unique_id", uid_row["uid"])
+        try:
+            self._writer.rollback()
+        except Exception:
+            pass
+        try:
+            self._writer = self._index.writer(heap_size=15_000_000)
+        except Exception:
+            pass
+        self._conn.execute("DELETE FROM local_pages WHERE sys_id = ?", (sys_id,))
+        self._conn.execute("DELETE FROM processed_files WHERE sys_id = ?", (sys_id,))
+        # Phase 102 Plan 03 HIGH (Codex round-3): delete local_files row so the pre-
+        # inserted row from _index_one_file does not persist after a cancel rollback.
+        self._conn.execute("DELETE FROM local_files WHERE sys_id = ?", (sys_id,))
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Delete (HIGH-3 three-step crash-safe protocol)
+    # ------------------------------------------------------------------
+
+    def _delete_file(self, sys_id: str, filepath: str, *, commit: bool = True) -> None:
+        """Crash-safe three-step delete (HIGH-3 review fix).
+
+        Step 1: Mark pending_delete=1 in SQLite (durable; recovery picks this up).
+        Step 2: Tantivy delete-by-uid + commit (if commit=True).
+        Step 3: SQLite final cleanup (only when the Tantivy commit actually ran).
+
+        If crash between step 1 and step 2: _recover_pending_deletes() replays steps 2-3.
+        If crash between step 2 and step 3: _recover_pending_deletes() re-runs step 2
+                                             (idempotent) then step 3.
+
+        Set commit=False when bulk-deleting (e.g. folder removal) — the caller
+        owns one final retry-protected commit + a single _recover_pending_deletes()
+        sweep to do Step 3 for the whole batch. This prevents N per-file Tantivy
+        commits from fighting with the live LOCAL searcher on Windows
+        (os error 5 — ERROR_ACCESS_DENIED), which on a folder of hundreds of
+        files used to hang the UI for minutes with one warning per file.
+        """
+        # Step 1: Mark pending_delete (durable; survives across launches)
+        self._conn.execute(
+            "UPDATE local_files SET pending_delete = 1 WHERE sys_id = ?", (sys_id,)
+        )
+        self._conn.commit()
+
+        # Step 2: Tantivy delete-by-uid (queue)
+        uid_rows = self._conn.execute(
+            "SELECT uid FROM local_pages WHERE sys_id = ?", (sys_id,)
+        ).fetchall()
+        self._ensure_writer()  # populate self._writer for _commit_writer_with_retry
+        for uid_row in uid_rows:
+            uid = uid_row["uid"]
+            self._writer.delete_documents("unique_id", uid)
+
+        if not commit:
+            # Caller owns the batched commit + Step 3 sweep via _recover_pending_deletes
+            return
+
+        try:
+            # Use the retry helper (250ms / 1s / 2s backoff) so transient Windows
+            # access-denied errors from live-reader contention don't fail the
+            # per-file path (single-file delete from scan_all / index_one_file).
+            self._commit_writer_with_retry()
+        except Exception as exc:
+            logger.warning(
+                "_delete_file: Tantivy commit failed for sys_id=%s: %s", sys_id, exc
+            )
+            return  # Step 3 will be replayed by recovery
+
+        # Step 3: SQLite final cleanup
+        self._conn.execute("DELETE FROM local_pages WHERE sys_id = ?", (sys_id,))
+        self._conn.execute("DELETE FROM local_files WHERE sys_id = ?", (sys_id,))
+        self._conn.execute(
+            "DELETE FROM processed_files WHERE sys_id = ?", (sys_id,)
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Two-phase commit (D-21)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_windows_access_denied(exc: BaseException) -> bool:
+        """Detect Windows ``os error 5`` (ERROR_ACCESS_DENIED) raised by the
+        Tantivy Python binding during writer.commit().
+
+        Tantivy surfaces the OS error inside a ValueError whose message
+        contains ``"An IO error occurred"`` and ``"os error 5"``.  We match
+        on the message rather than the exception type because the binding
+        normalizes platform errors into ValueError.
+        """
+        msg = str(exc) or ""
+        return (
+            "os error 5" in msg
+            or "Access is denied" in msg
+            or "access is denied" in msg
+        )
+
+    def _commit_writer_with_retry(self) -> None:
+        """Commit the Tantivy writer with retry/backoff on Windows os error 5.
+
+        User-reported BLOCKER (Category 2): indexing large folders on Windows
+        intermittently hit ``ValueError: An IO error occurred: 'Access is
+        denied. (os error 5)'`` during ``self._writer.commit()``. The typical
+        Windows causes are:
+          (a) an antivirus / Windows Defender briefly scanning a new segment
+              file just after rename;
+          (b) a reader (e.g. a live SearchEngine.local_searcher) holding a
+              handle the writer needs to atomically rename.
+
+        Retry envelope: up to 3 attempts at 250 ms, 1 s, 2 s.  Only retried
+        on Windows-access-denied; all other exceptions propagate immediately.
+        On final failure, raise ValueError with detailed context (which dir,
+        attempts, the underlying message).
+        """
+        import time as _time
+
+        attempts = 0
+        delays = (0.25, 1.0, 2.0)
+        last_exc = None
+        for delay in (0.0, *delays):
+            if delay > 0:
+                _time.sleep(delay)
+            attempts += 1
+            try:
+                self._writer.commit()
+                if attempts > 1:
+                    logger.info(
+                        "Tantivy writer.commit() succeeded on retry %d (dir=%s)",
+                        attempts, self._index_dir,
+                    )
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if not self._is_windows_access_denied(exc):
+                    raise
+                logger.warning(
+                    "Tantivy writer.commit() hit Windows access-denied "
+                    "(attempt %d/%d, dir=%s): %s",
+                    attempts, len(delays) + 1, self._index_dir, exc,
+                )
+        # All retries exhausted.
+        raise ValueError(
+            f"Tantivy writer.commit() failed after {attempts} attempts "
+            f"with Windows access-denied error on {self._index_dir!r}. "
+            f"Pending files: {len(self._pending_filepaths)}. "
+            f"Underlying error: {last_exc!r}. "
+            "Common causes: (a) antivirus scanning new segment files, "
+            "(b) another process holding a reader handle on this index. "
+            "Try closing the live SearchEngine reader before commit, or "
+            "exclude the LocalIndex directory from real-time antivirus scanning."
+        )
+
+    def _commit_batch(self) -> None:
+        """Two-phase commit per D-21.
+
+        Phase 1: Tantivy writer.commit() (Tantivy docs are now durable on disk).
+        Phase 2: SQLite UPDATE status='committed' for all pending filepaths.
+
+        Category-2 BLOCKER fix: wraps Tantivy commit in retry/backoff so
+        a transient Windows ``os error 5`` (antivirus or reader contention)
+        does not crash the entire indexing batch.
+
+        Phase 97 R-04 + LD-8: Phase 2 wrapped in PRAGMA synchronous=FULL +
+        BEGIN IMMEDIATE + ROLLBACK on failure to ensure the durability bracket
+        survives power loss between the Tantivy commit and the SQLite UPDATE.
+        """
+        if not self._pending_filepaths:
+            return
+        # Phase 1: Tantivy commit (with retry for Windows access-denied races).
+        self._commit_writer_with_retry()
+        # Phase 97 R-04 + LD-8: durability bracket with ROLLBACK on failure.
+        self._conn.execute("PRAGMA synchronous = FULL")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" * len(self._pending_filepaths))
+            self._conn.execute(
+                f"UPDATE processed_files SET status = 'committed' "  # noqa: S608
+                f"WHERE filepath IN ({placeholders})",
+                self._pending_filepaths,
+            )
+            # Phase 97 C-04 + LD-9: refresh folder counters from local_files
+            # INSIDE this same BEGIN IMMEDIATE transaction so counter update
+            # and status='committed' UPDATE are atomic.
+            self._refresh_folder_counters_for(list(self._pending_filepaths))
+            self._conn.execute("COMMIT")
+        except Exception:
+            # LD-8: ROLLBACK before restoring synchronous=NORMAL.
+            try:
+                self._conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass  # already rolled back (no active transaction)
+            raise
+        finally:
+            self._conn.execute("PRAGMA synchronous = NORMAL")
+        self._pending_filepaths.clear()
+
+    def _refresh_folder_counters_for(self, filepaths: list) -> None:
+        """Phase 97 C-04 + LD-9 — recompute aggregate counts for folders touched
+        by this batch. Uses local_files.folder_id + local_files.extraction_status
+        (UI source of truth per LD-9) — NOT processed_files.status + path LIKE prefix.
+
+        Codex MEDIUM #3 fix: ``LIKE 'C:\\foo%'`` would match ``C:\\foobar``.
+        The replacement query JOINs local_files ON folders.folder_id (the
+        relational key) and aggregates extraction_status directly.
+
+        Must be called INSIDE an active BEGIN IMMEDIATE transaction
+        (enforced by _commit_batch caller context).
+        """
+        if not filepaths:
+            return
+        placeholders = ",".join("?" * len(filepaths))
+        self._conn.execute(
+            f"""
+            UPDATE folders SET
+                indexed_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status IN ('ok', 'committed')
+                ),
+                error_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status IN (
+                          'error', 'encoding_error', 'changed_during_index', 'no_text_layer',
+                          'corrupt_encoding'
+                      )
+                ),
+                pending_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status = 'pending'
+                ),
+                oversized_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status IN ('oversized', 'zip_bomb_suspected')
+                ),
+                last_aggregate_at = strftime('%s', 'now')
+            WHERE folder_id IN (
+                SELECT DISTINCT local_files.folder_id FROM local_files
+                WHERE local_files.filepath IN ({placeholders})
+            )
+            """,  # noqa: S608
+            filepaths,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 97 R-02: Atomic rebuild helpers (LD-4 / LD-5)
+    # ------------------------------------------------------------------
+
+    def _retry_windows_rename(self, src: str, dst: str) -> None:
+        """Rename src->dst with Windows-access-denied retry (same shape as _commit_writer_with_retry)."""
+        import time as _time
+        delays = (0.0, 0.25, 1.0, 2.0)
+        last_exc = None
+        for delay in delays:
+            if delay > 0:
+                _time.sleep(delay)
+            try:
+                os.rename(src, dst)
+                return
+            except OSError as exc:
+                last_exc = exc
+                if not self._is_windows_access_denied(exc):
+                    raise
+        raise OSError(
+            f"Atomic rename {src!r} -> {dst!r} failed after retries: {last_exc!r}"
+        )
+
+    def _close_internal_writer_index(self) -> None:
+        """Close LocalIndexer's own _writer + _index handles before os.rename (LD-5)."""
+        try:
+            if self._writer is not None:
+                try:
+                    self._writer.rollback()
+                except Exception:
+                    pass
+                self._writer = None
+        except Exception:
+            self._writer = None
+        self._index = None
+        # R97.2-B / SEED-006 P1: nulling the Python refs is NOT enough on
+        # Windows — Python GC may delay the Rust-side drop, so the live index
+        # dir keeps an open handle and the os.rename in
+        # rebuild_main_index_atomic() (step 4) fails with
+        # PermissionError(13, 'Access is denied'). This bites the SEED-006
+        # schema-rebuild path, which opens self._index on the LIVE dir before
+        # the rebuild. Force the drop here, exactly as the validation block at
+        # step 2 already does for the fresh rebuild handles.
+        gc.collect()
+
+    def _reopen_internal_writer_index(self) -> None:
+        """Reopen _writer + _index after atomic swap so LocalIndexer can continue."""
+        self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
+        register_search_tokenizers(self._index)  # SEED-006: before writer use
+        self._writer = self._index.writer(heap_size=256 * 1024 * 1024)
+
+    def _ensure_writer(self):
+        """Phase 97.2 R97.2-D — fail-loud writer acquisition guard.
+
+        REVIEWS Codex HIGH #4: explicitly fail-loud-only. NO lazy reopen of
+        self._index when it is None. Reasoning: a silent reopen path here
+        would re-introduce the "log + continue + reopen" anti-pattern that
+        CONTEXT D-07 specifically prohibits ("fail-loud by design"). The
+        __init__'s 3-attempt retry loop owns the initial acquisition; this
+        helper is a STEADY-STATE guard, not a recovery path.
+
+        Returns the live self._writer or attempts a single acquisition.
+        Raises LocalIndexerError on:
+          - self._index is None (impossible if __init__ succeeded; if
+            observed, the indexer is in a corrupt state that only Reset My
+            Library / app restart can recover)
+          - schema marker mismatch (mid-session schema drift)
+          - LockBusy (after __init__'s 3-attempt loop already exhausted)
+        UI catches and offers Reset My Library CTA.
+        """
+        if self._writer is not None:
+            return self._writer
+        # REVIEWS Codex HIGH #4: fail-loud on missing index handle. Do NOT
+        # silently reopen — this is a steady-state guard, not a recovery
+        # path.
+        if self._index is None:
+            raise LocalIndexerError(
+                "LOCAL index handle is gone — restart the app or use Reset My Library"
+            )
+        # Defensive marker recheck: if schema drift snuck in mid-session,
+        # fail loud.
+        expected = _compute_schema_marker(build_local_schema)
+        actual = _read_schema_marker(self._index_dir)
+        if actual != expected:
+            raise LocalIndexerError(
+                "LOCAL index schema marker mismatch — Reset My Library required"
+            )
+        try:
+            self._writer = self._index.writer(heap_size=15_000_000)
+        except Exception as exc:
+            raise LocalIndexerError(
+                "Could not acquire writer lock — restart the app or use Reset My Library"
+            ) from exc
+        return self._writer
+
+    def _reextract_one_page_or_skip(self, filepath: str, page_num: int) -> str:
+        """Best-effort re-extract a single page from source file; return "" on failure."""
+        try:
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext == ".pdf":
+                for pn, txt, _t in extract_pdf_pages(filepath):
+                    if pn == page_num:
+                        return txt
+            elif ext == ".docx":
+                for pn, txt, _t in extract_docx_pages(filepath):
+                    if pn == page_num:
+                        return txt
+            elif ext == ".txt":
+                for pn, txt, _t in extract_txt(filepath):
+                    if pn == page_num:
+                        return txt
+        except Exception:
+            return ""
+        return ""
+
+    @index_swap
+    def rebuild_main_index_atomic(
+        self,
+        scan_run_id: str,
+        close_searcher_cb: Callable[[], None],
+        reload_searcher_cb: Callable[[], None],
+    ) -> None:
+        """Phase 97 R-02 — atomic temp-dir swap with full 7-handle closure.
+
+        7-step protocol (RESEARCH Issue #3 + Codex HIGH #4 + ADVICE LD-4/LD-5):
+          1. Build fresh index in <dir>.rebuild-<scan_run_id>/ from cached_text rows
+             (fallback to source re-extract for NULL-cached_text rows).
+          2. Validate via fresh_index.searcher().
+          3. Close ALL 7 handles (external searcher CB + internal writer/index).
+          4. os.rename(live -> <dir>.old-<ts>) with Windows retry.
+          5. os.rename(rebuild -> live) with Windows retry; rollback on failure.
+          6. Reload all searchers (engine + internal).
+          7. Schedule .old- cleanup via pending_dir_cleanup INSERT.
+        """
+        import shutil
+        import time as _time
+
+        # SEED-006 P1: the DB MUST live outside the dir we are about to rename
+        # wholesale (else the open SQLite handle locks os.rename on Windows, and
+        # on POSIX the DB is carried into the GC'd .old-* quarantine -> data loss).
+        _assert_db_outside_index_dir(self._db_path, self._index_dir)
+
+        rebuild_dir = f"{self._index_dir}.rebuild-{scan_run_id}"
+        # SEED-006 (Codex MED #4): include scan_run_id so back-to-back rebuilds in
+        # the same wall-clock second cannot collide on a shared .old-<ts> dir
+        # (a real risk given the _open_local_searcher double-rebuild path).
+        old_dir = f"{self._index_dir}.old-{int(_time.time())}-{scan_run_id}"
+
+        # --- Step 1: build fresh index from cached_text ---
+        if os.path.isdir(rebuild_dir):
+            shutil.rmtree(rebuild_dir, ignore_errors=True)
+        os.makedirs(rebuild_dir, exist_ok=True)
+        fresh_schema = build_local_schema()
+        fresh_index = tantivy.Index(fresh_schema, path=rebuild_dir)
+        register_search_tokenizers(fresh_index)  # SEED-006: before writer use
+        fresh_writer = fresh_index.writer(heap_size=256 * 1024 * 1024)
+        # SEED-006 Stage 2: fold diacritics for the content_search field. Lazy
+        # import keeps shared/local_indexer.py free of a module-top
+        # genizah_core import (mirrors the strip_nikud import at the live add site).
+        from shared.text_normalize import strip_search_diacritics  # noqa: PLC0415
+        docs_written = 0
+        try:
+            for row in self._conn.execute("""
+                SELECT lp.sys_id, lp.uid, lp.page_num,
+                       lp.cached_text, lp.cached_text_codec, lp.chunk_locator,
+                       lf.original_filename, lf.file_id,
+                       pf.scan_run_id AS pf_scan_run_id,
+                       pf.filepath
+                FROM local_pages lp
+                INNER JOIN processed_files pf ON pf.sys_id = lp.sys_id
+                INNER JOIN local_files lf ON lf.sys_id = lp.sys_id
+                WHERE pf.status = 'committed'
+                ORDER BY lp.sys_id, lp.page_num
+            """):
+                if row["cached_text"] is not None:
+                    if row["cached_text_codec"] == "zstd":
+                        text = decompress_cached_text(row["cached_text"])
+                    else:
+                        text = row["cached_text"].decode("utf-8", errors="replace")
+                else:
+                    # Legacy fallback: re-extract from source file (pre-Phase-97 rows)
+                    fp = row["filepath"]
+                    if not fp:
+                        continue
+                    text = self._reextract_one_page_or_skip(fp, row["page_num"])
+                    if not text:
+                        continue
+
+                full_header = _make_full_header(row["sys_id"], row["page_num"], row["file_id"])
+                words = text.split()
+                head = " ".join(words[:50]) if words else ""
+                tail = " ".join(words[-50:]) if words else ""
+                doc = tantivy.Document(
+                    unique_id=[row["uid"]],
+                    content=[text],
+                    content_search=[strip_search_diacritics(text)],  # SEED-006 Stage 2
+                    content_head=[head],
+                    content_tail=[tail],
+                    line_starts=[""],
+                    line_ends=[""],
+                    source=["LOCAL"],
+                    full_header=[full_header],
+                    shelfmark=[row["original_filename"]],
+                    scope=["page"],
+                    boundaries=[""],
+                    scan_run_id=[row["pf_scan_run_id"] or ""],
+                    chunk_locator=[row["chunk_locator"] or ""],
+                )
+                fresh_writer.add_document(doc)
+                docs_written += 1
+
+            fresh_writer.commit()
+            fresh_writer.wait_merging_threads()
+
+            # --- Step 2: validate ---
+            _validation_searcher = fresh_index.searcher()
+            # R97.2-B: explicit null + gc.collect() forces immediate Rust-side
+            # drop of writer + index BEFORE os.rename below. `del` is "weak" on
+            # Windows because Python GC may delay the Rust drop, causing
+            # os.rename to race against a still-held lock file.
+            _validation_searcher = None
+            fresh_writer = None
+            fresh_index = None
+            gc.collect()
+
+        except Exception:
+            shutil.rmtree(rebuild_dir, ignore_errors=True)
+            raise
+
+        if docs_written == 0:
+            # No committed rows at all — this is an error: we refuse to swap in an
+            # empty index when SQLite says there should be data (prevent silent data loss)
+            # UNLESS there genuinely are no committed rows.
+            committed_count = self._conn.execute(
+                "SELECT COUNT(*) FROM processed_files WHERE status = 'committed'"
+            ).fetchone()[0]
+            if committed_count > 0:
+                shutil.rmtree(rebuild_dir, ignore_errors=True)
+                raise RuntimeError(
+                    f"Rebuild produced 0 docs but SQLite has {committed_count} committed rows. "
+                    "All cached_text is NULL and source files are missing. "
+                    "Use 'Reset My Library' in Advanced settings to delete the cache and rescan."
+                )
+
+        # --- Step 3: close ALL 7 handles (LD-5) ---
+        close_searcher_cb()               # closes engine: local_searcher, local_index,
+                                          #   local_lab_searcher, _local_lab_index
+        self._close_internal_writer_index()  # closes LocalIndexer._writer + _index
+
+        # --- Steps 4+5: rename live -> .old, rebuild -> live ---
+        try:
+            self._retry_windows_rename(self._index_dir, old_dir)
+        except OSError:
+            # Could not move live aside — reopen handles and re-raise
+            self._reopen_internal_writer_index()
+            reload_searcher_cb()
+            raise
+
+        try:
+            self._retry_windows_rename(rebuild_dir, self._index_dir)
+        except OSError:
+            # Rollback: restore old as live
+            try:
+                self._retry_windows_rename(old_dir, self._index_dir)
+            except OSError:
+                logger.error(
+                    "CRITICAL: both rename steps failed during atomic rebuild; "
+                    "old index at %s may be unreachable", old_dir,
+                )
+            self._reopen_internal_writer_index()
+            reload_searcher_cb()
+            raise
+
+        # --- Step 6: reload ---
+        self._reopen_internal_writer_index()
+        reload_searcher_cb()
+
+        # --- Step 7: write schema marker + schedule .old- cleanup ---
+        _write_schema_marker(self._index_dir, _compute_schema_marker(build_local_schema))
+        self._conn.execute(
+            "INSERT OR REPLACE INTO pending_dir_cleanup (path, kind, created_at) "
+            "VALUES (?, 'rebuild_old', strftime('%s','now'))",
+            (old_dir,),
+        )
+        self._conn.commit()
+        logger.info(
+            "Phase 97 R-02: atomic rebuild complete (%d docs, old dir scheduled for GC: %s)",
+            docs_written, old_dir,
+        )
+
+    @index_swap
+    def rebuild_lab_index_atomic(
+        self,
+        scan_run_id: str,
+        close_cb: Callable[[], None],
+        reload_cb: Callable[[], None],
+    ) -> None:
+        """Mirror of rebuild_main_index_atomic for LOCAL_LAB_INDEX_DIR.
+
+        LAB index is derivable (D-09) — for Wave A this delegates to the
+        caller's reload_cb which will call rebuild_lab_index() from genizah_core.
+        Full implementation follows in Wave D/E.
+        """
+        # LAB index is always derivable from the main index; Wave A stub
+        # simply closes + schedules a reload via the callback.
+        close_cb()
+        reload_cb()
+
+    def clean_pending_rebuild_dirs(self) -> None:
+        """Delete quarantined index directories recorded in pending_dir_cleanup.
+
+        SEED-006 (Codex MED #5): covers BOTH kinds — 'rebuild_old' (.old-<ts> from
+        an atomic rebuild) AND 'reset_quarantine' (.reset-quarantine-<ts> from
+        reset_my_library). Previously only 'rebuild_old' was selected, so reset
+        quarantines leaked on disk indefinitely. Idempotent + best-effort
+        (rmtree ignore_errors); rows are removed only after a successful rmtree.
+        """
+        import shutil
+        rows = self._conn.execute(
+            "SELECT path FROM pending_dir_cleanup "
+            "WHERE kind IN ('rebuild_old', 'reset_quarantine')"
+        ).fetchall()
+        for r in rows:
+            try:
+                shutil.rmtree(r["path"], ignore_errors=True)
+                self._conn.execute(
+                    "DELETE FROM pending_dir_cleanup WHERE path = ?", (r["path"],)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Phase 97: clean_pending_rebuild_dirs: remove %r failed: %r",
+                    r["path"], exc,
+                )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Phase 97 LD-6: scan_runs lifecycle helpers
+    # ------------------------------------------------------------------
+
+    def _begin_scan_run(self) -> str:
+        """Insert a scan_runs row with status='running'; return the new scan_run_id.
+
+        Called at the start of scan_all so that an interrupted run is detectable
+        via start_recovery_probe() on next startup (replaces _pending_cleanup sentinel).
+        """
+        import uuid as _uuid
+        import time as _time
+        run_id = _uuid.uuid4().hex
+        self._conn.execute(
+            "INSERT INTO scan_runs (scan_run_id, started_at, status) VALUES (?, ?, 'running')",
+            (run_id, _time.time()),
+        )
+        self._conn.commit()
+        self._current_scan_run_id = run_id
+        logger.info("Phase 97 LD-6: scan_run begin scan_run_id=%s", run_id)
+        return run_id
+
+    def _end_scan_run(self, scan_run_id: str, status: str = "completed") -> None:
+        """Update scan_runs SET status=?, ended_at=NOW() for the given scan_run_id.
+
+        Valid status values: 'completed', 'canceled', 'discarded'.
+        Clears self._current_scan_run_id if this run matches.
+        """
+        import time as _time
+        assert status in ("completed", "canceled", "discarded"), status
+        self._conn.execute(
+            "UPDATE scan_runs SET ended_at = ?, status = ? WHERE scan_run_id = ?",
+            (_time.time(), status, scan_run_id),
+        )
+        self._conn.commit()
+        logger.info("Phase 97 LD-6: scan_run end scan_run_id=%s status=%s", scan_run_id, status)
+        if self._current_scan_run_id == scan_run_id:
+            self._current_scan_run_id = None
+
+    def start_recovery_probe(self) -> list:
+        """Phase 97 R-01: return scan_run_ids with status='running'.
+
+        Called from MyLibraryTab.__init__ after migrations; an interrupted run
+        (crash / power loss between Tantivy commit and SQLite COMMIT) leaves a
+        row with status='running'. MyLibraryTab shows the 3-button recovery modal
+        when this returns a non-empty list.
+
+        Returns: list of scan_run_id strings (str, not Row objects).
+        """
+        rows = self._conn.execute(
+            "SELECT scan_run_id FROM scan_runs WHERE status = 'running'"
+        ).fetchall()
+        return [r["scan_run_id"] for r in rows]
+
+    def discard_run(self, run_id: str) -> dict:
+        """Phase 97 U-02 + LD-7 — remove all docs/rows from this scan_run.
+
+        Returns dict of counts removed per source.
+
+        Protocol per ADVICE LD-7:
+          1) rollback uncommitted writer state (writer.rollback() or fallback)
+          2) writer.delete_documents("scan_run_id", run_id) + commit
+          3) ONE SQLite transaction:
+             DELETE local_pages / local_files / processed_files for this run
+             UPDATE scan_runs SET status='discarded'
+          4) refresh folder counters for affected paths
+          5) reopen writer/index handles (rollback may have invalidated them)
+
+        Pinned by tests/test_scan_run_id.py.
+        """
+        import sqlite3 as _sqlite3
+        counts: dict = {
+            "tantivy_rolled_back": False,
+            "local_pages": 0,
+            "local_files": 0,
+            "processed_files": 0,
+        }
+
+        # --- Step 1: rollback uncommitted writer state ---
+        if self._writer is not None:
+            try:
+                self._writer.rollback()
+                counts["tantivy_rolled_back"] = True
+                # rollback() invalidates the writer — null it so Step 2 opens a fresh one
+                self._writer = None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Phase 97 LD-7: writer.rollback() not available or failed: %r "
+                    "— falling back to commit-then-delete",
+                    exc,
+                )
+                try:
+                    self._commit_writer_with_retry()
+                except Exception:
+                    logger.exception(
+                        "Phase 97 LD-7: fallback commit failed; proceeding with delete-by-term"
+                    )
+                # Null writer so Step 5 reopens a fresh handle
+                self._writer = None
+
+        # --- Step 2: delete committed docs by term + commit ---
+        # Open a fresh writer for the delete-by-term operation (needed whether we
+        # rolled back or committed in Step 1, since both invalidate the old writer).
+        #
+        # R97.2-C: detect Phase 95 schema (no scan_run_id field) and fall back
+        # to a per-uid delete loop. Phase 95 installs do not have the
+        # scan_run_id field, so delete_documents("scan_run_id", run_id) raises
+        # ValueError("Field 'scan_run_id' is not defined"). We probe by trying
+        # the field-based delete first; on the "Field ... is not defined"
+        # ValueError (the literal Phase 95 signal), we fall back to per-uid.
+        #
+        # NOTE: tantivy-py 0.25.1's tantivy.Schema does NOT expose
+        # field_names() / get_field_names(), so the PATTERNS.md preferred
+        # schema-introspection branch is unavailable in this installation.
+        # The plan's PATTERNS.md / Task 7 action explicitly authorize this
+        # try/except probe fallback ("Field-name introspection fallback (if
+        # needed): wrap delete_documents in try/except ValueError as e: if
+        # 'scan_run_id' in str(e): ...").
+        #
+        # REVIEWS Codex HIGH #3: per-uid failures MUST NOT log-and-continue —
+        # they would leave a partially-deleted Tantivy state and the outer
+        # transaction would still commit, reintroducing R97.2-H orphan-doc
+        # risk. Any per-uid failure raises LocalIndexerError, leaves
+        # _tantivy_delete_ok = False, and (via Task 10's short-circuit)
+        # prevents the SQLite delete from running.
+        _tantivy_delete_ok = False
+        try:
+            _del_writer = self._index.writer(heap_size=15_000_000)
+            _phase_95_fallback_needed = False
+            try:
+                _del_writer.delete_documents("scan_run_id", run_id)
+            except Exception as _delete_exc:
+                # Phase 95 fallback signal: "Field 'scan_run_id' is not defined".
+                # We also handle the generic case where the field probe raises;
+                # any error here triggers the per-uid fallback path. Per-uid
+                # failures inside the fallback still fail-loud (HIGH #3).
+                if "scan_run_id" in str(_delete_exc):
+                    _phase_95_fallback_needed = True
+                else:
+                    # Unrelated failure — surface via outer except.
+                    raise
+            if _phase_95_fallback_needed:
+                # Phase 95 fallback — per-uid delete loop (analog of
+                # _delete_file :2407-2415).
+                uid_rows = self._conn.execute(
+                    "SELECT lp.uid FROM local_pages lp "
+                    "INNER JOIN processed_files pf ON pf.sys_id = lp.sys_id "
+                    "WHERE pf.scan_run_id = ?",
+                    (run_id,),
+                ).fetchall()
+                for uid_row in uid_rows:
+                    try:
+                        _del_writer.delete_documents("unique_id", uid_row["uid"])
+                    except Exception as _per_uid_exc:
+                        # REVIEWS Codex HIGH #3: fail-loud per uid. Raise
+                        # LocalIndexerError so Task 10's short-circuit
+                        # prevents the SQLite delete (orphan-doc prevention).
+                        _tantivy_delete_ok = False
+                        raise LocalIndexerError(
+                            f"discard_run aborted: per-uid Tantivy delete failed at "
+                            f"uid={uid_row['uid']!r} — SQLite rows preserved to prevent "
+                            f"orphaned-docs state. Use 'Reset My Library' if the index "
+                            f"is corrupt."
+                        ) from _per_uid_exc
+            _del_writer.commit()
+            _tantivy_delete_ok = True
+        except LocalIndexerError:
+            # Re-raise without converting — the per-uid fail-loud path above
+            # already set _tantivy_delete_ok = False and the outer wrapper
+            # expects this signal.
+            raise
+        except Exception:
+            logger.exception(
+                "Phase 97 LD-7: delete_documents/commit failed for run %s", run_id
+            )
+            _tantivy_delete_ok = False
+        finally:
+            # R97.2-G (Bug C2): force Rust-side drop of _del_writer BEFORE
+            # step 5 reopens self._writer. Without this, step 5's
+            # _index.writer(...) call races against this same writer's
+            # still-held lock file -> LockBusy.
+            try:
+                _del_writer = None  # noqa: F841 (intentional explicit clearance)
+            except UnboundLocalError:
+                pass
+            gc.collect()
+
+        # R97.2-H (Bug C3): short-circuit BEFORE the SQLite transaction if
+        # the Tantivy delete failed. Without this, step 3 would delete the
+        # SQLite rows while the Tantivy docs remain — an orphaned-docs state
+        # that subsequent searches cannot recover from. Raising here
+        # preserves both sides: SQLite rows + scan_runs.status untouched.
+        if not _tantivy_delete_ok:
+            raise LocalIndexerError(
+                "discard_run aborted: Tantivy delete failed in step 2 — "
+                "SQLite rows preserved to prevent orphaned-docs state. "
+                "Use 'Reset My Library' if the index is corrupt."
+            )
+
+        # --- Step 3: single SQLite transaction for all related row deletions ---
+        # Collect affected filepaths first so we can refresh counters after.
+        affected_rows = self._conn.execute(
+            "SELECT filepath FROM processed_files WHERE scan_run_id = ?", (run_id,)
+        ).fetchall()
+        affected_paths = [r["filepath"] if isinstance(r, dict) else r[0] for r in affected_rows]
+
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            cur = self._conn.execute(
+                "DELETE FROM local_pages WHERE sys_id IN ("
+                "  SELECT sys_id FROM processed_files WHERE scan_run_id = ?"
+                ")",
+                (run_id,),
+            )
+            counts["local_pages"] = cur.rowcount
+            cur = self._conn.execute(
+                "DELETE FROM local_files WHERE sys_id IN ("
+                "  SELECT sys_id FROM processed_files WHERE scan_run_id = ?"
+                ")",
+                (run_id,),
+            )
+            counts["local_files"] = cur.rowcount
+            cur = self._conn.execute(
+                "DELETE FROM processed_files WHERE scan_run_id = ?", (run_id,)
+            )
+            counts["processed_files"] = cur.rowcount
+            import time as _time
+            self._conn.execute(
+                "UPDATE scan_runs SET status = 'discarded', ended_at = ? "
+                "WHERE scan_run_id = ?",
+                (_time.time(), run_id),
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            try:
+                self._conn.execute("ROLLBACK")
+            except _sqlite3.OperationalError:
+                pass
+            raise
+
+        # --- Step 4: refresh folder counters for affected folders ---
+        if affected_paths:
+            try:
+                self._refresh_folder_counters_for(affected_paths)
+                self._conn.commit()
+            except Exception:
+                logger.exception("Phase 97 LD-7: _refresh_folder_counters_for failed after discard")
+
+        # --- Step 5: reopen writer/index handles (rollback may have invalidated) ---
+        try:
+            self._writer = self._index.writer(heap_size=15_000_000)
+        except Exception:
+            logger.exception("Phase 97 LD-7: writer reopen failed after discard")
+
+        logger.info("Phase 97 LD-7 discard_run scan_run_id=%s counts=%s", run_id, counts)
+        if self._current_scan_run_id == run_id:
+            self._current_scan_run_id = None
+        return counts
+
+    def keep_run(self, run_id: str) -> None:
+        """Phase 97 U-02 — explicit final commit + mark scan_run completed.
+
+        Called when the user chooses 'Keep partial' from the Cancel modal.
+        """
+        if self._writer is not None:
+            try:
+                self._commit_writer_with_retry()
+            except Exception:
+                logger.exception("Phase 97 U-02: keep_run commit failed for run %s", run_id)
+        self._end_scan_run(run_id, "completed")
+        logger.info("Phase 97 U-02 keep_run scan_run_id=%s preserved", run_id)
+
+    # ------------------------------------------------------------------
+    # Phase 97.2 R97.2-E — Reset My Library (atomic LOCAL teardown)
+    # ------------------------------------------------------------------
+
+    @index_swap
+    def reset_my_library(
+        self,
+        close_searcher_cb,
+        reload_searcher_cb,
+    ) -> dict:
+        """Phase 97.2 R97.2-E — atomic LOCAL teardown + recreate + migrate.
+
+        7-step protocol (REVIEWS update — added Step 1.5 path-safety per Codex HIGH #5;
+        Step 2 LAB rename failure rolls back LOCAL per Codex HIGH #6; Step 6 defers
+        rmtree to post-reinit `pending_dir_cleanup` table per Codex MEDIUM):
+          1.   Close all live handles (engine searcher + writer/index + SQLite conn).
+          1.5. PATH-SAFETY pre-checks (REVIEWS Codex HIGH #5) — abort BEFORE any
+               filesystem mutation if any check fails.
+          2.   Atomic rename LOCAL + LAB -> .reset-quarantine-<ts>. LAB rename
+               failure ROLLS BACK the LOCAL rename (Codex HIGH #6).
+          3.   Recreate empty directories.
+          4.   (Reserved — cleanup is scheduled in Step 6 after reinit.)
+          5.   Reinit via __init__ — triggers migration ladder on fresh DB.
+          6.   Schedule quarantine cleanup via `pending_dir_cleanup` (deferred
+               GC at next startup) OR best-effort `shutil.rmtree` if the table
+               INSERT fails (REVIEWS Codex MEDIUM — deferred path preferred).
+          7.   Reload searcher.
+
+        Args:
+          close_searcher_cb: callable() that releases SearchEngine's searcher
+            handles (typically engine.close_local_searcher).
+          reload_searcher_cb: callable() that re-opens SearchEngine's searcher
+            on the now-empty LOCAL index (typically engine.reload_local_indexes).
+
+        Returns dict {quarantined: [paths], reinit_ok: bool, cleanup_strategy: str}.
+
+        Raises LocalIndexerError on path-safety failure, irrecoverable rename
+        failure, or LAB-rename-rollback failure.
+        """
+        import shutil
+        import time as _time
+        import uuid as _uuid
+        # SEED-006 (Codex MED #4): ts_epoch stays NUMERIC — the deferred-cleanup
+        # created_at column parses it as float below, so it must not be a string.
+        # `ts` adds a uuid suffix used ONLY in dir names so two resets in the same
+        # wall-clock second cannot collide on a shared .reset-quarantine-<ts> dir.
+        ts_epoch = int(_time.time())
+        ts = f"{ts_epoch}-{_uuid.uuid4().hex[:8]}"
+        counts: dict = {
+            "quarantined": [],
+            "reinit_ok": False,
+            "cleanup_strategy": "deferred",
+        }
+
+        # SEED-006 P1: the DB lives OUTSIDE the swapped dir, so the rename-aside
+        # no longer carries it — reset must delete it explicitly (Step 4.5). Guard
+        # first so a mis-wired in-dir DB fails loud rather than getting orphaned.
+        _assert_db_outside_index_dir(self._db_path, self._index_dir)
+
+        # --- Step 1: close all live handles ---
+        try:
+            close_searcher_cb()
+        except Exception:
+            logger.exception(
+                "reset_my_library: close_searcher_cb failed (continuing)"
+            )
+        self._close_internal_writer_index()
+        try:
+            conn = getattr(self._thread_local, "_conn", None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    logger.exception(
+                        "reset_my_library: SQLite close failed (continuing)"
+                    )
+                self._thread_local._conn = None
+        except Exception:
+            logger.exception(
+                "reset_my_library: thread_local access failed (continuing)"
+            )
+        # Gemini LOW: gc.collect() right after SQLite close so the file handle
+        # is released before the Step 2 rename-aside.
+        gc.collect()
+
+        # --- Step 1.5: REVIEWS Codex HIGH #5 — path-safety pre-checks ---
+        # Resolve to absolute paths and verify ALL invariants BEFORE any
+        # filesystem mutation. If any check fails, raise BEFORE renaming.
+        local_dir = os.path.abspath(self._index_dir)
+        lab_dir = os.path.abspath(self._lab_index_dir)
+
+        def _path_check(cond: bool, reason: str) -> None:
+            if not cond:
+                raise LocalIndexerError(
+                    f"reset_my_library: path safety check failed: {reason}"
+                )
+
+        _path_check(
+            local_dir != lab_dir,
+            f"local == lab ({local_dir!r})",
+        )
+        _path_check(
+            local_dir != os.path.abspath(os.sep),
+            f"local is filesystem root ({local_dir!r})",
+        )
+        _path_check(
+            not (len(local_dir) <= 3 and local_dir.endswith((":\\", ":/", ":"))),
+            f"local is a drive root ({local_dir!r})",
+        )
+        _path_check(
+            os.path.basename(local_dir) == "LocalIndex",
+            f"local basename must be 'LocalIndex' (got {os.path.basename(local_dir)!r})",
+        )
+        _path_check(
+            os.path.basename(lab_dir) == "LocalLabIndex",
+            f"lab basename must be 'LocalLabIndex' (got {os.path.basename(lab_dir)!r})",
+        )
+        _path_check(
+            os.path.exists(local_dir),
+            f"local does not exist ({local_dir!r}) — unexpected; reset expects an index dir",
+        )
+        _path_check(
+            os.path.dirname(local_dir) == os.path.dirname(lab_dir),
+            f"local and lab parents differ (cannot atomic-rename across volumes): "
+            f"{os.path.dirname(local_dir)!r} vs {os.path.dirname(lab_dir)!r}",
+        )
+
+        # --- Step 2: atomic rename aside (REVIEWS Codex HIGH #6 — LAB rollback) ---
+        quarantine_main = f"{local_dir}.reset-quarantine-{ts}"
+        quarantine_lab = f"{lab_dir}.reset-quarantine-{ts}"
+
+        # Step 2a: rename LOCAL. Fatal on failure.
+        local_renamed = False
+        try:
+            self._retry_windows_rename(local_dir, quarantine_main)
+            counts["quarantined"].append(quarantine_main)
+            local_renamed = True
+        except OSError as exc:
+            logger.exception("reset_my_library: LOCAL rename failed")
+            raise LocalIndexerError(
+                f"Reset failed: could not move LOCAL index aside ({exc}). "
+                "Restart the app and retry."
+            ) from exc
+
+        # Step 2b: rename LAB ONLY IF IT EXISTS. On failure, ROLL BACK LOCAL rename.
+        lab_exists = os.path.isdir(lab_dir)
+        if lab_exists:
+            try:
+                self._retry_windows_rename(lab_dir, quarantine_lab)
+                counts["quarantined"].append(quarantine_lab)
+            except OSError as exc:
+                # REVIEWS Codex HIGH #6: LAB rename failed -> roll back the LOCAL
+                # rename to preserve the original state, then raise.
+                logger.exception(
+                    "reset_my_library: LAB rename failed — rolling back LOCAL rename"
+                )
+                if local_renamed:
+                    try:
+                        self._retry_windows_rename(quarantine_main, local_dir)
+                        counts["quarantined"].remove(quarantine_main)
+                    except OSError:
+                        # Both ways failed — abort hard. User must restart the app
+                        # to recover from this state.
+                        logger.exception(
+                            "reset_my_library: LOCAL rollback ALSO failed — "
+                            "filesystem is in an inconsistent state"
+                        )
+                        raise LocalIndexerError(
+                            "Reset failed catastrophically: LAB rename failed AND "
+                            "LOCAL rollback failed. LOCAL is now at "
+                            f"{quarantine_main!r}. Restart the app immediately."
+                        ) from exc
+                raise LocalIndexerError(
+                    f"Reset failed: LAB rename failed ({exc}); LOCAL was rolled "
+                    "back. Try again or restart the app."
+                ) from exc
+        # else: LAB did not exist — skip Step 2b silently.
+
+        # --- Step 2c (SEED-006 P1 / Codex): quarantine the EXTERNAL SQLite DB ---
+        # The DB lives OUTSIDE the swapped dirs, so the renames above did not
+        # carry it. It is a THIRD participant in the reset transaction: move it
+        # aside by RENAME (rollback-able) BEFORE recreating the live dirs, so a
+        # failure here leaves NOTHING recreated-empty and we can roll back
+        # LOCAL + LAB + DB to the original live state. Renaming (not deleting)
+        # keeps reset atomic — Codex REQUEST CHANGES: deleting at the old Step
+        # 4.5 (post-recreate) could leave an empty live LocalIndex next to a
+        # stale DB, which a restart would then reopen.
+        db_quarantines: list[tuple[str, str]] = []
+        try:
+            for _suffix in ("", "-wal", "-shm"):
+                _src = self._db_path + _suffix
+                if os.path.exists(_src):
+                    _dst = f"{_src}.reset-quarantine-{ts}"
+                    self._retry_windows_rename(_src, _dst)
+                    db_quarantines.append((_src, _dst))
+        except OSError as exc:
+            logger.exception("reset_my_library: DB quarantine failed — rolling back")
+            # Roll back DB renames already done (reverse order), then LAB, then LOCAL.
+            for _orig, _q in reversed(db_quarantines):
+                try:
+                    self._retry_windows_rename(_q, _orig)
+                except OSError:
+                    logger.exception(
+                        "reset_my_library: DB rollback %r -> %r failed", _q, _orig
+                    )
+            if lab_exists:
+                try:
+                    self._retry_windows_rename(quarantine_lab, lab_dir)
+                    counts["quarantined"].remove(quarantine_lab)
+                except (OSError, ValueError):
+                    logger.exception("reset_my_library: LAB rollback failed")
+            try:
+                self._retry_windows_rename(quarantine_main, local_dir)
+                counts["quarantined"].remove(quarantine_main)
+            except (OSError, ValueError):
+                logger.exception("reset_my_library: LOCAL rollback failed")
+            raise LocalIndexerError(
+                f"Reset failed: could not move the LOCAL DB aside ({exc}); "
+                "LOCAL + LAB were rolled back to their original state. "
+                "Retry or restart the app."
+            ) from exc
+
+        # --- Step 3: recreate empty dirs (ONLY after all participants quarantined) ---
+        os.makedirs(local_dir, exist_ok=True)
+        os.makedirs(lab_dir, exist_ok=True)
+
+        # --- Step 4: (reserved) cleanup scheduling happens in Step 6 after reinit ---
+        # REVIEWS Codex MEDIUM: defer rmtree off the UI thread by using the
+        # existing pending_dir_cleanup table (the next normal startup performs
+        # the GC). The reinit in Step 5 creates a fresh SQLite where the rows
+        # can be recorded — we MUST reinit before scheduling.
+
+        # --- Step 5: reinit via __init__ (triggers _run_migrations ladder) ---
+        self.__init__(self._index_dir, self._lab_index_dir, self._db_path)
+        counts["reinit_ok"] = True
+
+        # --- Step 5.5: clean up the quarantined DB files (non-fatal) ---
+        # reinit already opened a fresh empty DB at self._db_path, so the
+        # *.reset-quarantine-* copies can never be reopened. Delete them
+        # best-effort: a failure here cannot resurrect stale state.
+        for _orig, _q in db_quarantines:
+            try:
+                if os.path.exists(_q):
+                    os.remove(_q)
+            except OSError:
+                logger.exception(
+                    "reset_my_library: cleanup of quarantined DB file %r failed (non-fatal)",
+                    _q,
+                )
+
+        # --- Step 6: schedule quarantine cleanup ---
+        # Prefer pending_dir_cleanup table (Phase 97 R-02 infrastructure).
+        # Fall back to best-effort shutil.rmtree if the table is absent or
+        # the INSERT fails. NOTE: the real table schema is
+        # (path TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at REAL); we
+        # tag reset rows with kind='reset_quarantine' so a future GC pass
+        # can distinguish them from 'rebuild_old' rows.
+        scheduled = False
+        try:
+            for qdir in list(counts["quarantined"]):
+                # Real schema: (path, kind, created_at). The plan snippet
+                # showed (path, scheduled_at) — adapted to real table.
+                self._thread_local._conn.execute(
+                    "INSERT OR REPLACE INTO pending_dir_cleanup "
+                    "(path, kind, created_at) "
+                    "VALUES (?, 'reset_quarantine', ?)",
+                    (qdir, float(ts_epoch)),
+                )
+            self._thread_local._conn.commit()
+            scheduled = True
+            counts["cleanup_strategy"] = "deferred-via-pending-dir-cleanup"
+        except Exception:
+            logger.exception(
+                "reset_my_library: could not schedule quarantine cleanup via "
+                "pending_dir_cleanup — falling back to immediate shutil.rmtree"
+            )
+
+        if not scheduled:
+            # Fallback path — REVIEWS Codex MEDIUM acknowledged this is slow on
+            # huge libraries; the UI layer SHOULD run this fallback in a
+            # QThread, NOT on the UI thread. The deferred path above is the
+            # preferred branch; this only executes if pending_dir_cleanup is
+            # missing or the INSERT failed for another reason.
+            counts["cleanup_strategy"] = "immediate-rmtree-fallback"
+            for qdir in counts["quarantined"]:
+                try:
+                    shutil.rmtree(qdir, ignore_errors=True)
+                except Exception:
+                    logger.exception("reset_my_library: rmtree %s failed", qdir)
+
+        # --- Step 7: reload searcher ---
+        try:
+            reload_searcher_cb()
+        except Exception:
+            logger.exception(
+                "reset_my_library: reload_searcher_cb failed (continuing)"
+            )
+
+        logger.info(
+            "Phase 97.2 R97.2-E reset_my_library complete: %s", counts
+        )
+        return counts
+
+    # ------------------------------------------------------------------
+    # LOCAL LAB side-index builder (D-09 + D-38 + HIGH-4 + W5 Option C)
+    # ------------------------------------------------------------------
+
+    def build_lab_side_index(
+        self,
+        lab_weights: dict,
+        *,
+        fingerprint_dyn_fn: Callable,   # Callable[[str, dict | None], str] — computes fingerprint_dyn
+        fingerprint_static_fn: Callable, # Callable[[str], str] — computes static fingerprint
+        normalize_text_fn: Callable,     # Callable[[str], str] — normalizes content
+        lab_schema_version: int = 1,
+        dynamic_rank_map=None,
+    ) -> None:
+        """Build LOCAL LAB side-index (D-09) and write .meta.json (D-38).
+
+        W5 LOCKED — Option C: fingerprint helpers are passed as keyword-only
+        callback functions from genizah_core.py's SearchEngine. This keeps
+        shared/local_indexer.py free of any genizah_core import (no circular-dep
+        risk). Options A and B are STRUCK per plan 95-06.
+
+        HIGH-4 review fix (option b LOCKED): page text is sourced from the MAIN
+        LOCAL Tantivy stored `content` field via _iterate_lab_source_rows(). It
+        does NOT re-extract from source files (option a — fails on D-40 unavailable
+        folders) and does NOT read from a SQLite `page_text` column (option c —
+        this plan does not add that column).
+
+        D-38: writes <LOCAL_LAB_INDEX_DIR>/.meta.json with:
+          - weights_hash = sha256(json.dumps(lab_weights, sort_keys=True))
+          - lab_schema_version
+          - last_built_at (ISO 8601 UTC)
+
+        Arguments:
+            lab_weights: dict of current LAB dynamic weights (for weights_hash).
+            fingerprint_dyn_fn: callable(content, dynamic_rank_map) -> str.
+            fingerprint_static_fn: callable(content) -> str.
+            normalize_text_fn: callable(content) -> str.
+            lab_schema_version: int (bump when LAB schema changes to invalidate).
+            dynamic_rank_map: dict | None (forwarded to fingerprint_dyn_fn).
+        """
+        # Pre-flight: probe each callback ONCE with a tiny safe input. If any
+        # raises, abort BEFORE opening the writer / touching the LAB dir / running
+        # delete_all_documents. This avoids a ~10s freeze on real LAB sizes when
+        # the callbacks are broken (e.g. SearchEngine.lab_index_normalize missing
+        # — pre-existing Phase 97.3 deferred Finding 2). The full row-loop still
+        # has the 5-consecutive-failure bail as a fallback for callbacks that
+        # fail only on specific inputs.
+        try:
+            normalize_text_fn("")
+            fingerprint_static_fn("")
+            fingerprint_dyn_fn("", dynamic_rank_map)
+        except Exception as exc:
+            logger.error(
+                "build_lab_side_index: pre-flight callback probe failed (%r) — "
+                "aborting LAB rebuild before opening writer; prior LAB index + "
+                ".meta.json left intact",
+                exc,
+            )
+            return
+
+        os.makedirs(self._lab_index_dir, exist_ok=True)
+        schema = build_local_lab_schema()
+        lab_index = tantivy.Index(schema, path=self._lab_index_dir)
+        # Register tokenizers needed by the LAB schema
+        try:
+            lab_index.register_tokenizer(
+                "whitespace",
+                tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build(),
+            )
+        except Exception:
+            pass  # May fail on reopen — non-fatal
+        try:
+            lab_index.register_tokenizer(
+                "simple",
+                tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build(),
+            )
+        except Exception:
+            pass
+
+        writer = lab_index.writer(heap_size=50_000_000)
+        # True rebuild, not append: the LAB dir is reused across rebuilds
+        # (tantivy.Index reuse=True). Without clearing first, a rebuild after a
+        # weight change or a page deletion would leave stale fingerprint_dyn docs
+        # (and removed pages) beside the new rows, yet write a "fresh" weights_hash
+        # — duplicate/ghost LAB hits. delete_all_documents() + the add loop commit
+        # as one transaction, so only the current rows survive.
+        writer.delete_all_documents()
+
+        rows_written = 0
+        # Defensive: a broken callback (e.g. AttributeError on every row) used
+        # to spam ~1.9M log lines on a 12K-PDF library and freeze the UI's
+        # stderr handler. Bail out after a small fixed number of consecutive
+        # failures, log ONCE with the failure type, and let the existing
+        # `rows_written == 0 and expected_rows > 0` rollback fire below so
+        # the prior LAB index + .meta.json stay intact.
+        _FAILURE_BAIL_THRESHOLD = 5
+        consecutive_failures = 0
+        first_failure_exc = None
+        for sys_id, uid, page_num, file_id, content in self._iterate_lab_source_rows():
+            try:
+                fingerprint_dyn = fingerprint_dyn_fn(content, dynamic_rank_map)
+                fingerprint_static = fingerprint_static_fn(content)
+                text_normalized = normalize_text_fn(content)
+                full_header = _make_full_header(sys_id, page_num, file_id)
+
+                doc = tantivy.Document(
+                    unique_id=uid,
+                    content=content,
+                    text_normalized=text_normalized,
+                    fingerprint=fingerprint_static,
+                    fingerprint_dyn=fingerprint_dyn,
+                    full_header=full_header,
+                    shelfmark=sys_id,
+                    source="LOCAL",
+                )
+                writer.add_document(doc)
+                rows_written += 1
+                consecutive_failures = 0
+            except Exception as exc:
+                if first_failure_exc is None:
+                    first_failure_exc = exc
+                consecutive_failures += 1
+                if consecutive_failures <= _FAILURE_BAIL_THRESHOLD:
+                    logger.warning(
+                        "build_lab_side_index: failed to write uid %s: %r — skipping",
+                        uid, exc,
+                    )
+                if consecutive_failures >= _FAILURE_BAIL_THRESHOLD and rows_written == 0:
+                    logger.error(
+                        "build_lab_side_index: %d consecutive row failures with 0 successes "
+                        "(first exception: %r) — bailing to avoid log spam; LAB rebuild aborted "
+                        "and prior LAB index will be left intact",
+                        consecutive_failures, first_failure_exc,
+                    )
+                    break
+
+        # Partial-publish guard: delete_all_documents() above already queued a wipe.
+        # If the main LOCAL Tantivy source could not be opened/read,
+        # _iterate_lab_source_rows() returns early (yields nothing), so committing
+        # now would publish an EMPTY LAB index and stamp it "fresh" in .meta.json —
+        # the freshness check would then pass over a wiped index. Only the
+        # zero-rows-but-pages-exist case is catastrophic; a few skipped rows above
+        # is tolerated best-effort. Roll back so the prior index + .meta.json stay
+        # intact, and let the next rebuild retry.
+        expected_rows = self._conn.execute(
+            "SELECT COUNT(*) FROM local_pages lp "
+            "JOIN local_files lf ON lf.sys_id = lp.sys_id "
+            "WHERE lf.pending_delete = 0"
+        ).fetchone()[0]
+        if rows_written == 0 and expected_rows > 0:
+            try:
+                writer.rollback()
+            except Exception:
+                logger.exception(
+                    "build_lab_side_index: rollback failed after empty rebuild"
+                )
+            logger.error(
+                "build_lab_side_index: aborted — 0 rows written but %d pages expected "
+                "(main LOCAL source unreadable?); prior LAB index + .meta.json left intact",
+                expected_rows,
+            )
+            return
+
+        writer.commit()
+        writer.wait_merging_threads()
+
+        # Write .meta.json (D-38).
+        weights_hash = hashlib.sha256(
+            json.dumps(lab_weights, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        meta = {
+            "weights_hash": weights_hash,
+            "lab_schema_version": lab_schema_version,
+            "last_built_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+        meta_path = os.path.join(self._lab_index_dir, ".meta.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+        logger.info(
+            "LOCAL LAB side-index built: %d pages, weights_hash=%s",
+            rows_written,
+            weights_hash[:8],
+        )
+
+    def _iterate_lab_source_rows(self) -> Iterator[tuple[str, str, int, int, str]]:
+        """HIGH-4 review fix (option b LOCKED): yield (sys_id, uid, page_num, file_id, content)
+        sourced from the MAIN LOCAL Tantivy stored content field.
+
+        The SQLite local_files table stores metadata only (no page_text column per Plan 03 +
+        HIGH-4 decision). `local_pages` tracks the (sys_id, uid, page_num) mapping; the page
+        TEXT lives in the main LOCAL Tantivy index at the `content` stored field.
+
+        Generator steps:
+          1. SELECT (sys_id, uid, page_num, file_id) from local_pages JOIN local_files.
+          2. Open the main LOCAL Tantivy index.
+          3. For each uid: search by unique_id (raw tokenizer), retrieve stored `content`.
+          4. Yield the tuple.
+
+        Failure modes:
+          - main LOCAL Tantivy missing: log WARNING and yield nothing.
+          - uid present in local_pages but missing from main LOCAL Tantivy: log WARNING, skip.
+        """
+        try:
+            if not os.path.isdir(self._index_dir):
+                logger.warning(
+                    "HIGH-4: main LOCAL Tantivy missing at %s; LAB rebuild empty",
+                    self._index_dir,
+                )
+                return
+            main_schema = build_local_schema()
+            main_index = tantivy.Index(main_schema, path=self._index_dir)
+            # SEED-006: raw (unique_id term queries) + hebword (content field is
+            # now hebword-tokenized) must both be registered after open.
+            register_search_tokenizers(main_index)
+            searcher = main_index.searcher()
+        except Exception as exc:
+            logger.warning(
+                "HIGH-4: cannot open main LOCAL Tantivy for LAB rebuild: %r", exc
+            )
+            return
+
+        rows = self._conn.execute(
+            "SELECT lp.sys_id, lp.uid, lp.page_num, lf.file_id "
+            "FROM local_pages lp "
+            "JOIN local_files lf ON lf.sys_id = lp.sys_id "
+            "WHERE lf.pending_delete = 0 "
+            "ORDER BY lp.sys_id, lp.page_num"
+        ).fetchall()
+
+        for row in rows:
+            sys_id = row["sys_id"]
+            uid = row["uid"]
+            page_num = row["page_num"]
+            file_id = row["file_id"]
+            try:
+                # Use raw term query on unique_id (raw tokenizer — Pitfall #2)
+                q = main_index.parse_query(uid, ["unique_id"])
+                top = searcher.search(q, limit=1).hits
+                if not top:
+                    logger.warning(
+                        "HIGH-4: uid %s in local_pages but missing from main LOCAL Tantivy — skipping",
+                        uid,
+                    )
+                    continue
+                _, doc_addr = top[0]
+                doc = searcher.doc(doc_addr)
+                content = doc.get_first("content") or ""
+                yield sys_id, uid, page_num, file_id, content
+            except Exception as exc:
+                logger.warning("HIGH-4: uid %s read failed: %r — skipping", uid, exc)
+                continue
+
+    @staticmethod
+    def read_lab_meta(lab_index_dir: str) -> Optional[dict]:
+        """Read .meta.json for LOCAL LAB invalidation check (D-38).
+
+        Returns the parsed dict, or None if the file is absent or unreadable.
+        """
+        meta_path = os.path.join(lab_index_dir, ".meta.json")
+        if not os.path.exists(meta_path):
+            return None
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning("LOCAL LAB meta read failed: %r", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    # Close
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Flush + close Tantivy writer and SQLite connection.
+
+        Explicitly deletes the Tantivy writer and index objects to release the
+        Tantivy lockfile (LockBusy prevention for subsequent open() calls in
+        the same process or a different process).
+        """
+        if self._pending_filepaths:
+            try:
+                self._commit_batch()
+            except Exception as exc:
+                logger.warning("LocalIndexer.close: commit_batch failed: %s", exc)
+        try:
+            self._writer.commit()
+        except Exception:
+            pass
+        # Delete writer first (releases Tantivy lockfile), then index object
+        try:
+            del self._writer
+        except Exception:
+            pass
+        try:
+            del self._index
+        except Exception:
+            pass
+        try:
+            self._conn.close()
+        except Exception:
+            pass

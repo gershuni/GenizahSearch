@@ -1,0 +1,145 @@
+"""Neutral exception module shared by web and shared layers.
+
+Concern #3 fix (78-REVIEWS.md): previously APIError lived in
+web/api_hardening.py, which forced shared/fjms_service.validate_filter_values
+to do a `shared -> web` lazy import. Moving APIError to shared/ eliminates
+that dependency inversion: shared/ depends only on stdlib, web/ depends on
+shared/, never the reverse.
+
+Both `web/api_hardening.py` AND `shared/fjms_service.validate_filter_values`
+import APIError from here. This module deliberately imports NOTHING from
+the web layer or any web framework (nicegui, fastapi, starlette).
+"""
+
+import logging
+from typing import Optional
+
+
+logger = logging.getLogger(__name__)
+
+
+# D-07 error code taxonomy (lowercase snake_case, stable, contractual).
+# These codes are part of the public API surface — Phase 81's skill consumer
+# branches on `code` strings, so renaming any of them is a breaking change.
+ERROR_CODES = frozenset({
+    'invalid_request',
+    'invalid_combination',  # 81A D-03 — cross-field validation rejection (responsa_options/mode coupling, gap/metadata-mode coupling).
+    'invalid_mode',
+    'query_required',
+    'query_too_long',
+    'limit_too_high',
+    'unknown_filter_key',
+    'unresolvable_filter_value',
+    'filter_vocabulary_unavailable',  # R2-#3: fail-closed when vocabulary loader fails
+    'filter_unavailable',  # 503 (#17): the filters were valid but could not be applied; the request is never run without them
+    'rate_limited',
+    'disabled',
+    'localhost_only',
+    'internal_error',
+    # Phase 79 (/api/browse) additions:
+    'locator_conflict',
+    'manuscript_page_not_found',
+    'core_timeout',
+    'research_worker_stopped',
+    # Phase 80 (/api/parallels) additions:
+    'composition_required',     # D-06: text.strip() empty
+    'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
+    # P9X heavy-mode concurrency additions:
+    'heavy_search_busy',        # 503 — heavy-mode concurrency budget (SEARCH_API_HEAVY_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    # 2026-11-03 (scrape limits, after the PostHog review): one caller pulled 8,036
+    # requests in six hours and reader searches queued behind its searches.
+    'search_busy',              # 503 — synchronous interactive-mode concurrency budget (SEARCH_API_INTERACTIVE_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    'daily_limit_reached',      # 429 — per-address trailing-24 h budget (SEARCH_API_DAILY_LIMIT) across search, browse and parallels; Retry-After set
+    # Phase 145 (/api/parallels method='passage') additions:
+    'passage_unavailable',        # 503 — PASSAGE_PARALLELS_ENABLED off, or the passage index did not load
+    'passage_scope_unsupported',  # 400 — method='passage' + filters.library includes 'LOCAL' (include mode); the passage index has no Local-corpus records
+    'passage_search_busy',        # 503 — passage-matching concurrency budget (SEARCH_API_PASSAGE_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    'passage_option_unsupported', # 400 — method='passage' + boundary_mode != 'full'; passage has no cross-paragraph/token-boundary concept
+    # Multi-witness passage search additions:
+    'passage_multi_witness_unavailable',  # 503 — PASSAGE_MULTI_WITNESS_ENABLED off
+    'witnesses_require_passage_method',   # 400 — witnesses[] sent with method='chunk'; the chunk engine unions concatenated chunks and needs no fusion
+    'witnesses_and_text_conflict',        # 400 — both `text` and `witnesses` supplied; never silently pick one
+    'witnesses_required',                 # 400 — witnesses[] supplied but not one entry resolved to searchable text
+    'too_many_witnesses',                 # 400 — more than SEARCH_API_PASSAGE_MAX_WITNESSES entries
+    'witness_too_long',                   # 400 — a PASTED witness exceeds COMPOSITION_LENGTH_CAP (a resolved reference is skipped-and-reported instead)
+    'sort_requires_multi_witness',        # 400 — sort='fused'/'witness_count' without witnesses[]
+    # 2026-10-11: the website's Extended variant level runs only as a background job:
+    'background_job_required',            # 400 — search_mode=variants_extended sent to synchronous /api/search; use /api/search/jobs
+    # 2026-10-21 (Responsa Phase 1, shared/responsa_match.py): a star shape the engine does
+    # not search yet -- inside a word, a word of stars only, several stars -- is refused
+    # with a message, never answered with an empty list.
+    'responsa_unsupported_star',          # 400
+    # 2026-10-22: a Responsa query still over Config.MAX_EXPANDED_TERMS after every step
+    # down (variants, Judeo-Arabic, %, #) -- it was a 500.
+    'responsa_query_too_large',           # 400
+})
+
+# Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
+WARNING_CODES = frozenset({
+    'query_downgraded',
+    # The result may be incomplete; more may exist. /api/search: the engine read its
+    # candidate limit (Config.SEARCH_LIMIT), so `total` counts the matches it reached
+    # (D8, 2026-10-06). /api/search and /api/parallels: a background job reached the
+    # website's time limit and returned what it had found (2026-10-07).
+    'results_cut_off',
+    # Phase 80 (/api/parallels) additions:
+    'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned
+    # Phase 145 (method='passage') additions:
+    'passage_text_lookup_failed',  # a row was DROPPED (never rendered) because its display-text lookup failed; carries a `count` field
+    # Multi-witness: a witness that could not be resolved to searchable text
+    # was SKIPPED, not fatal -- rejecting a 17-witness request over one stale
+    # reference wastes the sixteen the caller can still have. Carries `count`
+    # and a per-witness `witnesses` list saying which failed and why.
+    'witness_ref_unresolved',
+    # Multi-witness: an entry resolving to text ALREADY supplied by an earlier
+    # witness was skipped. Not an unresolved reference -- it resolved fine --
+    # and reported separately so a caller is not sent hunting for a stale
+    # shelfmark. Searching it would spend a witness slot to re-derive rows
+    # already in hand and then count them twice, inflating `witness_count`
+    # and `fusion_score`. Carries `count` and a `witnesses` list naming each
+    # skipped entry and the one it duplicates.
+    'witness_duplicate_skipped',
+    # Chunk method (shared/composition_windows.py). Each carries the numbers
+    # it names: the text has fewer words than chunk_size and was searched as
+    # one chunk (`words`, `chunk_size`, `effective_chunk_size`); fewer than
+    # two words, nothing searched (`words`, `minimum`).
+    'text_shorter_than_chunk_size',
+    'text_too_short',
+})
+
+
+class APIError(Exception):
+    """Semantic API error. Raised inside handlers and validators.
+
+    Caught by the per-endpoint `wrap_endpoint` / `_build_envelope_response`
+    helper from web.api_hardening (Plan 03; per-endpoint, NOT global per
+    Concern #2).
+
+    Args:
+        code: One of ERROR_CODES (lowercase snake_case). Unknown codes log
+            a warning but are not rejected — the taxonomy can evolve, the
+            wrapper renders whatever code is supplied.
+        message: Human-readable message. Logs use this; the skill consumer
+            branches on `code`, not message text.
+        http_status: HTTP status to return in the envelope. Defaults to 400.
+        headers: Optional HTTP headers to propagate (notably Retry-After
+            for rate_limited responses).
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        http_status: int = 400,
+        headers: Optional[dict] = None,
+    ):
+        if code not in ERROR_CODES:
+            logger.warning(
+                "APIError raised with unknown code %r; allowed: %s",
+                code, sorted(ERROR_CODES),
+            )
+        self.code = code
+        self.message = message
+        self.http_status = http_status
+        self.headers = headers or {}
+        super().__init__(f"{code}: {message}")

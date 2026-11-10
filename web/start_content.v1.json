@@ -1,0 +1,397 @@
+{
+  "schema_version": 1,
+  "content_id": "start-curated-v1",
+  "status": "curated_v1",
+  "computed_candidates_published": true,
+  "featured_counts": {
+    "searches": 3,
+    "manuscripts": 3,
+    "works": 3,
+    "computed_candidates": 4
+  },
+  "searches": [
+    {
+      "id": "search-messianic-king",
+      "difficulty": "simple",
+      "mode": "exact",
+      "query": "המלך המשיח",
+      "title": {"en": "The Messiah in Genizah texts", "he": "המלך המשיח בטקסטים מן הגניזה"},
+      "description": {"en": "Follow one charged phrase through commentary, homily, polemic, and other genres.", "he": "עקבו אחר ביטוי טעון אחד בין פירושים, דרשות, פולמוסים וסוגות נוספות."}
+    },
+    {
+      "id": "search-ketubbah-moses-israel",
+      "difficulty": "simple",
+      "mode": "exact",
+      "query": "כדת משה וישראל",
+      "title": {"en": "A familiar ketubbah formula", "he": "נוסחה מוכרת מן הכתובה"},
+      "description": {"en": "See a legal formula recur across marriage documents written in different hands.", "he": "ראו נוסחה משפטית חוזרת בכתובות שנכתבו בידיים שונות."}
+    },
+    {
+      "id": "search-piyyut-judge-me",
+      "difficulty": "simple",
+      "mode": "exact",
+      "query": "אלהי אל תדינני כמעלי",
+      "title": {"en": "A line of penitential poetry", "he": "שורה מפיוט סליחות"},
+      "description": {"en": "A distinctive poetic line opens a compact, readable group of piyyut witnesses.", "he": "שורה פיוטית ייחודית פותחת קבוצה קטנה ונוחה לעיון של עדי פיוט."}
+    },
+    {
+      "id": "search-judeo-arabic-greeting",
+      "difficulty": "simple",
+      "mode": "exact",
+      "query": "אטאל אללה בקאך",
+      "title": {"en": "A Judeo-Arabic letter greeting", "he": "ברכה במכתבים בערבית־יהודית"},
+      "description": {"en": "Search a conventional wish for long life and enter the world of medieval correspondence.", "he": "חפשו איחול מקובל לאריכות ימים והיכנסו לעולם ההתכתבות של ימי הביניים."}
+    },
+    {
+      "id": "search-yonah-variants",
+      "difficulty": "advanced",
+      "mode": "variants",
+      "query": "יונה מצאה בו מנוח",
+      "title": {"en": "A Sabbath song despite spelling variation", "he": "זמר לשבת למרות חילופי כתיב"},
+      "description": {"en": "Variants search finds witnesses of “Yonah matz'ah vo manoah” despite spelling variation and imperfect automatic transcription.", "he": "חיפוש וריאנטים מאתר עדים של „יונה מצאה בו מנוח” למרות חילופי כתיב ותעתיק אוטומטי שאינו מושלם."}
+    },
+    {
+      "id": "search-beshem-rahmana",
+      "difficulty": "advanced",
+      "mode": "responsa",
+      "query": "(בשמך/בשמ) (רחמנא/רחמ)",
+      "responsa_flags": {"variants": false, "ja": false, "flex_spaces": false, "bidirectional": false},
+      "title": {"en": "“In Your name, Merciful One”", "he": "„בשמ׳ רחמ׳” — „בשמך רחמנא”"},
+      "description": {"en": "An alternatives query follows abbreviated and expanded forms of a recurring manuscript opening.", "he": "שאילתת חלופות עוקבת אחר הצורות המקוצרות והמלאות של פתיחה חוזרת בכתבי היד."}
+    },
+    {
+      "id": "search-ketubbah-wife-responsa",
+      "difficulty": "advanced",
+      "mode": "responsa",
+      "query": "#והות [3] #לאנתו",
+      "responsa_flags": {"variants": false, "ja": false, "flex_spaces": false, "bidirectional": false},
+      "title": {"en": "Recognize a ketubbah through Aramaic", "he": "זהו כתובה בעזרת נוסחה ארמית"},
+      "description": {"en": "Prefix expansion and a short word gap tolerate the changing wording of “and she became his wife.”", "he": "הרחבת תחיליות ומרווח קצר בין המילים מתמודדים עם הניסוחים המשתנים של „והות ליה לאנתו”."}
+    },
+    {
+      "id": "search-table-talk-responsa",
+      "difficulty": "advanced",
+      "mode": "responsa",
+      "query": "#אין (משיחין/מסיחין) [2] #סעודה",
+      "responsa_flags": {"variants": false, "ja": false, "flex_spaces": false, "bidirectional": false},
+      "title": {"en": "A saying with uncertain spacing", "he": "מאמר עם מרווחים לא ודאיים"},
+      "description": {"en": "Word gaps and spelling operators recover “ein mesihin ba-se'udah” from uneven automatic transcription.", "he": "מרווחי מילים וסימני כתיב מאתרים את „אין משיחין בסעודה” גם בתעתיק אוטומטי לא אחיד."}
+    },
+    {
+      "id": "search-witness-formula",
+      "difficulty": "research",
+      "mode": "exact",
+      "query": "בפנינו אנו עדים",
+      "title": {"en": "The witnesses speak", "he": "העדים מעידים"},
+      "description": {"en": "A documentary formula isolates a small set of legal records for close comparison.", "he": "נוסחה תיעודית מבודדת קבוצה קטנה של רשומות משפטיות להשוואה מדוקדקת."}
+    },
+    {
+      "id": "search-legal-closing",
+      "difficulty": "research",
+      "mode": "exact",
+      "query": "הכל שריר וקיים",
+      "title": {"en": "A legal document's closing words", "he": "מילות הסיום של מסמך משפטי"},
+      "description": {"en": "A precise closing formula produces a compact set of documents that can be read side by side.", "he": "נוסחת סיום מדויקת מפיקה קבוצה מצומצמת של מסמכים שאפשר לקרוא זה לצד זה."}
+    },
+    {
+      "id": "search-arabic-colophon",
+      "difficulty": "research",
+      "mode": "exact",
+      "query": "אלחמד ללה וחדה",
+      "title": {"en": "An Arabic colophon in Hebrew script", "he": "קולופון ערבי באותיות עבריות"},
+      "description": {"en": "A rare, specific formula demonstrates how Judeo-Arabic can mark the end of a copied text.", "he": "נוסחה נדירה ומדויקת מדגימה כיצד ערבית־יהודית עשויה לסמן את סיומו של טקסט מועתק."}
+    },
+    {
+      "id": "search-rosh-hashanah-liturgy",
+      "difficulty": "research",
+      "mode": "exact",
+      "query": "היום הרת עולם",
+      "title": {"en": "A Rosh Hashanah liturgical phrase", "he": "ביטוי מתפילת ראש השנה"},
+      "description": {"en": "Trace one liturgical phrase through prayer manuscripts and related textual settings.", "he": "עקבו אחר ביטוי ליטורגי אחד בין כתבי יד של תפילה והקשרים טקסטואליים סמוכים."}
+    }
+  ],
+  "manuscripts": [
+    {
+      "id": "ms-ben-sira",
+      "sys_id": "990051075430205171",
+      "shelfmark": "T-S 12.864",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051075430205171?page=0&width=640",
+      "category": {"en": "Discovery", "he": "תגלית"},
+      "title": {"en": "The Hebrew Ben Sira, recovered", "he": "בן סירא העברי שנתגלה מחדש"},
+      "description": {"en": "One of the Genizah manuscripts that restored the long-lost Hebrew text of Ben Sira—at the heart of the modern story of the Genizah.", "he": "אחד מכתבי היד מן הגניזה שהשיבו לעולם את הנוסח העברי האבוד של בן סירא — בלב סיפורה המודרני של הגניזה."},
+      "alt": {"en": "Hebrew Ben Sira manuscript T-S 12.864", "he": "כתב יד עברי של בן סירא, T-S 12.864"}
+    },
+    {
+      "id": "ms-maimonides-autograph",
+      "sys_id": "990051334700205171",
+      "shelfmark": "T-S 12.192",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051334700205171?page=0&width=640",
+      "category": {"en": "Autograph", "he": "אוטוגרף"},
+      "title": {"en": "A letter in Maimonides' own hand", "he": "מכתב בכתב ידו של הרמב״ם"},
+      "description": {"en": "A signed recommendation written by Maimonides in Fustat for a newcomer to Egypt and his son.", "he": "מכתב המלצה חתום שכתב הרמב״ם בפוסטאט למען אדם שהגיע למצרים עם בנו."},
+      "alt": {"en": "Autograph letter by Maimonides, T-S 12.192", "he": "מכתב אוטוגרפי של הרמב״ם, T-S 12.192"}
+    },
+    {
+      "id": "ms-piyyut-frontispiece",
+      "sys_id": "990053155830205171",
+      "shelfmark": "ENA 2197.4",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990053155830205171?page=0&width=640",
+      "category": {"en": "Piyyut", "he": "פיוט"},
+      "title": {"en": "A poet signs his book", "he": "משורר חותם בספרו"},
+      "description": {"en": "The frontispiece of a piyyut collection in Yedutun ha-Levi's hand, with his signature enclosed in a medallion.", "he": "שער של קובץ פיוטים בכתב ידו של ידותון הלוי, ובמרכזו חתימתו בתוך מדליון."},
+      "alt": {"en": "Piyyut manuscript frontispiece ENA 2197.4", "he": "שער כתב יד של פיוטים, ENA 2197.4"}
+    },
+    {
+      "id": "ms-magic-love-recipe",
+      "sys_id": "990051211110205171",
+      "shelfmark": "T-S K12.89",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051211110205171?page=0&width=640",
+      "category": {"en": "Magic", "he": "מאגיה"},
+      "title": {"en": "A recipe for love and affection", "he": "מרשם לאהבה ולחיבה"},
+      "description": {"en": "Magical recipes invoke Esther, Ahasuerus, and the Song of Songs to seek affection between husband and wife.", "he": "מרשמים מאגיים מגייסים את אסתר ואחשוורוש ואת שיר השירים כדי לעורר חיבה בין איש לאשתו."},
+      "alt": {"en": "Magical recipes manuscript T-S K12.89", "he": "כתב יד של מרשמים מאגיים, T-S K12.89"}
+    },
+    {
+      "id": "ms-mishnah-sifra-palimpsest",
+      "sys_id": "990051160400205171",
+      "shelfmark": "T-S E2.51",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051160400205171?page=0&width=640",
+      "category": {"en": "Palimpsest and Midrash", "he": "פלימפססט ומדרש"},
+      "title": {"en": "A Sifra hidden beneath the Mishnah", "he": "ספרא המסתתר מתחת למשנה"},
+      "description": {"en": "A palimpsest: the visible Mishnah was written over an earlier layer from the halakhic midrash Sifra.", "he": "פלימפססט: נוסח המשנה הגלוי נכתב על גבי שכבה קדומה יותר של מדרש ההלכה ספרא."},
+      "alt": {"en": "Mishnah and Sifra palimpsest T-S E2.51", "he": "פלימפססט של משנה וספרא, T-S E2.51"},
+      "reference": {
+        "label": {"en": "Read Elyashiv Cherlow’s article", "he": "קראו את מאמרו של אלישיב שרלו"},
+        "url": "https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit/fragment-month/fotm-2025/fragment-2"
+      }
+    },
+    {
+      "id": "ms-talmud-yoma",
+      "sys_id": "990001403820205171",
+      "shelfmark": "Or.1081 1.56",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990001403820205171?page=0&width=640",
+      "category": {"en": "Talmud", "he": "תלמוד"},
+      "title": {"en": "Babylonian Talmud, tractate Yoma", "he": "תלמוד בבלי, מסכת יומא"},
+      "description": {"en": "A manuscript witness to Yoma 38a–39a, presented beside its searchable transcription and catalogue records.", "he": "עד נוסח למסכת יומא לח ע״א–לט ע״א, לצד תעתיק הניתן לחיפוש ורשומות קטלוגיות."},
+      "alt": {"en": "Babylonian Talmud Yoma manuscript Or.1081 1.56", "he": "כתב יד של תלמוד בבלי מסכת יומא, Or.1081 1.56"}
+    },
+    {
+      "id": "ms-marriage-contract-micrography",
+      "sys_id": "990051344900205171",
+      "shelfmark": "T-S 20.33",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051344900205171?page=0&width=640",
+      "category": {"en": "Everyday life", "he": "חיי היום־יום"},
+      "title": {"en": "A marriage contract in micrography", "he": "כתובה מעוטרת במיקרוגרפיה"},
+      "description": {"en": "A parchment marriage contract whose surviving border turns tiny writing into ornament.", "he": "קטע כתובה על קלף, ששוליו ששרדו הופכים כתב זעיר לעיטור."},
+      "alt": {"en": "Micrographic marriage contract T-S 20.33", "he": "קטע כתובה במיקרוגרפיה, T-S 20.33"}
+    },
+    {
+      "id": "ms-yosippon-judeo-arabic",
+      "sys_id": "990001394270205171",
+      "shelfmark": "Add.1246",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990001394270205171?page=0&width=640",
+      "category": {"en": "Judeo-Arabic", "he": "ערבית־יהודית"},
+      "title": {"en": "Yosippon in Judeo-Arabic", "he": "יוסיפון בערבית־יהודית"},
+      "description": {"en": "A substantial 52-page witness to Jewish historical writing in Arabic written with Hebrew letters.", "he": "עד נרחב בן 52 עמודים לכתיבה היסטורית יהודית בערבית הכתובה באותיות עבריות."},
+      "alt": {"en": "Judeo-Arabic Yosippon manuscript Add.1246", "he": "כתב יד של יוסיפון בערבית־יהודית, Add.1246"}
+    },
+    {
+      "id": "ms-weekday-amidah",
+      "sys_id": "990051192580205171",
+      "shelfmark": "T-S H 10.164",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051192580205171?page=0&width=640",
+      "category": {"en": "Prayer", "he": "תפילה"},
+      "title": {"en": "A weekday Amidah", "he": "תפילת עמידה של חול"},
+      "description": {"en": "A fragment of the daily standing prayer, showing how familiar liturgy survives in the material record of worship.", "he": "קטע מתפילת העמידה של חול, המדגים כיצד ליטורגיה מוכרת שרדה בתיעוד החומרי של התפילה."},
+      "alt": {"en": "Weekday Amidah manuscript T-S H 10.164", "he": "כתב יד של תפילת עמידה לחול, T-S H 10.164"}
+    },
+    {
+      "id": "ms-decorated-bible",
+      "sys_id": "990051115320205171",
+      "shelfmark": "T-S A 4.31",
+      "page": 8,
+      "thumbnail": "/api/nli_image_by_sysid/990051115320205171?page=7&width=640",
+      "category": {"en": "Bible and book art", "he": "מקרא ואמנות הספר"},
+      "title": {"en": "A decorated Bible manuscript", "he": "כתב יד מקראי מעוטר"},
+      "description": {"en": "A biblical codex with decorated section headings and an illuminated note marking the number of verses in a seder.", "he": "מצחף מקראי ובו כותרות פרשה מעוטרות והערה מאוירת המציינת את מספר הפסוקים בסדר."},
+      "alt": {"en": "Decorated Bible manuscript T-S A 4.31", "he": "כתב יד מקראי מעוטר, T-S A 4.31"}
+    },
+    {
+      "id": "ms-personal-wedding-letter",
+      "sys_id": "990051250610205171",
+      "shelfmark": "T-S 13J34.9",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051250610205171?page=0&width=640",
+      "category": {"en": "Personal letter", "he": "מכתב אישי"},
+      "title": {"en": "An aunt writes about a family wedding", "he": "דודה כותבת על חתונה משפחתית"},
+      "description": {"en": "Umm Da'ud tells her nephew about her daughter's wedding, then adds requests concerning money and household goods.", "he": "אום דאוד מספרת לאחיינה על חתונת בתה, ומוסיפה בקשות בענייני כסף וחפצי בית."},
+      "alt": {"en": "Personal wedding letter T-S 13J34.9", "he": "מכתב אישי על חתונה, T-S 13J34.9"}
+    },
+    {
+      "id": "ms-247-year-calendar",
+      "sys_id": "990051202600205171",
+      "shelfmark": "T-S K2.8",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051202600205171?page=0&width=640",
+      "category": {"en": "Calendar", "he": "לוח שנה"},
+      "title": {"en": "A calendar designed for 247 years", "he": "לוח שנועד ל־247 שנים"},
+      "description": {"en": "A calendrical manuscript built on a 247-year cycle, simplifying the arithmetic of the fixed Jewish calendar.", "he": "כתב יד קלנדרי המבוסס על מחזור בן 247 שנים ומפשט את חישובי הלוח היהודי הקבוע."},
+      "alt": {"en": "Two-hundred-and-forty-seven-year calendar T-S K2.8", "he": "לוח שנה בן 247 שנים, T-S K2.8"}
+    }
+  ],
+  "works": [
+    {"id": "work-mishneh-torah", "catalog_value": "7267", "title": {"en": "Mishneh Torah", "he": "משנה תורה"}, "description": {"en": "Browse manuscripts catalogued under a well-known legal work.", "he": "עיינו בכתבי יד שקוטלגו תחת חיבור הלכתי מוכר."}},
+    {"id": "work-haggadah", "catalog_value": "1050", "title": {"en": "Passover Haggadah", "he": "הגדה של פסח"}, "description": {"en": "See the range of manuscripts assigned to one familiar liturgical work.", "he": "ראו את מגוון כתבי היד שיוחסו לחיבור ליטורגי מוכר אחד."}},
+    {"id": "work-saadiah-tafsir", "catalog_value": "7357", "title": {"en": "Saadia Gaon's Tafsir", "he": "תפסיר רב סעדיה גאון"}, "description": {"en": "Enter the catalogue through a major Judeo-Arabic biblical work.", "he": "היכנסו לקטלוג דרך חיבור מקראי מרכזי בערבית־יהודית."}},
+    {"id": "work-maimonides-mishnah-arabic", "catalog_value": "7466", "title": {"en": "Maimonides' Mishnah Commentary (Arabic)", "he": "פירוש המשנה לרמב״ם בערבית"}, "description": {"en": "Browse catalogued witnesses of Maimonides' Arabic commentary.", "he": "עיינו בעדים מקוטלגים של פירושו הערבי של הרמב״ם."}},
+    {"id": "work-guide-perplexed", "catalog_value": "7514", "title": {"en": "Guide for the Perplexed (Arabic)", "he": "מורה הנבוכים בערבית"}, "description": {"en": "Explore manuscripts catalogued under a philosophical work.", "he": "עיינו בכתבי יד שקוטלגו תחת חיבור פילוסופי."}},
+    {"id": "work-book-precepts", "catalog_value": "7285", "title": {"en": "Book of Precepts by Maimonides (Hebrew)", "he": "ספר המצוות לרמב״ם בעברית"}, "description": {"en": "Follow a known legal work through its catalogued Genizah witnesses.", "he": "עקבו אחר חיבור הלכתי מוכר בעדי הגניזה המקוטלגים שלו."}}
+  ],
+  "computed_candidates": [
+    {
+      "id": "computed-hayyuj-kitab-al-nutaf",
+      "identification_id": "e13f328f61040c2f6b591624dcd0922ace137b62293ebf62269a715672f53c5b",
+      "work_id": "w000068",
+      "sys_id": "990051269760205171",
+      "shelfmark": "T-S Ar.24.81",
+      "page": 2,
+      "thumbnail": "/api/nli_image_by_sysid/990051269760205171?page=1&width=640",
+      "alt": {"en": "Manuscript image of T-S Ar.24.81, page 2", "he": "תמונת כתב היד T-S Ar.24.81, עמוד 2"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Philology and grammar", "he": "בלשנות ודקדוק"},
+      "title": {"en": "Judah Hayyuj, Kitab al-Nutaf", "he": "יהודה חיוג׳, ספר המריטה"},
+      "description": {"en": "Catalogued as Judeo-Arabic biblical exegesis on Jeremiah and Ezekiel; the automatic match suggests Hayyuj’s grammatical work.", "he": "מקוטלג כפרשנות מקרא בערבית־יהודית לירמיהו וליחזקאל; ההתאמה האוטומטית מצביעה על חיבורו הדקדוקי של יהודה חיוג׳."}
+    },
+    {
+      "id": "computed-maimonides-logic",
+      "identification_id": "a8828dcbf734a7ddb4d6c2064c69bdc9acd3e0504c46625acd34ea838b2e6a48",
+      "work_id": "w000023",
+      "sys_id": "990053596740205171",
+      "shelfmark": "ENA 3171.7",
+      "page": 2,
+      "thumbnail": "/api/nli_image_by_sysid/990053596740205171?page=1&width=640",
+      "alt": {"en": "Manuscript image of ENA 3171.7, page 2", "he": "תמונת כתב היד ENA 3171.7, עמוד 2"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Philosophy and logic", "he": "פילוסופיה ולוגיקה"},
+      "title": {"en": "Maimonides, Treatise on Logic", "he": "הרמב״ם, באור מלאכת ההגיון"},
+      "description": {"en": "Catalogued only under broad philosophy and theology headings; the automatic match suggests Maimonides’ specific work on logic.", "he": "מקוטלג רק תחת כותרות כלליות של פילוסופיה ותאולוגיה; ההתאמה האוטומטית מצביעה על חיבורו המסוים של הרמב״ם בלוגיקה."}
+    },
+    {
+      "id": "computed-keter-malkhut",
+      "identification_id": "b7aa95c8c8378b84a2e697521737f6141555678d4685e9beaaeac860fecde929",
+      "work_id": "w001129",
+      "sys_id": "990051639550205171",
+      "shelfmark": "T-S NS 269.196",
+      "page": 8,
+      "thumbnail": "/api/nli_image_by_sysid/990051639550205171?page=7&width=640",
+      "alt": {"en": "Manuscript image of T-S NS 269.196, page 8", "he": "תמונת כתב היד T-S NS 269.196, עמוד 8"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Piyyut", "he": "פיוט"},
+      "title": {"en": "Solomon ibn Gabirol, Keter Malkhut", "he": "שלמה אבן גבירול, כתר מלכות"},
+      "description": {"en": "Catalogued as linguistics; the automatic match suggests Ibn Gabirol’s Keter Malkhut.", "he": "מקוטלג כבלשנות; ההתאמה האוטומטית מצביעה על כתר מלכות לרבי שלמה אבן גבירול."}
+    },
+    {
+      "id": "computed-twenty-chapters",
+      "identification_id": "ebde1012ea00a18d054b6cd8bfe2186a860be0da0cdd5f59080bca4f06f02f06",
+      "work_id": "w000057",
+      "sys_id": "990051284490205171",
+      "shelfmark": "T-S Ar.32.13",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051284490205171?page=0&width=640",
+      "alt": {"en": "Manuscript image of T-S Ar.32.13, page 1", "he": "תמונת כתב היד T-S Ar.32.13, עמוד 1"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Jewish kalam", "he": "כלאם יהודי"},
+      "title": {"en": "Daud al-Muqammis, Twenty Chapters", "he": "דאוד אלמקמץ, עשרים מאמרים"},
+      "description": {"en": "The Baker/Polliack catalogue gives no specific work; the automatic match suggests Daud al-Muqammis’s Twenty Chapters.", "he": "בקטלוג בייקר–פוליאק לא צוין חיבור מסוים; ההתאמה האוטומטית מצביעה על עשרים מאמרים לדאוד אלמקמץ."}
+    },
+    {
+      "id": "computed-ben-hofni-tzitzit",
+      "identification_id": "bd57368373fad942f2405a7760733f2cec93cfcf422463bfaf6243a349ed1b17",
+      "work_id": "w000066",
+      "sys_id": "990053241810205171",
+      "shelfmark": "ENA 3063.6",
+      "page": 1,
+      "thumbnail": "/api/jts_image/990053241810205171?page=0&width=640",
+      "alt": {"en": "Manuscript image of ENA 3063.6, page 1", "he": "תמונת כתב היד ENA 3063.6, עמוד 1"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Gaonic halakhah", "he": "הלכה גאונית"},
+      "title": {"en": "Samuel ben Hofni, Laws of the Commandment of Tzitzit", "he": "ספר דיני מצות הציצית לרשב״ח"},
+      "description": {"en": "Catalogued as Talmudic commentary on Shabbat 22a; the automatic match suggests Samuel ben Hofni’s work on the laws of tzitzit.", "he": "מקוטלג כפירוש תלמוד למסכת שבת כב ע״א; ההתאמה האוטומטית מצביעה על ספר דיני מצות הציצית לרב שמואל בן חופני."}
+    },
+    {
+      "id": "computed-rashi-numbers",
+      "identification_id": "8d2a157f0c0d9c4f0e268805e18ac7a6f3b97a3841df2413a57eca27a9403eb4",
+      "work_id": "w001304",
+      "sys_id": "990053174320205171",
+      "shelfmark": "ENA 2570.3",
+      "page": 2,
+      "thumbnail": "/api/nli_image_by_sysid/990053174320205171?page=1&width=640",
+      "alt": {"en": "Manuscript image of ENA 2570.3, page 2", "he": "תמונת כתב היד ENA 2570.3, עמוד 2"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Biblical commentary", "he": "פרשנות המקרא"},
+      "title": {"en": "Rashi on Numbers", "he": "רש״י על במדבר"},
+      "description": {"en": "The catalogue gives biblical-exegesis passages in Numbers and Deuteronomy; the automatic match proposes the more specific identification Rashi on Numbers.", "he": "הקטלוג מציין קטעי פרשנות מקרא בבמדבר ובדברים; ההתאמה האוטומטית מציעה זיהוי מסוים יותר: רש״י על במדבר."}
+    },
+    {
+      "id": "computed-saadiah-beliefs-opinions",
+      "identification_id": "84bf109e0fe2d044ee75219530c49ad5940d76463415fb01f8d388adc2d3bfac",
+      "work_id": "w000006",
+      "sys_id": "990051260290205171",
+      "shelfmark": "T-S Ar.18(1).24",
+      "page": 1,
+      "thumbnail": "/api/nli_image_by_sysid/990051260290205171?page=0&width=640",
+      "alt": {"en": "Manuscript image of T-S Ar.18(1).24, page 1", "he": "תמונת כתב היד T-S Ar.18(1).24, עמוד 1"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Philosophy and theology", "he": "פילוסופיה ותאולוגיה"},
+      "title": {"en": "Saadia Gaon, The Book of Beliefs and Opinions", "he": "רס״ג, הנבחר באמונות ודעות"},
+      "description": {"en": "Catalogued as halakhah, ethical literature, and a discussion of repentance; the automatic match suggests Saadia Gaon’s Book of Beliefs and Opinions.", "he": "מקוטלג כהלכה, מוסר ודיון בתשובה; ההתאמה האוטומטית מצביעה על ספר הנבחר באמונות ודעות לרס״ג."}
+    },
+    {
+      "id": "computed-mevasser-objections-saadiah",
+      "identification_id": "c2082111b7cca01290b2ed3dc8a682c3911d3f9118cc7c1272d9aee7a0e5d6ce",
+      "work_id": "w000031",
+      "sys_id": "990001538420205171",
+      "shelfmark": "Ms. EVR ARAB I 2030",
+      "page": 42,
+      "thumbnail": "/api/nli_image_by_sysid/990001538420205171?page=41&width=640",
+      "alt": {"en": "Manuscript image of Ms. EVR ARAB I 2030, page 42", "he": "תמונת כתב היד Ms. EVR ARAB I 2030, עמוד 42"},
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7", "dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4"],
+      "category": {"en": "Polemics", "he": "פולמוס"},
+      "title": {"en": "Mevasser ha-Levi, Objections to Saadia", "he": "מבשר הלוי, השגות על רס״ג"},
+      "description": {"en": "Catalogued as commentary on the Torah; the automatic match suggests Mevasser ha-Levi’s objections to Saadia Gaon.", "he": "מקוטלג כפירוש התורה; ההתאמה האוטומטית מצביעה על השגות מבשר הלוי על רס״ג."}
+    }
+  ],
+  "puzzle": {
+    "id": "puzzle-curated-v1",
+    "document_id": "start-curated-puzzle-pending",
+    "validated_public": false,
+    "title": {"en": "Try the Fragment Puzzle", "he": "נסו את פאזל הקטעים"},
+    "description": {"en": "Arrange manuscript images on a shared canvas and test how fragments might fit together.", "he": "סדרו תמונות כתבי יד על משטח משותף ובדקו כיצד קטעים עשויים להתחבר."}
+  },
+  "demos": {
+    "parallels": {
+      "id": "demo-parallels",
+      "enabled": true,
+      "text": "דרור יקרא לבן עם בת\nוינצרכם כמו בבת\nנעים שמכם ולא ישבת\nשבו נוחו ביום שבת\n\nדרוש נוי ואולמי\nואות ישע עשה עמי\nנטע שורק בתוך כרמי\nשעה שועת בני עמי",
+      "title": {"en": "Find parallels to Deror Yikra", "he": "מצאו מקבילות לדרור יקרא"},
+      "description": {"en": "Open a prepared parallel search for the opening stanzas of Dunash ben Labrat’s Sabbath poem.", "he": "פתחו חיפוש מקבילות מוכן לבתים הפותחים של פיוט השבת מאת דונש בן לברט."}
+    },
+    "joins": {
+      "id": "demo-joins",
+      "enabled": true,
+      "sys_id": "990001403820205171",
+      "page": 1,
+      "title": {"en": "Open the Joins Lab with an anchor", "he": "פתחו את מעבדת הצירופים עם כתב יד עוגן"},
+      "description": {"en": "Start from one manuscript and investigate possible physical or textual relationships.", "he": "התחילו מכתב יד אחד וחקרו קשרים פיזיים או טקסטואליים אפשריים."}
+    }
+  }
+}

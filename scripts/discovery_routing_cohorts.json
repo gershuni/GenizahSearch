@@ -1,0 +1,10 @@
+{
+  "schema_version": "discovery-routing-cohorts-v1",
+  "note": "Reviewed namespace/cohort registry (V4.2 plan C4). Every REF*-prefixed work id in a Track-1 match table must belong to exactly one namespace here; an unregistered REF* prefix is a hard classification error, never a silent legacy fallback. REF2 rows are governed by the fitted gen-2 decisions (legacy); REF4/REF5/REF6 are classified separately with the frozen coverage estimand (extrapolated).",
+  "cohorts": [
+    {"namespace": "REF2", "cohort": "legacy"},
+    {"namespace": "REF4", "cohort": "extrapolated", "identity_mode": "private_sibling", "source_map": "discovery_v4_sources.json"},
+    {"namespace": "REF5", "cohort": "extrapolated", "identity_mode": "private_sibling", "source_map": "discovery_v4_1_sources.json"},
+    {"namespace": "REF6", "cohort": "extrapolated", "identity_mode": "per_entry", "source_map": "discovery_v4_2_sources.json"}
+  ]
+}

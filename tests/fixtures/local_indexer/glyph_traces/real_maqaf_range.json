@@ -1,0 +1,940 @@
+{
+  "description": "REAL glyph trace from איגרות הרמבם - שילת.pdf page 116. Letter-spaced/justified line; guards the 2026-05-31 edge-gap + Mn de-space revision.",
+  "source_page": 116,
+  "raw_visual": " הרי״ף )ע׳ הקדמת המשנה עמ׳ פה־פו, הפירוש לשבועות ו, ז. וע״ע להלן איגרת",
+  "pipeline_output": "הרי״ף)ע׳ הקדמת המשנה עמ׳ פה־פו, הפירוש לשבועות ו, ז. וע״ע להלן איגרת",
+  "must_contain": [
+    "פה־פו"
+  ],
+  "must_not_contain": [
+    "פהפ־ו"
+  ],
+  "lines": [
+    {
+      "bbox": [
+        155.12,
+        1062.88,
+        874.9,
+        1084.46
+      ],
+      "spans": [
+        {
+          "font": "real",
+          "size": 19.4,
+          "chars": [
+            {
+              "c": " ",
+              "bbox": [
+                870.07,
+                1062.88,
+                874.9,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                860.19,
+                1062.88,
+                870.07,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                850.26,
+                1062.88,
+                859.22,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "י",
+              "bbox": [
+                843.29,
+                1062.88,
+                849.29,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": "״",
+              "bbox": [
+                833.44,
+                1062.88,
+                842.32,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 4
+            },
+            {
+              "c": "ף",
+              "bbox": [
+                822.95,
+                1062.88,
+                832.46,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 5
+            },
+            {
+              "c": " ",
+              "bbox": [
+                805.54,
+                1062.88,
+                810.36,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 6
+            },
+            {
+              "c": ")",
+              "bbox": [
+                799.11,
+                1062.88,
+                805.54,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 7
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                788.93,
+                1062.88,
+                798.72,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 8
+            },
+            {
+              "c": "׳",
+              "bbox": [
+                783.62,
+                1062.88,
+                788.54,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 9
+            },
+            {
+              "c": " ",
+              "bbox": [
+                767.09,
+                1062.88,
+                771.92,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 10
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                757.21,
+                1062.88,
+                767.09,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 11
+            },
+            {
+              "c": "ק",
+              "bbox": [
+                746.69,
+                1062.88,
+                756.02,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 12
+            },
+            {
+              "c": "ד",
+              "bbox": [
+                736.54,
+                1062.88,
+                745.5,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 13
+            },
+            {
+              "c": "מ",
+              "bbox": [
+                725.06,
+                1062.88,
+                735.35,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 14
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                713.87,
+                1062.88,
+                723.87,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 15
+            },
+            {
+              "c": " ",
+              "bbox": [
+                696.86,
+                1062.88,
+                701.69,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 16
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                686.98,
+                1062.88,
+                696.86,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 17
+            },
+            {
+              "c": "מ",
+              "bbox": [
+                675.77,
+                1062.88,
+                686.06,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 18
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                661.57,
+                1062.88,
+                674.85,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 19
+            },
+            {
+              "c": "נ",
+              "bbox": [
+                654.55,
+                1062.88,
+                660.65,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 20
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                643.75,
+                1062.88,
+                653.63,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 21
+            },
+            {
+              "c": " ",
+              "bbox": [
+                628.0,
+                1062.88,
+                632.83,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 22
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                618.21,
+                1062.88,
+                628.0,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 23
+            },
+            {
+              "c": "מ",
+              "bbox": [
+                607.3,
+                1062.88,
+                617.59,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 24
+            },
+            {
+              "c": "׳",
+              "bbox": [
+                601.75,
+                1062.88,
+                606.67,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 25
+            },
+            {
+              "c": " ",
+              "bbox": [
+                585.83,
+                1062.88,
+                590.65,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 26
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                577.0,
+                1062.88,
+                585.83,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 27
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                566.28,
+                1062.88,
+                576.16,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 28
+            },
+            {
+              "c": "־",
+              "bbox": [
+                558.43,
+                1062.88,
+                565.43,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 29
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                548.76,
+                1062.88,
+                557.58,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 30
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                542.17,
+                1062.88,
+                547.92,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 31
+            },
+            {
+              "c": ",",
+              "bbox": [
+                536.5,
+                1062.88,
+                541.32,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 32
+            },
+            {
+              "c": " ",
+              "bbox": [
+                518.65,
+                1062.88,
+                523.48,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 33
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                508.77,
+                1062.88,
+                518.65,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 34
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                498.98,
+                1062.88,
+                507.8,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 35
+            },
+            {
+              "c": "י",
+              "bbox": [
+                492.01,
+                1062.88,
+                498.01,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 36
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                482.09,
+                1062.88,
+                491.05,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 37
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                475.37,
+                1062.88,
+                481.12,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 38
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                461.12,
+                1062.88,
+                474.4,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 39
+            },
+            {
+              "c": " ",
+              "bbox": [
+                444.16,
+                1062.88,
+                448.98,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 40
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                435.76,
+                1062.88,
+                444.16,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 41
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                421.17,
+                1062.88,
+                434.45,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 42
+            },
+            {
+              "c": "ב",
+              "bbox": [
+                411.01,
+                1062.88,
+                419.87,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 43
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                403.95,
+                1062.88,
+                409.7,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 44
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                392.86,
+                1062.88,
+                402.65,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 45
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                385.8,
+                1062.88,
+                391.55,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 46
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                374.5,
+                1062.88,
+                384.5,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 47
+            },
+            {
+              "c": " ",
+              "bbox": [
+                359.23,
+                1062.88,
+                364.05,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 48
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                353.47,
+                1062.88,
+                359.23,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 49
+            },
+            {
+              "c": ",",
+              "bbox": [
+                348.25,
+                1062.88,
+                353.07,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 50
+            },
+            {
+              "c": " ",
+              "bbox": [
+                335.93,
+                1062.88,
+                340.76,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 51
+            },
+            {
+              "c": "ז",
+              "bbox": [
+                329.81,
+                1062.88,
+                335.93,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 52
+            },
+            {
+              "c": ".",
+              "bbox": [
+                325.37,
+                1062.88,
+                330.2,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 53
+            },
+            {
+              "c": " ",
+              "bbox": [
+                308.13,
+                1062.88,
+                312.96,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 54
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                302.38,
+                1062.88,
+                308.13,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 55
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                291.62,
+                1062.88,
+                301.4,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 56
+            },
+            {
+              "c": "״",
+              "bbox": [
+                281.76,
+                1062.88,
+                290.64,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 57
+            },
+            {
+              "c": "ע",
+              "bbox": [
+                271.0,
+                1062.88,
+                280.79,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 58
+            },
+            {
+              "c": " ",
+              "bbox": [
+                254.72,
+                1062.88,
+                259.55,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 59
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                246.32,
+                1062.88,
+                254.72,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 60
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                235.48,
+                1062.88,
+                245.36,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 61
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                226.13,
+                1062.88,
+                234.52,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 62
+            },
+            {
+              "c": "ן",
+              "bbox": [
+                218.87,
+                1062.88,
+                225.17,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 63
+            },
+            {
+              "c": " ",
+              "bbox": [
+                202.69,
+                1062.88,
+                207.51,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 64
+            },
+            {
+              "c": "א",
+              "bbox": [
+                192.51,
+                1062.88,
+                202.69,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 65
+            },
+            {
+              "c": "י",
+              "bbox": [
+                185.17,
+                1062.88,
+                191.18,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 66
+            },
+            {
+              "c": "ג",
+              "bbox": [
+                176.75,
+                1062.88,
+                183.84,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 67
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                166.46,
+                1062.88,
+                175.42,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 68
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                155.12,
+                1062.88,
+                165.12,
+                1084.46
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 19.4,
+              "span_id": 0,
+              "original_order": 69
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

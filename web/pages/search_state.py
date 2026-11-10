@@ -1,0 +1,878 @@
+# -*- coding: utf-8 -*-
+"""
+Search State Classes and Helpers
+
+Extracted from web/pages/search.py (Phase 72, Plan 01).
+Contains SearchUIState, AdvancedViewState, SearchPageRefs dataclass,
+search history management functions, and domain_display_name helper.
+
+This module has ZERO UI (nicegui.ui) dependencies -- it only holds state
+and pure logic that operates on app.storage or SearchUIState fields.
+"""
+from __future__ import annotations
+
+import asyncio
+
+from dataclasses import dataclass
+from typing import Any, Optional, List, Set
+from datetime import datetime
+
+from nicegui import app
+from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
+from web.translations import tr, get_language
+from web.services import BrowsePage
+from web import search_runs
+
+
+# ---------------------------------------------------------------------------
+# SearchUIState -- main per-page search state holder
+# ---------------------------------------------------------------------------
+
+class SearchUIState:
+    def __init__(self):
+        self.progress = 0.0
+        self.status = ""
+        self.is_running = False
+        self.is_cancelled = False  # For stop button functionality
+        self.results = []
+        # The Responsa guard's downgrade of these results (shown on the count line)
+        self.responsa_warning = None
+        self.selected_result = None
+        self.total_count = 0
+        self.current_page_idx = 0  # For browse within viewer
+        self.current_page = 0  # Zero-indexed page number for result pagination
+        self.selected_indices = set()  # For bulk operations
+        self.is_panel_collapsed = False  # For collapsible search panel
+        self.last_scroll_top = 0  # For scroll-based auto-collapse
+        self.update_timer = None  # Track progress update asyncio Task to prevent duplicates
+        self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions (link-presence; PGP badge)
+        # SEED-022: sys_ids with ANY readable manual transcription/translation
+        # (PGP text ∪ FGP). Source-agnostic; rendered as a SEPARATE additive badge
+        # alongside the PGP one. Do NOT conflate with transcription_sys_ids above.
+        self.manual_transcription_sys_ids: Set[str] = set()
+        self.displayed_results = []  # Currently rendered subset (may be filtered)
+        self.builder_negated_words: list = []  # Words negated via Query Builder
+        self.result_domains: dict = {}  # Domain classification map for result indicators
+        self.all_result_domains: dict = {}  # sys_id -> list of domain names (deduped)
+        self.domain_exclusions: set = set()  # domain names user has excluded
+        self.has_domain_data: bool = False  # whether any results have domain data
+        self.domain_name_map: dict = {}  # English domain name -> Hebrew name
+        self.catalog_source_counts: dict = {}  # sys_id -> count of catalog sources
+        self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
+        self.search_start_time: float = 0.0  # For elapsed timer display
+        self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
+        self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
+        self.pgp_filter: str = 'all'  # Phase 999.2: 'all', 'only_pgp', 'hide_pgp' — post-search PGP-presence filter
+        self.library_filter: list = []  # SEED-026 (LIBFILTER-01): active code set for the current mode (hide-set in Hide mode, allowlist in Show-only mode); empty = all
+        self.library_mode: str = 'hide'  # 'show_only' | 'hide' (D-05 default: Hide mode with empty set = show all)
+        self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
+        # Pre-search filter state (Search only in... panel)
+        self.filter_domains: list = []      # Selected domain filters (multi-select)
+        self.filter_authors: list = []      # Selected authors (person_ids, multi-select)
+        self.filter_works: list = []        # Selected works (title_ids, multi-select)
+        self.filter_include_mode: bool = True  # True=include, False=exclude
+        self.filter_material_exclude: list = []  # Material types to exclude (e.g., ['Printed'])
+        # Catalogue criteria ("Manuscript features", shared/catalog_criteria.py):
+        # period of copy, script, size, ... -- replaced the date range, the script
+        # lists and the measurement filters (PR 1b of CATALOGUE_CRITERIA_PLAN.md).
+        self.filter_criteria: dict = {}
+        self.filter_manuscript_count: int = None  # Count of manuscripts matching current filters
+        self.restrict_sys_ids: set = None   # Computed from filters, passed to search engine
+        self.filter_text_all: list = []     # FTS5 text: all words must match
+        self.filter_text_any: list = []     # FTS5 text: any word must match
+        self.filter_text_not: list = []     # FTS5 text: exclude these words
+        self.word_search_excluded_ids: set = set()  # Per-manuscript exclusions for word search mode
+        self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
+        # Post-search measurement filters (DIM-03, Phase 54) -- SEPARATE from the
+        # pre-search criteria, with the same meaning (D20): a criteria dict of the
+        # measured-data keys, matched by FjmsService.match_result_criteria.
+        self.post_filter_criteria: dict = {}
+        self._measurement_cache: dict = {}  # {sys_id: summary_dict}
+        # Translation enrichment (Phase 46)
+        self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
+        self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
+        self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
+        # Refinement chain state (Phase 55 -- search within results)
+        self.refinement_chain: list = []               # list of RefinementStep (the chain)
+        self.last_variant_settings: dict = None        # variant settings of the last search sent (recorded on its step)
+        # The shown results leave matches out (D8): the search reached its candidate
+        # limit, the list was restricted to a cut-off step, or the saved snapshot kept
+        # only part of it. The count shows "N+", and search-within completes it first.
+        self.result_count_capped: bool = False
+        # The shown results left out only crossings their search's own rule leaves out
+        # (shared/refinement.py::only_partial): a step built on them is not completed.
+        self.result_partial: bool = False
+        self.running_label: str = None   # what the progress line says while running (default "Searching...")
+        # What the last search sent ran with (query without its mode prefix, engine
+        # mode, gap, NOT-words, position, Responsa options, scope, variant settings):
+        # the first step of a search-within chain is built from it, so a replay or a
+        # completion runs the same search (the desktop's D8 commit 2).
+        self.last_run: dict = None
+        self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results, not post-filtered)
+        self._refine_mode: bool = False                # True when user clicked "Search within" and is entering query
+        self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
+        self._refinement_scope_sig: str = ''           # scope_signature at time of last chain step creation
+        self._zero_result_refine: bool = False         # True when last refine returned 0 results (D-14a)
+        self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
+        # Visual Similarity restriction state (Phase 57)
+        self.vs_restrict_sys_ids: set = None   # Partner sys_ids from visual suggestions
+        self.vs_restrict_label: str = None     # Display label for VS breadcrumb
+        self.vs_restrict_source_ids: list = [] # Source manuscript sys_ids that generated the restrict set
+        self.vs_restrict_mode: str = 'union'   # 'union' or 'intersection'
+        self.vs_availability: dict = {}        # sys_id -> bool, batch VS availability for current results
+        self.vs_browse_mode: bool = False      # True = show pool as results without text query
+        # Manuscript exclusion state (Phase 56 -- exclude known manuscripts)
+        self.exclusion_sources: list = []                    # list of ExclusionSource objects
+        self.manuscript_excluded_results: list = []          # Results hidden by manuscript exclusion [{result, reason}]
+        self._exclusion_shelf_map: dict | None = None        # Lazy-built norm->sys_id map for file resolution
+        # Dynamic render-state attributes (Pitfall 4: initialized here for clarity)
+        self.expanded_index = None              # Index of currently expanded result card
+        self.expansion_refs = {}                # {index: ui_element} for expanded card containers
+        self._lazy_loaders = {}                 # {index: callable} for deferred text loading
+
+
+# ---------------------------------------------------------------------------
+# AdvancedViewState -- state for the advanced/quick-view dialog
+# ---------------------------------------------------------------------------
+
+class AdvancedViewState:
+    """State holder for the Advanced View dialog to enable in-place updates."""
+    def __init__(self):
+        self.current_result_idx: int = 0
+        self.results: List[dict] = []
+        self.current_sys_id: Optional[str] = None
+        self.current_p_num: int = 1
+        self.current_fl_id: Optional[str] = None
+        self.total_pages: int = 1
+        self.current_page: Optional[BrowsePage] = None
+        # (sys_id, volume_ie, p_num) the search hit belongs to. Next/Previous
+        # re-renders the SAME result object, so `snippet` keeps pointing at the
+        # original hit page; the SEED-033 `must_contain` phrase must apply only
+        # while that page is displayed (Codex P2, 2026-09-02).
+        self.hit_scope: Optional[tuple] = None
+        self.show_image_panel: bool = True
+        self.zoom_level: float = 1.0
+        self.rotation: int = 0
+        self.is_fullscreen: bool = False  # Fullscreen mode
+        # Edit mode state (inline editing like browse.py)
+        self.edit_mode: bool = False
+        self.edit_text: str = ""
+        self.edit_notes: str = ""
+        self.original_edit_text: str = ""
+        self.draft_saved: bool = False
+        self.draft_id: Optional[str] = None
+        # Enrichment data (FJMS + crossref)
+        self.fjms_data: Optional[dict] = None
+        self.crossref_data: Optional[dict] = None
+        # Volume-aware browse (multi-IE manuscripts)
+        self.volume_ie: Optional[str] = None
+        # Highlighted search terms for re-application on version change
+        self.highlight_terms: List[str] = []
+        # UI element references for in-place updates
+        self.result_label = None
+        self.score_badge = None
+        self.prev_btn = None
+        self.next_btn = None
+        self.content_container = None
+        self.image_container = None
+        # Additional UI refs set during dialog construction
+        self.header_container = None
+        self.info_bar_container = None
+        self.brightness_sl = None
+
+
+# ---------------------------------------------------------------------------
+# SearchPageRefs -- UI element and callback references for extracted functions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SearchPageRefs:
+    """UI element references and callbacks needed by extracted search_results functions.
+
+    Populated in create_search_page() after all UI elements and callbacks are defined.
+    Plan 02 will wire this up; Plan 01 only defines the dataclass.
+    """
+    results_container: Any           # ui.scroll_area
+    query_input: Any                 # ui.input
+    page_client: Any                 # ui.context.client
+
+    page_size: int = 50              # PAGE_SIZE constant
+
+    # Callback functions (set after definition in create_search_page)
+    update_search_within_btn: Any = None
+    update_refinement_strip: Any = None
+    undo_zero_result_refine: Any = None
+    apply_word_search_exclusions_and_render: Any = None
+    update_selection_ui: Any = None
+    show_add_to_list_dialog: Any = None
+    copy_result_text: Any = None
+    domain_display_name: Any = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 74: Page-scoped snapshot helpers (D-06)
+# ---------------------------------------------------------------------------
+#
+# These are the SOLE owners of the restorable_page_snapshot storage keys
+# for the search page. Direct app.storage.user writes to any of the keys in
+# _SEARCH_SNAPSHOT_KEYS elsewhere in the codebase is a violation after
+# Phase 74 (D-03, D-05, D-08).
+
+_SEARCH_SNAPSHOT_VERSION = 1
+_SEARCH_RUN_SNAPSHOT_VERSION = 1  # the shape of a run's snapshot (web/search_runs.py)
+_SEARCH_ACTIVE_USER_FALLBACK_LIMIT = 250
+_SEARCH_RESULT_EXCERPT_CHARS = 500
+
+# Legacy keys owned by these helpers (D-08 - no format change).
+# Bootstrap-input keys (search_mode, search_query, search_preset,
+# search_max_changes, search_gap, search_text_position) are NOT in this set -
+# they feed resolve_search_bootstrap and are not SearchUIState fields
+# (per must_haves.truths[0]). Migration of bootstrap-input keys is explicitly
+# OUT OF SCOPE for Plan 74-01 (review-revision: Codex HIGH #1).
+# Filter keys are NOT here either - they are owned by filter_panel.load_filter_state
+# / persist_value and cleared separately by clear_search_snapshot.
+_SEARCH_SNAPSHOT_KEYS = (
+    'domain_exclusions', 'search_printed_filter',
+    'word_search_excluded_ids', 'search_exclusion_sources',
+    'search_refinement_chain', 'search_results',
+    'search_all_terms_filter', 'search_result_count_capped', 'search_result_partial',
+    'search_last_variant_settings', 'search_last_run',
+)
+
+# Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
+_SEARCH_FILTER_KEYS = (
+    'search_filter_domains', 'search_filter_authors', 'search_filter_works',
+    'search_filter_include_mode', 'search_filter_material_exclude',
+    'search_filter_text_all', 'search_filter_text_any', 'search_filter_text_not',
+    'search_filter_criteria',
+)
+# What the criteria replaced: cleared with the filters, never read again
+# (the dates are read in once by filter_panel.load_filter_state, D18).
+_SEARCH_LEGACY_FILTER_KEYS = tuple(
+    f'search_{key}' for key in ('filter_date_from', 'filter_date_to', 'filter_script_styles',
+                                'filter_script_places', 'filter_width_min', 'filter_width_max',
+                                'filter_height_min', 'filter_height_max',
+                                'filter_line_count_min', 'filter_line_count_max',
+                                'filter_line_height_min', 'filter_line_height_max',
+                                'filter_text_density_min', 'filter_text_density_max',
+                                'filter_measurement_material'))
+
+# The pre-search filters a search ran with, as SearchUIState attribute names. They
+# are saved with its run (last_run['pre_search_filters']) so that a stamped Back
+# restores the filters ITS rows were searched with -- not the shared current filter
+# keys, which another tab may have changed since (Codex, PR #436).
+RUN_FILTER_FIELDS = tuple(key[len('search_'):] for key in _SEARCH_FILTER_KEYS)
+_LIST_FILTER_FIELDS = frozenset({
+    'filter_domains', 'filter_authors', 'filter_works', 'filter_material_exclude',
+    'filter_text_all', 'filter_text_any', 'filter_text_not',
+})
+
+
+def _filter_value(name: str, value):
+    """A copy of a filter value (a saved run never shares a list with the page),
+    or the field's default when it is absent."""
+    if name in _LIST_FILTER_FIELDS:
+        return list(value) if isinstance(value, (list, tuple, set, frozenset)) else []
+    if name == 'filter_include_mode':
+        return True if value is None else bool(value)
+    if name == 'filter_criteria':
+        from shared.catalog_criteria import clean_criteria
+        return clean_criteria(value, strict=False)[0]  # a fresh dict, never shared
+    return value
+
+
+def run_filter_state(state: 'SearchUIState') -> dict:
+    """The pre-search filters *state* searches with now, for its run."""
+    return {name: _filter_value(name, getattr(state, name, None)) for name in RUN_FILTER_FIELDS}
+
+
+def apply_run_filter_state(state: 'SearchUIState', filters) -> bool:
+    """Set *state*'s pre-search filters to a run's saved ones (absent fields take
+    their defaults). False, and nothing changed, when *filters* is not a dict."""
+    if not isinstance(filters, dict):
+        return False
+    for name in RUN_FILTER_FIELDS:
+        setattr(state, name, _filter_value(name, filters.get(name)))
+    # A run saved before the criteria: its dates as the period (D18); and
+    # nothing the open catalogue file cannot answer (rule 9, with the notice).
+    from web.components.filter_panel import restore_saved_criteria
+    state.filter_criteria = restore_saved_criteria({
+        'criteria': filters.get('filter_criteria'),
+        'date_from': filters.get('filter_date_from'), 'date_to': filters.get('filter_date_to')})
+    return True
+
+
+def _browser_id() -> Optional[str]:
+    """This visitor's browser (NiceGUI's browser-storage id), or None outside a request.
+    Runs are kept per browser: another visitor's address never restores them."""
+    try:
+        value = app.storage.browser.get('id')
+    except Exception:
+        return None
+    return str(value) if value else None
+
+
+def url_stamp_of(state: 'SearchUIState') -> Optional[str]:
+    """The run code of the search *state* shows (in its address as ``run=``), if any."""
+    run = state.last_run
+    stamp = run.get('url_stamp') if isinstance(run, dict) else None
+    return stamp if isinstance(stamp, str) and stamp else None
+
+
+def _compact_result_rows(results: list) -> list:
+    """Strip heavy text fields before persisting result rows."""
+    compacted = []
+    for r in results or []:
+        sr = dict(r) if isinstance(r, dict) else r
+        if isinstance(sr, dict):
+            full_text = sr.pop('full_text', None)
+            if full_text:
+                sr['full_text_excerpt'] = str(full_text)[:_SEARCH_RESULT_EXCERPT_CHARS]
+            sr.pop('raw_file_hl', None)
+            sr.pop('content', None)
+            disp = sr.get('display')
+            if disp and isinstance(disp, dict):
+                d = dict(disp)
+                d.pop('full_text', None)
+                d.pop('raw_file_hl', None)
+                d.pop('content', None)
+                sr['display'] = d
+        compacted.append(sr)
+    return compacted
+
+
+def compact_result_rows(results: list) -> list:
+    """Public wrapper for compacting active/search-persisted result rows."""
+    return _compact_result_rows(results)
+
+
+def engine_mode(mode: str) -> str:
+    """The engine mode a web search runs for the page's *mode*.
+
+    The page's Exact is the engine's 'literal', as on the desktop: whole words
+    (owner, 2026-10-01) and the fast paths keyed on it -- pair phrases for a
+    phrase, page documents only for one word, whole manuscripts only for page-break
+    crossings. The engine's 'exact' has none of them (deferred in e8decfca). The
+    page keeps 'exact' for its own state (the mode selector, history, the URL,
+    exports); the engine and the search-within steps get this.
+    """
+    return 'literal' if mode == 'exact' else mode
+
+
+def result_sys_id(res: dict) -> str:
+    """The manuscript a result row is from."""
+    return res.get('sys_id') or res.get('display', {}).get('id', '')
+
+
+def post_criteria_matches(state: 'SearchUIState', results, fetch: bool = True):
+    """The sys_ids among *results* the post-search measurement filters keep:
+    the panel's criteria and rules (D20), the result rows being the universe
+    (FjmsService.match_result_criteria). Kept on the state per criteria, so
+    every re-render reuses them; only rows not checked yet are asked for --
+    and with ``fetch=False`` (a render on the event loop) not asked: None
+    then says some rows are not checked yet. Raises FilterUnavailable: the
+    caller shows the rows unfiltered and says so, never an empty list
+    (rule 9)."""
+    from shared.catalog_criteria import criteria_token
+    from shared.fjms_service import get_fjms_service
+    criteria = state.post_filter_criteria or {}
+    token = criteria_token(criteria)
+    cache = getattr(state, '_post_match', None)
+    if not cache or cache.get('token') != token:
+        cache = {'token': token, 'checked': set(), 'ids': set()}
+    wanted = {sid for sid in (result_sys_id(r) for r in results) if sid}
+    missing = wanted - cache['checked']
+    if missing and not fetch:
+        state._post_match = cache
+        return None
+    if missing:
+        found = get_fjms_service(thread_safe=True).match_result_criteria(criteria, missing)
+        cache['ids'] |= found or set()
+        cache['checked'] |= missing
+    # A worker whose criteria changed while it ran does not publish its answer
+    # over the new criteria's (Codex round 2 on PR 1b).
+    if criteria_token(state.post_filter_criteria or {}) == token:
+        state._post_match = cache
+    return cache['ids']
+
+
+class PostMatchRefill:
+    """Checks result rows for the post-search filters off the event loop, then
+    re-renders (D20). Every request is kept: rows asked for while a check runs
+    are checked next, in the same task; the task lets go before the re-render,
+    so a miss the re-render meets starts a new check (Codex round 2 on PR 1b:
+    a request made meanwhile was dropped, and the list stayed short).
+
+    ``prefetch(rows)`` is awaited (it fills the cache); ``rerender()`` draws
+    the list from it; ``busy()`` says a search is running, whose own render
+    will follow -- the re-render is skipped then."""
+
+    def __init__(self, prefetch, rerender, busy=lambda: False):
+        self._prefetch = prefetch
+        self._rerender = rerender
+        self._busy = busy
+        self._rows = []
+        self._again = False
+        self.task = None
+
+    def request(self, rows) -> None:
+        self._rows = list(rows)
+        if self.task is not None and not self.task.done():
+            self._again = True
+            return
+        self.task = asyncio.ensure_future(self._run())
+
+    async def _run(self):
+        try:
+            while True:
+                self._again = False
+                await self._prefetch(self._rows)
+                if not self._again:
+                    break
+        finally:
+            self.task = None
+        if not self._busy():
+            self._rerender()
+
+
+def preview_shows_final_rows(state: 'SearchUIState') -> bool:
+    """True when rows found while a search runs can be shown as they are.
+
+    The engine's early rows are the start of the final list, in its order. A
+    filter applied after the search (exclusions, library, printed, PGP, domain,
+    measurements, the all-terms view) could hide some of them, and most need
+    enrichment that only runs on the result -- so with any of them active the
+    page keeps its spinner and shows the result as before.
+    """
+    if (state.exclusion_sources or state.word_search_excluded_ids or state.domain_exclusions
+            or state.printed_filter != 'all' or state.pgp_filter != 'all' or state.library_filter
+            or (state._all_terms_filter and state.refinement_chain)):
+        return False
+    return not getattr(state, 'post_filter_criteria', None)
+
+
+def search_run_snapshot(state: 'SearchUIState', *, with_results: bool = True) -> dict:
+    """What a run keeps for Back: its rows (up to 1,000) and the state shown with them.
+    Without results, what is known when the search starts (its search and filters)."""
+    rows = (state.results or []) if with_results else []
+    return {
+        'version': _SEARCH_RUN_SNAPSHOT_VERSION,
+        'results': _compact_result_rows(rows[:1000]),
+        # A list longer than what is kept here comes back as a cut-off one.
+        'result_count_capped': bool(state.result_count_capped or len(rows) > 1000),
+        # Completing cannot add what it left out (Codex round 3 on PR #442) -- unless rows
+        # were dropped here, which completing does read.
+        'result_partial': bool(state.result_partial and len(rows) <= 1000),
+        'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
+        'last_variant_settings': state.last_variant_settings,
+        'last_run': dict(state.last_run) if isinstance(state.last_run, dict) else None,
+        # The Responsa guard's downgrade: with no rows, no first row carries it.
+        'responsa_warning': state.responsa_warning,
+        **_post_filters(state),
+    }
+
+
+def get_search_active_snapshot(stamp: Optional[str] = None) -> dict:
+    """The snapshot this browser's run *stamp* left, once that search has run; {}
+    otherwise (no such run, another browser's, still running, or failed)."""
+    run = search_runs.get_run(_browser_id(), stamp)
+    if run is None or not run.done:
+        return {}
+    raw = run.snapshot
+    if not isinstance(raw, dict) or raw.get('version') != _SEARCH_RUN_SNAPSHOT_VERSION:
+        return {}
+    return raw
+
+
+def live_search_run(stamp: Optional[str]) -> Optional['search_runs.SearchRun']:
+    """This browser's run *stamp* while a page can follow it (still running, or
+    ended with a result not saved yet: SearchRun.attachable), else None."""
+    run = search_runs.get_run(_browser_id(), stamp)
+    return run if run is not None and run.attachable else None
+
+
+def start_search_run(state: 'SearchUIState', stamp: str) -> 'search_runs.SearchRun':
+    """Register the search *state* is starting under *stamp* (already in its last_run)."""
+    return search_runs.start_run(_browser_id() or '', stamp, search_run_snapshot(state, with_results=False),
+                                 scoped=bool(state._refine_mode or state.vs_restrict_sys_ids))
+
+
+def apply_run_start_snapshot(state: 'SearchUIState', raw: dict) -> None:
+    """What a page showed with a search when it started (a run still running): its
+    display filters, exclusions and the run itself. Its rows come when it ends."""
+    state.printed_filter = raw.get('printed_filter', 'all')
+    _de = raw.get('domain_exclusions')
+    state.domain_exclusions = set(_de) if _de else set()
+    state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
+    state.last_run = _settings_or_none(raw.get('last_run'))
+    restore_post_filters(state, raw)
+
+
+def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] = None) -> bool:
+    """Restore the state run *stamp* left (see get_search_active_snapshot)."""
+    raw = get_search_active_snapshot(stamp)
+    if not raw:
+        return False
+    state.results = raw.get('results', []) or []
+    state.printed_filter = raw.get('printed_filter', 'all')
+    _de = raw.get('domain_exclusions')
+    state.domain_exclusions = set(_de) if _de else set()
+    state.result_count_capped = bool(raw.get('result_count_capped'))
+    state.result_partial = bool(raw.get('result_partial'))
+    from shared.refinement import RefinementStep
+    raw_chain = raw.get('search_refinement_chain', []) or []
+    try:
+        state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
+    except Exception:
+        state.refinement_chain = []
+    state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
+    state.last_run = _settings_or_none(raw.get('last_run'))
+    warning = raw.get('responsa_warning')
+    state.responsa_warning = warning if isinstance(warning, str) and warning else responsa_note_of(state.results)
+    restore_post_filters(state, raw)
+    return True
+
+
+# The display filters applied to the shown rows. Their shared user-storage keys are
+# what every tab reads; the run's snapshot keeps the values this page showed, and is
+# updated as they change (save_post_filters_with_run), so Back shows this run's rows
+# under its own filters, not those another tab set since (Codex, PR #436).
+_PGP_FILTER_STATES = ('all', 'only_pgp', 'hide_pgp')
+
+
+def _post_filters(state: 'SearchUIState') -> dict:
+    return {
+        'printed_filter': state.printed_filter,
+        'domain_exclusions': list(state.domain_exclusions or []),
+        'search_exclusion_sources': list(state.exclusion_sources or []),
+        'pgp_filter': state.pgp_filter,
+        'library_filter': {'mode': state.library_mode, 'codes': list(state.library_filter or [])},
+        'word_search_excluded_ids': list(state.word_search_excluded_ids or []),
+    }
+
+
+def restore_post_filters(state: 'SearchUIState', raw: dict) -> None:
+    """The display filters a run's snapshot holds, checked as the shared keys are on
+    load; a snapshot without them leaves the loaded values."""
+    if raw.get('pgp_filter') in _PGP_FILTER_STATES:
+        state.pgp_filter = raw['pgp_filter']
+    library = raw.get('library_filter')
+    if isinstance(library, dict):
+        from shared.browse_map_utils import sanitize_library_codes
+        codes = sanitize_library_codes(library.get('codes'))
+        mode = library.get('mode') if library.get('mode') in ('show_only', 'hide') else 'hide'
+        if mode == 'show_only' and not codes:
+            mode = 'hide'  # show-only nothing is never meant: the neutral show-all
+        state.library_mode, state.library_filter = mode, codes
+    excluded = raw.get('word_search_excluded_ids')
+    if isinstance(excluded, list):
+        state.word_search_excluded_ids = set(excluded)
+
+
+def save_post_filters_with_run(state: 'SearchUIState') -> None:
+    """Copy *state*'s display filters into its run's snapshot, if that run has run.
+    Called wherever they change, next to their shared-storage save."""
+    try:
+        search_runs.update_run(_browser_id(), url_stamp_of(state), **_post_filters(state))
+    except Exception:
+        pass
+
+
+def _settings_or_none(value):
+    """A restored settings snapshot, or None when absent or not a dict (they are
+    checked again by request_settings when a search sends them)."""
+    return dict(value) if isinstance(value, dict) else None
+
+
+def persist_search_active_snapshot(state: 'SearchUIState') -> None:
+    """Save what the page shows as its run's snapshot (the run in its address) -- once
+    that run is saved. An unfinished run (preparing, running, or ended with rows not
+    on the page yet) is saved only by its own search (save_search_run): a filter
+    applied meanwhile would save the old rows as the run's (Codex, PR #436)."""
+    stamp = url_stamp_of(state)
+    if not stamp:
+        return
+    try:
+        run = search_runs.get_run(_browser_id(), stamp)
+        if run is not None and not run.done:
+            return
+        search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state))
+    except Exception:
+        pass
+
+
+def discard_search_run(state: 'SearchUIState') -> None:
+    """The search *state* shows ended without a save: forget its run (web/search_runs.py)."""
+    try:
+        search_runs.discard_run(_browser_id(), url_stamp_of(state))
+    except Exception:
+        pass
+
+
+def save_search_run(state: 'SearchUIState') -> bool:
+    """A search's own save at its end: its rows are in *state* now, so its run is done.
+    With session persistence off nothing is kept, as for the user-storage copy: the
+    run is forgotten (its job's rows and its page are let go of too -- Codex, PR #436).
+    True when the run was saved (a scoped run's address is stamped only then)."""
+    if not safe_user_get('session_persistence_enabled', True):
+        discard_search_run(state)
+        return False
+    stamp = url_stamp_of(state)
+    if not stamp:
+        return False
+    try:
+        return search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state)) is not None
+    except Exception:
+        return False
+
+
+def responsa_note_of(results):
+    """The Responsa guard's downgrade a result set came with (its first row
+    carries it, in a snapshot too), or None."""
+    return results[0].get('responsa_warning') if results and isinstance(results[0], dict) else None
+
+
+def restore_search_snapshot(state: 'SearchUIState', stamp: Optional[str] = None) -> None:
+    """Hydrate page-scoped state from the run *stamp* left, else app.storage.user.
+
+    Called once at page mount. After this call, SearchUIState is authoritative -
+    direct app.storage.user reads for snapshot keys are forbidden (D-03).
+    Silently discards snapshot if version stamp is missing or stale (D-04).
+
+    Does NOT hydrate filter_* keys - callers still use
+    filter_panel.load_filter_state(state, 'search') for those.
+
+    The run's snapshot (web/search_runs.py) is this browser's, for that address
+    only; the user-storage copy is shared by every tab (the last search of any of
+    them wins) and keeps 250 rows -- the fallback when the run is not kept.
+    """
+    stored_version = safe_user_get('search_snapshot_schema_version', 0)
+    if stored_version == 0:
+        # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
+        # once by stamping to current; otherwise returning users would have
+        # their search_results / exclusions / refinement chain silently wiped
+        # on the first post-upgrade load (Codex review 74-CODEX-REVIEW2.md #1).
+        # Class A try/except collapsed — safe_user_set absorbs AssertionError.
+        safe_user_set('search_snapshot_schema_version', _SEARCH_SNAPSHOT_VERSION)
+    elif stored_version != _SEARCH_SNAPSHOT_VERSION:
+        clear_search_snapshot()
+        return
+
+    # Class B OUTER try-except PRESERVED — wraps restore_search_active_snapshot
+    # call (tab-snapshot read can return arbitrary types/decode errors) and
+    # RefinementStep.from_dict iteration (parsing failures, schema drift).
+    # M2: each safe_user_get read is INDEPENDENT — a missing search_results
+    # does not short-circuit the domain_exclusions read.
+    try:
+        # Restorable scalar/list fields (match RESEARCH §1.1 bucket).
+        # A restored result set brings its downgrade note back with it, on either
+        # path (Codex review of PR #433).
+        if restore_search_active_snapshot(state, stamp):
+            return  # the run's snapshot set responsa_warning (kept even with no rows)
+        state.results = safe_user_get('search_results', []) or []
+        state.responsa_warning = responsa_note_of(state.results)
+        state.result_count_capped = bool(safe_user_get('search_result_count_capped', False))
+        state.result_partial = bool(safe_user_get('search_result_partial', False))
+        state.printed_filter = safe_user_get('search_printed_filter', 'all')
+        _de = safe_user_get('domain_exclusions')
+        state.domain_exclusions = set(_de) if _de else set()
+        # refinement_chain (list[dict] -> list[RefinementStep])
+        from shared.refinement import RefinementStep
+        raw_chain = safe_user_get('search_refinement_chain', []) or []
+        try:
+            state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
+        except Exception:
+            state.refinement_chain = []
+        # exclusion sources (list[dict])
+        state.exclusion_sources = safe_user_get('search_exclusion_sources', []) or []
+        # the variant settings the shown results were searched with (step 0 of a refinement)
+        state.last_variant_settings = _settings_or_none(safe_user_get('search_last_variant_settings', None))
+        # the search they came from, exactly as it ran (a completion runs it again)
+        state.last_run = _settings_or_none(safe_user_get('search_last_run', None))
+        # NOTE: search_mode, search_query, search_preset, search_max_changes,
+        # search_gap are read as needed by search.py's bootstrap block
+        # (they feed resolve_search_bootstrap). They are not stored on
+        # SearchUIState directly in the current codebase.
+    except Exception:
+        # Defensive: bad snapshot -> reset to defaults.
+        pass
+
+
+def persist_search_snapshot(state: 'SearchUIState') -> None:
+    """Serialize restorable fields of SearchUIState to app.storage.user.
+
+    runtime_only and cross_page_preference fields are NOT written.
+    Gated by session_persistence_enabled, mirroring filter_panel.persist_value.
+    """
+    if not safe_user_get('session_persistence_enabled', True):
+        return
+    # Class B OUTER try-except PRESERVED per Fix 4 in 87-REVIEWS.md (M3):
+    # covers list/dict construction (_compact_result_rows, list(state.domain_exclusions),
+    # list(state.exclusion_sources)) and persist_search_active_snapshot subcall.
+    try:
+        safe_user_set('search_snapshot_schema_version', _SEARCH_SNAPSHOT_VERSION)
+        persist_search_active_snapshot(state)
+        safe_user_set('search_results', _compact_result_rows(
+            (state.results or [])[:_SEARCH_ACTIVE_USER_FALLBACK_LIMIT]
+        ))
+        safe_user_set('search_result_count_capped', bool(
+            state.result_count_capped or len(state.results or []) > _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
+        safe_user_set('search_result_partial', bool(
+            state.result_partial and len(state.results or []) <= _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
+        safe_user_set('search_printed_filter', state.printed_filter)
+        safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
+        # refinement_chain (list[RefinementStep] -> list[dict])
+        # Class B INNER try-except PRESERVED — covers to_dict() iteration which
+        # can raise on schema-drift / non-RefinementStep objects in the chain.
+        try:
+            safe_user_set('search_refinement_chain', [
+                s.to_dict() for s in (state.refinement_chain or [])
+            ])
+        except Exception:
+            safe_user_set('search_refinement_chain', [])
+        safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
+        safe_user_set('search_last_variant_settings', state.last_variant_settings)
+        safe_user_set('search_last_run', state.last_run)
+    except Exception:
+        pass  # Browser storage operation failed; snapshot not persisted (D-08)
+
+
+def clear_search_snapshot() -> None:
+    """Wipe all search snapshot keys from app.storage.user.
+
+    Replaces the scattered blocks at search.py:~805-832 and search.py:~2019-2025.
+    Clears both the core snapshot keys (_SEARCH_SNAPSHOT_KEYS) and the filter keys
+    (_SEARCH_FILTER_KEYS, and the _SEARCH_LEGACY_FILTER_KEYS the criteria
+    replaced) owned by filter_panel.
+
+    Does NOT touch cross_page_preference keys (session_persistence_enabled,
+    search_history, show_translations) or the cross-page signal 'incoming_filters'
+    (Pitfall 7).
+    """
+    # Core snapshot keys: reset to safe defaults.
+    # NOTE (review-revision): Bootstrap-input keys (search_query, search_mode,
+    # search_preset, search_max_changes, search_gap, search_text_position) are
+    # NOT cleared here - they are owned by the bootstrap path. The existing
+    # search.py:2019-2025 reset block writes search_query='' / search_mode='exact'
+    # for UX reasons (New Search wipes the query bar); those writes STAY in
+    # search.py and are NOT migrated into this helper. This preserves the
+    # Plan 74-01 scope stated in must_haves.truths[0].
+    defaults = {
+        'search_results': [],
+        'domain_exclusions': [],
+        'search_printed_filter': 'all',
+        'search_pgp_filter': 'all',  # Phase 999.2 (PGP-FILTER-05, D-10) — central New-Search reset path
+        'search_library_filter': {'mode': 'hide', 'codes': []},  # DMF (LIBFILTER-01/DMF-06) — central New-Search reset path; D-09 dict shape; D-05 fresh default
+        'word_search_excluded_ids': [],
+        'search_exclusion_sources': [],
+    }
+    for key, value in defaults.items():
+        # Class A try/except collapsed — safe_user_set absorbs AssertionError.
+        safe_user_set(key, value)
+    # Remaining snapshot keys: drop them.
+    for key in ('search_refinement_chain', 'search_result_count_capped', 'search_result_partial',
+                'search_last_variant_settings', 'search_last_run',
+                'search_all_terms_filter', 'search_snapshot_schema_version'):
+        safe_user_pop(key, None)
+    # Filter keys (match search.py:806-832 reset block).
+    # Defaults match LIVE field types (review-revision: Codex HIGH #2):
+    #   filter_include_mode is bool (default True) - NOT string 'any'
+    #   filter_criteria is a dict (default {})
+    clear_search_filters()
+
+
+def clear_search_filters() -> None:
+    """Reset only pre-search filter storage keys (Advanced 'Clear All' filters).
+
+    Narrower than clear_search_snapshot: preserves live search state
+    (search_results, domain_exclusions, search_printed_filter, refinement chain,
+    exclusion sources). Intended for the Advanced Filters 'Clear All' button,
+    which should not wipe results / exclusions already on screen
+    (Codex review 74-CODEX-REVIEW2.md #3).
+    """
+    for key in _SEARCH_FILTER_KEYS:
+        if key == 'search_filter_include_mode':
+            safe_user_set(key, True)
+        elif key == 'search_filter_criteria':
+            safe_user_set(key, {})
+        else:
+            safe_user_set(key, [])
+    for key in _SEARCH_LEGACY_FILTER_KEYS:
+        safe_user_set(key, None)
+
+
+# ---------------------------------------------------------------------------
+# Search history management (reads/writes app.storage.user)
+# ---------------------------------------------------------------------------
+
+def get_search_history() -> list:
+    """Get search history from storage."""
+    return safe_user_get('search_history', [])
+
+
+def add_to_search_history(query: str, result_count: int, mode: str, params: dict, state_snapshot: dict):
+    """Add or update a search history entry. Deduplicates by query+mode."""
+    if not safe_user_get('session_persistence_enabled', True):
+        return
+    limit = safe_user_get('search_history_limit', 20)
+    history = get_search_history()
+
+    # Dedup: check for existing entry with same query + mode
+    existing_idx = None
+    for i, entry in enumerate(history):
+        if entry.get('query') == query and entry.get('mode') == mode:
+            existing_idx = i
+            break
+
+    compact_state = dict(state_snapshot or {})
+    compact_state.pop('results', None)
+
+    entry = {
+        'query': query,
+        'result_count': result_count,
+        'mode': mode,
+        'timestamp': datetime.now().isoformat(),
+        'params': params,
+        'state': compact_state,
+    }
+
+    if existing_idx is not None:
+        history.pop(existing_idx)  # Remove old position
+        history.insert(0, entry)   # Move to front with updated data
+    else:
+        history.insert(0, entry)   # Add at front (newest first)
+
+    # Enforce limit
+    history = history[:limit]
+    safe_user_set('search_history', history)
+
+
+def delete_search_history_entry(index: int):
+    """Delete a specific history entry by index."""
+    history = get_search_history()
+    if 0 <= index < len(history):
+        history.pop(index)
+        safe_user_set('search_history', history)
+
+
+def clear_search_history():
+    """Clear all search history."""
+    safe_user_set('search_history', [])
+
+
+# ---------------------------------------------------------------------------
+# Domain display name helper
+# ---------------------------------------------------------------------------
+
+def domain_display_name(search_state: SearchUIState, en_name: str) -> str:
+    """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
+    if get_language() == 'he':
+        if en_name in search_state.domain_name_map:
+            return search_state.domain_name_map[en_name]
+        # Fall back to tr() for non-FJMS labels like 'Uncategorized'
+        translated = tr(en_name)
+        if translated != en_name:
+            return translated
+    return en_name

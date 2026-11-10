@@ -1,0 +1,5942 @@
+# -*- coding: utf-8 -*-
+"""
+Professional Manuscript Viewer page for GenizahSearch web application.
+
+Features:
+- Two-panel layout with image viewer and transcription
+- IIIF image support with zoom controls
+- Navigation controls with keyboard shortcuts hint
+- RTL Hebrew text display with search term highlighting
+- Metadata header with external links
+"""
+
+import logging
+import time
+
+from nicegui import background_tasks, ui, run
+from typing import Optional
+import asyncio
+import re
+import weakref
+import html as html_module
+from urllib.parse import quote
+from shared.fgp_service import (
+    number_repeated_labels, source_provider, source_relation_kind,
+)
+from shared.transcription_credits import resolve_transcription_credit
+from shared.export_utils import GENIZAHSEARCH_URL
+from shared.blau_service import empty_lookup as blau_empty_lookup
+from shared.blau_service import get_blau_service
+from shared.arabic_service import empty_lane, get_arabic_service
+from shared.friedman_service import DEFAULT_GAP as FRIEDMAN_DEFAULT_GAP
+from shared.friedman_service import empty_lookup as friedman_empty_lookup
+from shared.friedman_service import get_friedman_service
+from web.components import blau_panel
+from web.analytics import posthog_capture
+from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
+
+logger = logging.getLogger(__name__)
+
+
+def _merge_fgp_sources(sys_id: str, pgp_sources):
+    """Append FGP transcription sources (when enabled) to a PGP source list.
+
+    Used by the reading-desk fetch sites so FGP appears as a distinct, selectable
+    source in the per-fragment chooser (FGP-05). Degrades to the PGP list on any
+    error or when the flag/DB is off.
+    """
+    sources = list(pgp_sources or [])
+    try:
+        from web.feature_flags import web_fgp_enabled
+        if web_fgp_enabled():
+            from shared.fgp_service import get_fgp_sources_for_fragment
+            sources += get_fgp_sources_for_fragment(sys_id) or []
+    except Exception as exc:  # never let FGP break the reading desk
+        logger.debug("FGP merge skipped for %s: %s", sys_id, exc)
+    return sources
+
+
+# Phase 117 Plan 03: promoted to web/components/typography.py (ANC-03).
+# Re-export the old private name so existing call sites and tests keep working unchanged.
+from web.components.typography import render_line_numbered_html as _render_line_numbered_html
+
+# Phase 117 Plan 03: per-provider image-URL resolution extracted to web/components/image_resolution.py.
+from web.components.image_resolution import resolve_image_url
+
+
+from web.safe_storage import safe_user_get, safe_user_set
+from web.services import (
+    get_service,
+    get_oxford_direct_image_url,
+    is_oxford_manuscript,
+)
+from shared.synthetic_sys_id import is_synthetic_sys_id
+from web.translations import tr, is_rtl, get_language, using_language, in_visitor_language
+from web.ux_timing import ux_done
+from web.auth_state import GlobalAuthState
+from web.feature_flags import WEB_PUZZLE_ENABLED
+from web.supabase_client import create_correction, update_correction, get_corrections, get_user_client
+from web.components.typography import h1, h2, h3
+from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
+from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
+from web import io_bound_result
+from web.pages.browse_state import (
+    BrowseState, page_has_reading_view, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
+    clamp_zoom, zoom_percent,
+)
+from web.browse_bootstrap import resolve_browse_bootstrap
+from web.pages.browse_enrichment import (
+    BrowsePageRefs,
+    discovery_panel_enabled,
+    load_enrichment as _load_enrichment_fn,
+    update_enrichment_sections as _update_enrichment_sections_fn,
+    update_discovery_panel_section,
+    populate_bib_catalog_buttons,
+)
+
+
+async def add_to_reading_desk_by_shelfmark(service, query, container, add_entry):
+    """The reading desk's "Add by shelfmark" (catalogue-shelfmark plan, row H).
+
+    The lookup runs off the event loop. One match calls ``add_entry(sys_id, shelfmark)``;
+    several open the picker in ``container`` (this used to add the first silently), and
+    ``add_entry`` runs only if the user picks one -- closing the picker adds nothing. Returns
+    True when something was found, False otherwise -- including a lookup with no answer
+    (cancelled, or the app is stopping), which is not "not found" and says nothing.
+    """
+    found = await io_bound_result.io_bound(service.search_by_shelfmark, query, 50)
+    if found is io_bound_result.INTERRUPTED:
+        return False
+    results, _exact_match = found
+    if not results:
+        ui.notify(f'{tr("No manuscript found")}: {query}', type='warning')
+        return False
+    if len(results) == 1:
+        add_entry(results[0].sys_id, results[0].shelfmark or query)
+        return True
+    open_shelfmark_picker(container, items_from_manuscripts(results),
+                          lambda item: add_entry(item['sys_id'], item['shelfmark'] or query), query)
+    return True
+
+
+# ============================================================================
+# Custom Styles for Manuscript Viewer
+# ============================================================================
+
+def _viewer_js_version() -> str:
+    """A stamp of /static/manuscript_viewer.js for its <script> URL.
+
+    The static route lets a browser keep a file for an hour. The zoom buttons
+    below are wired to this file's viewer (``zoomIn`` tells the page through
+    ``onChange``); a page built after a deploy must not run the hour-old copy,
+    whose buttons would zoom without telling the page.
+    """
+    import hashlib
+    from pathlib import Path
+    try:
+        data = (Path(__file__).resolve().parent.parent / 'static' / 'manuscript_viewer.js').read_bytes()
+    except OSError:
+        return '0'
+    return hashlib.md5(data).hexdigest()[:10]
+
+
+VIEWER_STYLES = '''
+<script src="/static/manuscript_viewer.js?v=__VIEWER_JS_VERSION__"></script>
+<!-- progressiveLoad, initProgressiveImages, fetchFlIdsFromManifest, handleImageError,
+     NLI_IIIF_BASE are all in /static/manuscript_viewer.js (shared with /search) -->
+<style>
+    /* Image viewer container */
+    .image-viewer-container {
+        position: relative;
+        background-color: #1a1a1a;
+        border-radius: 8px;
+        overflow: hidden;
+        min-height: 500px;
+    }
+
+    .image-container {
+        position: relative;
+        width: 100%;
+        height: 70vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden; /* Hide scrollbars for custom drag */
+        background: linear-gradient(45deg, #1a1a1a 25%, #222 25%, #222 50%, #1a1a1a 50%, #1a1a1a 75%, #222 75%);
+        background-size: 20px 20px;
+    }
+
+    .image-container img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        transition: transform 0.2s ease-out;
+        cursor: grab;
+    }
+
+    .image-container img:active {
+        cursor: grabbing;
+    }
+
+    /* Image controls overlay */
+    .image-controls {
+        position: absolute;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+        padding: 8px 16px;
+        background: rgba(0, 0, 0, 0.75);
+        border-radius: 24px;
+        backdrop-filter: blur(8px);
+        z-index: 10;
+    }
+
+    .image-controls button {
+        color: white !important;
+    }
+
+    /* Loading placeholder */
+    .image-loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #888;
+        text-align: center;
+    }
+
+    /* Transcription panel */
+    .transcription-panel {
+        background: linear-gradient(to bottom, #fffef5, #fff9e6);
+        border: 1px solid #e8e4d4;
+        border-radius: 8px;
+        height: 70vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .transcription-header {
+        padding: 12px 16px;
+        background: #f5f0e0;
+        border-bottom: 1px solid #e8e4d4;
+        border-radius: 8px 8px 0 0;
+    }
+
+    .transcription-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px;
+    }
+
+    .transcription-text {
+        white-space: pre-wrap;
+        line-height: 2.4;
+        font-size: 1.6rem;
+        font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", "SBL Hebrew", serif;
+        direction: rtl;
+        text-align: right;
+    }
+
+    /* Highlight search terms */
+    .highlight-term {
+        background-color: #fef08a;
+        color: #1f2937;            /* explicit: the page text is white in dark mode */
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-weight: 600;
+    }
+    [data-theme="dark"] .highlight-term {
+        /* same treatment as .highlight-match on the search page (common.css) */
+        background: linear-gradient(120deg, #854d0e 0%, #a16207 100%);
+        color: #ffffff;
+    }
+
+    /* Metadata header */
+    .metadata-header {
+        background: linear-gradient(135deg, #15803d 0%, #166534 50%, #14532d 100%);
+        color: white;
+        padding: 28px 32px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 6px 20px rgba(22, 101, 52, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+    .metadata-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 10px,
+            rgba(255,255,255,0.03) 10px,
+            rgba(255,255,255,0.03) 20px
+        );
+        pointer-events: none;
+    }
+
+    .shelfmark-title {
+        font-size: 2.2rem;
+        font-weight: 800;
+        margin-bottom: 12px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        letter-spacing: 0.5px;
+        position: relative;
+    }
+
+    .metadata-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        align-items: center;
+        font-size: 1rem;
+        opacity: 0.95;
+    }
+
+    .metadata-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 6px 12px;
+        border-radius: 8px;
+    }
+
+    /* Navigation bar */
+    .navigation-bar {
+        background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+        border: 2px solid #c8e6c9;
+        border-radius: 12px;
+        padding: 18px 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+    }
+    .navigation-bar:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        border-color: #4caf50;
+    }
+
+    /* Source badge styling */
+    .source-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .source-v08 {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .source-v07 {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    /* Collapsible panels for tablet */
+    @media (max-width: 1024px) {
+        .viewer-panels {
+            flex-direction: column !important;
+        }
+        .image-panel, .transcription-panel-wrapper {
+            width: 100% !important;
+        }
+        .image-container {
+            height: 50vh;
+        }
+        .transcription-panel {
+            height: auto;
+            max-height: 50vh;
+        }
+    }
+
+    /* Mobile-specific styles */
+    @media (max-width: 768px) {
+        .metadata-header {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        .shelfmark-title {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+        .metadata-row {
+            gap: 12px;
+            font-size: 0.875rem;
+        }
+        .metadata-item {
+            padding: 4px 8px;
+            font-size: 0.8rem;
+        }
+        .navigation-bar {
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+        .image-container {
+            height: 40vh;
+            min-height: 250px;
+        }
+        .transcription-panel {
+            max-height: 45vh;
+        }
+        .transcription-content {
+            padding: 16px;
+        }
+        .transcription-text {
+            font-size: 1.3rem;
+            line-height: 2.2;
+        }
+        .image-controls {
+            padding: 6px 12px;
+            gap: 4px;
+        }
+        .image-controls button {
+            min-width: 44px !important;
+            min-height: 44px !important;
+        }
+    }
+
+    /* Buttons and links with an icon beside their text (owner, 2026-10-19).
+       No row may get wider on a phone, so below 600px one of the two goes:
+       .browse-icon-collapse keeps the icon and hides the text (the button keeps
+       its name through aria-label; Quasar's `.block` is a layered
+       `display: block !important`, so the text is shrunk, not undisplayed); .browse-icon-wide keeps the text, which is
+       what tells those controls apart, and hides the icon. */
+    @media (max-width: 599px) {
+        .browse-icon-collapse .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
+        .browse-icon-collapse .q-btn__content > .q-icon { margin: 0; }
+        .browse-icon-collapse.px-6 { padding-left: 16px !important; padding-right: 16px !important; }
+        .browse-icon-wide .q-icon { display: none; }
+    }
+    /* Icons that point "forward" (send) face the other way in the Hebrew UI. */
+    [dir="rtl"] .browse-icon-flip-rtl .q-icon { transform: scaleX(-1); }
+
+    /* Phone layout (owner, 2026-10-22). Measured at 390x844 before this: the
+       image began 958px down the page (title, lookup card, a 343px header
+       card with three stacked text buttons, a 225px control bar), then 279px
+       of zoom and slider rows above a 406px image letterboxed in a fixed-height
+       box, and the transcription scrolled inside a 426px pane of its own.
+       Nothing here applies above 640px. */
+    /* At every width (owner's mockups, 2026-10-22): the page title is for
+       screen readers only, the lookup is a slim row, the image panel is one
+       toolbar row with the sliders behind the `tune` button. */
+    .browse-page-title {
+        position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+    .browse-lookup-card { padding: 6px 10px !important; margin-bottom: 8px !important; gap: 0 !important; }
+    .browse-lookup-row { gap: 8px !important; flex-wrap: nowrap !important; }
+    .browse-lookup-icon { display: none; }
+    .browse-header-card { padding: 8px 10px !important; margin-bottom: 8px !important; }
+    /* The card's own 16px padding and gap go; its row carries the padding. */
+    .browse-controls-card { margin-bottom: 8px !important; padding: 0 !important; gap: 0 !important; }
+    .browse-controls-card > .nicegui-row { gap: 4px 8px !important; padding: 6px 10px !important; }
+    .browse-image-head { padding: 4px 8px !important; }
+    .browse-image-title { display: none; }
+    .browse-image-adjust { display: none !important; padding: 4px 8px !important; }
+    .browse-image-adjust.is-open { display: flex !important; }
+    /* The rotation slider needs a wide panel; below 1440px the two rotate
+       buttons do the job and the toolbar stays one row. */
+    @media (max-width: 1439px) { .browse-rotate-slider { display: none !important; } }
+    /* Laptop and up: the lookup is a short row, the green card is one line
+       WHEN IT FITS, with the title cut to the width, and the two panels get
+       the height. Nothing forces the line: beside the 280px drawer a 1024px
+       screen leaves 744px, and the shelfmark, links and buttons alone can
+       need more (Codex on #434), so the row still wraps. The title's box has
+       a zero flex basis and a 160px floor: it fills what is left of the first
+       line and drops to a line of its own only when less than that is left. */
+    @media (min-width: 1024px) {
+        .browse-lookup-card { max-width: 560px; }
+        .browse-header-center { gap: 8px !important; min-width: 0; }
+        .browse-header-center > h2 { white-space: nowrap; font-size: 1.15rem !important; }
+        .browse-header-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .browse-header-center > *:has(> .browse-header-title) { flex: 1 1 0%; min-width: 160px; }
+        .browse-header-center .q-btn { white-space: nowrap; }
+    }
+    /* Transcription type by width (the owner's screen-size table). */
+    .viewer-panels .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
+    @media (min-width: 641px) { .viewer-panels .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
+    @media (min-width: 1024px) { .viewer-panels .transcription-text { font-size: 19px !important; line-height: 2 !important; } }
+    @media (min-width: 1440px) { .viewer-panels .transcription-text { font-size: 20px !important; line-height: 2 !important; max-width: 760px; } }
+
+    @media (max-width: 640px) {
+        .browse-header-card h2 { font-size: 1.1rem !important; }
+        .browse-header-center { gap: 4px 6px !important; }
+        .browse-header-card .q-btn { min-height: 36px; }
+        .browse-controls-card .q-btn { min-height: 36px; }
+        .shortcuts-hint { display: none !important; }
+
+        /* Image panel: one row of 34px icon buttons. The rotation slider, the
+           zoom figure and the separators go. */
+        .browse-image-head { padding: 4px 6px !important; }
+        .browse-image-tools { gap: 2px !important; flex-wrap: nowrap !important; }
+        .browse-image-tools .q-separator, .browse-rotate-slider, .zoom-level-label { display: none !important; }
+        .browse-image-head .q-btn, .browse-image-adjust .q-btn {
+            min-width: 34px !important; min-height: 34px !important; width: 34px; height: 34px; padding: 0 !important;
+        }
+
+        /* The image sets the height of its box: no dark band above or below
+           it. The box's inline `height: calc(60vh - 100px)` beat every earlier
+           phone rule in this file; only `!important` reaches it. Fullscreen
+           keeps its full-height box. */
+        .viewer-panels > .q-card { min-height: 0 !important; }
+        .image-container { height: auto !important; min-height: 120px !important; max-height: 75vh !important; }
+        .image-container img.zoomable-image { max-height: 75vh !important; }
+        .fullscreen-mode .image-container { max-height: none !important; }
+        .fullscreen-mode .image-container img.zoomable-image { max-height: 100vh !important; }
+
+        /* Transcription: the page scrolls, not a pane inside it. The same
+           un-scroll as the print rules in common.css, scoped to the viewer. */
+        .viewer-panels .q-scrollarea,
+        .viewer-panels .q-scrollarea__container,
+        .viewer-panels .q-scrollarea__content {
+            height: auto !important; max-height: none !important; min-height: 0 !important;
+            overflow: visible !important; position: static !important; transform: none !important;
+            contain: none !important;
+        }
+        .viewer-panels .q-scrollarea { padding: 10px !important; }
+        .viewer-panels .q-scrollarea__thumb, .viewer-panels .q-scrollarea__bar { display: none !important; }
+    }
+
+    @media (max-width: 480px) {
+        .metadata-header {
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+        .shelfmark-title {
+            font-size: 1.25rem;
+            margin-bottom: 6px;
+        }
+        .metadata-row {
+            gap: 8px;
+            font-size: 0.8rem;
+            flex-wrap: wrap;
+        }
+        .metadata-item {
+            padding: 3px 6px;
+            font-size: 0.75rem;
+        }
+        .navigation-bar {
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+        }
+        .nav-controls-row {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+        }
+        .nav-btn {
+            min-width: 44px !important;
+            min-height: 44px !important;
+        }
+        .image-container {
+            height: 35vh;
+            min-height: 200px;
+        }
+        .image-viewer-container {
+            min-height: 200px;
+            border-radius: 6px;
+        }
+        .transcription-panel {
+            max-height: 40vh;
+            border-radius: 6px;
+        }
+        .transcription-header {
+            padding: 10px 12px;
+        }
+        .transcription-content {
+            padding: 12px;
+        }
+        .transcription-text {
+            font-size: 1.15rem;
+            line-height: 2;
+        }
+        /* Floating zoom controls for mobile */
+        .image-controls {
+            bottom: 12px;
+            padding: 6px 10px;
+            gap: 2px;
+            border-radius: 20px;
+        }
+        .shortcuts-hint {
+            display: none !important;
+        }
+        /* Page input narrower */
+        .page-input {
+            width: 60px !important;
+        }
+    }
+
+    /* Touch-friendly navigation buttons */
+    .nav-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    /* Keyboard shortcuts hint */
+    .shortcuts-hint {
+        font-size: 0.75rem;
+        color: #6b7280;
+        padding: 8px 12px;
+        background: #f9fafb;
+        border-radius: 6px;
+        border: 1px solid #e5e7eb;
+    }
+
+    .kbd {
+        display: inline-block;
+        padding: 2px 6px;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.7rem;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    /* Fullscreen mode */
+    .fullscreen-mode {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 9999 !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+        background: #000;
+    }
+
+    .fullscreen-mode .image-container {
+        height: 100vh !important;
+        width: 100vw !important;
+    }
+    
+    /* Zoomable Image Class */
+    .zoomable-image {
+        transform-origin: center center;
+        transition: transform 0.1s ease-out;
+        will-change: transform;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        user-select: none;
+    }
+</style>
+<script>
+    // The zoom is applied here, in the browser, and the page hears the level
+    // afterwards (2026-11-03): every viewer on this page reports its scale
+    // through the `browse_zoom` event, which the page's ui.on handler stores,
+    // so a rebuilt page (Prev/Next, Show Metadata, Edit) draws the image at
+    // the level the reader sees.
+    window.browseZoomChanged = function(viewer) {
+        if (typeof emitEvent === 'function') {
+            emitEvent('browse_zoom', { scale: viewer.state.scale, seq: viewer.reportSeq || 0 });
+        }
+    };
+    // Create viewer via shared factory (manuscript_viewer.js loaded with defer)
+    window.manuscriptViewer = createManuscriptViewer({
+        imageSelector: '.zoomable-image',
+        containerSelector: '.image-container',
+        zoomLabelSelector: '.zoom-level-label',
+        gammaFilterId: 'gamma-main',
+        onChange: window.browseZoomChanged
+    });
+    // The viewer the toolbar buttons drive: the fullscreen editor's while its
+    // image is on the page, else the main one. Called from the buttons'
+    // client-side click handlers and, through them, the + / - keys.
+    window.browseActiveViewer = function() {
+        var fs = window.fsEditViewer;
+        if (fs && fs.el && fs.el.isConnected) return fs;
+        return window.manuscriptViewer || null;
+    };
+    window.browseZoom = function(action) {
+        var viewer = window.browseActiveViewer();
+        if (!viewer) return;
+        if (action === 'in') viewer.zoomIn();
+        else if (action === 'out') viewer.zoomOut();
+        else if (action === 'fit') viewer.fit();
+    };
+</script>
+<svg style="position:absolute;width:0;height:0"><filter id="gamma-main"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
+<svg style="position:absolute;width:0;height:0"><filter id="gamma-fs"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
+'''.replace('__VIEWER_JS_VERSION__', _viewer_js_version())
+
+
+# BrowseState and _crossref_cache imported from web.pages.browse_state (Phase 73, Plan 01)
+# BrowsePageRefs imported from web.pages.browse_enrichment (Phase 73, Plan 01)
+
+
+def _document_transcription_html(full_text: str) -> str:
+    """HTML for the "View whole document" dialog's PGP transcription.
+
+    The text is ESCAPED: it is rendered with ``ui.html(..., sanitize=False)``,
+    and PGP editions use tag-like notation ('al-Ṣa<y>dalānī', '<upside down>')
+    that a browser would otherwise parse as markup and drop. The only markup is
+    this wrapper; ``white-space: pre-wrap`` keeps the line breaks.
+    """
+    return (
+        '<div dir="rtl" style="'
+        'white-space: pre-wrap; '
+        "font-family: 'SBL Hebrew', 'Frank Ruehl CLM', 'Ezra SIL', serif; "
+        'font-size: 1.1rem; '
+        'line-height: 1.8; '
+        'padding: 12px; '
+        'background: var(--bg-secondary, #f9fafb); '
+        'border-radius: 8px; '
+        'border: 1px solid #e5e7eb; '
+        'color: var(--text-primary);'
+        f'">{html_module.escape(full_text or "")}</div>'
+    )
+
+
+def _source_chip(label: str, on_click, style: str, tooltip: str, *, opens_external: bool):
+    """One viewer-source chip ("NLI", "Cambridge", ...) on the folio toolbar.
+
+    A chip that opens the library's own viewer in a new tab carries
+    ``open_in_new`` after its name, and so needs no separate icon button. A chip
+    that switches the images shown here carries ``image``, on wide screens
+    only: the library's name is what tells the chips apart.
+    """
+    btn = ui.button(label, on_click=on_click).props(
+        'flat dense size=sm no-caps'
+    ).classes('text-xs px-2 py-0').style(style).tooltip(tooltip)
+    if opens_external:
+        btn.props('icon-right=open_in_new')
+    else:
+        btn.props('icon=image').classes('browse-icon-wide')
+    return btn
+
+
+def _source_external_button(on_click, color: str, tooltip: str):
+    """The icon-only "open in the library's viewer" button beside a switching chip."""
+    btn = ui.button(icon='open_in_new', on_click=on_click).props(
+        'flat round dense size=xs'
+    ).style(f'min-width: 20px; min-height: 20px; color: {color}; opacity: 0.8;').tooltip(tooltip)
+    btn.props['aria-label'] = tooltip  # set directly: a translation may hold a quote
+    return btn
+
+
+def _external_link(text: str, url: str):
+    """A link in the metadata panel's "External link" row: its text, then ``open_in_new``."""
+    with ui.link(target=url, new_tab=True).classes(
+        'text-sm inline-flex items-center gap-1 browse-icon-wide'
+    ).style('color: var(--primary-600);') as link:
+        ui.label(text)
+        ui.icon('open_in_new', size='14px')
+    return link
+
+
+# One Recently-Viewed write at a time per account, across all its tabs:
+# add_recent_item is a delete then an insert, and two interleaved pairs leave a
+# duplicate row (recent_items has no unique key). Weak values: a lock no write
+# is holding or waiting on goes away with its last user.
+_recents_locks: 'weakref.WeakValueDictionary[str, asyncio.Lock]' = weakref.WeakValueDictionary()
+
+
+def _recents_lock_for(user_id: str) -> asyncio.Lock:
+    lock = _recents_locks.get(user_id)
+    if lock is None:
+        lock = _recents_locks[user_id] = asyncio.Lock()
+    return lock
+
+
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False):
+    """Create the professional manuscript viewer page UI.
+
+    embedded=True (R2-1 discovery-review iframe): renders a bare viewer — the
+    page-title h1 and shelfmark-search card are hidden, and browse-position
+    snapshot restore/persist is disabled so an embedded candidate never stomps a
+    normal /browse tab's remembered position (browse_state.py:120 tab-stomping).
+    """
+    state = BrowseState()
+    refs = BrowsePageRefs(open_discovery_panel_requested=bool(open_computed))
+
+    # The Blau dictionary companion (docs/plans/BLAU_DICTIONARY_PLAN.md §6.2):
+    # decided ONCE per page build, fail-closed. The service is available only
+    # when the sidecar passed every check at open and the kill switch is on;
+    # without it the page carries no script, no popover and no marked pane,
+    # and is byte-for-byte what it was before.
+    blau_service = get_blau_service()
+    # Lane's Lexicon (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12): its own tab in the
+    # same panel. The panel, the switch and the script are on the page when EITHER dictionary is
+    # served; each lookup asks each service again (the kill switches are read live), and a
+    # dictionary not served then has no tab.
+    lane_service = get_arabic_service()
+    # Friedman's dictionary (the private Friedman plan step 3): a third tab, served
+    # only while FRIEDMAN_DICTIONARY_ENABLED is on (off by default: its sidecar is a candidate).
+    friedman_service = get_friedman_service()
+    dict_on = blau_service.is_available() or lane_service.is_available() or friedman_service.is_available()
+    # The tab the reader last chose (blau_panel.pick_tab): it holds while the reader stays on the page,
+    # across the manuscripts opened from it (a reader who prefers Lane keeps Lane); a new visit starts
+    # afresh. Local Codex review of 5d84236f: per visit, not per manuscript, by choice.
+    dict_tab = {'value': None}
+    # The printed words Friedman's expression search allows between two of the typed words
+    # (friedman_panel's gap control); like the tab, the reader's choice holds for the visit.
+    dict_gap = {'value': FRIEDMAN_DEFAULT_GAP}
+    if dict_on:
+        ui.add_head_html(blau_panel.head_html())
+    service = get_service()
+
+    # Track metadata panel visibility
+    show_metadata = {'value': False}
+
+    # "Print all manuscript pages" is a two-step: switch to Full Manuscript
+    # View, then print. `toggle_view_all` REBUILDS the content tree, which
+    # destroys the menu item that was clicked -- so the print cannot be fired
+    # from the click handler after awaiting it. This flag carries the intent
+    # across the rebuild; the Full Manuscript View branch fires the print once
+    # it has actually rendered, and clears the flag so a later manual switch to
+    # that view does not print by itself.
+    print_pending = {'value': False}
+
+    def _citation_page_url():
+        """The durable locator for the folio ON SCREEN, not just the manuscript.
+
+        A citation that names "folio 2v" and links to a URL opening at folio 1r
+        sends the reader somewhere the citation does not describe. The shelfmark
+        alone did exactly that, and on a multi-volume manuscript it is ambiguous
+        as well.
+
+        Same three parameters `_update_browser_url` already puts in the address
+        bar -- `sys_id`, `page`, `volume_ie` -- because that IS this app's
+        durable locator, and a citation must not invent a second one that drifts
+        from it.
+        """
+        from urllib.parse import urlencode
+
+        page = state.current_page
+        if page is None:
+            return None
+        if not state.sys_id:
+            return (f'{GENIZAHSEARCH_URL}/browse?shelfmark={quote(page.shelfmark)}'
+                    if page.shelfmark else None)
+        params = {'sys_id': state.sys_id}
+        if page.p_num and page.p_num > 0:
+            params['page'] = page.p_num
+        if state.volume_ie:
+            params['volume_ie'] = state.volume_ie
+        return f'{GENIZAHSEARCH_URL}/browse?{urlencode(params)}'
+
+    def _update_citation_chip(version_info=None):
+        """Give the layout's "How to cite" chip this page's own citation.
+
+        The chip lives in `create_layout`, which runs BEFORE this page body, so
+        it already exists by the time we call this. It defaults to the SITE
+        citation (what most readers want, per the owner); this ADDS the
+        folio-specific one above it.
+
+        Wrapped, and never fatal: a citation is the least important thing on
+        this page, and `set_page_citation` is itself a no-op when the client is
+        gone. This guard is for the metadata lookups below it, not for the set.
+        """
+        try:
+            page = state.current_page
+            if page is None:
+                set_page_citation(None)
+                return
+
+            # A METADATA-ONLY record (a synthetic inventory id, served by
+            # `get_metadata_only_browse_page`) carries `text=''`: there is an
+            # image and a catalogue entry, and no transcription at all. Offering
+            # a citation there credits MiDRASH for a transcription that does not
+            # exist. Rejecting only `None` let those through. An edition shown on
+            # a page without an automatic text is cited as that edition (or as the
+            # reader's approved version shown there).
+            shown_edition = (version_info or {}).get('source') in ('fgp', 'pgp', 'translation', 'user')
+            if not (page.text or '').strip() and not shown_edition:
+                set_page_citation(None)
+                return
+            _sm = page.shelfmark or ''
+            set_page_citation(browse_page_citation(
+                version_info,
+                lang=get_language(),
+                library=page.library_name,
+                shelfmark=_sm or (f'ID: {page.sys_id}' if page.sys_id else None),
+                folio=page.folio_label,
+                page_url=_citation_page_url(),
+            ))
+        except Exception:                                        # noqa: BLE001
+            logger.debug('citation chip update skipped', exc_info=True)
+
+    # UI component references
+    content_container = None
+    metadata_panel = None
+    image_element = None
+    viewer_container = None
+    initial_fl_id_value = initial_fl_id
+    # Local aliases to BrowsePageRefs fields -- these are mutable container aliases,
+    # so mutations through either name are visible to both (dict/dict/dict).
+    # IMPORTANT: _load_generation MUST stay a dict (mutable container), not an int.
+    # If changed to a primitive, the alias would be a copy and stale checks break silently.
+    slider_refs = refs.slider_refs
+    enrichment_refs = refs.enrichment_refs
+    _load_generation = refs.load_generation  # dict alias -- safe, see BrowsePageRefs docstring
+    refs.page_client = ui.context.client
+    _page_client = refs.page_client
+    _url_state = {'highlight': highlight, 'last_sys_id': initial_sys_id}  # Track across navigations
+
+    if initial_sys_id:
+        state.sys_id = initial_sys_id
+    if initial_volume_ie:
+        state.volume_ie = initial_volume_ie
+    if highlight:
+        state.highlight_terms = highlight
+
+
+    def _search_scope_phrase(page):
+        """The search phrase, but ONLY on the folio the deep link arrived for.
+
+        `highlight_terms` drives the SEED-033 `must_contain` override. Clearing it
+        on a manuscript change is not enough: paging within the SAME manuscript kept
+        it, so on a structurally unalignable manuscript -- where whole-document FGP
+        sources are offered on every folio -- a later folio could default to the
+        edition containing the PREVIOUS folio's hit (Codex P2, 2026-09-02).
+
+        The first folio rendered after arriving with `?highlight=` claims the phrase;
+        every other folio gets None. The yellow marks are unaffected: they are a
+        plain text search and stay useful while browsing.
+        """
+        if not state.highlight_terms or page is None:
+            return None
+        # volume_ie belongs in the key: multi-volume manuscripts restart p_num in
+        # each volume and the volume selector loads page 1, so (sys_id, p_num) alone
+        # matches another volume's page 1 (Codex P2, 2026-09-02).
+        current = (getattr(page, 'sys_id', None),
+                   getattr(page, 'volume_ie', None) or state.volume_ie,
+                   getattr(page, 'p_num', None))
+        if state.highlight_scope is None:
+            state.highlight_scope = current      # this folio owns it
+            return state.highlight_terms
+        return state.highlight_terms if state.highlight_scope == current else None
+
+    def _clear_search_scope_for_new_manuscript(new_sys_id):
+        """Drop the search-scoped phrase once the reader leaves the matched MS.
+
+        `highlight_terms` arrives from `/browse?highlight=` and drives BOTH the
+        yellow marks and the SEED-033 `must_contain` default-source override. It
+        used to survive shelfmark and adjacent-manuscript navigation, so a later
+        manuscript could default to whichever transcription happened to contain the
+        previous manuscript's hit (Codex P2, 2026-09-02). `_update_browser_url`
+        already drops it from the URL; this drops it from the state that is read.
+        """
+        if new_sys_id and state.sys_id and new_sys_id != state.sys_id:
+            state.highlight_terms = None
+            state.highlight_scope = None
+            _url_state['highlight'] = None
+
+
+    def _update_browser_url():
+        """Sync the browser URL bar with the current manuscript/page for sharing.
+
+        Uses the captured _page_client to dispatch JS even when called from
+        detached asyncio.ensure_future() tasks that lack NiceGUI client context.
+        Clears highlight when manuscript changes (stale highlight from search entry).
+        """
+        page = state.current_page
+        if not page or not state.sys_id:
+            return
+        # Clear highlight when navigating to a different manuscript
+        if _url_state['last_sys_id'] and _url_state['last_sys_id'] != state.sys_id:
+            _url_state['highlight'] = None
+        _url_state['last_sys_id'] = state.sys_id
+        from urllib.parse import urlencode
+        import json as _json
+        params = {'sys_id': state.sys_id}
+        if page.p_num and page.p_num > 0:
+            params['page'] = page.p_num
+        if state.volume_ie:
+            params['volume_ie'] = state.volume_ie
+        if _url_state['highlight']:
+            params['highlight'] = _url_state['highlight']
+        qs = urlencode(params)
+        new_url = f'/browse?{qs}'
+        shelfmark = page.shelfmark or state.sys_id
+        safe_url = _json.dumps(new_url)
+        safe_title = _json.dumps(f'{shelfmark} | Dicta Genizah Search')
+        js = f'try {{ history.replaceState(null, "", {safe_url}); document.title = {safe_title}; }} catch(e) {{}}'
+        _page_client.run_javascript(js)
+
+    def _run_page_javascript(js: str) -> None:
+        """Run JavaScript through the captured client from detached load tasks."""
+        try:
+            _page_client.run_javascript(js)
+        except Exception as exc:
+            logger.warning("Browse page JavaScript dispatch failed: %s", exc)
+    # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
+    _pending_shelfmark = initial_shelfmark
+
+    # Add custom styles
+    ui.add_head_html(VIEWER_STYLES)
+
+    def update_search_error():
+        """Update the inline search error display below the search bar."""
+        error_container = slider_refs.get('search_error_container')
+        if error_container:
+            error_container.clear()
+            if state.search_error:
+                with error_container:
+                    ui.icon('error_outline', size='sm').classes('text-red-500')
+                    ui.label(state.search_error).classes('text-red-500 text-sm ml-1')
+
+    async def search_shelfmark():
+        """Search for manuscripts by shelfmark or sys_id."""
+        if not state.shelfmark_query.strip():
+            return
+
+        state.is_loading = True
+        state.error = None
+        state.search_error = None  # Clear inline error
+        update_search_error()  # Clear the error display
+        update_content()
+
+        try:
+            _query = state.shelfmark_query.strip()
+
+            # If input looks like a sys_id (starts with 99, all digits), load directly
+            if _query.isdigit() and _query.startswith('99'):
+                _clear_search_scope_for_new_manuscript(_query)
+                state.sys_id = _query
+                state.current_page = None
+                state.view_joined = False
+                state.reading_desk_entries = []
+                state.active_source = 'nli'
+                state.source_user_override = False
+                state.volume_ie = None  # Reset volume when navigating to new manuscript
+                enrichment_refs.clear()
+                await load_page(p_num=1)
+                return
+
+            found = await run.io_bound(
+                lambda: service.search_by_shelfmark(_query, limit=20)
+            )
+            if found is None:
+                # run.io_bound returns None when the lookup was cancelled or the
+                # app is stopping: nothing to show, and not an error.
+                state.is_loading = False
+                update_content()
+                return
+            results, exact_match = found
+
+            if not results:
+                # Show inline error below search bar instead of full-page error
+                state.search_error = tr('No manuscript found') + f": '{state.shelfmark_query}'"
+                state.is_loading = False
+                # Clear stale page so update_content shows error/welcome, not old manuscript
+                state.current_page = None
+                state.view_joined = False
+                update_search_error()
+                update_content()
+                return
+
+            # Clear any previous inline error on success
+            state.search_error = None
+            update_search_error()
+
+            # If exact match or single result, load directly
+            if exact_match or len(results) == 1:
+                _clear_search_scope_for_new_manuscript(results[0].sys_id)
+                state.sys_id = results[0].sys_id
+                state.current_page = None  # Reset to avoid using old page number
+                state.view_joined = False  # Exit reading desk if active
+                state.reading_desk_entries = []
+                state.active_source = 'nli'  # Reset image source for new manuscript
+                state.source_user_override = False
+                state.volume_ie = None  # Reset volume when navigating to new manuscript
+                enrichment_refs.clear()  # Prevent stale ref usage
+                await load_page(p_num=1)  # Always start at page 1 for new manuscript
+            else:
+                # Multiple results - show selection dialog
+                state.is_loading = False
+                update_content()
+                show_shelfmark_suggestions(results)
+
+        except Exception as e:
+            state.error = str(e)
+            state.is_loading = False
+            update_content()
+
+    def show_shelfmark_suggestions(results):
+        """Show a dialog with shelfmark suggestions for user to select."""
+        from genizah_core import get_library_display
+
+        # Explicit slot context — this may be called from a detached ensure_future task
+        with content_container:
+          with ui.dialog() as dialog, ui.card().classes('p-4 min-w-96 max-w-lg'):
+            # Header
+            with ui.row().classes('w-full items-center justify-between mb-4'):
+                h3(tr('Select Manuscript'), classes='text-lg font-semibold m-0')
+                ui.button(icon='close', on_click=dialog.close).props('flat round dense')
+
+            ui.label(
+                f"{tr('Multiple matches found for')}: \"{state.shelfmark_query}\""
+            ).classes('mb-4').style('color: var(--text-secondary);')
+
+            # Results list
+            with ui.column().classes('w-full gap-1 max-h-80 overflow-y-auto'):
+                for result in results:
+                    async def select_result(r=result):
+                        _clear_search_scope_for_new_manuscript(r.sys_id)
+                        state.sys_id = r.sys_id
+                        state.shelfmark_query = r.shelfmark  # Update state with selected shelfmark
+                        # Update the search input field if available
+                        if slider_refs.get('search_input'):
+                            slider_refs['search_input'].value = r.shelfmark
+                        state.current_page = None
+                        state.view_joined = False  # Exit reading desk if active
+                        state.reading_desk_entries = []
+                        state.active_source = 'nli'  # Reset image source for new manuscript
+                        state.source_user_override = False
+                        state.volume_ie = None  # Reset volume for new manuscript
+                        enrichment_refs.clear()  # Prevent stale ref usage
+                        dialog.close()
+                        await load_page(p_num=1)
+
+                    # Get library display name (short form)
+                    library_short = ''
+                    if result.library_code:
+                        library_short = get_library_display(result.library_code, short=True)
+
+                    with ui.card().classes(
+                        'w-full p-3 cursor-pointer hover:bg-gray-100'
+                    ).style(
+                        'background: var(--bg-surface); border: 1px solid var(--border-subtle);'
+                    ).on('click', select_result):
+                        # Library and Shelfmark row
+                        with ui.row().classes('items-center gap-2'):
+                            # Library badge (if available)
+                            if library_short:
+                                ui.badge(library_short).classes(
+                                    'text-xs'
+                                ).style('background: var(--primary-100); color: var(--primary-700);')
+                            # Shelfmark (LTR)
+                            ui.label(result.shelfmark).classes('font-medium').style(
+                                'color: var(--text-primary); direction: ltr; text-align: left;'
+                            )
+                        # Title (RTL for Hebrew)
+                        if result.title:
+                            ui.label(result.title).classes('text-sm').style(
+                                'color: var(--text-secondary); direction: rtl; text-align: right;'
+                            )
+
+        dialog.open()
+
+    async def load_page(direction: int = 0, p_num: Optional[int] = None, fl_id: Optional[str] = None,
+                        _ux_nav: bool = False):
+        """Load a page of the manuscript with async two-phase loading.
+
+        Phase A (fast): Fetch page data via run.io_bound → render image + header immediately.
+        Phase B (background): Fetch PGP + FJMS enrichment → update placeholder containers.
+
+        ``_ux_nav``: the page's own URL started this load (web/ux_timing.py).
+        """
+        _ux_t0 = time.perf_counter()
+        if not state.sys_id and not fl_id:
+            state.error = tr('No manuscript found')
+            update_content()
+            return
+
+        # Generation guard: prevent stale updates from superseded loads
+        _load_generation['value'] += 1
+        my_gen = _load_generation['value']
+        _recent = None  # (sys_id, fl_id) to record in Recently Viewed after Phase A
+
+        # Reset enrichment state
+        state.enrichment_loaded = False
+        state.enrichment_loading = False
+        state.pgp_transcription = None
+        state.pgp_metadata = None
+        state.all_sources = None
+        state.fjms_data = None
+        state.crossref_data = None
+        state.title_translation = None
+        state.oxford_translations = {}
+
+        state.is_loading = True
+        state.error = None
+        state.zoom_level = 1.0  # Reset zoom on page change
+        # Reset image adjustments on page change (must use content_container context for async tasks)
+        with content_container:
+            for key in ('brightness', 'contrast'):
+                if slider_refs.get(key): slider_refs[key].value = 0
+            if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+            # The viewer's own zoom and pan go too: the next page's image is
+            # drawn at 100%, and the viewer must start from there (its scale
+            # is the browser's, not pushed from here).
+            _run_page_javascript('if(window.manuscriptViewer) { window.manuscriptViewer.resetAdjustments(); window.manuscriptViewer.fit(); }')
+        update_content()  # Show loading spinner
+
+        # === Phase A: Fast page fetch ===
+        try:
+            _sys_id = state.sys_id
+            _current_p_num = state.current_page.p_num if state.current_page else None
+
+            _volume_ie = state.volume_ie
+
+            def _fetch_page():
+                # Phase 86: synthetic sys_ids have no transcription pages in
+                # Tantivy — Tantivy returns a single stub row with total_pages=0
+                # which blocks Next/Prev navigation (direction=+1 can't advance
+                # past page 1). Force the metadata-only fallback so the
+                # direction-based _requested_p computation runs and the CUDL
+                # canvas-derived total_pages takes effect.
+                if _sys_id and is_synthetic_sys_id(_sys_id):
+                    return None
+                if fl_id:
+                    _fl_page = service.get_browse_page_by_fl(fl_id, sys_id=_sys_id)
+                    if _fl_page:
+                        return _fl_page
+                    # FL lookup came back empty. Do NOT dead-end here: the
+                    # inbound URL also carries volume_ie (+ page), which
+                    # addresses the same folio by a different route. Erroring
+                    # out instead was strictly worse than the fallback.
+                    if _sys_id:
+                        return service.get_browse_page(
+                            _sys_id,
+                            p_num=p_num if p_num is not None else 1,
+                            volume_ie=_volume_ie,
+                        )
+                    return None
+                elif p_num is not None:
+                    return service.get_browse_page(_sys_id, p_num=p_num, volume_ie=_volume_ie)
+                elif _current_p_num is not None:
+                    return service.get_browse_page(
+                        _sys_id,
+                        p_num=_current_p_num,
+                        direction=direction,
+                        volume_ie=_volume_ie,
+                    )
+                else:
+                    return service.get_browse_page(_sys_id, p_num=1, volume_ie=_volume_ie)
+
+            page = await run.io_bound(in_visitor_language(_fetch_page))
+
+            if my_gen != _load_generation['value']:
+                return  # Superseded by newer load
+
+            if page:
+                # A manuscript without automatic text comes with no page count (0); keep the one
+                # Phase B counted for its previous page, so the total and Next hold while it reruns.
+                _prev = state.current_page
+                if not page.total_pages and _prev is not None and _prev.sys_id == page.sys_id and _prev.total_pages:
+                    page.total_pages = _prev.total_pages
+                state.sys_id = page.sys_id  # Update in case fl_id resolved differently
+                state.current_page = page
+                state.page_input_value = page.p_num
+                state.error = None
+                # Update volume_ie from the loaded page (auto-detect if not set)
+                if page.volume_ie:
+                    state.volume_ie = page.volume_ie
+
+                # Save position to storage for persistence (Phase 74: via helper).
+                # R2-1 embed: skip — an embedded candidate must not overwrite a
+                # normal /browse tab's remembered position (shared cookie).
+                if not embedded:
+                    persist_browse_snapshot(state, page)
+
+                # Phase 85 D-06: expose synthetic-row flag to client-side JS
+                # (web/static/manuscript_viewer.js gates NLI manifest fetch +
+                # NLI image proxy fallback on this flag).
+                _is_synth_js = 'true' if is_synthetic_sys_id(page.sys_id) else 'false'
+                _run_page_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
+
+                # PostHog: track manuscript views (through the page's client:
+                # this task has no page, or a cleared button's dead one)
+                from web.analytics import posthog_capture
+                posthog_capture('browse_manuscript', {
+                    'sys_id': state.sys_id,
+                    'shelfmark': page.shelfmark[:80] if page.shelfmark else '',
+                    'page_num': page.p_num,
+                }, client=_page_client)
+
+                # Sync browser URL bar for sharing/bookmarking
+                _update_browser_url()
+
+                # Anonymous web traffic shares the process-wide local lists store;
+                # persisting recents there causes cross-user leakage and blocking
+                # whole-file rewrites on every uncached browse request.
+                # Written after Phase A, off the loop (_record_recent): 3-4 Supabase
+                # round trips here delayed this page and stalled every visitor.
+                if state.sys_id and service.is_ready and GlobalAuthState.is_logged_in():
+                    _recent = (state.sys_id, page.fl_id, GlobalAuthState.get_user_id())
+            else:
+                # No Tantivy page — try metadata-only fallback from csv_bank.
+                # Phase 86: derive requested p_num from explicit p_num OR from
+                # current_page + direction (Next/Prev buttons send direction=±1).
+                _fallback_sys = state.sys_id
+                if p_num is not None:
+                    _requested_p = p_num
+                elif direction != 0 and state.current_page and state.current_page.p_num:
+                    _requested_p = state.current_page.p_num + direction
+                else:
+                    _requested_p = state.current_page.p_num if state.current_page else None
+                def _fetch_metadata_only():
+                    return service.get_metadata_only_browse_page(_fallback_sys, p_num=_requested_p)
+                meta_page = await run.io_bound(in_visitor_language(_fetch_metadata_only))
+                if my_gen != _load_generation['value']:
+                    return
+                if meta_page:
+                    state.sys_id = meta_page.sys_id
+                    state.current_page = meta_page
+                    state.page_input_value = meta_page.p_num
+                    state.error = None
+                    _update_browser_url()
+                    # Phase 85 D-06: expose synthetic-row flag to client-side JS
+                    _is_synth_js = 'true' if is_synthetic_sys_id(meta_page.sys_id) else 'false'
+                    _run_page_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
+                else:
+                    if fl_id:
+                        state.error = tr('No text available') + f" (fl_id: {fl_id})"
+                    else:
+                        state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
+
+        except Exception as e:
+            if my_gen != _load_generation['value']:
+                return
+            err_str = str(e)
+            # NiceGUI lifecycle race: a previous render's slot was torn down
+            # mid-flight (common on rapid navigation / Phase A re-render).
+            # The page data has loaded; log the artifact but do NOT poison
+            # state.error — that would block Phase B and any pagination
+            # fix we apply there (#86).
+            _err_lower = err_str.lower()
+            if (
+                'parent element this slot belongs to has been deleted' in _err_lower
+                or 'current slot cannot be determined' in _err_lower
+            ):
+                logger.warning(
+                    "NiceGUI slot lifecycle race during Phase A (continuing to Phase B): %s",
+                    err_str,
+                )
+            else:
+                state.error = f"{tr('Error')}: {err_str}"
+
+        # Title translations: fast SQLite query (~1ms), safe for Phase A
+        # Note: Oxford translations moved to Phase B (oxford_part_metadata is deferred)
+        if state.current_page and state.current_page.sys_id:
+            _title_sys_id = state.current_page.sys_id
+            def _fetch_title_translations():
+                title_result = None
+                try:
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    if svc.titles_available():
+                        title_result = svc.get_title_translations_batch([_title_sys_id]).get(_title_sys_id)
+                    svc.close()
+                except Exception:
+                    pass  # Translation lookup failed; continue without translation
+                return title_result
+            try:
+                state.title_translation = await run.io_bound(_fetch_title_translations)
+                state.oxford_translations = {}  # Will be populated in Phase B
+            except Exception:
+                pass  # Translation lookup failed; continue without translation
+
+        state.is_loading = False
+        update_content()  # Phase A complete: show image + header + title translation
+        if my_gen == _load_generation['value']:
+            ux_done(_page_client, 'browse_page', 'error' if state.error else 'ok',
+                    server_ms=(time.perf_counter() - _ux_t0) * 1000, nav=_ux_nav,
+                    img_selector='.img-loading-container img.zoomable-image')
+        # Only the current load: one overtaken during the title lookup above
+        # would otherwise record its page after the newer one's.
+        if _recent and my_gen == _load_generation['value']:
+            background_tasks.create(_record_recent(*_recent), name='browse-recents')
+
+        # === Phase B: Background enrichment ===
+        if state.current_page and state.current_page.sys_id and not state.error:
+            await _load_enrichment(state.current_page, my_gen)
+
+    async def _record_recent(sys_id: str, fl_id: Optional[str], user_id: Optional[str]) -> None:
+        """Record a viewed manuscript in the visitor's Recently Viewed, off the loop.
+
+        ``user_id`` is the account that viewed the page, read when it rendered.
+        The client and the title are read here, on the loop: in a worker thread
+        the visitor's storage is unreadable, so the write would go out as
+        anonymous and RLS would drop it silently. One write at a time per account
+        (_recents_lock_for); a write that waited is dropped if the browser has
+        since switched account, so A's page never lands in B's history.
+        """
+        if not user_id:
+            return
+        async with _recents_lock_for(user_id):
+            try:
+                from web.state import state as app_state
+                from web.supabase_client import add_recent_item, get_user_client
+                lists_mgr = app_state.lists_mgr
+                if GlobalAuthState.get_user_id() != user_id or not lists_mgr:
+                    return
+                meta_mgr = getattr(lists_mgr, 'meta_mgr', None)
+                shelfmark, title = meta_mgr.get_meta_for_id(sys_id) if meta_mgr else (None, None)
+                await run.io_bound(add_recent_item, user_id, sys_id, shelfmark, title, fl_id,
+                                   client=get_user_client())
+            except Exception as track_err:
+                logger.error(f"Failed to track recent item: {track_err}")
+
+    # Enrichment thin wrappers (inject state + refs into extracted module functions)
+    async def _load_enrichment(page, generation):
+        await _load_enrichment_fn(state, refs, page, generation)
+
+    def _update_enrichment_sections():
+        _update_enrichment_sections_fn(state, refs)
+
+    async def go_to_page(new_page: int):
+        """Navigate to a specific page number."""
+        if new_page < 1:
+            new_page = 1
+        if state.current_page and state.current_page.total_pages and new_page > state.current_page.total_pages:
+            new_page = state.current_page.total_pages  # an unknown count (0) is no ceiling
+        await load_page(p_num=new_page)
+
+    async def navigate_shelfmark(direction: int):
+        """Navigate to next/prev shelfmark based on file order."""
+        if not state.sys_id:
+            return
+
+        state.is_loading = True
+        update_content()
+
+        try:
+            _sys_id = state.sys_id
+            adjacent_sys_id = await run.io_bound(
+                lambda: service.get_adjacent_shelfmark(_sys_id, direction)
+            )
+            if adjacent_sys_id:
+                _clear_search_scope_for_new_manuscript(adjacent_sys_id)
+                state.sys_id = adjacent_sys_id
+                state.view_all = False  # Reset to single page view
+                state.view_joined = False  # Exit reading desk if active
+                state.full_manuscript = []
+                state.reading_desk_entries = []
+                state.active_source = 'nli'  # Reset image source for new manuscript
+                state.volume_ie = None  # Reset volume for new manuscript
+                state.source_user_override = False
+                enrichment_refs.clear()  # Prevent stale ref usage across navigations
+                await load_page(p_num=1)  # Load first page of new manuscript
+            else:
+                state.is_loading = False
+                # Show message: at first/last manuscript
+                state.error = tr('No more manuscripts') if direction > 0 else tr('At first manuscript')
+                update_content()
+        except Exception as e:
+            state.error = f"{tr('Error')}: {str(e)}"
+            state.is_loading = False
+            update_content()
+
+    async def toggle_view_all():
+        """Toggle between single page and full manuscript view."""
+        if state.view_all:
+            # Switch back to single page
+            state.view_all = False
+            state.full_manuscript = []
+            update_content()
+        else:
+            # Load full manuscript
+            state.is_loading = True
+            update_content()
+
+            try:
+                _sys_id = state.sys_id
+                pages = await run.io_bound(lambda: service.get_full_manuscript(_sys_id))
+                if pages:
+                    state.full_manuscript = pages
+                    state.view_all = True
+                    state.error = None
+                else:
+                    state.error = tr('Could not load full manuscript')
+            except Exception as e:
+                state.error = f"{tr('Error')}: {str(e)}"
+            finally:
+                state.is_loading = False
+                update_content()
+
+    def enter_joined_view(fragments_info: list, pgpid: int = None):
+        """Switch to reading desk mode showing all fragments in dual-pane layout."""
+        state.view_joined = True
+        state.view_all = False
+        state.joined_fragments_info = fragments_info
+        state.joined_pgpid = pgpid
+
+        # Load page data and PGP sources for each fragment
+        from shared.document_service import get_all_sources_for_fragment, get_document_for_fragment
+        entries = []
+        for frag_info in fragments_info:
+            frag_sid = frag_info.get('document_id', '')
+            frag_sm = frag_info.get('shelfmark', '')
+            if not frag_sid:
+                continue
+            pages = service.get_full_manuscript(frag_sid)
+            # Get PGP sources for version selector
+            sources = []
+            pgp_doc = None
+            try:
+                sources = _merge_fgp_sources(frag_sid, get_all_sources_for_fragment(frag_sid))
+                pgp_doc = get_document_for_fragment(frag_sid)
+            except Exception:
+                pass  # Shelfmark lookup failed; use fallback identifier
+            entries.append({
+                'sys_id': frag_sid,
+                'shelfmark': frag_sm,
+                'pages': pages or [],
+                'sources': sources,
+                'pgp_doc': pgp_doc or {}
+            })
+        state.reading_desk_entries = entries
+        state.reading_desk_selected_sources = {}
+        _persist_reading_desk_state()
+        update_content()
+
+    refs.enter_joined_view = enter_joined_view
+
+    def exit_joined_view():
+        """Return to single page view from joined fragments mode."""
+        state.view_joined = False
+        state.joined_fragments_info = []
+        state.joined_pgpid = None
+        state.reading_desk_entries = []
+        state.reading_desk_selected_sources = {}
+        # Clear persisted reading desk state (Phase 74: via helper).
+        # keep_position=True preserves the user's last single-page position;
+        # pre-refactor this path only cleared the desk (Codex 74-CODEX-REVIEW2 #2).
+        clear_browse_snapshot(keep_position=True)
+        update_content()
+
+    def add_to_reading_desk():
+        """Add current manuscript to the reading desk, or start reading desk if not active."""
+        if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
+            return
+
+        current_sid = state.sys_id
+        current_sm = state.current_page.shelfmark or f"ID: {current_sid}"
+
+        if state.view_joined:
+            # Reading desk is already active -- add the current manuscript if not already present
+            existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+            if current_sid in existing_sids:
+                ui.notify(tr('Already in Reading Desk'), type='info')
+                return
+
+            # Load data for the new entry
+            from shared.document_service import get_all_sources_for_fragment as rd_get_sources, get_document_for_fragment as rd_get_doc
+            pages = service.get_full_manuscript(current_sid)
+            sources = []
+            pgp_doc = None
+            try:
+                sources = _merge_fgp_sources(current_sid, rd_get_sources(current_sid))
+                pgp_doc = rd_get_doc(current_sid)
+            except Exception:
+                pass  # Join operation failed; continue with available data
+            state.reading_desk_entries.append({
+                'sys_id': current_sid,
+                'shelfmark': current_sm,
+                'pages': pages or [],
+                'sources': sources,
+                'pgp_doc': pgp_doc or {}
+            })
+            _persist_reading_desk_state()
+            update_content()
+            ui.notify(f'{current_sm} {tr("added to Reading Desk")}', type='positive')
+        else:
+            # Start reading desk with this manuscript
+            frag_info = [{'shelfmark': current_sm, 'document_id': current_sid}]
+            enter_joined_view(frag_info, pgpid=None)
+            _persist_reading_desk_state()
+
+    def _add_sys_id_to_reading_desk(sys_id: str, shelfmark: str):
+        """Internal helper: add a fragment by sys_id/shelfmark to the active reading desk."""
+        existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+        if sys_id in existing_sids:
+            ui.notify(tr('Already in Reading Desk'), type='info')
+            return
+
+        from shared.document_service import get_all_sources_for_fragment as rd_get_sources, get_document_for_fragment as rd_get_doc
+        pages = service.get_full_manuscript(sys_id)
+        sources = []
+        pgp_doc = None
+        try:
+            sources = _merge_fgp_sources(sys_id, rd_get_sources(sys_id))
+            pgp_doc = rd_get_doc(sys_id)
+        except Exception:
+            pass  # Shelfmark lookup failed; use fallback identifier
+        state.reading_desk_entries.append({
+            'sys_id': sys_id,
+            'shelfmark': shelfmark,
+            'pages': pages or [],
+            'sources': sources,
+            'pgp_doc': pgp_doc or {}
+        })
+        _persist_reading_desk_state()
+        update_content()
+        ui.notify(f'{shelfmark} {tr("added to Reading Desk")}', type='positive')
+
+    def _persist_reading_desk_state():
+        """Save reading desk state via Phase 74 snapshot helper.
+
+        Thin shim preserved so existing call sites do not need updating.
+        page=state.current_page carries shelfmark/p_num for browse_position.
+        """
+        persist_browse_snapshot(state, state.current_page)
+
+    def _restore_reading_desk_state():
+        """Restore reading desk state from session storage after language switch."""
+        # M3 audit: Class B wrapper — the try/except covers multi-step logic
+        # (dict access on saved.get('entries'), enter_joined_view() call,
+        # source preference restoration). The storage call moves to
+        # safe_user_get (which absorbs prune-race AssertionError internally),
+        # but the outer wrapper is PRESERVED because it catches AttributeError,
+        # KeyError, TypeError from downstream logic.
+        try:
+            saved = safe_user_get('reading_desk_state')
+            logger.info(f"[ReadingDesk] Attempting restore, saved state: {bool(saved)}")
+            if saved and saved.get('entries'):
+                frag_info = saved['entries']
+                pgpid = saved.get('pgpid')
+                selected_sources = saved.get('selected_sources', {})
+                enter_joined_view(
+                    [{'shelfmark': e['shelfmark'], 'document_id': e['sys_id']} for e in frag_info],
+                    pgpid=pgpid
+                )
+                # Restore selected source preferences after enter_joined_view resets them
+                if selected_sources:
+                    state.reading_desk_selected_sources = selected_sources
+                logger.info(f"[ReadingDesk] Restored {len(frag_info)} entries")
+                return True
+        except Exception as e:
+            logger.error(f"[ReadingDesk] Error restoring state: {e}")
+        return False
+
+    def search_for_parallels():
+        """Navigate to parallels page with current text."""
+        if not state.sys_id:
+            return
+
+        # Get text to search for parallels
+        if state.view_all and state.full_manuscript:
+            # Use all pages
+            text_content = "\n\n".join([p.text for p in state.full_manuscript if p.text])
+        elif state.current_page:
+            # Use current page only
+            text_content = state.current_page.text
+        else:
+            return
+
+        if not text_content:
+            ui.notify(tr('No text available'), type='warning')
+            return
+
+        # Navigate to parallels page with text as URL parameter
+        try:
+            from urllib.parse import quote
+            encoded_text = quote(text_content)
+            ui.navigate.to(f'/parallels?text={encoded_text}')
+        except Exception as e:
+            logger.error(f"Error navigating to parallels: {e}")
+            ui.notify(tr('Error'), type='negative')
+
+    def toggle_metadata():
+        """Toggle metadata panel visibility."""
+        show_metadata['value'] = not show_metadata['value']
+        update_content()
+
+    def export_browse_data():
+        """Prepare browse data for export."""
+        if not state.current_page:
+            ui.notify(tr('No text available'), type='warning')
+            return
+
+        # Get library info
+        library_code = ''
+        library_name = ''
+        if state.current_page and state.current_page.library_code:
+            library_code = state.current_page.library_code
+            from genizah_core import get_library_display
+            library_name = get_library_display(library_code, short=False, lang=get_language())
+
+        # Prepare export data
+        #
+        # The last six keys are for the SOURCE-AWARE credit (2026-09-04). The
+        # docx used to print an unconditional English MiDRASH citation whatever
+        # transcription the reader exported, which is wrong the moment they are
+        # looking at a Princeton or Friedberg edition.
+        #
+        # `version_info` comes out of `enrichment_refs`, not from a local: it is
+        # written by `handle_version_change` ~3400 lines below, in a sibling
+        # closure this function cannot see into. `enrichment_refs` is the dict
+        # both reach and it is cleared on navigation, so a stale manuscript's
+        # source can never be attached to a new one's export.
+        #
+        # `.get`, not `[...]`: on a manuscript with no alternative sources
+        # `on_version_change` is never called at all, so the key is simply
+        # absent -- and absent means the plain HTR text, which is exactly what
+        # `resolve_transcription_credit(None, ...)` credits.
+        # The locator comes from `_citation_page_url()`, the ONE builder the chip
+        # also uses, so a citation copied off the screen and one printed in the
+        # .docx cannot point at different folios.
+        _folio = state.current_page.folio_label
+        export_data = {
+            'shelfmark': state.current_page.shelfmark,
+            'title': state.current_page.title,
+            'sys_id': state.sys_id,
+            'view_all': state.view_all,
+            'library_code': library_code,
+            'library_name': library_name,
+            'lang': get_language(),
+            # FULL MANUSCRIPT VIEW sends no source: that branch has no
+            # per-page version chooser, so every folio's stored text is what is
+            # exported and MiDRASH is the correct unconditional credit. The
+            # single-page branch below pairs this with the displayed text.
+            'version_info': (None if state.view_all
+                             else enrichment_refs.get('current_version_info')),
+            # FULL MANUSCRIPT VIEW contains every folio, so naming the one
+            # that happened to be selected before entering it describes the
+            # document as something it is not -- the same reason `version_info`
+            # is dropped just above.
+            'folio_label': None if state.view_all else _folio,
+            'page_url': _citation_page_url(),
+            'retrieved_on': retrieved_today(),
+        }
+
+        if state.view_all and state.full_manuscript:
+            # Export all pages
+            export_data['pages'] = [
+                {
+                    'p_num': p.p_num,
+                    'text': p.text,
+                    'full_header': p.full_header
+                }
+                for p in state.full_manuscript
+            ]
+        else:
+            # Export current page.
+            #
+            # The DISPLAYED text, not `state.current_page.text`, which is always
+            # the automatic transcription. `version_info` a few lines above and
+            # this text are written together by `handle_version_change`; taking
+            # one from the version selector and the other from the page state
+            # put MiDRASH's transcription in a document credited to whichever
+            # scholar was selected.
+            #
+            # Falls back to the page text when no alternative version has been
+            # chosen -- which is the same condition under which `version_info`
+            # is absent, so the pair stays consistent in that case too.
+            export_data['p_num'] = state.current_page.p_num
+            export_data['text'] = (
+                enrichment_refs.get('current_version_text')
+                if enrichment_refs.get('current_version_info') is not None
+                else state.current_page.text)
+
+        # Store in session storage (safe_user_set absorbs prune-race AssertionError)
+        safe_user_set('browse_export_data', export_data)
+
+        # Trigger download
+        ui.download('/api/export/browse/word')
+
+    def add_manuscript_to_list():
+        """Add entire manuscript to a list."""
+        if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
+            return
+
+        from web.state import state as app_state
+        from web.components import show_add_to_list_dialog
+        if not app_state.lists_mgr:
+            ui.notify(tr('Lists manager not available'), type='warning')
+            return
+
+        show_add_to_list_dialog(
+            sys_id=state.sys_id,
+            shelfmark=state.current_page.shelfmark,
+            lists_mgr=app_state.lists_mgr,
+            note_default='',  # Empty by default
+            fl_id=None
+        )
+
+    def add_page_to_list():
+        """Add specific page/image to a list."""
+        if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
+            return
+
+        from web.state import state as app_state
+        from web.components import show_add_to_list_dialog
+        if not app_state.lists_mgr:
+            ui.notify(tr('Lists manager not available'), type='warning')
+            return
+
+        # Use FL ID if available for specific page reference
+        fl_id = state.current_page.fl_id
+
+        show_add_to_list_dialog(
+            sys_id=state.sys_id,
+            shelfmark=f"{state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}",
+            lists_mgr=app_state.lists_mgr,
+            note_default='',  # Empty by default (user requested)
+            fl_id=fl_id
+        )
+
+    # The zoom buttons (2026-11-03). A click is handled in the browser: the
+    # button's js_handler calls the viewer, which applies the transform at
+    # once and reports the level through the `browse_zoom` event (`_zoom_changed`
+    # below). No Python click handler, so a click costs no round-trip -- PostHog
+    # had 50 rage clicks by 19 readers on + in 30 days, each click a linear
+    # 0.25 through the server. The `data-action` attributes stay: the page's
+    # keyboard handler clicks them for + and -.
+    ZOOM_IN_JS = "() => { if (window.browseZoom) window.browseZoom('in'); }"
+    ZOOM_OUT_JS = "() => { if (window.browseZoom) window.browseZoom('out'); }"
+    # Reset applies in the browser first (the two viewers), then reaches the
+    # server for the sliders and the page's own state.
+    ZOOM_RESET_JS = ('(e) => { [window.manuscriptViewer, window.fsEditViewer].forEach('
+                     'function(v) { if (v && v.reset) v.reset(); }); emit(e); }')
+
+    def _zoom_changed(e):
+        """The browser's zoom level, from the viewer's `browse_zoom` event.
+
+        `seq` numbers the report; the image markup carries the last one heard
+        (`data-zoom-seq`), so the viewer can tell an image this page drew
+        before hearing its latest level from one drawn after.
+        """
+        args = e.args if isinstance(e.args, dict) else {}
+        if 'scale' not in args:
+            return
+        state.zoom_level = clamp_zoom(args.get('scale'))
+        try:
+            state.zoom_seq = max(state.zoom_seq, int(args.get('seq', 0)))
+        except (TypeError, ValueError):
+            pass
+
+    ui.on('browse_zoom', _zoom_changed)
+
+    def zoom_reset():
+        """Reset zoom to 100%."""
+        state.zoom_level = 1.0
+        state.rotation = 0  # Also reset rotation
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = 0
+        # Reset image adjustments
+        for key in ('brightness', 'contrast'):
+            if slider_refs.get(key): slider_refs[key].value = 0
+            if slider_refs.get(f'fs_{key}'): slider_refs[f'fs_{key}'].value = 0
+        if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+        if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
+        # The button's js_handler has reset both viewers already; the keyboard
+        # and any other caller reach this handler alone, so do it here too.
+        ui.run_javascript('''
+            [window.manuscriptViewer, window.fsEditViewer].forEach(function(v) { if (v && v.reset) v.reset(); });
+        ''')
+
+    def rotate_left():
+        """Rotate image 90 degrees counter-clockwise."""
+        state.rotation = (state.rotation - 90) % 360
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = state.rotation
+        update_image_transform()
+
+    def rotate_right():
+        """Rotate image 90 degrees clockwise."""
+        state.rotation = (state.rotation + 90) % 360
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = state.rotation
+        update_image_transform()
+
+    def rotate_reset():
+        """Reset rotation to 0."""
+        state.rotation = 0
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = 0
+        update_image_transform()
+
+    def handle_rotation_slider(e):
+        """Handle rotation slider change."""
+        if e.value is not None:
+             state.rotation = int(e.value)
+             update_image_transform()
+
+    def toggle_fullscreen():
+        """Toggle fullscreen mode."""
+        state.is_fullscreen = not state.is_fullscreen
+        update_content()
+
+    def toggle_image_fullscreen():
+        """Toggle fullscreen mode for image only."""
+        ui.run_javascript('''
+            const imageCard = document.querySelector('.image-container')?.closest('.q-card');
+            if (imageCard) {
+                imageCard.classList.toggle('fullscreen-mode');
+                // Add ESC key handler to exit
+                const escHandler = (e) => {
+                    if (e.key === 'Escape' && imageCard.classList.contains('fullscreen-mode')) {
+                        imageCard.classList.remove('fullscreen-mode');
+                        document.removeEventListener('keydown', escHandler);
+                    }
+                };
+                if (imageCard.classList.contains('fullscreen-mode')) {
+                    document.addEventListener('keydown', escHandler);
+                }
+            }
+        ''')
+
+    def toggle_fullscreen_edit():
+        """Toggle fullscreen edit mode with side-by-side image and text."""
+        state.fullscreen_edit = not state.fullscreen_edit
+        update_content()
+
+    def update_image_transform():
+        """Push the rotation to the viewers. The zoom is the browser's: it is
+        applied there and only reported here (`_zoom_changed`), so this never
+        writes a scale -- a rotation right after a zoom would otherwise snap
+        the image back to the level the server last heard of."""
+        ui.run_javascript(f'''
+            [window.manuscriptViewer, window.fsEditViewer].forEach(function(v) {{
+                if (v && v.setRotation) v.setRotation({int(state.rotation)});
+            }});
+        ''')
+
+    async def _submit_correction_now():
+        """Submit the correction to the backend."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login first'), type='negative')
+            return
+
+        if state.edit_text == state.original_edit_text and not state.edit_notes:
+            ui.notify(tr('No changes to submit'), type='warning')
+            return
+
+        state.error_message = None
+
+        user_id = GlobalAuthState.get_user_id()
+        if not user_id:
+            ui.notify(tr('User not found'), type='negative')
+            return
+
+        # Determine status based on role
+        status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
+
+        # Do the Supabase call BEFORE any UI rebuild, off the loop: the client
+        # is built here (a worker cannot read the visitor's storage and would
+        # write anonymously, refused by RLS).
+        client = get_user_client()
+        try:
+            if state.draft_id:
+                result = await run.io_bound(update_correction, state.draft_id, {
+                    'corrected_text': state.edit_text,
+                    'notes': state.edit_notes,
+                    'status': status
+                }, client=client)
+            else:
+                result = await run.io_bound(
+                    create_correction,
+                    author_id=user_id,
+                    sys_id=state.current_page.sys_id,
+                    shelfmark=state.current_page.shelfmark or '',
+                    page_number=state.current_page.p_num,
+                    original_text=state.original_edit_text,
+                    corrected_text=state.edit_text,
+                    notes=state.edit_notes if state.edit_notes else '',
+                    status=status,
+                    ie_id=state.volume_ie,
+                    client=client,
+                )
+        except Exception as e:
+            ui.notify(f'{tr("Error")}: {e}', type='negative')
+            logger.error(f"Submit error: {e}")
+            return
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+            return
+
+        if "error" in result:
+            error_msg = result["error"]
+            if '42501' in str(error_msg) or 'row-level security' in str(error_msg).lower():
+                ui.notify(tr('Session expired. Please log out and log back in, then try again.'),
+                          type='negative', timeout=10000)
+            else:
+                ui.notify(error_msg, type='negative')
+            return
+
+        # Success — update state and reload
+        state.edit_mode = False
+        state.draft_saved = False
+        state.draft_id = None
+        ui.notify(tr('Correction submitted successfully'), type='positive')
+        await load_page(direction=0)
+
+    async def _save_draft_now():
+        """Save the draft to Supabase, off the loop (see _submit_correction_now)."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login to save drafts'), type='warning')
+            return
+
+        user_id = GlobalAuthState.get_user_id()
+        if not user_id:
+            ui.notify(tr('User not found'), type='negative')
+            return
+
+        client = get_user_client()
+        sent = (state.edit_text, state.edit_notes)  # what this write carries
+        load_gen = _load_generation['value']  # the page this draft belongs to
+        if state.draft_id:
+            # Update existing draft
+            result = await run.io_bound(update_correction, state.draft_id, {
+                'corrected_text': state.edit_text,
+                'notes': state.edit_notes,
+                'status': 'draft'
+            }, client=client)
+        else:
+            # Create new draft
+            result = await run.io_bound(
+                create_correction,
+                author_id=user_id,
+                sys_id=state.current_page.sys_id,
+                shelfmark=state.current_page.shelfmark or '',
+                page_number=state.current_page.p_num,
+                original_text=state.original_edit_text,
+                corrected_text=state.edit_text,
+                notes=state.edit_notes if state.edit_notes else '',
+                status='draft',
+                ie_id=state.volume_ie,
+                client=client,
+            )
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+            return
+
+        if "error" in result:
+            error_msg = result["error"]
+            if '42501' in str(error_msg) or 'row-level security' in str(error_msg).lower():
+                ui.notify(tr('Session expired. Please log out and log back in, then try again.'),
+                          type='negative', timeout=10000)
+            else:
+                ui.notify(error_msg, type='negative')
+        elif load_gen != _load_generation['value']:
+            # The reader moved to another page while the write ran: the draft is
+            # saved, but its id must not become the new page's draft (a later
+            # save would overwrite this draft with the other page's text).
+            ui.notify(tr('Draft saved'), type='positive')
+        else:
+            # Text typed while the write ran is not in the draft: say "Saved"
+            # only when the editor still holds what was sent.
+            state.draft_saved = (state.edit_text, state.edit_notes) == sent
+            correction = result.get('correction', {})
+            state.draft_id = correction.get('id')
+            ui.notify(tr('Draft saved'), type='positive')
+            update_content()  # Update UI to show green border
+
+    # One correction write at a time per page. The write runs off the loop, so
+    # the loop serves a second click at once; it now WAITS for the first and
+    # then runs, as it did when the write blocked: a second Save Draft updates
+    # the draft the first created, and Submit during a draft save submits it.
+    # (Dropping it instead lost a Submit without a word.) The guard at the top
+    # of each is read after the wait: a stale Submit after a submit does nothing.
+    async def handle_submit_correction():
+        async with state.correction_lock:
+            await _submit_correction_now()
+
+    async def handle_save_draft():
+        async with state.correction_lock:
+            await _save_draft_now()
+
+    def toggle_edit_mode():
+        """Toggle edit mode with fetching existing corrections."""
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login to edit'), type='warning')
+            return
+
+        if state.edit_mode:
+            cancel_edit()
+        else:
+            # Enter edit mode - Show loading state
+            state.edit_loading = True
+            update_content()
+
+            try:
+                # Fetch existing corrections to see if we should resume one
+                user_id = GlobalAuthState.get_user_id()
+                my_corrections = []
+                if user_id:
+                    try:
+                        # Fetch corrections for this document
+                        all_corrections = get_corrections(sys_id=state.current_page.sys_id, author_id=user_id, ie_id=state.volume_ie)
+                        # Filter for THIS page
+                        current_p_num = state.current_page.p_num
+                        my_corrections = [
+                            c for c in all_corrections
+                            if c.get('page_number') == current_p_num
+                        ]
+                        # Sort by created_at desc
+                        my_corrections.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+                    except Exception as e:
+                        logger.error(f"Error fetching corrections: {e}")
+
+                latest = my_corrections[0] if my_corrections else None
+
+                state.edit_mode = True
+
+                # Default to page text
+                base_text = state.current_page.text or ""
+                base_notes = ""
+                
+                # Determine state from latest correction
+                if latest:
+                    # Use the latest correction text as baseline for editing
+                    base_text = latest.get('corrected_text', base_text)
+                    base_notes = latest.get('notes', "") or ""
+                    req_status = latest.get('status')
+                    
+                    if req_status in ('draft', 'pending', 'needs_revision'):
+                        # Resume editing this correction
+                        state.draft_id = latest.get('id')
+                        state.draft_saved = True 
+                    else:
+                        # It's approved/rejected, start fresh but with this content
+                        state.draft_id = None
+                        state.draft_saved = False
+                else:
+                    state.draft_id = None
+                    state.draft_saved = False
+
+                state.edit_text = base_text
+                # Original manuscript text acts as the "original_text" reference
+                state.original_edit_text = state.current_page.text or ""
+                state.edit_notes = base_notes
+                
+                state.edit_loading = False
+                update_content()
+            except Exception as e:
+                state.edit_loading = False
+                update_content()
+                ui.notify(f"Error loading edit mode: {str(e)}", type='negative')
+
+    def cancel_edit():
+        """Cancel edit and revert to view mode."""
+        state.edit_mode = False
+        state.edit_text = ""
+        state.edit_notes = ""
+        update_content()
+
+    def highlight_text(text: str) -> str:
+        """Apply highlighting to search terms in text, safely escaping HTML."""
+        if not text:
+            return ""
+
+        # First escape HTML to prevent XSS
+        escaped_text = html_module.escape(text)
+
+        if not state.highlight_terms:
+            return escaped_text
+
+        # Split highlight terms and apply highlighting
+        terms = state.highlight_terms.split()
+        highlighted = escaped_text
+
+        for term in terms:
+            # Escape the term for safe display, then do case-insensitive replacement
+            escaped_term = html_module.escape(term)
+            pattern = re.compile(re.escape(escaped_term), re.IGNORECASE)
+            highlighted = pattern.sub(
+                f'<span class="highlight-term">{escaped_term}</span>',
+                highlighted
+            )
+
+        return highlighted
+
+    def get_source_badge_class(full_header: str) -> str:
+        """Determine source badge class based on header."""
+        if 'V0.8' in full_header:
+            return 'source-v08'
+        elif 'V0.7' in full_header:
+            return 'source-v07'
+        return 'source-v08'
+
+    def extract_folio_number(full_header: str) -> str:
+        """Extract folio number from header if available."""
+        if not full_header:
+            return ''
+        # Try to extract folio info like "1r", "2v", etc. (but not long sys_ids)
+        match = re.search(r'\b(\d{1,3}[rv]?)\b', full_header)
+        if match:
+            folio = match.group(1)
+            # Only return if it looks like a valid folio (not a long ID)
+            if len(folio) <= 4:
+                return folio
+        return ''
+
+    def update_content():
+        """Update the content display."""
+        try:
+            _client = content_container.client
+        except (RuntimeError, AttributeError):
+            return  # Client/session gone (user navigated away)
+        # Accessing .client returns the (deleted) client object without raising,
+        # so the bare access above can't catch a torn-down session. Check the
+        # deletion flags explicitly — otherwise rebuilding here spams "Client has
+        # been deleted but is still being used" when an async enrichment resolves
+        # after the visitor navigated away (e.g. to the Joins Lab).
+        if content_container.is_deleted or getattr(_client, '_deleted', False):
+            return
+        if state.is_loading:
+            # The spinner is a row of its own above the content, shown and
+            # hidden in place: building it here cost a full clear of the page
+            # and a second full rebuild when Phase A landed. The old content
+            # stays, dimmed (.browse-loading) and `inert`, until the new page:
+            # `inert` also takes focus and Enter/Space from its buttons, which
+            # `pointer-events: none` does not (a focused Submit fired again).
+            loading_row.set_visibility(True)
+            content_container.classes(add='browse-loading')
+            content_container.props(add='inert')
+            return
+        loading_row.set_visibility(False)
+        content_container.classes(remove='browse-loading')
+        content_container.props(remove='inert')
+        content_container.clear()
+
+        with content_container:
+            if state.error and not state.current_page:
+                with ui.card().classes('w-full p-8 text-center'):
+                    ui.icon('error_outline', size='4rem').classes('text-red-400')
+                    ui.label(state.error).classes('text-red-600 mt-4 text-lg')
+                    ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: load_page()).classes('mt-4')
+                return
+
+            if not state.current_page and not state.view_joined:
+                # Show welcome/search prompt
+                with ui.column().classes('w-full items-center py-16'):
+                    ui.icon('auto_stories', size='6rem').classes('text-green-400')
+                    ui.label(tr('Enter a shelfmark to browse the manuscript')).classes(
+                        'mt-6 text-xl rtl-text hebrew-text'
+                    ).style('color: var(--text-secondary);')
+                    with ui.column().classes('mt-8 text-center'):
+                        ui.label(tr('Examples')).classes('text-sm mb-2').style('color: var(--text-tertiary);')
+                        with ui.row().classes('gap-2'):
+                            for example in ['T-S 8J6.1', 'T-S 13J2.5', 'T-S AS 145.295']:
+                                ui.button(
+                                    example,
+                                    on_click=lambda e=example: set_shelfmark_and_search(e)
+                                ).props('flat dense').classes('text-green-700')
+                return
+
+            page = state.current_page
+
+            # Reference to hold the notes panel refresh function
+            # Will be set after the notes panel is created
+            notes_refresh_ref = {'refresh': None}
+
+            async def refresh_notes_after_comment():
+                """Refresh the notes panel after a comment is submitted."""
+                if notes_refresh_ref['refresh']:
+                    await notes_refresh_ref['refresh']()
+
+            # === Compact Metadata Header ===
+            # `print-hide`: this card carries the library name, the shelfmark
+            # and the title, but its green gradient is an INLINE `!important`
+            # style that no stylesheet rule can override, and most printers
+            # drop background graphics — so on paper it would be white text on
+            # nothing. The print sheet rebuilds this masthead as plain text
+            # instead; see the `.print-only` block in the transcription panel.
+            with ui.card().classes('w-full p-3 mb-3 browse-header-card print-hide').style(
+                'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important; '
+                'border: none;'
+            ):
+                with ui.row().classes('w-full items-center justify-between'):
+                    # Prev Shelfmark Button
+                    ui.button(
+                        icon='skip_next' if is_rtl() else 'skip_previous',
+                        on_click=lambda: navigate_shelfmark(-1)
+                    ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Previous manuscript'))
+
+                    # Shelfmark and Title
+                    with ui.row().classes('flex-1 items-center justify-center gap-4 browse-header-center'):
+                        # Shelfmark with Library Name - H2
+                        display_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
+                        if page.library_name:
+                            display_shelfmark = f"{page.library_name}, {display_shelfmark}"
+                        h2(display_shelfmark, classes='text-xl font-bold', style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
+
+                        # Oxford Part badge (e.g. [part 6], or [fol. 27] when the Part is the
+                        # whole codex). Computed once by the shared codicological helper in
+                        # browse_enrichment -- never re-derived here by splitting on "part".
+                        if page.oxford_part_label:
+                            ui.label(f"[{page.oxford_part_label}]").classes(
+                                'text-lg font-bold'
+                            ).style(
+                                'color: #3b82f6 !important; '
+                                'text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);'
+                            )
+
+                        # Title (truncated with tooltip, language-aware)
+                        _overlay_title = page.title
+                        if state.title_translation:
+                            _ol_lang = get_language()
+                            if _ol_lang == 'he':
+                                _overlay_title = state.title_translation.get('hebrew_title') or state.title_translation.get('english_title') or page.title
+                            else:
+                                _overlay_title = state.title_translation.get('english_title') or state.title_translation.get('hebrew_title') or page.title
+                        if _overlay_title:
+                            _ol_dir = 'rtl-text hebrew-text' if not (state.title_translation and get_language() != 'he' and state.title_translation.get('english_title')) else ''
+                            words = _overlay_title.split()
+                            if len(words) > 5:
+                                short_title = ' '.join(words[:5]) + '...'
+                            else:
+                                short_title = _overlay_title
+                            _ol_has_toggle = state.title_translation and _overlay_title != page.title
+                            if _ol_has_toggle:
+                                _ol_st = {'showing_original': False}
+                                with ui.row().classes('items-center gap-0'):
+                                    _ol_lbl = ui.label(short_title).classes(
+                                        _ol_dir + ' browse-header-title'
+                                    ).style(
+                                        'color: #ffffff !important; opacity: 0.95;'
+                                    )
+                                    if len(words) > 5:
+                                        _ol_lbl.tooltip(_overlay_title)
+                                    def _make_ol_toggle(lbl, orig_title, trans_title, orig_short, trans_short, flag, trans_dir):
+                                        def handler():
+                                            flag['showing_original'] = not flag['showing_original']
+                                            if flag['showing_original']:
+                                                lbl.text = orig_short
+                                                lbl.classes(remove=trans_dir, add='rtl-text hebrew-text')
+                                                lbl.tooltip(orig_title)
+                                            else:
+                                                lbl.text = trans_short
+                                                lbl.classes(remove='rtl-text hebrew-text', add=trans_dir)
+                                                lbl.tooltip(trans_title)
+                                        return handler
+                                    _orig_words = page.title.split() if page.title else []
+                                    _orig_short = (' '.join(_orig_words[:5]) + '...') if len(_orig_words) > 5 else (page.title or '')
+                                    ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                        'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
+                                    ).tooltip(tr('Show original title')).on(
+                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title, _overlay_title, _orig_short, short_title, _ol_st, _ol_dir)
+                                    )
+                            else:
+                                ui.label(short_title).classes(
+                                    _ol_dir + ' browse-header-title'
+                                ).style(
+                                    'color: #ffffff !important; opacity: 0.95;'
+                                ).tooltip(_overlay_title if len(words) > 5 else '')
+
+                        # Ktiv link — Phase 85 D-06: hidden for synthetic sys_ids (no NLI Alma record)
+                        if not is_synthetic_sys_id(page.sys_id):
+                            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
+                            with ui.link(target=ktiv_url, new_tab=True).classes(
+                                'flex items-center gap-1 px-2 py-1 rounded'
+                            ).style(
+                                'text-decoration: none; '
+                                'color: #ffffff !important; '
+                                'background: rgba(255, 255, 255, 0.2);'
+                            ):
+                                ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
+
+                        # PGP link button placeholder (populated by enrichment Phase B)
+                        pgp_link_el = ui.element('span')
+                        enrichment_refs['pgp_link_container'] = pgp_link_el
+                        if state.enrichment_loaded and state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
+                            with pgp_link_el:
+                                with ui.link(target=state.pgp_metadata['pgp_url'], new_tab=True).classes(
+                                    'flex items-center gap-1 px-2 py-1 rounded'
+                                ).style(
+                                    'text-decoration: none; '
+                                    'color: #ffffff !important; '
+                                    'background: rgba(255, 255, 255, 0.2);'
+                                ):
+                                    ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                    ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
+
+                        # Library digital collection link (header)
+                        if page.library_viewer_url and page.library_viewer_url.get('url'):
+                            lib_info = page.library_viewer_url
+                            if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
+                                with ui.link(target=lib_info['url'], new_tab=True).classes(
+                                    'flex items-center gap-1 px-2 py-1 rounded'
+                                ).style(
+                                    'text-decoration: none; '
+                                    'color: #ffffff !important; '
+                                    'background: rgba(255, 255, 255, 0.2);'
+                                ):
+                                    ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                    ui.label(lib_info.get('label', tr('Library'))).classes('text-sm font-semibold').style('color: #ffffff !important;')
+
+                        # Search for Parallels button
+                        ui.button(
+                            tr('Search for Parallels'),
+                            icon='search',
+                            on_click=search_for_parallels
+                        ).props(f'flat dense aria-label="{tr("Search for Parallels")}"').style(
+                            'color: #ffffff !important; '
+                            'background: rgba(255, 255, 255, 0.15);'
+                        ).tooltip(tr('Search for Parallels')).classes('browse-icon-collapse')
+
+                        # Metadata button. One label for the text, the aria-label
+                        # and the tooltip: the aria-label replaces the text for a
+                        # screen reader, so a fixed "Show Metadata" named the
+                        # opposite action while the panel was open (Codex on #434).
+                        _meta_label = tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata')
+                        ui.button(
+                            _meta_label,
+                            icon='info',
+                            on_click=toggle_metadata
+                        ).props(f'flat dense aria-label="{_meta_label}"').style(
+                            'color: #ffffff !important; '
+                            'background: rgba(255, 255, 255, 0.15);'
+                        ).tooltip(_meta_label).classes('browse-icon-collapse')
+
+                        # Add manuscript to list (star button)
+                        from web.state import state as app_state
+                        from web.components import get_star_icon
+                        star_icon = get_star_icon(app_state.lists_mgr, page.sys_id) if page else 'star_border'
+                        ui.button(
+                            icon=star_icon,
+                            on_click=add_manuscript_to_list
+                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('In List') if star_icon == 'star' else tr('Add to List'))
+
+                        if WEB_PUZZLE_ENABLED:
+                            # Add to Puzzle button (Phase 49)
+                            def add_to_puzzle():
+                                sid = state.sys_id
+                                fl = state.current_page.fl_id if state.current_page else None
+                                if fl:
+                                    param = f'{sid},{fl}'
+                                elif state.current_page and state.active_source != 'nli':
+                                    # External library — pass page index (0-based from p_num)
+                                    page_idx = max(0, state.current_page.p_num - 1) if state.current_page.p_num else 0
+                                    param = f'{sid},page:{page_idx}'
+                                else:
+                                    param = str(sid)
+                                ui.navigate.to(f'/puzzle?add={param}')
+                            ui.button(
+                                icon='extension',
+                                on_click=add_to_puzzle
+                            ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Puzzle'))
+
+                        # Share / Copy Link button
+                        def _copy_share_link():
+                            ui.run_javascript('''
+                                navigator.clipboard.writeText(window.location.href).then(() => {
+                                    // Brief visual feedback via a toast-like notification
+                                    const t = document.createElement('div');
+                                    t.textContent = ''' + repr(tr('Link copied!')) + ''';
+                                    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;padding:8px 16px;border-radius:6px;z-index:9999;font-size:14px;';
+                                    document.body.appendChild(t);
+                                    setTimeout(() => t.remove(), 2000);
+                                });
+                            ''')
+                        ui.button(
+                            icon='share',
+                            on_click=_copy_share_link
+                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Copy Link'))
+
+                    # Next Shelfmark Button
+                    ui.button(
+                        icon='skip_previous' if is_rtl() else 'skip_next',
+                        on_click=lambda: navigate_shelfmark(1)
+                    ).props('flat round aria-label="Next manuscript" data-action="next-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Next manuscript'))
+
+            # === Action Buttons Row ===
+            # Removed - buttons moved to appropriate headers
+
+            # === Metadata Panel (Expandable) ===
+            if show_metadata['value']:
+                with ui.card().classes('w-full p-4 mb-3').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
+                    with ui.row().classes('w-full items-center justify-between mb-3'):
+                        # Changed to H3
+                        h3(tr('Metadata'), classes='text-lg font-bold', style='color: var(--text-primary);')
+                        ui.button(
+                            icon='close',
+                            on_click=toggle_metadata
+                        ).props('flat round dense size=sm').tooltip(tr('Close'))
+
+                    # Metadata grid
+                    with ui.grid(columns=2).classes('w-full gap-4'):
+                        # Library
+                        if page.library_name:
+                            with ui.column().classes('gap-1 col-span-2'):
+                                ui.label(tr('Library')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(page.library_name).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Shelfmark (with Neubauer-Cowley catalog entry)
+                        # Read crossref metadata from enrichment state (fetched in parallel by _load_enrichment)
+                        _crossref = state.crossref_data or {}
+                        _catalog_entry_str = _crossref.get('catalog_entry', '') or ''
+                        _collection_storage = _crossref.get('collection_storage')
+
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Shelfmark')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            with ui.row().classes('items-center gap-2'):
+                                ui.label(page.shelfmark or 'N/A').classes('text-sm').style('color: var(--text-primary);')
+                            if _catalog_entry_str:
+                                ui.label(_catalog_entry_str).classes('text-xs text-gray-500').style('color: var(--text-tertiary);')
+
+                        # System ID
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('System ID')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(page.sys_id).classes('text-sm font-mono').style('color: var(--text-primary);')
+
+                        # Title (language-aware with swap toggle)
+                        if page.title:
+                            with ui.column().classes('gap-1 col-span-2'):
+                                ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                _meta_title = page.title
+                                _meta_dir = 'rtl-text hebrew-text'
+                                if state.title_translation:
+                                    _mt_lang = get_language()
+                                    if _mt_lang == 'he':
+                                        _meta_title = state.title_translation.get('hebrew_title') or state.title_translation.get('english_title') or page.title
+                                    else:
+                                        _meta_title = state.title_translation.get('english_title') or state.title_translation.get('hebrew_title') or page.title
+                                        if state.title_translation.get('english_title'):
+                                            _meta_dir = ''
+                                if state.title_translation and _meta_title != page.title:
+                                    _mt_st = {'showing_original': False}
+                                    with ui.row().classes('items-center gap-0'):
+                                        _mt_lbl = ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')
+                                        def _make_mt_toggle(lbl, orig, resolved, flag, resolved_dir):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = orig
+                                                    lbl.classes(remove=resolved_dir, add='rtl-text hebrew-text')
+                                                else:
+                                                    lbl.text = resolved
+                                                    lbl.classes(remove='rtl-text hebrew-text', add=resolved_dir)
+                                            return handler
+                                        ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                            'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
+                                        ).tooltip(tr('Show original title')).on(
+                                            'click.stop', _make_mt_toggle(_mt_lbl, page.title, _meta_title, _mt_st, _meta_dir)
+                                        )
+                                else:
+                                    ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')
+
+                        # Total Pages (0: not known)
+                        if page.total_pages:
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Pages')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(str(page.total_pages)).classes('text-sm').style('color: var(--text-primary);')
+
+                        # FL ID (if available)
+                        if page.fl_id:
+                            with ui.column().classes('gap-1'):
+                                ui.label('FL ID').classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(f'FL{page.fl_id}').classes('text-sm font-mono').style('color: var(--text-primary);')
+
+                        # Material type (NLI crossref)
+                        if page.physical_metadata and page.physical_metadata.get('material'):
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Material')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(tr(page.physical_metadata['material'])).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Folio count (NLI crossref)
+                        if page.physical_metadata:
+                            num_folio = page.physical_metadata.get('num_folio', '')
+                            num_bifolio = page.physical_metadata.get('num_bifolio', '')
+                            folio_parts = []
+                            if num_folio and num_folio != '0':
+                                folio_parts.append(f"{num_folio} {tr('Folios')}")
+                            if num_bifolio and num_bifolio != '0':
+                                folio_parts.append(f"{num_bifolio} {tr('Bifolios')}")
+                            if folio_parts:
+                                with ui.column().classes('gap-1'):
+                                    ui.label(tr('Folios')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(' + '.join(folio_parts)).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Oxford Metadata (Part Title, Contents, Provenance)
+                        if page.oxford_part_metadata:
+                            _ox_trans = state.oxford_translations or {}
+                            _ox_is_heb = get_language() == 'he'
+                            for _ox_field, _ox_label in [('title', tr('Part Title')), ('contents', tr('Contents')), ('provenance', tr('Provenance'))]:
+                                _ox_eng = page.oxford_part_metadata.get(_ox_field, '').strip()
+                                if not _ox_eng:
+                                    continue
+                                _ox_heb = _ox_trans.get(_ox_eng)
+                                _ox_display = _ox_heb if (_ox_is_heb and _ox_heb) else _ox_eng
+                                _ox_dir = 'direction: rtl; text-align: right;' if (_ox_is_heb and _ox_heb) else ''
+                                with ui.column().classes('gap-1 col-span-2'):
+                                    ui.label(_ox_label).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    _ox_lbl = ui.label(_ox_display).classes('text-sm whitespace-pre-wrap').style(f'color: var(--text-primary); {_ox_dir}')
+                                    if _ox_heb and _ox_heb != _ox_eng:
+                                        _ox_st = {'showing_original': False if _ox_is_heb else True}
+                                        _ox_badge_ref = [None]
+                                        def _make_ox_toggle(lbl, badge_ref, eng, heb, flag):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = eng
+                                                    lbl.style('color: var(--text-primary);')
+                                                    badge_ref[0].text = 'Original'
+                                                else:
+                                                    lbl.text = heb
+                                                    lbl.style('color: var(--text-primary); direction: rtl; text-align: right;')
+                                                    badge_ref[0].text = tr('Translated')
+                                            return handler
+                                        _init_badge = tr('Translated') if _ox_is_heb else 'Original'
+                                        _ox_badge = ui.badge(_init_badge, color='light-blue').props('dense outline').classes('text-xs cursor-pointer')
+                                        _ox_badge_ref[0] = _ox_badge
+                                        _ox_badge.on('click', _make_ox_toggle(_ox_lbl, _ox_badge_ref, _ox_eng, _ox_heb, _ox_st))
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='oxford', record_id=str(page.sys_id),
+                                            field_name=_ox_field, direction='en2he',
+                                            source_text=_ox_eng, translated_text=_ox_heb,
+                                        )
+
+                    # External Links
+                    ui.separator().classes('my-3')
+                    # Changed to H3 (or small title)
+                    h3(tr('External link'), classes='text-xs font-bold mb-2', style='color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 flex-wrap'):
+                        # NLI Ktiv — Phase 85 D-06: hidden for synthetic sys_ids
+                        if not is_synthetic_sys_id(page.sys_id):
+                            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
+                            _external_link('NLI Ktiv', ktiv_url)
+
+                        # Oxford Bodleian
+                        if page.is_oxford and page.external_url:
+                            _external_link('Oxford Bodleian', page.external_url)
+
+                        # Cambridge CUDL
+                        if page.is_cambridge and page.external_url:
+                            _external_link('Cambridge CUDL', page.external_url)
+
+                        # Princeton Geniza Project
+                        if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
+                            _external_link('Princeton Geniza Project', state.pgp_metadata['pgp_url'])
+
+                        # Library digital collection (from NLI crossref)
+                        if page.library_viewer_url and page.library_viewer_url.get('url'):
+                            lib_url = page.library_viewer_url
+                            # Only show if not already covered by Oxford/Cambridge links above
+                            if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
+                                _external_link(
+                                    lib_url.get('label', tr('View in Library Catalog')),
+                                    lib_url['url'],
+                                )
+
+                    # === PGP Metadata Section ===
+                    if state.pgp_metadata:
+                        ui.separator().classes('my-3')
+                        # Header with link to PGP
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            h3(tr('Princeton Geniza Project'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                            if state.pgp_metadata.get('pgp_url'):
+                                ui.link('', state.pgp_metadata['pgp_url'], new_tab=True).props(
+                                    'icon=open_in_new flat dense round size=xs'
+                                ).style('color: var(--primary-600);').tooltip(tr('View on PGP'))
+
+                        # Document Type + Languages (inline row)
+                        doc_type = state.pgp_metadata.get('document_type')
+                        lang_primary = state.pgp_metadata.get('languages_primary')
+                        lang_secondary = state.pgp_metadata.get('languages_secondary')
+                        if doc_type or lang_primary:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                type_parts = []
+                                if doc_type:
+                                    type_parts.append(doc_type)
+                                if lang_primary:
+                                    type_parts.append(lang_primary)
+                                if lang_secondary:
+                                    type_parts.append(lang_secondary)
+                                type_text = ' \u00b7 '.join(type_parts)
+                                # Show document_type_he when UI is Hebrew and translation toggle is on
+                                _browse_type_he = None
+                                _browse_type_lang = get_language()
+                                _browse_pgpid = state.pgp_metadata.get('pgpid')
+                                # Class A wrapper collapsed — safe_user_get absorbs prune-race AssertionError.
+                                _browse_show_trans = safe_user_get('show_translations', False)
+                                if _browse_show_trans and _browse_type_lang == 'he' and _browse_pgpid:
+                                    try:
+                                        from shared.translation_service import TranslationService
+                                        _tsvc_type = TranslationService(thread_safe=True)
+                                        _browse_type_he = _tsvc_type.get_pgp_document_type_he(_browse_pgpid)
+                                        _tsvc_type.close()
+                                    except Exception:
+                                        pass  # Translation lookup failed; continue without translation
+                                if _browse_type_he:
+                                    ui.label(_browse_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
+                                else:
+                                    ui.label(type_text).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Tags (clickable badges)
+                        tags = state.pgp_metadata.get('tags', [])
+                        if tags:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Tags')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                with ui.row().classes('gap-1 flex-wrap'):
+                                    for tag in tags:
+                                        ui.badge(tag, color='green').props('outline clickable').classes(
+                                            'text-xs cursor-pointer'
+                                        ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
+
+                        # Description (full length, with translate button or pre-translated)
+                        description = (state.pgp_metadata.get('description') or '').strip()
+                        if description:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                # Phase 46: Show translated description when toggle is on
+                                # Class A wrapper collapsed — safe_user_get absorbs prune-race AssertionError.
+                                _show_trans_browse = safe_user_get('show_translations', False)
+                                _pgpid_browse = state.pgp_metadata.get('pgpid')
+                                _trans_desc_he = None
+                                _browse_lang = get_language()
+                                if _show_trans_browse and _browse_lang == 'he' and _pgpid_browse:
+                                    try:
+                                        from shared.translation_service import TranslationService
+                                        _tsvc = TranslationService(thread_safe=True)
+                                        _trans_desc_he = _tsvc.get_pgp_description_he(_pgpid_browse)
+                                        _tsvc.close()
+                                    except Exception:
+                                        pass  # Translation lookup failed; continue without translation
+                                if _trans_desc_he:
+                                    _br_st = {'showing_original': False}
+                                    with ui.row().classes('w-full items-start gap-1'):
+                                        _br_lbl = ui.label(_trans_desc_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                            'color: var(--text-primary); direction: rtl;'
+                                        )
+                                        _br_badge_ref = [None]
+                                        def _make_browse_toggle(lbl, badge_ref, orig, trans, flag):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = orig
+                                                    lbl.style('color: var(--text-primary); direction: ltr; white-space: pre-wrap;')
+                                                    badge_ref[0].text = tr('Original')
+                                                else:
+                                                    lbl.text = trans
+                                                    lbl.style('color: var(--text-primary); direction: rtl; white-space: pre-wrap;')
+                                                    badge_ref[0].text = tr('Translated')
+                                            return handler
+                                        _br_btn = ui.button(tr('Translated')).props(
+                                            'flat dense no-caps size=xs'
+                                        ).classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                            'background: #e0f2fe !important; color: #0369a1 !important; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                        )
+                                        _br_btn.on('click.stop', _make_browse_toggle(_br_lbl, _br_badge_ref, description, _trans_desc_he, _br_st))
+                                        _br_badge_ref[0] = _br_btn
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='pgp', record_id=str(_pgpid_browse),
+                                            field_name='description', direction='en2he',
+                                            source_text=description, translated_text=_trans_desc_he,
+                                        )
+                                else:
+                                    ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
+
+                        # Dates
+                        inferred_display = state.pgp_metadata.get('inferred_date_display')
+                        doc_date_standard = state.pgp_metadata.get('doc_date_standard')
+                        doc_date_original = state.pgp_metadata.get('doc_date_original')
+                        date_rationale = state.pgp_metadata.get('inferred_date_rationale')
+
+                        # Show dates section if any date info exists
+                        if inferred_display or doc_date_standard or doc_date_original:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                # Primary: inferred display date, fallback to standard date
+                                primary_date = inferred_display or doc_date_standard
+                                if primary_date:
+                                    ui.label(primary_date).classes('text-sm font-medium').style('color: var(--text-primary);')
+                                # Secondary: original date (only if different from primary)
+                                if doc_date_original and doc_date_original != primary_date:
+                                    ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
+                                # Rationale
+                                if date_rationale:
+                                    ui.label(date_rationale).classes('text-sm').style('color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
+
+                    # === FJMS Catalog Metadata (pre-fetched in load_page) ===
+                    from shared.fjms_service import merge_catalog_records, parse_textual_frame
+                    fjms_data = state.fjms_data or {}
+                    catalog_records = fjms_data.get('catalog_records')
+                    if catalog_records:
+                            ui.separator().classes('my-3')
+                            # Section header with purple FJMS badge
+                            with ui.row().classes('items-center gap-2 mb-2'):
+                                h3(tr('FJMS Catalog'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                                ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+
+                            merged = merge_catalog_records(catalog_records)
+                            lang = get_language()
+
+                            # Title (language-aware)
+                            title = merged.get('title_heb') if lang == 'he' else merged.get('title')
+                            if title and title.strip():
+                                with ui.column().classes('gap-1 mb-2'):
+                                    ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(title).classes('text-sm').style('color: var(--text-primary);')
+
+                            # Author (prominent, clickable link to catalog browse)
+                            if merged.get('author_text') and merged['author_text'].strip():
+                                with ui.column().classes('gap-1 mb-2'):
+                                    ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.link(
+                                        merged['author_text'],
+                                        f'/catalog-browse?author={quote(merged["author_text"])}'
+                                    ).classes('text-sm').style('color: var(--primary-600);')
+
+                            # Copy Date and Place (inline row)
+                            date = merged.get('copy_date')
+                            place = merged.get('copy_place')
+                            if date or place:
+                                with ui.row().classes('gap-6 mb-2'):
+                                    if date:
+                                        with ui.column().classes('gap-1'):
+                                            ui.label(tr('Copy Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                            ui.label(str(date)).classes('text-sm').style('color: var(--text-primary);')
+                                    if place:
+                                        with ui.column().classes('gap-1'):
+                                            ui.label(tr('Place')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                            ui.label(place).classes('text-sm').style('color: var(--text-primary);')
+
+                            # Content Identifications (TextualFrames)
+                            frames = merged.get('textual_frames', [])
+                            if frames:
+                                with ui.column().classes('gap-1 mb-2'):
+                                    ui.label(tr('Content Identification')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+
+                                    # Determine how many to show initially
+                                    max_initial = 10
+                                    show_frames = frames[:max_initial] if len(frames) > max_initial else frames
+
+                                    for frame in show_frames:
+                                        text = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                        if not text or not text.strip():
+                                            # Fallback to other language if preferred is empty
+                                            text = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                        if text and text.strip():
+                                            category, content = parse_textual_frame(text)
+                                            source = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                            with ui.row().classes('gap-1 items-baseline'):
+                                                if category:
+                                                    ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                    ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                                else:
+                                                    ui.label(text).classes('text-sm').style('color: var(--text-primary);')
+                                                if source and source.strip():
+                                                    ui.label(f'({source})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                                    # "Show all N identifications" expansion for 10+ frames
+                                    if len(frames) > max_initial:
+                                        remaining = frames[max_initial:]
+                                        with ui.expansion(f'{tr("Show all")} {len(frames)} {tr("identifications")}').classes('text-xs'):
+                                            for frame in remaining:
+                                                text = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                                if not text or not text.strip():
+                                                    text = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                                if text and text.strip():
+                                                    category, content = parse_textual_frame(text)
+                                                    source = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                                    with ui.row().classes('gap-1 items-baseline'):
+                                                        if category:
+                                                            ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                            ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                                        else:
+                                                            ui.label(text).classes('text-sm').style('color: var(--text-primary);')
+                                                        if source and source.strip():
+                                                            ui.label(f'({source})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                    # === FJMS Domain Classifications ===
+                    domains = fjms_data.get('domains')
+                    if domains:
+                        with ui.column().classes('gap-1 mb-2'):
+                            ui.label(tr('Subject Domains')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                lang = get_language()
+                                # Deduplicate: skip parent if child already shown
+                                all_domain_names = {d['domain'] for d in domains}
+                                for dom in domains:
+                                    parent = dom.get('parent_domain')
+                                    if parent and parent in all_domain_names and parent != dom['domain']:
+                                        continue
+                                    display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
+                                    ui.link(
+                                        display_name,
+                                        f'/catalog-browse?domain={quote(dom["domain"])}'
+                                    ).classes('text-sm').style('color: var(--primary-600);')
+
+                    # === Phase 33: Catalog Cross-References ===
+                    cat_refs = fjms_data.get('catalog_refs')
+                    if cat_refs:
+                        ui.separator().classes('my-2')
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            h3(tr('Catalog References'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                            ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+
+                        with ui.column().classes('gap-1'):
+                            for ref in cat_refs:
+                                acronym = ref.get('cat_acronym', '')
+                                cat_entry = ref.get('catalog_entry', '')
+                                display = f"{acronym} #{cat_entry}" if cat_entry else acronym
+                                ui.label(display).classes('text-sm').style('color: var(--text-primary);')
+
+                    # === Phase 33: Scholarly Source Names ===
+                    source_names = fjms_data.get('source_names')
+                    if source_names:
+                        with ui.column().classes('gap-1 mb-2 mt-2'):
+                            ui.label(tr('Scholarly Sources')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                for sn in source_names:
+                                    ui.label(sn).classes('text-sm').style('color: var(--text-primary);')
+
+                    # === Phase 33: Collection & Storage ===
+                    if _collection_storage:
+                        coll = _collection_storage.get('collection_name', '')
+                        box = _collection_storage.get('ob_box', '')
+                        vol_cs = _collection_storage.get('ob_volume', '')
+                        folio_cs = _collection_storage.get('ob_folio', '')
+                        if coll or box or vol_cs or folio_cs:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Collection & Storage')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                parts = []
+                                if coll:
+                                    parts.append(coll)
+                                storage = []
+                                if box:
+                                    storage.append(f'Box {box}')
+                                if vol_cs:
+                                    storage.append(f'Vol. {vol_cs}')
+                                if folio_cs:
+                                    storage.append(f'Fol. {folio_cs}')
+                                if storage:
+                                    parts.append(', '.join(storage))
+                                ui.label(' - '.join(parts)).classes('text-sm').style('color: var(--text-primary);')
+
+                    # === Related Fragments Section ===
+                    # The joins lookup is blocking Supabase + SQLite work, so it
+                    # never runs here, on the event loop. The section renders
+                    # from the joins cache when it is warm (the toolbar Joins
+                    # button fetches the same key off the loop on every view),
+                    # and otherwise fills its slot later from a worker.
+                    pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
+
+                    def _render_related_fragments(joins_data, page=page, pgpid_for_joins=pgpid_for_joins):
+                        if joins_data.get('total_fragments', 1) > 1:
+                            ui.separator().classes('my-3')
+                            total_frags = joins_data['total_fragments']
+                            other_count = total_frags - 1  # Exclude current fragment from badge count
+
+                            # Header row: title + count badge
+                            with ui.row().classes('items-center gap-2 mb-2'):
+                                h3(tr('Related Fragments'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                                ui.badge(str(other_count), color='green').props('dense').classes('text-xs')
+
+                            # Build relationship/source lookup from joins data
+                            current_shelfmark_upper = (page.shelfmark or '').upper()
+                            joins_list = joins_data.get('joins', [])
+                            frag_info_map = {}  # shelfmark_upper -> {sources, relationship_type, scholar_name}
+                            for join_entry in joins_list:
+                                fa = join_entry.get('fragment_a', '')
+                                fb = join_entry.get('fragment_b', '')
+                                sources = join_entry.get('sources', [join_entry.get('source', 'user')])
+                                rel = join_entry.get('relationship_type', '')
+                                scholar = join_entry.get('scholar_name', '')
+                                # Map the OTHER fragment in each join pair, aggregating sources
+                                for target_key, check_key in [(fb.upper(), fa.upper()), (fa.upper(), fb.upper())]:
+                                    if check_key == current_shelfmark_upper and target_key:
+                                        if target_key in frag_info_map:
+                                            existing = frag_info_map[target_key]
+                                            for s in sources:
+                                                if s not in existing['sources']:
+                                                    existing['sources'].append(s)
+                                            if scholar and not existing.get('scholar_name'):
+                                                existing['scholar_name'] = scholar
+                                        else:
+                                            frag_info_map[target_key] = {'sources': list(sources), 'relationship_type': rel, 'scholar_name': scholar}
+
+                            # Clickable fragment rows (skip current fragment)
+                            for frag_shelfmark in joins_data.get('fragments', []):
+                                if frag_shelfmark.upper() == current_shelfmark_upper:
+                                    continue
+
+                                info = frag_info_map.get(frag_shelfmark.upper(), {})
+                                frag_sources = info.get('sources', [info.get('source', 'user')])
+                                frag_rel_type = info.get('relationship_type', '')
+
+                                # Navigation handler using search_shelfmark pattern
+                                def make_nav_to(target=frag_shelfmark):
+                                    async def nav():
+                                        state.shelfmark_query = target
+                                        await search_shelfmark()
+                                    return nav
+
+                                with ui.row().classes(
+                                    'items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded w-full'
+                                ).on('click', make_nav_to()):
+                                    ui.icon('description').classes('text-gray-500').style('font-size: 1.1rem;')
+                                    ui.label(frag_shelfmark).classes('text-sm font-medium')
+                                    for frag_src in frag_sources:
+                                        if frag_src == 'FJMS':
+                                            ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+                                        elif frag_src and frag_src != 'user':
+                                            ui.badge(frag_src, color='blue').props('outline dense').classes('text-xs')
+                                    if frag_rel_type:
+                                        rel_label = {
+                                            'physical_join': tr('Physical join'),
+                                            'physical': tr('Physical join'),
+                                            'same_composition': tr('Same composition'),
+                                            'content': tr('Same composition'),
+                                            'uncertain': tr('Unknown'),
+                                        }.get(frag_rel_type, frag_rel_type)
+                                        ui.label(rel_label).classes('text-xs text-gray-500')
+                                    scholar = info.get('scholar_name', '')
+                                    if scholar:
+                                        ui.label(f"({scholar})").classes('text-xs text-gray-400 italic')
+                                    ui.element('div').classes('flex-grow')
+                                    ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-gray-400')
+
+                            # View whole document button + dialog
+                            frag_details_for_dialog = joins_data.get('fragment_details', [])
+                            doc_pgpid = pgpid_for_joins
+
+                            def open_document_viewer():
+                                """Open dialog showing all fragment images and full transcription."""
+                                from web.document_service import get_transcription_for_document
+                                dialog = ui.dialog()
+                                with dialog, ui.card().classes('w-[90vw] max-w-[900px] max-h-[90vh] p-0'):
+                                    # Header
+                                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                                        'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                                    ):
+                                        with ui.row().classes('items-center gap-2'):
+                                            ui.icon('auto_stories').classes('text-xl').style('color: white !important;')
+                                            header_text = f'{tr("Document")} #{doc_pgpid}' if doc_pgpid else tr('Document')
+                                            ui.label(header_text).classes('text-lg font-bold').style('color: white !important;')
+                                            ui.badge(f'{total_frags} {tr("fragments")}', color='white').props('outline dense').classes('text-xs').style('color: white !important;')
+                                        ui.button(icon='close', on_click=dialog.close).props('flat round size=sm text-color=white')
+
+                                    # Scrollable content
+                                    with ui.scroll_area().classes('w-full').style('max-height: calc(90vh - 70px);'):
+                                        with ui.column().classes('w-full p-4 gap-4'):
+                                            # === Images for each fragment ===
+                                            for fd in frag_details_for_dialog:
+                                                frag_sm = fd.get('shelfmark', '')
+                                                frag_sid = fd.get('document_id', '')
+                                                if not frag_sid:
+                                                    continue
+
+                                                # Fragment header
+                                                is_current = frag_sm.upper() == current_shelfmark_upper
+                                                with ui.row().classes('items-center gap-2 mt-2'):
+                                                    ui.icon('description', size='xs').classes('text-green-600')
+                                                    ui.label(frag_sm).classes('text-sm font-bold').style('color: var(--text-primary);')
+                                                    if is_current:
+                                                        ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+
+                                                # Oxford detection for correct image endpoint
+                                                frag_library_code = ''
+                                                if getattr(state, 'meta_mgr', None) and frag_sid:
+                                                    try:
+                                                        frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
+                                                    except Exception:
+                                                        frag_library_code = ''  # Library code lookup failed; use empty string
+                                                frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
+
+                                                # Show recto and verso images side by side
+                                                with ui.row().classes('w-full gap-2 flex-wrap justify-center'):
+                                                    for pg_idx in range(2):  # 0=recto, 1=verso
+                                                        pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+                                                        if frag_is_oxford:
+                                                            img_src = get_oxford_direct_image_url(frag_sm, pg_idx)
+                                                            if not img_src:
+                                                                img_src = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                                        elif is_synthetic_sys_id(frag_sid):
+                                                            # Phase 85 D-06: synthetic sys_ids have no NLI image source
+                                                            # — image_url stays empty so the <img> shows blank/error placeholder
+                                                            img_src = ''
+                                                        else:
+                                                            img_src = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
+
+                                                        with ui.column().classes('items-center'):
+                                                            ui.label(pg_label).classes('text-xs text-gray-500 mb-1')
+                                                            safe_sid = frag_sid.replace("'", "\\'")
+                                                            is_ox_js = 'true' if frag_is_oxford else 'false'
+                                                            ui.html(f'''
+                                                                <img src="{img_src}"
+                                                                     style="max-height: 350px; max-width: 400px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 4px;"
+                                                                     loading="lazy"
+                                                                     onerror="
+                                                                         if ({is_ox_js}) {{
+                                                                             this.style.display='none';
+                                                                             this.parentElement.style.display='none';
+                                                                         }} else {{
+                                                                             var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
+                                                                             if (this.src.indexOf('oxford_image')===-1) {{
+                                                                                 this.onerror=function(){{ this.style.display='none'; this.parentElement.style.display='none'; }};
+                                                                                 this.src=ox;
+                                                                             }} else {{
+                                                                                 this.style.display='none';
+                                                                                 this.parentElement.style.display='none';
+                                                                             }}
+                                                                         }}
+                                                                     "
+                                                                />
+                                                            ''', sanitize=False)
+                                                ui.separator().classes('my-2')
+
+                                            # === Full Transcription ===
+                                            if doc_pgpid:
+                                                full_text = get_transcription_for_document(doc_pgpid)
+                                                if full_text:
+                                                    with ui.row().classes('items-center gap-2 mb-2'):
+                                                        ui.icon('text_snippet', size='xs').classes('text-green-600')
+                                                        ui.label(tr('Full Transcription')).classes('text-sm font-bold').style('color: var(--text-primary);')
+                                                        ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
+                                                    # Escaped by the builder: notation such as
+                                                    # '<upside down>' shows literally.
+                                                    ui.html(_document_transcription_html(full_text), sanitize=False)
+
+                                dialog.open()
+
+                            ui.button(
+                                tr('View whole document'), icon='auto_stories',
+                                on_click=open_document_viewer
+                            ).props('dense outline color=green').classes('w-full mt-2')
+
+                    related_slot = ui.column().classes('w-full gap-0')
+                    _joins_kwargs = dict(shelfmark=page.shelfmark, document_id=page.sys_id, pgpid=pgpid_for_joins)
+                    _cached_joins = peek_connected_fragments(**_joins_kwargs)
+                    if _cached_joins is not None:
+                        with related_slot:
+                            _render_related_fragments(_cached_joins)
+                    else:
+                        # Captured now, checked when the worker returns: by then
+                        # the visitor may have moved to another page, closed the
+                        # metadata panel, or update_content may have rebuilt
+                        # (and deleted) the slot. The UI language is a process
+                        # global that every page render resets, so it is
+                        # captured here; the deferred render (synchronous, no
+                        # await) runs in it and then restores whatever another
+                        # visitor's render had set.
+                        _joins_gen = _load_generation['value']
+                        _joins_sys_id = page.sys_id
+                        _joins_lang = get_language()
+
+                        def _joins_still_current():
+                            return (_load_generation['value'] == _joins_gen
+                                    and show_metadata['value']
+                                    and state.current_page is not None
+                                    and state.current_page.sys_id == _joins_sys_id)
+
+                        def _render_joins_deferred(joins_data):
+                            with using_language(_joins_lang):
+                                _render_related_fragments(joins_data)
+
+                        background_tasks.create(
+                            load_connected_fragments_into(
+                                related_slot, _render_joins_deferred, _joins_still_current,
+                                **_joins_kwargs,
+                            ),
+                            name='browse-related-fragments',
+                        )
+
+                    # Export
+                    ui.separator().classes('my-3')
+                    # Changed to H3 (or small title)
+                    h3(tr('Export'), classes='text-xs font-bold mb-2', style='color: var(--text-secondary);')
+                    with ui.row().classes('gap-2'):
+                        ui.button(
+                            tr('Export Word'),
+                            icon='description',
+                            on_click=export_browse_data
+                        ).props('flat dense color=green')
+                        # Print / Save as PDF (owner, 2026-09-04).
+                        #
+                        # `window.print()`, not a server-side renderer: the
+                        # browser's own print dialog already offers "Save as
+                        # PDF" on every platform we ship to, it needs no
+                        # dependency, and it prints exactly the transcription
+                        # the reader is looking at — including whichever
+                        # version they picked in the version selector, which a
+                        # server-side render would have to reconstruct.
+                        #
+                        # What makes it usable is the `@media print` block in
+                        # common.css: it strips the chrome, kills Quasar's
+                        # layout offsets, and un-scrolls the transcription's
+                        # scroll area so the whole page prints rather than the
+                        # one screenful that happened to be in view.
+                        ui.button(
+                            tr('Print / Save as PDF'),
+                            icon='print',
+                            on_click=lambda: ui.run_javascript('window.print()')
+                        ).props('flat dense color=green')
+
+            # === Main Content ===
+            if state.view_all:
+                # Show all pages
+                with ui.card().classes('w-full').style('min-height: 60vh;'):
+                    # Header -- `print-hide`: a view title and a "back" button
+                    # are navigation, and the printed sheet gets its own
+                    # masthead below instead.
+                    with ui.row().classes('w-full items-center justify-between p-4 border-b print-hide').style('background: var(--bg-tertiary);'):
+                        with ui.row().classes('items-center gap-2'):
+                            # Changed to H2
+                            h2(tr('Full Manuscript View'), classes='font-bold text-lg')
+                            ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('ml-2').style('color: var(--text-secondary);')
+
+                        # Back to single page button
+                        ui.button(
+                            tr('Back to Page View'),
+                            icon='arrow_forward' if is_rtl() else 'arrow_back',
+                            on_click=toggle_view_all
+                        ).props('flat dense color=green')
+
+                    # Print-only masthead for the ALL-PAGES sheet.
+                    #
+                    # The single-page view has its own (in the transcription
+                    # panel); this branch is a separate render and had none, so
+                    # an all-pages print carried no shelfmark and no credit at
+                    # all -- the worst of the two, since it is the sheet most
+                    # likely to leave the building.
+                    #
+                    # The credit is unconditionally the HTR one, and that is
+                    # correct rather than a shortcut: Full Manuscript View
+                    # renders `doc_page.text` for every folio and offers no
+                    # per-page version selector, so what prints here IS the
+                    # automatic transcription on every page. If FMV ever gains
+                    # a version chooser, this has to be revisited -- and
+                    # `test_the_all_pages_sheet_credits_the_automatic_transcription`
+                    # is the test that will say so.
+                    _fmv_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
+                    if page.library_name:
+                        _fmv_shelfmark = f"{page.library_name}, {_fmv_shelfmark}"
+                    _fmv_credit = resolve_transcription_credit(None, lang=get_language())
+                    # Same reasoning as the masthead above: FMV has no per-page
+                    # version chooser, so the citation is the HTR one.
+                    _update_citation_chip(None)
+                    with ui.element('div').classes('print-only').style(
+                        'margin-bottom: 12px;'
+                    ):
+                        _fmv_title_html = ''
+                        if page.title:
+                            _fmv_title_html = (
+                                f'<div style="font-size: 10pt; margin-top: 2px;">'
+                                f'{html_module.escape(page.title)}</div>'
+                            )
+                        _fmv_rows = [
+                            f'<div style="font-weight: 600;">'
+                            f'{html_module.escape(_fmv_credit.heading)}</div>',
+                            f'<div style="margin-top: 3px;">'
+                            f'{html_module.escape(tr("When publishing material from this site, please cite:"))}'
+                            f'</div>',
+                        ]
+                        _fmv_rows += [
+                            f'<div>{html_module.escape(_l)}</div>'
+                            for _l in _fmv_credit.citation_lines
+                        ]
+                        _fmv_rows += [
+                            f'<div style="margin-top: 3px;">{html_module.escape(_l)}</div>'
+                            for _l in _fmv_credit.site_lines
+                        ]
+                        ui.html(
+                            f'<div style="font-size: 13pt; font-weight: 700;">'
+                            f'{html_module.escape(_fmv_shelfmark)}</div>'
+                            f'{_fmv_title_html}'
+                            f'<div style="font-size: 10pt; margin-top: 2px;">'
+                            f'{len(state.full_manuscript)} {html_module.escape(tr("pages"))}</div>'
+                            '<div style="font-size: 7.5pt; margin-top: 6px; '
+                            'padding-top: 6px; border-top: 1px solid #000; '
+                            'line-height: 1.45;">' + ''.join(_fmv_rows) + '</div>',
+                            sanitize=False,
+                        )
+
+                    # All pages in scroll area
+                    with ui.scroll_area().classes('w-full').style('height: 70vh; padding: 24px;'):
+                        for idx, doc_page in enumerate(state.full_manuscript):
+                            # Page separator
+                            if idx > 0:
+                                ui.separator().classes('my-6')
+
+                            # Page header
+                            with ui.row().classes('w-full items-center gap-2 mb-2'):
+                                # Changed to H3
+                                h3(f"{tr('Page')} {doc_page.p_num}", classes='font-bold text-green-700')
+                                if doc_page.full_header:
+                                    ui.label(doc_page.full_header).classes('text-xs font-mono').style('color: var(--text-tertiary);')
+
+                            # Page text — Phase 999.4 Plan 01 FMV extension (post-smoke-check):
+                            # Route Full Manuscript View through `_render_line_numbered_html`
+                            # so each page gets its own gutter restarting at 1. The toggle
+                            # state is the same `ui.show_line_numbers` storage key the
+                            # single-page Browse + Quick View toggles read.
+                            if doc_page.text:
+                                _show_ln = bool(safe_user_get('ui.show_line_numbers', True))
+                                if state.highlight_terms:
+                                    _hl_html = highlight_text(doc_page.text)
+                                    _fmv_html = _render_line_numbered_html(
+                                        text=doc_page.text,
+                                        highlight_html=_hl_html,
+                                        line_height='2.0',
+                                        font_size='1.3rem',
+                                        show_line_numbers=_show_ln,
+                                    )
+                                else:
+                                    _fmv_html = _render_line_numbered_html(
+                                        text=doc_page.text,
+                                        highlight_html=None,
+                                        line_height='2.0',
+                                        font_size='1.3rem',
+                                        show_line_numbers=_show_ln,
+                                    )
+                                ui.html(_fmv_html, sanitize=False)
+                            else:
+                                ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
+
+                    # Fire the deferred print, if we got here from the print
+                    # menu's "all manuscript pages".
+                    #
+                    # Cleared FIRST, unconditionally: without that, a reader who
+                    # later switched to this view by hand would get a print
+                    # dialog they never asked for.
+                    #
+                    # The small JS delay lets the browser lay the pages out
+                    # before the dialog freezes the page. It can be short
+                    # because this branch renders TEXT ONLY -- no images to wait
+                    # on, unlike the single-page view.
+                    if print_pending['value']:
+                        print_pending['value'] = False
+                        ui.run_javascript('setTimeout(() => window.print(), 300)')
+            elif state.view_joined:
+                # === V3 Reading Desk: Dual-Pane Synchronized View ===
+                # Left pane: stacked images with per-image zoom/rotate/drag
+                # Right pane: stacked texts with per-fragment PGP version selector
+                # IntersectionObserver synchronizes scrolling between panes
+                current_shelfmark_upper = (page.shelfmark or '').upper()
+
+                async def rd_navigate_to_fragment(target_sm):
+                    """Exit reading desk and navigate to a specific fragment."""
+                    exit_joined_view()
+                    state.shelfmark_query = target_sm
+                    await search_shelfmark()
+
+                def remove_from_desk(sys_id_to_remove):
+                    """Remove a fragment from the reading desk by sys_id."""
+                    state.reading_desk_entries = [
+                        e for e in state.reading_desk_entries
+                        if e.get('sys_id') != sys_id_to_remove
+                    ]
+                    if not state.reading_desk_entries:
+                        # All removed -- exit reading desk
+                        exit_joined_view()
+                        return
+                    _persist_reading_desk_state()
+                    update_content()
+
+                async def toolbar_add_by_shelfmark(shelfmark_text, on_added=None):
+                    """Add a manuscript to the reading desk by shelfmark search.
+
+                    The lookup runs off the event loop. One match adds it; several open the
+                    picker (this used to add the first silently). `on_added` runs after an
+                    actual add -- not when the picker is closed -- so the box keeps the text
+                    of a cancelled choice.
+                    """
+                    if not shelfmark_text or not shelfmark_text.strip():
+                        return False
+                    query = shelfmark_text.strip()
+
+                    def _add(sys_id, shelfmark):
+                        _add_sys_id_to_reading_desk(sys_id, shelfmark)
+                        if on_added is not None:
+                            on_added()
+                    try:
+                        return await add_to_reading_desk_by_shelfmark(
+                            service, query, content_container, _add)
+                    except RuntimeError:
+                        # Stale slot reference after UI rebuild -- silently ignore
+                        pass
+                    except Exception as e:
+                        try:
+                            ui.notify(f'{tr("Error")}: {str(e)}', type='negative')
+                        except RuntimeError:
+                            pass
+
+                def show_add_from_list_dialog():
+                    """Show dialog to add manuscripts from personal lists to the reading desk."""
+                    from web.components.add_to_list_dialog import require_login_for_lists
+                    if not require_login_for_lists():  # sweep C2: before any lists read
+                        return
+                    from web.state import state as app_state
+                    lists_mgr = app_state.lists_mgr
+                    if not lists_mgr:
+                        ui.notify(tr('Lists not available'), type='warning')
+                        return
+
+                    with ui.dialog() as dlg, ui.card().classes('p-0 min-w-[400px] max-w-[500px]'):
+                        # Header
+                        with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                            'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                        ):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.icon('playlist_add').classes('text-xl').style('color: white !important;')
+                                ui.label(tr('Add from List')).classes('text-lg font-bold').style('color: white !important;')
+                            ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
+
+                        # Content: list of user's lists with expandable manuscript details
+                        with ui.scroll_area().classes('w-full').style('max-height: 400px;'):
+                            with ui.column().classes('w-full p-4 gap-2'):
+                                all_lists = lists_mgr.get_all_lists(include_recent=False)
+                                if not all_lists:
+                                    with ui.column().classes('items-center py-6'):
+                                        ui.icon('list_alt', size='3rem').classes('text-gray-300')
+                                        ui.label(tr('No lists found')).classes('text-gray-500')
+                                else:
+                                    # Track per-list checkbox selections for "Add Selected" feature
+                                    selections = {}  # list_id -> list of (sys_id, shelfmark, checkbox) tuples
+
+                                    for lst in all_lists:
+                                        list_id = lst.get('id', '')
+                                        list_name = lst.get('name', lst.get('name_en', list_id))
+                                        list_color = lst.get('color', '#FFD700')
+
+                                        # Pre-fetch items for this list to show count and contents
+                                        list_items = []
+                                        try:
+                                            list_items = lists_mgr.get_items_in_list_sync(list_id) or []
+                                        except Exception:
+                                            pass  # Shelfmark lookup failed; use fallback identifier
+
+                                        # Resolve shelfmarks for display
+                                        resolved_items = []
+                                        for item in list_items:
+                                            item_sid = item.get('sys_id', '')
+                                            if not item_sid:
+                                                continue
+                                            item_sm = item.get('shelfmark') or item.get('shelfmark_override', '')
+                                            if not item_sm and app_state.meta_mgr:
+                                                try:
+                                                    item_sm, _ = app_state.meta_mgr.get_meta_for_id(item_sid)
+                                                except Exception:
+                                                    pass  # Shelfmark lookup failed; use fallback identifier
+                                            if not item_sm:
+                                                item_sm = item_sid
+                                            resolved_items.append({'sys_id': item_sid, 'shelfmark': item_sm})
+
+                                        item_count = len(resolved_items)
+
+                                        def make_add_list_handler(lid=list_id, lname=list_name, dialog_ref=dlg, r_items=resolved_items):
+                                            def add_list_items():
+                                                if not r_items:
+                                                    ui.notify(f'{lname}: {tr("No items")}', type='info')
+                                                    return
+                                                added_count = 0
+                                                existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+                                                for ri in r_items:
+                                                    item_sid = ri['sys_id']
+                                                    item_sm = ri['shelfmark']
+                                                    if item_sid in existing_sids:
+                                                        continue
+                                                    # Load full data for the entry
+                                                    from shared.document_service import get_all_sources_for_fragment as ld_src, get_document_for_fragment as ld_doc
+                                                    pages = service.get_full_manuscript(item_sid)
+                                                    sources = []
+                                                    pgp_doc_data = None
+                                                    try:
+                                                        sources = _merge_fgp_sources(item_sid, ld_src(item_sid))
+                                                        pgp_doc_data = ld_doc(item_sid)
+                                                    except Exception:
+                                                        pass  # Shelfmark lookup failed; use fallback identifier
+                                                    state.reading_desk_entries.append({
+                                                        'sys_id': item_sid,
+                                                        'shelfmark': item_sm,
+                                                        'pages': pages or [],
+                                                        'sources': sources,
+                                                        'pgp_doc': pgp_doc_data or {}
+                                                    })
+                                                    existing_sids.add(item_sid)
+                                                    added_count += 1
+                                                if added_count > 0:
+                                                    _persist_reading_desk_state()
+                                                    update_content()
+                                                    ui.notify(f'{added_count} {tr("manuscripts added")}', type='positive')
+                                                else:
+                                                    ui.notify(tr('All items already in Reading Desk'), type='info')
+                                                dialog_ref.close()
+                                            return add_list_items
+
+                                        with ui.expansion(
+                                            group='rd-lists'
+                                        ).classes('w-full').style(
+                                            'border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 8px; margin-bottom: 4px;'
+                                        ) as expansion:
+                                            # Custom header slot
+                                            with expansion.add_slot('header'):
+                                                with ui.row().classes('items-center gap-3 w-full'):
+                                                    ui.icon('circle').style(f'color: {list_color}; font-size: 0.8rem;')
+                                                    ui.label(list_name).classes('font-medium flex-1')
+                                                    ui.badge(str(item_count), color='green').props('dense').classes('text-xs')
+
+                                            # Expansion content: list of manuscripts + Add All button
+                                            with ui.column().classes('w-full gap-1 pb-2'):
+                                                if not resolved_items:
+                                                    ui.label(tr('No items')).classes('text-sm italic text-gray-400 px-2')
+                                                else:
+                                                    for ri in resolved_items:
+                                                        already_in = ri['sys_id'] in {e.get('sys_id') for e in state.reading_desk_entries}
+                                                        with ui.row().classes('items-center gap-2 px-2 py-1').style(
+                                                            'border-bottom: 1px solid var(--border-subtle, #f0f0f0);'
+                                                        ):
+                                                            if already_in:
+                                                                ui.icon('check', size='xs').classes('text-green-500').tooltip(tr('Already in Reading Desk'))
+                                                                ui.label(ri['shelfmark']).classes('text-sm flex-1').style('color: var(--text-primary);')
+                                                            else:
+                                                                cb = ui.checkbox(ri['shelfmark']).classes('text-sm flex-1')
+                                                                if list_id not in selections:
+                                                                    selections[list_id] = []
+                                                                selections[list_id].append((ri['sys_id'], ri['shelfmark'], cb))
+
+                                                    # Add Selected handler factory
+                                                    def make_add_selected_handler(lid=list_id, dialog_ref=dlg):
+                                                        def add_selected_items():
+                                                            if lid not in selections:
+                                                                return
+                                                            added_count = 0
+                                                            existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+                                                            for s_sid, s_sm, s_cb in selections[lid]:
+                                                                if s_cb.value and s_sid not in existing_sids:
+                                                                    _add_sys_id_to_reading_desk(s_sid, s_sm)
+                                                                    existing_sids.add(s_sid)
+                                                                    added_count += 1
+                                                            if added_count > 0:
+                                                                try:
+                                                                    ui.notify(f'{added_count} {tr("manuscripts added")}', type='positive')
+                                                                except RuntimeError:
+                                                                    pass
+                                                                dialog_ref.close()
+                                                            else:
+                                                                try:
+                                                                    ui.notify(tr('No items selected'), type='info')
+                                                                except RuntimeError:
+                                                                    pass
+                                                        return add_selected_items
+
+                                                    # Button row: Add Selected + Add All
+                                                    with ui.row().classes('w-full justify-end pt-2 px-2 gap-2'):
+                                                        ui.button(
+                                                            tr('Add Selected'),
+                                                            icon='check_circle',
+                                                            on_click=make_add_selected_handler()
+                                                        ).props('dense outline color=green').classes('text-sm')
+
+                                                        ui.button(
+                                                            f'{tr("Add All")} ({item_count})',
+                                                            icon='playlist_add',
+                                                            on_click=make_add_list_handler()
+                                                        ).props('dense color=green').classes('text-sm')
+
+                    dlg.open()
+
+                # Header bar
+                with ui.card().classes('w-full mb-2').style(
+                    'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important;'
+                ):
+                    with ui.row().classes('w-full items-center justify-between p-3'):
+                        with ui.row().classes('items-center gap-3'):
+                            ui.icon('auto_stories').classes('text-xl').style('color: white !important;')
+                            if state.joined_pgpid:
+                                header_txt = f'{tr("Document")} #{state.joined_pgpid}'
+                            else:
+                                header_txt = tr('Reading Desk')
+                            ui.label(header_txt).classes('text-lg font-bold').style('color: white !important;')
+                            ui.badge(
+                                f'{len(state.reading_desk_entries)} {tr("fragments")}',
+                            ).props('dense').classes('text-xs').style(
+                                'border: 1px solid white; color: white !important; background: transparent;'
+                            )
+
+                        ui.button(
+                            tr('Back to Page View'),
+                            icon='arrow_forward' if is_rtl() else 'arrow_back',
+                            on_click=exit_joined_view
+                        ).props('flat dense text-color=white')
+
+                # === Reading Desk Toolbar ===
+                with ui.card().classes('w-full mb-2 p-2').style(
+                    'background: var(--bg-tertiary, #f3f4f6); border: 1px solid var(--border-light, #e5e7eb);'
+                ):
+                    with ui.row().classes('w-full items-center gap-3'):
+                        # Shelfmark input for adding manuscripts
+                        rd_shelfmark_input = ui.input(
+                            placeholder=tr('Add by shelfmark...'),
+                        ).props('dense outlined clearable color=green').classes('flex-1').style('max-width: 300px;')
+
+                        async def rd_toolbar_add():
+                            # Awaited: toolbar_add_by_shelfmark is async (Enter and Add both
+                            # come here). The box is cleared only once a record is added.
+                            def _clear():
+                                try:
+                                    rd_shelfmark_input.value = ''
+                                except RuntimeError:
+                                    pass  # the toolbar was rebuilt meanwhile
+                            await toolbar_add_by_shelfmark(rd_shelfmark_input.value, on_added=_clear)
+
+                        rd_shelfmark_input.on('keydown.enter', rd_toolbar_add)
+
+                        ui.button(
+                            tr('Add'), icon='add',
+                            on_click=rd_toolbar_add
+                        ).props('dense color=green')
+
+                        # Separator
+                        ui.separator().props('vertical').classes('h-6')
+
+                        # Add from List button
+                        ui.button(
+                            tr('Add from List'), icon='playlist_add',
+                            on_click=show_add_from_list_dialog
+                        ).props('flat dense color=green')
+
+                        ui.element('div').classes('flex-grow')
+
+                        # Fragment count
+                        ui.label(
+                            f'{len(state.reading_desk_entries)} {tr("fragments")}'
+                        ).classes('text-sm').style('color: var(--text-secondary);')
+
+                # Two-panel flex row (same pattern as single-page view)
+                with ui.element('div').classes('reading-desk-panels').style(
+                    'display: flex; flex-direction: row; gap: 16px; min-height: 70vh; width: 100%;'
+                ):
+
+                    # === LEFT PANE: Image Stack ===
+                    with ui.card().style('flex: 0 0 50%; min-height: 70vh; display: flex; flex-direction: column;'):
+                        ui.label(tr('Manuscript Images')).classes('text-sm font-semibold p-2 border-b').style(
+                            'color: var(--text-secondary); background: #1a1a1a; color: white; border-radius: 8px 8px 0 0;'
+                        )
+                        with ui.scroll_area().classes('rd-image-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
+                            for frag_idx, entry in enumerate(state.reading_desk_entries):
+                                frag_sm = entry.get('shelfmark', '')
+                                frag_sid = entry.get('sys_id', '')
+                                frag_pages = entry.get('pages', [])
+                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
+
+                                # Fragment separator
+                                if frag_idx > 0:
+                                    ui.separator().classes('my-4')
+
+                                # Fragment header (clickable link to navigate)
+                                with ui.element('div').props(f'id="rd-img-frag-{frag_idx}"').classes('reading-desk-fragment'):
+                                    with ui.row().classes('items-center gap-2 p-2 w-full').style(
+                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
+                                    ):
+                                        ui.icon('description').classes('text-green-600')
+
+                                        def make_nav_handler(sm=frag_sm):
+                                            return lambda: rd_navigate_to_fragment(sm)
+
+                                        ui.label(frag_sm).classes(
+                                            'font-bold text-base cursor-pointer hover:underline'
+                                        ).style('color: var(--text-primary);').on('click', make_nav_handler())
+                                        if is_current_frag:
+                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+                                        ui.element('div').classes('flex-grow')
+
+                                        def make_remove_img(sid=frag_sid):
+                                            return lambda: remove_from_desk(sid)
+
+                                        ui.button(
+                                            icon='close', on_click=make_remove_img()
+                                        ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
+
+                                # Oxford detection
+                                frag_library_code = ''
+                                if getattr(state, 'meta_mgr', None) and frag_sid:
+                                    try:
+                                        frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
+                                    except Exception:
+                                        frag_library_code = ''  # Library code lookup failed; use empty string
+                                frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
+
+                                if not frag_pages:
+                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
+                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
+
+                                # Render each page image with its own controls
+                                for pg_i, pg in enumerate(frag_pages):
+                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
+                                    pg_idx = max(0, pg_num - 1)
+                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+                                    viewer_id = f'rd-viewer-{frag_idx}-{pg_i}'
+
+                                    # Image URL
+                                    if frag_is_oxford:
+                                        frag_img_url = get_oxford_direct_image_url(frag_sm, pg_idx)
+                                        if not frag_img_url:
+                                            frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                    elif is_synthetic_sys_id(frag_sid):
+                                        # Phase 85 D-06: synthetic sys_ids have no NLI image source
+                                        frag_img_url = ''
+                                    else:
+                                        frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
+
+                                    # Page label
+                                    ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
+
+                                    # Per-image controls bar
+                                    with ui.row().classes('items-center gap-1 px-2 py-1').style(
+                                        'background: #1a1a1a; border-radius: 4px; margin: 0 4px;'
+                                    ):
+                                        ui.button(
+                                            icon='remove',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdZoom('{vid}', -0.25)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Zoom out'))
+                                        ui.html(f'<span id="{viewer_id}-zoom-label" style="color: white; font-size: 0.75rem; min-width: 36px; text-align: center;">100%</span>', sanitize=False)
+                                        ui.button(
+                                            icon='add',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdZoom('{vid}', 0.25)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Zoom in'))
+                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                        ui.button(
+                                            icon='rotate_left',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdRotate('{vid}', -90)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Rotate Left'))
+                                        ui.button(
+                                            icon='rotate_right',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdRotate('{vid}', 90)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Rotate Right'))
+                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                        ui.button(
+                                            icon='restart_alt',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdResetView('{vid}')")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Reset View'))
+
+                                    # Per-image adjustment controls
+                                    with ui.row().classes('items-center gap-1 px-2 py-1').style(
+                                        'background: #1a1a1a; margin: 0 4px; border-top: 1px solid #333;'
+                                    ):
+                                        ui.icon('brightness_6').style('color: white; font-size: 0.85rem;').tooltip(tr('Brightness'))
+                                        _rd_b_sl = ui.slider(
+                                            min=-100, max=100, step=1, value=0,
+                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetBrightness('{vid}', {e.value})")
+                                        ).props('dark dense').classes('w-16')
+                                        ui.icon('contrast').style('color: white; font-size: 0.85rem;').tooltip(tr('Contrast'))
+                                        _rd_c_sl = ui.slider(
+                                            min=-100, max=100, step=1, value=0,
+                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetContrast('{vid}', {e.value})")
+                                        ).props('dark dense').classes('w-16')
+                                        ui.icon('timeline').style('color: white; font-size: 0.85rem;').tooltip(tr('Gamma'))
+                                        _rd_g_sl = ui.slider(
+                                            min=20, max=300, step=1, value=100,
+                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetGamma('{vid}', {e.value / 100})")
+                                        ).props('dark dense').classes('w-16')
+                                        ui.button(
+                                            icon='exposure',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdToggleInvert('{vid}')")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Invert Colors'))
+                                        # Store refs for reset
+                                        _rd_b_ref, _rd_c_ref, _rd_g_ref = _rd_b_sl, _rd_c_sl, _rd_g_sl
+                                        def _rd_reset(vid=viewer_id, b_sl=_rd_b_ref, c_sl=_rd_c_ref, g_sl=_rd_g_ref):
+                                            b_sl.value = 0; c_sl.value = 0; g_sl.value = 100
+                                            ui.run_javascript(f"window.rdResetAdjustments('{vid}')")
+                                        ui.button(
+                                            icon='restart_alt',
+                                            on_click=_rd_reset
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Reset Image'))
+
+                                    # Image display area with zoom/drag support
+                                    safe_sid = frag_sid.replace("'", "\\'")
+                                    is_ox_js = 'true' if frag_is_oxford else 'false'
+                                    with ui.element('div').style(
+                                        'background: #1a1a1a; border-radius: 0 0 4px 4px; overflow: hidden; '
+                                        'display: flex; align-items: center; justify-content: center; '
+                                        'min-height: 350px; margin: 0 4px 8px 4px; position: relative;'
+                                    ):
+                                        ui.html(f'''
+                                            <img id="{viewer_id}"
+                                                 class="rd-zoomable"
+                                                 src="{frag_img_url}"
+                                                 style="max-height: 500px; max-width: 100%; object-fit: contain; cursor: grab; transition: none;"
+                                                 loading="lazy"
+                                                 draggable="false"
+                                                 onerror="
+                                                     if ({is_ox_js}) {{
+                                                         this.style.display='none';
+                                                     }} else {{
+                                                         var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
+                                                         if (this.src.indexOf('oxford_image')===-1) {{
+                                                             this.onerror=function(){{ this.style.display='none'; }};
+                                                             this.src=ox;
+                                                         }} else {{
+                                                             this.style.display='none';
+                                                         }}
+                                                     }}
+                                                 "
+                                            />
+                                        ''', sanitize=False)
+
+                    # === RIGHT PANE: Text Stack ===
+                    with ui.card().style('flex: 1 1 auto; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;'):
+                        ui.label(tr('Transcriptions')).classes('text-sm font-semibold p-2 border-b').style(
+                            'color: var(--text-secondary);'
+                        )
+                        with ui.scroll_area().classes('rd-text-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
+                            for frag_idx, entry in enumerate(state.reading_desk_entries):
+                                frag_sm = entry.get('shelfmark', '')
+                                frag_sid = entry.get('sys_id', '')
+                                frag_pages = entry.get('pages', [])
+                                frag_sources = entry.get('sources', [])
+                                frag_pgp_doc = entry.get('pgp_doc', {})
+                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
+
+                                # Fragment separator
+                                if frag_idx > 0:
+                                    ui.separator().classes('my-4')
+
+                                # Fragment header (clickable link)
+                                with ui.element('div').props(f'id="rd-text-frag-{frag_idx}"').classes('reading-desk-fragment'):
+                                    with ui.row().classes('items-center gap-2 p-2 w-full').style(
+                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
+                                    ):
+                                        ui.icon('description').classes('text-green-600')
+
+                                        def make_nav_handler_text(sm=frag_sm):
+                                            return lambda: rd_navigate_to_fragment(sm)
+
+                                        ui.label(frag_sm).classes(
+                                            'font-bold text-base cursor-pointer hover:underline'
+                                        ).style('color: var(--text-primary);').on('click', make_nav_handler_text())
+                                        if is_current_frag:
+                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+                                        ui.element('div').classes('flex-grow')
+
+                                        def make_remove_text(sid=frag_sid):
+                                            return lambda: remove_from_desk(sid)
+
+                                        ui.button(
+                                            icon='close', on_click=make_remove_text()
+                                        ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
+
+                                # Per-fragment version selector
+                                # Build source options for dropdown
+                                source_options = {}
+                                source_map = {}  # option_key -> source dict
+                                if frag_sources:
+                                    for src_i, src in enumerate(frag_sources):
+                                        doc_rel = src.get('doc_relation', '')
+                                        scholar = src.get('source_scholar', 'Unknown')
+                                        lang = src.get('language', '')
+                                        # FGP is a distinct provider — label it as such
+                                        # so it never reads as a PGP edition (FGP-07).
+                                        if source_provider(src) == 'fgp':
+                                            if source_relation_kind(src) == 'translation':
+                                                label = f"FGP {lang} {tr('Translation')}".replace('  ', ' ').strip()
+                                            else:
+                                                label = tr('FGP Transcription')
+                                            # Disambiguate the per-image navigable
+                                            # list (1r, 1v, 2r…) — one FGP row/image.
+                                            folio = src.get('folio_label')
+                                            if folio:
+                                                label = f"{label} · {folio}"
+                                        elif 'Edition' in doc_rel:
+                                            label = f"PGP Edition: {scholar}"
+                                        elif 'Translation' in doc_rel:
+                                            label = f"{lang} Translation: {scholar}"
+                                        else:
+                                            label = f"{doc_rel}: {scholar}"
+                                        key = f"src_{src_i}"
+                                        source_options[key] = label
+                                        source_map[key] = src
+                                    # FGP entries that read alike are numbered, as in
+                                    # the version menu (owner, 2026-10-27).
+                                    _fgp_keys = [k for k, s in source_map.items() if source_provider(s) == 'fgp']
+                                    for k, numbered in zip(_fgp_keys, number_repeated_labels(
+                                            [source_options[k] for k in _fgp_keys])):
+                                        source_options[k] = numbered
+
+                                # Always add V0.8 as fallback
+                                source_options['v08'] = 'V0.8 (HTR)'
+
+                                # Default selection: first PGP edition if available, else first translation, else V0.8
+                                default_key = 'v08'
+                                for k, src in source_map.items():
+                                    if 'Edition' in (src.get('doc_relation') or ''):
+                                        default_key = k
+                                        break
+                                if default_key == 'v08':
+                                    for k, src in source_map.items():
+                                        if 'Translation' in (src.get('doc_relation') or ''):
+                                            default_key = k
+                                            break
+
+                                # Text containers for each page (for version switching)
+                                text_containers = {}
+
+                                if len(source_options) > 1:
+                                    with ui.row().classes('items-center gap-2 px-2 py-1'):
+                                        ui.icon('history', size='xs').classes('text-green-600')
+
+                                        def make_version_handler(f_sid=frag_sid, f_pages=frag_pages, s_map=source_map, t_containers=text_containers):
+                                            def on_change(e):
+                                                selected = e.value
+                                                state.reading_desk_selected_sources[f_sid] = selected
+                                                # Update text display for this fragment
+                                                src = s_map.get(selected)
+                                                if src and src.get('content'):
+                                                    content = src['content']
+                                                    is_translation = 'Translation' in (src.get('doc_relation') or '')
+                                                    is_english = src.get('language') == 'English'
+                                                    text_dir = 'ltr' if (is_translation and is_english) else 'rtl'
+                                                    text_align = 'left' if text_dir == 'ltr' else 'right'
+                                                    is_fgp = source_provider(src) == 'fgp'
+                                                    from shared.document_service import parse_transcription_sections
+                                                    sections = parse_transcription_sections(content)
+                                                    for pg_key, container in t_containers.items():
+                                                        container.clear()
+                                                        with container:
+                                                            pg_section = 'recto' if pg_key == 0 else 'verso'
+                                                            section_texts = sections.get(pg_section, [])
+                                                            if is_fgp:
+                                                                # FGP is a navigable per-image list; its image
+                                                                # numbering does not map to the fragment's
+                                                                # recto/verso, so show the full content once
+                                                                # (under the first page) — never side-split or
+                                                                # hidden on a later page (round-2 contract).
+                                                                section_text = content if pg_key == 0 else ''
+                                                            else:
+                                                                section_text = '\n\n'.join(section_texts) if section_texts else content
+                                                            if section_text:
+                                                                ui.label(section_text).style(
+                                                                    f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                                    f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                    f'overflow-wrap: break-word; word-break: break-word; '
+                                                                    f'color: var(--text-primary);'
+                                                                )
+                                                            else:
+                                                                ui.label(tr('No text for this page')).classes('italic text-gray-400')
+                                                else:
+                                                    # V0.8 - use original page text
+                                                    for pg_key, container in t_containers.items():
+                                                        container.clear()
+                                                        with container:
+                                                            pg_text = ''
+                                                            for p in f_pages:
+                                                                p_num = p.p_num if hasattr(p, 'p_num') else 0
+                                                                if max(0, p_num - 1) == pg_key:
+                                                                    pg_text = p.text if hasattr(p, 'text') else ''
+                                                                    break
+                                                            if pg_text:
+                                                                ui.label(pg_text).style(
+                                                                    'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
+                                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                    'overflow-wrap: break-word; word-break: break-word; '
+                                                                    'color: var(--text-primary);'
+                                                                )
+                                                            else:
+                                                                ui.label(tr('No text available')).classes('italic text-gray-400')
+                                            return on_change
+
+                                        ui.select(
+                                            options=source_options,
+                                            value=default_key,
+                                            on_change=make_version_handler()
+                                        ).props('dense outlined').classes('text-sm').style('min-width: 200px;')
+
+                                if not frag_pages:
+                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
+                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
+
+                                # Determine initial text content based on default source selection
+                                initial_source = source_map.get(default_key)
+                                initial_sections = None
+                                initial_is_ltr = False
+                                initial_is_fgp = False
+                                if initial_source and initial_source.get('content'):
+                                    from shared.document_service import parse_transcription_sections
+                                    initial_sections = parse_transcription_sections(initial_source['content'])
+                                    is_translation = 'Translation' in (initial_source.get('doc_relation') or '')
+                                    is_english = initial_source.get('language') == 'English'
+                                    initial_is_ltr = is_translation and is_english
+                                    initial_is_fgp = source_provider(initial_source) == 'fgp'
+
+                                # Render each page's text
+                                for pg_i, pg in enumerate(frag_pages):
+                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
+                                    pg_idx = max(0, pg_num - 1)
+                                    pg_text = pg.text if hasattr(pg, 'text') else ''
+                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+
+                                    ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
+
+                                    # Text content container (replaceable by version selector)
+                                    tc = ui.column().classes('w-full px-3 py-2').style('min-width: 0;')
+                                    text_containers[pg_idx] = tc
+
+                                    with tc:
+                                        # Show PGP source text if available and selected by default
+                                        display_text = pg_text
+                                        text_dir = 'rtl'
+                                        text_align = 'right'
+
+                                        if initial_is_fgp:
+                                            # FGP: full content shown once (navigable per-image
+                                            # list; its image numbering does not map to the
+                                            # fragment's recto/verso, so no side split — round-2).
+                                            display_text = initial_source.get('content', '') if pg_idx == 0 else ''
+                                            if initial_is_ltr:
+                                                text_dir = 'ltr'
+                                                text_align = 'left'
+                                        elif initial_sections is not None:
+                                            pg_section = 'recto' if pg_idx == 0 else 'verso'
+                                            section_texts = initial_sections.get(pg_section, [])
+                                            if section_texts:
+                                                display_text = '\n\n'.join(section_texts)
+                                            elif pg_idx == 0 and not initial_sections.get('verso'):
+                                                # No markers, use full content for recto
+                                                display_text = initial_source.get('content', pg_text)
+                                            if initial_is_ltr:
+                                                text_dir = 'ltr'
+                                                text_align = 'left'
+
+                                        if display_text:
+                                            ui.label(display_text).style(
+                                                f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                f'overflow-wrap: break-word; word-break: break-word; '
+                                                f'color: var(--text-primary);'
+                                            )
+                                        else:
+                                            ui.label(tr('No text available')).classes('italic text-gray-400')
+
+                # Inject per-image viewer JS (zoom/rotate/drag)
+                ui.run_javascript('''
+                    window.rdViewers = window.rdViewers || {};
+
+                    function rdInitState(viewerId) {
+                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, brightness: 0, contrast: 0, gamma: 1.0, invert: false};
+                        return window.rdViewers[viewerId];
+                    }
+
+                    function rdApplyFilters(viewerId) {
+                        const s = window.rdViewers[viewerId];
+                        if (!s) return;
+                        const img = document.getElementById(viewerId);
+                        if (!img) return;
+                        const b = 1 + s.brightness / 100;
+                        const c = 1 + s.contrast / 100;
+                        const inv = s.invert ? 1 : 0;
+                        let f = 'brightness(' + b + ') contrast(' + c + ') invert(' + inv + ')';
+                        if (s.gamma !== 1.0) {
+                            const filterId = 'gamma-' + viewerId;
+                            let svgFilter = document.getElementById(filterId);
+                            if (!svgFilter) {
+                                const svgNS = 'http://www.w3.org/2000/svg';
+                                const svg = document.createElementNS(svgNS, 'svg');
+                                svg.style.cssText = 'position:absolute;width:0;height:0';
+                                const filter = document.createElementNS(svgNS, 'filter');
+                                filter.setAttribute('id', filterId);
+                                const ct = document.createElementNS(svgNS, 'feComponentTransfer');
+                                ['R','G','B'].forEach(ch => {
+                                    const fn = document.createElementNS(svgNS, 'feFunc' + ch);
+                                    fn.setAttribute('type', 'gamma');
+                                    fn.setAttribute('amplitude', '1');
+                                    fn.setAttribute('exponent', '1.0');
+                                    ct.appendChild(fn);
+                                });
+                                filter.appendChild(ct);
+                                svg.appendChild(filter);
+                                document.body.appendChild(svg);
+                                svgFilter = filter;
+                            }
+                            const exp = 1.0 / s.gamma;
+                            svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
+                            f += ' url(#' + filterId + ')';
+                        }
+                        img.style.filter = f;
+                    }
+
+                    window.rdZoom = function(viewerId, delta) {
+                        const state = rdInitState(viewerId);
+                        state.scale = Math.max(0.25, Math.min(4, state.scale + delta));
+                        const img = document.getElementById(viewerId);
+                        if (img) img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                        const label = document.getElementById(viewerId + '-zoom-label');
+                        if (label) label.textContent = Math.round(state.scale * 100) + '%';
+                    };
+
+                    window.rdRotate = function(viewerId, degrees) {
+                        const state = rdInitState(viewerId);
+                        state.rotation = (state.rotation + degrees + 360) % 360;
+                        const img = document.getElementById(viewerId);
+                        if (img) img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                    };
+
+                    window.rdResetView = function(viewerId) {
+                        if (!window.rdViewers[viewerId]) return;
+                        const state = window.rdViewers[viewerId];
+                        state.scale = 1; state.rotation = 0; state.x = 0; state.y = 0;
+                        state.brightness = 0; state.contrast = 0; state.gamma = 1.0; state.invert = false;
+                        const img = document.getElementById(viewerId);
+                        if (img) { img.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1)'; img.style.filter = ''; }
+                        const label = document.getElementById(viewerId + '-zoom-label');
+                        if (label) label.textContent = '100%';
+                    };
+
+                    window.rdSetBrightness = function(viewerId, val) { rdInitState(viewerId).brightness = val; rdApplyFilters(viewerId); };
+                    window.rdSetContrast = function(viewerId, val) { rdInitState(viewerId).contrast = val; rdApplyFilters(viewerId); };
+                    window.rdSetGamma = function(viewerId, val) { rdInitState(viewerId).gamma = val; rdApplyFilters(viewerId); };
+                    window.rdToggleInvert = function(viewerId) { const s = rdInitState(viewerId); s.invert = !s.invert; rdApplyFilters(viewerId); };
+                    window.rdResetAdjustments = function(viewerId) {
+                        const s = rdInitState(viewerId);
+                        s.brightness = 0; s.contrast = 0; s.gamma = 1.0; s.invert = false;
+                        rdApplyFilters(viewerId);
+                    };
+
+                    // Initialize drag support for all rd-zoomable images
+                    window.rdInitDrag = function(viewerId) {
+                        const img = document.getElementById(viewerId);
+                        if (!img || img.dataset.rdDragInit) return;
+                        img.dataset.rdDragInit = 'true';
+                        const state = rdInitState(viewerId);
+                        img.style.cursor = 'grab';
+                        img.ondragstart = (e) => e.preventDefault();
+
+                        img.onmousedown = function(e) {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            state.isDragging = true;
+                            state.startX = e.clientX - state.x;
+                            state.startY = e.clientY - state.y;
+                            img.style.cursor = 'grabbing';
+                        };
+                        const moveHandler = function(e) {
+                            if (!state.isDragging) return;
+                            state.x = e.clientX - state.startX;
+                            state.y = e.clientY - state.startY;
+                            img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                        };
+                        const upHandler = function() {
+                            if (state.isDragging) {
+                                state.isDragging = false;
+                                img.style.cursor = 'grab';
+                            }
+                        };
+                        window.addEventListener('mousemove', moveHandler);
+                        window.addEventListener('mouseup', upHandler);
+
+                        img.onwheel = function(e) {
+                            e.preventDefault();
+                            const delta = e.deltaY > 0 ? -0.25 : 0.25;
+                            window.rdZoom(viewerId, delta);
+                        };
+                    };
+
+                    // Init drag for all existing rd-zoomable images
+                    setTimeout(function() {
+                        document.querySelectorAll('.rd-zoomable').forEach(function(img) {
+                            if (img.id) window.rdInitDrag(img.id);
+                        });
+                    }, 300);
+                ''')
+
+                # Inject synchronized scrolling JS
+                rd_frag_count = len(state.reading_desk_entries)
+                ui.run_javascript(f'''
+                    (function() {{
+                        const fragCount = {rd_frag_count};
+                        if (fragCount <= 1) return;
+
+                        // Wait for scroll areas to render
+                        setTimeout(function() {{
+                            const imgPane = document.querySelector('.rd-image-pane .q-scrollarea__container');
+                            const textPane = document.querySelector('.rd-text-pane .q-scrollarea__container');
+                            if (!imgPane || !textPane) {{
+                                console.log('[ReadingDesk] Scroll panes not found');
+                                return;
+                            }}
+
+                            const imgHeaders = document.querySelectorAll('[id^="rd-img-frag-"]');
+                            const textHeaders = document.querySelectorAll('[id^="rd-text-frag-"]');
+
+                            let syncing = false;
+
+                            const imgObserver = new IntersectionObserver((entries) => {{
+                                if (syncing) return;
+                                for (const entry of entries) {{
+                                    if (entry.isIntersecting) {{
+                                        const idx = entry.target.id.replace('rd-img-frag-', '');
+                                        const textTarget = document.getElementById('rd-text-frag-' + idx);
+                                        if (textTarget) {{
+                                            syncing = true;
+                                            textTarget.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+                                            setTimeout(() => syncing = false, 600);
+                                        }}
+                                        break;
+                                    }}
+                                }}
+                            }}, {{root: imgPane, threshold: 0.3}});
+
+                            const textObserver = new IntersectionObserver((entries) => {{
+                                if (syncing) return;
+                                for (const entry of entries) {{
+                                    if (entry.isIntersecting) {{
+                                        const idx = entry.target.id.replace('rd-text-frag-', '');
+                                        const imgTarget = document.getElementById('rd-img-frag-' + idx);
+                                        if (imgTarget) {{
+                                            syncing = true;
+                                            imgTarget.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+                                            setTimeout(() => syncing = false, 600);
+                                        }}
+                                        break;
+                                    }}
+                                }}
+                            }}, {{root: textPane, threshold: 0.3}});
+
+                            imgHeaders.forEach(h => imgObserver.observe(h));
+                            textHeaders.forEach(h => textObserver.observe(h));
+                            console.log('[ReadingDesk] Synchronized scrolling initialized for ' + fragCount + ' fragments');
+                        }}, 500);
+                    }})();
+                ''')
+
+            else:
+                # Single page view
+                # Extract FL ID and check if we have an image
+                fl_id = page.fl_id
+                if not fl_id and page.image_url:
+                    match = re.search(r'FL(\d+)', page.image_url)
+                    if match:
+                        fl_id = match.group(1)
+
+                # Prepare image URLs
+                img_url = None
+                fallback_url = None
+                has_image = False
+
+                # Compute FL ID digits once (for proper fallback logic)
+                fl_digits = ""
+                if fl_id:
+                    fl_digits = re.sub(r"\D", "", str(fl_id))
+
+                # Use pre-computed is_oxford from BrowsePage (computed in services.py)
+                # Also check shelfmark pattern as fallback
+                is_oxford = page.is_oxford
+                if not is_oxford:
+                    is_oxford = is_oxford_manuscript(page.shelfmark, page.library_code)
+
+
+                # Phase 117 Plan 03: image-URL resolution delegated to the shared helper
+                # (web/components/image_resolution.py) so anchor pane + Compare can reuse it.
+                # The _has_*_images flags and active_source auto-default logic live in
+                # resolve_image_url; browse reads them back from the returned dict.
+                _img_result = resolve_image_url(
+                    sys_id=page.sys_id,
+                    p_num=page.p_num,
+                    is_oxford=is_oxford,
+                    shelfmark=page.shelfmark,
+                    volume_suffix=page.volume_suffix,
+                    cambridge_images=page.cambridge_images,
+                    external_provider=page.external_provider,
+                    cambridge_alignment=page.cambridge_alignment,
+                    volumes=page.volumes,
+                    total_pages=page.total_pages,
+                    active_source=state.active_source,
+                    source_user_override=state.source_user_override,
+                )
+                img_url = _img_result['img_url']
+                has_image = _img_result['has_image']
+                state.active_source = _img_result['active_source']
+                fallback_url = None
+
+                # page_idx still needed below for NLI viewer deep-link JS
+                page_idx = max(0, page.p_num - 1)
+
+                # Reconstruct the external-source flags needed for the source-chip UI
+                # (these were formerly computed inline above; now derived from page fields
+                # after active_source has been set by resolve_image_url).
+                _has_ext_images = bool(page.cambridge_images)
+                _has_cambridge_images = _has_ext_images and (page.external_provider or '') not in ('manchester', 'jts')
+                _has_manchester_images = _has_ext_images and page.external_provider == 'manchester'
+                _has_jts_images = _has_ext_images and page.external_provider == 'jts'
+                _has_oxford_images = bool(is_oxford and page.sys_id)
+
+                # Header bar with folio info, navigation, controls
+                # Determine effective image count and folio data
+                _src_info = page.image_source_info or {}
+                _folio_images = page.folio_images or []
+                _effective_count = _src_info.get('image_count', 0) or page.total_pages
+                _is_single_page = _effective_count <= 1 and page.total_pages <= 1
+                # Phase 85 D-06: synthetic sys_ids have no NLI Alma record —
+                # _has_nli forced False so the NLI source chip + viewer deep-link
+                # button never render. Cambridge / Manchester / JTS chips still
+                # appear when their respective images are available.
+                _has_nli = (not is_synthetic_sys_id(page.sys_id)) and _src_info.get('nli_fgp', False)
+                _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
+                _has_manchester = _src_info.get('manchester', False)
+                _has_jts = _src_info.get('jts', False)
+
+                # Source switching setup -- any external source with NLI enables toggling
+                _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images or _has_oxford_images
+                _both_sources = _has_nli and _any_ext_images
+                _is_nli_active = state.active_source == 'nli' or not _any_ext_images
+                _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
+                _is_manchester_active = state.active_source == 'manchester' and _has_manchester_images
+                _is_jts_active = state.active_source == 'jts' and _has_jts_images
+                _is_oxford_active = state.active_source == 'oxford' and _has_oxford_images
+
+                async def switch_to_nli():
+                    state.active_source = 'nli'
+                    state.source_user_override = True
+                    await load_page(direction=0)
+
+                async def switch_to_cambridge():
+                    state.active_source = 'cambridge'
+                    state.source_user_override = True
+                    await load_page(direction=0)
+
+                async def switch_to_manchester():
+                    state.active_source = 'manchester'
+                    state.source_user_override = True
+                    await load_page(direction=0)
+
+                async def switch_to_jts():
+                    state.active_source = 'jts'
+                    state.source_user_override = True
+                    await load_page(direction=0)
+
+                async def switch_to_oxford():
+                    state.active_source = 'oxford'
+                    state.source_user_override = True
+                    await load_page(direction=0)
+
+                # NLI viewer deep link handler
+                if _has_nli:
+                    _nli_sys_id = page.sys_id
+                    _nli_page_idx = page_idx
+
+                    async def open_nli_viewer(sys_id=_nli_sys_id, pidx=_nli_page_idx):
+                        js = f'''
+                        (async () => {{
+                            let docid = "PNX_MANUSCRIPTS{sys_id}-1";
+                            try {{
+                                const resp = await fetch("/api/fl_ids/{sys_id}");
+                                if (resp.ok) {{
+                                    const flIds = await resp.json();
+                                    if (flIds.length > {pidx}) docid += ",FL" + flIds[{pidx}];
+                                }}
+                            }} catch(e) {{}}
+                            window.open("https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid=" + docid, "_blank");
+                        }})()
+                        '''
+                        await ui.run_javascript(js)
+
+                # `print-hide`: source chips, external links and page controls
+                # are navigation, not content. The folio label they sit beside
+                # is reproduced by the print-only masthead instead.
+                with ui.card().classes('w-full mb-2 print-hide browse-controls-card').style('background: var(--bg-tertiary);'):
+                    with ui.row().classes('w-full items-center flex-wrap gap-2 px-3 py-2'):
+                        # -- Left group: folio label, page count, version badge, source chips --
+                        with ui.row().classes('items-center gap-2'):
+                            # Folio/Page label
+                            if page.folio_label:
+                                ui.label(f"{tr('Folio')} {page.folio_label}").classes('text-sm font-bold')
+                            else:
+                                folio = extract_folio_number(page.full_header)
+                                if folio:
+                                    ui.label(f"{tr('Folio')} {folio}").classes('text-sm font-bold')
+                                else:
+                                    ui.label(f"{tr('Page')} {page.p_num}").classes('text-sm font-bold')
+
+                            # Source badge
+                            source_class = get_source_badge_class(page.full_header)
+                            source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
+                            ui.label(source_text).classes(f'source-badge {source_class}')
+
+                            # Source chips with matching external link icon colors
+                            if _has_nli:
+                                nli_style = (
+                                    'background: #4caf50; color: white; border: 1.5px solid #4caf50; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_nli_active else
+                                    'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 22px; color: #4caf50; font-weight: 600;'
+                                )
+                                if _both_sources:
+                                    _source_chip(
+                                        'NLI', switch_to_nli, nli_style,
+                                        tr('View NLI images') if not _is_nli_active else tr('Viewing NLI images'),
+                                        opens_external=False,
+                                    )
+                                    _source_external_button(open_nli_viewer, '#4caf50', tr('Open in NLI KTIV'))
+                                else:
+                                    _source_chip('NLI', open_nli_viewer, nli_style, tr('Open in NLI KTIV'), opens_external=True)
+
+                            if _has_cambridge:
+                                # Only the item the record's Cambridge decision named
+                                # (browse_enrichment): a URL built from the shelfmark is
+                                # a guess, and CUDL answers most guesses "Page Not Found".
+                                cudl_url = page.external_url or ''
+                                if cudl_url:
+                                    cudl_style = (
+                                        'background: #2196f3; color: white; border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                        if _is_cambridge_active else
+                                        'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; color: #2196f3; font-weight: 600;'
+                                    )
+                                    _open_cudl = lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    if _both_sources:
+                                        _source_chip(
+                                            'Cambridge', switch_to_cambridge, cudl_style,
+                                            tr('View Cambridge images') if not _is_cambridge_active else tr('Viewing Cambridge images'),
+                                            opens_external=False,
+                                        )
+                                        _source_external_button(_open_cudl, '#2196f3', tr('Open in Cambridge Digital Library'))
+                                    else:
+                                        _source_chip('Cambridge', _open_cudl, cudl_style, tr('Open in Cambridge Digital Library'), opens_external=True)
+
+                            if _has_manchester:
+                                manchester_color = '#e91e63'
+                                man_style = (
+                                    f'background: {manchester_color}; color: white; border: 1.5px solid {manchester_color}; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_manchester_active else
+                                    f'border: 1.5px solid {manchester_color}; border-radius: 12px; min-height: 22px; color: {manchester_color}; font-weight: 600;'
+                                )
+                                if _has_nli and _has_manchester_images:
+                                    _source_chip(
+                                        'Manchester', switch_to_manchester, man_style,
+                                        tr('View Manchester images') if not _is_manchester_active else tr('Viewing Manchester images'),
+                                        opens_external=False,
+                                    )
+                                # External link to LUNA detail page
+                                lib_viewer = page.library_viewer_url or {}
+                                luna_url = lib_viewer.get('url', '')
+                                if luna_url:
+                                    _open_luna = lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    if not (_has_nli and _has_manchester_images):
+                                        _source_chip('Manchester', _open_luna, man_style, tr('Open in Manchester LUNA'), opens_external=True)
+                                    else:
+                                        _source_external_button(_open_luna, manchester_color, tr('Open in Manchester LUNA'))
+
+                            if _has_jts:
+                                jts_color = '#ff9800'
+                                jts_style = (
+                                    f'background: {jts_color}; color: white; border: 1.5px solid {jts_color}; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_jts_active else
+                                    f'border: 1.5px solid {jts_color}; border-radius: 12px; min-height: 22px; color: {jts_color}; font-weight: 600;'
+                                )
+                                if _has_nli and _has_jts_images:
+                                    _source_chip(
+                                        'JTS', switch_to_jts, jts_style,
+                                        tr('View JTS images') if not _is_jts_active else tr('Viewing JTS images'),
+                                        opens_external=False,
+                                    )
+                                # External link to DPUL catalog page
+                                lib_viewer_jts = page.library_viewer_url or {}
+                                dpul_url = lib_viewer_jts.get('url', '')
+                                if dpul_url:
+                                    _open_dpul = lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    if not (_has_nli and _has_jts_images):
+                                        _source_chip('JTS', _open_dpul, jts_style, tr('Open in Princeton Digital Library'), opens_external=True)
+                                    else:
+                                        _source_external_button(_open_dpul, jts_color, tr('Open in Princeton Digital Library'))
+
+                            if page.is_oxford:
+                                oxford_color = '#8e44ad'
+                                ox_style = (
+                                    f'background: {oxford_color}; color: white; border: 1.5px solid {oxford_color}; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_oxford_active else
+                                    f'border: 1.5px solid {oxford_color}; border-radius: 12px; min-height: 22px; color: {oxford_color}; font-weight: 600;'
+                                )
+                                if _has_nli and _has_oxford_images:
+                                    _source_chip(
+                                        'Oxford', switch_to_oxford, ox_style,
+                                        tr('View Oxford images') if not _is_oxford_active else tr('Viewing Oxford images'),
+                                        opens_external=False,
+                                    )
+                                # External link to Bodleian detail page
+                                if page.external_url:
+                                    _open_bodleian = lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    if not (_has_nli and _has_oxford_images):
+                                        _source_chip('Oxford', _open_bodleian, ox_style, tr('Open in Bodleian Libraries'), opens_external=True)
+                                    else:
+                                        _source_external_button(_open_bodleian, oxford_color, tr('Open in Bodleian Libraries'))
+
+                            # === Bibliography & Catalog Buttons (inline, deferred) ===
+                            bib_catalog_el = ui.element('span').classes('inline-flex items-center gap-1')
+                            enrichment_refs['bib_catalog_container'] = bib_catalog_el
+                            if state.enrichment_loaded:
+                                populate_bib_catalog_buttons(bib_catalog_el, state, page)
+
+                        # Spacer
+                        ui.element('div').classes('flex-grow')
+
+                        # -- Volume selector for multi-IE manuscripts --
+                        if page.volume_count > 1 and page.volumes:
+                            _vol_options = {}
+                            for _v in page.volumes:
+                                _vp = _v.get('transcription_pages') or _v['page_count']
+                                _label = f"{tr('Volume')} {_v['suffix']} ({_vp} {tr('Pages').lower()})"
+                                _vol_options[_v['ie_id']] = _label
+                            _vol_current = page.volume_ie or page.volumes[0]['ie_id']
+
+                            async def _handle_volume_change(e):
+                                new_ie = e.value
+                                if new_ie and new_ie != state.volume_ie:
+                                    state.volume_ie = new_ie
+                                    await load_page(p_num=1)
+
+                            ui.select(
+                                options=_vol_options,
+                                value=_vol_current,
+                                on_change=_handle_volume_change,
+                            ).classes('w-48').props('dense outlined color=orange').tooltip(
+                                tr('This manuscript has multiple volumes (IEs)')
+                            )
+
+                        # -- Right group: navigation, full manuscript, star --
+                        with ui.row().classes('items-center gap-1'):
+                            prev_disabled = _is_single_page or page.current_idx <= 1
+                            ui.button(
+                                icon='chevron_right' if is_rtl() else 'chevron_left',
+                                on_click=lambda: load_page(direction=-1)
+                            ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" data-ux="browse_page" aria-label="{tr("Previous Page")}"').classes(
+                                'text-green-700' if not prev_disabled else 'text-gray-300'
+                            ).tooltip(f'{tr("Previous Page")} ({"→" if is_rtl() else "←"})')
+
+                            # Only use folio-label dropdown when crossref image count
+                            # matches the page count from the search index.  When they
+                            # differ the labels would be misleading (e.g. crossref starts
+                            # at leaf 4 while pages start at 1).
+                            _folio_count_matches = (
+                                _folio_images
+                                and len(_folio_images) > 1
+                                and len(_folio_images) == page.total_pages
+                            )
+                            if _folio_count_matches:
+                                folio_options = {
+                                    str(i + 1): img.get('folio_label', str(i + 1))
+                                    for i, img in enumerate(_folio_images)
+                                }
+
+                                async def handle_folio_select(e):
+                                    try:
+                                        val = int(e.value) if e.value is not None else 1
+                                    except (ValueError, TypeError):
+                                        return
+                                    await go_to_page(val)
+
+                                # Clamp p_num to valid folio range to prevent ValueError
+                                _folio_val = str(min(page.p_num, len(_folio_images)))
+                                ui.select(
+                                    options=folio_options,
+                                    value=_folio_val,
+                                    on_change=handle_folio_select
+                                ).classes('w-20').props('dense outlined')
+                            else:
+                                page_input = ui.number(
+                                    value=page.p_num, min=1, max=page.total_pages or None
+                                ).classes('w-24').props('dense outlined')
+
+                                async def handle_go_click():
+                                    try:
+                                        val = int(page_input.value) if page_input.value is not None else 1
+                                    except (ValueError, TypeError):
+                                        val = 1
+                                    await go_to_page(val)
+
+                                ui.button(
+                                    tr('Go'), icon='arrow_back' if is_rtl() else 'arrow_forward', on_click=handle_go_click,
+                                ).props(f'flat dense color=green size=sm data-ux=browse_page aria-label="{tr("Go")}"').classes('browse-icon-collapse')
+
+                            if page.total_pages:  # 0: not known (yet) -- never "/ 0"
+                                ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
+
+                            next_disabled = _is_single_page or page.current_idx >= page.total_pages
+                            ui.button(
+                                icon='chevron_left' if is_rtl() else 'chevron_right',
+                                on_click=lambda: load_page(direction=1)
+                            ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" data-ux="browse_page" aria-label="{tr("Next Page")}"').classes(
+                                'text-green-700' if not next_disabled else 'text-gray-300'
+                            ).tooltip(f'{tr("Next Page")} ({"←" if is_rtl() else "→"})')
+
+                            ui.button(
+                                tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
+                                icon='view_agenda' if not state.view_all else 'view_day',
+                                on_click=toggle_view_all
+                            ).props(f'flat dense color=green size=sm aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"').classes('browse-icon-collapse')
+
+                            # Print / Save as PDF -- ON THE ALWAYS-VISIBLE TOOLBAR.
+                            #
+                            # It was first put beside "Export Word" in the
+                            # Export group, which lives inside the metadata
+                            # panel -- and that panel is COLLAPSED by default
+                            # (`show_metadata` starts False), so the reader had
+                            # to click "Show Metadata" before the button existed
+                            # at all. The owner reported it as missing, which it
+                            # effectively was.
+                            #
+                            # Worth recording how that shipped: printing was
+                            # verified by driving `window.print()` directly to a
+                            # real PDF, which proves the STYLESHEET and bypasses
+                            # the button entirely. A working feature behind an
+                            # unreachable control is not a working feature.
+                            #
+                            # Icon-only with a tooltip, matching the star and
+                            # image buttons either side of it. `print-hide` so
+                            # the control never prints itself.
+                            async def _print_all_pages():
+                                """Print every folio of this manuscript.
+
+                                Two steps, and they cannot be collapsed into
+                                one: Full Manuscript View is a SEPARATE render
+                                branch, so the all-pages text does not exist in
+                                the DOM until `toggle_view_all` has run -- and
+                                that call rebuilds the content tree, destroying
+                                this very menu item. So the intent is parked on
+                                `print_pending` and the print is fired by the
+                                FMV branch once it has rendered.
+
+                                Already in that view: print straight away.
+                                """
+                                if state.view_all:
+                                    ui.run_javascript('window.print()')
+                                    return
+                                print_pending['value'] = True
+                                await toggle_view_all()
+                                # `toggle_view_all` swallows a failed fetch and
+                                # leaves `view_all` false. Without this the
+                                # intent SURVIVED, and the next time the reader
+                                # opened Full Manuscript View -- deliberately,
+                                # much later -- the render branch consumed the
+                                # stale flag and threw up a print dialog nobody
+                                # had asked for.
+                                if not state.view_all:
+                                    print_pending['value'] = False
+
+                            with ui.button(icon='print').props(
+                                f'flat round dense aria-label="{tr("Print / Save as PDF")}"'
+                            ).classes('text-green-700 print-hide').tooltip(tr('Print / Save as PDF')):
+                                # A menu on the button itself (owner's choice,
+                                # 2026-09-04) rather than a second toolbar
+                                # control -- the row is already crowded enough
+                                # to wrap at 1280px.
+                                with ui.menu().props('auto-close'):
+                                    # DISABLED in Full Manuscript View and in
+                                    # edit mode, for two different reasons.
+                                    #
+                                    # In FMV the DOM holds every folio, so
+                                    # "this page" printed the entire manuscript
+                                    # -- indistinguishable from the entry below
+                                    # it, and a large job nobody asked for.
+                                    #
+                                    # In edit mode the masthead, the source
+                                    # credit and the rendered transcription are
+                                    # built by the VIEW branch only, so what
+                                    # printed was the editor: a textarea of
+                                    # unsaved draft text, with no shelfmark and
+                                    # no credit on the sheet. A printed page
+                                    # carrying manuscript text and no
+                                    # attribution is the defect this whole
+                                    # change set exists to remove.
+                                    _no_single = (state.view_all
+                                                  or state.edit_mode
+                                                  or state.edit_loading)
+                                    _single = ui.menu_item(
+                                        tr('Print this page'),
+                                        on_click=(None if _no_single
+                                                  else (lambda: ui.run_javascript('window.print()'))),
+                                    ).classes('text-sm')
+                                    if _no_single:
+                                        _single.props('disable').tooltip(
+                                            tr('Leave Full Manuscript View or '
+                                               'finish editing to print one page'))
+                                    _all_label = tr('Print all manuscript pages')
+                                    if page.total_pages and page.total_pages > 1:
+                                        _all_label = f'{_all_label} ({page.total_pages})'
+                                    ui.menu_item(
+                                        _all_label,
+                                        on_click=_print_all_pages,
+                                    ).classes('text-sm')
+
+                            # Add page to list (star button)
+                            from web.state import state as app_state
+                            from web.components import get_star_icon
+                            page_star_icon = get_star_icon(app_state.lists_mgr, state.sys_id)
+                            ui.button(
+                                icon=page_star_icon,
+                                on_click=add_page_to_list
+                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes('text-green-700').tooltip(tr('In List') if page_star_icon == 'star' else tr('Add to List'))
+
+                            # Image toggle button - placeholder, will be connected later
+                            image_toggle_btn = None
+                            if has_image:
+                                image_toggle_btn = ui.button(
+                                    icon='image'
+                                ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
+
+                            # Edit, Comment, Notes, and Joins buttons -- also on a page without an
+                            # automatic transcription (its text is then empty; owner, 2026-10-27)
+                            if page_has_reading_view(page):
+                                from web.components import create_comment_button, create_version_selector, create_notes_button, create_joins_button
+
+                                # Refresh callback to reload page after edits/comments
+                                async def refresh_page():
+                                    await load_page(direction=0)
+
+                                # Navigation callback for joins
+                                async def navigate_to_shelfmark(target_shelfmark: str):
+                                    state.shelfmark_query = target_shelfmark
+                                    await search_shelfmark()
+
+                                # Custom Edit Button
+                                # Phase 85 SYNTH-06 / D-10 — corrections-write deferred for
+                                # synthetic rows (page_number semantics undefined for
+                                # image-less FJMS-only inventories). UI hide is
+                                # defense-in-depth; backend reject at corrections_client.py
+                                # + supabase_corrections_client.py is the load-bearing gate.
+                                if not is_synthetic_sys_id(page.sys_id):
+                                    ui.button(
+                                        tr('Edit'),
+                                        icon='edit',
+                                        on_click=toggle_edit_mode
+                                    ).props(f'flat dense size=sm aria-label="{tr("Edit")}"').classes('text-xs browse-icon-collapse').tooltip(tr('Edit Transcription'))
+                                create_comment_button(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    shelfmark=page.shelfmark or page.sys_id,
+                                    on_submit=refresh_notes_after_comment,
+                                    ie_id=state.volume_ie
+                                )
+                                create_notes_button(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    shelfmark=page.shelfmark or page.sys_id,
+                                    ie_id=state.volume_ie
+                                )
+
+                                # Joins button placeholder (populated by enrichment Phase B)
+                                if page.shelfmark:
+                                    joins_el = ui.element('span')
+                                    enrichment_refs['joins_container'] = joins_el
+                                    enrichment_refs['navigate_to_shelfmark'] = navigate_to_shelfmark
+                                    if state.enrichment_loaded:
+                                        pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
+                                        # FND-05 (D-19): build Lab deep link; append volume_ie for multi-IE
+                                        _joins_lab_url = f'/joins-lab?sys_id={page.sys_id}'
+                                        if page.volume_ie:
+                                            _joins_lab_url += f'&volume_ie={page.volume_ie}'
+                                        with joins_el:
+                                            create_joins_button(
+                                                shelfmark=page.shelfmark,
+                                                document_id=page.sys_id,
+                                                pgpid=pgpid_for_joins,
+                                                on_navigate=navigate_to_shelfmark,
+                                                on_view_all=enter_joined_view,
+                                                find_joins_url=_joins_lab_url,
+                                            )
+
+                            # Computed-identifications entry control placeholder
+                            # (Phase 136, plan 136-17, PANEL-01) -- the FIFTH
+                            # enrichment placeholder, beside Joins in this same
+                            # second toolbar row, filled by
+                            # update_enrichment_sections() once Phase B
+                            # completes. Created ONLY when the discovery flag is
+                            # on, so a flag-off browse page is byte-for-byte
+                            # what it was before this plan.
+                            if discovery_panel_enabled():
+                                discovery_entry_el = ui.element('span')
+                                enrichment_refs['discovery_entry_container'] = discovery_entry_el
+
+                            # "Add to View" button -- start or extend reading desk with current manuscript
+                            ui.button(
+                                icon='library_add',
+                                on_click=add_to_reading_desk
+                            ).props(f'flat dense aria-label="{tr("Add to Reading Desk")}"').classes(
+                                'text-green-700'
+                            ).tooltip(tr('Add to Reading Desk'))
+
+                # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
+                # State for image panel visibility
+                show_image_panel = {'value': has_image}  # Start visible if image available
+                image_panel_ref = {'container': None}
+
+                def toggle_image_panel():
+                    show_image_panel['value'] = not show_image_panel['value']
+                    if image_panel_ref['container']:
+                        if show_image_panel['value']:
+                            image_panel_ref['container'].style('display: block;')
+                        else:
+                            image_panel_ref['container'].style('display: none;')
+
+                # Connect toggle button click handler
+                if image_toggle_btn:
+                    image_toggle_btn.on('click', toggle_image_panel)
+
+                # Discovery connections panel body (Phase 136, plan 136-17).
+                #
+                # FULL WIDTH, DIRECTLY BELOW THE TOOLBAR that carries its entry
+                # button (owner, 2026-08-07). It sat beneath the two viewer panes
+                # until then, which put it a 60vh scroll away from the control
+                # that opens it: the reader clicked, nothing visibly happened,
+                # and the panel they had asked for was off-screen. Adjacency to
+                # its own control is the whole point of the placement.
+                #
+                # Still full width and still OUTSIDE `viewer-panels`, for the
+                # reason the old comment gave: at `flex: 0 0 50%` x 60vh neither
+                # pane has room for it. Above the panes rather than inside one.
+                #
+                # Empty until the enrichment phase fills it; hidden until the
+                # reader opens the entry control.
+                if discovery_panel_enabled():
+                    discovery_panel_el = ui.element('div').classes('w-full').style('display: none;')
+                    enrichment_refs['discovery_panel_container'] = discovery_panel_el
+
+                    # REFILL, exactly as the four sibling placeholders do above
+                    # (`state.enrichment_loaded` guards Joins, the version
+                    # selector, bibliography and catalog).
+                    #
+                    # `update_content()` CLEARS `content_container` and rebuilds
+                    # every placeholder inside it as empty. The other four are
+                    # re-populated inline on that same pass; the discovery pair
+                    # was not, so any later `update_content()` -- Show Metadata,
+                    # the line-number toggle, entering edit mode, a comment
+                    # refresh -- left both the toolbar control and the panel body
+                    # as empty divs. The panel had not failed and the reader had
+                    # not closed it: it was silently unbuilt, with no way back
+                    # short of a page reload (owner report, 2026-08-07).
+                    #
+                    # Placed HERE, after BOTH placeholders exist, because the
+                    # refill fills both -- the entry control is created further
+                    # up, in the toolbar. Order is load-bearing and pinned by
+                    # `test_update_content_refills_the_discovery_placeholders_it_rebuilds`.
+                    # No `enrichment_loaded` check: the function returns on a
+                    # `None` bundle, and that single self-guard is the authority
+                    # -- a second gate here could only drift from it.
+                    update_discovery_panel_section(state, refs)
+
+                # The dictionary popover (plan §6.2). ONE element per content
+                # build, fixed-positioned by the click script beside the word
+                # (a sheet at the foot of a phone), so where it sits in the
+                # tree does not matter; here, beside the other full-width
+                # placeholders, so `update_content()` rebuilds it with them
+                # and a lookup in flight for a page the reader has left finds
+                # a deleted element and stops. The script dispatches
+                # `blau-lookup` / `blau-close` on it; the page answers from
+                # the service off the loop and the renderer draws the answer.
+                # The reader's language is captured now: the handler runs
+                # outside any render, where the process global may be another
+                # visitor's (the same capture the deferred joins render makes).
+                if dict_on:
+                    blau_popover = ui.element('div').classes(
+                        f'{blau_panel.POPOVER_CLASS} {blau_panel.PANEL_CLASS} print-hide'
+                    ).style('display: none;').props(
+                        # data-no-loading-bar: Enter in the panel's box looks a word up in
+                        # the page; the site's top bar (web/main.py) must not start.
+                        'role="dialog" aria-live="polite" data-no-loading-bar')
+                    _blau_lang = get_language()
+                    # PostHog (blau_panel.POSTHOG_*: is the switch found, and used?) goes through
+                    # the page's client: a lookup answers from a background task, with no page.
+                    _blau_client = ui.context.client
+                    # The request counter: a lookup that finishes after a later
+                    # click or a close is stale and draws nothing (Codex on
+                    # #473: a slow earlier lookup overwrote the newer word, or
+                    # reopened a panel the reader had closed).
+                    _blau_request = {'value': 0}
+
+                    def _blau_hide(_e=None):
+                        _blau_request['value'] += 1
+                        if not blau_popover.is_deleted:
+                            blau_popover.style('display: none;')
+
+                    def _choose_tab(name):
+                        dict_tab['value'] = name
+                        posthog_capture(blau_panel.POSTHOG_TAB, {'tab': name}, client=_blau_client)
+
+                    def _choose_gap(gap, text):
+                        # The gap control in Friedman's expression search: the same
+                        # words again with the new gap, the focus staying in the box.
+                        dict_gap['value'] = gap
+                        _blau_start(text, True)
+
+                    def _blau_draw(result, focus, lane=None, friedman=None):
+                        with using_language(_blau_lang):
+                            blau_popover.clear()
+                            with blau_popover:
+                                drawn = blau_panel.render_lookup(
+                                    result, credit_he=blau_service.credit_he,
+                                    credit_en=blau_service.credit_en, lang=_blau_lang,
+                                    on_close=_blau_hide, on_search=_blau_search,
+                                    focus_input=focus, lane=lane, lane_credit=lane_service.credit,
+                                    tab=dict_tab['value'], on_tab=_choose_tab,
+                                    friedman=friedman, friedman_credit=friedman_service.credit_he,
+                                    on_gap=_choose_gap)
+                        blau_popover.style('display: flex;' if drawn else 'display: none;')
+
+                    def _friedman_answer(word):
+                        # Several words (typed, or selected in the text) are an
+                        # expression search in Friedman; one word is a lookup.
+                        if not friedman_service.is_available():
+                            return None
+                        if len(word.split()) > 1:
+                            return friedman_service.expression(word, gap=dict_gap['value'])
+                        return friedman_service.lookup(word)
+
+                    def _both_lookups(word):
+                        # One trip off the loop for every dictionary; None for a
+                        # dictionary not served now (it gets no tab). Several words are
+                        # an expression search in Blau too (one gap for both dictionaries).
+                        return ((blau_service.answer(word, gap=dict_gap['value']) if blau_service.is_available() else None),
+                                (lane_service.lookup(word) if lane_service.is_available() else None),
+                                _friedman_answer(word))
+
+                    async def _blau_answer(word, request, focus=False, how='word'):
+                        answers = await run.io_bound(_both_lookups, word)
+                        if answers is None or blau_popover.is_deleted or request != _blau_request['value']:
+                            return
+                        result, lane, friedman = answers
+                        _blau_draw(result, focus, lane, friedman)
+                        posthog_capture(blau_panel.POSTHOG_LOOKUP,
+                                        blau_panel.lookup_event(focus, result, lane, how, friedman=friedman),
+                                        client=_blau_client)
+
+                    def _blau_start(word, focus, how='word'):
+                        # Synchronous on purpose: the counter must move in the
+                        # order the clicks arrived, before any of their lookups
+                        # runs. An async handler is a task that starts later,
+                        # and a close handled in between would be counted
+                        # before the lookup it was meant to cancel.
+                        _blau_request['value'] += 1
+                        background_tasks.create(_blau_answer(word, _blau_request['value'], focus, how),
+                                                name='blau-lookup')
+
+                    def _blau_lookup(e):
+                        word = blau_panel.lookup_word(e.args)
+                        if word:
+                            _blau_start(word, False, blau_panel.lookup_how(e.args))
+
+                    def _blau_search(word):
+                        # The box at the top of the panel (typed, or a
+                        # clicked word corrected): the focus stays in it.
+                        word = (word or '').strip()
+                        if word:
+                            _blau_start(word, True)
+
+                    def _blau_open(_e=None):
+                        # The "type a word" button: the panel with an empty box.
+                        _blau_request['value'] += 1
+                        if not blau_popover.is_deleted:
+                            _blau_draw(blau_empty_lookup('') if blau_service.is_available() else None, True,
+                                       empty_lane('') if lane_service.is_available() else None,
+                                       friedman_empty_lookup('') if friedman_service.is_available() else None)
+
+                    blau_popover.on(blau_panel.LOOKUP_EVENT, _blau_lookup)
+                    blau_popover.on(blau_panel.CLOSE_EVENT, _blau_hide)
+                    blau_popover.on(blau_panel.OPEN_EVENT, _blau_open)
+
+                # Main container with flex row
+                with ui.element('div').classes('viewer-panels').style(
+                    'display: flex; flex-direction: row; gap: 16px; min-height: 60vh; width: 100%;'
+                ):
+
+                    # === LEFT PANEL: Image (only if available) ===
+                    if has_image:
+                        image_panel_ref['container'] = ui.card().style(
+                            'flex: 0 0 50%; min-height: 60vh; display: block;'
+                        )
+                        with image_panel_ref['container']:
+                            # Image header with zoom controls
+                            with ui.row().classes('w-full items-center justify-between p-3 print-hide browse-image-head').style(
+                                'background: #1a1a1a; border-radius: 8px 8px 0 0;'
+                            ):
+                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold browse-image-title')
+                                # 260902: direct link to the current folio side on the Genizah Fragments site.
+                                # The Bodleian fronts images with a JS bot-challenge that an <img> or a server
+                                # fetch cannot pass, but the reader's own browser can -- and the Oxford licence
+                                # asks for a link to the site as the source in any case. `is_oxford`, `page_idx`
+                                # and `page` come from the enclosing page-render scope (same as the <img> below).
+                                _ox_direct_link = ''
+                                if is_oxford and page.sys_id:
+                                    from web.services import get_oxford_direct_image_url as _ox_direct_url
+                                    _ox_direct_link = _ox_direct_url(page.shelfmark, page_idx, folio_offset=max(0, (page.volume_suffix or 1) - 1)) or ''
+                                    if _ox_direct_link:
+                                        ui.link(tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True).classes('text-xs').style('color: #9ecbff;').props('data-role="oxford-direct-link"')
+                                with ui.row().classes('gap-1 browse-image-tools') as _image_tools_row:
+                                    ui.button(icon='remove').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').on('click', js_handler=ZOOM_OUT_JS).tooltip(f'{tr("Zoom out")} (−)')
+                                    ui.label(f'{zoom_percent(state.zoom_level)}%').classes('zoom-level-label text-white text-sm px-2')
+                                    ui.button(icon='add').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').on('click', js_handler=ZOOM_IN_JS).tooltip(f'{tr("Zoom in")} (+)')
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='rotate_left', on_click=rotate_left).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
+                                    
+                                    # Rotation Slider
+                                    slider_refs['rotate'] = ui.slider(
+                                        min=0, max=360, step=1, value=state.rotation,
+                                        on_change=handle_rotation_slider
+                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2 browse-rotate-slider').style('transition: none;')
+                                    
+                                    ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='restart_alt').props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}" data-action="zoom-reset"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(f'{tr("Reset View")} (0)')
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(f'{tr("Fullscreen Image")} (F)')
+
+                            # Image adjustment controls row
+                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 print-hide browse-image-adjust').style(
+                                'background: #1a1a1a; border-top: 1px solid #333;'
+                            ) as _image_adjust_row:
+                                ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
+                                slider_refs['brightness'] = ui.slider(
+                                    min=-100, max=100, step=1, value=0,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setBrightness({e.value})')
+                                ).props('dark dense').classes('w-24')
+                                ui.icon('contrast').classes('text-white text-sm').tooltip(tr('Contrast'))
+                                slider_refs['contrast'] = ui.slider(
+                                    min=-100, max=100, step=1, value=0,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setContrast({e.value})')
+                                ).props('dark dense').classes('w-24')
+                                ui.icon('timeline').classes('text-white text-sm').tooltip(tr('Gamma'))
+                                slider_refs['gamma'] = ui.slider(
+                                    min=20, max=300, step=1, value=100,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setGamma({e.value / 100})')
+                                ).props('dark dense').classes('w-24')
+                                ui.button(
+                                    icon='exposure',
+                                    on_click=lambda: ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.toggleInvert()')
+                                ).props('flat round size=sm text-color=white').tooltip(tr('Invert Colors'))
+                                def _reset_image_adj():
+                                    if slider_refs.get('brightness'): slider_refs['brightness'].value = 0
+                                    if slider_refs.get('contrast'): slider_refs['contrast'].value = 0
+                                    if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+                                    ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
+                                ui.button(
+                                    icon='restart_alt',
+                                    on_click=_reset_image_adj
+                                ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
+
+                            # The slider row above is folded behind this one
+                            # button in the tools row at every width (owner's
+                            # mockups, 2026-10-22).
+                            with _image_tools_row:
+                                ui.button(
+                                    icon='tune',
+                                    on_click=lambda: _image_adjust_row.classes(toggle='is-open'),
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Image adjustments")}"').classes(
+                                    'browse-adjust-toggle'
+                                ).tooltip(tr('Image adjustments'))
+
+                            # Image display area - using div instead of scroll_area for drag support
+                            with ui.element('div').classes('image-container w-full').style(
+                                'background: #1a1a1a; height: calc(60vh - 100px); overflow: hidden; position: relative;'
+                            ):
+                                with ui.element('div').classes('img-loading-container').style(
+                                    'display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;'
+                                ):
+                                    safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                    safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
+
+                                    is_oxford_js = 'true' if is_oxford else 'false'
+                                    # Progressive loading: thumbnail first, then full resolution
+                                    _thumb_url = safe_img_url
+                                    _full_url = safe_img_url
+                                    if '/api/nli_image_by_sysid/' in safe_img_url:
+                                        _sep = '&' if '?' in safe_img_url else '?'
+                                        _thumb_url = f"{safe_img_url}{_sep}width=400"
+                                    _ox_direct_attr = html_module.escape(_ox_direct_link, quote=True)
+                                    _ox_direct_label = html_module.escape(tr('Open in Bodleian Libraries'), quote=True)
+                                    img_html = f'''
+                                    <img
+                                        src="{_thumb_url}"
+                                        data-full-src="{_full_url}"
+                                        class="zoomable-image"
+                                        style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
+                                        data-zoom-seq="{int(state.zoom_seq)}"
+                                        draggable="false"
+                                        data-oxford-direct="{_ox_direct_attr}"
+                                        data-oxford-direct-label="{_ox_direct_label}"
+                                        onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
+                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'manuscriptViewer')"
+                                    />
+                                    '''
+                                    ui.html(img_html, sanitize=False)
+                                    ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100); initProgressiveImages();')
+
+                            # === Image Credit/Attribution Footer ===
+                            # `browse-image-credit` is a print hook. This strip is NOT
+                            # `print-hide`: the image licences require the credit to
+                            # travel with the image, so a printed sheet that carries
+                            # the plate must carry the attribution too. common.css
+                            # recolours it to black on white for print instead --
+                            # possible here, unlike the green header card, because
+                            # this inline background is not `!important`.
+                            if page.attribution or page.attribution_nli:
+                                with ui.row().classes('w-full items-center justify-center gap-2 py-2 browse-image-credit').style(
+                                    'background: #2a2a2a; border-radius: 0 0 8px 8px; border-top: 1px solid #333;'
+                                ):
+                                    ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
+                                    # Oxford licence form: "[object], Image provided by [owner]" with a
+                                    # link to the Genizah Fragments site. When the NLI image is what is
+                                    # on screen (manual switch, or the JS fallback chain after the
+                                    # Bodleian/NLI-IIIF failures), the credit must be NLI's instead.
+                                    _credit_nli_text = page.attribution_nli or (
+                                        'הספרייה הלאומית' if get_language() == 'he'
+                                        else 'National Library of Israel')
+                                    if page.is_oxford and page.attribution:
+                                        _credit_ox_text = f"{page.shelfmark} · {page.attribution}" if page.shelfmark else page.attribution
+                                    else:
+                                        _credit_ox_text = page.attribution
+                                    # Use the shelfmark-prefixed text for the INITIAL
+                                    # Oxford label too, not only in the data attribute
+                                    # a later fallback reads -- the licence's
+                                    # "[object] ... Image provided by [owner]" form is
+                                    # what should be on screen from the start
+                                    # (Codex P2, 2026-09-02).
+                                    credit_text = (
+                                        _credit_nli_text if (_is_nli_active and page.is_oxford)
+                                        else (_credit_ox_text or _credit_nli_text)
+                                    )
+                                    # Route credit link based on the actively viewed source,
+                                    # not just the manuscript's native source. If the user
+                                    # switched to NLI on an Oxford manuscript, the credit
+                                    # should link to NLI/Ktiv, not to Bodleian.
+                                    # Phase 85 D-06: synthetic sys_ids skip NLI URL construction
+                                    # entirely; credit_link falls through to the cambridge/oxford/etc.
+                                    # branches if applicable, or stays empty for the no-image case.
+                                    if is_synthetic_sys_id(page.sys_id):
+                                        _nli_credit_url = ''
+                                    else:
+                                        _nli_credit_url = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
+                                    if _is_nli_active:
+                                        credit_link = _nli_credit_url
+                                    elif _is_oxford_active or (page.is_oxford and state.active_source != 'nli'):
+                                        # Licence: link to the Genizah Fragments site as the source.
+                                        credit_link = _ox_direct_link or page.external_url or 'https://hebrew.bodleian.ox.ac.uk/'
+                                    elif _is_manchester_active or page.external_provider == 'manchester':
+                                        credit_link = 'https://luna.manchester.ac.uk/'
+                                    elif _is_cambridge_active or page.is_cambridge:
+                                        credit_link = 'https://cudl.lib.cam.ac.uk/'
+                                    elif _is_jts_active or page.external_provider == 'jts':
+                                        credit_link = 'https://dpul.princeton.edu/cairo_geniza'
+                                    elif page.library_code == 'BL':
+                                        credit_link = 'https://searcharchives.bl.uk/'
+                                    else:
+                                        credit_link = _nli_credit_url
+                                    _credit_ox_link = _ox_direct_link or page.external_url or 'https://hebrew.bodleian.ox.ac.uk/'
+                                    with ui.link(target=credit_link, new_tab=True).style('text-decoration: none;').props(
+                                        f'data-role="image-credit-link" data-link-oxford="{html_module.escape(_credit_ox_link, quote=True)}" '
+                                        f'data-link-nli="{html_module.escape(_nli_credit_url, quote=True)}"'
+                                    ):
+                                        ui.label(credit_text).classes('text-xs').style(
+                                            'color: #aaa; font-style: italic;'
+                                        ).props(
+                                            f'data-role="image-credit" data-credit-oxford="{html_module.escape(_credit_ox_text, quote=True)}" '
+                                            f'data-credit-nli="{html_module.escape(_credit_nli_text, quote=True)}"'
+                                        )
+                            # NLI could not answer for this manuscript, so its catalogue
+                            # record and image list came from the copies kept on disk
+                            # (shared/nli_metadata_store.py): say so quietly, with their date.
+                            if page.nli_stale_from:
+                                _stale_date = time.strftime('%Y-%m-%d', time.localtime(page.nli_stale_from))
+                                ui.label(tr('Catalogue details from {date}').format(date=_stale_date)).classes(
+                                    'text-xs w-full text-center py-1'
+                                ).style('color: #999; font-style: italic;').props('data-role="nli-stale-note"')
+
+                    # === RIGHT PANEL: Transcription ===
+                    text_panel_flex = 'flex: 1 1 auto; min-width: 0;' if has_image else 'flex: 1 1 100%; min-width: 0;'
+                    
+                    # Style based on edit mode
+                    panel_style = f'{text_panel_flex} min-height: 60vh; display: flex; flex-direction: column;'
+                    if state.edit_mode:
+                        if state.draft_saved:
+                            panel_style += ' border: 3px solid #27ae60;'  # Green for Saved
+                        else:
+                             # Orange for Unsaved/Edit Mode
+                            panel_style += ' border: 3px solid #f39c12;'
+
+                    with ui.card().style(panel_style):
+                        if state.edit_mode:
+                            # === EDIT MODE ===
+                            # Edit Bar
+                            with ui.row().classes('w-full items-center justify-between p-2 bg-gray-100 border-b'):
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.label(tr('Edit Mode')).classes('font-bold').style('color: var(--text-primary);')
+                                    if state.draft_saved:
+                                        ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
+                                    else:
+                                        ui.label(tr('Unsaved changes')).classes('text-orange-600 text-sm')
+                                
+                                with ui.row().classes('gap-2'):
+                                    ui.button(icon='fullscreen', on_click=toggle_fullscreen_edit).props('flat round dense').tooltip(tr('Fullscreen Edit'))
+                                    ui.button(tr('Cancel'), icon='close', on_click=cancel_edit).props('flat dense color=grey')
+                                    ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
+                                    ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props(
+                                        f'unelevated dense color=green aria-label="{tr("Submit")}"'
+                                    ).classes('browse-icon-collapse browse-icon-flip-rtl')
+
+                            # Error Message Display
+                            if state.error_message:
+                                ui.markdown(f"**Error:** {state.error_message}").classes('w-full p-2 text-red-600 bg-red-100 border-b border-red-200 text-sm')
+
+                            # Text Area - use readable Hebrew font
+                            textarea = ui.textarea(value=state.edit_text).classes('w-full h-full text-lg').props(
+                                'borderless autofocus input-style="height: 100%; min-height: 500px;"'
+                            ).style(
+                                'direction: rtl; text-align: right; resize: none; flex: 1; padding: 16px; '
+                                'font-family: "Noto Sans Hebrew", "Segoe UI", "Arial Hebrew", sans-serif; '
+                                'font-size: 1.2rem; line-height: 1.8; min-height: 500px;'
+                            )
+                            # Bind value manually
+                            textarea.bind_value(state, 'edit_text')
+
+                            def on_edit_input():
+                                if state.draft_saved:
+                                    state.draft_saved = False
+                                    update_content()
+                            
+                            textarea.on('input', on_edit_input)
+                            
+                            # Notes field (Expanded by default if notes exist)
+                            with ui.expansion(tr('Add Notes'), icon='note_add', value=bool(state.edit_notes)).classes('w-full border-t bg-gray-50'):
+                                ui.textarea(label=tr('Notes'), value=state.edit_notes).bind_value(state, 'edit_notes').classes('w-full p-2').props('outlined dense')
+                        elif state.edit_loading:
+                            # === LOADING EDIT MODE ===
+                            with ui.column().classes('w-full h-full items-center justify-center'):
+                                ui.spinner(size='lg', color='primary')
+                                ui.label(tr('Loading...')).classes('mt-2 font-bold').style('color: var(--text-tertiary);')
+                        else:
+                            # === VIEW MODE ===
+
+                            # Print-only masthead (owner, 2026-09-04).
+                            #
+                            # `.print-only` is display:none on screen and block
+                            # under @media print, so this costs the reader
+                            # nothing and only exists on paper.
+                            #
+                            # It restates the shelfmark, the folio and the
+                            # citation because print HIDES the chrome each of
+                            # them lives in on screen. The shelfmark is in the
+                            # green header card, the folio label sits in the
+                            # badges bar beside source chips and external links,
+                            # and the citation is in the app footer. A sheet that
+                            # leaves the building must still say WHICH manuscript
+                            # it is and WHAT to cite.
+                            #
+                            # Rebuilding the header rather than restyling it is
+                            # deliberate. That card's green gradient is an INLINE
+                            # `!important` style, and an inline `!important`
+                            # cannot be overridden from a stylesheet at any
+                            # specificity — verified in the browser, where the
+                            # print rule lost. Most printers drop background
+                            # graphics by default, so leaving it in place prints
+                            # white text on nothing. The card is `print-hide`;
+                            # this is what replaces it.
+                            _print_folio = (
+                                f"{tr('Folio')} {page.folio_label}" if page.folio_label
+                                else f"{tr('Page')} {page.p_num}"
+                            )
+                            _print_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
+                            if page.library_name:
+                                _print_shelfmark = f"{page.library_name}, {_print_shelfmark}"
+                            with ui.element('div').classes('print-only').style(
+                                'margin-bottom: 12px;'
+                            ):
+                                _print_title_html = ''
+                                if page.title:
+                                    _print_title_html = (
+                                        f'<div style="font-size: 10pt; margin-top: 2px;">'
+                                        f'{html_module.escape(page.title)}</div>'
+                                    )
+                                ui.html(
+                                    f'<div style="font-size: 13pt; font-weight: 700;">'
+                                    f'{html_module.escape(_print_shelfmark)}</div>'
+                                    f'{_print_title_html}'
+                                    f'<div style="font-size: 10pt; margin-top: 2px;">'
+                                    f'{html_module.escape(_print_folio)}</div>',
+                                    sanitize=False,
+                                )
+                                # THE CREDIT IS A SEPARATE, LIVE ELEMENT.
+                                #
+                                # It cannot be baked into the masthead above,
+                                # for two reasons that only showed up on a real
+                                # read of the version-selector contract:
+                                #
+                                # 1. This block renders SYNCHRONOUSLY at page
+                                #    build, and the default source is decided
+                                #    ~100ms later and asynchronously, by
+                                #    `shared.fgp_service.choose_default_source`.
+                                #    Whatever is written here is written before
+                                #    anyone knows what will be on screen.
+                                # 2. The reader can switch versions afterwards.
+                                #
+                                # So it is seeded with the HTR credit and
+                                # re-rendered from `handle_version_change`.
+                                # Seeding with HTR is not a placeholder: on a
+                                # manuscript with no alternative sources at all
+                                # — the common case — `on_version_change` is
+                                # NEVER called, and the plain V0.8 text on
+                                # screen genuinely is the MiDRASH transcription.
+                                _print_credit_html = ui.html('', sanitize=False)
+
+                                def _render_print_credit(version_info=None):
+                                    """Redraw everything that depends on WHICH transcription is shown.
+
+                                    The one seam for it, deliberately: the
+                                    printed sheet, the "How to cite" chip and the
+                                    Word export must never disagree about who
+                                    made the text, and three separate hooks into
+                                    `handle_version_change` would be three
+                                    chances to drift.
+
+                                    The mapping itself lives in
+                                    `shared/transcription_credits.py` — shared,
+                                    so the Word export takes the same decision,
+                                    and because a fifth hand-copy of the MiDRASH
+                                    citation is exactly what
+                                    `shared/export_utils` exists to prevent.
+                                    """
+                                    # (a) The Word export reads this. `version_info`
+                                    # is a closure local here and
+                                    # `export_browse_data` is a sibling closure
+                                    # ~3400 lines earlier with no line of sight to
+                                    # it; `enrichment_refs` is the dict both can
+                                    # reach, already used for
+                                    # 'version_container'/'version_change_handler'
+                                    # and cleared on navigation.
+                                    enrichment_refs['current_version_info'] = version_info
+                                    # (b) The citation chip.
+                                    _update_citation_chip(version_info)
+                                    credit = resolve_transcription_credit(
+                                        version_info, lang=get_language())
+                                    _rows = [
+                                        f'<div style="font-weight: 600;">'
+                                        f'{html_module.escape(credit.heading)}</div>'
+                                    ]
+                                    if credit.citation_lines:
+                                        _rows.append(
+                                            f'<div style="margin-top: 3px;">'
+                                            f'{html_module.escape(tr("When publishing material from this site, please cite:"))}'
+                                            f'</div>'
+                                        )
+                                        _rows.extend(
+                                            f'<div>{html_module.escape(_line)}</div>'
+                                            for _line in credit.citation_lines
+                                        )
+                                    _rows.extend(
+                                        f'<div style="margin-top: 3px;">'
+                                        f'{html_module.escape(_line)}</div>'
+                                        for _line in credit.site_lines
+                                    )
+                                    _print_credit_html.content = (
+                                        '<div style="font-size: 7.5pt; margin-top: 6px; '
+                                        'padding-top: 6px; border-top: 1px solid #000; '
+                                        'line-height: 1.45;">'
+                                        + ''.join(_rows) +
+                                        '</div>'
+                                    )
+
+                                _render_print_credit()
+
+                            # Text content container
+                            text_container = ui.column().classes('w-full h-full')
+                            # The reader's switch (owner, 2026-11-04: the page
+                            # never guesses the text's language). Marked, the
+                            # pane's words are looked up; unmarked, a click on
+                            # a word does nothing.
+                            blau_lookup_on = dict_on and blau_panel.lookup_on()
+                            if blau_lookup_on:
+                                text_container.props(blau_panel.PANE_ATTR)
+                            # The look-up key, Alt + a click and the phone's
+                            # chip work here with the switch off too (owner,
+                            # 2026-11-05; blau_lookup.js); the chip's label is
+                            # in the page's language.
+                            if dict_on:
+                                text_container.props(blau_panel.KEY_PANE_ATTR)
+                                text_container.props[blau_panel.CHIP_LABEL_ATTR] = tr(blau_panel.CHIP_LABEL)
+                            current_text = {'value': page.text}
+
+                            def render_text_content(text: str):
+                                """Render text content with optional highlighting + optional line-number gutter (Phase 999.4)."""
+                                text_container.clear()
+                                # D-07: line numbers ON by default; coerced to bool to defend against type drift.
+                                show_ln = bool(safe_user_get('ui.show_line_numbers', True))
+                                with text_container:
+                                    with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
+                                        if text:
+                                            highlight_html = highlight_text(text) if state.highlight_terms else None
+                                            html_str = _render_line_numbered_html(
+                                                text=text,
+                                                highlight_html=highlight_html,
+                                                line_height="2.2",
+                                                font_size="1.4rem",
+                                                show_line_numbers=show_ln,
+                                            )
+                                            ui.html(html_str, sanitize=False)
+                                        else:
+                                            with ui.column().classes('items-center justify-center h-full'):
+                                                ui.icon('text_snippet', size='4rem').style('color: var(--text-muted);')
+                                                ui.label(tr('No text available')).classes('mt-4 text-xl').style('color: var(--text-muted);')
+                                text_container.update()
+
+                            def _toggle_line_numbers():
+                                """D-08: persist toggle via safe_storage chokepoint, then re-render."""
+                                current = bool(safe_user_get('ui.show_line_numbers', True))
+                                safe_user_set('ui.show_line_numbers', not current)
+                                render_text_content(current_text['value'])
+
+                            def handle_version_change(new_text: str, version_info: dict):
+                                """Handle version selection - update displayed text."""
+                                current_text['value'] = new_text
+                                # The DISPLAYED text goes into `enrichment_refs`
+                                # beside the source it came from, because the
+                                # Word export reads the source from there and
+                                # read the TEXT from `state.current_page.text`
+                                # -- the automatic transcription -- so a .docx
+                                # exported while a Princeton edition was on
+                                # screen contained MiDRASH's text credited to
+                                # Goitein. Writing both here means they cannot
+                                # separate: the export takes the pair or
+                                # neither.
+                                enrichment_refs['current_version_text'] = new_text
+                                render_text_content(new_text)
+                                # The printed credit follows the DISPLAYED text.
+                                # Before this, the sheet credited MiDRASH for an
+                                # FGP or PGP edition or a reader's own
+                                # correction -- crediting the wrong people for
+                                # someone else's scholarship. Unconditional and
+                                # ahead of the notify branches below, because it
+                                # must also cover the sources those branches
+                                # forgot ('fgp' and 'pending' have no branch).
+                                _render_print_credit(version_info)
+                                source = version_info.get('source', 'unknown')
+                                author = version_info.get('author', '')
+
+                                if source == 'pgp':
+                                    attribution = version_info.get('attribution', 'PGP')
+                                    ui.notify(
+                                        f"{tr('PGP Transcription')} - {attribution}",
+                                        type='positive'
+                                    )
+                                elif source == 'translation':
+                                    attribution = version_info.get('attribution', '')
+                                    language = version_info.get('language', '')
+                                    ui.notify(
+                                        f"{language} {tr('Translation')} - {attribution}",
+                                        type='info'
+                                    )
+                                elif source == 'user' and author:
+                                    ui.notify(f"{tr('Showing version by')} {author}", type='info')
+                                elif source in ('V0.7', 'V0.8'):
+                                    ui.notify(f"{tr('Showing')} {source}", type='info')
+
+                            # Version selector placeholder (populated by enrichment Phase B). A page without
+                            # an automatic transcription gets it too, with empty text, so an edition of the
+                            # page shows by the usual rule (owner, 2026-10-27).
+                            if page_has_reading_view(page):
+                                version_row = ui.row().classes('items-center p-2 border-b print-hide')
+                                enrichment_refs['version_container'] = version_row
+                                enrichment_refs['version_change_handler'] = handle_version_change
+
+                                # Phase 999.4 — line-number toggle (D-07, D-08).
+                                # Always visible when text is present, regardless of enrichment state.
+                                with version_row:
+                                    ui.button(
+                                        icon='format_list_numbered',
+                                        on_click=_toggle_line_numbers,
+                                    ).props('flat round dense').tooltip(tr('Toggle line numbers'))
+                                    if dict_on:
+                                        # The switch, then (while it is on) the
+                                        # hint and the "type a word" button --
+                                        # whose click the script handles: a
+                                        # server handler would race its close.
+                                        # The switch is the letters עع and, from
+                                        # 640px, its label; highlighted and
+                                        # saying "New!" until this visitor first
+                                        # turns it on (owner, 2026-11-04).
+                                        blau_new = blau_panel.switch_is_new(blau_lookup_on)
+                                        # color=None: Quasar's `text-primary` is
+                                        # !important and would beat the state's
+                                        # colour (common.css, .blau-switch).
+                                        blau_switch = ui.button(color=None).props(
+                                            'flat dense no-caps').classes(
+                                            f'{blau_panel.SWITCH_CLASS} print-hide'
+                                            + (' active' if blau_lookup_on else '')
+                                            + (f' {blau_panel.NEW_CLASS}' if blau_new else ''))
+                                        blau_switch.props(
+                                            f'aria-pressed={"true" if blau_lookup_on else "false"} '
+                                            f'aria-label="{blau_panel.switch_label(blau_new)}"')
+                                        with blau_switch:
+                                            ui.html(blau_panel.GLYPH_SVG, sanitize=False).classes(
+                                                blau_panel.GLYPH_CLASS)
+                                            blau_label = ui.label(blau_panel.switch_label(blau_new)).classes(
+                                                blau_panel.LABEL_CLASS)
+                                            # What pressing it does, and under it the look-up
+                                            # key, which works either way (owner, 2026-11-05).
+                                            with ui.tooltip().classes(blau_panel.TIP_CLASS):
+                                                blau_switch_tip = ui.label(
+                                                    blau_panel.switch_tooltip(blau_lookup_on))
+                                                ui.label(tr(blau_panel.KEY_HINT)).classes(
+                                                    blau_panel.KEY_HINT_CLASS)
+                                        blau_hint = ui.label(tr('Click a word to look it up in the dictionaries')).classes(
+                                            f'text-xs {blau_panel.HINT_CLASS} print-hide')
+                                        blau_type = ui.button(icon='keyboard').props(
+                                            'flat round dense size=sm').classes(
+                                            f'{blau_panel.OPEN_CLASS} print-hide')
+                                        blau_type.props(f'aria-label="{tr("Type a word to look up")}"')
+                                        blau_type.tooltip(tr('Type a word to look up'))
+                                        blau_hint.set_visibility(blau_lookup_on)
+                                        blau_type.set_visibility(blau_lookup_on)
+
+                                        def _toggle_blau():
+                                            on = not blau_panel.lookup_on()
+                                            was_new = blau_panel.NEW_CLASS in blau_switch.classes
+                                            blau_panel.set_lookup_on(on)
+                                            if on:
+                                                text_container.props(blau_panel.PANE_ATTR)
+                                                blau_switch.classes(add='active', remove=blau_panel.NEW_CLASS)
+                                            else:
+                                                text_container.props(remove=blau_panel.PANE_ATTR)
+                                                blau_switch.classes(remove='active')
+                                                _blau_hide()
+                                            blau_switch.props(f'aria-pressed={"true" if on else "false"}')
+                                            with using_language(_blau_lang):
+                                                blau_switch_tip.text = blau_panel.switch_tooltip(on)
+                                                if was_new and on:
+                                                    blau_label.text = blau_panel.switch_label(False)
+                                                    blau_switch.props(f'aria-label="{blau_label.text}"')
+                                            blau_hint.set_visibility(on)
+                                            blau_type.set_visibility(on)
+                                            posthog_capture(blau_panel.POSTHOG_SWITCH,
+                                                            {'on': on, 'was_new': was_new}, client=_blau_client)
+
+                                        blau_switch.on_click(_toggle_blau)
+
+                                if state.enrichment_loaded:
+                                    with version_row:
+                                        create_version_selector(
+                                            document_id=page.sys_id,
+                                            page_number=page.p_num,
+                                            original_text=page.text or '',
+                                            on_version_change=handle_version_change,
+                                            pgp_transcription=state.pgp_transcription,
+                                            all_sources=state.all_sources,
+                                            full_original_text=getattr(state, 'fgp_full_htr_text', None),
+                                            # SEED-033 Option A: the search-scoped
+                                            # phrase from the `/browse?highlight=`
+                                            # deep link, when this page was reached
+                                            # from a search hit.
+                                            must_contain=_search_scope_phrase(page),
+                                        )
+
+                            # Initial render
+                            render_text_content(page.text if page.text else None)
+
+                # Comments section - below panels
+                from web.components import create_notes_panel
+                _, notes_refresh_fn = create_notes_panel(
+                    document_id=page.sys_id,
+                    page_number=page.p_num,
+                    shelfmark=page.shelfmark or page.sys_id,
+                    ie_id=state.volume_ie
+                )
+                # Store the refresh function so comment dialog can call it
+                notes_refresh_ref['refresh'] = notes_refresh_fn
+
+                # === FULLSCREEN EDIT OVERLAY ===
+                if state.fullscreen_edit and state.edit_mode:
+                    with ui.element('div').classes('fullscreen-edit-overlay'):
+                        # Toolbar
+                        with ui.element('div').classes('fullscreen-edit-toolbar'):
+                            with ui.row().classes('items-center gap-4'):
+                                ui.label(tr('Fullscreen Edit')).classes('font-bold').style('color: var(--text-primary);')
+                                if page.shelfmark:
+                                    ui.label(f"• {page.shelfmark}").classes('text-sm').style('color: var(--text-secondary);')
+                                if state.draft_saved:
+                                    ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
+                                else:
+                                    ui.label(tr('Unsaved changes')).classes('text-orange-600 text-sm')
+
+                            with ui.row().classes('items-center gap-2'):
+                                # Save/Submit/Exit controls only
+                                ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
+                                ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props(
+                                    f'unelevated dense color=green aria-label="{tr("Submit")}"'
+                                ).classes('browse-icon-collapse browse-icon-flip-rtl')
+                                ui.button(icon='fullscreen_exit', on_click=toggle_fullscreen_edit).props('flat round dense data-action="exit-fullscreen-edit"').tooltip(tr('Exit Fullscreen'))
+
+                        # Content area: Image + Splitter + Text
+                        with ui.element('div').classes('fullscreen-edit-content').props('id="fs-edit-content"'):
+                            # Image panel (left) with its own toolbar
+                            with ui.element('div').classes('fullscreen-edit-image-wrapper').props('id="fs-image-wrapper"'):
+                                # Image controls toolbar
+                                with ui.element('div').classes('fullscreen-image-toolbar'):
+                                    ui.button(icon='remove').props(f'flat round dense size=sm aria-label="{tr("Zoom out")}"').on('click', js_handler=ZOOM_OUT_JS).tooltip(tr('Zoom out'))
+                                    ui.label(f'{zoom_percent(state.zoom_level)}%').classes('text-xs zoom-level-label').style('color: #ccc; min-width: 40px; text-align: center;')
+                                    ui.button(icon='add').props(f'flat round dense size=sm aria-label="{tr("Zoom in")}"').on('click', js_handler=ZOOM_IN_JS).tooltip(tr('Zoom in'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4')
+                                    ui.button(icon='rotate_left', on_click=rotate_left).props('flat round dense size=sm').tooltip(tr('Rotate left'))
+                                    ui.button(icon='rotate_right', on_click=rotate_right).props('flat round dense size=sm').tooltip(tr('Rotate right'))
+                                    ui.button(icon='restart_alt').props(f'flat round dense size=sm aria-label="{tr("Reset view")}"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(tr('Reset view'))
+
+                                # Fullscreen image adjustment controls
+                                with ui.element('div').classes('fullscreen-image-toolbar').style(
+                                    'border-top: 1px solid #444; padding: 2px 8px;'
+                                ):
+                                    ui.icon('brightness_6').style('color: #ccc; font-size: 1rem;').tooltip(tr('Brightness'))
+                                    slider_refs['fs_brightness'] = ui.slider(
+                                        min=-100, max=100, step=1, value=0,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setBrightness({e.value})')
+                                    ).props('dark dense').classes('w-20')
+                                    ui.icon('contrast').style('color: #ccc; font-size: 1rem;').tooltip(tr('Contrast'))
+                                    slider_refs['fs_contrast'] = ui.slider(
+                                        min=-100, max=100, step=1, value=0,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setContrast({e.value})')
+                                    ).props('dark dense').classes('w-20')
+                                    ui.icon('timeline').style('color: #ccc; font-size: 1rem;').tooltip(tr('Gamma'))
+                                    slider_refs['fs_gamma'] = ui.slider(
+                                        min=20, max=300, step=1, value=100,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setGamma({e.value / 100})')
+                                    ).props('dark dense').classes('w-20')
+                                    ui.button(
+                                        icon='exposure',
+                                        on_click=lambda: ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.toggleInvert()')
+                                    ).props('flat round size=sm').tooltip(tr('Invert Colors'))
+                                    def _fs_reset_adj():
+                                        if slider_refs.get('fs_brightness'): slider_refs['fs_brightness'].value = 0
+                                        if slider_refs.get('fs_contrast'): slider_refs['fs_contrast'].value = 0
+                                        if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
+                                        ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.resetAdjustments()')
+                                    ui.button(
+                                        icon='restart_alt',
+                                        on_click=_fs_reset_adj
+                                    ).props('flat round size=sm').tooltip(tr('Reset Image'))
+
+                                # Image display area
+                                with ui.element('div').classes('fullscreen-edit-image img-loading-container').props('id="fs-image-panel"'):
+                                    if has_image and img_url:
+                                        safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                        safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
+                                        is_oxford_js = 'true' if is_oxford else 'false'
+                                        _fs_thumb = safe_img_url
+                                        _fs_full = safe_img_url
+                                        if '/api/nli_image_by_sysid/' in safe_img_url:
+                                            _sep = '&' if '?' in safe_img_url else '?'
+                                            _fs_thumb = f"{safe_img_url}{_sep}width=400"
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
+                                        ui.html(img_html, sanitize=False)
+                                        ui.run_javascript('initProgressiveImages();')
+                                    else:
+                                        with ui.column().classes('items-center justify-center h-full'):
+                                            ui.icon('image_not_supported', size='4rem').style('color: #666;')
+                                            ui.label(tr('No image available')).style('color: #888;')
+
+                            # Draggable splitter
+                            ui.element('div').classes('fullscreen-edit-splitter').props('id="fs-splitter"')
+
+                            # Text panel (right)
+                            with ui.element('div').classes('fullscreen-edit-text').props('id="fs-text-panel"'):
+                                fs_textarea = ui.textarea(value=state.edit_text).classes('w-full fullscreen-textarea').props(
+                                    'outlined autogrow id="fs-textarea"'
+                                ).style(
+                                    'direction: rtl; text-align: right; '
+                                    'font-family: "Noto Sans Hebrew", "Segoe UI", "Arial Hebrew", sans-serif; '
+                                    'font-size: 1.2rem; line-height: 1.8;'
+                                )
+                                fs_textarea.bind_value(state, 'edit_text')
+
+                                def on_fs_edit():
+                                    if state.draft_saved:
+                                        state.draft_saved = False
+                                fs_textarea.on('input', on_fs_edit)
+
+                                # JavaScript to force textarea height after render
+                                ui.run_javascript('''
+                                    setTimeout(() => {
+                                        const panel = document.getElementById('fs-text-panel');
+                                        const textarea = panel?.querySelector('textarea');
+                                        if (panel && textarea) {
+                                            const setHeight = () => {
+                                                const h = panel.clientHeight - 20;
+                                                textarea.style.height = h + 'px';
+                                                textarea.style.minHeight = h + 'px';
+                                                textarea.style.maxHeight = h + 'px';
+                                            };
+                                            setHeight();
+                                            // Also handle resize
+                                            new ResizeObserver(setHeight).observe(panel);
+                                            textarea.focus();
+                                        }
+                                    }, 50);
+                                ''')
+
+                        # JavaScript: ESC key, splitter drag, image pan/zoom
+                        ui.run_javascript('''
+                            (function() {
+                                const fsOverlay = document.querySelector('.fullscreen-edit-overlay');
+                                if (!fsOverlay) return;
+
+                                // ESC key to exit
+                                const escHandler = (e) => {
+                                    if (e.key === 'Escape') {
+                                        document.querySelector('[data-action="exit-fullscreen-edit"]')?.click();
+                                    }
+                                };
+                                document.addEventListener('keydown', escHandler);
+
+                                // The fullscreen editor's image: the shared viewer (zoom in the
+                                // browser, wheel and double-click at the pointer, pinch on a
+                                // phone), reporting its level like the main one. Until 2026-11-03
+                                // this was a second, inline copy of the viewer with its own wheel
+                                // step.
+                                setTimeout(() => {
+                                    const fsImage = document.getElementById('fs-zoomable-image');
+                                    const fsImagePanel = document.getElementById('fs-image-panel');
+                                    if (fsImage && fsImagePanel && typeof createManuscriptViewer === 'function') {
+                                        window.fsEditViewer = createManuscriptViewer({
+                                            imageSelector: '#fs-zoomable-image',
+                                            containerSelector: '#fs-image-panel',
+                                            zoomLabelSelector: '.fullscreen-image-toolbar .zoom-level-label',
+                                            gammaFilterId: 'gamma-fs',
+                                            onChange: window.browseZoomChanged
+                                        });
+                                        window.fsEditViewer.init();
+                                    }
+                                }, 100);
+
+                                // Splitter drag functionality
+                                const splitter = document.getElementById('fs-splitter');
+                                const imageWrapper = document.getElementById('fs-image-wrapper');
+                                const textPanel = document.getElementById('fs-text-panel');
+                                const content = document.getElementById('fs-edit-content');
+
+                                if (splitter && imageWrapper && textPanel && content) {
+                                    let isDragging = false;
+                                    let startX, startWidth;
+
+                                    splitter.addEventListener('mousedown', (e) => {
+                                        isDragging = true;
+                                        startX = e.clientX;
+                                        startWidth = imageWrapper.offsetWidth;
+                                        splitter.classList.add('dragging');
+                                        document.body.style.cursor = 'col-resize';
+                                        document.body.style.userSelect = 'none';
+                                        e.preventDefault();
+                                    });
+
+                                    document.addEventListener('mousemove', (e) => {
+                                        if (!isDragging) return;
+                                        const delta = e.clientX - startX;
+                                        const newWidth = Math.max(200, Math.min(startWidth + delta, content.offsetWidth - 250));
+                                        imageWrapper.style.flex = 'none';
+                                        imageWrapper.style.width = newWidth + 'px';
+                                    });
+
+                                    document.addEventListener('mouseup', () => {
+                                        if (isDragging) {
+                                            isDragging = false;
+                                            splitter.classList.remove('dragging');
+                                            document.body.style.cursor = '';
+                                            document.body.style.userSelect = '';
+                                            // Recalculate textarea height
+                                            const textarea = textPanel.querySelector('textarea');
+                                            if (textarea) {
+                                                const h = textPanel.clientHeight - 20;
+                                                textarea.style.height = h + 'px';
+                                            }
+                                        }
+                                    });
+                                }
+                            })();
+                        ''')
+
+    refs.update_content = update_content
+
+    async def set_shelfmark_and_search(shelfmark: str):
+        """Set shelfmark and trigger search."""
+        state.shelfmark_query = shelfmark
+        await search_shelfmark()
+
+    # === Main Layout ===
+    with ui.column().classes('w-full max-w-7xl mx-auto p-4'):
+        # Page title
+        # Changed to H1
+        if not embedded:
+            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800 print-hide browse-page-title')
+
+        # Shelfmark Search Box - Simple and Working
+        # `print-hide`: a lookup form is furniture, not part of the sheet.
+        with ui.card().classes('w-full p-4 mb-6 print-hide browse-lookup-card').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);') as _search_card:
+            with ui.row().classes('w-full gap-4 items-center browse-lookup-row'):
+                # Search icon
+                ui.icon('search', size='md').classes('text-green-600 browse-lookup-icon')
+
+                # Simple input that works
+                search_input = ui.input(
+                    placeholder=tr('e.g. T-S 8J6.1'),
+                    label=tr('Enter shelfmark or NLI system ID')
+                ).classes('flex-1').props('outlined dense clearable color=green')
+
+                # Store reference for updates from other functions (e.g. suggestion dialog)
+                slider_refs['search_input'] = search_input
+
+                # Set initial value if we have one
+                if state.shelfmark_query:
+                    search_input.value = state.shelfmark_query
+
+                async def do_search():
+                    state.shelfmark_query = search_input.value or ''
+                    state.search_error = None  # Clear previous error
+                    if state.shelfmark_query.strip():
+                        await search_shelfmark()
+
+                search_input.on('keydown.enter', do_search)
+
+                # Go button
+                ui.button(
+                    tr('Go'),
+                    icon='search',
+                    on_click=do_search
+                ).props(f'color=green aria-label="{tr("Go")}"').classes('px-6 browse-icon-collapse')
+
+            # Error notice area (below search bar)
+            search_error_container = ui.row().classes('w-full mt-2 items-center')
+            slider_refs['search_error_container'] = search_error_container
+
+        if embedded and _search_card is not None:
+            _search_card.set_visibility(False)  # R2-1 embed: hide the search card in the iframe
+
+        # Service status warning
+        if not service.is_ready:
+            with ui.card().classes('w-full p-4 bg-yellow-50 border border-yellow-300 mb-4'):
+                with ui.row().classes('items-center gap-2'):
+                    ui.icon('warning', color='orange')
+                    ui.label(tr('Service not available')).classes('text-yellow-800')
+
+        # The loading spinner, built once and toggled by update_content(). A
+        # zero-height sticky row (.browse-loading-row): it floats over the top
+        # of the dimmed content and stays in view when the reader has scrolled,
+        # instead of pushing the content down while a page loads.
+        loading_row = ui.row().classes('w-full justify-center browse-loading-row')
+        with loading_row:
+            with ui.row().classes('items-center browse-loading-pill'):
+                ui.spinner(size='xl', color='green')
+                ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
+        loading_row.set_visibility(False)
+        refs.loading_row = loading_row
+
+        # Main content container
+        content_container = ui.column().classes('w-full')
+        # Expose it on refs so deferred enrichment (Phase B) can check page
+        # liveness before rebuilding UI on a torn-down client.
+        refs.content_container = content_container
+
+        # Phase 74 (D-17): precedence logic extracted to resolve_browse_bootstrap.
+        # asyncio.ensure_future calls remain here because create_browse_page() still
+        # requires deferred init - the UI container must mount (update_content spinner)
+        # before load_page() begins async work. Pure scheduling stays with this caller;
+        # precedence logic is unit-tested separately.
+        if embedded:
+            saved_position, saved_reading_desk = None, None  # R2-1 embed: no snapshot restore
+        else:
+            saved_position, saved_reading_desk = restore_browse_snapshot(state)
+        bootstrap = resolve_browse_bootstrap(
+            initial_fl_id=initial_fl_id_value,
+            initial_sys_id=initial_sys_id,
+            initial_page=initial_page or 1,        # normalize Optional[int] -> int (Codex #8)
+            pending_shelfmark=_pending_shelfmark,
+            saved_reading_desk=saved_reading_desk,
+            saved_position=saved_position,
+        )
+
+        action = bootstrap['action']
+        if action == 'fl_id':
+            state.is_loading = True
+            update_content()  # Show spinner synchronously before async kicks in
+            # Cat-2: deferred to next event loop tick to allow spinner to render before load.
+            # p_num is passed alongside fl_id purely as a FALLBACK: the fl_id
+            # route wins when it resolves, but when the FL id is stale/unknown
+            # (or its uid has no text) _fetch_page retries the volume+page
+            # route instead of dead-ending on 'No text available'.
+            asyncio.ensure_future(load_page(fl_id=bootstrap['fl_id'], p_num=bootstrap['p_num'], _ux_nav=True))
+        elif action == 'sys_id':
+            if bootstrap['clear_desk']:
+                # Stale desk - use snapshot helper, not direct pop (Codex HIGH #9).
+                # keep_position=True: pre-refactor this path only dropped reading_desk_state
+                # (Codex 74-CODEX-REVIEW2 #2).
+                clear_browse_snapshot(keep_position=True)
+            state.is_loading = True
+            update_content()
+            # Cat-2: deferred init - container must mount before async load.
+            asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
+        elif action == 'restore_desk':
+            # Reuses the existing local _restore_reading_desk_state() helper.
+            # NOTE (Codex MEDIUM #5): _restore_reading_desk_state is responsible for
+            # fully-populated page/source hydration - restore_browse_snapshot only
+            # returned the minimal dict for precedence resolution.
+            if not _restore_reading_desk_state():
+                # Safety net: fall through to normal page load when desk restore fails.
+                if initial_sys_id:
+                    state.is_loading = True
+                    update_content()
+                    # Cat-2: deferred init safety-net fallback - container must mount before async load.
+                    asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
+                else:
+                    update_content()
+        elif action == 'shelfmark':
+            # Shelfmark passed via URL param - auto-search on load.
+            state.shelfmark_query = bootstrap['shelfmark']
+            # Show it in the box (the homepage box sends readers here), so a
+            # "No manuscript found" can be corrected in place.
+            search_input.value = state.shelfmark_query
+            # Cat-2: bootstrap deferred init.
+            asyncio.ensure_future(search_shelfmark())
+        elif action == 'restore_position':
+            # PRESERVE live side effects from pre-refactor block (Codex HIGH #6).
+            state.sys_id = bootstrap['sys_id']
+            state.shelfmark_query = bootstrap.get('shelfmark') or ''
+            # Restore volume_ie with validation (D-12: invalid falls back to None).
+            restored_vie = bootstrap.get('volume_ie')
+            if restored_vie:
+                from genizah_core import get_volumes_for_sys_id
+                volumes = get_volumes_for_sys_id(bootstrap['sys_id'])
+                if any(v['ie_id'] == restored_vie for v in volumes):
+                    state.volume_ie = restored_vie
+                # else: silently fall back to None (primary IE)
+            state.is_loading = True
+            update_content()
+            # Cat-2: bootstrap deferred init.
+            asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
+        else:  # action == 'none'
+            update_content()
+
+        # Keyboard shortcuts (listed on the card, web/keyboard_shortcuts.py; each
+        # button's tooltip names its key). The arrows follow the page as the
+        # buttons do: in Hebrew the next page is to the left, in English to the
+        # right. F and 0 by the physical key too, so they work on a Hebrew
+        # layout (F types כ there). Never with Ctrl/Alt/Cmd: Ctrl+F is the browser's
+        # find and Ctrl++ its zoom, and they used to toggle full screen and zoom
+        # the image as well (2026-11-05).
+        ui.add_body_html('''
+        <script>
+            document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey || e.altKey || e.metaKey) return;
+                // A dialog or menu is open (the shortcuts card, a confirmation, a
+                // dropdown): its keys are its own, never the manuscript's behind it
+                // (Codex, PR #484). Browse's full-screen modes are classes, not dialogs.
+                if (document.querySelector('.q-dialog, .q-menu')) return;
+                // A page is loading: the old content is inert, so no second load
+                // from its (still clickable, programmatically) navigation buttons.
+                if (document.querySelector('.browse-loading')) return;
+                // Ignore if focused on any text input element
+                const tag = document.activeElement.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;
+                const rtl = __BROWSE_RTL__;
+                let action = null;
+                if (e.key === 'ArrowLeft') action = rtl ? 'next' : 'prev';
+                else if (e.key === 'ArrowRight') action = rtl ? 'prev' : 'next';
+                else if (e.key === '+' || e.key === '=') action = 'zoom-in';
+                else if (e.key === '-') action = 'zoom-out';
+                else if (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0') action = 'zoom-reset';
+                else if (e.code === 'KeyF' || e.key === 'f' || e.key === 'F') action = 'fullscreen';
+                if (action) document.querySelector('[data-action="' + action + '"]')?.click();
+            });
+        </script>
+        '''.replace('__BROWSE_RTL__', 'true' if is_rtl() else 'false'))

@@ -1,0 +1,265 @@
+{
+  "description": "REAL letter-spaced HEADING from 1אוצר הגאונים - ברכות.pdf page 1 (running head). Tracking ~0.5*em would shatter under the fixed 0.45 floor; guards the per-line adaptive threshold (_ADAPTIVE_GAP_MULT, 2026-05-31).",
+  "source_page": 1,
+  "raw_visual": " מ ס כ ת ב ר כ ו ת",
+  "pipeline_output": "מסכת ברכות",
+  "must_contain": [
+    "מסכת ברכות"
+  ],
+  "must_not_contain": [
+    "מ ס כ ת",
+    "ב ר כ ו ת"
+  ],
+  "lines": [
+    {
+      "bbox": [
+        124.8,
+        263.5,
+        278.11,
+        290.06
+      ],
+      "spans": [
+        {
+          "font": "real",
+          "size": 23.88,
+          "chars": [
+            {
+              "c": " ",
+              "bbox": [
+                272.17,
+                263.5,
+                278.11,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "מ",
+              "bbox": [
+                259.51,
+                263.5,
+                272.17,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": " ",
+              "bbox": [
+                255.85,
+                263.5,
+                259.51,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "ס",
+              "bbox": [
+                244.49,
+                263.5,
+                255.85,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": " ",
+              "bbox": [
+                240.83,
+                263.5,
+                244.49,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 4
+            },
+            {
+              "c": "כ",
+              "bbox": [
+                230.24,
+                263.5,
+                240.83,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 5
+            },
+            {
+              "c": " ",
+              "bbox": [
+                226.58,
+                263.5,
+                230.24,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 6
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                214.27,
+                263.5,
+                226.58,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 7
+            },
+            {
+              "c": " ",
+              "bbox": [
+                191.45,
+                263.5,
+                197.39,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 8
+            },
+            {
+              "c": "ב",
+              "bbox": [
+                180.54,
+                263.5,
+                191.45,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 9
+            },
+            {
+              "c": " ",
+              "bbox": [
+                176.86,
+                263.5,
+                180.54,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 10
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                165.83,
+                263.5,
+                176.86,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 11
+            },
+            {
+              "c": " ",
+              "bbox": [
+                162.15,
+                263.5,
+                165.83,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 12
+            },
+            {
+              "c": "כ",
+              "bbox": [
+                151.55,
+                263.5,
+                162.15,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 13
+            },
+            {
+              "c": " ",
+              "bbox": [
+                147.87,
+                263.5,
+                151.55,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 14
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                140.79,
+                263.5,
+                147.87,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 15
+            },
+            {
+              "c": " ",
+              "bbox": [
+                137.11,
+                263.5,
+                140.79,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 16
+            },
+            {
+              "c": "ת",
+              "bbox": [
+                124.8,
+                263.5,
+                137.11,
+                290.06
+              ],
+              "font": "TimesNewRomanPS-BoldMT",
+              "size": 23.88,
+              "span_id": 0,
+              "original_order": 17
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
