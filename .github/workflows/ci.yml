@@ -25,6 +25,9 @@ concurrency:
   group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
 
+# Only lint-and-docs runs in the development repository: it is the check the
+# publishing step waits for. Every other job runs in the public repository, on
+# each published commit, and carries the same `if:` below.
 jobs:
   lint-and-docs:
     # Bounded so a hung runner fails in minutes instead of burning GitHub's
@@ -52,6 +55,7 @@ jobs:
       - run: python scripts/check_docs.py
 
   tests:
+    if: github.repository == 'gershuni/GenizahSearch'
     # Three shards per OS (2026-10-19). As ONE process the Windows lane took
     # 41-52 min for 15,300 tests (it needed a 90-min timeout after being
     # cancelled at 60 twice at 97-99%) and Ubuntu ~25 -- the wall time of every
@@ -119,7 +123,7 @@ jobs:
   # on the superseded commit (seen on this PR's first push).
   tests-all:
     name: tests
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.repository == 'gershuni/GenizahSearch' }}
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -127,6 +131,7 @@ jobs:
       - run: test "${{ needs.tests.result }}" = "success"
 
   render-smoke-tests:
+    if: github.repository == 'gershuni/GenizahSearch'
     timeout-minutes: 40
     needs: lint-and-docs
     strategy:
@@ -153,6 +158,7 @@ jobs:
       - run: pytest tests/ -m render_smoke
 
   gui-tests:
+    if: github.repository == 'gershuni/GenizahSearch'
     timeout-minutes: 20
     needs: lint-and-docs
     env:
@@ -198,6 +204,7 @@ jobs:
       - run: python scripts/run_gui_tests.py
 
   slow-tests:
+    if: github.repository == 'gershuni/GenizahSearch'
     timeout-minutes: 30
     needs: lint-and-docs
     runs-on: ubuntu-latest
@@ -218,6 +225,7 @@ jobs:
       - run: pytest -m slow tests/
 
   atlas-bake-tests:
+    if: github.repository == 'gershuni/GenizahSearch'
     timeout-minutes: 20
     needs: lint-and-docs
     runs-on: ubuntu-latest

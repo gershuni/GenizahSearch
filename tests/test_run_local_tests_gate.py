@@ -412,7 +412,8 @@ def test_the_combined_tests_check_skips_a_cancelled_run():
         ci = fh.read()
     job = ci[ci.index("\n  tests-all:\n"):]
     job = job[:job.index("\n\n")]
-    assert "if: ${{ !cancelled() }}" in job and "always()" not in job
+    # The public-repository condition may follow (ci.yml runs only lint-and-docs elsewhere).
+    assert "if: ${{ !cancelled()" in job and "always()" not in job
     assert "needs: tests" in job
 
 
