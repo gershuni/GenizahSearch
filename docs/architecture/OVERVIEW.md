@@ -44,7 +44,7 @@ mounted at `/api` in [web/main.py](../../web/main.py).
 | Local web-server manager (dev only) | `python scripts/server.py start\|stop\|status` ([scripts/server.py](../../scripts/server.py)) | spawns `web.main` detached and keeps a PID file; production uses the `genizah-web` systemd unit instead |
 | Desktop app | `python genizah_app.py` ([genizah_app.py](../../genizah_app.py)) | the frozen build is `dist/GenizahSearchPro/GenizahSearchPro.exe`, produced by [build_app.bat](../../build_app.bat) from the checked-in [GenizahSearchPro.spec](../../GenizahSearchPro.spec); the installer by [CompileScriptGenizah.iss](../../CompileScriptGenizah.iss) |
 | Index build | `python build_index.py [main|lab]` ([build_index.py](../../build_index.py)) | builds the Tantivy indexes from the transcription inputs |
-| Tests | `python scripts/run_local_tests.py` ([scripts/run_local_tests.py](../../scripts/run_local_tests.py)) | the bounded runner ([decision 0003](../decisions/0003-bounded-test-runner.md)); `python scripts/run_gui_tests.py` for the Qt lane |
+| Tests | `python scripts/run_local_tests.py` ([scripts/run_local_tests.py](../../scripts/run_local_tests.py)) | the bounded runner ([decision 0003](../decisions/0003-bounded-test-runner.md)), with its pytest plugin in `scripts/lane_plugin/` (removes a passing test's `tmp_path`); `python scripts/run_gui_tests.py` for the Qt lane |
 | Doc gates | `python scripts/check_docs.py` ([scripts/check_docs.py](../../scripts/check_docs.py)) | links, outdated terms, size ceilings, contract-header dates |
 | Browser extension | `python extension/build.py` ([extension/build.py](../../extension/build.py)) | Chrome and Firefox ZIPs |
 
@@ -243,7 +243,7 @@ doc gates.
 | `migrations/` | Supabase SQL migrations | stays; a `supabase/` regrouping with `supabase_setup.sql` is a Round 2 item |
 | `pgp_data/` | PGP sidecar (`pgp.db`, gitignored) and its tracked companions | stays |
 | `reports/` | CSV/TXT evidence from data pipelines; one is read at runtime (`leading_zero_collisions.csv`) and one is written at start-up (`cudl_alias_collisions.csv`, untracked) | stays; the four phase-84 leftovers were moved to `docs/archive/reports/phase84/` (Round 1) |
-| `scripts/` | tooling, flat namespace package | stays flat; regrouping is Round 2 |
+| `scripts/` | tooling, flat namespace package | stays flat; regrouping is Round 2. `scripts/lane_plugin/` holds the runner's pytest plugin and the folder-removal helper both share, apart so that putting it on PYTHONPATH exposes nothing else |
 | `shared/` | code both apps use | grows: cross-app root modules are proposed to move here (Stage 2) |
 | `skills/` | the published research skill | **frozen in place** (published contract, CI-exercised, namespace pin) |
 | `tests/` | the suite, flat plus lane subdirectories | stays flat |

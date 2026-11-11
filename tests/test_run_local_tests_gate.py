@@ -478,24 +478,37 @@ def test_a_cp1252_console_shows_a_hebrew_failure_instead_of_crashing():
 
 # --- the lanes' temp files (2026-10-22: a full run left ~18 GB under %TEMP%) ---
 
-def _run_main(monkeypatch, tmp_path, rc, summary):
-    """main() end to end on one chunk, whose fake pytest writes a file into its basetemp.
+def _run_main(monkeypatch, tmp_path, rc, summary, files=("tests/test_a.py",),
+              seen=None):
+    """main() end to end, one file per chunk, each chunk's fake pytest writing a file
+    named after its test file into its basetemp.
 
-    Returns main's exit code and the shared lanes folder under the fake temp dir."""
+    *rc* and *summary* are the chunk's exit code and output, or functions of the
+    chunk's first file returning them. *seen*, a list, gets one (test file, files
+    under the lanes folder) pair per chunk, taken as the chunk starts. Returns main's
+    exit code and the shared lanes folder under the fake temp dir."""
+    parent = os.path.join(str(tmp_path), runner.LANES_DIR_NAME)
     monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(runner, "_test_files",
-                        lambda markers: (["tests/test_a.py"], [], []))
+                        lambda markers: (list(files), [], []))
     monkeypatch.setattr(runner, "_durations", lambda: {})
 
     def fake_pytest(cmd, **kwargs):
         leaf = cmd[cmd.index("--basetemp") + 1]
+        test_file = cmd[-1]
+        if seen is not None:
+            seen.append((test_file, [os.path.basename(f) for f in _files_under(parent)]))
         os.makedirs(leaf, exist_ok=True)
-        with open(os.path.join(leaf, "left_by_a_test.txt"), "w") as fh:
+        name = "left_by_%s.txt" % os.path.basename(test_file)[:-3]
+        with open(os.path.join(leaf, name), "w") as fh:
             fh.write("x")
-        return subprocess.CompletedProcess(cmd, rc, stdout=summary, stderr="")
+        return subprocess.CompletedProcess(
+            cmd, rc(test_file) if callable(rc) else rc,
+            stdout=summary(test_file) if callable(summary) else summary, stderr="")
 
     monkeypatch.setattr(runner.subprocess, "run", fake_pytest)
-    return runner.main(["-j", "1"]), os.path.join(str(tmp_path), runner.LANES_DIR_NAME)
+    code = runner.main(["-j", "1", "--max-files", "1"])
+    return code, parent
 
 
 def _files_under(path):
@@ -514,7 +527,219 @@ def test_a_failing_run_keeps_its_temp_files_for_inspection(monkeypatch, tmp_path
     assert code == 1
     [run_dir] = os.listdir(parent)
     assert run_dir.startswith("run-")
-    assert [os.path.basename(f) for f in _files_under(parent)] == ["left_by_a_test.txt"]
+    assert sorted(os.path.basename(f) for f in _files_under(parent)) == [
+        runner.FINISHED_MARKER, "left_by_test_a.txt"]
+
+
+# 2026-11-11: a failed run kept EVERY chunk's folder (~17.5 GB) for a day. With 11
+# tests failing on master every run failed, and four runs in one morning filled
+# drive C: -- the fifth broke with hundreds of tmp_path errors.
+
+def test_a_failing_run_keeps_only_its_failing_chunks_files(monkeypatch, tmp_path):
+    files = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    code, parent = _run_main(
+        monkeypatch, tmp_path,
+        rc=lambda f: 1 if f.endswith("test_b.py") else 0,
+        summary=lambda f: ("1 failed in 0.10s" if f.endswith("test_b.py")
+                           else "1 passed in 0.10s"),
+        files=files)
+    assert code == 1
+    assert sorted(os.path.basename(f) for f in _files_under(parent)) == [
+        runner.FINISHED_MARKER, "left_by_test_b.txt"]
+
+
+def test_a_passing_chunks_files_go_when_it_ends_not_when_the_run_ends(monkeypatch, tmp_path):
+    """A run used to peak at ~17.5 GB before its end could remove anything."""
+    seen = []
+    files = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    _run_main(monkeypatch, tmp_path,
+              rc=lambda f: 1 if f.endswith("test_b.py") else 0,
+              summary=lambda f: ("1 failed in 0.10s" if f.endswith("test_b.py")
+                                 else "1 passed in 0.10s"),
+              files=files, seen=seen)
+    order = [os.path.basename(f)[:-3] for f, _present in seen]
+    assert sorted(order) == ["test_a", "test_b", "test_c"]
+    for i, (_f, present) in enumerate(seen):
+        assert sorted(present) == sorted("left_by_%s.txt" % name for name in order[:i]
+                                         if name == "test_b"), (order, seen)
+
+
+def test_the_end_of_a_failed_run_removes_every_chunk_folder_it_does_not_keep(tmp_path):
+    """Whatever a passing chunk left (a file still open when it ended), the run's end
+    removes; a lane left with no kept chunk goes too."""
+    root = tmp_path / "run-1000-1"
+    for leaf in ("lane0/c1", "lane0/c2", "lane1/c3"):
+        (root / leaf).mkdir(parents=True)
+        (root / leaf / "f.txt").write_text("x")
+    runner._clean_lanes(str(root), passed=False, keep=[str(root / "lane0" / "c2")])
+    assert sorted(os.listdir(root)) == [runner.FINISHED_MARKER, "lane0"]
+    assert os.listdir(root / "lane0") == ["c2"]
+
+
+def test_a_run_folder_goes_whole_with_a_long_path_and_a_read_only_file(tmp_path):
+    """Measured 2026-11-11: plain rmtree left a >260-character path (a long Hebrew path
+    test) and read-only git objects, so a swept run folder never fully went."""
+    root = tmp_path / "run-1000-1"
+    leaf = root / "lane0" / "c1"
+    leaf.mkdir(parents=True)
+    read_only = leaf / "object"
+    read_only.write_text("x")
+    os.chmod(read_only, 0o444)
+    deep = str(leaf)
+    while len(deep) < 300:
+        deep = os.path.join(deep, "longpath_שלום_" + "a" * 30)
+    long_file = os.path.join(deep, "f.pdf")
+    prefix = "\\\\?\\" if os.name == "nt" else ""
+    os.makedirs(prefix + deep)
+    with open(prefix + long_file, "w") as fh:
+        fh.write("x")
+    assert len(long_file) > 260
+
+    runner._clean_lanes(str(root), passed=True)
+
+    assert not os.path.exists(prefix + str(root))
+
+
+def test_a_failed_run_removes_earlier_finished_runs_and_no_live_one(monkeypatch, tmp_path):
+    """Only the latest failure is kept, and a run still going is never touched
+    (2026-09-20: runs deleting each other's live files gave 133 errors)."""
+    parent = os.path.join(str(tmp_path), runner.LANES_DIR_NAME)
+    now = int(time.time())
+    earlier_failed = os.path.join(parent, "run-%d-1111" % (now - 3600))
+    live = os.path.join(parent, "run-%d-2222" % (now - 600))
+    for run_dir in (earlier_failed, live):
+        os.makedirs(os.path.join(run_dir, "lane0", "c1"))
+        with open(os.path.join(run_dir, "lane0", "c1", "f.txt"), "w") as fh:
+            fh.write("x")
+    with open(os.path.join(earlier_failed, runner.FINISHED_MARKER), "w") as fh:
+        fh.write("x")
+
+    code, _parent = _run_main(monkeypatch, tmp_path, 1, "1 failed in 0.10s")
+
+    assert code == 1
+    names = sorted(os.listdir(parent))
+    assert "run-%d-1111" % (now - 3600) not in names
+    assert os.path.exists(os.path.join(live, "lane0", "c1", "f.txt"))
+    [own] = [n for n in names if n != "run-%d-2222" % (now - 600)]
+    assert os.path.isfile(os.path.join(parent, own, runner.FINISHED_MARKER))
+
+
+def test_a_finished_run_spares_a_finished_run_that_started_after_it(tmp_path):
+    """Two failed runs ending at once must not delete each other: a run removes
+    only finished runs that STARTED before it."""
+    parent = str(tmp_path)
+    own = os.path.join(parent, "run-1000-1")
+    later = os.path.join(parent, "run-2000-2")
+    for run_dir in (own, later):
+        os.makedirs(run_dir)
+        with open(os.path.join(run_dir, runner.FINISHED_MARKER), "w") as fh:
+            fh.write("x")
+    runner._remove_earlier_finished_runs(own)
+    assert sorted(os.listdir(parent)) == ["run-1000-1", "run-2000-2"]
+    runner._remove_earlier_finished_runs(later)
+    assert os.listdir(parent) == ["run-2000-2"]
+
+
+@pytest.mark.parametrize("rc, summary, passed", [
+    (0, "3 passed in 0.10s", True),
+    (5, "43 deselected in 0.29s", True),
+    (5, "no tests ran in 0.16s", False),     # collected nothing: kept, it is a failure
+    (1, "1 failed, 2 passed in 0.10s", False),
+    (0, "1 failed, 2 passed in 0.10s", False),  # failures behind exit 0: still kept
+    (1, "3 passed, 2 errors in 0.10s", False),
+    (-9, "", False),                          # killed: no summary
+])
+def test_which_chunks_count_as_passed(rc, summary, passed):
+    assert runner._chunk_passed(_chunk(rc, summary)) is passed
+    assert runner._chunk_passed(None) is False
+
+
+def test_a_chunk_keeps_exactly_its_failing_and_erroring_tests_tmp_paths(tmp_path):
+    """The chunk command itself, run by real pytest: a test that passed setup, call and
+    teardown has no tmp_path left when the chunk ends, even one holding a path over 260
+    characters and a read-only file; a test that failed, or whose fixture failed in
+    setup or teardown, keeps its own. pytest's built-in
+    `tmp_path_retention_policy=failed` lost the setup and teardown errors' folders
+    (Codex on PR #7)."""
+    test_file = tmp_path / "test_outcomes.py"
+    test_file.write_text(
+        "import pytest\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def breaks_in_setup(tmp_path):\n"
+        "    (tmp_path / 'evidence.txt').write_text('x')\n"
+        "    raise RuntimeError('setup')\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def breaks_in_teardown(tmp_path):\n"
+        "    yield\n"
+        "    raise RuntimeError('teardown')\n"
+        "\n"
+        "def test_passes(tmp_path):\n"
+        "    (tmp_path / 'evidence.txt').write_bytes(b'x' * 1000)\n"
+        "\n"
+        "def test_skips(tmp_path):\n"
+        "    (tmp_path / 'evidence.txt').write_text('x')\n"
+        "    pytest.skip('not here')\n"
+        "\n"
+        "def test_fails(tmp_path):\n"
+        "    (tmp_path / 'evidence.txt').write_text('x')\n"
+        "    assert False\n"
+        "\n"
+        "def test_passes_with_hard_files(tmp_path):\n"
+        "    import os\n"
+        "    read_only = tmp_path / 'object'\n"
+        "    read_only.write_text('x')\n"
+        "    os.chmod(read_only, 0o444)\n"
+        "    deep = str(tmp_path)\n"
+        "    while len(deep) < 300:\n"
+        "        deep = os.path.join(deep, 'd' * 40)\n"
+        "    b = chr(92)\n"
+        "    prefix = b + b + '?' + b if os.name == 'nt' else ''\n"
+        "    os.makedirs(prefix + deep)\n"
+        "    with open(prefix + os.path.join(deep, 'f.txt'), 'w') as fh:\n"
+        "        fh.write('x')\n"
+        "\n"
+        "def test_passes_dynamically(request):\n"
+        "    path = request.getfixturevalue('tmp_path')\n"
+        "    (path / 'evidence.txt').write_text('x')\n"
+        "\n"
+        "def test_fails_dynamically(request):\n"
+        "    path = request.getfixturevalue('tmp_path')\n"
+        "    (path / 'evidence.txt').write_text('x')\n"
+        "    assert False\n"
+        "\n"
+        "def test_setup_errs(breaks_in_setup):\n"
+        "    pass\n"
+        "\n"
+        "def test_teardown_errs(breaks_in_teardown, tmp_path):\n"
+        "    (tmp_path / 'evidence.txt').write_text('x')\n", encoding="utf-8")
+    leaf = tmp_path / "lane0" / "c1"
+    leaf.parent.mkdir()
+    cmd = runner._chunk_cmd(str(leaf), runner.DEFAULT_MARKERS, [str(test_file)])
+    pr = subprocess.run(cmd, cwd=str(tmp_path), capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", env=runner._chunk_env())
+    counts = runner._parse_counts(pr.stdout)
+    assert counts is not None and counts[1:4] == (2, 2, 1), pr.stdout[-3000:]
+    # pytest also leaves a `<name>current` symlink beside each kept folder where the
+    # OS lets it make one (Linux); it is bookkeeping, not a test's files.
+    kept = sorted(n for n in os.listdir(leaf) if not os.path.islink(leaf / n))
+    assert kept == ["test_fails0", "test_fails_dynamically0", "test_setup_errs0",
+                    "test_teardown_errs0"]
+    for name in kept:
+        assert os.listdir(leaf / name) == ["evidence.txt"]
+
+
+@pytest.mark.parametrize("path, extended", [
+    ("C:\\Users\\x\\Temp\\run", "\\\\?\\C:\\Users\\x\\Temp\\run"),
+    ("\\\\server\\share\\Temp\\run", "\\\\?\\UNC\\server\\share\\Temp\\run"),
+    ("\\\\?\\C:\\already", "\\\\?\\C:\\already"),
+    ("\\\\?\\UNC\\server\\share\\x", "\\\\?\\UNC\\server\\share\\x"),
+    ("\\\\.\\device", "\\\\.\\device"),
+])
+def test_the_extended_length_form_of_a_windows_path(path, extended):
+    """A UNC temp folder needs `\\\\?\\UNC\\`, not `\\\\?\\` before the path (Codex on PR #7)."""
+    assert runner._extended_length(path) == extended
 
 
 def test_a_run_leaves_a_concurrent_run_alone_and_sweeps_day_old_ones(monkeypatch, tmp_path):

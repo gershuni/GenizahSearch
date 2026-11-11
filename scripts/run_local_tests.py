@@ -56,11 +56,11 @@ was the wall time of every PR.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import queue
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,6 +69,24 @@ import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DURATIONS = os.path.join(REPO_ROOT, "tests", "lane_durations.json")
+# The pytest plugin that removes a passing test's tmp_path (_chunk_cmd), in a folder
+# of its own: on PYTHONPATH, it makes only its own two modules importable.
+LANE_PLUGIN_DIR = os.path.join(REPO_ROOT, "scripts", "lane_plugin")
+LANE_PLUGIN = "genizah_lane_tmp_retention"
+
+
+def _load_lane_rmtree():
+    """genizah_lane_rmtree, by path: the removal function the plugin uses too."""
+    spec = importlib.util.spec_from_file_location(
+        "genizah_lane_rmtree", os.path.join(LANE_PLUGIN_DIR, "genizah_lane_rmtree.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_lane_rmtree = _load_lane_rmtree()
+_rmtree = _lane_rmtree.rmtree
+_extended_length = _lane_rmtree.extended_length
 
 # CI's own selection (.github/workflows/ci.yml, the `tests` job), so a green
 # local run means the same thing a green CI run does. `slow` is deliberately NOT
@@ -83,7 +101,13 @@ DEFAULT_DURATION = 1.0          # unmeasured module: assume cheap, not free
 # Lanes' temp files, under the system temp dir: one folder per run (_lanes_root).
 LANES_DIR_NAME = "genizah-test-lanes"
 _RUN_DIR_RE = re.compile(r"run-(\d+)-\d+$")
-_STALE_RUN_SECONDS = 24 * 3600   # no run lasts a day; a failed run's files stay that long
+# No run lasts a day: a run folder this old without FINISHED_MARKER is a run that was
+# killed, and the next run removes it. A finished failed run goes sooner (_clean_lanes).
+_STALE_RUN_SECONDS = 24 * 3600
+# Written by a failed run when it ends, after its last chunk: only a run folder holding
+# it may be removed by another run before _STALE_RUN_SECONDS (2026-09-20 rule: a run
+# never deletes a run that is still going).
+FINISHED_MARKER = "FINISHED.txt"
 
 # One INDEPENDENT search per category, because pytest does not emit them in a
 # fixed order. A real chunk line from this suite's own failing run reads
@@ -486,13 +510,17 @@ def main(argv=None) -> int:
     # tests assert behaviour in a NON-git directory -- they failed on the first
     # run of this script for exactly that reason. pytest's own default lives in
     # the system temp dir; lanes live beside it, in a folder of this run's own
-    # (_lanes_root), removed again when the run passes (_clean_lanes).
+    # (_lanes_root). What stays there is decided in three places: pytest removes
+    # each passing test's tmp_path (_chunk_cmd), a chunk that passed has its folder
+    # removed when it ends (_chunk_passed), and the run's end removes the rest or
+    # keeps the failing chunks' folders (_clean_lanes).
     tmp_root = _lanes_root()
 
     work = queue.Queue()
     for i, (chunk, load) in enumerate(plan, 1):
         work.put((i, chunk, load))
     results = {}
+    leaves = {}
     lock = threading.Lock()
 
     def lane(lane_no):
@@ -505,30 +533,34 @@ def main(argv=None) -> int:
         # errors, first time round). So the lane directory is created here and
         # pytest creates only the per-chunk leaf inside it.
         os.makedirs(basetemp, exist_ok=True)
-        env = dict(os.environ, PYTHONUTF8="1", POSTHOG_API_KEY="")
+        env = _chunk_env()
         while True:
             try:
                 idx, chunk, load = work.get_nowait()
             except queue.Empty:
                 return
             leaf = os.path.join(basetemp, "c%d" % idx)
-            shutil.rmtree(leaf, ignore_errors=True)
-            cmd = [sys.executable, "-m", "pytest", "-q", "--no-header",
-                   "-p", "no:cacheprovider",
-                   "--basetemp", leaf,
-                   "-m", args.markers] + chunk
+            with lock:
+                leaves[idx] = leaf
+            _rmtree(leaf)
+            cmd = _chunk_cmd(leaf, args.markers, chunk)
             t0 = time.time()
             pr = subprocess.run(cmd, cwd=REPO_ROOT, env=env,
                                 capture_output=True, text=True,
                                 encoding="utf-8", errors="replace")
             dur = time.time() - t0
             counts = _parse_counts(pr.stdout or "")
+            result = {
+                "files": chunk, "predicted": load, "seconds": dur,
+                "rc": pr.returncode, "counts": counts,
+                "stdout": pr.stdout or "", "stderr": pr.stderr or "",
+            }
+            if _chunk_passed(result):
+                # Its files are nobody's evidence: free the disk now, not at the
+                # end of a 13-minute run (a run used to peak at ~17.5 GB).
+                _rmtree(leaf)
             with lock:
-                results[idx] = {
-                    "files": chunk, "predicted": load, "seconds": dur,
-                    "rc": pr.returncode, "counts": counts,
-                    "stdout": pr.stdout or "", "stderr": pr.stderr or "",
-                }
+                results[idx] = result
                 tail = [ln for ln in (pr.stdout or "").splitlines()
                         if ln.strip()][-1:]
                 state = ("ok" if pr.returncode == 0 else
@@ -575,7 +607,9 @@ def main(argv=None) -> int:
             if (r["stderr"] or "").strip():
                 print("--- stderr ---")
                 print("\n".join(r["stderr"].splitlines()[-20:]))
-        _clean_lanes(tmp_root, passed=False)
+        _clean_lanes(tmp_root, passed=False,
+                     keep=[leaves[i] for i in sorted(leaves)
+                           if not _chunk_passed(results.get(i))])
         return 1
 
     print("\nAll chunks passed.")
@@ -583,39 +617,137 @@ def main(argv=None) -> int:
     return 0
 
 
+def _chunk_cmd(leaf, markers, chunk):
+    """The pytest command for one chunk, its tmp_path files under *leaf*; run it
+    with _chunk_env().
+
+    LANE_PLUGIN removes each test's tmp_path as soon as the test has passed setup,
+    call and teardown, so a chunk keeps only its failing and erroring tests' folders
+    (and what fixtures made with tmp_path_factory). Without it every test's folder
+    stayed until the run ended: ~17.5 GB per full run, measured 2026-11-11, four of
+    which filled drive C: in one morning."""
+    return [sys.executable, "-m", "pytest", "-q", "--no-header",
+            "-p", "no:cacheprovider",
+            "-p", LANE_PLUGIN,
+            "--basetemp", leaf,
+            "-m", markers] + list(chunk)
+
+
+def _chunk_env(base=None):
+    """The environment a chunk runs in: UTF-8, no PostHog, LANE_PLUGIN importable."""
+    env = dict(os.environ if base is None else base, PYTHONUTF8="1", POSTHOG_API_KEY="")
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (LANE_PLUGIN_DIR, env.get("PYTHONPATH")) if p)
+    return env
+
+
+def _chunk_passed(r):
+    """Did this chunk pass cleanly, so its temp files are evidence of nothing?
+
+    The same per-chunk test _verdict applies: a result exists and parsed, nothing
+    failed or errored, and the exit is 0 -- or 5 with every test accounted for as
+    deselected or skipped. Anything else keeps its folder."""
+    if r is None or r["counts"] is None:
+        return False
+    p, f, e, s, d = r["counts"]
+    if f or e:
+        return False
+    if r["rc"] == 5:
+        return p + s + d > 0
+    return r["rc"] == 0
+
+
 def _lanes_root(now=None):
     """A temp folder of this run's own, `genizah-test-lanes/run-<start>-<pid>`.
 
     The folder used to be shared, and every run began by deleting it, so a second
     run started meanwhile destroyed the first one's live `tmp_path` folders: 133
-    errors, measured 2026-09-20. Now a run deletes only runs that started more than
-    _STALE_RUN_SECONDS ago (a failed run's files are kept that long for inspection),
-    and anything not named like a run (the old shared layout's `lane<N>`)."""
+    errors, measured 2026-09-20. Now a run starts by deleting only runs that started
+    more than _STALE_RUN_SECONDS ago (by then every run has ended: one without
+    FINISHED_MARKER was killed, or kept by the runner before 2026-11-11), and anything
+    not named like a run (the old shared layout's `lane<N>`). A finished failed run is
+    removed sooner, by the next failed run's end (_clean_lanes)."""
     now = time.time() if now is None else now
     parent = os.path.join(tempfile.gettempdir(), LANES_DIR_NAME)
     os.makedirs(parent, exist_ok=True)
     for name in os.listdir(parent):
         m = _RUN_DIR_RE.match(name)
         if m is None or now - int(m.group(1)) > _STALE_RUN_SECONDS:
-            shutil.rmtree(os.path.join(parent, name), ignore_errors=True)
+            _rmtree(os.path.join(parent, name))
     root = os.path.join(parent, "run-%d-%d" % (int(now), os.getpid()))
     os.makedirs(root)
     return root
 
 
-def _clean_lanes(tmp_root, passed):
-    """Remove the lanes' temp files after a run that passed; keep them after one that failed.
+def _clean_lanes(tmp_root, passed, keep=()):
+    """Remove the lanes' temp files at the end of a run, except a failed run's evidence.
 
-    A full run leaves ~18 GB of `tmp_path` output under *tmp_root*, which the next run
-    wiped only when it started, so the disk carried it between runs (2026-10-22). A failed
-    run keeps it: a failing test's files are what one looks at next."""
-    if not passed:
-        print(" lane temp files kept for inspection: %s" % tmp_root)
+    A run that passed removes its whole folder. A run that failed keeps only the chunk
+    folders in *keep* (the failing chunks', in which pytest has already removed every
+    passing test's tmp_path), marks itself finished, and removes every earlier finished
+    run: the latest failure is what one inspects next.
+
+    Measured 2026-11-11: a failed run kept every chunk's folder, ~17.5 GB, for a day, and
+    with 11 tests failing on master every run failed; four in one morning filled drive C:
+    and broke the fifth with hundreds of tmp_path errors. A run never removes a folder
+    without FINISHED_MARKER before it is a day old, so a run still going is safe."""
+    if passed:
+        _rmtree(tmp_root)
+        if os.path.exists(tmp_root):
+            print(" ! some lane temp files could not be removed (a file still open?): %s"
+                  % tmp_root)
         return
-    shutil.rmtree(tmp_root, ignore_errors=True)
-    if os.path.exists(tmp_root):
-        print(" ! some lane temp files could not be removed (a file still open?): %s"
-              % tmp_root)
+    keep = {os.path.normcase(os.path.abspath(p)) for p in keep}
+    for lane in os.listdir(tmp_root):
+        lane_dir = os.path.join(tmp_root, lane)
+        if not os.path.isdir(lane_dir):
+            continue
+        for leaf in os.listdir(lane_dir):
+            path = os.path.join(lane_dir, leaf)
+            if os.path.normcase(os.path.abspath(path)) not in keep:
+                _rmtree(path)
+        try:
+            os.rmdir(lane_dir)             # only if no kept chunk is in it
+        except OSError:
+            pass
+    with open(os.path.join(tmp_root, FINISHED_MARKER), "w", encoding="utf-8",
+              newline="\n") as fh:
+        fh.write("This run failed and ended %s. Kept: the folders of its failing "
+                 "chunks.\nThe next failed run removes this folder.\n"
+                 % time.strftime("%Y-%m-%d %H:%M:%S"))
+    _remove_earlier_finished_runs(tmp_root)
+    print(" lane temp files of the failing chunk(s) kept for inspection (%.1f MB): %s"
+          % (_folder_bytes(tmp_root) / 1e6, tmp_root))
+
+
+def _remove_earlier_finished_runs(tmp_root):
+    """Remove the run folders that started before *tmp_root*'s and hold FINISHED_MARKER.
+
+    Earlier, not every: two failed runs ending at once would otherwise delete each
+    other. A folder without the marker is a run still going (or killed), left to
+    _lanes_root's day-old sweep."""
+    parent, own = os.path.split(tmp_root)
+    m = _RUN_DIR_RE.match(own)
+    if m is None:
+        return
+    own_start = int(m.group(1))
+    for name in os.listdir(parent):
+        other = _RUN_DIR_RE.match(name)
+        path = os.path.join(parent, name)
+        if (other is not None and name != own and int(other.group(1)) < own_start
+                and os.path.isfile(os.path.join(path, FINISHED_MARKER))):
+            _rmtree(path)
+
+
+def _folder_bytes(path):
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                pass
+    return total
 
 
 def _record_durations(results):
