@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -530,3 +531,104 @@ def test_the_default_margin_is_unchanged_for_long_spans(short_name_index):
             != PassagePolicy(name='x', verify_margin=8).policy_id)
     with pytest.raises(ValueError):
         PassagePolicy(name='x', verify_margin=-1)
+
+
+# ---------------------------------------------------------------------------
+# The 'long' passage-length profile: a floor on each record's matched letters,
+# min(120, half the query), applied after merging (spec section 8.2,
+# measured 2026-11-11 -- LENGTH_RECORD_FLOORS in shared/passage_policy.py).
+# ---------------------------------------------------------------------------
+
+def test_compose_long_keeps_the_normal_pair_and_adds_the_floor():
+    base, long_ = get_preset('widest-40'), compose('widest-40', 'long')
+    assert (long_.min_span, long_.verify_margin) == (40, 30)
+    assert long_.min_record_letters == 120
+    assert long_.density_scale == base.density_scale
+    assert long_.name == 'widest-40+long'
+    assert long_.policy_id != base.policy_id
+    # Every other profile has no floor.
+    assert base.min_record_letters == 0
+    assert compose('widest-40', 'short').min_record_letters == 0
+    assert compose('max-40', 'long', 'deep').min_record_letters == 120
+
+
+def test_a_zero_floor_keeps_every_existing_policy_id():
+    """min_record_letters joined the schema 2026-11-11: at 0 it must stay out
+    of the hash, or every measured policy_id (and every ledger row keyed on
+    one) would move."""
+    assert (PassagePolicy(name='x').policy_id
+            == PassagePolicy(name='x', min_record_letters=0).policy_id)
+    assert (PassagePolicy(name='x').policy_id
+            != PassagePolicy(name='x', min_record_letters=120).policy_id)
+    with pytest.raises(ValueError):
+        PassagePolicy(name='x', min_record_letters=-1)
+
+
+def test_the_record_floor_is_capped_at_half_the_query():
+    p = PassagePolicy(name='x', min_record_letters=120)
+    assert p.record_floor(1000) == 120
+    assert p.record_floor(240) == 120
+    assert p.record_floor(200) == 100
+    assert p.record_floor(81) == 40.5
+    assert PassagePolicy(name='x').record_floor(1000) == 0
+
+
+@pytest.fixture(scope='module')
+def lengths_index(tmp_path_factory):
+    """Records sharing passages of three lengths with one 900-letter query,
+    each verbatim between unrelated flanks, plus unrelated filler."""
+    d = str(tmp_path_factory.mktemp('plengths'))
+    query = _aperiodic(900, salt=5151)
+    shares = {'share300': query[50:350], 'share150': query[400:550],
+              'share70': query[650:720]}
+    records = [(name, _aperiodic(120, salt=60 + i) + seg
+                + _aperiodic(120, salt=80 + i))
+               for i, (name, seg) in enumerate(shares.items())]
+    for r in range(30):
+        records.append((f'unrel{r:03d}', _aperiodic(600, salt=7000 + r)))
+    build_index(records, d, partitions=2, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, query
+
+
+def _scores(idx, query, policy):
+    hits, report = search_passage(idx, query, policy)
+    return {h.record_id: h.score for h in hits}, hits, report
+
+
+def test_the_floor_drops_exactly_the_records_scoring_under_it(lengths_index):
+    idx, query = lengths_index
+    open_scores, open_hits, _ = _scores(idx, query, get_preset('max-40'))
+    assert {'share300', 'share150', 'share70'} <= set(open_scores), (
+        'fixture: max-40 must find all three shared passages without a floor')
+    assert open_scores['share300'] > open_scores['share150'] > open_scores['share70']
+    # A floor between the two shorter shares: exactly the records under it go.
+    floor = (open_scores['share150'] + open_scores['share70']) / 2
+    floored = replace(get_preset('max-40'), name='t-floor',
+                      min_record_letters=int(floor))
+    kept, kept_hits, report = _scores(idx, query, floored)
+    assert set(kept) == {r for r, s in open_scores.items() if s >= int(floor)}
+    assert 'share70' not in kept and {'share300', 'share150'} <= set(kept)
+    assert report.rejected_below_floor == len(open_scores) - len(kept)
+    # What is kept is untouched: same spans, same score, same order.
+    by_id = {h.record_id: h for h in open_hits}
+    for h in kept_hits:
+        assert (h.spans, h.score, h.windows) == (
+            by_id[h.record_id].spans, by_id[h.record_id].score,
+            by_id[h.record_id].windows)
+    # No floor, no rejections counted.
+    assert _scores(idx, query, get_preset('max-40'))[2].rejected_below_floor == 0
+
+
+def test_the_long_profile_keeps_a_short_query_from_being_emptied(lengths_index):
+    """A 100-letter query cannot make a 120-letter match at all: even a
+    verbatim copy of it scores 100. The half-query cap (a floor of 50 here) is
+    what keeps that copy."""
+    idx, query = lengths_index
+    short_query = query[420:520]            # inside share150's passage
+    hits, report = search_passage(idx, short_query, compose('max-40', 'long'))
+    assert report.query_letters == 100
+    found = {h.record_id: h.score for h in hits}
+    assert 'share150' in found and found['share150'] < 120
+    assert all(s >= 50 for s in found.values())

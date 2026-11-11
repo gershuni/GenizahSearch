@@ -88,6 +88,9 @@ class QueryReport:
     accepted_spans: int = 0
     rejected_short: int = 0
     rejected_density: int = 0
+    # Records verified and merged, then dropped for scoring under the
+    # policy's record floor (PassagePolicy.record_floor; the 'long' profile).
+    rejected_below_floor: int = 0
     below_min_span_query: bool = False
     # True when the search ran over a record mask (`search_passage(...,
     # record_mask=)`): every query gram present in the index was admitted, no
@@ -458,8 +461,12 @@ def search_passage(idx: PassageIndex, query_text: str,
                                                   checkpoint=checkpoint)
 
     hits = []
+    floor = policy.record_floor(report.query_letters)
     for ri, spans in merged.items():
         matched = sum(q1 - q0 for q0, q1, _r0, _r1, _d in spans)
+        if matched < floor:
+            report.rejected_below_floor += 1
+            continue
         hits.append(PassageHit(
             record=ri, record_id=idx.record_id(ri),
             matched_letters=matched,

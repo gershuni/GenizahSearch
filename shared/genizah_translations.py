@@ -5232,6 +5232,10 @@ TRANSLATIONS.update({
         "קטעים רגילים (ברירת מחדל)",
     "Also short passages":
         "גם קטעים קצרים",
+    "Only long passages":
+        "רק קטעים ארוכים",
+    "\"Only long\" keeps only manuscripts whose match covers at least 120 letters of your text (half of it, if your text is shorter).":
+        "\"רק קטעים ארוכים\" משאיר רק כתבי יד שההתאמה בהם מכסה 120 אותיות לפחות מהטקסט שלך (או מחציתו, אם הוא קצר יותר).",
     "Whether a short shared passage counts as a match. \"Also short\" finds piyyutim, quotations and badly damaged copies that share only a phrase — measured at roughly double the results for a third fewer correct ones, so expect to skim more.":
         "האם קטע משותף קצר נחשב התאמה. \"גם קטעים קצרים\" מוצא פיוטים, ציטוטים ועותקים פגומים מאוד שחולקים רק צירוף אחד — נמדד כמכפיל את מספר התוצאות תמורת שליש פחות תוצאות נכונות, כך שיש לצפות לסינון ידני רב יותר.",
     "Search depth":

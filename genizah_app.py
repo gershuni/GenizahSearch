@@ -7211,14 +7211,22 @@ class GenizahGUI(QMainWindow):
         self.comp_passage_width_combo.setAccessibleName(tr("Match width"))
 
         self.comp_passage_length_combo = QComboBox()
+        # 'long' last, so the default keeps index 0 and a saved choice is
+        # restored by its key (findData), never by position.
         for _val, _lbl in (('normal', tr("Normal passages (default)")),
-                           ('short', tr("Also short passages"))):
+                           ('short', tr("Also short passages")),
+                           ('long', tr("Only long passages"))):
             self.comp_passage_length_combo.addItem(_lbl, _val)
-        self.comp_passage_length_combo.setToolTip(tr(
-            "Whether a short shared passage counts as a match. \"Also short\" "
-            "finds piyyutim, quotations and badly damaged copies that share "
-            "only a phrase \u2014 measured at roughly double the results for a "
-            "third fewer correct ones, so expect to skim more."))
+        # The web's tooltip, both sentences, each its own key (as the depth
+        # combo's below): one changes when the web's does.
+        self.comp_passage_length_combo.setToolTip(
+            tr("Whether a short shared passage counts as a match. \"Also short\" "
+               "finds piyyutim, quotations and badly damaged copies that share "
+               "only a phrase \u2014 measured at roughly double the results for a "
+               "third fewer correct ones, so expect to skim more.")
+            + " " + tr("\"Only long\" keeps only manuscripts whose match "
+                       "covers at least 120 letters of your text (half of "
+                       "it, if your text is shorter)."))
         self.comp_passage_length_combo.setAccessibleName(tr("Passage length"))
 
         self.comp_passage_depth_combo = QComboBox()

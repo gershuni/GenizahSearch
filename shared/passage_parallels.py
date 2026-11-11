@@ -1128,8 +1128,13 @@ class PassageSearcher:
             # is proven trivially.
             return ConditionSearch((), (), QueryReport(exhaustive_mask=True).as_dict(),
                                    False)
+        # No record floor: "Only long passages" chooses which manuscripts the
+        # MAIN text returns. A condition must still find its text wherever it
+        # occurs -- with the floor, a "must not appear" text found only in a
+        # short passage would go unseen and the manuscript would be kept.
         policy = replace(self.policy, verify_cap=CONDITION_VERIFY_CAP,
-                         candidate_cap=CONDITION_CANDIDATE_CAP)
+                         candidate_cap=CONDITION_CANDIDATE_CAP,
+                         min_record_letters=0)
         stopped = [False]
 
         def _checkpoint(_done, _total):

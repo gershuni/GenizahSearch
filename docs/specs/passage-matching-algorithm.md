@@ -326,6 +326,39 @@ Because the two parameters are one decision, they are offered to users as a join
 and never as independent controls: a slider on the span floor alone would visibly do nothing
 and read as a broken feature.
 
+### 8.2 The `long` profile: a floor on the result, not on the span (2026-11-11)
+
+Asked for by a user running the widest settings: "only long passages", so that a search meant
+to miss nothing does not return too much that is unrelated. Raising `min_span` cannot do it —
+it is checked per verified window, margin included, so at 40 it is nearly inert, and a high one
+would reject the windows of a long match that verification split. The `long` profile keeps the
+normal pair and adds `min_record_letters` = 120: a record is returned only when its merged
+query-side span length (its score) reaches **min(120, half the query's letters)**. The cap keeps a
+short query from being emptied by a floor longer than any match it can make. It is applied after
+merging, in `search_passage`, and counted in `QueryReport.rejected_below_floor`. Condition
+searches (`PassageSearcher.search_condition`) run without it: a "must not appear" text must be
+found wherever it occurs.
+
+Measured on the production index (702,466 records). Short queries: the 398 FGP queries behind the
+owner-graded decks, where each query's own manuscript is a known true match and 152 rows carry an
+owner grade:
+
+| width | rows removed | own manuscript lost | owner-good rows lost |
+|---|---|---|---|
+| widest-40 | 45% | 1 / 369 | 7 / 151 |
+| max-40 | 49% | 1 / 375 | 8 / 152 |
+| max-40 + `deep` | 45% | 1 / 375 | 6 / 153 |
+
+A flat 150 lost 9% of the own manuscripts and ~30% of the owner-good rows; a flat 120 lost them on
+queries under 300 letters. The removed rows are ungraded, so this shows that almost no known match
+is lost, not that what is removed is all noise.
+
+On the Antiochus deck (section 8.1), the only graded tail: max-40 goes from 67 manuscripts / 58
+positives to 56 / 52, and max-40 + `deep` from 115 / 60 to 73 / 53. Maximal's added noise there is
+mostly high edit density rather than short length — 26 of its 27 noise rows at density 0.6 or
+more, against 5 of 52 witnesses — and widest-40 + `deep` with no floor (58 manuscripts, 55
+positives) does better than max-40 + `deep` + `long`.
+
 ---
 
 ## 9. Stage-0 hygiene — mandatory, not optional
@@ -689,7 +722,8 @@ word-chunk matching plus vocabulary triage, not to the letter engine.
 | | posting cap | 3,000 | method report |
 | DF — batch, asymmetric | `REF_DF_CAP` | 128 raw postings per code — **known non-monotonic**, section 10.1 | `track1_match.py` |
 | DF — interactive | policy | band-allocated posting budget, section 10.2 | this spec |
-| Length profile | `min_span` / `verify_margin` | `normal` = (40, 30), `short` = (28, 12) | `passage_policy.py::LENGTH_PROFILES`, section 8.1 |
+| Length profile | `min_span` / `verify_margin` | `normal` = (40, 30), `short` = (28, 12), `long` = (40, 30) | `passage_policy.py::LENGTH_PROFILES`, section 8.1 |
+| | `min_record_letters` (per record, after merge) | `long` = 120, capped at half the query's letters; 0 otherwise | `passage_policy.py::LENGTH_RECORD_FLOORS`, section 8.2 |
 | Depth profile | `posting_budget` / `verify_cap` / `candidate_cap` | `normal` = (500K, 3K, 200K), `deep` = (2M, 50K, 500K), `deepest` = (5M, 50K, 500K) | `passage_policy.py::DEPTH_PROFILES`, section 10.2a |
 | Measured noise | letter CER | 20.1% micro, 16.6% median, p25 8.9%, p90 42% | 209-page alignment against human transcriptions |
 | Corpus | records / letters | 948,549 records, 602,598,330 normalized letters, longest record 11,809 | measured 2026-08-20 |

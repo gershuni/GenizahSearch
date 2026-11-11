@@ -666,11 +666,18 @@ _SHARED_WITH_WEB = (
     'Narrow (near-exact)', 'Medium width', 'Wide width',
     'Very wide (default)', 'Maximal (may add noise)',
     'Normal passages (default)', 'Also short passages',
+    'Only long passages',
     'Normal (fast, default)', 'Deep (slower, more witnesses)',
     'Deepest (slowest, most)',
     # The width/length/depth tooltips, ported verbatim
     'How far a manuscript may drift from your text and still match. Wider '
     'finds more noisy witnesses; the strongest matches always rank first.',
+    'Whether a short shared passage counts as a match. "Also short" finds '
+    'piyyutim, quotations and badly damaged copies that share only a phrase '
+    '— measured at roughly double the results for a third fewer correct '
+    'ones, so expect to skim more.',
+    '"Only long" keeps only manuscripts whose match covers at least 120 '
+    'letters of your text (half of it, if your text is shorter).',
     'How much of the corpus the search may examine. Deeper searches take '
     'seconds longer and return more manuscripts \u2014 including badly '
     'damaged and reworked copies a fast pass misses. Long texts benefit '
@@ -1502,7 +1509,7 @@ class _Spin:
 _WIDTHS = [('standard-40', 'W-STD'), ('wide-40', 'W-WIDE'),
            ('wider-40', 'W-WIDER'), ('widest-40', 'W-WIDEST'),
            ('max-40', 'W-MAX')]
-_LENGTHS = [('normal', 'L-NORMAL'), ('short', 'L-SHORT')]
+_LENGTHS = [('normal', 'L-NORMAL'), ('short', 'L-SHORT'), ('long', 'L-LONG')]
 _DEPTHS = [('normal', 'D-NORMAL'), ('deep', 'D-DEEP'),
            ('deepest', 'D-DEEPEST')]
 _MODES = [('exact', 'M-EXACT'), ('variants', 'M-VARIANTS'),
@@ -3240,3 +3247,30 @@ def test_the_restore_honours_a_parked_letter_level_choice():
         'index loaded first')
     assert (body.index('_honour_deferred_comp_method()')
             < body.index('_apply_default_comp_method()'))
+
+
+def test_the_desktop_length_combo_offers_every_profile_in_the_webs_order():
+    """The desktop's Passage length keys reach compose() as they are, so a key
+    with no profile would fail the search; and the order matches the web's
+    select (normal, short, long), so 'normal' stays at index 0, the default."""
+    import re
+
+    from shared.passage_policy import LENGTH_PROFILES
+    src = _app_source()
+    start = src.index('self.comp_passage_length_combo = QComboBox()')
+    block = src[start:src.index('.addItem(_lbl, _val)', start)]
+    keys = re.findall(r"\('(\w+)', tr\(", block)
+    assert keys == ['normal', 'short', 'long']
+    assert set(keys) == set(LENGTH_PROFILES)
+
+
+@pytest.mark.parametrize('rel_path, label', [
+    ('Help.html', '"Only long passages"'),
+    ('Help.html', '"רק קטעים ארוכים"'),
+    (os.path.join('web', 'pages', 'help.py'), '**Only long passages**'),
+    (os.path.join('web', 'pages', 'help.py'), '**רק קטעים ארוכים**'),
+])
+def test_help_names_only_long_passages_by_its_label(rel_path, label):
+    """Help uses the control's exact label, in both languages, on both apps."""
+    text = io.open(os.path.join(REPO_ROOT, rel_path), encoding='utf-8').read()
+    assert label in text

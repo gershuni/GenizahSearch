@@ -1439,6 +1439,11 @@ def create_parallels_page(initial_text: str = None):
                             options={
                                 'normal': tr('Normal passages (default)'),
                                 'short': tr('Also short passages'),
+                                # 2026-11-11: a floor on each manuscript's
+                                # matched letters, min(120, half the text)
+                                # (LENGTH_RECORD_FLOORS in
+                                # shared/passage_policy.py, with its numbers).
+                                'long': tr('Only long passages'),
                             },
                             value='normal',
                             label=tr('Passage length'),
@@ -1449,6 +1454,10 @@ def create_parallels_page(initial_text: str = None):
                             'damaged copies that share only a phrase — measured '
                             'at roughly double the results for a third fewer '
                             'correct ones, so expect to skim more.'
+                        ) + ' ' + tr(
+                            '"Only long" keeps only manuscripts whose match '
+                            'covers at least 120 letters of your text (half of '
+                            'it, if your text is shorter).'
                         ))
                         # The THIRD axis (2026-08-24): search depth. The
                         # engine's default budgets were tuned on short

@@ -3559,13 +3559,14 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `_boundary_one_sided` (Line 48)
 - **Function** `_boundary_two_sided` (Line 54)
 - **Class** `PassagePolicy` (Line 64) — Everything about a query that can change its results.
-    - Method `__post_init__` (Line 102)
-    - Property `policy_id` (Line 122) — Content hash over every field. Stable across processes and runs.
-    - Method `as_dict` (Line 143)
-    - Method `max_density` (Line 150)
-    - Method `accepts` (Line 156)
-- **Function** `compose` (Line 303) — A width preset plus a passage-length profile plus a search depth,
-- **Function** `get_preset` (Line 351)
+    - Method `__post_init__` (Line 110)
+    - Property `policy_id` (Line 132) — Content hash over every field. Stable across processes and runs.
+    - Method `as_dict` (Line 157)
+    - Method `max_density` (Line 164)
+    - Method `accepts` (Line 170)
+    - Method `record_floor` (Line 176) — The least score a record needs for this query: min_record_letters,
+- **Function** `compose` (Line 355) — A width preset plus a passage-length profile plus a search depth,
+- **Function** `get_preset` (Line 404)
 
 ## shared/arabic_normalize.py
 

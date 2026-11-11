@@ -890,8 +890,28 @@ def test_the_page_offers_a_passage_length_control():
     src = inspect.getsource(pp.create_parallels_page)
     assert 'passage_length = ui.select(' in src
     block = src[src.index('passage_length = ui.select('):][:900]
-    assert "'normal'" in block and "'short'" in block
+    assert "'normal'" in block and "'short'" in block and "'long'" in block
     assert "value='normal'" in block, 'normal must remain the default'
+
+
+def test_every_offered_passage_length_is_a_profile_compose_accepts():
+    """The select's keys reach compose() unchanged: a key with no profile
+    would raise there and take the search down. Read from the page's own
+    options dict, so a fourth choice added to one side only fails here."""
+    import ast
+    import inspect
+
+    import web.pages.parallels as pp
+    from shared.passage_policy import LENGTH_PROFILES, compose
+    src = inspect.getsource(pp.create_parallels_page)
+    start = src.index('passage_length = ui.select(')
+    opts = src.index('options=', start)
+    dict_src = src[src.index('{', opts):src.index('}', opts) + 1]
+    keys = [k.value for k in ast.parse(dict_src, mode='eval').body.keys]
+    assert keys == ['normal', 'short', 'long']
+    assert set(keys) == set(LENGTH_PROFILES)
+    for k in keys:
+        compose('widest-40', k)
 
 
 def test_passage_length_is_captured_at_dispatch_and_reaches_the_searcher():

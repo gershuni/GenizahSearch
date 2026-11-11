@@ -1273,7 +1273,9 @@ Three controls shape the result:
 - **Passage length** \u2014 whether a short shared passage also counts.
   **Normal passages (default)** keeps only substantial overlap;
   **Also short passages** adds formulaic phrases, quotations and badly damaged
-  copies, at roughly double the results for a third fewer correct ones.
+  copies, at roughly double the results for a third fewer correct ones;
+  **Only long passages** keeps only manuscripts whose match covers at least 120
+  letters of your text (half of it, if your text is shorter).
 - **Search depth** \u2014 how deep the engine looks. Deeper settings find more and
   cost proportionally more time (roughly one second, six seconds and twenty
   seconds per search).
@@ -2064,7 +2066,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 שלוש הגדרות קובעות את התוצאה:
 
 - **רוחב התאמה** – כמה קרוב חייב קטע להיות כדי להיספר. רוחב צר מוצא טקסט כמעט זהה; הגדרות רחבות יותר מקבלות יותר שונות וגם יותר רעש.
-- **אורך הקטע** – האם גם קטע משותף קצר נחשב התאמה. האפשרות **קטעים רגילים (ברירת מחדל)** משאירה רק חפיפה משמעותית; האפשרות **גם קטעים קצרים** מוסיפה צירופים נוסחאיים, ציטוטים ועותקים פגומים מאוד – בערך פי שניים תוצאות, תמורת שליש פחות תוצאות נכונות.
+- **אורך הקטע** – האם גם קטע משותף קצר נחשב התאמה. האפשרות **קטעים רגילים (ברירת מחדל)** משאירה רק חפיפה משמעותית; האפשרות **גם קטעים קצרים** מוסיפה צירופים נוסחאיים, ציטוטים ועותקים פגומים מאוד – בערך פי שניים תוצאות, תמורת שליש פחות תוצאות נכונות; האפשרות **רק קטעים ארוכים** משאירה רק כתבי יד שההתאמה בהם מכסה 120 אותיות לפחות מהטקסט שלך (או מחציתו, אם הוא קצר יותר).
 - **עומק החיפוש** – כמה עמוק המנוע מחפש. הגדרות עמוקות יותר מוצאות יותר, ועולות בזמן בהתאם (בערך שנייה, שש שניות ועשרים שניות לחיפוש).
             ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 

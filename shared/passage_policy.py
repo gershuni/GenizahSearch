@@ -97,6 +97,14 @@ class PassagePolicy:
     # rejected_density absorbs every one. The pair (min_span, verify_margin)
     # has to move together, which is why this is policy and not a constant.
     verify_margin: int = 30
+    # Least matched letters a RECORD must reach to be returned (its score,
+    # `PassageHit.matched_letters`), capped at half the query's letters so a
+    # short query is never emptied by a floor longer than any match it can
+    # make (see `record_floor`). 0 = no floor, every historical policy. Unlike
+    # min_span, which each verified WINDOW must clear and which the margin
+    # makes nearly inert at 40, this is applied to the merged result, after
+    # verification. The 'long' passage-length profile sets it (2026-11-11).
+    min_record_letters: int = 0
     schema_version: int = POLICY_SCHEMA_VERSION
 
     def __post_init__(self):
@@ -112,6 +120,8 @@ class PassagePolicy:
             raise ValueError('density_scale outside [0.1, 2.0]')
         if self.verify_margin < 0:
             raise ValueError('verify_margin must be >= 0')
+        if self.min_record_letters < 0:
+            raise ValueError('min_record_letters must be >= 0')
         for f_name in ('posting_budget', 'candidate_cap', 'verify_cap'):
             if getattr(self, f_name) <= 0:
                 raise ValueError(f'{f_name} must be positive')
@@ -136,6 +146,10 @@ class PassagePolicy:
         # hash only when moved off that value.
         if self.verify_margin == 30:
             del d['verify_margin']
+        # min_record_letters joined on 2026-11-11, same rule: at 0 the
+        # query behaves exactly as before.
+        if self.min_record_letters == 0:
+            del d['min_record_letters']
         blob = json.dumps(d, sort_keys=True, ensure_ascii=True,
                           separators=(',', ':'))
         return 'pp1-' + hashlib.sha256(blob.encode('ascii')).hexdigest()[:16]
@@ -158,6 +172,13 @@ class PassagePolicy:
         if shorter_span_len < self.min_span:
             return False
         return density <= self.max_density(aligned_len)
+
+    def record_floor(self, query_letters: int) -> float:
+        """The least score a record needs for this query: min_record_letters,
+        or half the query's letters when that is less. 0 means no floor."""
+        if self.min_record_letters <= 0:
+            return 0
+        return min(self.min_record_letters, query_letters / 2)
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +276,40 @@ MAX_40 = PassagePolicy(name='max-40', density_scale=2.0)
 #
 # Score gives no cutoff inside the added rows: the five positives scored
 # 35/35/39/58/255 against noise spanning 31-55. The added tail needs eyes.
+#
+# 'long' (2026-11-11) goes the other way: the normal pair, plus a floor on
+# each RECORD's matched letters, min(120, half the query) -- for wide searches
+# whose list has grown past reading (a user's request: "only long passages",
+# for "Very wide" and "Maximal"). It cannot be a raised min_span: min_span is
+# checked per verified window, margin included, so a span floor of 120 would
+# reject the windows of a long match that verification happened to split.
+# Measured on the production index (702,466 records):
+#
+#   398 FGP queries (the owner-graded decks' queries; each query's own
+#   manuscript is a known true match, 152 rows carry an owner grade):
+#     widest-40      rows -45%, own manuscript lost 1/369, owner-good 7/151
+#     max-40         rows -49%, own manuscript lost 1/375, owner-good 8/152
+#     max-40+deep    rows -45%, own manuscript lost 1/375, owner-good 6/153
+#   A flat 150 lost 9% of own manuscripts and ~30% of owner-good rows; a flat
+#   120 lost them on queries under 300 letters -- hence the half-query cap.
+#   The removed rows are ungraded: "almost no known match lost", not "all
+#   noise removed".
+#
+#   Antiochus (83 positives, the only graded tail):
+#     max-40         67 mss / 58 positives  ->  56 / 52
+#     max-40+deep   115 mss / 60 positives  ->  73 / 53
+#   Maximal's added noise is mostly HIGH-DENSITY (26 of 27 noise rows at
+#   >= 0.6 edit density, against 5 of 52 witnesses), not short: widest-40+deep
+#   with no floor (58 mss, 55 positives) beats max-40+deep+long there.
 LENGTH_PROFILES = {
     'normal': (40, 30),   # the historical pair; every width preset's default
     'short': (28, 12),    # measured 2026-08-24, see above
+    'long': (40, 30),     # the normal pair; its floor is in LENGTH_RECORD_FLOORS
+}
+# Per-record matched-letter floor of a length profile (PassagePolicy.
+# min_record_letters); a profile not listed here has none.
+LENGTH_RECORD_FLOORS = {
+    'long': 120,          # measured 2026-11-11, see above
 }
 DEFAULT_LENGTH = 'normal'
 
@@ -324,7 +376,8 @@ def compose(width: str, length: str = DEFAULT_LENGTH,
             raise ValueError(f'unknown passage-length profile {length!r}; '
                              f'known: {sorted(LENGTH_PROFILES)}')
         policy = replace(policy, name=f'{policy.name}+{length}',
-                         min_span=min_span, verify_margin=verify_margin)
+                         min_span=min_span, verify_margin=verify_margin,
+                         min_record_letters=LENGTH_RECORD_FLOORS.get(length, 0))
     if depth != DEFAULT_DEPTH:
         try:
             posting_budget, verify_cap, candidate_cap = DEPTH_PROFILES[depth]

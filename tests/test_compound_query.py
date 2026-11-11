@@ -697,3 +697,49 @@ def test_condition_windows_are_page_offsets_of_each_match_unmerged(own_text_inde
     found = s.search_condition(QUOTE_TEXT, sys_ids=(S4, S5))
     assert found.hit_windows[rid(S4, 1, 1)] == ((150, 250),)
     assert sorted(found.hit_windows[rid(S5, 1, 1)]) == [(150, 250), (270, 370)]
+
+
+# -- "Only long passages" never reaches a condition (2026-11-11) -------------------
+
+S_SHORT = '990000000000000777'
+LONG_COND_TEXT = _aperiodic(400, salt=8080)
+
+
+@pytest.fixture(scope='module')
+def short_share_index(tmp_path_factory):
+    """One page sharing only 50 letters of a 400-letter condition text,
+    between unrelated flanks, plus filler."""
+    d = str(tmp_path_factory.mktemp('shortshare'))
+    records = [(rid(S_SHORT, 1, 1), _aperiodic(150, salt=31)
+                + LONG_COND_TEXT[100:150] + _aperiodic(150, salt=32))]
+    for n in range(20):
+        records.append((rid(f'99{n + 6000:016d}', 6000 + n, 1),
+                        _aperiodic(300, salt=1900 + n)))
+    build_index(records, d, partitions=2, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    clear_cache()
+    yield idx
+    clear_cache()
+
+
+def test_a_condition_finds_a_short_passage_under_only_long(short_share_index):
+    """The record floor chooses which manuscripts the MAIN text returns. A
+    condition must find its text wherever it occurs: under the floor a "must
+    not appear" text present only as a short passage would go unseen, and the
+    manuscript would be kept."""
+    from shared.passage_policy import compose
+    idx = short_share_index
+    page = rid(S_SHORT, 1, 1)
+    open_hits, _ = search_passage(idx, LONG_COND_TEXT, get_preset('max-40'))
+    scores = {h.record_id: h.score for h in open_hits}
+    assert page in scores and scores[page] < 120, (
+        'fixture: the page must match, and under the 120-letter floor')
+    long_policy = compose('max-40', 'long')
+    main_hits, report = search_passage(idx, LONG_COND_TEXT, long_policy)
+    assert page not in {h.record_id for h in main_hits}
+    assert report.rejected_below_floor >= 1
+    found = _searcher(idx, long_policy).search_condition(LONG_COND_TEXT,
+                                                         sys_ids=[S_SHORT])
+    assert page in found.hit_record_ids
+    assert found.report['rejected_below_floor'] == 0
