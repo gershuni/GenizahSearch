@@ -104,6 +104,8 @@ async function fetchFlIdsFromManifest(sysId) {
  * native source is another library (Oxford), swap the credit footer to the NLI
  * credit + link. Server-side (browse.py) renders both variants as data attributes.
  */
+// Called with 'nli' when the viewer falls back to NLI for an Oxford image, or for any
+// <img data-credit-fallback="nli"> (a Cambridge or other library image in Quick View).
 function switchImageCredit(source) {
     try {
         const lbl = document.querySelector('[data-role="image-credit"]');
@@ -156,7 +158,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
             img.src = newUrl;
             img.onload = function() {
                 console.log('Manifest-based image loaded, initializing viewer');
-                if (isOxford) switchImageCredit('nli');
+                if (isOxford || img.dataset.creditFallback === 'nli') switchImageCredit('nli');
                 if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
             };
             return;
@@ -176,7 +178,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
         img.src = proxyUrl;
         img.onload = function() {
             console.log('Server proxy image loaded');
-            if (isOxford) switchImageCredit('nli');
+            if (isOxford || img.dataset.creditFallback === 'nli') switchImageCredit('nli');
             if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
         };
         return;
@@ -225,23 +227,31 @@ function progressiveLoad(img) {
     var container = img.closest('.img-loading-container');
     var fullSrc = img.getAttribute('data-full-src');
     // Mark loaded on first successful paint
-    img.addEventListener('load', function onThumbLoad() {
+    function onThumbLoad() {
         if (container) container.classList.add('img-loaded');
         img.removeEventListener('load', onThumbLoad);
-        // Upgrade to full resolution if available
-        if (fullSrc && img.src !== fullSrc) {
+        // Upgrade to full resolution if available -- but not after handleImageError fell
+        // back to NLI: the image on screen is then NLI's full one, and the upgrade would put
+        // back the library image whose thumbnail failed, under the NLI credit it switched to
+        // (Codex review, 2026-11-11).
+        if (fullSrc && img.src !== fullSrc && !img.dataset.triedManifest && !img.dataset.triedServerProxy) {
             var full = new Image();
             full.onload = function() {
                 img.src = fullSrc;
             };
             full.src = fullSrc;
         }
-    });
+    }
+    img.addEventListener('load', onThumbLoad);
     // Also mark loaded on error (hide spinner)
     img.addEventListener('error', function onErr() {
         if (container) container.classList.add('img-loaded');
         img.removeEventListener('error', onErr);
     });
+    // A thumbnail from the browser's cache can finish loading before this runs (Quick View
+    // calls initProgressiveImages 200 ms after drawing the image): its load event is gone,
+    // so the image would stay at 400 px. Treat it as loaded now (2026-11-11).
+    if (img.complete && img.naturalWidth > 0) onThumbLoad();
 }
 
 /**

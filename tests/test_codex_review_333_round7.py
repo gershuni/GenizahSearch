@@ -78,6 +78,10 @@ class TestAdvancedNliCreditIsNonEmpty:
         m = re.search(r"_adv_credit_nli = (.+)", src)
         assert m, "_adv_credit_nli not found"
         value = m.group(1).split("#")[0].strip()
+        if value.isidentifier():  # a module constant (QUICK_VIEW_NLI_CREDIT, 2026-11-11)
+            c = re.search(rf"^{value} = (.+)", src, re.M)
+            assert c, f"{value} not defined in {SRC}"
+            value = c.group(1).split("#")[0].strip()
         assert value not in ("''", '""'), (
             "switchImageCredit() skips a falsy value, so an empty credit leaves "
             "the Bodleian label in place after the NLI fallback"

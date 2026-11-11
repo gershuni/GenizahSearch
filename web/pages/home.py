@@ -17,6 +17,7 @@ from web.state import state
 from web.supabase_client import get_user_client
 from web.auth_state import GlobalAuthState
 from web.client_guard import client_gone, show_load_error
+from web.client_nav import go_to_js
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
 from web.atlas_assets import atlas_preview_available
@@ -225,7 +226,7 @@ def create_page():
             for icon_name, label, href, marker in _chips:
                 chip = ui.row().classes('items-center gap-1 px-2 py-1 cursor-pointer hover:shadow-sm transition-all').style(
                     'border: 1px solid var(--border-light); border-radius: 16px; background: var(--bg-tertiary);'
-                ).on('click', lambda h=href: ui.navigate.to(h))
+                ).on('click', js_handler=go_to_js(href))
                 if marker:
                     chip.mark(marker)
                 with chip:
@@ -351,7 +352,7 @@ def create_page():
         _slide_cards = []
         for i, slide in enumerate(_slides_data):
             card = ui.card().classes(_card_classes).props('role=button tabindex=0').style(_card_style)
-            card.on('click', lambda link=slide['link']: ui.navigate.to(link))
+            card.on('click', js_handler=go_to_js(slide['link']))
             if slide.get('mark'):
                 card.mark(slide['mark'])
             if i > 0:
@@ -445,7 +446,7 @@ def create_page():
             # Search Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/search')).on('keydown.enter', lambda: ui.navigate.to('/search')).on('keydown.space', lambda: ui.navigate.to('/search')):
+            ).on('click', js_handler=go_to_js('/search')).on('keydown.enter', js_handler=go_to_js('/search')).on('keydown.space', js_handler=go_to_js('/search')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, var(--primary-600), var(--primary-700));'
@@ -466,7 +467,7 @@ def create_page():
             # Parallels Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/parallels')).on('keydown.enter', lambda: ui.navigate.to('/parallels')).on('keydown.space', lambda: ui.navigate.to('/parallels')):
+            ).on('click', js_handler=go_to_js('/parallels')).on('keydown.enter', js_handler=go_to_js('/parallels')).on('keydown.space', js_handler=go_to_js('/parallels')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #3b82f6, #1d4ed8);'
@@ -487,9 +488,9 @@ def create_page():
             # Joins Lab Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/joins-lab')).on(
-                'keydown.enter', lambda: ui.navigate.to('/joins-lab')
-            ).on('keydown.space', lambda: ui.navigate.to('/joins-lab')).mark('joins-lab-tool-card'):
+            ).on('click', js_handler=go_to_js('/joins-lab')).on(
+                'keydown.enter', js_handler=go_to_js('/joins-lab')
+            ).on('keydown.space', js_handler=go_to_js('/joins-lab')).mark('joins-lab-tool-card'):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #0f766e, #115e59);'
@@ -510,7 +511,7 @@ def create_page():
             # Browse by Shelfmark Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/browse')).on('keydown.enter', lambda: ui.navigate.to('/browse')).on('keydown.space', lambda: ui.navigate.to('/browse')):
+            ).on('click', js_handler=go_to_js('/browse')).on('keydown.enter', js_handler=go_to_js('/browse')).on('keydown.space', js_handler=go_to_js('/browse')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #f59e0b, #d97706);'
@@ -531,7 +532,7 @@ def create_page():
             # Browse by Identification Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/catalog-browse')).on('keydown.enter', lambda: ui.navigate.to('/catalog-browse')).on('keydown.space', lambda: ui.navigate.to('/catalog-browse')):
+            ).on('click', js_handler=go_to_js('/catalog-browse')).on('keydown.enter', js_handler=go_to_js('/catalog-browse')).on('keydown.space', js_handler=go_to_js('/catalog-browse')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #8b5cf6, #6d28d9);'
@@ -555,10 +556,10 @@ def create_page():
             if _discovery_ready:
                 with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                     'role=button tabindex=0'
-                ).on('click', lambda: ui.navigate.to('/computed-identifications')).on(
-                    'keydown.enter', lambda: ui.navigate.to('/computed-identifications')
+                ).on('click', js_handler=go_to_js('/computed-identifications')).on(
+                    'keydown.enter', js_handler=go_to_js('/computed-identifications')
                 ).on(
-                    'keydown.space', lambda: ui.navigate.to('/computed-identifications')
+                    'keydown.space', js_handler=go_to_js('/computed-identifications')
                 ).mark('computed-tool-card'):
                     with ui.column().classes('w-full'):
                         with ui.row().classes('w-full p-3 items-center gap-3').style(
@@ -580,7 +581,7 @@ def create_page():
             # Community Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/discoveries')).on('keydown.enter', lambda: ui.navigate.to('/discoveries')).on('keydown.space', lambda: ui.navigate.to('/discoveries')):
+            ).on('click', js_handler=go_to_js('/discoveries')).on('keydown.enter', js_handler=go_to_js('/discoveries')).on('keydown.space', js_handler=go_to_js('/discoveries')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #ec4899, #be185d);'
@@ -608,7 +609,7 @@ def create_page():
             if _atlas_ready:
                 with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                     'role=button tabindex=0'
-                ).on('click', lambda: ui.navigate.to('/atlas')).on('keydown.enter', lambda: ui.navigate.to('/atlas')).on('keydown.space', lambda: ui.navigate.to('/atlas')).mark('atlas-teaser-card'):
+                ).on('click', js_handler=go_to_js('/atlas')).on('keydown.enter', js_handler=go_to_js('/atlas')).on('keydown.space', js_handler=go_to_js('/atlas')).mark('atlas-teaser-card'):
                     with ui.column().classes('w-full'):
                         with ui.row().classes('w-full p-3 items-center gap-3').style(
                             'background: linear-gradient(135deg, #14b8a6, #0f766e);'
@@ -632,7 +633,7 @@ def create_page():
             # Personal Lists
             with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/lists')).on('keydown.enter', lambda: ui.navigate.to('/lists')).on('keydown.space', lambda: ui.navigate.to('/lists')):
+            ).on('click', js_handler=go_to_js('/lists')).on('keydown.enter', js_handler=go_to_js('/lists')).on('keydown.space', js_handler=go_to_js('/lists')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: var(--primary-100);'):
                         ui.icon('star').classes('text-2xl').style('color: var(--primary-700);')
@@ -646,7 +647,7 @@ def create_page():
             # Lab Settings
             with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/settings')).on('keydown.enter', lambda: ui.navigate.to('/settings')).on('keydown.space', lambda: ui.navigate.to('/settings')):
+            ).on('click', js_handler=go_to_js('/settings')).on('keydown.enter', js_handler=go_to_js('/settings')).on('keydown.space', js_handler=go_to_js('/settings')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: #dbeafe;'):
                         ui.icon('tune').classes('text-2xl text-blue-700')
@@ -660,7 +661,7 @@ def create_page():
             # Help Center
             with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/help')).on('keydown.enter', lambda: ui.navigate.to('/help')).on('keydown.space', lambda: ui.navigate.to('/help')):
+            ).on('click', js_handler=go_to_js('/help')).on('keydown.enter', js_handler=go_to_js('/help')).on('keydown.space', js_handler=go_to_js('/help')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: #fef3c7;'):
                         ui.icon('help_center').classes('text-2xl text-amber-700')
@@ -674,7 +675,7 @@ def create_page():
             # Desktop App
             with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
-            ).on('click', lambda: ui.navigate.to('/download')).on('keydown.enter', lambda: ui.navigate.to('/download')).on('keydown.space', lambda: ui.navigate.to('/download')):
+            ).on('click', js_handler=go_to_js('/download')).on('keydown.enter', js_handler=go_to_js('/download')).on('keydown.space', js_handler=go_to_js('/download')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: #e0e7ff;'):
                         ui.icon('download').classes('text-2xl text-indigo-700')
@@ -690,7 +691,7 @@ def create_page():
                 # Changed to H2
                 h2(tr('Recent Activity'), classes='text-lg font-bold', style='color: var(--text-primary);')
                 ui.button(tr('View All'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('flat dense').on(
-                    'click', lambda: ui.navigate.to('/lists')
+                    'click', js_handler=go_to_js('/lists')
                 )
 
             # Recent items container (min-height reserves space so the async
@@ -730,7 +731,7 @@ def create_page():
 
                                 with ui.card().classes('p-4 min-w-48 cursor-pointer hover:shadow-md transition-all').props(
                                     'role=button tabindex=0'
-                                ).on('click', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')).on('keydown.enter', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')).on('keydown.space', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')):
+                                ).on('click', js_handler=go_to_js(f'/browse?sys_id={sys_id}')).on('keydown.enter', js_handler=go_to_js(f'/browse?sys_id={sys_id}')).on('keydown.space', js_handler=go_to_js(f'/browse?sys_id={sys_id}')):
                                     ui.label(shelfmark).classes('font-semibold truncate').style(
                                         'color: var(--primary-700); max-width: 180px;'
                                     )

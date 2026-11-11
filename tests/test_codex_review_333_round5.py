@@ -19,25 +19,24 @@ def _read(path):
 SRC = "web/pages/search_results.py"
 
 
+def _footer_block(src):
+    i = src.index("# Attribution footer")
+    return src[i:src.index("adv_state.image_credit_el = _adv_credit_lbl", i)]
+
+
 class TestAdvancedViewCreditIsSwitchable:
     def test_footer_renders_the_switchable_metadata(self):
-        src = _read(SRC)
-        i = src.index("# Attribution footer")
-        block = src[i:i + 2200]
+        block = _footer_block(_read(SRC))
         assert 'data-role="image-credit"' in block
         assert "data-credit-oxford=" in block
         assert "data-credit-nli=" in block
 
     def test_both_credit_variants_are_html_escaped(self):
-        src = _read(SRC)
-        i = src.index("# Attribution footer")
-        block = src[i:i + 2200]
+        block = _footer_block(_read(SRC))
         assert block.count("html.escape(") == 2, "both attribute values must be escaped"
 
     def test_the_nli_variant_is_not_the_oxford_credit(self):
-        src = _read(SRC)
-        i = src.index("# Attribution footer")
-        block = src[i:i + 2200]
+        block = _footer_block(_read(SRC))
         assert "_adv_credit_nli" in block
         m = re.search(r"data-credit-nli=\"\{html\.escape\((\w+),", block)
         assert m and m.group(1) == "_adv_credit_nli"
@@ -45,8 +44,10 @@ class TestAdvancedViewCreditIsSwitchable:
         assert m2 and m2.group(1) == "attribution"
 
     def test_the_image_still_runs_the_shared_error_chain(self):
-        src = _read(SRC)
-        assert "handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')" in src
+        from web.pages.search_results import quick_view_img_html
+        img = quick_view_img_html('/api/oxford_image/990000000000205171?page=2', '990000000000205171', 2,
+                                  is_oxford=True)
+        assert "handleImageError(this, '990000000000205171', 2, true, 'advViewer')" in img
 
     def test_module_imports_html(self):
         src = _read(SRC)
@@ -54,12 +55,13 @@ class TestAdvancedViewCreditIsSwitchable:
         imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
         assert "html" in imported
 
-    def test_metadata_is_only_emitted_for_oxford_pages(self):
-        # A non-Oxford manuscript has nothing to switch away from; keep the DOM clean.
+    def test_metadata_is_only_emitted_for_pages_whose_image_can_fall_back(self):
+        # An NLI image has nothing to switch away from; keep the DOM clean. Oxford's image and
+        # a library's own (Cambridge, ...) fall back to NLI (2026-11-11).
         src = _read(SRC)
         i = src.index("_adv_credit_lbl = ui.label(attribution)")
         window = src[i:i + 700]
-        gate = window.index("if is_oxford:")
+        gate = window.index("if is_oxford or library_image_credit:")
         props = window.index("_adv_credit_lbl.props(")
         assert gate < props
 

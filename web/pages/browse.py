@@ -10,6 +10,7 @@ Features:
 - Metadata header with external links
 """
 
+import json
 import logging
 import time
 
@@ -702,31 +703,85 @@ def _document_transcription_html(full_text: str) -> str:
     )
 
 
+class _JsClick(str):
+    """A click handler in JavaScript, run in the browser (``js_handler``), as opposed to a URL."""
+
+
+def _open_in_new_tab(btn, target):
+    """Make ``btn`` open a library's viewer in a new tab IN THE BROWSER, with no server
+    round trip. ``target``: the URL (the button becomes a link), or a :class:`_JsClick`
+    (:func:`_nli_viewer_open_js`).
+
+    These buttons used to call ``ui.run_javascript('window.open(...)')`` from the server:
+    the tab opened only after a round trip to the server, and a browser blocks a
+    ``window.open`` that comes that long after the click (about a second in Firefox and
+    Safari, five in Chrome) -- the "NLI / CUDL button does nothing" of 2026-11-11.
+    """
+    if isinstance(target, _JsClick):
+        btn.on('click', js_handler=str(target))
+    else:
+        btn.props['href'] = target
+        btn.props['target'] = '_blank'
+        btn.props['rel'] = 'noopener noreferrer'
+    return btn
+
+
+def _nli_viewer_open_js(sys_id: str, page_idx: int) -> _JsClick:
+    """The click handler that opens this page in NLI's viewer (Ktiv) in a new tab.
+
+    The tab is opened during the click itself, so no popup blocker stops it, and is sent
+    to the page's own image once ``/api/fl_ids`` names it -- or to the manuscript after
+    4 seconds without an answer.
+    """
+    base = ('https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage'
+            f'?vid=MANUSCRIPTS&docid=PNX_MANUSCRIPTS{sys_id}-1')
+    return _JsClick(
+        '() => {'
+        f' const base = {json.dumps(base)}, idx = {int(page_idx)};'
+        ' const w = window.open("", "_blank");'
+        ' if (!w) return;'
+        ' try { w.opener = null; } catch (e) {}'
+        ' let done = false;'
+        ' const go = (fl) => { if (done) return; done = true;'
+        ' w.location.href = base + (fl ? ",FL" + fl : ""); };'
+        ' setTimeout(() => go(""), 4000);'
+        f' fetch({json.dumps("/api/fl_ids/" + sys_id)})'
+        '.then((r) => r.ok ? r.json() : [])'
+        '.then((ids) => { const list = Array.isArray(ids) ? ids : ((ids && ids.fl_ids) || []);'
+        ' go(list.length > idx ? list[idx] : ""); })'
+        '.catch(() => go(""));'
+        ' }'
+    )
+
+
 def _source_chip(label: str, on_click, style: str, tooltip: str, *, opens_external: bool):
     """One viewer-source chip ("NLI", "Cambridge", ...) on the folio toolbar.
 
     A chip that opens the library's own viewer in a new tab carries
-    ``open_in_new`` after its name, and so needs no separate icon button. A chip
-    that switches the images shown here carries ``image``, on wide screens
+    ``open_in_new`` after its name, and so needs no separate icon button; its
+    ``on_click`` is then the URL or the click JavaScript (:func:`_open_in_new_tab`).
+    A chip that switches the images shown here carries ``image``, on wide screens
     only: the library's name is what tells the chips apart.
     """
-    btn = ui.button(label, on_click=on_click).props(
+    btn = ui.button(label, on_click=None if opens_external else on_click).props(
         'flat dense size=sm no-caps'
     ).classes('text-xs px-2 py-0').style(style).tooltip(tooltip)
     if opens_external:
         btn.props('icon-right=open_in_new')
+        _open_in_new_tab(btn, on_click)
     else:
         btn.props('icon=image').classes('browse-icon-wide')
     return btn
 
 
-def _source_external_button(on_click, color: str, tooltip: str):
-    """The icon-only "open in the library's viewer" button beside a switching chip."""
-    btn = ui.button(icon='open_in_new', on_click=on_click).props(
+def _source_external_button(target: str, color: str, tooltip: str):
+    """The icon-only "open in the library's viewer" button beside a switching chip.
+    ``target``: the URL, or the click JavaScript (:func:`_open_in_new_tab`)."""
+    btn = ui.button(icon='open_in_new').props(
         'flat round dense size=xs'
     ).style(f'min-width: 20px; min-height: 20px; color: {color}; opacity: 0.8;').tooltip(tooltip)
     btn.props['aria-label'] = tooltip  # set directly: a translation may hold a quote
-    return btn
+    return _open_in_new_tab(btn, target)
 
 
 def _external_link(text: str, url: str):
@@ -4288,51 +4343,42 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _is_jts_active = state.active_source == 'jts' and _has_jts_images
                 _is_oxford_active = state.active_source == 'oxford' and _has_oxford_images
 
-                async def switch_to_nli():
-                    state.active_source = 'nli'
+                async def _switch_source(source):
+                    """Show another library's image of this page. Only the image changes:
+                    the page and its enrichment are already here, so it is drawn again
+                    from them. It used to reload both (load_page): the page dimmed, then
+                    every enrichment source was asked again and the whole page rebuilt a
+                    second time, seconds later (2026-11-11)."""
+                    state.active_source = source
                     state.source_user_override = True
-                    await load_page(direction=0)
+                    if state.current_page is not None and not state.is_loading:
+                        state.zoom_level = 1.0
+                        update_content()
+                        _run_page_javascript(
+                            'if(window.manuscriptViewer) { window.manuscriptViewer.resetAdjustments();'
+                            ' window.manuscriptViewer.fit(); }')
+                    else:  # no page yet: load it, in the chosen source
+                        await load_page(direction=0)
+
+                async def switch_to_nli():
+                    await _switch_source('nli')
 
                 async def switch_to_cambridge():
-                    state.active_source = 'cambridge'
-                    state.source_user_override = True
-                    await load_page(direction=0)
+                    await _switch_source('cambridge')
 
                 async def switch_to_manchester():
-                    state.active_source = 'manchester'
-                    state.source_user_override = True
-                    await load_page(direction=0)
+                    await _switch_source('manchester')
 
                 async def switch_to_jts():
-                    state.active_source = 'jts'
-                    state.source_user_override = True
-                    await load_page(direction=0)
+                    await _switch_source('jts')
 
                 async def switch_to_oxford():
-                    state.active_source = 'oxford'
-                    state.source_user_override = True
-                    await load_page(direction=0)
+                    await _switch_source('oxford')
 
                 # NLI viewer deep link handler
+                # (opened in the browser, not by a round trip: _open_in_new_tab)
                 if _has_nli:
-                    _nli_sys_id = page.sys_id
-                    _nli_page_idx = page_idx
-
-                    async def open_nli_viewer(sys_id=_nli_sys_id, pidx=_nli_page_idx):
-                        js = f'''
-                        (async () => {{
-                            let docid = "PNX_MANUSCRIPTS{sys_id}-1";
-                            try {{
-                                const resp = await fetch("/api/fl_ids/{sys_id}");
-                                if (resp.ok) {{
-                                    const flIds = await resp.json();
-                                    if (flIds.length > {pidx}) docid += ",FL" + flIds[{pidx}];
-                                }}
-                            }} catch(e) {{}}
-                            window.open("https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid=" + docid, "_blank");
-                        }})()
-                        '''
-                        await ui.run_javascript(js)
+                    open_nli_viewer = _nli_viewer_open_js(page.sys_id, page_idx)
 
                 # `print-hide`: source chips, external links and page controls
                 # are navigation, not content. The folio label they sit beside
@@ -4384,7 +4430,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if _is_cambridge_active else
                                         'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; color: #2196f3; font-weight: 600;'
                                     )
-                                    _open_cudl = lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    _open_cudl = cudl_url  # a link: opens in the browser (_open_in_new_tab)
                                     if _both_sources:
                                         _source_chip(
                                             'Cambridge', switch_to_cambridge, cudl_style,
@@ -4412,7 +4458,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 lib_viewer = page.library_viewer_url or {}
                                 luna_url = lib_viewer.get('url', '')
                                 if luna_url:
-                                    _open_luna = lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    _open_luna = luna_url  # a link: opens in the browser (_open_in_new_tab)
                                     if not (_has_nli and _has_manchester_images):
                                         _source_chip('Manchester', _open_luna, man_style, tr('Open in Manchester LUNA'), opens_external=True)
                                     else:
@@ -4435,7 +4481,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 lib_viewer_jts = page.library_viewer_url or {}
                                 dpul_url = lib_viewer_jts.get('url', '')
                                 if dpul_url:
-                                    _open_dpul = lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    _open_dpul = dpul_url  # a link: opens in the browser (_open_in_new_tab)
                                     if not (_has_nli and _has_jts_images):
                                         _source_chip('JTS', _open_dpul, jts_style, tr('Open in Princeton Digital Library'), opens_external=True)
                                     else:
@@ -4456,7 +4502,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     )
                                 # External link to Bodleian detail page
                                 if page.external_url:
-                                    _open_bodleian = lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
+                                    _open_bodleian = page.external_url  # a link (_open_in_new_tab)
                                     if not (_has_nli and _has_oxford_images):
                                         _source_chip('Oxford', _open_bodleian, ox_style, tr('Open in Bodleian Libraries'), opens_external=True)
                                     else:

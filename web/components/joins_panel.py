@@ -789,16 +789,17 @@ def create_joins_dialog(
                         # FND-04/05 (D-19): never a dead-end — offer a visible Lab
                         # entry point even with zero known joins.
                         if find_joins_url:
-                            def _open_lab_no_joins():
-                                dialog.close()
-                                ui.navigate.to(find_joins_url, new_tab=True)
-
-                            ui.button(
+                            # A link: the browser opens the tab during the click. A
+                            # window.open sent back from the server after a round trip
+                            # is stopped by popup blockers (2026-11-11).
+                            lab_btn = ui.button(
                                 tr('Find Joins in the Joins Lab'), icon='science',
-                                on_click=_open_lab_no_joins
+                                on_click=dialog.close,
                             ).props('flat color=primary').classes('mt-4').tooltip(
                                 tr('Go to Joins Lab to find more joins')
                             )
+                            lab_btn.props['href'] = find_joins_url
+                            lab_btn.props['target'] = '_blank'
                 else:
                     # Show cluster info
                     ui.label(f"{tr('This fragment is part of a group of')} {total}:").classes(
@@ -1022,16 +1023,15 @@ def create_joins_dialog(
 
                 # Find more joins button (D-19, FND-04/05) — only when Lab URL provided and joins exist
                 if find_joins_url and total > 1:
-                    def _open_lab():
-                        dialog.close()
-                        ui.navigate.to(find_joins_url, new_tab=True)
-
-                    ui.button(
+                    # A link, as "Find Joins in the Joins Lab" above.
+                    lab_btn = ui.button(
                         tr('Find more joins'), icon='science',
-                        on_click=_open_lab
+                        on_click=dialog.close,
                     ).props('flat color=primary').classes('w-full').tooltip(
                         tr('Go to Joins Lab to find more joins')
                     )
+                    lab_btn.props['href'] = find_joins_url
+                    lab_btn.props['target'] = '_blank'
 
                 # Add new join button
                 ui.separator().classes('my-2')

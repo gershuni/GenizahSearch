@@ -174,6 +174,75 @@ def test_chips_that_switch_images_carry_an_image_icon_and_keep_a_named_external_
     _run_browse(SWITCH_PAGE, driver)
 
 
+def _server_click_listeners(element):
+    return [l for l in element._event_listeners.values()
+            if l.element_id == element.id and l.type == 'click' and l.handler is not None]
+
+
+def _js_click_handlers(element):
+    return [l.js_handler for l in element._event_listeners.values()
+            if l.element_id == element.id and l.type == 'click' and l.js_handler]
+
+
+def test_library_viewer_chips_open_in_the_browser_without_a_round_trip():
+    """2026-11-11 ("the NLI / CUDL buttons sometimes do nothing"): they asked the server,
+    which sent back window.open after a round trip -- late enough for a popup blocker.
+    Cambridge is now a link; NLI opens its tab during the click, then fetches the FL id."""
+    async def driver(user):
+        await _open_browse(user, lambda texts: {'NLI', 'Cambridge'} <= set(texts))
+        [cudl] = _button(user, 'Cambridge')
+        assert cudl.props.get('href') == CUDL_URL and cudl.props.get('target') == '_blank', cudl.props
+        assert not _server_click_listeners(cudl)
+        [nli] = _button(user, 'NLI')
+        assert not _server_click_listeners(nli)
+        [js] = _js_click_handlers(nli)
+        assert js.index('window.open(') < js.index(f'fetch("/api/fl_ids/{SID}")'), js
+        assert 'PNX_MANUSCRIPTS' + SID in js
+
+    _run_browse(OPEN_PAGE, driver)
+
+
+def test_the_external_icon_buttons_beside_switching_chips_open_in_the_browser_too():
+    async def driver(user):
+        await _open_browse(user, lambda texts: {'NLI', 'Cambridge'} <= set(texts))
+        external = {b.props.get('aria-label'): b for b in _buttons(user)
+                    if not b.text and b.props.get('icon') == 'open_in_new'}
+        cudl = external['Open in Cambridge Digital Library']
+        assert cudl.props.get('href') == CUDL_URL and not _server_click_listeners(cudl)
+        nli = external['Open in NLI KTIV']
+        assert _js_click_handlers(nli) and not _server_click_listeners(nli)
+
+    _run_browse(SWITCH_PAGE, driver)
+
+
+def _viewer_image_html(user):
+    return ' '.join(e.content for e in _all_elements(user)
+                    if isinstance(e, ui.html) and 'zoomable-image' in (e.content or ''))
+
+
+def test_switching_the_image_source_does_not_load_the_page_again():
+    """The source chips reloaded the page (load_page): the page dimmed, then Phase B asked
+    every enrichment source again and rebuilt the page a second time. Now only the image
+    is drawn again, from the page already loaded."""
+    svc = _service(SWITCH_PAGE)
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: {'NLI', 'Cambridge'} <= set(texts))
+        assert f'/api/nli_image_by_sysid/{SID}' in _viewer_image_html(user)
+        fetches = svc.get_browse_page.call_count
+        [cudl] = _button(user, 'Cambridge')
+        _click(user, cudl)
+        await _wait_until(lambda: f'/api/cambridge_image/{SID}' in _viewer_image_html(user))
+        assert f'/api/cambridge_image/{SID}' in _viewer_image_html(user)
+        await asyncio.sleep(0.3)
+        assert svc.get_browse_page.call_count == fetches, 'the page was fetched again'
+
+    crossref = MagicMock()
+    crossref.is_available.return_value = False
+    with patch.object(browse, 'get_service', return_value=svc),             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref),             patch.object(browse, 'load_connected_fragments_into', AsyncMock()),             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=True),             patch.object(browse.GlobalAuthState, 'get_user_id', return_value=None):
+        _run_home_smoke(driver, lang='en')
+
+
 def test_external_links_carry_open_in_new_after_their_text():
     async def driver(user):
         await _open_browse(user, lambda texts: 'Show Metadata' in texts)

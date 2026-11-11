@@ -1366,6 +1366,9 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     .app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }
 }
 
+/* The logo is a link home (web/client_nav.py): no link colour or underline. */
+.header-logo-link { color: inherit; text-decoration: none; }
+
 /* Ensure logo text doesn't shrink */
 .header-logo-text {
     flex-shrink: 0 !important;

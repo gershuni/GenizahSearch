@@ -378,16 +378,12 @@ def test_teaser_surface(state, monkeypatch):
                 "TEASER/ready FAIL: no element marked 'atlas-teaser-card' on '/' "
                 "even though the atlas is ready."
             )
-            # Links to /atlas: clicking the card navigates to '/atlas'.
-            with patch("nicegui.ui.navigate.to") as nav_mock:
-                _click_element(user, card)
-                assert nav_mock.called, (
-                    "TEASER/ready FAIL: clicking the teaser did not call ui.navigate.to."
-                )
-                assert all(c.args == ("/atlas",) for c in nav_mock.call_args_list), (
-                    f"TEASER/ready FAIL: teaser navigated somewhere other than "
-                    f"'/atlas'. Calls: {nav_mock.call_args_list!r}"
-                )
+            # Links to /atlas: clicking the card goes to '/atlas', in the browser
+            # (web/client_nav.py; no server round trip first).
+            from tests.render_smoke.test_home_teaser_render_smoke import _client_nav_targets
+            assert _client_nav_targets(card).get("click") == "/atlas", (
+                f"TEASER/ready FAIL: the teaser does not go to '/atlas': {_client_nav_targets(card)!r}"
+            )
         else:
             assert card is None, (
                 f"TEASER/{state} FAIL: the teaser card is present while "

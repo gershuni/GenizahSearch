@@ -12,7 +12,7 @@ search_state and refs parameters instead of capturing them via closure.
 """
 from __future__ import annotations
 
-from nicegui import ui, run
+from nicegui import background_tasks, ui, run
 from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
@@ -26,7 +26,6 @@ from web.pages.search_state import (
 )
 from web.services import (
     get_service,
-    get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
 from web.page_count import apply_page_count, count_pages
@@ -149,6 +148,86 @@ def _quick_view_has_reading_view(sys_id, page, current_text) -> bool:
     when the page could not be fetched (``page`` is None), as before.
     """
     return bool(sys_id) and (bool(current_text) or page_has_reading_view(page))
+
+
+# ---------------------------------------------------------------------------
+# Quick View image: the one Browse shows first
+# ---------------------------------------------------------------------------
+
+#: How long Quick View waits for the manuscript's library images before it shows the
+#: NLI image; a later answer that changes the image swaps it in.
+QUICK_VIEW_EXTERNAL_WAIT_S = 2.5
+#: The credit under an NLI image in Quick View (non-empty: switchImageCredit() skips a falsy value).
+QUICK_VIEW_NLI_CREDIT = 'הספרייה הלאומית / National Library of Israel'
+
+
+def quick_view_external_images(sys_id: str) -> dict:
+    """The manuscript's library images for Quick View, tagged with ``sys_id``. BLOCKING:
+    ``resolve_external_images`` may fetch from the libraries; call it off the loop."""
+    from web.components.image_resolution import resolve_external_images
+    ext = dict(resolve_external_images(sys_id) or {})
+    ext['sys_id'] = sys_id
+    try:
+        cached = state.meta_mgr.nli_cache.get(sys_id, {}) if state.meta_mgr else {}
+        ext['attribution'] = (cached or {}).get('attribution', '') or ''
+    except Exception:
+        ext['attribution'] = ''
+    return ext
+
+
+def quick_view_image(sys_id, page_idx, *, page=None, is_oxford=False, shelfmark='',
+                     volume_suffix=1, external=None) -> dict:
+    """Quick View's image, chosen as Browse chooses it (``resolve_image_url``): an aligned
+    Cambridge image, or Manchester / JTS / Oxford, before NLI.
+
+    Quick View used to build the NLI URL itself, so T-S 12.782 opened on NLI's image
+    in Quick View and on Cambridge's in Browse (owner, 2026-11-11). ``external``: from
+    :func:`quick_view_external_images`, used only for the same ``sys_id``; ``page``: the
+    BrowsePage, for its volumes and page count. Returns ``resolve_image_url``'s dict.
+    """
+    from web.components.image_resolution import resolve_image_url
+    if is_synthetic_sys_id(sys_id or ''):
+        # A catalogue-only record keeps Quick View's metadata-only view (Phase 53): Browse
+        # pages through its library images, Quick View could show only the first (Codex).
+        return {'img_url': '', 'has_image': False, 'active_source': 'nli'}
+    ext = external if external and external.get('sys_id') == sys_id else {}
+    alignment = ext.get('cambridge_alignment')
+    if alignment is None and page is not None:
+        alignment = page.cambridge_alignment
+    return resolve_image_url(
+        sys_id=sys_id or '',
+        p_num=page_idx + 1,
+        is_oxford=is_oxford,
+        shelfmark=shelfmark or '',
+        volume_suffix=volume_suffix or 1,
+        cambridge_images=ext.get('cambridge_images') or (page.cambridge_images if page else None),
+        external_provider=ext.get('external_provider') or (page.external_provider if page else ''),
+        cambridge_alignment=alignment,
+        volumes=page.volumes if page else None,
+        total_pages=page.total_pages if page else 0,
+    )
+
+
+def quick_view_img_html(img_url: str, sys_id: str, page_idx: int, *, is_oxford: bool,
+                        credit_falls_back_to_nli: bool = False) -> str:
+    """Quick View's ``<img>``: a 400-px image first, the full one from ``data-full-src``
+    (initProgressiveImages), and handleImageError's NLI fallback on error.
+
+    ``credit_falls_back_to_nli``: a library's image (Cambridge, ...) whose credit must turn
+    to NLI's when the viewer falls back to NLI (manuscript_viewer.js ``data-credit-fallback``).
+    """
+    safe_img_url = html.escape(img_url, quote=True)
+    safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
+    thumb = safe_img_url
+    if img_url.startswith('/api/'):  # every library proxy takes width= (web/api.py)
+        thumb = f"{safe_img_url}{'&amp;' if '?' in img_url else '?'}width=400"
+    fallback = ' data-credit-fallback="nli"' if credit_falls_back_to_nli else ''
+    return (
+        f'<img src="{thumb}" data-full-src="{safe_img_url}" class="adv-zoomable-image"{fallback}'
+        ' style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"'
+        ' draggable="false" onload="if(window.advViewer) window.advViewer.init()"'
+        f''' onerror="handleImageError(this, '{safe_sys_id}', {int(page_idx)}, {'true' if is_oxford else 'false'}, 'advViewer')"/>'''
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1316,6 +1395,43 @@ def open_advanced_dialog(search_state, refs, index, result):
         suffix = resolve_volume_suffix(page.sys_id, adv_state.volume_ie)
         apply_page_count(page, await count_pages(page.sys_id, suffix=suffix, on_late=late))
 
+    async def _apply_late_external_images(task, selected):
+        """The library images came after Quick View drew its image (QUICK_VIEW_EXTERNAL_WAIT_S):
+        if they change the image, swap the image and its credit in place. Only those two: a
+        full render_content would also rebuild the text and put back the default edition
+        the reader may have changed meanwhile (Codex review)."""
+        try:
+            ext = await task
+        except Exception:
+            return
+        if not ext or (adv_state.current_result_idx, adv_state.current_sys_id) != selected:
+            return
+        adv_state.external_images = ext
+        choice, image_el = adv_state.image_choice, adv_state.image_el
+        if not choice or choice[0] != ext.get('sys_id') or image_el is None or image_el.is_deleted:
+            return
+        sys_id, page_idx, img_args, shown = choice
+        chosen = quick_view_image(sys_id, page_idx, external=ext, **img_args)
+        new_url = chosen.get('img_url') or None
+        if not new_url or new_url == shown:
+            return
+        credit = ext.get('attribution', '') if chosen.get('active_source') not in ('nli', 'oxford') else ''
+        image_el.content = quick_view_img_html(new_url, sys_id, page_idx, is_oxford=img_args['is_oxford'],
+                                               credit_falls_back_to_nli=bool(credit))
+        adv_state.image_choice = (sys_id, page_idx, img_args, new_url)
+        credit_el = adv_state.image_credit_el
+        if credit and credit_el is not None and not credit_el.is_deleted:
+            credit_el.text = credit
+            credit_el.props['data-role'] = 'image-credit'
+            credit_el.props['data-credit-oxford'] = credit
+            credit_el.props['data-credit-nli'] = QUICK_VIEW_NLI_CREDIT
+            credit_el.update()
+        try:
+            image_el.client.run_javascript(
+                'setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
+        except Exception:
+            pass  # the dialog is gone
+
     def load_result(idx: int):
         """Load a result into the dialog, updating UI in-place."""
         result = adv_state.results[idx]
@@ -1374,6 +1490,20 @@ def open_advanced_dialog(search_state, refs, index, result):
             def superseded():
                 return (adv_state.current_result_idx, adv_state.current_sys_id) != selected
 
+            # The library images, fetched beside the page so the image is Browse's
+            # (quick_view_image); not again for another page of the same manuscript.
+            ext_task = None
+            ext_deadline = 0.0
+            _ext = adv_state.external_images
+            if (adv_state.current_sys_id and not is_synthetic_sys_id(adv_state.current_sys_id)
+                    and not (_ext and _ext.get('sys_id') == adv_state.current_sys_id)):
+                adv_state.external_images = None
+                ext_task = asyncio.ensure_future(
+                    run.io_bound(quick_view_external_images, adv_state.current_sys_id))
+                # The wait counts from here, not from the end of the reads below: they would
+                # add their own time to it (Codex on #6).
+                ext_deadline = asyncio.get_running_loop().time() + QUICK_VIEW_EXTERNAL_WAIT_S
+
             if adv_state.current_sys_id:
                 page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
                     adv_state.current_sys_id, p_num=adv_state.current_p_num,
@@ -1416,9 +1546,21 @@ def open_advanced_dialog(search_state, refs, index, result):
                         )
                 except Exception:
                     pass  # Enrichment failed for this item; continue with available data
+            external = None
+            if ext_task is not None:
+                try:
+                    left = max(0.0, ext_deadline - asyncio.get_running_loop().time())
+                    external = await asyncio.wait_for(asyncio.shield(ext_task), left)
+                except asyncio.TimeoutError:
+                    background_tasks.create(_apply_late_external_images(ext_task, selected),
+                                            name='quick-view-external-images')
+                except Exception:
+                    logger.debug('Quick View: library images not read', exc_info=True)
             if superseded():
                 return
             adv_state.fjms_data, adv_state.crossref_data = fjms_data, crossref_data
+            if external:
+                adv_state.external_images = external
 
             render_content(result)
             ux_done(_ux_client, 'result_quick_view', 'ok' if adv_state.current_page else 'error',
@@ -1575,6 +1717,7 @@ def open_advanced_dialog(search_state, refs, index, result):
     def render_content(result):
         """Render the main content area."""
         adv_state.content_container.clear()
+        adv_state.image_el = adv_state.image_credit_el = None  # set again below when drawn
 
         # The PGP and FJMS sections are collapsed bars at the foot of the
         # text (`adv-info`), filled in below; the info bar's PGP / FJMS
@@ -1708,20 +1851,19 @@ def open_advanced_dialog(search_state, refs, index, result):
                     if _v['ie_id'] == ie_id:
                         _vol_suffix = _v['suffix']
                         break
-        if is_oxford and sys_id:
-            img_url = get_oxford_direct_image_url(shelfmark, page_idx)
-            if not img_url:
-                img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
-        elif sys_id and is_synthetic_sys_id(sys_id):
-            # Phase 85 D-06: synthetic sys_ids have no NLI image source —
-            # advanced search dialog renders without an image (Phase 53 metadata-only)
-            img_url = None
-            has_image = False
-        elif sys_id:
-            _suffix_param = f'&suffix={_vol_suffix}' if _vol_suffix > 1 else ''
-            img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}{_suffix_param}"
-        else:
-            img_url = None
+        # The image Browse shows first (quick_view_image): an aligned Cambridge image
+        # before NLI's, Oxford's own; a synthetic record only a library's image.
+        _img_args = dict(page=page, is_oxford=is_oxford, shelfmark=shelfmark, volume_suffix=_vol_suffix)
+        _img = quick_view_image(sys_id, page_idx, external=adv_state.external_images,
+                                **_img_args) if sys_id else {}
+        img_url = _img.get('img_url') or None
+        has_image = bool(img_url)
+        image_source = _img.get('active_source', 'nli')
+        adv_state.image_choice = (sys_id, page_idx, _img_args, img_url)
+        _ext_images = adv_state.external_images or {}
+        library_image_credit = (
+            _ext_images.get('attribution', '')
+            if _ext_images.get('sys_id') == sys_id and image_source not in ('nli', 'oxford') else '')
 
         # Get library display name
         library_name = ''
@@ -1870,18 +2012,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=xs text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
                             # Image
-                            safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                            safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
-                            is_oxford_js = 'true' if is_oxford else 'false'
-
-                            _adv_thumb = safe_img_url
-                            _adv_full = safe_img_url
-                            if '/api/nli_image_by_sysid/' in safe_img_url:
-                                _sep = '&' if '?' in safe_img_url else '?'
-                                _adv_thumb = f"{safe_img_url}{_sep}width=400"
                             with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: calc(100% - 48px);'):
-                                img_html = f'''<img src="{_adv_thumb}" data-full-src="{_adv_full}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')"/>'''
-                                ui.html(img_html, sanitize=False)
+                                adv_state.image_el = ui.html(quick_view_img_html(
+                                    img_url, sys_id, page_idx, is_oxford=is_oxford,
+                                    credit_falls_back_to_nli=bool(library_image_credit)), sanitize=False)
                                 ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
                 return  # Exit early for fullscreen mode
@@ -2406,28 +2540,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ).props(f'flat round size=sm text-color=white aria-label="{tr("Image adjustments")}"').tooltip(tr('Image adjustments'))
 
                             # Image display
-                            safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                            safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
-                            is_oxford_js = 'true' if is_oxford else 'false'
-
-                            _adv2_thumb = safe_img_url
-                            _adv2_full = safe_img_url
-                            if '/api/nli_image_by_sysid/' in safe_img_url:
-                                _sep = '&' if '?' in safe_img_url else '?'
-                                _adv2_thumb = f"{safe_img_url}{_sep}width=400"
                             with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: 70vh;'):
-                                img_html = f'''
-                                <img
-                                    src="{_adv2_thumb}"
-                                    data-full-src="{_adv2_full}"
-                                    class="adv-zoomable-image"
-                                    style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"
-                                    draggable="false"
-                                    onload="if(window.advViewer) window.advViewer.init()"
-                                    onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')"
-                                />
-                                '''
-                                ui.html(img_html, sanitize=False)
+                                adv_state.image_el = ui.html(quick_view_img_html(
+                                    img_url, sys_id, page_idx, is_oxford=is_oxford,
+                                    credit_falls_back_to_nli=bool(library_image_credit)), sanitize=False)
                                 ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
                             # Attribution footer. The image above can fall back to NLI
@@ -2437,10 +2553,12 @@ def open_advanced_dialog(search_state, refs, index, result):
                             # credit. `switchImageCredit()` looks these attributes up by
                             # `data-role="image-credit"` (Codex P2, 2026-09-02); there is
                             # no link element here, and the helper tolerates its absence.
-                            _adv_credit_nli = 'הספרייה הלאומית / National Library of Israel'  # non-empty: switchImageCredit() skips a falsy value
+                            _adv_credit_nli = QUICK_VIEW_NLI_CREDIT
                             attribution = ''
                             if is_oxford:
                                 attribution = OXFORD_IMAGE_CREDIT_EN
+                            elif library_image_credit:  # the library's own image (Cambridge, ...)
+                                attribution = library_image_credit
                             elif page and page.attribution:
                                 attribution = page.attribution
                             else:
@@ -2451,12 +2569,15 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
                                 _adv_credit_lbl = ui.label(attribution).classes('text-xs').style(
                                     'color: #aaa; font-style: italic;')
-                                if is_oxford:
+                                # A library's image (Cambridge, ...) falls back to NLI's in the
+                                # browser as Oxford's does: its credit must switch with it.
+                                if is_oxford or library_image_credit:
                                     _adv_credit_lbl.props(
                                         'data-role="image-credit" '
                                         f'data-credit-oxford="{html.escape(attribution, quote=True)}" '
                                         f'data-credit-nli="{html.escape(_adv_credit_nli, quote=True)}"'
                                     )
+                                adv_state.image_credit_el = _adv_credit_lbl
 
             # === Actions Section ===
             with ui.card().classes('w-full p-6 adv-actions-card adv-info').style('border-radius: 16px; background: var(--bg-tertiary);'):

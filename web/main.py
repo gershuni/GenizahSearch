@@ -32,6 +32,7 @@ from web.crawler_visibility import (
 )
 from web.safe_storage import ensure_session_uuid, safe_user_get, safe_user_set, safe_user_pop
 from web.auth_state import GlobalAuthState
+from web.client_nav import make_link
 from web.perf_watch import SlowRequestTimingMiddleware, start_event_loop_lag_monitor
 apply_all_patches()
 
@@ -1855,8 +1856,8 @@ def create_layout():
         with ui.row().classes('items-center gap-4') as section:
             refs['menu_btn'] = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
-            # Logo - compact 2-line layout
-            with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
+            # Logo - compact 2-line layout. A link: the browser goes home itself (web/client_nav.py).
+            with make_link(ui.element('a').classes('row no-wrap items-center gap-3 cursor-pointer header-logo-link'), '/'):
                 ui.icon('auto_stories').classes('text-2xl text-white opacity-90')
                 # Hide text on xs screens to prevent crowding; show on sm+
                 with ui.column().classes('header-logo-text justify-center').style('gap: 2px;'):
@@ -2041,7 +2042,7 @@ def create_layout():
                 _whats_new_btn.on('click', lambda: _mark_whats_new_seen())
 
             # Help Button (hidden on mobile via CSS)
-            ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props(f'flat round text-color=white aria-label="{tr("Help")}"').tooltip(tr('Help')).classes('help-btn-header')
+            make_link(ui.button(icon='help_outline'), '/help').props(f'flat round text-color=white aria-label="{tr("Help")}"').tooltip(tr('Help')).classes('help-btn-header')
         return section
 
     # === Build Header with correct DOM order ===
@@ -2136,10 +2137,6 @@ def create_layout():
         main_drawer.toggle()
         safe_user_set('drawer_open', not safe_user_get('drawer_open', True))
 
-    def nav_to(path):
-        """Navigate to path. Drawer auto-hides on mobile via breakpoint=1023."""
-        ui.navigate.to(path)
-
     # Connect menu button to toggle function (using refs dictionary)
     if 'menu_btn' in refs:
         refs['menu_btn'].on('click', toggle_drawer)
@@ -2160,11 +2157,18 @@ def create_layout():
     _collapse_icon = 'chevron_left'
     _expand_icon = 'chevron_right'
 
-    def _nav_row(icon, label, badge=None, *, active=False, on_click=None, mark=None):
-        # A page is a link; "Keyboard shortcuts" (marked) opens the card, a button.
+    def _nav_row(icon, label, badge=None, *, active=False, href=None, on_click=None, mark=None):
+        # A page is a link, an <a href> the browser follows itself: it used to be a row
+        # whose click went to the server and back before the next page started loading
+        # (web/client_nav.py). "Keyboard shortcuts" (marked) opens the card, a button.
+        # The drawer still hides on a phone: the next page opens with it closed.
         is_button = mark is not None
-        row = ui.row(wrap=False).classes(f'nav-item {"active" if active else ""}').props(
-            'role=button tabindex=0' if is_button else 'role=link tabindex=0')
+        if href is not None:
+            row = make_link(ui.element('a').classes(f'nav-item {"active" if active else ""}'), href)
+            row.props('role=link')
+        else:
+            row = ui.row(wrap=False).classes(f'nav-item {"active" if active else ""}').props(
+                'role=button tabindex=0')
         # The row's own name: in the icon rail the label is hidden, and with it the name a
         # screen reader announced (Codex, PR #484). The badge (Beta) stays visible text.
         row.props['aria-label'] = label
@@ -2252,8 +2256,7 @@ def create_layout():
                 ]
 
                 for path, icon, label, badge in nav_items:
-                    _nav_row(icon, label, badge, active=current_page == path,
-                             on_click=lambda p=path: nav_to(p))
+                    _nav_row(icon, label, badge, active=current_page == path, href=path)
 
                 ui.separator().classes('nav-separator')
 
@@ -2267,8 +2270,7 @@ def create_layout():
                 ]
 
                 for path, icon, label, badge in tool_items:
-                    _nav_row(icon, label, badge, active=current_page == path,
-                             on_click=lambda p=path: nav_to(p))
+                    _nav_row(icon, label, badge, active=current_page == path, href=path)
                 # Not a page: the card of keyboard shortcuts ("?" opens it too).
                 _nav_row('keyboard', tr('Keyboard shortcuts'), on_click=lambda: open_shortcuts_card(),
                          mark='nav-shortcuts')

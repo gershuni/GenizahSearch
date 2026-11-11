@@ -381,14 +381,73 @@ class TestProxyUsesTheStores:
         assert (content, ct) == (PNG, 'image/png')
         assert store.thumb_get(SID, 0, 300, 1) is None
 
-    def test_another_pages_image_from_the_fallback_loop_is_not_kept(self, seam):
-        # Page 1's FL fails everywhere; the loop serves page 0's image for it.
-        nli = _FakeNli({SID: ['701', '702']}, iiif_ok=['701'])
+    def test_a_page_with_its_own_image_is_never_answered_with_another_page(self, seam):
+        # T-S 12.782 (2026-11-11): page 0's FL failed during an NLI hiccup and the loop
+        # answered it with page 1's image -- the verso shown as 1r, kept a week by the
+        # browser and Cloudflare. Now: no answer, and nothing kept anywhere.
+        nli = _FakeNli({SID: ['701', '702']}, iiif_ok=['702'])
         p1, p2 = nli.patches()
         with p1, p2:
-            content, _ct, fl_id = seam['_fetch_nli_image_bytes'](SID, 1, width=300)
-        assert (content, fl_id) == (JPEG, '701')
-        assert store.thumb_get(SID, 1, 300, 1) is None
+            assert seam['_fetch_nli_image_bytes'](SID, 0, width=2000) is None
+            assert seam['_fetch_nli_image_bytes'](SID, 0, width=300) is None
+            nli.iiif_ok.add('701')            # NLI answers again: page 0's own image
+            assert seam['_fetch_nli_image_bytes'](SID, 0, width=2000)[2] == '701'
+        assert store.thumb_get(SID, 0, 300, 1) is None
+
+    def test_a_page_with_no_fl_id_of_its_own_gets_a_stand_in_that_is_not_kept(self, seam):
+        # A MARC fallback list (the manifest failing) names only the first image: page 2
+        # is shown that one rather than nothing, but no browser or CDN may keep it.
+        sid = '990000000000505171'
+        nli = _FakeNli({sid: ['71', '72', '73']}, iiif_ok=['71', '72', '73'],
+                       marc={sid: ['71']}, manifest_status=500)
+        p1, p2 = nli.patches()
+        with p1, p2:
+            content, _ct, fl_id, kept = seam['_fetch_nli_image_bytes'](sid, 2, width=300, with_kept=True)
+            assert (content, fl_id, kept) == (JPEG, '71', False)
+            # Page 0 is its own image, but from a MARC list: right today, not kept either.
+            assert seam['_fetch_nli_image_bytes'](sid, 0, width=300, with_kept=True)[2:] == ('71', False)
+        assert store.thumb_get(sid, 2, 300, 1) is None
+
+    def test_a_marc_list_replaced_by_a_manifest_list_meanwhile_is_still_not_kept(self, seam):
+        # Codex round 2: request A gets the MARC list; request B stores the manifest's list
+        # before A reads whether its list is complete. A's image came from the MARC list:
+        # not kept. B lands in that window here: right after A stored its MARC list
+        # (the breaker's success hook is the next thing A runs).
+        import shared.nli_circuit_breaker as br
+        sid = '990000000000605171'
+        nli = _FakeNli({sid: ['81', '82']}, iiif_ok=['81', '82'], marc={sid: ['81']}, manifest_status=500)
+        fn = seam['_fetch_nli_image_bytes']
+        cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
+        cache, partial, lock = (cells[n].cell_contents for n in ('_nli_cache', '_nli_partial_keys', '_nli_cache_lock'))
+
+        def success(path='', **kw):
+            if path == 'fetch_fl_ids_from_nli' and sid in partial:
+                with lock:                             # B: the manifest answered meanwhile
+                    cache[sid] = ['81', '82']
+                    partial.discard(sid)
+            return br.record_success(path=path, **kw)
+
+        p1, p2 = nli.patches()
+        with p1, p2, patch('web.api._nli_record_success', side_effect=success):
+            assert fn(sid, 0, width=300, with_kept=True)[2:] == ('81', False)
+        assert store.thumb_get(sid, 0, 300, 1) is None
+
+    def test_only_a_pages_own_iiif_image_is_marked_kept(self, seam, request):
+        nli = _FakeNli({SID: ['901', '902']}, iiif_ok=['901'], rosetta_ok=['902'])
+        p1, p2 = nli.patches()
+        with p1, p2:
+            assert seam['_fetch_nli_image_bytes'](SID, 0, width=2000, with_kept=True)[2:] == ('901', True)
+            # Page 1 from Rosetta: its own page, but a stand-in for the IIIF image.
+            assert seam['_fetch_nli_image_bytes'](SID, 1, width=2000, with_kept=True)[2:] == ('902', False)
+            # From the memory cache, the same answers.
+            assert seam['_fetch_nli_image_bytes'](SID, 0, width=2000, with_kept=True)[3] is True
+            assert seam['_fetch_nli_image_bytes'](SID, 1, width=2000, with_kept=True)[3] is False
+            # The three-item answer the other callers read is unchanged.
+            assert len(seam['_fetch_nli_image_bytes'](SID, 0, width=2000)) == 3
+            # A disk thumbnail is a page's own IIIF image.
+            seam['_fetch_nli_image_bytes'](SID, 0, width=300)
+        request.node.clear_memory()
+        assert seam['_fetch_nli_image_bytes'](SID, 0, width=300, with_kept=True)[2:] == ('', True)
 
     def test_full_size_images_stay_off_disk(self, seam):
         nli = _FakeNli({SID: ['801']}, iiif_ok=['801'])
@@ -396,3 +455,30 @@ class TestProxyUsesTheStores:
         with p1, p2:
             assert seam['_fetch_nli_image_bytes'](SID, 0, width=2000)[0] == JPEG
         assert not os.path.exists(store.thumb_cache_dir())
+
+
+class TestProxyRouteCacheHeaders:
+    """What /api/nli_image_by_sysid lets a browser and Cloudflare keep."""
+
+    @pytest.fixture()
+    def client(self, seam):
+        from fastapi.testclient import TestClient
+        import web.api as api
+        app = FastAPI()
+        api.init_api_routes(app_override=app)
+        return TestClient(app), api._api_test_seam
+
+    def test_a_pages_own_image_is_kept_a_stand_in_and_a_miss_are_not(self, client):
+        import web.api as api
+        http, routes_seam = client
+        nli = _FakeNli({SID: ['951', '952', '953']}, iiif_ok=['951'], rosetta_ok=['952'])
+        p1, p2 = nli.patches()
+        with p1, p2:
+            own = http.get(f'/api/nli_image_by_sysid/{SID}?page=0')
+            stand_in = http.get(f'/api/nli_image_by_sysid/{SID}?page=1')
+            missing = http.get(f'/api/nli_image_by_sysid/{SID}?page=2')
+        assert own.status_code == 200
+        assert own.headers['cache-control'] == f'public, max-age={api.IMAGE_HTTP_MAX_AGE}'
+        assert stand_in.status_code == 200 and stand_in.headers['cache-control'] == 'no-store'
+        # Page 2 has its own FL id and NLI did not deliver it: not page 0's image.
+        assert missing.status_code == 404 and missing.headers['cache-control'] == 'no-store'

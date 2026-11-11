@@ -31,11 +31,14 @@ def create_download_page():
                     ui.icon('download').classes('text-5xl text-white')
 
                 # Download button
-                ui.button(
+                # A link: opened by the browser, not by a round trip to the server.
+                download_btn = ui.button(
                     tr('Download for Windows'),
                     icon='windows',
-                    on_click=lambda: ui.navigate.to('https://github.com/gershuni/GenizahSearch/releases', new_tab=True)
                 ).props('size=lg color=primary unelevated').classes('px-8 py-2')
+                download_btn.props['href'] = 'https://github.com/gershuni/GenizahSearch/releases'
+                download_btn.props['target'] = '_blank'
+                download_btn.props['rel'] = 'noopener'
 
                 ui.label('Windows 10 / 11').classes('text-sm').style('color: var(--text-muted);')
 

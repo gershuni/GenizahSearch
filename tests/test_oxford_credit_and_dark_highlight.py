@@ -62,7 +62,8 @@ class TestCreditFollowsDisplayedSource:
     def test_js_fallback_switches_the_credit_to_nli(self):
         js = _read("web/static/manuscript_viewer.js")
         assert "function switchImageCredit(source)" in js
-        assert js.count("if (isOxford) switchImageCredit('nli');") == 2  # manifest + proxy fallbacks
+        # manifest + proxy fallbacks; a library image marked data-credit-fallback="nli" too (2026-11-11)
+        assert js.count("if (isOxford || img.dataset.creditFallback === 'nli') switchImageCredit('nli');") == 2
 
 
 class TestDarkModeHighlight:

@@ -441,7 +441,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === UI Layout ===
     # Add Advanced View image handler JavaScript at page level (must be outside dialog)
-    ui.add_head_html(ADVANCED_VIEWER_STYLES)
+    # Versioned as on /browse (_viewer_js_version): an unversioned copy was kept 4 hours.
+    from web.pages.browse import _viewer_js_version
+    ui.add_head_html(ADVANCED_VIEWER_STYLES.replace(
+        '/static/manuscript_viewer.js"', f'/static/manuscript_viewer.js?v={_viewer_js_version()}"', 1))
 
     # Domain filter dialog JS helpers (must be at page level for inline onchange handlers)
     # Functions accept containerId parameter for unique dialog instances

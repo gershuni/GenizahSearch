@@ -64,6 +64,23 @@ from tests.render_smoke._bounded_run import run_user_driver
 
 _TEASER_MARKER = 'atlas-teaser-card'
 
+_ASSIGN_RE = re.compile(r'window\.location\.assign\("([^"]*)"\)')
+
+
+def _client_nav_targets(element) -> dict:
+    """{event type: path} of the element's navigation handlers that run IN THE BROWSER
+    (web/client_nav.py::go_to_js). A homepage card no longer asks the server to navigate:
+    that cost a round trip before the next page started (2026-11-11)."""
+    found = {}
+    for listener in element._event_listeners.values():
+        if listener.element_id != element.id:
+            continue
+        assert listener.handler is None, f'{listener.type}: a server round trip, not a browser navigation'
+        match = _ASSIGN_RE.search(listener.js_handler or '')
+        if match:
+            found[listener.type] = match.group(1)
+    return found
+
 # Claim-level wording the teaser must NEVER carry (T-133-06 / D-16). Digits are
 # checked separately (any ASCII digit anywhere in the teaser's own text).
 _FORBIDDEN_SUBSTRINGS_EN = ('identification', 'discoveries found', 'discovery')
@@ -244,22 +261,12 @@ def test_teaser_present_when_available_en(monkeypatch):
             f"wording {offenders!r}. Text: {blob!r}"
         )
 
-        # Click -> ui.navigate.to('/atlas'). Patch ui.navigate.to to record calls
-        # (clicking would otherwise attempt a real client-side navigation).
-        # The card has THREE identical-target listeners (click, keydown.enter,
-        # keydown.space -- matching every other homepage card's pattern), and
-        # _click_element fires all listeners on the element, so assert every
-        # recorded call targeted '/atlas' rather than call-count-once.
-        with patch('nicegui.ui.navigate.to') as nav_mock:
-            _click_element(user, card)
-            assert nav_mock.called, (
-                "Home teaser FAIL: clicking the teaser card did not call "
-                "ui.navigate.to at all."
-            )
-            assert all(c.args == ('/atlas',) for c in nav_mock.call_args_list), (
-                f"Home teaser FAIL: teaser card navigated somewhere other than "
-                f"'/atlas'. Calls: {nav_mock.call_args_list!r}"
-            )
+        # Click, Enter and Space go to '/atlas', in the browser (_client_nav_targets).
+        assert _client_nav_targets(card) == {
+            'click': '/atlas', 'keydown.enter': '/atlas', 'keydown.space': '/atlas'}, (
+            f"Home teaser FAIL: the teaser card does not go to '/atlas' on click, Enter "
+            f"and Space: {_client_nav_targets(card)!r}"
+        )
 
     _run_home_smoke(driver, lang='en')
 
@@ -391,10 +398,9 @@ def test_requested_discovery_tools_appear_across_homepage_surfaces(monkeypatch):
         for marker, route in expected.items():
             element = _marked_element(user, marker)
             assert element is not None, f'missing homepage entry point: {marker}'
-            with patch('nicegui.ui.navigate.to') as nav_mock:
-                _click_element(user, element)
-                assert nav_mock.called
-                assert all(call.args == (route,) for call in nav_mock.call_args_list)
+            targets = _client_nav_targets(element)
+            assert targets.get('click') == route, (marker, targets)
+            assert set(targets.values()) == {route}, (marker, targets)
 
     _run_home_smoke(driver, lang='en')
 

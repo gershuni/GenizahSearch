@@ -164,6 +164,12 @@ class AdvancedViewState:
         # Enrichment data (FJMS + crossref)
         self.fjms_data: Optional[dict] = None
         self.crossref_data: Optional[dict] = None
+        # The manuscript's library images (resolve_external_images), so the image is
+        # chosen as Browse chooses it: Cambridge, Manchester, JTS before NLI.
+        self.external_images: Optional[dict] = None
+        # What render_content showed: (sys_id, page_idx, quick_view_image kwargs, img_url),
+        # so library images that come late redraw only when they change the image.
+        self.image_choice: Optional[tuple] = None
         # Volume-aware browse (multi-IE manuscripts)
         self.volume_ie: Optional[str] = None
         # Highlighted search terms for re-application on version change

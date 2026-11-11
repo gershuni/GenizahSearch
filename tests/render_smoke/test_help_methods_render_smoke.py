@@ -99,11 +99,20 @@ def _marked(elements, marker):
     return [element for element in elements if marker in getattr(element, '_markers', [])]
 
 
+# The layout's own links (the sidebar's pages, the header's logo and Help button) are
+# <a href> since 2026-11-11 (web/client_nav.py); these tests are about the page's links.
+_LAYOUT_LINK_CLASSES = {'nav-item', 'header-logo-link', 'help-btn-header'}
+
+
+def _is_layout_link(element):
+    return bool(_LAYOUT_LINK_CLASSES & set(getattr(element, '_classes', None) or []))
+
+
 def _hrefs(elements):
     return {
         str((getattr(element, '_props', None) or {}).get('href'))
         for element in elements
-        if (getattr(element, '_props', None) or {}).get('href')
+        if (getattr(element, '_props', None) or {}).get('href') and not _is_layout_link(element)
     }
 
 

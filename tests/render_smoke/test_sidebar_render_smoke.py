@@ -102,6 +102,27 @@ def test_every_row_keeps_its_name_in_the_rail_and_the_shortcuts_button_answers_s
 
     _run_home_smoke(driver, lang='en')
 
+def test_every_page_row_is_a_link_the_browser_follows_itself():
+    """2026-11-11: a row's click went to the server, which then told the browser where to
+    go -- a round trip (half a second from Israel, seconds when the server was busy)
+    before the next page even started. Each page row is now an <a href> with no server
+    listener; the header's logo and Help button too."""
+    async def driver(user):
+        await user.open('/about')
+        rows = [el for el in _all_elements(user) if 'nav-item' in _classes(el)]
+        pages = {r.props.get('aria-label'): r for r in rows if r.props.get('role') == 'link'}
+        assert set(WORK_ORDER + EXPLAIN_ORDER[:-1]) <= set(pages), sorted(pages)
+        for label, row in pages.items():
+            assert row.tag == 'a' and row.props.get('href', '').startswith('/'), (label, row.tag, row.props)
+            assert not row._event_listeners, (label, [l.type for l in row._event_listeners.values()])
+        assert pages['Search'].props['href'] == '/search'
+        assert pages['Help Center'].props['href'] == '/help'
+        hrefs = {el.props.get('href') for el in _all_elements(user)}
+        assert {'/', '/help'} <= hrefs  # the header's logo and Help button
+
+    _run_home_smoke(driver, lang='en')
+
+
 def test_the_rail_button_collapses_the_sidebar_and_it_stays_collapsed():
     async def driver(user):
         await user.open('/about')

@@ -995,16 +995,28 @@ def init_api_routes(app_override=None):
 
         return Response(content="Image not found", status_code=404)
 
-    # Image cache: (sys_id, page, width, suffix) -> (content, content_type, fl_id)
+    # Image cache: (sys_id, page, width, suffix) -> (content, content_type, fl_id, kept).
+    # Only this page's own image is put here (``kept``: see _fetch_nli_image_bytes).
     _image_cache = _make_image_cache('image_nli')
 
-    def _fetch_nli_image_bytes(sys_id: str, page: int, width: int = 2000, suffix: int = 1):
+    def _fetch_nli_image_bytes(sys_id: str, page: int, width: int = 2000, suffix: int = 1,
+                               *, with_kept: bool = False):
         """Internal helper: fetch NLI image bytes for (sys_id, page, width, suffix).
 
         Returns (content_bytes, content_type, fl_id) on success, or None when
         nothing was retrievable. The fl_id is the FL digit string that
         actually succeeded (for logging / observability); '' for a thumbnail
         served from disk.
+
+        ``with_kept=True`` adds a fourth item: whether a browser or Cloudflare may keep
+        the answer for IMAGE_HTTP_MAX_AGE -- True only for this page's own IIIF image
+        from the manifest's list. A Rosetta stand-in, or another page's image when this
+        page has no FL id of its own, is right only until NLI answers again.
+
+        A page that HAS an FL id of its own is never answered with another page's
+        image: when NLI does not deliver it, the answer is None. T-S 12.782 (2026-11-11)
+        showed its verso as 1r: the loop below had answered page 0 with page 1 during
+        an NLI hiccup, and the browser and Cloudflare kept it for a week.
 
         Grid thumbnails (NLI_THUMB_CACHE_WIDTHS, 300) are kept on disk
         (web/nli_image_store.py): read before the breaker check, so they show
@@ -1021,14 +1033,16 @@ def init_api_routes(app_override=None):
         width = max(100, min(width, 2000))
         cache_key = (sys_id, page, width, suffix)
 
+        def _answer(content, content_type, fl_id, kept):
+            return (content, content_type, fl_id, kept) if with_kept else (content, content_type, fl_id)
+
         entry = _image_cache.get(cache_key)
         if entry is not None:
-            content, content_type, fl_id = entry
-            return (content, content_type, fl_id)
+            return _answer(*entry)
 
         stored = nli_image_store.thumb_get(sys_id, page, width, suffix)
         if stored is not None:
-            return (stored, 'image/jpeg', '')
+            return _answer(stored, 'image/jpeg', '', True)
 
         # Phase 98 D-17: circuit check BEFORE the FL-id iteration loop. Without
         # this guard, a 20-element fl_ids list would multiply per-call blocking
@@ -1040,6 +1054,15 @@ def init_api_routes(app_override=None):
         fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
         if not fl_ids:
             return None
+        # Whether the list is a manifest's, read with the list: after the image fetch a MARC
+        # list's marker may have been pruned with it, and its image would pass as kept
+        # (Codex review). Only THIS list is vouched for: a list no longer in memory is not,
+        # nor one another request has since replaced (a MARC list answered here, a manifest
+        # list stored meanwhile -- Codex round 2). fetch_fl_ids_from_nli returns the very
+        # object it keeps, so identity tells the two apart.
+        fl_key = f"{sys_id}:{suffix}" if suffix != 1 else sys_id
+        with _nli_cache_lock:
+            list_complete = _nli_cache.get(fl_key) is fl_ids and fl_key not in _nli_partial_keys
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -1163,17 +1186,21 @@ def init_api_routes(app_override=None):
         if 0 <= page < len(fl_ids):
             got = _try_fl(fl_ids[page])
             if got is not None:
-                _image_cache.set(cache_key, (got[0], got[1], fl_ids[page]))
-                if got[2] == 'iiif' and _fl_ids_complete(sys_id, suffix):
+                kept = got[2] == 'iiif' and list_complete
+                _image_cache.set(cache_key, (got[0], got[1], fl_ids[page], kept))
+                if kept:
                     nli_image_store.thumb_put(sys_id, page, width, suffix, got[0])
-                return (got[0], got[1], fl_ids[page])
+                return _answer(got[0], got[1], fl_ids[page], kept)
+            # This page's own image did not come: no answer rather than another page's
+            # (the docstring). The viewer's fallback (manuscript_viewer.js) asks NLI itself.
+            return None
 
-        # Fallback: try each FL id until one works.
+        # No FL id for this page (a MARC fallback list names only the first image, or the
+        # page is past NLI's list): any image of the manuscript, served but never kept.
         for fl_id in fl_ids:
             got = _try_fl(fl_id)
             if got is not None:
-                _image_cache.set(cache_key, (got[0], got[1], fl_id))
-                return (got[0], got[1], fl_id)
+                return _answer(got[0], got[1], fl_id, False)
 
         return None
 
@@ -1206,13 +1233,16 @@ def init_api_routes(app_override=None):
         """
         if is_synthetic_sys_id(sys_id):
             return Response(content="", status_code=204)
-        got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=suffix)
+        got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=suffix, with_kept=True)
         if got is None:
             return Response(content="Image not found", status_code=404)
-        content, content_type, _fl_id = got
+        content, content_type, _fl_id, kept = got
+        # A stand-in (Rosetta, or another page's image) is not kept: a week in the
+        # browser and at Cloudflare outlived the NLI hiccup that made it.
         return Response(
             content=content,
             media_type=content_type,
+            headers=None if kept else {'Cache-Control': 'no-store'},
         )
 
     # Oxford image cache: (sys_id, page, width) -> (content, content_type)
@@ -1333,10 +1363,11 @@ def init_api_routes(app_override=None):
             # (SEED-010: previously a hard 404, which broke CUL grid thumbnails when
             # the cache was cold). _fetch_nli_image_bytes is breaker-guarded and
             # returns None when NLI itself is down → 404 → placeholder.
-            got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=1)
+            got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=1, with_kept=True)
             if got is None:
                 return Response(content="No Cambridge images available", status_code=404)
-            content, ct, _resolved_fl_id = got
+            content, ct, _resolved_fl_id, nli_kept = got
+            cacheable = cacheable and nli_kept  # an NLI stand-in is not kept (_fetch_nli_image_bytes)
             extra_headers = {"X-Image-Fallback-Source": "nli"}
             if cacheable:
                 _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
@@ -1401,10 +1432,11 @@ def init_api_routes(app_override=None):
             # scope per CONTEXT.md). Multi-IE CUL shelfmarks (rare) may
             # therefore receive the wrong volume's NLI image on the web
             # fallback path. Desktop does NOT have this limitation.
-            got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=1)
+            got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=1, with_kept=True)
             if got is None:
                 return Response(content="Image not found", status_code=404)
-            content, ct, resolved_fl_id = got
+            content, ct, resolved_fl_id, nli_kept = got
+            cacheable = cacheable and nli_kept  # an NLI stand-in is not kept (_fetch_nli_image_bytes)
             logger.info(
                 "cambridge_image NLI fallback: sys_id=%s page=%s folio=%s fl_id=%s",
                 sys_id, page, matched_folio_side or "?", resolved_fl_id or "?",
