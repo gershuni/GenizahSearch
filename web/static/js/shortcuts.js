@@ -5,8 +5,8 @@
  *      page draws the card (one round trip; the card is translated there).
  *   /  moves the focus to the page's own search box, the one marked
  *      `data-gs-primary-search` (/search, the homepage), else to the header's
- *      go-to box, opening it first where it sits behind its button (below
- *      1024px; common.css `.header-search.is-open`).
+ *      go-to box, opening it first where it sits behind its button (a bar
+ *      without room for it; common.css `.header-search.is-open`).
  *
  * Neither key does anything while a box has the focus, while a dialog or menu is open,
  * or with Ctrl, Alt or Cmd (those are the browser's). Both answer the key's

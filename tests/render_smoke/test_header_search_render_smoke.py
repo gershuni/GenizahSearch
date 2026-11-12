@@ -6,8 +6,9 @@
 a manuscript from anywhere). Enter in it navigates to
 ``web/home_query.py::home_query_target``'s URL -- the homepage box's routing --
 so a shelfmark opens Browse and words, including Hebrew typed on the English
-layout, are searched. Below 1024px a search button opens it (common.css,
-client-side; pinned in tests/test_phone_layout_rules.py). Harness: the
+layout, are searched. Without room for it in the bar (under 150px to spare) a
+search button opens it (common.css, client-side; pinned in
+tests/test_phone_layout_rules.py). Harness: the
 homepage User context of ``test_home_teaser_render_smoke.py``; the box's
 neighbours there are routed by the same pages.
 """

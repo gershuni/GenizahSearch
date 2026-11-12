@@ -1601,7 +1601,8 @@ NAV_MINI_KEY = 'drawer_mini'
 NAV_MINI_BODY_CLASS = 'gs-nav-mini'
 NAV_MINI_TIP_CLASS = 'nav-mini-tip'
 
-# The header's go-to box (render_header_center). Below 1024px the box is closed behind a search button. Opening and closing
+# The header's go-to box (render_header_center). Without room for it (a bar with under 150px
+# to spare) the box is closed behind a search button. Opening and closing
 # only toggle a class on the header row (common.css draws the field across the
 # header while it is set) and move the focus, so they run in the browser.
 _HEADER_SEARCH_OPEN_JS = (
@@ -1853,7 +1854,9 @@ def create_layout():
 
     def render_header_left():
         """Render left section: Menu button + Logo"""
-        with ui.row().classes('items-center gap-4') as section:
+        # header-left / header-logo-link: the hooks of the one-row rules in common.css (the
+        # logo's text is what gives way when the bar is short of room).
+        with ui.row().classes('items-center gap-4 header-left') as section:
             refs['menu_btn'] = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
             # Logo - compact 2-line layout. A link: the browser goes home itself (web/client_nav.py).
@@ -1873,8 +1876,9 @@ def create_layout():
         replaces the old "Quick search..." box, which ran every input as text
         and was hidden below 768px. On every page, ``/`` and ``/search`` too
         (owner, 2026-11-04: it is how a reader jumps to any manuscript from
-        anywhere). From 1024px the field sits in the header; below, a
-        search button opens it across the header (``header-search`` rules in
+        anywhere). The field sits in the header while the bar has 150px for
+        it, narrowing with the bar (2026-11-11); with less, a search button
+        opens it across the header (``header-search`` rules in
         common.css). Opening and closing are client-side: no round trip.
         """
         with ui.row(wrap=False).classes('items-center header-search') as section:
@@ -1905,7 +1909,7 @@ def create_layout():
 
     def render_header_right():
         """Render right section: Status + Auth + Help"""
-        with ui.row().classes('items-center gap-2 sm:gap-4') as section:
+        with ui.row().classes('items-center gap-2 sm:gap-4 header-right') as section:
             # Status Indicator with continuous heartbeat monitoring
             with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
                 status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
@@ -1972,7 +1976,7 @@ def create_layout():
             # instead of being destroyed by a 30-second timer.
             #
             # It keeps its own class rather than `help-btn-header`, which is
-            # `display:none` under 768px: this site skews mobile, and hiding the
+            # `display:none` at 640px and under: this site skews mobile, and hiding the
             # announcement from most of its readers is not a tidy-up.
             #
             # The `whats-new-banner` mark stays on the panel. It is the handle

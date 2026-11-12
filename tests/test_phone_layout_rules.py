@@ -405,18 +405,127 @@ def test_joins_lab_keeps_the_anchor_in_a_strip_once_the_pane_scrolls_off():
     assert '.joins-lab-anchor-strip-thumb {' in rules
 
 
-def test_the_header_search_box_folds_behind_a_button_below_1024px():
-    """The header's go-to box (2026-11-04): a field from 1024px, a search button
-    below that opens the field across the bar, and on a phone the header groups
-    stay on one line beside the button (measured at 360 and 375px)."""
+def _media_rules(css: str, query: str, at: str = '@media') -> str:
+    """The text of every ``<at> <query> {`` block (``@media`` or ``@container``)."""
+    blocks = []
+    for m in re.finditer(r'%s %s \{' % (re.escape(at), re.escape(query)), css):
+        depth, i = 1, m.end()
+        while depth and i < len(css):
+            depth += {'{': 1, '}': -1}.get(css[i], 0)
+            i += 1
+        blocks.append(css[m.end():i])
+    assert blocks, f'no {at} {query} block'
+    return '\n'.join(blocks)
+
+
+def _top_level(css: str) -> str:
+    """The CSS outside every @-rule block: the rules that apply at every width."""
+    kept, last = [], 0
+    for m in re.finditer(r'@[a-z-]+[^{;]*\{', css):
+        if m.start() < last:
+            continue  # inside a block already cut
+        depth, i = 1, m.end()
+        while depth and i < len(css):
+            depth += {'{': 1, '}': -1}.get(css[i], 0)
+            i += 1
+        kept.append(css[last:m.start()])
+        last = i
+    kept.append(css[last:])
+    return ''.join(kept)
+
+
+def test_the_header_search_box_narrows_then_folds_behind_a_button():
+    """The header's go-to box (2026-11-04): a field in the bar, or a search button that opens
+    the field across the bar. It gave way at a fixed 1023px, and on a phone always, with room to
+    spare (owner, 2026-11-11); now the search group takes the bar's free space as a size
+    container, and the field shows while that is at least 150px, narrowing with it; with less,
+    the button. The logo text gives its room to the box below 826px. Open, the GROUP covers the
+    bar and the field fills it: a placed field would open inside the narrow group in browsers that
+    gave size containers layout containment (Codex, round 3). Measured, signed out, Hebrew and
+    English, 320-1920px: the field from 440px, at today's widths from 1024px, the button below
+    440px; open, the field covers the whole bar; "/" opens or focuses it."""
     main = _read('web/main.py')
     for cls in ("classes('items-center header-search')", "classes('items-center header-search-field')",
                 "classes('header-search-toggle')", "classes('header-search-close')"):
         assert cls in main, cls
     css = _read('web/static/common.css')
-    narrow = _phone_rules(css, 1023)
-    assert '.header-search-field { display: none !important; }' in narrow
-    assert '.header-search.is-open .header-search-field {' in narrow
-    assert re.search(r'@media \(min-width: 1024px\) \{\s*\.header-search-toggle \{ display: none !important; \}', css)
+    top = _top_level(css)
+    assert '.q-header {' in top and '@media' not in top and '@container' not in top
+    # The button is the default, at every width: no room for the field.
+    assert '\n.header-search-field { display: none !important; }\n' in top
+    # Open: the group covers the bar, the field fills it, the close button replaces the toggle.
+    for rule in ('.header-search.is-open {\n    position: absolute; inset: 0; z-index: 10; padding: 0 8px; '
+                 'background: var(--bg-header);\n}',
+                 '.header-search.is-open .header-search-field { display: flex !important; flex: 1 1 auto; gap: 4px; }',
+                 '.header-search.is-open .header-search-input { flex: 1 1 auto; width: auto; }',
+                 '.header-search.is-open .header-search-close { display: inline-flex !important; }',
+                 '.header-search.is-open .header-search-toggle { display: none !important; }',
+                 '.header-search-input input { color: #fff !important; text-overflow: ellipsis; }'):
+        assert rule in top, rule
+    # No placed field: that is the containing-block trap.
+    assert not re.search(r'\.header-search-field \{[^}]*position: absolute', css)
+    # No fixed 1023/1024px switch any more.
+    assert not re.search(r'@media \((max-width: 1023|min-width: 1024)px\) \{\s*\.header-search', css)
+    # The group at every width; on a phone its button is 36px, and the phone rule that lets the
+    # groups shrink leaves it alone.
+    assert ('\n.app-header > .header-search {\n    flex: 1 1 0; min-width: 42px; justify-content: center; '
+            'container: header-search / inline-size;\n}\n') in top
+    assert '.app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }' in _phone_rules(css)
+    assert '.app-header > .header-search { min-width: 36px; }' in _phone_rules(css)
+    assert '.app-header > .nicegui-row:not(.header-search) { min-width: 0; }' in _phone_rules(css)
+    assert '.app-header > .nicegui-row { min-width: 0; }' not in css
+    # The logo text gives way to the box below 826px.
+    assert '.header-logo-text { display: none !important; }' in _media_rules(css, '(max-width: 825px)')
+    # The Sign in label goes on a phone, its icon above: exact complements, no 640.5px gap.
+    assert '.phone-icon-only .q-btn__content > .q-icon { display: none; }' in _media_rules(
+        css, 'not all and (max-width: 640px)')
+    field = _media_rules(css, 'header-search (min-width: 150px)', at='@container')
+    for rule in ('.header-search-toggle { display: none !important; }',
+                 '.header-search .header-search-field { display: flex !important; }',
+                 '.header-search-input { width: min(clamp(220px, 24vw, 320px), 100cqi); }'):
+        assert rule in field, rule
+    assert 'is-open' not in field  # open is the same at every room: the group covers the bar
     phone = _phone_rules(css)
     assert '.app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }' in phone
+
+
+def test_the_header_is_one_row_above_640px():
+    """Owner's screenshot, 2026-11-11: from 641px until the groups fit (about 700px; a browser
+    at 200% on a 1360px window is 680px wide) the three header groups were wrap rows, each
+    wrapped inside itself, and the second lines hung over the page under the 64px bar.
+
+    The button groups keep one line; the logo text gives way (the next test: hidden below 826px).
+    Above that, should the bar be short of room, the logo LINK (web/client_nav.py's `<a>`) wraps
+    its text onto a second line that its 28px cap -- the text's own height -- hides. The clip is
+    the link's own: an element's overflow never cuts its own focus ring, and nothing around the
+    link clips (a `display: contents` logo had no box to draw one). The block is the phone
+    block's exact complement, so no fractional width under zoom falls between them (Codex,
+    round 1). Measured after the change, 320-1920px wide and 350-1000px high, Hebrew and
+    English: one row, nothing outside the bar, spacing unchanged where the text shows."""
+    main = _read('web/main.py')
+    for cls in ("with ui.row().classes('items-center gap-4 header-left') as section:",
+                "with make_link(ui.element('a').classes('row no-wrap items-center gap-3 cursor-pointer "
+                "header-logo-link'), '/'):",
+                "with ui.column().classes('header-logo-text justify-center').style('gap: 2px;'):",
+                "ui.label('Dicta Genizah Search').classes('font-bold text-white tracking-wide')"
+                ".style('font-size: 15px; line-height: 1;')",
+                "ui.label('אתר הגניזה מבית דיקטה').classes('text-white/60').style('font-size: 11px; line-height: 1;')",
+                "with ui.row().classes('items-center gap-2 sm:gap-4 header-right') as section:"):
+        assert cls in main, cls
+    css = _read('web/static/common.css')
+    assert '.header-logo-text {\n    flex-shrink: 0 !important;\n    white-space: nowrap !important;\n}' in css
+    # No header rule in the old 641px blocks, which miss fractional widths (Codex, round 2).
+    assert '.app-header' not in _media_rules(css, '(min-width: 641px)')
+    rules = _media_rules(css, 'not all and (max-width: 640px)')
+    assert '.app-header > .header-right { flex: none; flex-wrap: nowrap !important; }' in rules
+    assert '.app-header > .header-left { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap !important; }' in rules
+    link = rules[rules.index('.app-header .header-logo-link {'):]
+    link = link[:link.index('}')]
+    # 28px = 15px + 11px at line-height 1 + the 2px gap (the labels above).
+    for decl in ('flex: 0 1 auto;', 'min-width: 0;', 'flex-wrap: wrap !important;', 'max-height: 28px;',
+                 'overflow: hidden;', 'align-content: flex-start;'):
+        assert decl in link, decl
+    # Nothing around the link clips, and the link keeps its box.
+    assert 'display: contents' not in rules
+    left = rules[rules.index('.app-header > .header-left {'):]
+    assert 'overflow' not in left[:left.index('}')]

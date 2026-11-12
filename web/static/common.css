@@ -1330,40 +1330,76 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     .header-logo-text { display: none !important; }
 }
 
-/* The header's go-to box (web/main.py::render_header_center, 2026-11-04).
-   From 1024px the field sits in the header and the search button is hidden;
-   below, the button shows and the field opens across the whole header bar
-   while the row carries .is-open (set and cleared in the browser). */
-.header-search-input { width: clamp(220px, 24vw, 320px); }
+/* The header's go-to box (web/main.py::render_header_center, 2026-11-04). The field sits in the
+   header while it has room, and narrows with the bar; with under 150px for it (owner,
+   2026-11-11: it used to give way at a fixed 1023px, and on a phone always, with room to spare)
+   the search button shows instead, and opens the field across the whole header bar while the row
+   carries .is-open (set and cleared in the browser). The room is the search group's own width: the
+   group takes the bar's free space and is a size container, and the rules that show the field
+   are a query on it. */
 /* The site's field rules paint every outlined field white; in the header the
    text and placeholder are white (Quasar "dark"), so the field is see-through. */
 .header-search-input .q-field__control { background: rgba(255, 255, 255, 0.15) !important; }
 .header-search-input .q-field__control:before { border-color: rgba(255, 255, 255, 0.45) !important; }
-.header-search-input input { color: #fff !important; }
+.header-search-input input { color: #fff !important; text-overflow: ellipsis; }
 .header-search-input input::placeholder { color: rgba(255, 255, 255, 0.75) !important; opacity: 1; }
 .header-search-close { display: none !important; }
-@media (min-width: 1024px) {
-    .header-search-toggle { display: none !important; }
+/* The button: a bar without room for the field. */
+.header-search-field { display: none !important; }
+.app-header > .header-search {
+    flex: 1 1 0; min-width: 42px; justify-content: center; container: header-search / inline-size;
 }
-@media (max-width: 1023px) {
-    .header-search-field { display: none !important; }
-    .header-search.is-open .header-search-field {
-        display: flex !important;
-        position: absolute;
-        inset: 0;
-        z-index: 10;
-        padding: 0 8px;
-        gap: 4px;
-        background: var(--bg-header);
-    }
-    .header-search.is-open .header-search-input { flex: 1 1 auto; width: auto; }
-    .header-search.is-open .header-search-close { display: inline-flex !important; }
+/* Open (the button pressed, or "/"): the search group itself covers the bar, and the field fills
+   it. The group, not the field, is placed: browsers that gave a size container layout
+   containment (Codex, round 3: Safari 16-18.3, Chrome 105-128, Firefox 110-132) made it the
+   containing block of a placed field, which then opened inside the narrow group. The group's own
+   containing block is the header in every one. A bar widened while open stays open until closed. */
+.header-search.is-open {
+    position: absolute; inset: 0; z-index: 10; padding: 0 8px; background: var(--bg-header);
+}
+.header-search.is-open .header-search-field { display: flex !important; flex: 1 1 auto; gap: 4px; }
+.header-search.is-open .header-search-input { flex: 1 1 auto; width: auto; }
+.header-search.is-open .header-search-close { display: inline-flex !important; }
+.header-search.is-open .header-search-toggle { display: none !important; }
+/* The field in the bar: at least 150px of room. Its width is today's (24vw, 220-320px) or the
+   room, if less. */
+@container header-search (min-width: 150px) {
+    .header-search-toggle { display: none !important; }
+    .header-search .header-search-field { display: flex !important; }
+    .header-search-input { width: min(clamp(220px, 24vw, 320px), 100cqi); }
 }
 /* Room for the search button on a phone (measured at 375px: without this the
    groups beside it wrapped to a second line under the 64px bar). */
 @media (max-width: 640px) {
     .app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }
     .app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }
+    .app-header > .header-search { min-width: 36px; }
+}
+/* The logo text gives its room to the go-to box below 826px: there the two no longer fit side by
+   side in the widest header measured (Hebrew, signed out, What's New; the box at 150px), and the
+   box is the one readers use (owner, 2026-11-11). The logo link's clip below still hides the
+   text in a header wider than that. */
+@media (max-width: 825px) {
+    .header-logo-text { display: none !important; }
+}
+/* Above 640px the header is one row too (owner's screenshot, 2026-11-11). Its three groups
+   were wrap rows there, and from 641px until they fit (about 700px, in either language) each
+   group wrapped inside itself: the menu over the logo, "?" on a second line, all of it hanging
+   over the page under the 64px bar. A browser zoomed to 200% on a 1360px window is 680px wide.
+   Now no group wraps: the button groups keep their width, the search group (above) takes the
+   room between them down to its button, and the logo text is what gives way: hidden below 826px
+   (the rule above), and above that, should the bar ever be short of room, the logo link wraps its
+   text onto a second line that its 28px cap (the text's own height) hides, so the icon stays.
+   The clip is the link's own overflow, which never cuts the link's own focus ring, and nothing
+   around the link clips. The query is the phone block's exact complement, so no fractional
+   width under browser zoom (640.5px) falls between the two. */
+@media not all and (max-width: 640px) {
+    .app-header > .header-right { flex: none; flex-wrap: nowrap !important; }
+    .app-header > .header-left { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap !important; }
+    .app-header .header-logo-link {
+        flex: 0 1 auto; min-width: 0; flex-wrap: wrap !important; max-height: 28px; overflow: hidden;
+        align-content: flex-start;
+    }
 }
 
 /* The logo is a link home (web/client_nav.py): no link colour or underline. */
@@ -2403,14 +2439,17 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     .phone-icon-only .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
     .phone-icon-only .q-btn__content > .q-icon { margin: 0; }
 }
-@media (min-width: 641px) {
+/* The phone block's exact complement: at a fractional 640.5px under zoom neither matched, and the
+   button showed its icon and its label. */
+@media not all and (max-width: 640px) {
     .phone-icon-only .q-btn__content > .q-icon { display: none; }
 }
 
-/* Header: the row is no-wrap (web/main.py); a long username is cut short. */
+/* Header: the row is no-wrap (web/main.py); a long username is cut short. The search group keeps
+   its button's width (its own rule, above). */
 @media (max-width: 640px) {
     .app-header { gap: 4px; }
-    .app-header > .nicegui-row { min-width: 0; }
+    .app-header > .nicegui-row:not(.header-search) { min-width: 0; }
 }
 /* Signed in, the header shows the account icon alone (owner, 2026-11-05); the name heads
    its menu. */
