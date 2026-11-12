@@ -40,7 +40,7 @@ TRUTHY = {"x", "X", "1", "yes", "YES", "y", "Y", "true", "TRUE", "v", "V"}
 
 # work_id -> dict(drop_author=True | author="..." | title="...", note="...")
 #
-# Owner, 2026-09-01: "פרקי דרבי אליעזר - drop the author". The string was
+# Owner, 2026-09-01: פרקי דרבי אליעזר gets no author. The string was
 # "מיוחס לר' אליעזר בן הורקנוס (נתחבר במאות ה-8-9)" -- an attribution note plus
 # a dating, not an author. It sat on five works: both title spellings
 # (פרקי דרבי אליעזר / פרקי רבי אליעזר) across all three corpora, which are the
@@ -52,7 +52,7 @@ RULINGS = {w: dict(drop_author=True,
                         "author")
            for w in _PIRKEI}
 
-# Owner, 2026-09-01: "fix the duplicates" -- one canonical string per person.
+# Owner, 2026-09-01: duplicate spellings are merged -- one canonical string per person.
 # The winner of each group is the DOMINANT existing spelling (by works, then
 # rows), in the house form "full name + acronym" with gershayim. Where those two
 # pull apart the dominant form wins, because it is what the rest of the db

@@ -2674,7 +2674,7 @@ Where: `project_ref_span` in the sidecar build script (kept in the private repos
 
 Moved 2026-10-25 from `v9.0.0 Discovery Milestone - open items (parked in docs/archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md)`, where it read:
 
-❌ **Open (2026-08-10) — v3 stores ONE work-side span per claim, so the owner's "remember the exact pieces" ruling cannot be met from this bake.** 0 of 254,612 private and 0 of 221,771 public `(page_id, work_id)` pairs carry a second distinct span, against 22.1% of multi-alignment pairs in gen-2's `g_launch3.db`. So the reference-locus WP4 (`project_ref_span` -> `parse_ref_span_alignments()`, consumed by the locus build) is a precondition for scattered multi-range citations, and the scholar-audit deck must draw its scattered stratum from gen-2. Recorded in the project's internal bake-plan notes. Full text archived 2026-10-19.
+❌ **Open (2026-08-10) — v3 stores ONE work-side span per claim, so the owner's ruling that the exact matched pieces be kept cannot be met from this bake.** 0 of 254,612 private and 0 of 221,771 public `(page_id, work_id)` pairs carry a second distinct span, against 22.1% of multi-alignment pairs in gen-2's `g_launch3.db`. So the reference-locus WP4 (`project_ref_span` -> `parse_ref_span_alignments()`, consumed by the locus build) is a precondition for scattered multi-range citations, and the scholar-audit deck must draw its scattered stratum from gen-2. Recorded in the project's internal bake-plan notes. Full text archived 2026-10-19.
 
 *Triage 2026-10-25:* still open. The sidecar build script still returns only select_primary_alignment(parse_ref_span_alignments(...)) at the cited location; the only callers are two nearby lines in that same private script, and parse_ref_span_alignments has no other caller under scripts/. In the deployed artifact only 149 of 224,255 (sys_id, page, work) pairs carry a second distinct work span (0.07%, vs 22% in gen-2).
 
@@ -3974,7 +3974,7 @@ highlighting in both apps (`browse.py::highlight_text`, `desktop/widgets::mark_p
 desktop `*…*` headings collide with the hit markers. Found alongside: the desktop drops every `<…>` mark (its
 own row, from `docs/open_issues.d/2026-10-26-desktop-fgp-pgp-angle-marks-swallowed.md`).
 
-Option A built 2026-10-27 (owner: "A now and B later"): a "?" beside a Genuzot transcription opens the legend, in
+Option A built 2026-10-27 (owner: build A now and B later): a "?" beside a Genuzot transcription opens the legend, in
 both apps, from one shared table (`shared/fgp_marks_legend.py::legend_html`; web `web/components/version_selector.py`,
 desktop `desktop/marks_legend.py`). Owner, 2026-10-27: it shows the two lists and nothing else, "סיגלה צוות גנוזות
 - קטעי תפילה ופיוט" (2024) and "סיגלה צוות גנוזות - קטעי תלמוד" (2014), each in its own wording; the text itself is

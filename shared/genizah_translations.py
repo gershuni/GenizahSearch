@@ -6486,7 +6486,7 @@ TRANSLATIONS.update({
 
 # The dictionary panel holds every dictionary, one tab each (owner, 2026-11-04; plan
 # docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12): its title, the tabs, the hint and the
-# switch name no one dictionary. Approved by the owner, 2026-11-04 ("Wording is fine").
+# switch name no one dictionary. Approved by the owner as worded, 2026-11-04.
 TRANSLATIONS.update({
     "Dictionaries": "מילונים",
     "Blau": "בלאו",
@@ -6502,7 +6502,7 @@ TRANSLATIONS.update({
     "Judeo-Arabic dictionaries": "מילונים לערבית־יהודית",
 })
 # Lane's Lexicon in its tab (web/components/lane_panel.py, phase B, 2026-11-04). Approved by the
-# owner as drafted, both source lines included, 2026-11-05 ("Approve as is"). The Perseus credit
+# owner as drafted, both source lines included, 2026-11-05. The Perseus credit
 # line itself is not translated: it is shown verbatim (D3).
 TRANSLATIONS.update({
     "Lane's Arabic-English Lexicon": "הלקסיקון הערבי-אנגלי של ליין",  # the owner's wording, 2026-11-04

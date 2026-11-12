@@ -45,8 +45,8 @@ def _md(content: str = '', *, extras=None, **kwargs):
 # published and CERT-02 names it as where each tier's unit and status are
 # recorded -- so retiring it was never a free choice. It now renders BELOW the
 # practical computed-identifications card, on the same `discovery_available()`
-# gate, and was SHORTENED in the same pass (owner: "concise and
-# understandable"): the estimand prose is stated once for the section instead of
+# gate, and was SHORTENED in the same pass (owner: short and easy to
+# follow): the estimand prose is stated once for the section instead of
 # once per tier, an ungraded tier stops after its count and status rather than
 # printing four more placeholder lines, and the two-bucket rule and limitations
 # paragraph moved out entirely because the practical card already carries them.
@@ -122,7 +122,7 @@ _CONFIDENCE_TOC_TITLE = {
     'he': 'דרגות ודאות ושיטות',
 }
 
-# ⟨SHORTENED 2026-08-13, owner: "keep it concise and understandable"⟩ Three
+# ⟨SHORTENED 2026-08-13, owner: short and easy to follow⟩ Three
 # sentences instead of five, and the dangling cross-reference is gone: this
 # section no longer carries the "Known limitations" subsection (it moved to the
 # practical card), so pointing at it "below" would have sent the reader nowhere.
@@ -501,7 +501,7 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     status = band_measurement_status(row)
     ui.label(f"{fl['status'][lk]}: {_measurement_status_copy(status, lk)}").style(text_style)
 
-    # ⟨2026-08-13, owner: "concise and understandable"⟩ AN UNGRADED TIER STOPS
+    # ⟨2026-08-13, owner: short and easy to follow⟩ AN UNGRADED TIER STOPS
     # HERE. Its sample size, date, grader, audit state and report id are all
     # absent, so what rendered was four more lines of "not yet measured" under a
     # status line that had just said exactly that -- and with most tiers
@@ -511,7 +511,7 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     if status == 'not_measured':
         return
 
-    # ⟨2026-11-05, owner: "remove all these if we did not measure -- here and below"⟩ A GRADED
+    # ⟨2026-11-05, owner: what was not measured is not shown, here and below⟩ A GRADED
     # tier shows only what was measured too: its sample numbers that exist, and the registry
     # fields that are set. Before, a graded tier printed a sample line of three "not yet
     # measured" and an audit line repeating the "audit pending" its status line had just said.

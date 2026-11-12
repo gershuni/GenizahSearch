@@ -126,8 +126,8 @@ LAUNCH_POOL_LABEL_CLASS = "gs-findings-launch-pool-label"
 #: construction. The constant went with the element rather than lingering as a
 #: marker a test could still assert against -- a selector for something nothing
 #: renders is a guard that can only ever pass.
-#: THE STAT-CARD BAND (owner ruling, 2026-08-06: "do the top stats in neat
-#: cards"). The band and one card inside it.
+#: THE STAT-CARD BAND (owner ruling, 2026-08-06: the top figures sit in neat
+#: cards). The band and one card inside it.
 #:
 #: The card treatment is `web/pages/home.py`'s corpus-stats band, VERBATIM -- the
 #: same border, radius, tint, min-width and flex basis -- because this site
@@ -138,7 +138,7 @@ LAUNCH_POOL_LABEL_CLASS = "gs-findings-launch-pool-label"
 #: premature.
 LAUNCH_STATS_BAND_CLASS = "gs-findings-launch-stats"
 LAUNCH_STAT_CARD_CLASS = "gs-findings-launch-stat"
-#: A card's decorative glyph (owner, 2026-08-06: "what about icons"). Its own
+#: A card's decorative glyph (owner, 2026-08-06: the cards get icons). Its own
 #: class so a test can assert it is DECORATIVE -- `aria-hidden`, outside the
 #: figure/label pair -- rather than a fact a reader depends on. An icon that
 #: carried meaning here would be information available only to sighted readers.
@@ -192,8 +192,8 @@ ROW_CATALOGUE_TITLE_CLASS = "gs-findings-row-catalogue-title"
 #: (`display_author`/`author`), NEVER the catalogue's.
 #:
 #: ITS OWN LINE, ABOVE the shelfmark line, and that placement is a CORRECTNESS fix
-#: rather than a layout preference (owner report, 2026-08-07: *"the name in the id
-#: looks like it comes from the cat[alogue]"*). It previously rendered as the last
+#: rather than a layout preference (owner report, 2026-08-07: the name beside the
+#: id read as if it came from the catalogue). It previously rendered as the last
 #: element of the same flex row that carries "Catalogued as: <title>", so a reader
 #: scanning left-to-right met `Catalogued as: ספר השרשים (קטע). נתן בן יחיאל מרומי`
 #: and read the name as part of the quotation -- i.e. as the LIBRARY's attribution.
@@ -289,8 +289,8 @@ _COPY: Dict[str, Dict[str, str]] = {
         "en": "Report a problem",
         "he": "דיווח על בעיה",
     },
-    # THE ADMIN HIDE CONTROL's accessible name (owner ruling, 2026-08-06: "can we
-    # add X to identification so admin can click and hide it").
+    # THE ADMIN HIDE CONTROL's accessible name (owner ruling, 2026-08-06: an X on
+    # each identification that an admin clicks to hide it).
     #
     # It says HIDE, not "delete" or "reject": the row is removed from the surface
     # and nothing about the underlying identification changes -- the artifact is
@@ -488,8 +488,8 @@ _COPY: Dict[str, Dict[str, str]] = {
     #    Each says what the CATALOGUES DID record; none says a catalogue was
     #    wrong.
     #
-    # "THE CATALOGUES WE CHECKED", NOT "the aid" (owner ruling, 2026-08-06: "'the
-    # aid' is not good. should be 'available catalogs'"). Two changes in one:
+    # "THE CATALOGUES WE CHECKED", NOT "the aid" (owner ruling, 2026-08-06: "the
+    # aid" goes, for "available catalogs"). Two changes in one:
     #
     # 1. "aid" is jargon. "Finding aid" is a library-science term of art, and on a
     #    card with three words of room it reads as a typo for "the aid" in the
@@ -516,8 +516,8 @@ _COPY: Dict[str, Dict[str, str]] = {
     # would read -- to the gate and to a reader -- as an accuracy claim about
     # the match rather than a statement about granularity.
     #
-    # "פירוט רב יותר", not "פירוט עדין יותר" (owner, 2026-08-07: the latter "does
-    # not sound good"). `עדין` is *delicate/subtle* -- an aesthetic word about
+    # "פירוט רב יותר", not "פירוט עדין יותר" (owner, 2026-08-07: the latter
+    # reads badly). `עדין` is *delicate/subtle* -- an aesthetic word about
     # texture, which is not what a granularity comparison means; `רב יותר` is
     # plainly *more* detail, the same comparative the English "finer than" makes.
     #
@@ -858,9 +858,8 @@ def render_launch_headline(
     at request time, which is what the sentinel fixture in this plan's suite
     proves.
 
-    LEAD (2026-08-05, owner ruling): "the headline should say all in all how
-    many computed identifications there are, that's the main number to be
-    highlighted" -- the lede was the MAIN POOL, a subset, and the second pool
+    LEAD (2026-08-05, owner ruling): the headline gives the total number of
+    computed identifications, the main number to highlight -- the lede was the MAIN POOL, a subset, and the second pool
     was not in the headline at all. The approved block ledes with the FRAGMENT
     count and the WORK count (two different kinds of thing, so no ratio is
     invited), states the all-in-all match count quietly under them, and shows
@@ -944,7 +943,7 @@ _STAT_CARD_CLASSES = (
     "px-3 py-3 gap-0"
 )
 
-#: EVERY FIGURE IS BIG (owner ruling, 2026-08-06: "make all numbers big"). One
+#: EVERY FIGURE IS BIG (owner ruling, 2026-08-06: all numbers are big). One
 #: constant, so "big" cannot come to mean three different sizes across five
 #: cards.
 #:
@@ -1049,7 +1048,7 @@ def _render_launch_v2(items, meta: Mapping[str, Any], total: Any,
     )
 
     # LEVEL 2 -- THE CONTRIBUTION, and it is carded too (owner, 2026-08-06:
-    # "what about the rest of the text").
+    # the rest of the text gets the same treatment).
     #
     # IN ITS OWN BAND, and that separation is the one thing this layout may not
     # collapse. The five figures above count EVERY bucket and EVERY shade; these
@@ -1107,8 +1106,7 @@ def _stat_card(figure: Any, label: str, *, figure_marker: str = "",
                figure_classes: str = "", icon: Optional[str] = None,
                note: Optional[str] = None, note_marker: str = "") -> None:
     """ONE stat card in `web/pages/home.py`'s shape: icon, BIG FIGURE, small noun
-    under it (owner, 2026-08-06 -- "take the style from there", "what about
-    icons").
+    under it (owner, 2026-08-06 -- the homepage's style, with icons).
 
     That shape is the whole reason every figure here can be big. The ratified
     strings are SENTENCES with the figure inside them ("matched to {count} known
@@ -1199,10 +1197,9 @@ def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
                       main_pool_name: str, lang: str) -> None:
     """THE APPROVED BLOCK (owner ruling, 2026-08-05), as TWO CARD BANDS.
 
-    LAYOUT (owner, 2026-08-06): "do the top stats in neat cards", "make all
-    numbers big", "take the style from there" (the homepage corpus-stats band),
-    "what about icons", "what about the rest of the text", "have it
-    mobile-friendly". Every figure below is now a card with a decorative glyph, a
+    LAYOUT (owner, 2026-08-06): the top figures in neat cards, every number
+    big, the style of the homepage corpus-stats band, icons, the same for the
+    rest of the text, and a layout that works on a phone. Every figure below is now a card with a decorative glyph, a
     big number and its noun beneath -- the homepage's own shape, so the two
     surfaces read as one product.
 
@@ -1260,7 +1257,7 @@ def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
     ):
         # THE LEDE, at `text-4xl` where the others are `text-3xl`, and a test
         # enforces it: the owner chose the fragment count as the lede on
-        # 2026-08-05 from a rendered comparison. "Make all numbers big" is a
+        # 2026-08-05 from a rendered comparison. Making all numbers big is a
         # request about SIZE, not licence to flatten a ratified reading order --
         # so every figure got big and the lede stayed biggest.
         if fragments is not None:
@@ -1810,8 +1807,8 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
 #:
 #: What that safety cost was the whole unit: a reader grouping by manuscript saw a
 #: shelfmark and a work count with no way through to the identifications underneath
-#: (owner report, 2026-08-07: "In One Row Per Manuscript I don't see the computed
-#: identifications at all"). So `di.sys_id = ?` now exists in the shared predicate,
+#: (owner report, 2026-08-07: One Row Per Manuscript showed no computed
+#: identifications at all). So `di.sys_id = ?` now exists in the shared predicate,
 #: and the pair below is admitted BY THE SAME DERIVED CHECK that previously refused
 #: it -- `EXPANSION_SUPPORTED_AXES` reads the builder's signature, so this table
 #: cannot claim an axis the query lacks.
@@ -1914,8 +1911,8 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
     lang = _lang_key(lang)
     unit = item.get("unit") or FINDINGS_UNIT_IDENTIFICATION
 
-    # A HAIRLINE BETWEEN ROWS (owner report, 2026-08-06: "list items blend
-    # together"). Applied to EVERY row identically, in both pools and at both
+    # A HAIRLINE BETWEEN ROWS (owner report, 2026-08-06: the list items ran
+    # together). Applied to EVERY row identically, in both pools and at both
     # levels -- which is what keeps it clear of D-24: a separator is not a row
     # TREATMENT, because it carries no information about the row it sits under
     # and cannot be read as a verdict on it. The moment it varied by pool, novelty
@@ -2003,8 +2000,8 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
     row has no matches underneath it", and one of those is an outage.
     """
     #: THE TOGGLE IS CREATED FIRST, AND THAT ORDER IS THE WHOLE FIX (owner
-    #: report, 2026-08-06: "expanding requires excessive downward scrolling to
-    #: collapse the list").
+    #: report, 2026-08-06: after expanding, collapsing the list took a long
+    #: scroll down).
     #:
     #: The button already retitles itself to "Hide the individual matches" the
     #: moment it opens -- that was never the defect. The defect was DOM ORDER:

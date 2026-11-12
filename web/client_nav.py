@@ -6,7 +6,7 @@ starts loading: the click goes to the server over the websocket, waits its turn 
 one event loop, and only then is the browser told where to go. From Israel to the
 server in Oregon that was about half a second on a quiet day (PostHog ``ux_timing``,
 2026-11-11), several seconds while the loop was busy, and nothing at all while the
-websocket was reconnecting -- the "several seconds from one module to another" the
+websocket was reconnecting -- the delay of several seconds between modules that the
 owner reported that day. A link, or a click handler that runs in the browser, starts
 the next page at once.
 """

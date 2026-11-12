@@ -1,6 +1,6 @@
 """Variants match whole words, through the same paths as Exact (owner, 2026-10-01).
 
-"I don't need to find שלום inside ושלום -- Responsa mode is for this kind of search."
+Finding שלום inside ושלום is not wanted there; Responsa mode is for that kind of search.
 So Variants retrieve every form the verifier accepts as a WHOLE token (not only the
 first 200), read page docs for one word, use whole-manuscript docs only for page-break
 crossings, and a match inside a longer Hebrew word is not a match -- for Exact too.

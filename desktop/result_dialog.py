@@ -88,7 +88,7 @@ def _cached_meta_needs_enrichment(meta_mgr, sys_id, cached_meta) -> bool:
 
 class _ReadingTextSize(QObject):
     """The transcription text size, one for the Manuscript Viewer and the Browse
-    tab (owner, 2026-10-24: "option to change the size of the texts"): saved under
+    tab (owner, 2026-10-24: the text size is adjustable): saved under
     VIEWER_TEXT_PT_KEY and announced, so a view that is open follows a change
     made in the other -- the viewer is a window of its own beside the main one."""
 

@@ -1238,7 +1238,7 @@ APPROVED_PATTERNS = (
     "rows grouped differently",
     "a row mixes decoded and native presentation forms",
     "other characters moved: Hebrew or Arabic reordered",
-    # owner, 2026-10-27, after the page of all 83 rows (_tmp/fgp_glyph_reread_stray.html): "not perfect but good enough"
+    # owner, 2026-10-27, after the page of all 83 rows (_tmp/fgp_glyph_reread_stray.html): accepted as good enough
     "a decoded glyph produced an uncertified character",
     # owner, 2026-10-28, after the page of all 83 rows (_tmp/fgp_direction_review.html): decoded Arabic letters turn a
     # line of boxes and symbols right-to-left, which is the correct reading

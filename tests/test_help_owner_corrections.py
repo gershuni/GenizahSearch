@@ -14,7 +14,7 @@ ENGLISH = HELP[HELP.index('def _create_english_content('):HELP.index('def _creat
 
 
 def test_a_tier_shows_only_the_sample_numbers_that_were_measured():
-    """Owner: "remove all these if we did not measure -- here and below". A graded tier printed
+    """Owner: what was not measured is not shown, here and below. A graded tier printed
     a sample line of three "not yet measured" and an audit line repeating its status line."""
     parts = help_page._measured_sample_parts
     assert parts({}, 'he') == []

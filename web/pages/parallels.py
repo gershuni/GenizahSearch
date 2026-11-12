@@ -961,7 +961,7 @@ def create_parallels_page(initial_text: str = None):
                     # zero frontier gain at 4-6x the time.
                     with ui.column().classes('w-full gap-2') as witness_panel:
                         # ONE collapsed line by default (owner, 2026-08-24:
-                        # "the witnesses option should be less prominent").
+                        # the witnesses option is less prominent).
                         # Most searches use a single text; an always-open
                         # block pushed the primary controls down the page for
                         # a feature they never touch.
@@ -6272,8 +6272,7 @@ def create_parallels_page(initial_text: str = None):
                     # chevron at the end of the header and rotates it on open;
                     # this one was a SECOND arrow that never rotated, because
                     # nothing ever changed its transform. Owner-reported
-                    # 2026-08-25: "why do the results have two down arrow
-                    # 'open' symbols?"
+                    # 2026-08-25: each result showed two down arrows.
 
             # Expanded content (shown on click)
             with ui.column().classes('w-full p-4 gap-4').style('background: var(--bg-card);'):

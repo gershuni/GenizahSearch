@@ -2524,7 +2524,7 @@ class GenizahGUI(QMainWindow):
         # Ctrl+G Go to, F1 Help for the section in front, Ctrl+, Settings,
         # Ctrl+F the section's own search or find field (owner, 2026-10-24).
         # Ctrl+8 the Fragment Puzzle, Ctrl+9 the Joins Lab (owner, 2026-10-25).
-        # Ctrl+O Go to as well (owner, 2026-10-30: "they both can mean the same"),
+        # Ctrl+O Go to as well (owner, 2026-10-30: both keys can mean Go to),
         # Ctrl+E the search box as well (File Explorer's and Outlook's key for
         # it), Ctrl+R the section's results list, Ctrl+/ the list of keys
         # (owner, 2026-10-30).
@@ -2542,8 +2542,8 @@ class GenizahGUI(QMainWindow):
             shortcut.activated.connect(slot)
             self._section_shortcuts.append(shortcut)
         # On Windows a Ctrl+letter shortcut can miss in a keyboard layout whose
-        # letter keys type another script (owner: "Ctrl-G does not work" while
-        # the menu entry did). These also answer to the physical key.
+        # letter keys type another script (owner: Ctrl+G did nothing while
+        # the menu entry worked). These also answer to the physical key.
         if sys.platform == 'win32':
             self._layout_shortcuts = LayoutProofShortcuts(self, {
                 ('G', Qt.KeyboardModifier.ControlModifier): self.open_go_to,
@@ -2559,14 +2559,14 @@ class GenizahGUI(QMainWindow):
         self._wire_tip_signals()
 
         # Two menu layouts, chosen in Settings and kept in config.pkl as
-        # nav_layout (owner, 2026-10-24: "Keep the tabs. Offer an option to
-        # change them to the side menu"): the tab bar with the buttons in its
+        # nav_layout (owner, 2026-10-24: the tabs stay, and the side menu is an
+        # option): the tab bar with the buttons in its
         # corner -- the default -- or the side menu (desktop/widgets/side_nav.py).
         # Both are built; _apply_nav_layout shows one of them.
 
         # The menu, at the window's edge before the first tab -- far right in
-        # Hebrew, far left in English (owner, 2026-10-24: "Move the menu button
-        # to the extreme right or left"). Every section, the current one in bold
+        # Hebrew, far left in English (owner, 2026-10-24: the menu button sits at
+        # the window's far edge). Every section, the current one in bold
         # and no tick boxes, then Go to, Puzzle, Joins Lab, Help, Settings and the
         # switch to the side menu: it still has every section when the tab bar
         # is too narrow and scrolls.
@@ -17291,8 +17291,8 @@ class GenizahGUI(QMainWindow):
             found.add('custom_pairs')
         return found
 
-    # -- text size (owner, 2026-10-24: "option to change the size of the texts
-    # in search etc windows") ---------------------------------------------------
+    # -- text size (owner, 2026-10-24: text size is adjustable in the result
+    # lists and the viewer) -----------------------------------------------------
     # The result lists: points added to the window's own font, one level for
     # all of them, chosen in Settings > Text size or with Ctrl+= / Ctrl+- /
     # Ctrl+0. Their headers keep the window's font. The transcription (Browse,
@@ -17842,8 +17842,8 @@ class GenizahGUI(QMainWindow):
         h.addWidget(cit_lbl, 1)
 
         # ONE button, and it cites the SITE. There is deliberately no "this
-        # page" entry here (owner, 2026-09-05: "the bar will cite generally, and
-        # citing 'this page' will be always in toolbar").
+        # page" entry here (owner, 2026-09-05: the bar cites the site in general,
+        # and a page is always cited from the toolbar).
         #
         # The bar spans the whole window, so a page entry on it was offered on
         # the Search tab, on Personal Lists, on Community -- for a folio the

@@ -23,7 +23,7 @@ Until 2026-11-04 everything without a Hebrew or Arabic letter went to
 "No manuscript found" (PostHog review 2026-11-03) and never reached /search,
 which offers "Did you mean <Hebrew>?" for the first (PR #469).
 
-The owner asked for numbers that "end with 99"; corpus sys_ids BEGIN with 99
+The owner asked for numbers that end with 99; corpus sys_ids BEGIN with 99
 (255,723 of 255,723 in ``libraries.csv``, and none ends with 99), so the test is
 the canonical ``CORPUS_SYS_ID_RE`` -- the same namespace ``/browse`` itself
 treats as a sys_id.

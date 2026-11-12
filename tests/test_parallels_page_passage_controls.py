@@ -334,8 +334,8 @@ def _passage_width_creation_slice() -> str:
 
 
 def test_width_ladder_has_no_rung_above_widest():
-    """Owner ruling: 'widest and then maximal means this is not the
-    widest'. The 1.8 preset's label must not claim to be the extreme while
+    """Owner ruling: a rung called widest cannot have a wider one above
+    it. The 1.8 preset's label must not claim to be the extreme while
     the 2.0 option sits above it."""
     slice_ = _passage_width_creation_slice()
     assert "tr('Very wide (default)')" in slice_, (
@@ -1163,7 +1163,7 @@ def test_a_result_row_draws_exactly_one_expand_chevron():
     """QExpansionItem renders its own chevron and rotates it on open. The
     header slot added a SECOND one that nothing ever rotated, so expanding a
     row turned one arrow and left the other pointing down (owner-reported
-    2026-08-25: "why do the results have two down arrow 'open' symbols?").
+    2026-08-25: each result showed two down arrows).
     """
     src = _read_source()
     for node in ast.walk(ast.parse(src)):

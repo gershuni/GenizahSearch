@@ -399,7 +399,7 @@ def _first_position_valid_match(regex, text, first_match, text_position, line_co
 
 
 # Whole words (owner, D1 for Exact, 2026-10-01 for Variants and Fuzzy): a match inside a
-# longer Hebrew word is not a match -- "Responsa mode is for that kind of search".
+# longer Hebrew word is not a match -- that kind of search is Responsa mode's job.
 # Marks (nikud, cantillation, the Judeo-Arabic dot), quotes/geresh and lacuna brackets
 # belong to the word they sit in (ו[שלום is one word), so they are looked past. Any
 # other neighbour is a boundary. That is lenient on purpose: the hebword tokenizer and

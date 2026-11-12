@@ -4,7 +4,7 @@
 WHY THIS EXISTS
 ---------------
 Owner ruling, 2026-08-06: a clearly-wrong row must come off the live beta
-immediately, "not going through long process". This is that mechanism, and it is
+immediately, without a long process. This is that mechanism, and it is
 deliberately the smallest thing that does the job: a list of identification ids,
 an admin-only ✕ that adds one, and a filter that drops them from the query.
 
@@ -62,8 +62,8 @@ TABLE = "discovery_suppressed"
 #: cache this would put a Supabase round trip on the critical path of every
 #: interaction, on a server with ONE uvicorn worker.
 #:
-#: 30s rather than a longer TTL because the owner's workflow is "click ✕, confirm
-#: it is gone": a stale window measured in minutes would look like the button did
+#: 30s rather than a longer TTL because the owner's workflow is to click ✕ and
+#: check that the row is gone: a stale window measured in minutes would look like the button did
 #: not work. `invalidate()` is called on every write, so the reader who clicked
 #: sees the change immediately and 30s only bounds how long ANOTHER visitor's
 #: process keeps the old list.

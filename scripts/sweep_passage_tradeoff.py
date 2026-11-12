@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Map the passage engine's recall/precision tradeoff across its policy knobs.
 
-Purpose (owner request, 2026-08-21): an INTERNAL map -- "how much better is
-the new method, and can parameters trade recall against precision in either
-direction" -- not a certified claim. Tune split only; the shelved holdout
+Purpose (owner request, 2026-08-21): an INTERNAL map -- how much better the
+new method is, and whether its parameters trade recall against precision in
+either direction -- not a certified claim. Tune split only; the shelved holdout
 stays untouched.
 
 The two real knobs (measured earlier: verify_cap/posting_budget sweeps changed

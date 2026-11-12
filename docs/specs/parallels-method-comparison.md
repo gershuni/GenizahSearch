@@ -797,9 +797,9 @@ instrument exists.
 
 ## Owner correction (2026-08-22): list length is not a cost
 
-The owner's constraint, stated directly: *"a researcher has no problem
-receiving 50 or even a hundred, two hundred, three hundred fragments if in the
-end there is something that fits. It is like search results."*
+The owner's constraint (2026-08-22): a researcher is glad to receive 50, a
+hundred or even three hundred fragments if one of them fits in the end; a list
+of candidates is read like search results.
 
 That invalidates the premise under two earlier conclusions, and both have to
 be reopened rather than defended.

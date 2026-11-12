@@ -1,5 +1,5 @@
-"""Text size (owner, 2026-10-24: "option to change the size of the texts in search
-etc windows").
+"""Text size (owner, 2026-10-24: text size is adjustable in the result lists and
+the viewer).
 
 Pinned here: the result lists take one size level (Settings > Text size in result
 lists, Ctrl+= / Ctrl+- / Ctrl+0), their headers keep the window's font, table rows

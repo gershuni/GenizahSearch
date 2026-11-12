@@ -45,7 +45,7 @@ def create_page():
         #
         # 1. It was one of four overlays a first visit stacked on this page
         #    (this, the What's New toast, the citation footer, and a blocking
-        #    citation modal) — the "עומס / too many popups" the owner reported
+        #    citation modal) — the popup overload the owner reported
         #    on 2026-09-04. Removing it removes an overlay AND a close button.
         # 2. A toast that deletes itself after 30 seconds, permanently, is the
         #    wrong shape for this particular sentence. "These transcriptions
@@ -247,7 +247,7 @@ def create_page():
 
         # The two big BETA ANNOUNCEMENT CARDS -- Computed Identifications and
         # the Visual Genizah Atlas -- stood here until 2026-09-04. Removed on
-        # the owner's instruction: "we are past the promotional phase".
+        # the owner's instruction: the promotional phase is over.
         #
         # Both surfaces KEEP their other homepage entry points, which is why
         # this is a de-promotion and not a withdrawal: each still has a

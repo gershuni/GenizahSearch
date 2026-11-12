@@ -229,7 +229,7 @@ class TranscriptionCredit:
     citation_lines: List[str] = field(default_factory=list)
     site_lines: List[str] = field(default_factory=list)
     #: True when `citation_lines` carries the MiDRASH citation. Lets a caller
-    #: assert the owner's rule ("MiDRASH only for HTR") without string-matching.
+    #: assert the owner's rule (MiDRASH is credited only for HTR) without string-matching.
     credits_midrash: bool = False
 
     def all_lines(self) -> List[str]:
@@ -467,7 +467,7 @@ class PageCitation:
 
     `heading` is the chip's own label; `text` is the citation. Deliberately a
     SENTENCE and not a list of lines: the first cut of this returned a block of
-    six rows, and the owner's verdict was "too much duplicacy" -- the domain
+    six rows, and the owner judged it too repetitive -- the domain
     appeared twice, the word "retrieved" twice, and seventeen author names sat
     between the shelfmark and the URL. A citation is read and pasted as prose.
 
@@ -656,9 +656,9 @@ def site_citation(*, lang: str = 'en', retrieved_on=None,
                   software: Optional[str] = None) -> PageCitation:
     """How to cite the SITE as a whole -- the regular chip on every page.
 
-    Owner, 2026-09-04: "most people will want to cite the website usage as a
-    whole (they've found many things there), and the regular chip will just
-    mention the dicta genizah search (and site address) and zenodo citation."
+    Owner, 2026-09-04: most readers will cite their use of the website as a
+    whole, having found many things there, so the regular chip names only
+    Dicta's Genizah Search, the site's address and the Zenodo citation.
 
     So this is the DEFAULT the chip shows. A reader who used the site across
     many manuscripts has nothing to gain from a citation pinned to whichever

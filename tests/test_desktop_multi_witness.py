@@ -1622,8 +1622,8 @@ def test_a_current_entry_uses_its_stored_count():
 
 
 def test_an_older_entry_recovers_the_count_from_its_witness_list():
-    """Owner-reported: "the first search has one (another) witness and it is
-    not mentioned". That record was written before the count existed -- but
+    """Owner-reported: the first search had one more witness, and the list
+    did not mention it. That record was written before the count existed -- but
     it still carries the witnesses, so the number is recoverable. The seed is
     a witness too, so one stored witness reads as two."""
     out = _render({'query': 'ויהי בימי אנטיוכוס',
@@ -1632,7 +1632,7 @@ def test_an_older_entry_recovers_the_count_from_its_witness_list():
 
 
 def test_a_baked_english_suffix_is_replaced_not_appended_to():
-    """Owner-reported: "the other say in English instead of Hebrew". Those
+    """Owner-reported: the other entries were in English instead of Hebrew. Those
     records have the sentence baked in, in whatever language the app was in
     when they were saved, and no re-translation can reach a string that no
     longer knows it holds a number. Stripping it and re-rendering from the

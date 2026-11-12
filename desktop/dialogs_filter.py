@@ -971,7 +971,7 @@ def migrate_saved_filters(filters):
 
     A date range and "include undated" become Period of copy (D18), when
     the state is older than the criteria (no 'criteria' key). The old
-    measurement bounds are not restored (R2, owner: "the least work"); a
+    measurement bounds are not restored (R2, owner: the option with the least work); a
     search saved with them must not show its stored rows, which were found
     with a filter that is no longer shown -- hence the second value. The
     criteria are cleaned (a malformed one is dropped). Returns (a deep copy:

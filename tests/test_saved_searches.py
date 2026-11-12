@@ -1,6 +1,6 @@
 """Saved searches, the window's size, and the Composition Search tooltips
-(owner, 2026-10-25: "saved searches (star icon on the list) and usable tooltips
-in composition search. Remember windows size and position").
+(owner, 2026-10-25: searches can be saved with a star in the list, Composition
+Search has usable tooltips, and the window keeps its size and position).
 
 Pinned here: a starred history entry is kept whatever its age -- the history
 limit counts only the rest and Clear keeps it -- and a re-run keeps it starred;

@@ -161,9 +161,9 @@ def test_there_is_still_only_one_vocabulary_translation():
 # ---------------------------------------------------------------------------
 
 def test_the_cite_button_is_a_single_cite_this_page_action():
-    """REPLACES a test asserting a two-entry menu (owner, 2026-09-06:
-    "Make the single 'cite this page' also the button in ResultDialog like
-    Browse Tab").
+    """REPLACES a test asserting a two-entry menu (owner, 2026-09-06: the
+    viewer's button is the single cite-this-page action, as on the Browse
+    tab).
 
     THE CONSEQUENCE, recorded because it is not obvious: this dialog is
     application-modal, so the citation bar behind it is inert -- citing the

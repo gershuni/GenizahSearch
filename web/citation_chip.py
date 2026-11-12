@@ -8,9 +8,9 @@ its wording could not follow what a reader was actually looking at.
 
 WHAT THE CHIP SHOWS, AND WHY THERE ARE TWO CITATIONS
 ----------------------------------------------------
-Owner: "most people will want to cite the website usage as a whole (they've
-found many things there), and the regular chip will just mention the dicta
-genizah search (and site address) and zenodo citation."
+Owner: most readers will cite their use of the website as a whole, having
+found many things there, so the regular chip names only Dicta's Genizah
+Search, the site's address and the Zenodo citation.
 
 So the DEFAULT — every page, including /browse — is the SITE citation. A reader
 who worked across forty manuscripts gains nothing from a citation pinned to

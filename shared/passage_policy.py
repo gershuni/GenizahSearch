@@ -207,8 +207,8 @@ FLAT_25_NOISY = PassagePolicy(name='flat-25-noisy', min_span=25,
 WIDE_40 = PassagePolicy(name='wide-40', density_scale=1.3)
 
 # wider-40: density_scale 1.6, the operating point the owner's 2026-08-22
-# ruling opened up ("a researcher has no problem receiving 50 or even three
-# hundred fragments if in the end there is something that fits"). 1.3 had been
+# ruling opened up (a researcher is glad to receive 50 or even three hundred
+# fragments if one of them fits in the end). 1.3 had been
 # chosen at a knee defined by BURDEN doubling -- a cost that ruling removes.
 # Re-measured on 300 FGP tune queries: recall@200 0.820 -> 0.893, median
 # manuscripts 3 -> 8, latency still sub-second. Not pushed further because

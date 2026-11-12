@@ -140,8 +140,8 @@ _GAP_TOKEN_RE = re.compile(r'^\[(\d+)\]$')
 # Regex for matching [|N] line-gap tokens like [|2], [|0]
 _LINE_GAP_TOKEN_RE = re.compile(r'^\[\|(\d+)\]$')
 
-# Responsa gaps have no policy limit (owner, 2026-10-12: "we can get more gap if we
-# want"); only re's own repeat-count ceiling applies -- one more and re.compile
+# Responsa gaps have no policy limit (owner, 2026-10-12: a longer gap is allowed
+# when wanted); only re's own repeat-count ceiling applies -- one more and re.compile
 # raises OverflowError, which the builders do not catch.
 _MAX_GAP_TOKEN = 4_294_967_294
 

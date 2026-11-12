@@ -2,7 +2,7 @@
 """The corpus-wide "Computed Identifications" findings page (Phase 136, plan 136-16).
 
 The surface the owner described as the reason the milestone is worth shipping --
-"a big new amazing feature... maximum ability to see new findings" -- and the one
+a major new feature that gives the most room to see new findings -- and the one
 place the caveat is given a designed home rather than being buried as fine print.
 
 WHAT THIS MODULE OWNS
@@ -343,9 +343,9 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     # cannot see. This wording states what a match IS and what it is not,
     # without reaching for any of the three prohibited words.
     # TWO SENTENCES ADDED 2026-08-07, at the owner's request, rephrased from
-    # their draft ("Matches may point to a work with shared text. Candidates for
-    # new finds and catalog non-correspondences were LLM-generated so there might
-    # be inaccuracies").
+    # their draft (matches may point to a work with shared text; the candidates
+    # for new finds and the catalogue non-correspondences came from an LLM and
+    # may be inaccurate).
     #
     # WHY THEY BELONG HERE and not in `_render_howto`: both name a limit of the
     # DATA ITSELF rather than explaining how to read the page, and the caveat is
@@ -370,8 +370,8 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     #    for no figure.
     #
     # NO INTERNAL VOCABULARY IN THE PROSE. An earlier revision said "the two
-    # candidacy readings" / "שני ממדי המועמדות" -- owner, 2026-08-07: it "sounds
-    # not good", and they were right for a reason worth recording. "Candidacy" and
+    # candidacy readings" / "שני ממדי המועמדות" -- owner, 2026-08-07: it reads
+    # badly, and they were right for a reason worth recording. "Candidacy" and
     # "axis" are this project's OWN words for the model: a reader meeting them in
     # the caveat, before any row, has nothing to attach them to. The sentence now
     # names the two markings by WHAT THEY SAY ("whether a row looks new, and
@@ -742,8 +742,8 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     # Why the candidacy switch is inert while the row unit is a work -- and,
     # crucially, WHAT STILL WORKS THERE.
     #
-    # Owner, 2026-08-05: "in each work we can show only those mss we want, i.e.
-    # only divergent". He was right, and the previous wording was over-broad in a
+    # Owner, 2026-08-05: within each work the manuscripts can be filtered too,
+    # to the divergent ones only. He was right, and the previous wording was over-broad in a
     # way that mattered. It said only "Not offered while each row is a work",
     # sitting on a card that holds TWO controls -- so it read as if the whole
     # card were dead, when in fact only ONE axis is withdrawn.
@@ -1522,8 +1522,8 @@ def _render_caveat(lang: str) -> None:
     """The permanent caveat slot -- a designed element with the gold
     inline-start rule, never fine print and never a dismissible warning.
 
-    IT NOW CARRIES AN ICON (owner report, 2026-08-06: the disclaimer "is easily
-    missed"). The `caveat` class already gives it a tinted plate and a gold
+    IT NOW CARRIES AN ICON (owner report, 2026-08-06: the disclaimer was
+    easily missed). The `caveat` class already gives it a tinted plate and a gold
     inline-start rule, and it was still being read past -- so the missing signal
     was the one thing that marks a block as an ADVISORY rather than as more prose.
     `info` rather than `warning`: nothing here is going wrong, and an alarm glyph
@@ -1876,9 +1876,9 @@ def _card_header(text: str, *extra_classes: str) -> Any:
 def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh):
     """THE FOUR-STATE SELECTOR -- one control where this card had two chips.
 
-    Owner ruling, 2026-08-06: "we have three wanted states. Default: Show all.
-    State one: Show only candidates for new find. State two: Show only
-    divergent" -- then "we may want also the state of divergent OR novel".
+    Owner ruling, 2026-08-06: three states -- by default show all, then only
+    the candidates for a new find, then only the divergent rows -- and then
+    perhaps a fourth, divergent OR novel.
 
     WHY ONE CONTROL AND NOT TWO. `novelty_status` holds ONE value per
     identification, and `fills_gap` (a candidate) and the two ruling-F shades are
@@ -2410,7 +2410,7 @@ def _node_text(label: str, count: Any) -> str:
     number to the BUCKET control, and that control still carries none.)
 
     STILL ONE STRING, and that is a decision rather than an omission (owner
-    report, 2026-08-06: "count numbers in the domain list are misaligned").
+    report, 2026-08-06: the counts in the domain list did not line up).
 
     The report is right about the symptom -- a ragged column of counts is harder
     to scan than a flush one -- and the shared CSS block already ships the rule

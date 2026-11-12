@@ -297,7 +297,7 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
 # HOW it is drawn, which changed on 2026-09-04: it used to be a fixed-position
 # card floating over the page with its own close button and a 30-second
 # self-destruct. On a first visit the homepage stacked four such overlays at
-# once, which is the "עומס / too many popups" the owner reported.
+# once, which is the popup overload the owner reported.
 #
 # It is now a header button with an unread dot. The tests above still pass
 # unchanged — deliberately, because the announcement's CONTENT contract did not

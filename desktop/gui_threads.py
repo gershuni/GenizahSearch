@@ -593,7 +593,7 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
     uninterruptible call -- twenty-five witnesses at Deepest is about eight
     minutes with a dead Stop button. Looping puts a real checkpoint between
     witnesses, which is what makes Stop work here at all (owner ruling
-    2026-08-27, revising the 2026-08-25 "accept the wait" for batches).
+    2026-08-27, revising the 2026-08-25 ruling that a batch is waited out).
 
     Two things this thread must get right that no single search has to:
 

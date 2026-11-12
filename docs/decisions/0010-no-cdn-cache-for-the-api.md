@@ -2,7 +2,7 @@
 
 - **Status:** binding
 - **Date:** 2026-10-20
-- **Source:** owner decision ("Not worth it", 2026-10-20) on the API part of the
+- **Source:** owner decision (2026-10-20: the gain does not justify it) on the API part of the
   `docs/OPEN_ISSUES.md` row "Cloudflare caches no page or API response". It followed an
   investigation with a working prototype: branch `claude/api-cdn-cache-prototype`, commit
   `95cd351`.

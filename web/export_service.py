@@ -368,7 +368,7 @@ def add_word_source_credits(
 
     Used ONLY by `export_browse_word`, which does export the manuscript's own
     transcription text -- the owner's condition for fixing this at all
-    (2026-09-04: "If Word export is referring to ms text so yes fix it too").
+    (2026-09-04: fix the Word export too if it carries the manuscript text).
 
     The citation comes from `shared/transcription_credits`, the same decision
     the printed sheet and the "How to cite" chip take, so an exported document

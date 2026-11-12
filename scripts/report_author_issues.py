@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Report what the author surface still needs -- and ADD NOTHING.
 
-Owner, 2026-09-01: "it seems there are more to be added (but carefully, do not
-add without me approving)". So this script only ever REPORTS. It never writes an
+Owner, 2026-09-01: more authors may be added, but carefully, and none without
+the owner's approval. So this script only ever REPORTS. It never writes an
 author, never guesses one, and never touches the db: filling a cell stays a
 human act, made in the export file and applied by
 `scripts/apply_work_author_rulings.py`.

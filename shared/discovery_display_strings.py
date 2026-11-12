@@ -54,8 +54,8 @@ THE FOUR HONESTY RULES EVERY STRING HERE OBEYS
    a DIRECT-family row (D-08a / D-21), and it renders only in its qualified
    form.
 2. **None of the three relation words D-21 prohibits**, in any form,
-   including negated. The owner's reason, verbatim: *"we are not sure that
-   tier_a is same work and the next are parallels, just heuristics."* The
+   including negated. The owner's reason: nobody can be sure that tier_a is the
+   same work and the lower tiers are parallels; the tiers are heuristics. The
    words themselves are listed in `136-CONTEXT.md` D-21 and enforced by the
    shared honesty gate; they are not repeated here.
 3. **No stored vocabulary key ever reaches markup.** `claim_type` values
@@ -123,8 +123,8 @@ _DOT = "·"
 # (`ids.RENDERED_RELATIONS`), not the stored `claim_type` vocabulary; its
 # display labels are the only thing that leaves.
 #
-# ⟨AMENDED 2026-08-12 -- C-track, owner ruling 2026-08-11, the "softer
-# register"; `docs/specs/discovery-relation-matrix-v1.md` §1 is the frozen
+# ⟨AMENDED 2026-08-12 -- C-track, owner ruling 2026-08-11 for a softer
+# register; `docs/specs/discovery-relation-matrix-v1.md` §1 is the frozen
 # table these strings come from⟩
 #
 # Two changes, one of which is a correction rather than a rewording:

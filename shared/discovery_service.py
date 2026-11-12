@@ -814,7 +814,7 @@ DIVERGENCE_SHADE_ORDER: Tuple[str, ...] = tuple(
 # disagreements is shown a mixed set in which they are 12% of the rows.
 #
 # A boolean cannot express the state that answers the owner's actual question --
-# "show me the 3,229" -- so the axis takes the shape this project already ships
+# a view of the 3,229 alone -- so the axis takes the shape this project already ships
 # for exactly this problem: the three-state PGP filter (Phase 93, mirroring
 # `printed_filter`), whose three states are exclude / no-filter / only.
 #
@@ -1420,8 +1420,8 @@ def _build_findings_filter(
         )
         params.extend(range_params)
 
-    # THE MANUSCRIPT AXIS (owner report, 2026-08-07: "In One Row Per Manuscript I
-    # don't see the computed identifications at all").
+    # THE MANUSCRIPT AXIS (owner report, 2026-08-07: One Row Per Manuscript
+    # showed no computed identifications at all).
     #
     # This axis was DELIBERATELY absent, and its absence was load-bearing at the
     # time: `web/components/findings_rows.py::EXPANSION_KEY_BY_UNIT` maps a unit to
@@ -3607,8 +3607,8 @@ class DiscoveryService:
         # no excerpt either), and a manuscript row has no work, author or
         # relation. On the PAGE that is complete, because the row carries an
         # EXPANDER. A spreadsheet has none, so the file was a title and two
-        # counts -- "useless xlsx, no expandable id ... so no ms id and not
-        # text" (owner report, 2026-08-21).
+        # counts -- of no use, with no manuscript id and no text, since
+        # nothing expands (owner report, 2026-08-21).
         #
         # The expander's own contract is that "the children come from the same
         # read at the leaf grain with this key pinned". So the export walks the

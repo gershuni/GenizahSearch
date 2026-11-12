@@ -2065,8 +2065,7 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 }
 
 /* ---- findings page: "How to read this page" is BODY TEXT, not a footnote ----
-   Owner, 2026-08-06: "the font of the text inside 'How to read this page' is too
-   small".
+   Owner, 2026-08-06: the text inside "How to read this page" was too small.
 
    The panel holds the page's honesty-critical prose — the recall disclaimer, the
    candidacy sub-line, the checked-source list, the staleness warning and the
@@ -2074,8 +2073,8 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
    for a note sitting BESIDE a row and the wrong size for four paragraphs a reader
    has deliberately opened in order to read. Prose set at footnote size is prose
    that gets skipped, which is the same failure the collapse was introduced to
-   fix — the owner's earlier verdict was that this text "read as a draft and
-   therefore got read by nobody".
+   fix — the owner's earlier verdict was that this text read like a draft, so
+   nobody read it.
 
    Scoped to the panel's own class, so `.dnote` keeps its 11px everywhere else
    (the row meta line, the facet notes, the launch basis lines). 14px is the
@@ -2178,7 +2177,7 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
    ------------------------------------------------------------------------ */
 
 /* ==========================================================================
-   Dismiss controls  (owner, 2026-09-04: "האיקס לסגירה לא ברור")
+   Dismiss controls  (owner, 2026-09-04: the closing X was unclear)
    ==========================================================================
    Every dismiss X on the site was `flat dense size=xs` plus `opacity-50`,
    which produced a ~20px, half-transparent glyph that readers did not
@@ -2421,7 +2420,7 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 
 
 /* ========================================================================
-   Phone layout (owner, 2026-10-22): "more compact on mobile"
+   Phone layout (owner, 2026-10-22): a more compact layout on phones
    ========================================================================
    Below 640px the pages were the desktop layout stacked. Measured at 390x844
    before this: the English header wrapped out of its 64px bar, /search left

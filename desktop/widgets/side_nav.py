@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """The main window's side menu: the sections and tools down one side of the window.
 
-Owner, 2026-10-24: "move the menu to one of the app sides, remove the V tick
-boxes, and add also the puzzle, joins lab and settings to the menu", then "Keep
-the tabs. Offer an option to change them to the side menu". So it is one of two
-layouts, chosen in Settings: the tab bar with its corner buttons (the default),
-or this column in their place. The tab layout's ☰ menu is built from this
+Owner, 2026-10-24: a menu on one side of the window, without tick boxes, that
+also lists the Puzzle, the Joins Lab and Settings; then: the tabs stay, and the
+side menu is an option. So it is one of two layouts, chosen in Settings: the tab
+bar with its corner buttons (the default), or this column in their place. The tab layout's ☰ menu is built from this
 column's entries too (``build_menu``), so the two always list the same things.
 
 * It sits on the window's start side -- right in Hebrew, left in English; Qt
@@ -90,7 +89,7 @@ class LayoutProofShortcuts(QObject):
 
     On Windows, a QShortcut for Ctrl+G can miss when the keyboard layout's G
     key types another script, the Hebrew \u05e2 for one (owner, 2026-10-25:
-    "Ctrl-G does not work" while the menu entry did). Installed on the
+    Ctrl+G did nothing while the menu entry worked). Installed on the
     application, this sees a key press that no shortcut took and matches it
     by its virtual-key code, which is the same in every layout. A press a
     QShortcut did take never arrives as a key press, so nothing fires twice;

@@ -9,8 +9,8 @@ its replacement gets these.
 
 What matters here, in order:
 
-1. The SENTENCE. The first cut returned a six-row block; the owner's verdict was
-   "too much duplicacy" and they wrote the shape they wanted. These pin that
+1. The SENTENCE. The first cut returned a six-row block; the owner judged it
+   too repetitive and wrote the shape they wanted. These pin that
    shape -- three clauses, no repeated domain, no repeated "retrieved".
 2. WHO is credited. Same rule as the print sheet and the Word export, because
    all three now read one decision: MiDRASH for the automatic transcription and

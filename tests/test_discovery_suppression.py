@@ -617,8 +617,8 @@ def test_a_failed_reread_after_a_successful_write_never_UNHIDES_anything():
 
 
 # ===========================================================================
-# THE MANUSCRIPT FILTER AXIS (owner report, 2026-08-07: "In One Row Per Manuscript
-# I don't see the computed identifications at all").
+# THE MANUSCRIPT FILTER AXIS (owner report, 2026-08-07: One Row Per Manuscript
+# showed no computed identifications at all).
 #
 # The per-manuscript unit had no expansion because the shared predicate had no
 # `sys_id` axis, and offering one would have passed a keyword the read silently

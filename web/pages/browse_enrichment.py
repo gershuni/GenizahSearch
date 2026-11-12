@@ -935,8 +935,8 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
             refs.enrichment_refs['discovery_excerpts_on'] = False
         update_discovery_panel_section(state, refs)
 
-    # THE LAUNCH HIGHLIGHT on the entry control (owner, 2026-08-07: "perhaps just
-    # highlight it"). The panel is the release's one new browse surface, arriving
+    # THE LAUNCH HIGHLIGHT on the entry control (owner, 2026-08-07: a highlight
+    # alone is enough). The panel is the release's one new browse surface, arriving
     # on a toolbar that already carries seven `flat dense` controls -- without a
     # marker it is a button nobody has a reason to notice.
     #

@@ -1970,7 +1970,7 @@ def create_layout():
             # This used to be a fixed-position card over the page. On a first
             # visit the homepage stacked FOUR overlays at once (this, the OCR
             # caveat, the citation footer, and a blocking citation modal), which
-            # is the "עומס / too many popups" the owner reported on 2026-09-04.
+            # is the popup overload the owner reported on 2026-09-04.
             # A header button costs no page area, never covers the hero, and —
             # unlike the toast — the news stays REACHABLE after it is read
             # instead of being destroyed by a 30-second timer.

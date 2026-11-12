@@ -9,7 +9,7 @@ viewer, lazy appendix groups vanished whole under any filter (their only child w
 data-less placeholder), and rows instantiated by expanding a group were never
 filtered. Both surfaces now ask this module the same question about the same data.
 
-The contract (owner decision, 2026-09-23 -- "split by filter type"):
+The contract (owner decision, 2026-09-23: the view splits by filter type):
 
 * MANUSCRIPT-level filters keep or drop a manuscript together with all its pages:
   library, title and printed-column text; the 3-state printed filter; LOCAL

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """The browse Word export must credit the transcription it actually exported.
 
-Owner, 2026-09-04: "If Word export is referring to ms text so yes fix it too."
+Owner, 2026-09-04: if the Word export carries the manuscript text, fix it too.
 It is — `export_browse_word` writes the transcription itself via
 `add_hebrew_paragraph`, on both the single-page and the all-pages path — so the
 condition is met and the credit has to follow the source.
@@ -180,7 +180,7 @@ def test_the_document_carries_the_full_author_list_EXACTLY_ONCE():
     the sentence abbreviated to "et al." and a document has room for the full
     list. Since the owner's 2026-09-05 ruling the sentence IS the full list, so
     printing the rows unfiltered put the same seventeen names on one page twice,
-    back to back -- the "too much duplicacy" the citation was collapsed into one
+    back to back -- the repetition the citation was collapsed into one
     sentence to fix.
 
     Counted on a mid-list name, not on the whole string: the two renderings

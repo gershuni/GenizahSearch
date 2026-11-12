@@ -33,7 +33,7 @@ WORD_RE = re.compile(r"[א-ת][א-ת֑-ׇ]*")
 NIKUD_RE = re.compile(r"[֑-ׇ]")
 
 # Actions, per _tmp/V08-REPAIR-SPEC.md §1 reconciled with the owner's 2026-08-14
-# ruling that the harm to fix is "points at the wrong manuscript entity":
+# ruling that the harm to fix is a pointer to the wrong manuscript entity:
 #   refile  - victim has NO V0.8 record; strip the block from the host AND re-file
 #             it under the victim's own pre-existing V0.7 (IE,P,FL). Fixes the
 #             wrong-entity harm with no loss of searchable text.
