@@ -1574,6 +1574,13 @@ TRANSLATIONS = {
 
     # Collapsible Search Panel
     "Expand search options": "הרחב אפשרויות חיפוש",
+    # On-screen Hebrew keyboard (web/hebrew_keyboard.py)
+    "Hebrew keyboard": "מקלדת עברית",
+    "Final form of {}": "{} סופית",
+    "Space": "רווח",
+    "Wildcard: any letters": "תו כללי: אותיות כלשהן",
+    "Apostrophe (geresh)": "גרש",
+    "Quotation mark (abbreviation)": "מירכאות (ראשי תיבות)",
     "Collapse search panel": "כווץ את חלונית החיפוש",
     "Enter search query": "הזן שאילתת חיפוש",
     "New": "חדש",

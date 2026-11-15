@@ -2613,6 +2613,12 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 @media (min-width: 641px) and (max-width: 1023px) {
     .search-main-row > .min-w-80 { min-width: 240px !important; }
 }
+/* Phone: the box takes its own line at the card's width. Its 320px minimum was
+   wider than the card's inside below ~370px, so the box, and the Hebrew keys
+   under it (web/hebrew_keyboard.py), ran off the card's right edge (2026-11-15). */
+@media (max-width: 640px) {
+    .search-main-row > .min-w-80 { min-width: 0 !important; flex-basis: 100%; }
+}
 
 /* Result rows. One DOM, two densities on the list: `density-compact` is one
    header line (shelfmark, badges, the title cut to the width, the actions)

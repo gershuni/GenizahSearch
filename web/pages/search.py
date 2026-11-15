@@ -16,6 +16,7 @@ from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, tr_engine_message, is_rtl, get_language, using_language
 from web.ux_timing import ux_done, ux_ignored
+from web import hebrew_keyboard
 from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
@@ -165,6 +166,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
     # Capture NiceGUI client for deferred async tasks (slot context)
     _page_client = ui.context.client
+    # The on-screen Hebrew keyboard: open, and used since the last search began.
+    hk_state = {'open': False, 'used': False}
     # ux_timing: the next search was started by this page's URL, not a click.
     _ux_url_start = {'nav': False}
     _page_run = {'run': None}  # the run this page's search is (web/search_runs.py)
@@ -443,6 +446,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Add Advanced View image handler JavaScript at page level (must be outside dialog)
     # Versioned as on /browse (_viewer_js_version): an unversioned copy was kept 4 hours.
     from web.pages.browse import _viewer_js_version
+    ui.add_head_html(hebrew_keyboard.head_html())
     ui.add_head_html(ADVANCED_VIEWER_STYLES.replace(
         '/static/manuscript_viewer.js"', f'/static/manuscript_viewer.js?v={_viewer_js_version()}"', 1))
 
@@ -637,8 +641,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # progress bar; the site's top bar would run on 15 s (web/main.py).
                             'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
                             ' data-gs-primary-search'  # "/" jumps here (web/keyboard_shortcuts.py)
+                            f' {hebrew_keyboard.TARGET_ATTR}'  # the on-screen keys type here
                         ).style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
+
+                        # The on-screen Hebrew keyboard (pilot, web/hebrew_keyboard.py): a
+                        # button in the box opens the keys under it. The keys type in the
+                        # browser; the page only opens the panel and notes, for PostHog,
+                        # whether a search's query was typed with them.
+                        with query_input.add_slot('append'):
+                            hk_toggle = ui.button(
+                                icon='keyboard', on_click=lambda: _toggle_hebrew_keyboard()
+                            ).props(
+                                f'flat round dense size=sm aria-expanded="false"'
+                                f' aria-label="{tr("Hebrew keyboard")}"'
+                            ).tooltip(tr('Hebrew keyboard'))
+                        hk_panel = ui.element('div').classes('w-full').props(
+                            f'{hebrew_keyboard.PANEL_ATTR} data-hk-field="{hebrew_keyboard.FIELD}"'
+                            f' data-hk-layout="{hebrew_keyboard.LAYOUT}"')
+                        with hk_panel:
+                            ui.html(hebrew_keyboard.panel_html(tr), sanitize=False)
+                        hk_panel.set_visibility(False)
+
+                        def _toggle_hebrew_keyboard():
+                            hk_state['open'] = not hk_state['open']
+                            hk_panel.set_visibility(hk_state['open'])
+                            hk_toggle.props(f'aria-expanded="{"true" if hk_state["open"] else "false"}"')
+                            if hk_state['open']:
+                                from web.analytics import posthog_capture
+                                posthog_capture(hebrew_keyboard.POSTHOG_OPENED, {
+                                    'field': hebrew_keyboard.FIELD, 'layout': hebrew_keyboard.LAYOUT,
+                                }, client=_page_client)
+
+                        def _note_hebrew_keyboard_used(e):
+                            if hebrew_keyboard.used_payload(getattr(e, 'args', None)).get('used'):
+                                hk_state['used'] = True
+                        hk_panel.on(hebrew_keyboard.USED_EVENT, _note_hebrew_keyboard_used, ['detail'])
 
                         # --- Live shortcut detection: switch mode when user types prefix + space ---
                         _shortcut_prefixes = [
@@ -5247,6 +5285,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             variant_settings = variant_preferences.for_search(mode)
         search_state.last_variant_settings = dict(variant_settings)
 
+        # Whether this search's query was typed with the on-screen keys (PostHog,
+        # search_executed); the script's next key starts the next attempt's count.
+        _hebrew_keyboard_used = hk_state['used']
+        hk_state['used'] = False
+        if _hebrew_keyboard_used:
+            try:
+                _page_client.run_javascript(hebrew_keyboard.reset_script())
+            except Exception:
+                pass  # page gone: nothing to reset
+
         # Reset UI
         search_state.is_running = True
         search_state.is_cancelled = False  # Reset cancellation flag
@@ -5941,6 +5989,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'result_count': len(results),
             'duration_seconds': round(total_elapsed, 1),
             'was_cancelled': False,
+            'hebrew_keyboard': _hebrew_keyboard_used,
         })
 
         # URL state persistence: the address the search got when it started, again

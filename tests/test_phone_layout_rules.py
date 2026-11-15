@@ -529,3 +529,12 @@ def test_the_header_is_one_row_above_640px():
     assert 'display: contents' not in rules
     left = rules[rules.index('.app-header > .header-left {'):]
     assert 'overflow' not in left[:left.index('}')]
+
+
+def test_the_search_box_fits_the_card_on_a_phone():
+    """The query column's 320px minimum (``min-w-80``) was wider than the card's
+    inside on a phone, so the box and the Hebrew keys under it ran off the card
+    (2026-11-15); below 640px it takes its own line at the card's width."""
+    assert "ui.column().classes('flex-grow min-w-80 gap-1') as query_column" in _read('web/pages/search.py')
+    rules = _phone_rules(_read('web/static/common.css'))
+    assert '.search-main-row > .min-w-80 { min-width: 0 !important; flex-basis: 100%; }' in rules
