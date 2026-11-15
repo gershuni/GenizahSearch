@@ -68,6 +68,7 @@ from shared.supabase_provider import SUPABASE_URL, SUPABASE_ANON_KEY
 # client.table('corrections').insert call. UI hide on web + desktop is
 # defense-in-depth; this is the load-bearing gate.
 from shared.synthetic_sys_id import is_synthetic_sys_id
+from shared.atomic_io import read_bytes, write_bytes_atomic
 
 # Sign-up and sign-in answers under email confirmation (production requires
 # it). The English keys of the website's approved messages: the dialogs
@@ -311,6 +312,12 @@ class SupabaseCorrectionsClient:
 
         self._client: Optional[Client] = None
         self.current_user: Optional[User] = None
+        # Guards the credentials file and the choice of the live client: the auth
+        # client refreshes its tokens on a timer thread, and each refresh is saved.
+        self._session_lock = threading.RLock()
+        # The last session the live client's events reported: the one every save
+        # writes, so a save that failed is made good by the next one.
+        self._latest_session = None
 
         # Cache
         self._cache: Dict[str, Any] = {}
@@ -335,18 +342,150 @@ class SupabaseCorrectionsClient:
                 logger.warning("SUPABASE_ANON_KEY not set")
                 return None
             try:
-                self._client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+                client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
             except Exception as e:
                 logger.error(f"Failed to create Supabase client: {e}")
                 return None
+            self._client = client
+            self._follow_token_refreshes(client)
         return self._client
+
+    # Supabase rotates refresh tokens: every refresh returns a new pair and
+    # retires the old refresh token. The server still accepts a retired token
+    # for ten seconds, or when it is the parent of the current one; anything
+    # older is refused and ends the session. The auth client refreshes by
+    # itself -- at a start whose saved access token has expired, before each
+    # hourly expiry, and whenever a request finds it expired -- and reports each
+    # new session through these events. Each event saves the session the client
+    # holds at that moment (_held_session), not the one the event carries: the
+    # client stores a session before it reports it, and reports from different
+    # threads can arrive out of order, so an event's own session may already be
+    # older than the client's. The session saved is kept (_latest_session) and
+    # is what every save writes. The file used to keep the sign-in's pair: after
+    # an hour of use that pair was two refreshes old, and the next start
+    # (typically the one an upgrade forces) was refused and signed the user out.
+    _EVENTS_WITH_NEW_TOKENS = ('SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED',
+                               'MFA_CHALLENGE_VERIFIED')
+    _REWRITES_WHILE_STORAGE_MOVES = 3
+
+    def _follow_token_refreshes(self, client):
+        subscribe = getattr(getattr(client, 'auth', None), 'on_auth_state_change', None)
+        if subscribe is None:
+            return
+        try:
+            subscribe(lambda event, session, c=client: self._on_auth_event(c, event, session))
+        except Exception as e:
+            logger.warning(f"Could not follow token refreshes; the sign-in may not survive a restart: {e}")
+
+    def _on_auth_event(self, client, event, session):
+        """Runs on whichever thread refreshed (often the auth client's timer), inside
+        the auth client's own call: nothing may escape, or the refresh, the start's
+        session restore or the request that refreshed would fail with it."""
+        if event not in self._EVENTS_WITH_NEW_TOKENS or session is None:
+            return
+        try:
+            with self._session_lock:
+                if client is not self._client:
+                    return  # dropped by a sign-out: it never writes the file back
+                held = self._held_session(client, session)
+                # Refreshes on other threads store their session without this lock,
+                # so the client may hold a newer one by the time the file is written:
+                # write again until what was written is what it holds (bounded; the
+                # reports of those refreshes, waiting for the lock, write it too).
+                for _ in range(self._REWRITES_WHILE_STORAGE_MOVES):
+                    if held is None:
+                        return  # the client holds no session any more
+                    self._latest_session = held
+                    self._write_saved_session(client)
+                    now_held = self._held_session(client, held)
+                    if now_held is None or now_held.refresh_token == held.refresh_token:
+                        return
+                    held = now_held
+        except Exception as e:
+            logger.warning(f"Could not save the refreshed sign-in; the next start may ask to sign in: {e}")
+
+    @staticmethod
+    def _held_session(client, reported):
+        """The session ``client`` holds now, read from its storage without a request
+        (``get_session()`` could refresh, and that is a request made under the lock).
+
+        Reads supabase-auth's own storage (pinned at 2.28.0;
+        tests/test_desktop_sign_in_survives_restart.py fails if this stops reading
+        it). A client without those attributes falls back to ``reported``."""
+        auth = getattr(client, 'auth', None)
+        if getattr(auth, '_persist_session', None) is False:
+            return getattr(auth, '_in_memory_session', reported)
+        storage = getattr(auth, '_storage', None)
+        key = getattr(auth, '_storage_key', None)
+        validate = getattr(auth, '_get_valid_session', None)
+        if storage is None or key is None or validate is None:
+            return reported
+        return validate(storage.get_item(key))
+
+    def _write_saved_session(self, client, snapshot=None):
+        """Save the newest session the client's events reported, and the user once
+        known, if ``client`` is still the live client. ``snapshot`` (a session read
+        from the client) is written only when no event has reported one: a client
+        that cannot be followed. A followed client's snapshot may already have been
+        replaced by a refresh on another thread, and must not overwrite it."""
+        with self._session_lock:
+            if client is not self._client:
+                return
+            session = self._latest_session if self._latest_session is not None else snapshot
+
+            def update(data):
+                if session is not None:
+                    data['access_token'] = session.access_token
+                    data['refresh_token'] = session.refresh_token
+                if self.current_user:
+                    data['cached_user'] = self._cached_user_dict()
+            self._update_credentials_file(update)
+
+    def _read_credentials_file(self) -> Dict[str, Any]:
+        # Retried while another program (antivirus, a backup tool) holds the file.
+        data = json.loads(read_bytes(str(self.credentials_file)).decode('utf-8'))
+        return data if isinstance(data, dict) else {}
+
+    def _update_credentials_file(self, update, create=True):
+        """Read, change and rewrite the credentials file in one step. It holds the
+        session, the cached user and "Remember me": each writer changes only its
+        own keys. A file that cannot be read is never taken for an empty one: the
+        error is raised and the file stays as it was. Only a file whose contents
+        are not a JSON object is rewritten from nothing."""
+        with self._session_lock:
+            exists = self.credentials_file.exists()
+            if not exists and not create:
+                return
+            data = {}
+            if exists:
+                try:
+                    data = self._read_credentials_file()
+                except FileNotFoundError:
+                    if not create:
+                        return
+                except ValueError as e:
+                    logger.warning(f"Rewriting a damaged credentials file: {e}")
+            update(data)
+            write_bytes_atomic(str(self.credentials_file), json.dumps(data).encode('utf-8'))
+
+    def _cached_user_dict(self) -> Dict[str, Any]:
+        user = self.current_user
+        return {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'full_name': user.full_name,
+            'affiliation': user.affiliation,
+            'role': user.role,
+            'reputation_score': user.reputation_score,
+            'uuid': user._uuid
+        }
 
     def _load_credentials(self):
         """Load saved Supabase session from disk."""
         if self.credentials_file.exists():
             try:
-                with open(self.credentials_file, 'r') as f:
-                    data = json.load(f)
+                data = self._read_credentials_file()
 
                 # Restore session if we have tokens
                 access_token = data.get('access_token')
@@ -379,34 +518,15 @@ class SupabaseCorrectionsClient:
                 logger.warning(f"Failed to load credentials: {e}")
 
     def _save_credentials(self):
-        """Save Supabase session to disk."""
+        """Save the newest session and the cached user ("Remember me" is kept). It
+        also makes good an event's save that failed (a file held for a moment)."""
         try:
             client = self._get_client()
             if not client:
                 return
-
-            session = client.auth.get_session()
-            data = {}
-
-            if session:
-                data['access_token'] = session.access_token
-                data['refresh_token'] = session.refresh_token
-
-            if self.current_user:
-                data['cached_user'] = {
-                    'id': self.current_user.id,
-                    'email': self.current_user.email,
-                    'username': self.current_user.username,
-                    'full_name': self.current_user.full_name,
-                    'affiliation': self.current_user.affiliation,
-                    'role': self.current_user.role,
-                    'reputation_score': self.current_user.reputation_score,
-                    'uuid': self.current_user._uuid
-                }
-
-            with open(self.credentials_file, 'w') as f:
-                json.dump(data, f)
-
+            snapshot = client.auth.get_session()  # an expired one is refreshed, and reported, here
+            if snapshot is not None or self._latest_session is not None or self.current_user:
+                self._write_saved_session(client, snapshot)
         except Exception as e:
             logger.warning(f"Failed to save credentials: {e}")
 
@@ -424,18 +544,10 @@ class SupabaseCorrectionsClient:
         Returns True if successful, False otherwise.
         """
         try:
-            # Save email to credentials file
-            if self.credentials_file.exists():
-                with open(self.credentials_file, 'r') as f:
-                    data = json.load(f)
-            else:
-                data = {}
-
-            data['saved_email'] = email
-            data['remember_me'] = True
-
-            with open(self.credentials_file, 'w') as f:
-                json.dump(data, f)
+            def update(data):
+                data['saved_email'] = email
+                data['remember_me'] = True
+            self._update_credentials_file(update)
 
             # Save password to system keyring (secure storage)
             if KEYRING_AVAILABLE:
@@ -459,8 +571,7 @@ class SupabaseCorrectionsClient:
             if not self.credentials_file.exists():
                 return None, None
 
-            with open(self.credentials_file, 'r') as f:
-                data = json.load(f)
+            data = self._read_credentials_file()
 
             email = data.get('saved_email')
             remember_me = data.get('remember_me', False)
@@ -485,17 +596,15 @@ class SupabaseCorrectionsClient:
     def clear_saved_login_credentials(self):
         """Clear saved login credentials."""
         try:
-            # Remove from credentials file
-            if self.credentials_file.exists():
-                with open(self.credentials_file, 'r') as f:
-                    data = json.load(f)
+            removed = []
 
-                email = data.pop('saved_email', None)
+            def update(data):
+                removed.append(data.pop('saved_email', None))
                 data.pop('remember_me', None)
+            self._update_credentials_file(update, create=False)
 
-                with open(self.credentials_file, 'w') as f:
-                    json.dump(data, f)
-
+            if removed:
+                email = removed[0]
                 # Remove from keyring
                 if KEYRING_AVAILABLE and email:
                     try:
@@ -705,31 +814,31 @@ class SupabaseCorrectionsClient:
         only, so it cannot touch a sign-in made meanwhile (a new client object with
         its own session). If the program exits first the request is simply not
         made; the tokens are already gone from memory and disk.
+
+        Both ways drop the client object before the request: a refresh it makes
+        meanwhile (sign_out refreshes an expired session first, and its timer may
+        fire) can then never write the file back.
         """
-        if revoke == 'background':
+        with self._session_lock:
             old, self._client = self._client, None
+            self._latest_session = None
             self.current_user = None
             self._forget_saved_session()
-            if old is not None:
-                threading.Thread(target=self._revoke_session, args=(old,),
-                                 name="supabase-sign-out", daemon=True).start()
+        if old is None:
             return
-        client = self._get_client()
-        if client:
-            try:
-                client.auth.sign_out(self.SIGN_OUT_OPTIONS)
-            except Exception:
-                pass
-
-        self.current_user = None
-        self._forget_saved_session()
+        if revoke == 'background':
+            threading.Thread(target=self._revoke_session, args=(old,),
+                             name="supabase-sign-out", daemon=True).start()
+        else:
+            self._revoke_session(old)
 
     def _forget_saved_session(self):
-        if self.credentials_file.exists():
-            try:
-                self.credentials_file.unlink()
-            except OSError:
-                pass
+        with self._session_lock:
+            if self.credentials_file.exists():
+                try:
+                    self.credentials_file.unlink()
+                except OSError:
+                    pass
 
     @classmethod
     def _revoke_session(cls, client):
