@@ -769,7 +769,16 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.15.0-friedman"
+WHATS_NEW_VERSION = "9.16.0-long-passages"
+# The key before it. 9.16.0's entry is gated on the letter-level index; where that
+# is off, the key stays here, so the unread dot lights only where the new entry is
+# there to read.
+WHATS_NEW_PREVIOUS_VERSION = "9.15.0-friedman"
+
+
+def whats_new_content_key() -> str:
+    """The What's New content this deployment shows (before any AI-listing suffix)."""
+    return WHATS_NEW_VERSION if passage_available() else WHATS_NEW_PREVIOUS_VERSION
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1843,10 +1852,17 @@ def create_layout():
                                     "search: select several words on the manuscript page to find them "
                                     "together in both dictionaries"),
                                  '/browse'))
+    # v9.16.0 (2026-11-15), approved with the release texts. Gated like the letter-level
+    # entry above: the passage length choice exists only where letter-level parallels are
+    # served, and it leads to the same prefilled demo.
+    if passage_available():
+        _new_surfaces.insert(0, (tr('New: "Only long passages" in letter-level parallels search, to keep '
+                                    'only manuscripts whose match covers a long passage of your text'),
+                                 _parallels_demo_target))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).
-    _whats_new_key = WHATS_NEW_VERSION + ai_whats_new_suffix()
+    _whats_new_key = whats_new_content_key() + ai_whats_new_suffix()
     _whats_new_unseen = safe_user_get('whats_new_dismissed') != _whats_new_key
 
     # === Modular Header Rendering Functions ===

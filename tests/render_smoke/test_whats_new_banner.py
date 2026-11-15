@@ -142,6 +142,7 @@ def test_toast_advertises_the_new_entry_and_letter_level_parallels():
         assert _banner(elements) is not None
         assert _parallels_hrefs(elements), 'the toast advertised no parallels link'
         text = _texts(elements)
+        assert '"Only long passages" in letter-level parallels search' in text      # v9.16.0
         assert 'corrected and added links to the Cambridge Digital Library' in text      # v9.11.1
         assert 'about 14,600 more Friedberg Genizah Project transcriptions' in text      # v9.11.0
         assert 'Better wildcard search in Responsa style' in text      # v9.9.0
@@ -184,13 +185,16 @@ def test_the_parallels_entry_is_gated_on_its_own_predicate():
     simply failed to render the entry at all."""
     async def passage_up(user):
         await user.open('/search')
-        assert 'Letter-level parallels search' in _texts(_elements(user))
+        text = _texts(_elements(user))
+        assert 'Letter-level parallels search' in text
+        assert '"Only long passages"' in text      # v9.16.0, the same gate
 
     async def passage_down(user):
         await user.open('/search')
         text = _texts(_elements(user))
         assert 'Better wildcard search in Responsa style' in text
         assert 'Letter-level parallels search' not in text
+        assert 'Only long passages' not in text
 
     _run(passage_up, passage_on=True)
     _run(passage_down, passage_on=False)
@@ -278,6 +282,8 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
         text = _texts(_elements(user))
         assert 'תכונות חדשות!' in text
         assert 'חיפוש מקבילות ברמת האות' in text
+        assert 'חדש: "רק קטעים ארוכים" בחיפוש מקבילות ברמת האות' in text      # v9.16.0
+        assert 'Only long passages' not in text
         assert 'בסגנון פרויקט השו"ת (שימוש באופרטור *)' in text      # v9.9.0
         assert "תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג'" in text      # v9.11.1
         assert 'כ-14,600 העתקות נוספות של פרויקט פרידברג' in text      # v9.11.0
@@ -362,6 +368,32 @@ def test_an_unread_announcement_carries_a_dot():
             'no unread dot: a fresh reader gets no signal that there is news')
 
     _run(driver)
+
+
+def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
+    """9.16.0's entry is gated on the letter-level index, and so is its key: a reader who
+    dismissed the 9.15.0 content gets the dot where the new entry is there to read, and
+    no dot on a box without the index, where nothing new is shown."""
+    from web.main import WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION
+
+    def dot_after_dismissing(key):
+        async def driver(user):
+            from nicegui import app
+            await user.open('/')
+            with user._client:
+                app.storage.user['whats_new_dismissed'] = key
+            await user.open('/')
+            found.append(bool(_by_class(_elements(user), 'whats-new-dot')))
+        return driver
+
+    from datetime import date
+    with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
+          patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''})):
+        found = []
+        _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
+        _run(dot_after_dismissing(WHATS_NEW_VERSION), passage_on=True)
+        _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=False)
+        assert found == [True, False, False], found
 
 
 def test_the_button_is_drawn_because_there_IS_something_to_announce():

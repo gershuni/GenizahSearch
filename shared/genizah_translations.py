@@ -6410,6 +6410,16 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v9.16.0 web What's New entry and desktop What's New bar and dialog (2026-11-15),
+# approved with the release texts.
+TRANSLATIONS.update({
+    'New: "Only long passages" in letter-level parallels search, to keep only manuscripts whose match covers a long passage of your text':
+        'חדש: "רק קטעים ארוכים" בחיפוש מקבילות ברמת האות, כדי להשאיר רק כתבי יד שההתאמה בהם מכסה קטע ארוך מהטקסט שלכם',
+    'New: "Only long passages" in letter-level Composition Search':
+        'חדש: "רק קטעים ארוכים" בחיפוש חיבורים ברמת האות',
+    'Letter-level Composition Search has a third Passage length choice, "Only long passages": it keeps only manuscripts whose match covers at least 120 letters of your text (half of it, if your text is shorter). It helps at Very wide and Maximal, where the list grows long.':
+        'בחיפוש חיבורים ברמת האות יש אפשרות שלישית ב"אורך הקטע": "רק קטעים ארוכים" משאירה רק כתבי יד שההתאמה בהם מכסה 120 אותיות לפחות מהטקסט שלכם (או מחציתו, אם הוא קצר יותר). היא מועילה ב"רחב מאוד" וב"מרבי", שבהם הרשימה מתארכת.',
+})
 # v9.14.0 web What's New entry (2026-11-05), approved with the release texts.
 TRANSLATIONS.update({
     "New: Judeo-Arabic dictionaries! On the manuscript page, press the dictionaries button (עع) at the bottom of the text pane; clicking a word then shows its entry in Blau's dictionary and in Lane's Lexicon":

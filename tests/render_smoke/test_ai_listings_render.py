@@ -227,14 +227,15 @@ def test_after_retirement_claude_alone_and_no_gpt(settings):
 def test_each_launch_lights_the_unread_dot_again(settings):
     """A reader who dismissed the 9.6.0 announcement sees the dot again when a listing goes
     live; with the new key stored the dot stays off; the second listing lights it once more."""
-    from web.main import WHATS_NEW_VERSION
+    from web.main import whats_new_content_key
     settings()
-    assert _has_unread_dot(WHATS_NEW_VERSION) is False          # control: dismissed, nothing new
+    key = whats_new_content_key()
+    assert _has_unread_dot(key) is False          # control: dismissed, nothing new
     settings(AI_CHATGPT_PLUGIN_URL=PLUGIN)
-    assert _has_unread_dot(WHATS_NEW_VERSION) is True
-    assert _has_unread_dot(WHATS_NEW_VERSION + '+ai-chatgpt') is False
+    assert _has_unread_dot(key) is True
+    assert _has_unread_dot(key + '+ai-chatgpt') is False
     settings(AI_CHATGPT_PLUGIN_URL=PLUGIN, AI_CLAUDE_CONNECTOR_URL=CONNECTOR)
-    assert _has_unread_dot(WHATS_NEW_VERSION + '+ai-chatgpt') is True
+    assert _has_unread_dot(key + '+ai-chatgpt') is True
 
 
 # --- MCP-first /ai page (MCP_ENABLED on, as in production) -------------------------------------

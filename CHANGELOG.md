@@ -8,6 +8,386 @@ which is not public.
 
 ---
 
+## [9.16.0] - 2026-11-15 — Dictionary lookup and only long passages
+
+Both apps. Letter-level Composition Search (desktop) and Parallels (web) gain a third *Passage
+length* choice, "Only long passages", which keeps only manuscripts whose match covers at least
+120 letters of the text (half of it, when the text is shorter). On the website, moving between
+pages starts in the browser, the buttons that open a library's own viewer are links, a page NLI
+did not deliver is no longer answered with another page's image, Quick View opens on the image
+Browse opens on, and the header stays one row at every width. Blau's, Friedman's and Lane's
+dictionaries get a wider lookup (quotations, verb stems, roots borrowed between dictionaries,
+verb forms, the words beside a clicked word) and a preview switch: each `*_DICTIONARY_ENABLED`
+also takes `editors`, which serves it only to a signed-in editor or admin. No sidecar changes.
+Deploy: set the three dictionary switches in the server's `.env` to `0` or `editors` before
+deploying the code (an older build reads `editors` as off). Web What's New
+"9.16.0-long-passages", shown where letter-level parallels are served; desktop What's New 9.16.0.
+
+### "Only long passages" in letter-level Composition Search and Parallels (web + desktop)
+
+A third choice under **Passage length**, beside *Normal passages (default)* and *Also short
+passages*: **Only long passages** keeps only manuscripts whose match covers at least 120 letters
+of the text (half the text, when it is shorter). Asked for by a desktop user, for searches at
+*Very wide* and *Maximal*, where the list had grown past reading — the desktop has shown every
+letter-level result, with no 200-manuscript limit, since 9.7.0.
+
+- `shared/passage_policy.py`: the `long` profile (`LENGTH_PROFILES`, `LENGTH_RECORD_FLOORS`), a new
+  policy field `min_record_letters` (in `policy_id` only when non-zero, so every existing policy
+  keeps its id) and `PassagePolicy.record_floor()`.
+- `shared/passage_search.py::search_passage` drops a record scoring under the floor after merging,
+  and counts it in `QueryReport.rejected_below_floor`. "Filter texts" conditions search without the
+  floor (`PassageSearcher.search_condition`), so a "must not appear" text is still found in a
+  short passage.
+- Desktop Composition Search and the website's Parallels page offer it, with the tooltip and Help
+  in English and Hebrew. The public API and MCP do not take a passage length and are unchanged.
+- Measured on the production index (spec section 8.2): on 398 FGP queries it removes 45-49% of the
+  rows at Very wide, Maximal and Maximal + Deep, losing 1 of ~375 known source manuscripts and 6-8
+  of ~152 confirmed matches.
+
+### Faster moves between pages, library links that always open, the right side of the leaf (web)
+
+Reported 2026-11-11: several seconds from one module to another; the NLI / CUDL
+buttons sometimes did nothing; T-S 12.782 showed one side twice on NLI, and Quick View
+opened on NLI where Browse opens on Cambridge.
+
+- **Moving between pages starts at once.** The sidebar, the header's logo and Help button,
+  and the homepage's cards and chips sent the click to the server, which then told the
+  browser where to go: a round trip to Oregon (about half a second from Israel, PostHog
+  `ux_timing`) before the next page even started, seconds while the server was busy, and
+  nothing while the connection was being re-made. They are now links, or handlers that
+  run in the browser (`web/client_nav.py`).
+- **Library viewer buttons always open.** "Open in NLI Ktiv / Cambridge / Manchester /
+  Princeton / Bodleian" opened their tab from the server after a round trip, late enough
+  for a popup blocker to stop it. They are links now; NLI's opens its tab during the click
+  and then sends it to the page's own image (`_nli_viewer_open_js`). The Joins dialog's
+  Joins Lab buttons and the Download page's button are links too.
+- **Switching NLI / Cambridge images is immediate.** A source chip reloaded the whole page
+  and asked every enrichment source again (seconds, with a second full rebuild); it now
+  only draws the image again.
+- **NLI no longer shows the wrong side.** When NLI did not deliver a page's own image, the
+  proxy answered with another page's (`_fetch_nli_image_bytes`'s fallback loop) and the
+  browser and Cloudflare kept it for a week: T-S 12.782 showed its verso as 1r. A page
+  with an image of its own is now answered with nothing (the viewer then asks NLI itself),
+  and a stand-in (Rosetta, or any image for a page with no FL id) is `no-store`.
+  Entries Cloudflare already holds expire within 7 days or with a purge.
+- **Quick View opens on the image Browse opens on** (an aligned Cambridge image before
+  NLI's), via the same `resolve_image_url` (`quick_view_image`), with that library's credit.
+- **Quick View's image is no longer left blurry.** A 400-px preview already in the
+  browser's cache finished loading before the viewer started listening for it, so the
+  full-size image never replaced it (`progressiveLoad` now upgrades an image that has
+  already loaded).
+
+### The header stays one row at every width, and its search box stays while it fits (web)
+
+From 641px until the header's groups fit (about 700px, in Hebrew and English; a browser zoomed to
+200% on a 1360px window is 680px wide) the three header groups were wrap rows: each wrapped inside
+itself, the menu over the logo and "?" on a second line, and the second lines hung over the page
+under the 64px bar (reported 2026-11-11). Only the phone block (640px and under)
+made them no-wrap. And the go-to box gave way to the search button at a fixed 1023px, and on a
+phone always, with room to spare.
+
+- `web/main.py`: the header groups carry `header-left` / `header-right` (the logo link keeps its
+  `header-logo-link`).
+- `web/static/common.css` (`@media not all and (max-width: 640px)`, the phone block's exact
+  complement, so a fractional width under browser zoom such as 640.5px is covered too): no header
+  group wraps and the button groups keep their width; should the bar be short of room where the
+  logo text shows, the logo link wraps the text onto a second line its 28px cap (the text's own
+  height) hides, so the icon stays. The clip is the link's own overflow, which never cuts its own
+  focus ring. Spacing where the text shows is unchanged.
+- The go-to box: the search group takes the bar's free space and is a size container
+  (`container: header-search / inline-size`); `@container header-search (min-width: 150px)` shows
+  the field, at today's width (24vw, 220-320px) or the room if less, with an ellipsis on a cut
+  placeholder. With less room it is the search button, whose field opens across the whole bar as
+  before. Below 826px the logo text gives its room to the box (`@media (max-width: 825px)`; the
+  widest header measured, Hebrew signed out with What's New, no longer fits both). Signed out, in
+  both languages, the field now shows from 440px (it was 1024px), at today's widths from 1024px;
+  below 440px it is the button. Open, the search group itself covers the bar and the field fills
+  it (the field was the placed element before; in browsers that gave a size container layout
+  containment it would have opened inside the narrow group); a bar widened
+  while open stays open until closed; "/" opens or focuses it. This also removes the 1023-1024px gap where a fractional width
+  showed both the field and the button, and the 640.5px gap where Sign in showed its icon and its
+  label (`.phone-icon-only`, now the phone block's exact complement too). No text changes.
+- Measured in the browser at 320-1920px wide and 350-1000px high, both languages, on /browse, /,
+  /search, /help and /joins-lab: one row, nothing outside the bar or overlapping; the logo still
+  leads home.
+- `tests/test_phone_layout_rules.py`: `test_the_header_is_one_row_above_640px` and
+  `test_the_header_search_box_narrows_then_folds_behind_a_button` (replacing
+  `..._folds_behind_a_button_below_1024px`) pin the hooks and the rules; both fail on the old
+  sources.
+
+### Dictionaries: a word is also found inside the quotations (web)
+
+A one-word lookup in Blau's and Friedman's dictionaries now also reads the quotations and the
+longer headwords. When an entry quotes the word, the panel lists that entry under "Also in the
+examples under", with the quotation and the word marked. Before, a word that was no headword was
+answered with "Nothing in the dictionary for this word" even when the dictionary printed it.
+
+- `shared/blau_service.py`, `shared/friedman_service.py`: `BlauLookup.quotes` and
+  `FriedmanLookup.quotes`, read from each sidecar's `tokens` table (`_quotes`). The entries that
+  print the exact word most often come first. Five entries are shown and the rest counted
+  (`MAX_QUOTE_HITS`), with two places each (`MAX_QUOTE_PLACES`).
+- Not listed: the entries already shown as cards, a function word (פי), a word held by more than
+  25 entries (`MAX_QUOTE_UNITS`), and several words (those are the expression search).
+- A Blau 1.0.0 sidecar has no `tokens` table and is served as before, without this list.
+- `web/components/blau_panel.py`, `web/components/friedman_panel.py`: the list uses the existing
+  label and the expression search's rendering. No new public string.
+
+This is step A of the dictionary lookup plan. It does not yet lead from an inflected verb to its
+root: a form is found only where a quotation prints that same form.
+
+### Dictionaries: a root's verb stems, Blau's entries for the roots Friedman and Lane give, and an empty answer that says what was checked (web)
+
+A root's card in Blau's and Friedman's dictionaries now shows the verb stems that dictionary lists
+under it, as buttons (דלל: I, II, IV, V, VII, X in Blau). Pressing one opens that stem's
+paragraph: in Blau its senses, in Friedman its stem paragraph (or the entry itself when the stem
+is the entry's own). Typing the root with a stem does the same: "דלל X" or "דלל 10", or the root
+in the box and the stem in the field beside it. A stem the root does not list says so above the
+root's cards. An entry headed by the word now comes before one that lists it as another spelling:
+וצל shows the verb וצל before the noun אَצْל/אُצْל/וَצْל in Friedman (157 words change their first
+entry there; in Blau, an entry whose first name is the word before one that gives it as a later
+name). An apostrophe after a letter is its dot in
+both dictionaries (ד'לל is ד̇לל): the dotted reading first, the other marked. Before, Blau's lookup
+did this and Friedman's gave no preference.
+
+Blau's tab now also shows Blau's entry for the root that Friedman or Lane gives for the word, after
+Blau's own entries. Blau has no list of inflected forms, so קאל found no entry; Friedman's index and
+Lane's reading both give קול, and Blau's tab now shows קול after its own entries. On
+5,000 words from each dictionary's quotations (Friedman's, Blau's), Blau shows an entry for 77% and
+73% of them (35% and 40% before); one word in seven that Blau already answered gets one more entry. A borrowed root is
+taken only from a dictionary that is served. From Friedman, a root comes from its index of forms
+or from an entry headed by the word or its base form, never from a sub-entry, a stem paragraph or an
+entry that holds the word further in its head: such a head is mostly a phrase, and the word the
+verb's complement (אלעלמא borrowed דרס from "עِלْמאً", a stem paragraph of דרס; it now shows עלם,
+which Lane gives).
+
+Nothing is left only on the dictionary's site or PDF page any more. A Blau card shows its first four
+senses and a button "Show N more senses" that opens the rest in place (it linked to the site
+before); a Friedman unit shows its first eight quotations, a sub-entry its first, and the first 30
+sub-entries and stem paragraphs, each with "Show N more ..." in place of the link to the PDF page. A
+single remaining item is shown without a button. A new word opens on the first dictionary that has
+something for it; the tab chosen for an earlier word is no longer remembered. A stem button, a gap
+control or a Lane reading stays on its own tab, and choosing a tab opens it at its top.
+
+A verb form now opens on its stem when a dictionary reaches its root through another way than the
+word itself: אסתקר opens קרר at stem X in Blau (a root Friedman and Lane gave) and in Friedman (its
+index), טאלבתה opens טלב at stem III. The stem comes from the word's shape: every form of each stem
+the dictionary lists is generated (`shared/ja_verb_forms.py`, the plan's rules), and a stem is chosen
+only when exactly one listed stem holds the word. Friedman's tab now also borrows roots, from Blau's
+own entries and Lane: ויכון, which reached nothing there, shows כון.
+Among Blau's own entries, one another dictionary names comes first, whichever key reached it (ויכון:
+כון first). Lane marks and puts first the entry a reading is cited by (أيضا under أيض, طالبته as
+طالبه, استقر as استقرر), and shows all of a root's entries and a cut entry's whole text in place
+("Show N more entries", "Show the full entry").
+
+A word a dictionary does not list can now reach its root through the generated forms of a stem the
+dictionary lists: אסתדלו reaches דלל, stem X, in both. When the word itself reaches nothing in a
+dictionary, up to three such cards are shown, each saying how it was reached: "found by its verb
+form", then the form, the root and the stems ("אסתדלו (דלל X)"). When the word itself does reach an
+entry, the other roots its verb forms give are only suggested, as chips at the top of the tab
+under "Other possible roots" ("קרב V"; a press opens that root on that stem): נדרי reaches נדר
+("vow") by its letters, and the chips offer דרי I ("we know"). The chips stay while the reader
+presses them one by one, the one shown marked and the word itself first, to go back to its own
+answer (pressing the marked chip again does the same). On a graded sample of 425 words of
+the corpus's Judeo-Arabic editions (Hebrew and Aramaic words left out), a card shown where nothing
+else was found named a right root for 87% to 95% of words, depending on the dictionary and the kind;
+beside an entry the word already reached, it was mostly wrong, hence the chips. Each card has a kind,
+by the word's own key or a clitic peeled and by its stem (A to E, `shared/ja_verb_forms.py`). Four
+switches name the kinds each dictionary shows and those that open on the stem
+(`BLAU_VERB_FORM_KINDS`, `FRIEDMAN_VERB_FORM_KINDS`, `BLAU_VERB_FORM_STEM_KINDS`,
+`FRIEDMAN_VERB_FORM_STEM_KINDS`): by default A, B and D are shown, opened on the stem where the guessed
+stem was right in 85% or more of the sample (A and D in Blau; A, B and D in Friedman); set empty, a
+switch turns them off. A root one dictionary found by verb form is not lent to the other: both run
+the same rules. A verb whose final
+weak letter is dropped takes an ending (רמת, ירמו, not a bare ירמ, the short form after לם): the bare
+form mostly spells another word (תלתה, "three", read as stem VIII of להו; אסתקר as stem X of קרא
+beside קרר). On the gate it cost a tenth of a point of reach and took 0.4 points off the forms that
+get only wrong cards.
+
+A borrowed Blau card for a word that fits none of the entry's stems shows the senses outside the
+stem paragraphs first: אלחרוף, the plural of the noun חרף, opened on the verb's stem II sense.
+
+Only the box, a stem button and a chip read a stem: words clicked or selected in the manuscript stay
+words ("פרק 2" is the expression search, not פרק at stem II), and several words typed in the box stay
+an expression search whatever the stem field beside it holds. Lane tries a reading's other shapes
+(طالبته as طالبه) only when the reading itself names none of the root's entries (بنت no longer marks
+بن). Where a kind of card found by verb form is shown, the verb forms are built in the background
+after the server starts (`web/main.py`), not inside the first reader's lookup.
+
+A word printed in an entry only beside the entry's verb no longer reaches that entry. Blau writes
+the words a verb takes after it ("אכ̇ד̇ לה"), so אללה reached אכ̇ד̇, חצל, כ̇רג̇ and עמל through "לה",
+and ואלסלאם reached כ̇צץ. A form under an entry now counts only when the word holds the entry's root
+letters in order (those other than א ו י ה; 293 of Blau's 680 one-word forms are such words). In
+Friedman, a unit reached that way through a peeled key is left out, and one the word itself
+reaches comes after the units of the word's own root (אלכלאם: the noun כלאם before the sub-entries
+of טול). A word with the article reads as a noun: an entry it reaches by its name shows its noun
+senses first in Blau (אלקול: 'saying' before 'to say'), Friedman shows the noun's entry before the
+verb's, and a verb form is read only as a participle or a verbal noun (אלקאצ̇י is no longer stem III
+of קצו).
+
+A Blau card heads the senses of each of its sub-entries with the sub-entry's name, as the site does:
+קרצת's card gave 'nettle' and 'pulp', the senses of the noun קריץ, as the verb's.
+
+In Friedman's tab, a sub-entry or stem paragraph the book prints without its root reads root, stem,
+then what the book prints: "VIII -הُ" under שכו is drawn "שכו VIII -הُ", where the card showed "-הُ"
+as the word. That is 1,360 units: a head that opens with a pronoun suffix ("-ה", "-ה גרצה/אמלה"), one
+made only of prepositions and placeholders ("עליה", "לה/להא", "אן יפעל"), or a stem paragraph with no
+head; under its own entry's card the root is the entry's head. Such a unit is no longer reached as the
+word itself: clicking עליה or לה reached a dozen verbs' stem paragraphs headed by it (13% of the
+clicked words of four letters reached one). It is still reached through its verb (a verb form, a
+stem, the root). A particle's own forms (אליה under אלי) stay words.
+
+An article that lost its alif after a preposition is peeled apart: בלסלאם (bi-l-salām) is read
+ב + (א)ל + סלאם, ללנאס ל + (א)ל + נאס, כלכתאב כ + (א)ל + כתאב (after ו or פ too; the stem of three
+letters or more). A lookup reads it only when the word as written reaches nothing, so בלגני stays בלג;
+on four letters, 11 clicked words had the shape and 6 now reach their entry (לליום, ללנחאס,
+ללמגאובה...). A selected or typed word answers to the stem in the expression search, so "יכצך בלסלאם"
+finds what "יכצך באלסלאם" finds. The dictionaries' words are keyed as before, so the sidecars are
+unchanged.
+
+A feminine noun before a pronoun suffix reaches its entry: a lookup reads a ת that a suffix was
+peeled from also as ה, so סלאמתך, וסעאדתך and עזתך reach סלאמה, סעאדה and עזה in Blau and Friedman,
+where they reached only a root borrowed from Lane. A verb with an object suffix can now also reach a
+noun (קלתה, 'I said it', reaches קלה). The expression search keys words as before, so the sidecars
+are unchanged.
+
+A clicked word is also looked up with the words beside it in the text. The page sends up to two
+words on each side (not across a sentence's end, nor past a word broken by a gap), and the runs of
+three and then two words that hold the clicked one are searched with no word between; a run of
+function words only (עלי כל) is not. An entry or sub-entry whose name holds one comes first in its
+tab, under "As an expression with the words beside it", and the panel opens on the dictionary that
+has one: אללה in "ואטאל אללה בקאך" now opens on Friedman's tab with "אטאל אללה בקאה" first, where
+it opened on Blau's entry אללה אללה. This adds about 50 to 60 ms a dictionary to a click.
+
+When no name holds such a run word for word, the units that hold one with up to two words between,
+in a name or in a quotation, come first instead, at most three: ואדאם and סלאמתך in "ואדאם סלאמתך"
+now bring Friedman's "אדאם אללה סלאמתה" (quoted under ג̇דד) first, as selecting both words did. Only
+runs without a function word or a word of a name (בן, אבו) are searched this way: on four letters
+(1,570 clicked words), any run with one word between reached quotations for nearly half the words,
+about eight units each, mostly by chance ("פי אלבר", "אבו אלפרג"); these runs reach them for 14% in
+Friedman and 9% in Blau. The gap is the selection's, at most two.
+
+The panel now opens on the dictionary whose answer comes closest to the clicked word, not on the
+first one with any answer: an expression with the words beside it, then the word itself (an entry,
+a form or a head that is the word, or Friedman's index listing it), then an expression with the
+words beside it that only quotations hold, then its base form (a clitic peeled), then a guessed root
+(another dictionary's, a verb form, Lane's reading), then quotations only; a reading spelled without
+the word's dot counts half a step further, and of equals the first tab opens. An action inside a tab
+still stays on it.
+
+Every dictionary tab now opens with a line saying the lookup is automatic: "Found automatically
+from the word's letters: an entry may belong to another word, and the word's own entry may be
+missing. Check the dictionary."
+
+With the switch on, words selected by dragging over them are looked up together, as with the D or
+M key; before, only the word under the pointer was.
+
+A dictionary can be shown to editors only, as a preview before it is released: each of
+`BLAU_DICTIONARY_ENABLED`, `LANE_DICTIONARY_ENABLED` and `FRIEDMAN_DICTIONARY_ENABLED` also takes
+`editors` (`shared/dictionary_switch.py`). A signed-in editor or admin then gets the dictionary on
+/browse, in the `?` card and in Help; everyone else, and What's New, see the site as if it were off.
+Each service's `is_available()` stays the public answer and `served_to(editor)` adds the preview, so a
+surface that does not know the reader cannot show it by mistake.
+
+- `shared/ja_roots.py` (new): the dot above (`dot_pattern`, moved from `shared/blau_service.py`),
+  stem labels read as every numeral they name (`stem_numbers`), and the typed shortcut
+  (`root_and_stem`).
+- `shared/blau_service.py`: `stem_pairs`, `root_stems`. A stem row's number comes from its
+  `binyan` column, its `binyan_shift` and its printed head together; 355 rows of release 1.1 have a
+  column that disagrees with the printed head, and such a row answers to both numbers.
+- `shared/friedman_service.py`: `stem_pairs`, `entry_stems`, `answer`, and the dot rule in the
+  lookup. Noisy stem labels ("IV/II", "II(<IV)") are read as every numeral they name.
+- `web/components/stem_buttons.py` (new); `web/components/blau_panel.py`,
+  `web/components/friedman_panel.py`, `web/pages/browse.py` (a press stays on its tab; Lane gets
+  the root alone); a Help sentence on the Browse page.
+- The empty answer in Blau's and Friedman's tabs (step B) now reads "Not found as an entry or in
+  the examples. A verb or an inflected form may be listed under its root: type the root." Lane's
+  tab keeps its line.
+- New strings, English and Hebrew: "As an expression with the
+  words beside it" ("כצירוף עם המילים הסמוכות") and the line every tab opens with ("נמצא אוטומטית
+  לפי אותיות המילה: ייתכן שערך שייך למילה אחרת, וייתכן שהערך של המילה חסר. בדקו במילון.").
+- New strings, English and Hebrew: the empty answer, "Stem
+  {stem} is not listed under this root.", the Help sentence, "Show {n} more senses", "Show {n} more quotations" and "Show {n} more
+  sub-entries and verb stems", "Show {n} more entries", "Show the full entry" (Hebrew "הצג ..."),
+  "found by its verb form" ("נמצא לפי צורת הפועל") and "Other
+  possible roots" ("שורשים אפשריים נוספים"). The stem buttons reuse "verb stem".
+- `shared/ja_verb_forms.py` (new): the forms of a stem, the stem a word belongs to, and the cards
+  found by verb form with their kinds (`verb_form_cards`); each service's `verb_form_index` (built
+  once, on the first lookup with a kind switched on); and `scripts/measure_dictionary_stems.py`, the
+  gate that measures the forms before they reach a root by themselves, on the lookup's own cards.
+  `docs/guides/ENV_VARS.md` documents the four switches. `scripts/draw_dictionary_stems_sample.py`
+  and `scripts/score_dictionary_stems_sample.py` draw the graded sample from the corpus's
+  Judaeo-Arabic editions and apply the pass rule a kind must meet before it is switched on.
+- `web/components/show_more.py` (new): the rest of a card behind one button. `MAX_SENSES` (Blau)
+  and `MAX_CHILDREN` / `MAX_QUOTATIONS` (Friedman) are now bounds far above the largest entry (115
+  senses; 44 sub-entries, 16 quotations), so a card carries everything.
+- `shared/ja_roots.py`: `borrowed_roots`, `ja_root_of_arabic`; `shared/blau_service.py`:
+  `BlauService.borrow`; `web/pages/browse.py` hands Blau the roots after the three lookups.
+- `shared/ja_roots.py`: `carries_root`; `shared/blau_normalize.py`: `article_candidates`;
+  `shared/ja_verb_forms.py`: `nominal_forms`; `shared/ja_expression.py`: `context_windows`; each
+  service's `context` and `answer(before=, after=)`; `BlauSense.sub_entry`;
+  `web/components/expression_panel.py::render_context`; the click script's `wordsBeside`.
+- `shared/friedman_service.py`: `construction_head`, `FRAME_TOKENS` (the unit builder's, kept equal by
+  a test), `FriedmanUnit.entry_root`; `web/components/friedman_panel.py`: `ROOT_CLASS`,
+  `CONSTRUCTION_CLASS`.
+- `shared/blau_normalize.py`: `elided_article_stems`, `MIN_ELIDED_STEM`; `shared/ja_expression.py`:
+  `query_keys` (the reader's words only).
+- `shared/blau_normalize.py`: `lookup_stems`; `shared/ja_expression.py`: `quoted_runs`, `quoted_gap`,
+  `MAX_CONTEXT_QUOTED`, `NAME_WORDS`; each lookup's `context_quoted`; `blau_panel.CLOSE_QUOTED`.
+
+The stem lists are built in memory on first use (about 50 ms for Blau and 36 ms for Friedman on
+the local sidecars); the verb forms, once a kind is switched on, in one to two seconds each and 75 MB
+held for both. No
+sidecar change. Steps A, B and the stems of the dictionary lookup plan; a clicked verb form reaches
+its root's entry in Blau through Friedman and Lane, opened on its stem, and by itself in both
+dictionaries once a kind of card found by verb form is switched on.
+
+### Dictionary expressions, spelling alternatives and printed nominal forms (web)
+
+Defined expressions retain priority when looking up a word in context. Words occurring together
+only in a quotation now appear below lexical matches, with a separate label, and cannot displace
+the word's own entry. The dictionary tabs use the same distinction.
+
+Lookup now combines the article with plural participles, recognizes shortened vocatives before
+address nouns, and offers dictionary-supported alternatives with one internal yod or waw added
+or removed. These spelling suggestions preserve the original query, supplement existing verb
+analyses and do not become independent evidence for borrowing a root into another dictionary.
+
+Lane lookup recognizes more explicitly printed plural lists, including weak-final forms, and
+printed verbal nouns. Matching entries identify that evidence. Direct headwords take precedence
+over plural homographs, while closed-class words retain their dedicated links. Suggested spellings,
+grammatical analyses and inferred roots are labelled in Hebrew and English.
+
+These changes use the existing dictionary databases; no rebuild is required.
+
+### Dictionary verb forms and contextual quotations (web)
+
+Improve common inflected verb retrieval in the three dictionaries, retaining printed lexical
+matches and marking generated analyses as possibilities. Recognize additional demonstrative
+spellings, prefer noun entries for article-bearing queries, and allow a clicked verb to find
+an adjacent preposition with a pronoun in dictionary quotations. Missing personal-pronoun
+entries in Lane no longer fall back to unrelated verb roots.
+
+Regression checks cover noun and particle ambiguity, existing lookup switches, source-key
+stability, and quotation attribution. Dictionary data files are unchanged.
+
+### A failed local test run keeps only its failing chunks' files (ci)
+
+- `scripts/run_local_tests.py` kept every chunk's `tmp_path` folder after a failed run, about
+  17.5 GB, for a day. With tests failing on master every run failed, and four runs in one morning
+  filled drive C: (2026-11-11); the fifth broke with hundreds of `tmp_path` errors.
+- Now a small pytest plugin (`scripts/lane_plugin/`) removes each test's `tmp_path` once the test
+  has passed setup, call and teardown (pytest's own `tmp_path_retention_policy=failed` decides on
+  the call alone and lost the folders of setup and teardown errors), a chunk that passed has its
+  folder removed when it ends,
+  and a failed run keeps only its failing chunks' folders. When it ends it writes `FINISHED.txt`
+  and removes every earlier run that has one, so only the latest failure stays. A run without
+  `FINISHED.txt` is still going (or was killed) and is left alone until it is a day old, as before.
+- Measured on the same 11 failures: the kept folder went from 17.54 GB to 0.23 GB, and a run's
+  folder peaks at about 1.1 GB while it runs (was 17.5 GB). Chunk times are unchanged.
+- The runner's deletions now also remove paths over 260 characters and read-only files, which
+  plain `rmtree` left behind on Windows, so a removed run folder goes whole.
+- Pinned by `tests/test_run_local_tests_gate.py`, including a real pytest run of the chunk command.
+
 ## [9.15.0] - 2026-11-08 — Friedman's dictionary and expression search
 
 Web only (no installer, no GitHub Release). Friedman's Judeo-Arabic dictionary as a tab of the /browse

@@ -8,6 +8,69 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "9.16.0",
+        "date": "2026-11-15",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Dictionary lookup and only long passages",
+            "he": "חיפוש במילונים ורק קטעים ארוכים"
+        },
+        "items": [
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Letter-level Composition Search and Parallels have a third Passage length choice, \"Only long passages\": it keeps only manuscripts whose match covers at least 120 letters of your text (half of it, if your text is shorter).",
+                "he": "בחיפוש חיבורים ובחיפוש מקבילות ברמת האות יש אפשרות שלישית ב\"אורך הקטע\": \"רק קטעים ארוכים\" משאירה רק כתבי יד שההתאמה בהם מכסה 120 אותיות לפחות מהטקסט שלכם (או מחציתו, אם הוא קצר יותר)."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Moving from page to page starts at once: the side menu, the logo, Help and the cards on the homepage no longer wait for the server.",
+                "he": "המעבר בין עמודים מתחיל מיד: התפריט הצדדי, הלוגו, העזרה והכרטיסים בעמוד הבית כבר אינם ממתינים לשרת."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The buttons that open a manuscript in its library's own viewer (Ktiv, Cambridge, Manchester, Princeton, the Bodleian) open it every time, and switching between the NLI and Cambridge images is immediate.",
+                "he": "הכפתורים שפותחים כתב יד במציג של הספרייה שלו (כתיב, קיימברידג', מנצ'סטר, פרינסטון, הבודליאנה) פותחים אותו בכל פעם, והמעבר בין התמונות של הספרייה הלאומית לתמונות של קיימברידג' מיידי."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Quick View opens on the same image as the manuscript page, with that library's credit, and shows it sharp.",
+                "he": "מבט מהיר נפתח על אותה תמונה שבעמוד כתב היד, עם הקרדיט של אותה ספרייה, ומציג אותה חדה."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The header stays on one row at every window width, and the search box at the top stays visible on narrower windows.",
+                "he": "סרגל הכותרת נשאר בשורה אחת בכל רוחב חלון, ותיבת החיפוש שבראש העמוד נשארת גלויה גם בחלונות צרים יותר."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "A page whose image the National Library of Israel did not deliver is no longer shown with the image of another page of the same manuscript.",
+                "he": "עמוד שהספרייה הלאומית לא סיפקה את תמונתו כבר אינו מוצג עם תמונה של עמוד אחר מאותו כתב יד."
+            }
+        ]
+    },
+    {
         "version": "9.15.0",
         "date": "2026-11-08",
         "apps": [

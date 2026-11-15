@@ -4304,3 +4304,19 @@ Fix sketch: log that exception with `exc_info=True` so the next occurrence names
 copy that iteration (or snapshot the store under the lists manager's lock at the start of the
 upload). Run the race test in a loop on Windows (`pytest -k racing_the_user --count 50` with
 pytest-repeat, or a shell loop) to confirm it.
+
+## GS-292
+
+**An NLI image served by the Cambridge route keeps the Cambridge credit** · P3 · Website · ❌ Open · opened 2026-11-11
+
+Where: `web/api.py::_cambridge_image`, `web/pages/browse.py` (image credit footer), `web/pages/search_results.py::open_advanced_dialog`
+
+`/api/cambridge_image/{sys_id}` answers with NLI's image, HTTP 200, when the manuscript has no
+CUDL canvases or a page has no CUDL match (`X-Image-Fallback-Source: nli` on the response). No
+image error happens, so `handleImageError` never runs and nothing switches the credit: Browse and
+Quick View show NLI's image under the Cambridge credit. Found by Codex reviewing the 2026-11-11
+Quick View change (round 2); Browse has always behaved this way. An `<img>` cannot read the
+response headers. Fix sketch: load the viewer image with `fetch()` (reading
+`X-Image-Fallback-Source`) into an object URL and call `switchImageCredit('nli')` on that header,
+or let the route redirect to `/api/nli_image_by_sysid/...` instead of answering with NLI's bytes
+under the Cambridge URL.

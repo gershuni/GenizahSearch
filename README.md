@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.15.0
+# Dicta Genizah Search Pro 9.16.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,16 +8,16 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.15.0?
+## What's New in Version 9.16.0?
 
-**Friedman's dictionary and expression search**
+**Dictionary lookup and only long passages**
 
-The website's dictionaries panel on the manuscript page has a new tab, beside Blau's dictionary: M. A.
-Friedman's *Dictionary of Medieval Judeo-Arabic for the India Book documents and other texts*. Click a word
-to see its entries, with a link to the printed page; the text is a machine reading of the dictionary's files
-and may contain errors. Blau's and Friedman's dictionaries now search expressions too: select several words,
-or type them in the panel's box, to find the entries and quotations that hold them in that order, with a
-choice of how many words may stand between them.
+Letter-level Composition Search in the desktop app and letter-level Parallels on the website have
+a third *Passage length* choice, **Only long passages**: it keeps only manuscripts whose match
+covers at least 120 letters of your text (half of it, if your text is shorter), for the wide
+settings, where the list grows long. On the website, moving from page to page starts at once, the
+buttons that open a manuscript in its library's viewer open it every time, Quick View opens on the
+same image as the manuscript page, and the header stays on one row at every window width.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
@@ -94,7 +94,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.14.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest). Version 9.15.0 is a website-only release: the desktop app is 9.14.0, and the dictionary tab is on the website.
+1. **Download:** the installer (`GenizahSearchPro_V9.16.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
