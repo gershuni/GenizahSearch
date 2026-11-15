@@ -13,7 +13,7 @@ rendering beside it only in the English UI -- and shows the popover, with the wo
 box looks up what is typed; the close hides it; an empty answer says what the dictionary covers and what was looked for; a result without a credit
 line is not shown; a service that is not available leaves the page without any of it; a payload without a word
 asks the dictionary nothing. With Lane's Lexicon served too, each dictionary has its own tab (owner, 2026-11-04;
-plan D12): a new word opens on the first tab that has an answer (owner, 2026-11-11: no tab is remembered), an
+plan D12): a new word opens on the first tab that has an answer (no tab is remembered), an
 action inside a tab stays on it, and a tab chosen opens at its top; a tab with nothing is greyed; Lane alone
 gives the page the panel without a tab row. A card shows its first senses and the rest in place on a click.
 """
@@ -70,7 +70,7 @@ def _dictionary(available=True, credit_he=CREDIT_HE, result=None):
     svc.lookup.side_effect = lambda word: result if result is not None else _lookup(word)
     # The page asks ``answer`` (one word a lookup, several an expression search); the double
     # routes it to ``lookup`` so a test that replaces the lookup, or counts its calls, still holds.
-    svc.answer.side_effect = lambda word, gap=None, stems=True: svc.lookup(word)
+    svc.answer.side_effect = lambda word, gap=None, stems=True, before=(), after=(), ordered=True: svc.lookup(word)
     # The page then asks ``borrow`` for the roots Friedman and Lane give; the double adds none
     # (test_blau_s_tab_shows_the_entries_of_the_roots_lane_gives_after_its_own replaces it).
     svc.borrow.side_effect = lambda result, borrowed: result
@@ -103,6 +103,7 @@ def _lane(result=None, credit=PERSEUS, available=True):
         svc.lookup.side_effect = lambda word: result(word) if callable(result) else (result or _lane_result(word))
     else:
         svc.lookup.side_effect = lambda word: empty_lane(word)
+    svc.borrow.side_effect = lambda answer, roots: answer   # ArabicService.borrow: nothing to add here
     return svc
 
 
@@ -406,9 +407,8 @@ def test_an_empty_answer_says_what_was_looked_for():
         await _wait_until(lambda: popover._style.get('display') == 'flex')
         texts = _texts(user)
         assert _with_class(user, blau_panel.EMPTY_CLASS) and not _with_class(user, blau_panel.CARD_CLASS)
-        # Step B of the dictionary lookup plan (owner, 2026-11-11): what was checked, and the root.
-        assert ('Not found as an entry or in the examples. A verb or an inflected form may be listed under its '
-                'root: type the root.') in texts and blau_panel.DISCLAIMER in texts
+        # Step B of the dictionary lookup plan: what was checked, and the root.
+        assert blau_panel.NOTHING in texts and blau_panel.DISCLAIMER in texts
         assert 'Nothing in the dictionary for this word.' not in texts, "Lane's line, not Blau's any more"
         assert 'Looked for' in texts and 'וזזז' in texts and 'זזז' in texts
         assert CREDIT_HE in texts and blau_panel.MIDRASH_CREDIT in texts
@@ -509,10 +509,10 @@ def test_an_entry_spelled_without_the_word_s_dot_is_marked():
 
 @pytest.mark.parametrize('lang', ['en', 'he'])
 def test_blau_s_tab_shows_the_entries_of_the_roots_lane_gives_after_its_own(lang):
-    """Owner, 2026-11-11: Blau has no list of inflected forms; the page hands Blau the roots Friedman
+    """Blau has no list of inflected forms; the page hands Blau the roots Friedman
     and Lane give for the word (Lane's first root here, ذا, in Hebrew letters as Blau spells a root),
     and Blau's tab shows those entries after its own. No line names the dictionary that gave the root
-    (owner, 2026-11-12: redundant)."""
+    (redundant)."""
     dictionary, lane = _dictionary(), _lane()
     asked = []
 
@@ -532,7 +532,7 @@ def test_blau_s_tab_shows_the_entries_of_the_roots_lane_gives_after_its_own(lang
             await _turn_on(user)
             _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
             await _wait_until(lambda: len(_with_class(user, blau_panel.CARD_CLASS)) == 2)
-            assert asked == [(BorrowedRoot('ד̇א', BORROW_LANE, 'ذا'),)]
+            assert asked == [(BorrowedRoot('ד̇א', BORROW_LANE, 'ذا', ('script_reading', 'root')),)]
             cards = _with_class(user, blau_panel.CARD_CLASS)
             texts = [e.text for e in cards[1].descendants() if isinstance(e, ui.label)]
             assert any('ד̇א' in t for t in texts), "the borrowed card is shown"
@@ -547,7 +547,7 @@ def test_blau_s_tab_shows_the_entries_of_the_roots_lane_gives_after_its_own(lang
 
 @pytest.mark.parametrize('lang, label', [('en', 'found by its verb form'), ('he', 'נמצא לפי צורת הפועל')])
 def test_a_card_found_by_verb_form_says_so_with_the_form_the_root_and_the_stem(lang, label):
-    """PR 3 (the owner's wording, 2026-11-11): a card the word's verb form reached (BlauCard.verb_form)
+    """PR 3: a card the word's verb form reached (BlauCard.verb_form)
     comes with a line naming the way and the evidence, the form, the root and the stem; the word's
     own card has none. PostHog counts such cards, never the word."""
     own = _lookup('אסתדלו')
@@ -743,7 +743,7 @@ def test_a_word_blau_lacks_opens_on_lane_s_tab_and_greys_blau_s():
 
 
 def test_a_new_word_opens_on_the_first_tab_with_an_answer_and_a_tab_chosen_opens_at_its_top():
-    """Owner, 2026-11-11: no tab is remembered from an earlier word (a new word opens on the first
+    """No tab is remembered from an earlier word (a new word opens on the first
     dictionary that has something for it), and a tab chosen opens at its top: the body that scrolls is
     one for all the tabs, and choosing a tab puts it back to the top in the browser."""
     dictionary, lane = _dictionary(), _lane()
@@ -799,8 +799,8 @@ def test_one_sense_beyond_the_first_is_shown_without_a_button():
 
 
 def test_a_card_shows_its_first_senses_and_the_rest_in_place_on_a_click():
-    """Owner, 2026-11-11: no sense only behind a link to the site; the first SENSES_SHOWN, then one button
-    ("Show N more senses", the owner's Hebrew "הצג N משמעויות נוספות") that draws the rest in its place."""
+    """No sense only behind a link to the site; the first SENSES_SHOWN, then one button
+    ("Show N more senses", in Hebrew "הצג N משמעויות נוספות") that draws the rest in its place."""
     exact = _lookup()
     senses = tuple(_sense(f's{i}', f"'משמעות {i}'", f"'sense {i}'") for i in range(1, 7))
     result = replace(exact, cards=(replace(exact.cards[0], senses=senses, more_senses=0),), examples=(),
@@ -853,7 +853,7 @@ def test_a_reading_chip_looks_that_reading_up_in_the_box():
 @pytest.mark.parametrize('lang, more, full', [('en', 'Show 2 more entries', 'Show the full entry'),
                                               ('he', 'הצג 2 ערכים נוספים', 'הצג את הערך המלא')])
 def test_lane_s_other_entries_and_a_cut_entry_s_whole_text_open_in_place(lang, more, full):
-    """Owner, 2026-11-11: "+N more entries under this root" and "full entry" went to the site. The root
+    """"+N more entries under this root" and "full entry" went to the site. The root
     card shows its first ENTRIES_SHOWN entries, "Show N more entries" draws the rest in place, and a cut
     entry's "Show the full entry" puts its whole text in place; nothing points away."""
     def entry(n, cut=False):
@@ -922,7 +922,36 @@ def test_lane_s_tab_says_when_it_has_no_reading():
         [none] = _with_class(user, lane_panel.EMPTY_SECTION_CLASS)
         assert _tab_of(none) == 'lane'
         said = [e.text for e in _all_elements(user) if isinstance(e, ui.label) and none.id in {a.id for a in e.ancestors()}]
-        assert said == [lane_panel.TITLE, 'Nothing in the dictionary for this word.']
+        assert said == [lane_panel.TITLE, blau_panel.NOTHING]
+
+    _run(driver, dictionary, lane=lane)
+
+
+def test_lane_s_tab_shows_a_root_another_dictionary_gave_for_a_word_it_has_no_reading_of():
+    """``ArabicService.borrow``: a root alone, no reading. The tab is found, the card says the root is
+    another dictionary's, no readings row is drawn, and the Perseus line still stands."""
+    dictionary = _dictionary()
+    lane = _lane(result=lambda word: LaneLookup(word=word, script='ja', readings=(), roots=()))
+    entry = LaneEntry(entry_id='lane:t:ذا', headword='ذَا', page=948, text='ذَا …', cut=False, url=LANE_ENTRY_URL,
+                      matched=False)
+    lent = LaneRoot(root_key='ذWW', name='ذا', page=948, url=LANE_ROOT_URL, entries=(entry,), more_entries=0,
+                    borrowed=(('blau', 'ד̇א'),))
+    lane.borrow.side_effect = lambda answer, roots: LaneLookup(word=answer.word, script='ja', readings=(), roots=(lent,))
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex' and lane.borrow.called)
+        [section] = _lane_sections(user)
+        assert _tabs(user) == [('blau', 'Blau', True), ('lane', 'Lane', True)]
+        said = [e.text for e in _all_elements(user) if isinstance(e, ui.label) and section.id in {a.id for a in e.ancestors()}]
+        assert 'Possible root from another dictionary' in said and 'ذا' in said
+        assert lane_panel.READINGS_LABEL not in said and lane_panel.NO_ROOT not in said
+        assert not _with_class(user, lane_panel.EMPTY_SECTION_CLASS)
+        assert [e.text for e in _with_class(user, lane_panel.CREDIT_CLASS)[0].descendants()
+                if isinstance(e, ui.link) and e.props.get('href') == lane_panel.PERSEUS_URL] == [PERSEUS]
 
     _run(driver, dictionary, lane=lane)
 
@@ -982,3 +1011,31 @@ def test_lane_alone_gives_the_page_the_panel():
         assert PERSEUS in _texts(user)
 
     _run(driver, dictionary, lane=lane)
+
+
+def test_additional_entries_append_in_pages_without_duplicates():
+    first = _lookup()
+    cards = tuple(replace(first.cards[0], root_id=f'entry-{i}', name=f'entry {i}') for i in range(23))
+    dictionary = _dictionary(result=replace(first, cards=cards[:10], more_cards=13))
+    dictionary.lookup.side_effect = lambda word, limit=10: replace(
+        first, cards=cards[:limit], more_cards=max(0, len(cards) - limit))
+    dictionary.borrow.side_effect = lambda result, borrowed, **kwargs: result
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+        await _wait_until(lambda: len(_with_class(user, blau_panel.CARD_CLASS)) == 10)
+        [button] = _with_class(user, 'dict-more-entries-button')
+        assert button.text == '+13 more entries'
+        _click(user, button)
+        await _wait_until(lambda: len(_with_class(user, blau_panel.CARD_CLASS)) == 20)
+        assert button.text == '+3 more entries'
+        _click(user, button)
+        await _wait_until(lambda: len(_with_class(user, blau_panel.CARD_CLASS)) == 23)
+        assert not button.visible
+        assert _shown_word(user) == ['כתאב']
+        assert all(_texts(user).count(f'entry {i}') == 1 for i in range(23))
+        assert [call.kwargs.get('limit') for call in dictionary.lookup.call_args_list] == [None, 20, 30]
+
+    _run(driver, dictionary)

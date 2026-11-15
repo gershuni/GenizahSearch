@@ -835,7 +835,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # only while FRIEDMAN_DICTIONARY_ENABLED is on (off by default: its sidecar is a candidate).
     friedman_service = get_friedman_service()
     # A dictionary whose switch is "editors" is a preview for a signed-in editor or admin before
-    # release (shared/dictionary_switch.py; owner, 2026-11-11): asked once per page, as the reader
+    # release (shared/dictionary_switch.py): asked once per page, as the reader
     # is known here and not in the lookups' worker threads.
     dict_editor = GlobalAuthState.is_editor()
 
@@ -843,12 +843,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         return service.is_available() or (dict_editor and service.served_to(True))
 
     dict_on = _dict_served(blau_service) or _dict_served(lane_service) or _dict_served(friedman_service)
-    # No tab is remembered (owner, 2026-11-11): a new word opens on the first dictionary that has
+    # No tab is remembered: a new word opens on the first dictionary that has
     # something for it (blau_panel.pick_tab); only an action inside a tab (a stem button, a gap
     # control, a Lane reading) looks up again on that tab.
     # The printed words Friedman's expression search allows between two of the typed words
     # (friedman_panel's gap control); the reader's choice holds for the visit.
     dict_gap = {'value': FRIEDMAN_DEFAULT_GAP}
+    dict_ordered = {'value': True}
     if dict_on:
         ui.add_head_html(blau_panel.head_html())
     service = get_service()
@@ -4907,6 +4908,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Counted only: the next word opens on the first tab with an answer.
                         posthog_capture(blau_panel.POSTHOG_TAB, {'tab': name}, client=_blau_client)
 
+                    def _choose_order(ordered, text, tab=None):
+                        dict_ordered['value'] = ordered
+                        _blau_start(text, True, tab=tab, stems=False)
+
+                    async def _more_quotes(tab, answer, offset):
+                        service = friedman_service if tab == blau_panel.FRIEDMAN_TAB else blau_service
+                        return await run.io_bound(service.quotation_page, answer, offset)
+
+                    async def _blau_form_details(form_id):
+                        return await run.io_bound(blau_service.form_details, form_id)
+
                     def _choose_gap(gap, text, tab=None):
                         # The gap control in an expression search: the same words again with
                         # the new gap, on the tab it is in, the focus staying in the box. The
@@ -4920,7 +4932,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         _blau_start(text, False, how=blau_panel.STEM_HOW, tab=tab)
 
                     # The word's chips of other possible roots, kept while the reader presses
-                    # them one by one (blau_panel.keep_chips; owner, 2026-11-11).
+                    # them one by one (blau_panel.keep_chips).
                     _blau_chips = {'word': '', 'blau': (), 'friedman': (), 'chosen': ''}
 
                     def _choose_suggestion(tab, text):
@@ -4929,6 +4941,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         _blau_start(text, False, how=blau_panel.SUGGEST_HOW, tab=tab)
 
                     def _blau_draw(result, focus, lane=None, friedman=None, tab=None, chips=('', '')):
+                        async def more_entries(name, answer, limit):
+                            service = friedman_service if name == blau_panel.FRIEDMAN_TAB else blau_service
+                            def load():
+                                if hasattr(answer, 'hits'):
+                                    return service.expression(answer.text, answer.gap, limit=limit, ordered=answer.ordered)
+                                extra = service.lookup(answer.word, limit=limit)
+                                roots = (borrowed_roots(lane=lane, blau=result) if name == blau_panel.FRIEDMAN_TAB
+                                         else borrowed_roots(friedman, lane))
+                                return service.borrow(extra, roots, limit=limit)
+                            return await run.io_bound(load)
+
                         with using_language(_blau_lang):
                             blau_popover.clear()
                             with blau_popover:
@@ -4939,11 +4962,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     focus_input=focus, lane=lane, lane_credit=lane_service.credit,
                                     tab=tab, on_tab=_choose_tab,
                                     friedman=friedman, friedman_credit=friedman_service.credit_he,
-                                    on_gap=_choose_gap, on_stem=_choose_stem,
+                                    on_gap=_choose_gap, on_order=_choose_order, on_more_quotes=_more_quotes,
+                                    on_more_entries=more_entries, on_stem=_choose_stem, on_blau_details=_blau_form_details,
                                     on_suggest=_choose_suggestion, chips=chips)
                         blau_popover.style('display: flex;' if drawn else 'display: none;')
 
-                    def _both_lookups(word, stems=True):
+                    def _both_lookups(word, stems=True, beside=((), ())):
                         # One trip off the loop for every dictionary; None for a
                         # dictionary not served now (it gets no tab). Several words are
                         # an expression search in Blau and Friedman (one gap for both); a
@@ -4951,25 +4975,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Lane, which has no stem paragraphs here, reads the root alone. Blau's
                         # and Friedman's tabs then show, after their own, their entries of the
                         # roots the other dictionaries give for the word, each from the others'
-                        # OWN answers (BlauService.borrow, FriedmanService.borrow; owner, 2026-11-11):
+                        # OWN answers (BlauService.borrow, FriedmanService.borrow):
                         # Friedman's from Friedman's own matches, then Blau's own cards in the
                         # order Blau's borrow gave them (borrowed_roots skips Blau's borrowed cards).
                         # ``stems`` False: words clicked or selected in the manuscript, where a
-                        # number after a word ("פרק 2") is no typed stem.
+                        # number after a word ("פרק 2") is no typed stem. ``beside``: the words
+                        # before and after a clicked word in the text, for the expressions it
+                        # makes with them, shown first in both tabs.
+                        before, after = beside
                         lane_word = (root_and_stem(word)[0] if stems else '') or word
-                        blau = (blau_service.answer(word, gap=dict_gap['value'], stems=stems)
+                        blau = (blau_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])
                                 if _dict_served(blau_service) else None)
                         lane = lane_service.lookup(lane_word) if _dict_served(lane_service) else None
-                        friedman = (friedman_service.answer(word, gap=dict_gap['value'], stems=stems)
+                        friedman = (friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])
                                     if _dict_served(friedman_service) else None)
                         if blau is not None:
                             blau = blau_service.borrow(blau, borrowed_roots(friedman, lane))
                         if friedman is not None:
                             friedman = friedman_service.borrow(friedman, borrowed_roots(lane=lane, blau=blau))
+                        if lane is not None:
+                            # Last, so the other two borrowed from Lane's own answer: Lane's tab adds
+                            # its entries of the roots they give, those reached by verb form too.
+                            lane = lane_service.borrow(lane, borrowed_roots(friedman, blau=blau, verb_forms=True))
                         return blau, lane, friedman
 
-                    async def _blau_answer(word, request, focus=False, how='word', tab=None, stems=True):
-                        answers = await run.io_bound(_both_lookups, word, stems)
+                    async def _blau_answer(word, request, focus=False, how='word', tab=None, stems=True,
+                                           beside=((), ())):
+                        answers = await run.io_bound(_both_lookups, word, stems, beside)
                         if answers is None or blau_popover.is_deleted or request != _blau_request['value']:
                             return
                         result, lane, friedman = answers
@@ -4979,23 +5011,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         blau_panel.lookup_event(focus, result, lane, how, friedman=friedman),
                                         client=_blau_client)
 
-                    def _blau_start(word, focus, how='word', tab=None, stems=True):
+                    def _blau_start(word, focus, how='word', tab=None, stems=True, beside=((), ())):
                         # Synchronous on purpose: the counter must move in the
                         # order the clicks arrived, before any of their lookups
                         # runs. An async handler is a task that starts later,
                         # and a close handled in between would be counted
                         # before the lookup it was meant to cancel. ``tab``: the
                         # tab an action inside the panel came from, else None.
-                        # ``stems`` False: the words came from the manuscript.
+                        # ``stems`` False: the words came from the manuscript; ``beside``: the
+                        # words before and after a clicked one there.
                         _blau_request['value'] += 1
-                        background_tasks.create(_blau_answer(word, _blau_request['value'], focus, how, tab, stems),
+                        background_tasks.create(_blau_answer(word, _blau_request['value'], focus, how, tab, stems,
+                                                             beside),
                                                 name='blau-lookup')
 
                     def _blau_lookup(e):
-                        # Words clicked or selected in the manuscript: never a typed stem.
+                        # Words clicked or selected in the manuscript: never a typed stem. A clicked
+                        # word comes with the words beside it (blau_panel.lookup_context).
                         word = blau_panel.lookup_word(e.args)
                         if word:
-                            _blau_start(word, False, blau_panel.lookup_how(e.args), stems=False)
+                            _blau_start(word, False, blau_panel.lookup_how(e.args), stems=False,
+                                        beside=blau_panel.lookup_context(e.args))
 
                     def _blau_search(word, tab=None):
                         # The box at the top of the panel (typed, or a clicked word

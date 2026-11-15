@@ -31,7 +31,7 @@ What is reported, for each dictionary (plan section 6):
    filter off (every root of the dictionary in every stem).
 6. **Build time and memory** of each service's ``verb_form_index`` (plan 4.3).
 
-The thresholds are not fixed here: they are agreed with the owner on these numbers (plan section 6,
+The thresholds are not fixed here: they are agreed on these numbers (plan section 6,
 an ``/effort xhigh`` call), and the graded click sample is the only measure of wrong cards on real
 pages. Output: a summary on stdout; ``--out`` writes the full result as JSON (numbers and shapes
 only; ``--samples N`` adds up to N example forms per bucket, dictionary text, for the private

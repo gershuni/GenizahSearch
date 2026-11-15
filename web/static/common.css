@@ -2870,7 +2870,7 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     font-size: 1.15rem; font-weight: 600;
 }
 .gs-blau .panel-head .word-input + .blau-search + .blau-close { margin-inline-start: 0; }
-/* The verb stem beside the box (owner, 2026-11-11): narrow, the numerals left to right. On a
+/* The verb stem beside the box: narrow, the numerals left to right. On a
    phone the head's small title gives way to it. */
 .gs-blau .panel-head .stem-select { flex: none; width: 7.5em; }
 .gs-blau .panel-head .stem-select .q-field__native { direction: ltr; font-weight: 600; }
@@ -2880,6 +2880,10 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     .gs-blau .panel-head:has(.stem-select) .title { display: none; }
 }
 .gs-blau .type-note { font-size: 0.82rem; color: var(--text-muted, #64748b); padding: 4px 0 8px; }
+/* The line every dictionary tab opens with: the lookup is automatic (expression_panel.AUTOMATIC_NOTE). */
+.gs-blau .automatic-note {
+    font-size: 0.75rem; line-height: 1.4; color: var(--text-secondary, #475569); padding: 2px 0 0;
+}
 /* What the dictionary records, on every panel (owner, 2026-11-04). */
 .gs-blau .disclaimer {
     font-size: 0.75rem; line-height: 1.4; color: var(--text-muted, #64748b);
@@ -2911,6 +2915,25 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     border-inline-start: 3px solid transparent;
 }
 .gs-blau .sense.matched { border-inline-start-color: var(--primary-600, #059669); }
+/* The entries that print a clicked word with the words beside it (expression_panel.render_context). */
+.gs-blau .expr-context {
+    margin: 4px 0 6px; padding: 2px 8px;
+    border: 1px solid var(--border-light, #e2e8f0); border-radius: 6px;
+    background: var(--bg-secondary, #f8fafc);
+}
+.gs-blau .expr-context .context-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding-top: 4px; font-size: 0.8rem;
+}
+.gs-blau .expr-context .context-label { color: var(--text-muted, #64748b); }
+.gs-blau .expr-context .context-words {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif; font-size: 1.05rem; font-weight: 700;
+}
+.gs-blau .expr-context .card:last-of-type { border-bottom: 0; }
+/* Where a card's senses of a sub-entry begin (BlauSense.sub_entry), its name, as the site heads it. */
+.gs-blau .blau-sub-entry-head {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.1rem; font-weight: 700; padding-top: 6px;
+}
 .gs-blau .sense .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .gs-blau .sense .ja {
     font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
@@ -3032,6 +3055,17 @@ html.blau-armed [data-blau-pane] { cursor: help; }
 .gs-blau .friedman-match .kind { font-size: 0.72rem; color: var(--text-muted, #64748b); }
 .gs-blau .friedman-match .references { font-size: 0.78rem; color: var(--text-secondary, #475569); }
 .gs-blau .friedman-via { font-size: 0.78rem; }
+/* The entries a unit's references send the reader to ("ראה הערך חפי"): one button each, and the
+   unit itself, set in from the card's edge. */
+.gs-blau .friedman-referred {
+    margin: 4px 0; padding-inline-start: 8px;
+    border-inline-start: 2px solid var(--primary-600, #059669);
+}
+.gs-blau .friedman-see { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 2px 0; }
+.gs-blau .friedman-see .chip {
+    font-size: 0.95rem; min-height: 0; padding: 0 10px; border-radius: 999px;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
 .gs-blau .friedman-quote {
     margin-top: 4px; padding: 2px 8px 2px 0; border-inline-start: 2px solid var(--border-light, #e2e8f0);
 }
@@ -3039,6 +3073,13 @@ html.blau-armed [data-blau-pane] { cursor: help; }
 .gs-blau .friedman-quote .locator { font-size: 0.72rem; color: var(--text-muted, #64748b); }
 .gs-blau .friedman-child { margin-top: 6px; }
 .gs-blau .friedman-child .name.sub { font-size: 1rem; }
+/* A head the book prints without its root ("VIII -הُ" under שכו): root, stem, then the construction,
+   in the head's face but lighter, so the root reads as the word. */
+.gs-blau .entry .construction {
+    font-family: 'David', 'Frank Ruehl', 'Noto Sans Hebrew', serif;
+    font-size: 1.15rem; font-weight: 600; line-height: 1.3;
+}
+.gs-blau .entry .construction.sub { font-size: 1rem; }
 .gs-blau .friedman-credit { margin-top: 8px; }
 /* The expression search, in Friedman's tab and Blau's alike (web/components/expression_panel.py):
    the gap control, the matched words marked in the quotation or the name, the place's label and
@@ -3057,7 +3098,9 @@ html.blau-armed [data-blau-pane] { cursor: help; }
     display: flex; flex-wrap: wrap; gap: 4px 10px;
     font-size: 0.78rem; color: var(--text-secondary, #475569);
 }
-.gs-blau .expr-components .component.stem { font-style: italic; }
+/* Never italic in the panel: an italic face has no Arabic vowel marks, and Friedman's printed words
+   carry them (בَקאَהُ showed boxes). A word reached by its base form is muted. */
+.gs-blau .expr-components .component.stem { color: var(--text-muted, #64748b); }
 /* Blau's expression hits: the entry's card as a lookup's, each place a name (the headword with
    its gloss) or a citation (the quote, its translation, the form it illustrates, the locator). */
 .gs-blau .blau-expression .place .form-text { font-size: 0.85rem; }

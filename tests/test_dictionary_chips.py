@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """web/components/blau_panel.py ``keep_chips``: the chips of the other possible roots stay while the
-reader presses them one by one (owner, 2026-11-11: a press must not take the other chips away, so the
+reader presses them one by one (a press must not take the other chips away, so the
 reader can check each root in turn)."""
 from __future__ import annotations
 

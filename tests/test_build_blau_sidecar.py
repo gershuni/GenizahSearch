@@ -154,6 +154,37 @@ def built(tmp_path):
     return out
 
 
+def test_rekey_preserves_constructed_frames(built, tmp_path):
+    from scripts.build_blau_sidecar import rekey_existing
+    from scripts.dictionary_search_indexes import verify_search_indexes
+    with sqlite3.connect(built) as conn:
+        expected = conn.execute('SELECT * FROM constructions').fetchall()
+        assert expected
+        conn.execute("UPDATE meta SET value='1.1.0' WHERE key='version'")
+        for table in ('constructions', 'lookup_aliases', 'spelling_keys'):
+            conn.execute(f'DROP TABLE {table}')
+    target = tmp_path / 'rekeyed.db'
+    rekey_existing(built, target)
+    with sqlite3.connect(target) as conn:
+        assert conn.execute('SELECT * FROM constructions').fetchall() == expected
+        verify_search_indexes(conn, 'blau')
+
+
+def test_rekey_current_sidecar_preserves_source_and_replaces_derived_rows(built, tmp_path):
+    from scripts.build_blau_sidecar import rekey_existing
+    with sqlite3.connect(built) as conn:
+        conn.execute("INSERT INTO spelling_keys VALUES ('stale', 'stale')")
+    original = _sha(built)
+    target = tmp_path / 'upgraded.db'
+    rekey_existing(built, target)
+    assert _sha(built) == original
+    with _ro(built) as source, _ro(target) as upgraded:
+        for table in ('roots', 'stems', 'forms', 'citations', 'forms_norm'):
+            assert source.execute(f'SELECT * FROM {table}').fetchall() == upgraded.execute(f'SELECT * FROM {table}').fetchall()
+        assert not upgraded.execute("SELECT * FROM spelling_keys WHERE literal='stale'").fetchall()
+    assert verify(str(target), 3, 5) == []
+
+
 # ---------------------------------------------------------------------------
 # The build
 # ---------------------------------------------------------------------------
@@ -167,8 +198,8 @@ def test_build_writes_every_table_and_the_meta(built):
     finally:
         con.close()
     assert counts == {"roots": 3, "sub_entries": 1, "stems": 4, "forms": 5, "citations": 2,
-                      "forms_norm": 9, "sources": 2, "tokens": 13}
-    assert meta["keying_version"] == "1"
+                      "forms_norm": 9, "sources": 2, "tokens": 43}
+    assert meta["keying_version"] == "7"
     assert meta["version"] == SCHEMA_VERSION
     assert meta["source_release"] == "1.1"
     assert meta["source_schema_version"] == "v6"
@@ -239,6 +270,9 @@ def test_tokens_key_every_name_and_quoted_citation(built):
                            "ORDER BY scope, scope_id, n, pos, peeled").fetchall()
     finally:
         con.close()
+    original_rows = rows
+    rows = [r for r in rows if not r[6].startswith(("~", "@")) and r[6] not in ("ואכדה", "אכדה")]
+    assert any(r[6] == "~אכדת" for r in original_rows)
     assert [r for r in rows if r[0] == "citation"] == [
         ("citation", "blau-c-000001", 0, "blau-e-000001", None, 0, "ואכדת", 0),
         ("citation", "blau-c-000001", 0, "blau-e-000001", None, 0, "אכדת", 1),

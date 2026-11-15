@@ -4,10 +4,13 @@
  * element `.gs-blau-popover` and marks the transcription pane with
  * `data-blau-lookup`. This script, on any click:
  *   - inside the popover: nothing (its links and buttons are its own);
+ *   - at the end of a drag over words of the marked pane: looks up the selection,
+ *     as the key does below (`how: 'selection'`);
  *   - on a word of the marked pane: unwraps the previous mark, wraps the word
  *     in `span.blau-word-hit`, places the popover beside the word (CSS puts
  *     it at the foot of a phone instead) and dispatches `blau-lookup` on the
- *     popover with `detail` = JSON {word};
+ *     popover with `detail` = JSON {word, how, before, after}: `before` and
+ *     `after` the words beside it in the text (`wordsBeside`);
  *   - anywhere else, or on no word: unwraps the mark and dispatches
  *     `blau-close` (the page hides the popover);
  *   - on the panel's own close control (`.blau-close`): unwraps the mark and
@@ -38,9 +41,9 @@
  * D and M are the keys by name, the Hebrew letter on a Hebrew layout (`מ`), or
  * the physical keys on any layout; never while a box has the focus, while a
  * dialog or menu is open, or with Ctrl, Alt or Cmd (those are the browser's).
- * The word is what sits between two non-word characters in the text node
- * under the pointer: Hebrew letters, combining marks, the apostrophe and
- * geresh family the transcriptions write the Judeo-Arabic letters with.
+ * A word can span inline text nodes and contain reading brackets. Its letters,
+ * marks and brackets are sent unchanged; whitespace, punctuation and an empty
+ * lacuna separate words. Highlighting preserves the original inline elements.
  * A click that lands beside a word (padding, a line number) is no word.
  * Nothing here changes what the page says: the page asks the dictionary.
  */
@@ -50,7 +53,6 @@
   var POPOVER = '.gs-blau-popover';
   var PANE = '[data-blau-lookup]';
   var KEY_PANE = '[data-blau-pane]';   // where the look-up key works, the switch on or off
-  var SELECTION_WORDS = 6;            // a selection is looked up by its first words
   var HIT = 'blau-word-hit';
   var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
   var OPEN = 'blau-open';     // the "type a word" button (this script opens the panel)
@@ -61,6 +63,8 @@
   // shared/blau_normalize.py); the combining diacriticals; the apostrophe and
   // geresh family the transcriptions write the Judeo-Arabic letters with.
   var WORD_CHAR = /[א-ת֑-ׇֽֿׁׂׅׄ̀-ͯ'"׳״‘’]/;
+  var COMBINING_MARK = /\p{M}/u;       // including Arabic vocalization on Hebrew letters
+  var BRACKET_CHAR = /[\[\]()]/;
   var WIDTH = 440;   // keep in step with .gs-blau-popover in common.css
   var HEIGHT = 380;
   var GAP = 8;
@@ -78,16 +82,96 @@
     return null;
   }
 
-  function wordAt(node, offset) {
+  // Reading brackets are transparent within a word, but [] is a missing stretch,
+  // not supplied letters. Do not join the legible fragments on its two sides.
+  function wordPart(text, at) {
+    var ch = text.charAt(at);
+    if (WORD_CHAR.test(ch) || COMBINING_MARK.test(ch)) return true;
+    if (!BRACKET_CHAR.test(ch)) return false;
+    return !(ch === '[' && text.charAt(at + 1) === ']' ||
+             ch === ']' && text.charAt(at - 1) === '[');
+  }
+
+  function wordAt(pane, node, offset) {
     if (!node || node.nodeType !== 3) return null;
-    var text = node.data;
-    var start = offset, end = offset;
-    while (start > 0 && WORD_CHAR.test(text.charAt(start - 1))) start--;
-    while (end < text.length && WORD_CHAR.test(text.charAt(end))) end++;
+    var reading = paneText(pane);
+    var anchor = reading.parts.find(function (part) { return part.node === node; });
+    if (!anchor) return null;
+    var text = reading.text;
+    var start = anchor.start + offset, end = start;
+    while (start > 0 && wordPart(text, start - 1)) start--;
+    while (end < text.length && wordPart(text, end)) end++;
     if (start === end) return null;
     var word = text.slice(start, end);
     if (!/[א-ת]/.test(word)) return null;  // marks alone are no word
-    return { start: start, end: end, text: word };
+    var parts = reading.parts.filter(function (part) { return part.start < end && part.end > start; });
+    return { start: start, end: end, text: word, reading: reading, parts: parts };
+  }
+
+  // The words beside a clicked word, sent with it ("אטאל אללה בקאך" is one
+  // blessing, and אללה alone reached other entries): at most CONTEXT_WORDS on each side
+  // (shared/ja_expression.py MAX_CONTEXT_WORDS), the nearest last before it and first after it,
+  // not across a sentence's end.
+  var CONTEXT_WORDS = 8;
+  var CONTEXT_CHARS = 200;                 // of the text on each side, plenty for two words
+  var SENTENCE_END = /[.:׃!?…]$/;
+  var BLOCK_TAGS = { DIV: 1, P: 1, BR: 1, LI: 1, UL: 1, OL: 1, PRE: 1, TD: 1, TH: 1, TR: 1 };
+  var GUTTER = 'line-number-gutter';       // web/components/typography.py: the line numbers
+
+  // One reading stream, with offsets back into its text nodes. Inline formatting
+  // does not split a word; both ends of a block do. Line numbers never enter it.
+  function paneText(pane) {
+    var reading = { text: '', parts: [] };
+    function visit(n) {
+      if (n.nodeType === 3) {
+        var start = reading.text.length;
+        reading.text += n.data;
+        reading.parts.push({ node: n, start: start, end: reading.text.length });
+      } else if (n.nodeType === 1) {
+        if (n.classList.contains(GUTTER)) { reading.text += ' '; return; }
+        if (BLOCK_TAGS[n.tagName]) reading.text += ' ';
+        for (var i = 0; i < n.childNodes.length; i++) visit(n.childNodes[i]);
+        if (BLOCK_TAGS[n.tagName]) reading.text += ' ';
+      }
+    }
+    visit(pane);
+    return reading;
+  }
+
+  // A word without what stands around it; '' for none (a line number, a mark); null for a word
+  // broken inside ("מ].נ": a gap in the manuscript), past which the words are not beside it.
+  function cleanWord(part) {
+    if (/\[\s*\]|\.\.\.|…/.test(part) || (!/[א-ת]/.test(part) && /[\[\]]/.test(part))) return null;
+    var start = 0, end = part.length;
+    while (start < end && !wordPart(part, start)) start++;
+    while (end > start && !wordPart(part, end - 1)) end--;
+    part = part.slice(start, end);
+    for (var k = 0; k < part.length; k++) if (!wordPart(part, k)) return null;
+    return /[א-ת]/.test(part) ? part : '';
+  }
+
+  function wordsBeside(word) {
+    var text = { before: word.reading.text.slice(Math.max(0, word.start - CONTEXT_CHARS), word.start),
+                 after: word.reading.text.slice(word.end, word.end + CONTEXT_CHARS) };
+    var before = [], after = [];
+    // What touches the word with no space is its own punctuation ("[", "]."), not a word.
+    var parts = text.before.split(/\s+/);
+    if (!/\s$/.test(text.before) && /[.:׃!?…\[\]]/.test(parts.pop() || '')) parts = [];
+    for (var i = parts.length - 1; i >= 0 && before.length < CONTEXT_WORDS; i--) {
+      if (SENTENCE_END.test(parts[i])) break;
+      var w = cleanWord(parts[i]);
+      if (w === null) break;
+      if (w) before.unshift(w);
+    }
+    parts = text.after.split(/\s+/);
+    if (!/^\s/.test(text.after) && /[.:׃!?…\[\]]/.test(parts.shift() || '')) parts = [];
+    for (var j = 0; j < parts.length && after.length < CONTEXT_WORDS; j++) {
+      var a = cleanWord(parts[j]);
+      if (a === null) break;
+      if (a) after.push(a);
+      if (SENTENCE_END.test(parts[j])) break;
+    }
+    return { before: before, after: after };
   }
 
   function clearHit() {
@@ -102,16 +186,27 @@
     }
   }
 
-  function markWord(node, word) {
+  function markWord(word) {
     try {
+      var first = word.parts[0], last = word.parts[word.parts.length - 1];
       var range = document.createRange();
-      range.setStart(node, word.start);
-      range.setEnd(node, word.end);
-      var span = document.createElement('span');
-      span.className = HIT;
-      range.surroundContents(span);
-      return span.getBoundingClientRect();
+      range.setStart(first.node, word.start - first.start);
+      range.setEnd(last.node, word.end - last.start);
+      var rect = range.getBoundingClientRect();
+      // Wrap only text slices, not partially selected inline elements. Reversing
+      // the slices also keeps their original offsets stable while nodes split.
+      for (var i = word.parts.length - 1; i >= 0; i--) {
+        var part = word.parts[i];
+        var mark = document.createRange();
+        mark.setStart(part.node, Math.max(0, word.start - part.start));
+        mark.setEnd(part.node, Math.min(part.node.data.length, word.end - part.start));
+        var span = document.createElement('span');
+        span.className = HIT;
+        mark.surroundContents(span);
+      }
+      return rect;
     } catch (e) {
+      clearHit();
       return null;
     }
   }
@@ -190,13 +285,10 @@
     if (!paneOf(range.commonAncestorContainer, viaKey)) return null;
     var words = [];
     var parts = sel.toString().split(/\s+/);
-    for (var i = 0; i < parts.length && words.length < SELECTION_WORDS; i++) {
-      var part = parts[i];
-      var start = 0, end = part.length;
-      while (start < end && !WORD_CHAR.test(part.charAt(start))) start++;
-      while (end > start && !WORD_CHAR.test(part.charAt(end - 1))) end--;
-      part = part.slice(start, end);
-      if (/[א-ת]/.test(part)) words.push(part);
+    for (var i = 0; i < parts.length; i++) {
+      var part = cleanWord(parts[i]);
+      if (part === null) return null;
+      if (part) words.push(part);
     }
     if (!words.length) return null;
     return { text: words.join(' '), rect: range.getBoundingClientRect() };
@@ -325,7 +417,7 @@
     }
     // The verb-stem field's list is drawn outside the popover, at the end of <body>: a choice
     // there is the panel's own control, not a click elsewhere (it closed the panel, 2026-11-11).
-    if (event.target && event.target.nodeType === 1 && event.target.closest('.' + STEM_MENU)) return;
+    if (event.target && event.target.nodeType === 1 && (event.target.closest('.' + STEM_MENU) || event.target.closest('.dict-gap-menu'))) return;
     var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
     var opener = target ? target.closest('.' + OPEN) : null;
     if (opener) {
@@ -336,6 +428,10 @@
     }
     // Words selected with the key armed (or Alt held): the selection, not the word under the pointer.
     if (viaKey && target && paneOf(target, true) && lookUpSelection(pop, true)) return;
+    // With the switch on, words dragged over end in this click too: the selection, as the key looks
+    // it up (only the word under the pointer was looked up). A double or triple
+    // click (`detail` 2, 3) selects a word or a line by itself: that stays the word clicked.
+    if (!viaKey && event.detail <= 1 && target && paneOf(target, false) && lookUpSelection(pop, false)) return;
     var pane = target ? paneOf(target, viaKey) : null;
     // Something to close: the popover is up, or a word is marked (its lookup
     // may still be running; the close makes it stale).
@@ -345,15 +441,18 @@
     // that no longer exists (a second click on the same line found no word).
     clearHit();
     var caret = pane ? caretAt(event.clientX, event.clientY) : null;
-    var word = caret && pane && pane.contains(caret.node) ? wordAt(caret.node, caret.offset) : null;
+    var word = caret && pane && pane.contains(caret.node) ? wordAt(pane, caret.node, caret.offset) : null;
     if (!word) {
       if (open) dispatch(pop, 'blau-close');
       return;
     }
-    var rect = markWord(caret.node, word) ||
+    // Before the mark: wrapping the word splits its text node.
+    var beside = wordsBeside(word);
+    var rect = markWord(word) ||
       { left: event.clientX, right: event.clientX, top: event.clientY, bottom: event.clientY, width: 0 };
     place(pop, rect);
     hideChip();
-    dispatch(pop, 'blau-lookup', { word: word.text, how: viaAlt ? 'alt' : viaKey ? 'key' : 'word' });
+    dispatch(pop, 'blau-lookup', { word: word.text, how: viaAlt ? 'alt' : viaKey ? 'key' : 'word',
+                                   before: beside.before, after: beside.after });
   });
 })();

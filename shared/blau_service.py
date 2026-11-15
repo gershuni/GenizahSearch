@@ -22,8 +22,9 @@ switch (default on, read live like ``FGP_TRANSCRIPTIONS_ENABLED``). Nothing
 here raises into a page.
 
 The lookup (plan §6.2): ``normalize_ja`` the clicked word, then
-``candidate_stems`` in order -- the word first, then one proclitic layer
-peeled, then one pronoun suffix -- each against ``forms_norm``. A key of a
+``lookup_stems`` in order -- the word first, then one proclitic layer
+peeled, then one pronoun suffix (a feminine ת before it also read as ה) --
+each against ``forms_norm``. A key of a
 headword-like kind (root, sub-entry, headword, variant) makes one card per
 scope it reaches -- a dictionary entry, or one sub-entry of it -- per
 candidate, in candidate order, with the matched senses first and then the
@@ -53,7 +54,7 @@ write it (``dot_pattern``) -- the cards whose spelling has the dot on the same
 letters come first. Only the letters Judeo-Arabic dots count (``DOT_LETTERS``),
 so an abbreviation mark (ר', מ') changes nothing.
 
-A root's stems (owner, 2026-11-11; the private dictionary lookup plan, section 4.6). Every card
+A root's stems (the private dictionary lookup plan, section 4.6). Every card
 carries the stems the dictionary lists under its entry (``root_stems``: a ``stems`` row's column,
 shift and printed head together, ``stem_row_numbers``), and a root typed with a stem ("דלל X",
 "דלל 10", ``shared.ja_roots.root_and_stem``) opens that stem's paragraph on each entry of the root
@@ -66,7 +67,7 @@ entry, the entries whose listed stems have the word among their generated forms
 each saying how it was reached (``BlauCard.verb_form``). Beside cards the word itself reaches, those
 roots are only suggested (``BlauLookup.suggestions``: a root and a stem a press looks up). Each card
 has a kind (A to E), and only the kinds the switch names are shown (``BLAU_VERB_FORM_KINDS``,
-default A, B, D: the graded sample, owner 2026-11-11); a shown kind opens on the word's stem only if
+default A, B, D: the graded sample); a shown kind opens on the word's stem only if
 ``BLAU_VERB_FORM_STEM_KINDS`` names it too (default A, D).
 
 A typed word may be Arabic script (the panel's box): it is looked up against
@@ -106,37 +107,54 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Union
 from urllib.parse import quote
 
+from shared.blau_normalize import matching_paths, evidence_cost, plural_analyses, query_stems
+from shared.blau_normalize import ACCUSATIVE, BROKEN_PLURAL, DUAL, FEMININE_PLURAL, PLURAL, feminine_heading
+from shared.blau_normalize import analysis_paths, article_candidates, bare_keys, preposition_candidates
 from shared.blau_normalize import (
     NORMALIZER_VERSION,
-    candidate_stems,
+    nominal_candidates,
+    lexical_key,
+    spelling_candidates,
     normalize_arabic,
     normalize_ja,
 )
+from shared.ja_expression import function_reading, matching_scopes
 from shared.ja_expression import (
+    clitic_governed, governed_runs, names_expression, verb_keys,
+    governed_verb_run,
+    is_function_word,
+    component_runs, context_component_runs, context_quality,
     DEFAULT_GAP,
+    expression_match, expression_words, ExpressionLimitError,
     KEYING_VERSION,
+    MAX_CONTEXT_QUOTED,
     MAX_EXPRESSION_WORDS,
+    context_windows,
     MAX_GAP,
     ExpressionPlace,
     clamp_gap,
     components_for,
-    is_function_word,
     lookup_key,
     ordered_match,
+    query_keys,
+    quoted_gap,
+    quoted_runs,
     tiered,
-    word_keys,
 )
 # The dot above (DOT_LETTERS, dot_pattern) lives in shared.ja_roots since 2026-11-11, so Friedman's
 # lookup reads it the same way; the names stay importable from here.
+from shared.ja_roots import supported_hollow_perfect
 from shared.ja_roots import DOT_LETTERS, StemPair, dot_pattern, root_and_stem, stem_numbers  # noqa: F401 - DOT_LETTERS: importable from here, as before the move
-from shared.ja_roots import BorrowedRoot
+from shared.ja_roots import BorrowedRoot, carries_root, ja_root_of_arabic
 from shared.ja_roots import dots_agree as _dots_agree
 from shared.dictionary_switch import OFF, ON, read_switch, serves
+from shared.ja_verb_forms import listed_alef_perfect
 from shared.ja_verb_forms import MAX_SUGGESTIONS  # noqa: F401 - importable from here, as before the move
 from shared.ja_verb_forms import (
     MAX_VERB_FORM_CARDS,
     suggested_roots,
     switch_kinds,
+    under_conjunction,
     verb_form_cards,
     verb_form_index,
     word_stems,
@@ -152,7 +170,7 @@ logger = logging.getLogger(__name__)
 #: 1.0.0, the file before the expression search's ``tokens`` table, which is 1.1.0
 #: without that table and is served without the expression search: the code goes
 #: to the server first, the rebuilt file after it (``SERVED_SCHEMA_VERSIONS``).
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.4.0"
 SERVED_SCHEMA_VERSIONS = ("1.0.0", SCHEMA_VERSION)
 SIDECAR_DIR = "blau_data"
 SIDECAR_FILENAME = "blau.db"
@@ -162,7 +180,7 @@ ENV_ENABLED = "BLAU_DICTIONARY_ENABLED"
 #: them that open on the word's stem. Read live; unset is the default below, set and empty is none.
 ENV_VERB_FORM_KINDS = "BLAU_VERB_FORM_KINDS"
 ENV_VERB_FORM_STEM_KINDS = "BLAU_VERB_FORM_STEM_KINDS"
-#: The graded sample (owner, 2026-11-11: recall counts more than precision): where Blau finds nothing
+#: The graded sample (recall counts more than precision): where Blau finds nothing
 #: for the word itself, a card found by verb form names a right root for 91-93% of words of kinds A,
 #: B and D; its guessed stem is right for 94% (A) and 92% (D) of them, 80% (B) is under the 85% bar.
 DEFAULT_VERB_FORM_KINDS = "A,B,D"
@@ -179,11 +197,16 @@ HEADWORD_KINDS = ("root", "sub_entry", "headword", "variant")
 #: common word under cards.
 NAME_PREFIX_KINDS = ("root", "sub_entry", "headword")
 PHRASE_KIND = "phrase"
+#: The kinds that are a form written under an entry, not the entry's own name: a hit of one counts
+#: only where the key carries the entry's root (``shared.ja_roots.carries_root``). The rest are the
+#: words a verb takes, written after it ("אכ̇ד̇ לה": the form is "לה"; 293 of 680 one-word forms,
+#: measured 2026-11-12), which reached the entry as if the clicked word were its own.
+FORM_KINDS = ("headword", "variant")
 #: The segments of a stem's printed head that name its stem number (``stems.head_json``).
 STEM_HEAD_TYPES = ("binyan", "binyan_shift")
 MAX_CARDS = 10
 #: A card carries every sense of its scope that has content (the panel shows the first few and the
-#: rest on a click; owner, 2026-11-11: no sense only on the site). A bound, not a cut: the largest
+#: rest on a click; no sense only on the site). A bound, not a cut: the largest
 #: entry of release 1.1 has 115 forms; any beyond it are counted in ``BlauCard.more_senses``.
 MAX_SENSES = 200
 MAX_EXAMPLES = 8
@@ -203,14 +226,14 @@ MAX_QUOTE_PLACES = 2
 #: them say nothing about it: no quotes at all. Measured 2026-11-10: nine keys in ten are in six
 #: units or fewer.
 MAX_QUOTE_UNITS = 25
-NAME_SCOPES = ("root", "sub_entry", "form")
+NAME_SCOPES = ("root", "sub_entry", "form", "construction")
 SCOPE_CITATION = "citation"
 #: ``forms.ja_text`` joins a form's headword and its variants with this; each is one name.
 NAME_SEPARATOR = " | "
 _KIND_RANK = {kind: rank for rank, kind in enumerate(HEADWORD_KINDS)}
 #: What a sense needs of a form; never ``segments_json``, the largest column.
 _FORM_COLUMNS = ("id, ja_text, arabic_spelling, binyan, gloss_he, gloss_en, cross_reference, target_ids, "
-                 "page, is_classical, is_reconstructed, is_erroneous")
+                 "page, is_classical, is_reconstructed, is_erroneous, sub_entry_id")
 
 
 def blau_switch() -> str:
@@ -248,6 +271,18 @@ def name_alternatives(ja_text: Any) -> list[str]:
     return [part for part in str(ja_text or "").split(NAME_SEPARATOR) if part.strip()]
 
 
+def form_head_alternatives(ja_text: Any, arabic_spelling: Any) -> list[str]:
+    """Printed form heads in either script; retain old JA positions and append new spellings."""
+    names = name_alternatives(ja_text)
+    seen = {lookup_key(name) for name in names}
+    for name in name_alternatives(arabic_spelling):
+        key = lookup_key(name)
+        if key and key not in seen:
+            names.append(name)
+            seen.add(key)
+    return names
+
+
 def stem_row_numbers(binyan: Any, binyan_shift: Any, head_json: Any) -> tuple[int, ...]:
     """The stem numbers of one ``stems`` row, read from the three places the dictionary writes
     them, together (plan section 4.1): the ``binyan`` column, the ``binyan_shift`` ("IV > I" names
@@ -268,7 +303,13 @@ def stem_row_numbers(binyan: Any, binyan_shift: Any, head_json: Any) -> tuple[in
 def _root_label(root: Mapping[str, Any]) -> str:
     """A root's first printed name, dots kept (what the box holds to open it again)."""
     names = _names_of(root["names_json"]) if "names_json" in root.keys() else []
-    return names[0] if names else _text(root["name_ja"]).split(NAME_SEPARATOR, 1)[0].strip()
+    label = names[0] if names else _text(root["name_ja"]).split(NAME_SEPARATOR, 1)[0].strip()
+    arabic = normalize_arabic(_text(root["arabic_spelling"])).replace(" ", "")
+    # The digital source occasionally puts a quoted sentence in name_ja while retaining
+    # its three-letter Arabic root. Use that root as a label; keep the source row untouched.
+    if len(label.split()) >= 3 and len(arabic) == 3 and "|" not in _text(root["arabic_spelling"]):
+        return ja_root_of_arabic(arabic)
+    return label
 
 
 # The Arabic key: on top of normalize_arabic, the letters a typist writes either
@@ -357,6 +398,11 @@ class BlauSense:
     is_reconstructed: bool
     is_erroneous: bool
     matched: bool
+    #: The name of the sub-entry this sense begins, as the site heads it (קריץ under קרץ), when it is
+    #: not the card's own scope; the entry's name where its own senses come back after one. '' on
+    #: every other sense (קרצת's card gave קריץ's 'nettle' as the verb's).
+    sub_entry: str = ""
+    details_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -393,6 +439,8 @@ class BlauCard:
     verb_form: str = ""
     kind: str = ""
 
+    analyses: tuple[tuple[str, ...], ...] = ()
+
 
 @dataclass(frozen=True)
 class BlauExample:
@@ -424,16 +472,42 @@ class BlauLookup:
     #: Beside the cards the word itself reached: the other roots its verb forms give, (root as
     #: printed, stem; 0 when several fit), at most ``MAX_SUGGESTIONS``; a press looks "root stem" up.
     suggestions: tuple[tuple[str, int], ...] = ()
+    #: The expressions the word makes with the words beside it in the text, when the page sent them
+    #: (``BlauService.context``): each a run of words with the units whose NAME holds
+    #: it, or else that hold it with words between, shown first; the word's own cards and quotations
+    #: leave out the units shown here.
+    context: tuple["BlauExpression", ...] = ()
+    problem: str = ""
+
+    quote_exclusions: tuple[tuple[str, ...], ...] = ()
+    quote_offset: int = 0
 
     @property
     def found(self) -> bool:
-        return bool(self.cards or self.examples or self.quotes)
+        return bool(self.cards or self.examples or self.quotes or self.context)
+
+    @property
+    def context_quoted(self) -> bool:
+        """The words beside it reached only citations: no entry or sub-entry shown has the run in its name."""
+        return bool(self.context) and not any(
+            place.scope != SCOPE_CITATION for found in self.context for hit in found.hits for place in hit.places)
 
     @property
     def stem_missing(self) -> bool:
         """A stem was typed, the root was found, and no entry it reached lists that stem: the
         cards are the root's, with the stems they have."""
         return bool(self.stem and self.cards and not any(card.stem == self.stem for card in self.cards))
+
+
+def function_word_first(cards: tuple[BlauCard, ...], key: str) -> tuple[BlauCard, ...]:
+    """The cards with a function word's own entries first: the word itself, or what is left of it
+    under a conjunction, a preposition or a pronoun (עליה is עלי with a pronoun before it is the
+    noun עליה̈; וכל is כל before the verb וכל). The order is otherwise kept."""
+    def other(card: BlauCard) -> bool:
+        return not (function_reading(key, card.candidate) and normalize_ja(card.matched_key) == card.candidate
+                    and not card.verb_form and not card.borrowed and not card.dot_mismatch
+                    and all(set(path) <= {'prefix', 'suffix'} for path in card.analyses))
+    return tuple(sorted(cards, key=other))
 
 
 def empty_lookup(word: str = "", key: str = "", candidates: tuple[str, ...] = (),
@@ -452,6 +526,18 @@ class BlauCitation:
     locator: str
     source: str
     foreign: str = ""   # Blau quotes no Arabic-script text; the shared renderer may ask
+    id: str = ""
+    commentary: str = ""
+    bibliography: str = ""
+
+
+@dataclass(frozen=True)
+class BlauFormDetails:
+    """Examples and notes belonging to one sense, loaded only when requested."""
+    form_id: str
+    notes: str
+    classical_note: str
+    citations: tuple[BlauCitation, ...]
 
 
 @dataclass(frozen=True)
@@ -462,6 +548,9 @@ class BlauPlace(ExpressionPlace):
     form_text: str = ""
     gloss_he: str = ""
     gloss_en: str = ""
+    binyan: str = ""
+    requires_governing_verb: bool = False
+    details_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -486,6 +575,10 @@ class BlauExpression:
     hits: tuple[BlauExpressionHit, ...]
     truncated: bool
 
+    ordered: bool = True
+    problem: str = ""
+    related: tuple["BlauExpression", ...] = ()
+
     @property
     def word(self) -> str:
         """The text, under the name the panel's head reads for every dictionary's answer."""
@@ -493,7 +586,7 @@ class BlauExpression:
 
     @property
     def found(self) -> bool:
-        return bool(self.hits)
+        return bool(self.hits or self.related)
 
 
 #: What the dictionary panel receives from this service: one word's lookup, or several words' expression.
@@ -566,6 +659,7 @@ class BlauService:
         self._stem_pairs: Optional[tuple[StemPair, ...]] = None
         self._root_stem_rows: dict[str, dict[int, tuple[str, ...]]] = {}
         self._verb_forms: Optional[dict[str, tuple[StemPair, ...]]] = None
+        self._detail_forms: Optional[frozenset[str]] = None
         self.unavailable_reason = "not opened"
         self._db_path = db_path or default_sidecar_path()
         if not self._db_path:
@@ -619,7 +713,7 @@ class BlauService:
 
     def served_to(self, editor: bool) -> bool:
         """Ready AND shown to this reader: on for everyone, or ``editors`` and the reader an editor
-        or admin (``shared.dictionary_switch``; owner, 2026-11-11: a preview before release)."""
+        or admin (``shared.dictionary_switch``; a preview before release)."""
         return self.is_ready() and serves(blau_switch(), editor)
 
     def _answering(self) -> bool:
@@ -652,10 +746,38 @@ class BlauService:
             self._conn = None
             self.unavailable_reason = "closed"
 
+    def _has_details(self, form_id: str) -> bool:
+        if self._detail_forms is None:
+            self._detail_forms = frozenset(r[0] for r in self._conn.execute(
+                "SELECT id FROM forms WHERE COALESCE(notes, '') <> '' OR COALESCE(classical_note, '') <> '' "
+                "UNION SELECT form_id FROM citations"))
+        return form_id in self._detail_forms
+
+    def form_details(self, form_id: str) -> Optional[BlauFormDetails]:
+        """Read a sense's own examples, references and notes; never another sense's material."""
+        if not form_id or not self._answering():
+            return None
+        try:
+            form = self._conn.execute('SELECT notes, classical_note FROM forms WHERE id=?', (form_id,)).fetchone()
+            if form is None:
+                return None
+            rows = self._conn.execute(
+                "SELECT c.*, s.abbreviation, s.full_reference FROM citations c "
+                "LEFT JOIN sources s ON s.id=c.source_id WHERE c.form_id=? ORDER BY c.ordinal, c.id",
+                (form_id,)).fetchall()
+            return BlauFormDetails(form_id, _text(form['notes']), _text(form['classical_note']), tuple(
+                BlauCitation(int(r['ordinal']), _text(r['ja_text']), _text(r['translation']), _text(r['citation']),
+                             _text(r['source_work']) or _text(r['abbreviation']), id=r['id'],
+                             commentary=_text(r['commentary']), bibliography=_text(r['full_reference'])) for r in rows))
+        except Exception:
+            logger.exception('BlauService: sense details could not be read')
+            return None
+
     # -- the lookup ----------------------------------------------------------
 
     def lookup(self, word: str, verb_forms: Optional[frozenset[str]] = None,
-               verb_form_stems: Optional[frozenset[str]] = None, stems: bool = True) -> BlauLookup:
+               verb_form_stems: Optional[frozenset[str]] = None, stems: bool = True,
+               limit: Optional[int] = None) -> BlauLookup:
         """What the dictionary has for one clicked or typed word. A word with
         Hebrew letters is looked up as Judeo-Arabic; a word with Arabic letters
         only, against the Arabic spellings. ``verb_forms`` / ``verb_form_stems``: the kinds of
@@ -664,10 +786,11 @@ class BlauService:
         from the manuscript, and a number after a word ("פרק 2") is no typed stem. Never raises;
         empty when unavailable, when the word has neither, or on any error."""
         word = _text(word)
+        limit = MAX_CARDS if limit is None else max(1, int(limit))
         kinds = verb_form_kinds() if verb_forms is None else frozenset(verb_forms)
         stem_kinds = verb_form_stem_kinds() if verb_form_stems is None else frozenset(verb_form_stems)
         if not word or not self._answering():
-            return empty_lookup(word)
+            return replace(empty_lookup(word), problem="unavailable" if word else "")
         key = ""
         candidates: tuple[str, ...] = ()
         script = "ja"
@@ -678,39 +801,219 @@ class BlauService:
                 # that stem's paragraph opened on every entry of the root that lists it.
                 key = normalize_ja(root)
                 candidates = (key,)
-                return self._lookup(word, key, candidates, stem=stem, root_text=root)
+                return self._lookup(word, key, candidates, stem=stem, root_text=root, limit=limit)
             key = normalize_ja(word)
             if not key:
                 script = "arabic"
                 candidates = tuple(arabic_candidates(word))
                 if not candidates:
-                    return empty_lookup(word)
+                    return replace(empty_lookup(word), problem="unsupported")
                 key = candidates[0]
-                return self._lookup_arabic(word, key, candidates)
-            candidates = tuple(candidate_stems(key))
-            return self._lookup(word, key, candidates, verb_forms=kinds, verb_form_stems=stem_kinds)
+                native = self._lookup_arabic(word, key, candidates)
+                ja = lexical_key(word)
+                if not ja or self._meta.get("version") != SCHEMA_VERSION:
+                    return native
+                equivalents = spelling_candidates(self._conn, query_stems(ja))
+                mapped = self._lookup(word, ja, equivalents, verb_forms=kinds, verb_form_stems=stem_kinds, limit=limit)
+                seen = {(c.root_id, c.sub_entry) for c in native.cards}
+                return replace(mapped, script="arabic", key=key, candidates=candidates, cards=native.cards + tuple(
+                    c for c in mapped.cards if (c.root_id, c.sub_entry) not in seen))
+            candidates = query_stems(key)
+            if self._meta.get("version") == SCHEMA_VERSION:
+                candidates = spelling_candidates(self._conn, candidates)
+            result = self._lookup(word, key, candidates, verb_forms=kinds, verb_form_stems=stem_kinds, limit=limit)
+            if self._meta.get('version') == SCHEMA_VERSION:
+                expanded = spelling_candidates(self._conn, query_stems(key), matres=True)
+                extra = tuple(k for k in expanded if k not in candidates)
+                if extra:
+                    additional = self._lookup(word, key, extra, limit=limit, plurals=False)
+                    seen = {c.root_id for c in result.cards}
+                    added = tuple(c for c in additional.cards if c.root_id not in seen)
+                    combined = result.cards + added
+                    result = replace(result, cards=combined[:limit],
+                                     more_cards=result.more_cards + additional.more_cards + max(0, len(combined) - limit),
+                                     candidates=tuple(dict.fromkeys((*result.candidates, *extra))))
+            return replace(result, cards=function_word_first(result.cards, result.key))
         except Exception:
             logger.exception("BlauService: lookup of %r failed", word)
-            return empty_lookup(word, key, candidates, script)
+            return replace(empty_lookup(word, key, candidates, script), problem="error")
 
     # -- the expression search -----------------------------------------------
 
-    def answer(self, text: str, gap: int = DEFAULT_GAP, stems: bool = True) -> BlauAnswer:
+    def answer(self, text: str, gap: int = DEFAULT_GAP, stems: bool = True,
+               before: tuple[str, ...] = (), after: tuple[str, ...] = (), ordered: bool = True) -> BlauAnswer:
         """What the panel asks for what the reader clicked, selected or typed: several words
         are an expression search where the sidecar supports it, else (one word, or a 1.0.0
         file) the lookup of the text as one key. A root with a typed stem ("דלל X") is the
         lookup of that root with the stem chosen, never an expression; ``stems`` False (words
-        clicked or selected in the manuscript) reads no stem: "פרק 2" there is two words."""
+        clicked or selected in the manuscript) reads no stem: "פרק 2" there is two words.
+        ``before`` / ``after``: the words beside a clicked word in the text, for ``context``."""
         text = " ".join(_text(text).split())
         if len(text.split()) > 1 and self.expressions_available() and not (stems and root_and_stem(text)[1]):
-            return self.expression(text, gap)
-        return self.lookup(text, stems=stems)
+            expression = self.expression(text, gap, ordered=ordered)
+            if not expression.found and not expression.problem:
+                related = []
+                for components in component_runs(text):
+                    partial = self.expression(components, gap, ordered=ordered)
+                    if partial.found:
+                        related.append(partial)
+                        if len(related) == 3:
+                            break
+                if related:
+                    expression = replace(expression, related=tuple(related))
+            return expression
+        result = self.lookup(text, stems=stems)
+        if (before or after) and not result.stem and result.script == "ja":
+            context = self.context(text, before, after, gap)
+            if context:
+                shown = {(hit.root_id, hit.sub_entry) for found in context for hit in found.hits}
+                promoted = {(hit.root_id, hit.sub_entry) for found in context for hit in found.hits
+                            if any(place.scope != SCOPE_CITATION for place in hit.places)}
+                result = replace(result, context=context, cards=tuple(
+                    card for card in result.cards if (card.root_id, card.sub_entry) not in promoted), quotes=tuple(
+                    hit for hit in result.quotes if (hit.root_id, hit.sub_entry) not in shown))
+        return result
+
+    def context(self, word: str, before: tuple[str, ...] = (), after: tuple[str, ...] = (),
+                gap: int = DEFAULT_GAP) -> tuple[BlauExpression, ...]:
+        """The expressions a clicked word makes with the words beside it in the text
+        (אללה in "אטאל אללה בקאך" reached the entries of אללה, and not the blessing): the
+        runs ``shared.ja_expression.context_windows`` gives, longest first, searched with no word
+        between; for the first size where an entry or a sub-entry has the run in its NAME (not only
+        in a citation), each such run with those units and those places. When none has one in its
+        name, the units that hold one with ``quoted_gap(gap)`` words between, in a name or in a
+        citation: ``quoted_runs``, every size, longest first, at most
+        ``MAX_CONTEXT_QUOTED`` units (``BlauLookup.context_quoted`` when only citations hold them). ()
+        when none does, no word is beside it, on a 1.0.0 file, or on any error. Never raises."""
+        if not (before or after) or not self.expressions_available():
+            return ()
+        try:
+            windows = context_windows(word, before, after)
+            index = self.verb_form_index()
+            around = frozenset(key for value in (*before, word, *after) for key in query_keys(value, index))
+            # Named constructions may have an intervening argument slot.
+            for head_gap in dict.fromkeys((0, quoted_gap(gap))):
+                for runs in windows:
+                    found: list[BlauExpression] = []
+                    for text in runs:
+                        named = self._named(self._context_expression(text, head_gap, head_only=True), around)
+                        if named is not None:
+                            found.append(named)
+                    if found:
+                        return tuple(found)
+            # No run of neighbours is a name: a verb with the preposition it governs across other
+            # words (יפלח אללה בה), or with one written onto a later word (יטמע באלגאולה). The
+            # governing word answers as a finite verb only, the other as the preposition.
+            pairs = [(tuple(text.split()), None) for text in governed_runs(word, before, after)]
+            pairs += [((governing, carrier), preposition) for governing, carrier, preposition in clitic_governed(word, before, after)]
+            found = []
+            for pair, preposition in pairs:
+                keys = (verb_keys(pair[0], index), (preposition,) if preposition else query_keys(pair[1], index))
+                if not all(keys):
+                    continue
+                result = self._expression(" ".join(pair), pair, keys, 0, MAX_EXPRESSION_HITS, True, True)
+                named = self._named(self._eligible(result), around)
+                if named is not None:
+                    found.append(named)
+            if found:
+                return tuple(found)
+            runs = list(dict.fromkeys([*quoted_runs(windows), *context_component_runs(word, before, after)]))
+            governed = governed_verb_run(word, after, self.verb_form_index())
+            if governed and governed not in runs:
+                runs.append(governed)
+            return self._quoted_context(runs, quoted_gap(gap), around)
+        except Exception:
+            logger.exception("BlauService: the words beside %r could not be looked up", word)
+        return ()
+
+    def _context_expression(self, text: str, gap: int, *, head_only: bool = False,
+                            result: Optional[BlauExpression] = None) -> BlauExpression:
+        """A complement alone can be searched explicitly, but cannot promote its absent verb."""
+        from shared.ja_verb_forms import stem_forms
+
+        def eligible(place):
+            if place.requires_governing_verb:
+                return False
+            if place.scope == 'construction' and place.form_id:
+                matched = dict(zip(place.positions, place.components))
+                verb, prep = matched.get(0), matched.get(1)
+                if verb is None or prep is None:
+                    return False
+                # Automatic neighbouring-word suggestions must fit the numbered stem.
+                # An explicit root search can still inspect every numbered paragraph.
+                forms = stem_forms(lookup_key(place.words[0]), stem_numbers(place.binyan)[0])
+                if not any(key in forms for key in query_keys(verb.word)):
+                    return False
+                # A conjunction before the preposition can start another clause or member.
+                # Do not automatically join it to the preceding verb/noun.
+                key, printed = lookup_key(prep.word), lookup_key(prep.printed)
+                if key[:1] in ('ו', 'פ') and key[:1] != printed[:1]:
+                    return False
+            return True
+
+        result = self.expression(text, gap, head_only=head_only) if result is None else result
+        hits = []
+        for hit in result.hits:
+            places = tuple(p for p in hit.places if eligible(p))
+            if places:
+                hits.append(replace(hit, places=places, places_total=len(places)))
+        return replace(result, hits=tuple(hits))
+
+    def _eligible(self, result: BlauExpression) -> BlauExpression:
+        """``_context_expression``'s rules over a search already made."""
+        return self._context_expression(result.text, result.gap, result=result)
+
+    def _named(self, result: BlauExpression, around: frozenset[str]) -> Optional[BlauExpression]:
+        """``result`` with the entries a name of which the run names, and those places: a name
+        holding the run's words among other lexical words of its own, none of them in the text
+        around the click (``around``, those words' keys), is not the expression read there
+        (``shared.ja_expression.names_expression``). None when no entry is left."""
+        index = self.verb_form_index()
+        hits = []
+        for hit in result.hits:
+            names = tuple(place for place in hit.places if place.scope != SCOPE_CITATION
+                          and names_expression(place, around, "", lambda w: query_keys(w, index)))
+            if names:
+                hits.append(replace(hit, places=names, places_total=len(names)))
+        return replace(result, hits=tuple(hits), truncated=False) if hits else None
+
+    def _quoted_context(self, runs: list[str], gap: int, around: frozenset[str] = frozenset()) -> tuple[BlauExpression, ...]:
+        """``context`` with words between: each run with the entries and sub-entries, not shown for a
+        longer run, that hold it, at most ``MAX_CONTEXT_QUOTED`` in all. A citation holding the run
+        counts as it is; a name counts only when the run names it (``names_expression``, as in the
+        stages before: a name passed over there must not come back here with words between)."""
+        index = self.verb_form_index()
+        found: list[BlauExpression] = []
+        shown: set[tuple[str, str]] = set()
+        candidates = []
+        for text in runs:
+            result = self._context_expression(text, gap)
+            kept = []
+            for hit in result.hits:
+                places = tuple(p for p in hit.places if p.scope == SCOPE_CITATION
+                               or names_expression(p, around, "", lambda w: query_keys(w, index)))
+                if places:
+                    kept.append(replace(hit, places=places, places_total=len(places)))
+            candidates.append(replace(result, hits=tuple(kept)))
+        candidates.sort(key=context_quality)
+        for result in candidates:
+            if len(shown) >= MAX_CONTEXT_QUOTED:
+                break
+            hits = []
+            for hit in result.hits:
+                unit = (hit.root_id, hit.sub_entry)
+                if unit not in shown and len(shown) < MAX_CONTEXT_QUOTED:
+                    shown.add(unit)
+                    hits.append(hit)
+            if hits:
+                found.append(replace(result, hits=tuple(hits), truncated=False))
+        return tuple(found)
 
     # -- roots borrowed from the other dictionaries -------------------------
 
-    def borrow(self, result: BlauAnswer, borrowed: tuple[BorrowedRoot, ...]) -> BlauAnswer:
+    def borrow(self, result: BlauAnswer, borrowed: tuple[BorrowedRoot, ...], limit: Optional[int] = None) -> BlauAnswer:
         """Blau's answer with a card for each root another dictionary gives for the word
-        (``shared.ja_roots.borrowed_roots``), after Blau's own cards (owner, 2026-11-11: Blau has
+        (``shared.ja_roots.borrowed_roots``), after Blau's own cards (Blau has
         no list of inflected forms; Friedman's matches and Lane's first root reach קול for קאל).
         A root reaches the entries named by it, the one spelled with the same dots where several
         share the letters; an entry Blau's own cards already show gets no second card, and two
@@ -723,12 +1026,12 @@ class BlauService:
         if not isinstance(result, BlauLookup) or result.stem or not borrowed or not self._answering():
             return result
         try:
-            return self._borrow(result, borrowed)
+            return self._borrow(result, borrowed, MAX_CARDS if limit is None else max(1, int(limit)))
         except Exception:
             logger.exception("BlauService: borrowing roots for %r failed", result.word)
             return result
 
-    def _borrow(self, result: BlauLookup, borrowed: tuple[BorrowedRoot, ...]) -> BlauLookup:
+    def _borrow(self, result: BlauLookup, borrowed: tuple[BorrowedRoot, ...], limit: int = MAX_CARDS) -> BlauLookup:
         shown = {card.root_id for card in result.cards}
         # A card found by verb form (PR 3) whose root another dictionary also gives keeps its place
         # and names that dictionary too; the word's own cards come first, the borrowed ones last.
@@ -761,35 +1064,56 @@ class BlauService:
                     if root_id in shown:
                         continue
                     if root_id not in builds:
-                        if len(result.cards) + len(builds) >= MAX_CARDS:
+                        if len(result.cards) + len(builds) >= limit:
                             overflow.add(root_id)
                             continue
                         builds[root_id] = build
                     if given not in sources.setdefault(root_id, []):
                         sources[root_id].append(given)
-        # Blau's own cards: the entry another dictionary names first, whichever key reached it (owner,
-        # 2026-11-11: ויכון: כון, which Lane names, before כ̇לו, which also prints יכון in a phrase; and
+        # Blau's own cards: the entry another dictionary names first, whichever key reached it
+        # (ויכון: כון, which Lane names, before כ̇לו, which also prints יכון in a phrase; and
         # ואלקול: קול, reached with the article peeled, before טלע, which prints אלקול as a variant).
         # The dotted reading first; among the named, and among the rest, the key order the lookup made.
         named = {normalize_ja(item.root) for item in borrowed}
         key_order = {key: n for n, key in enumerate(result.candidates)}
-        own = tuple(sorted((card for card in result.cards if not card.verb_form), key=lambda card: (
-            card.dot_mismatch, normalize_ja(card.root_label or card.name) not in named,
-            key_order.get(card.candidate, len(key_order)))))
+        weak = tuple(card for card in result.cards if card.analyses and all('mater' in path for path in card.analyses))
+        nominal = nominal_candidates(result.key)
+        article = article_candidates(result.key) and not is_function_word((result.key,))
+        finite_ids = {card.root_id for card in verb if card.verb_form and
+                      any(c.entry_id == card.root_id and c.finite_for(result.key)
+                          for c in verb_form_cards(result.candidates, self.verb_form_index(), nominal))}
+        own = tuple(sorted((card for card in result.cards if not card.verb_form and card not in weak), key=lambda card: (
+            card.dot_mismatch,
+            all('suffix' in path for path in card.analyses) if article else 0,
+            normalize_ja(card.root_label or card.name) not in named,
+            evidence_cost(card.analyses), key_order.get(card.candidate, len(key_order)))))
         own += tuple(replace(card, borrowed=card.borrowed + tuple(verb_sources[card.root_id]))
-                     if verb_sources.get(card.root_id) else card for card in verb)
+                     if verb_sources.get(card.root_id) else card
+                     for card in (sorted(verb, key=lambda c: -len(verb_sources.get(c.root_id, ()))) if finite_ids else verb))
+        own += weak
+        if finite_ids:
+            own = tuple(sorted(own, key=lambda card: (
+                card.dot_mismatch,
+                0 if any(not path for path in card.analyses) else
+                1 if card.verb_form and not card.sub_entry else 2)))
         if not builds and not overflow:
+            own = function_word_first(own, result.key)
             return replace(result, cards=own) if own != result.cards else result
         if result.script == "ja":
+            nominal = nominal_candidates(result.key)
             for build in builds.values():
-                self._open_on_word_stem(build, result.candidates)
+                self._open_on_word_stem(build, result.candidates, nominal)
         # An entry two dictionaries agree on first; otherwise in the order the roots came.
-        added = tuple(replace(self._finish(build, roots), borrowed=tuple(sources[root_id]))
+        added = tuple(replace(self._finish(build, roots), borrowed=tuple(sources[root_id]), analyses=tuple(
+                          (f"borrowed:{item.source}", *item.steps) for item in borrowed
+                          if normalize_ja(item.root) == normalize_ja(_root_label(build.root))))
                       for root_id, build in sorted(builds.items(), key=lambda item: -len(sources[item[0]])))
         # A suggested root another dictionary also gives is now a card: no chip for it.
         taken = {dot_pattern(card.root_label or card.name) for card in added}
         return replace(
-            result, cards=own + added, more_cards=result.more_cards + len(overflow),
+            result, cards=function_word_first(tuple(sorted(own + added, key=lambda c: not (
+                any(source == "lane" for source, _ in c.borrowed)
+                and supported_hollow_perfect(result.word, c.root_label, c.stems)))), result.key), more_cards=result.more_cards + len(overflow),
             examples=tuple(e for e in result.examples if e.root_id not in builds),
             quotes=tuple(q for q in result.quotes if q.root_id not in builds),
             suggestions=tuple(s for s in result.suggestions if dot_pattern(s[0]) not in taken),
@@ -808,7 +1132,7 @@ class BlauService:
                     pairs: list[StemPair] = []
                     by_root: dict[str, dict[int, list[str]]] = {}
                     for row in self._conn.execute(
-                            "SELECT s.id, s.root_id, s.binyan, s.binyan_shift, s.head_json, r.name_ja, r.names_json "
+                            "SELECT s.id, s.root_id, s.binyan, s.binyan_shift, s.head_json, r.name_ja, r.names_json, r.arabic_spelling "
                             "FROM stems s JOIN roots r ON r.id = s.root_id ORDER BY r.ordinal, s.rowid"):
                         numbers = stem_row_numbers(row["binyan"], row["binyan_shift"], row["head_json"])
                         if not numbers:
@@ -859,22 +1183,25 @@ class BlauService:
         with none, when unavailable, or on any error. Never raises."""
         return tuple(self._stem_rows(root_id))
 
-    def _open_on_word_stem(self, build: _CardBuild, keys: tuple[str, ...]) -> None:
+    def _open_on_word_stem(self, build: _CardBuild, keys: tuple[str, ...],
+                           nominal: frozenset[str] = frozenset()) -> None:
         """Open a borrowed card on the stem the word's shape gives (``shared.ja_verb_forms.word_stem``;
-        owner, 2026-11-11: אסתקר is stem X of קרר and its card opened on stem I): the one stem the
+        אסתקר is stem X of קרר and its card opened on stem I): the one stem the
         entry lists whose generated forms hold one of the word's keys. Only for a root another
         dictionary gave: Blau's own card already shows the form the word matched first, and a
         typed root is the whole entry. Not for a card scoped to a sub-entry or with a stem already
         chosen; nothing when several listed stems hold the word. When none does, the word is no form
-        of the entry's verbs, and the senses outside its stem paragraphs come first (owner,
-        2026-11-11: אלחרוף, the plural of the noun חרף, opened on the verb's stem II sense)."""
+        of the entry's verbs, and the senses outside its stem paragraphs come first
+        (אלחרוף, the plural of the noun חרף, opened on the verb's stem II sense). A key in
+        ``nominal`` (a word with the article: ``article_candidates``) fits a stem only as its
+        participle or verbal noun."""
         if build.stem or build.sub_entry_id or not keys:
             return
         root_id = _text(build.root["id"])
         listed = self._stem_rows(root_id)
         if not listed:
             return
-        fits = word_stems(keys, normalize_ja(_root_label(build.root)), listed)
+        fits = word_stems(keys, normalize_ja(_root_label(build.root)), listed, nominal)
         if len(fits) == 1:
             build.stem = fits[0]
         elif not fits:
@@ -889,7 +1216,7 @@ class BlauService:
             logger.exception("BlauService: the stems of %r could not be read", root_id)
             return {}
 
-    def expression(self, text: str, gap: int = DEFAULT_GAP, limit: int = MAX_EXPRESSION_HITS) -> BlauExpression:
+    def expression(self, text: str, gap: int = DEFAULT_GAP, limit: int = MAX_EXPRESSION_HITS, ordered: bool = True, head_only: bool = False) -> BlauExpression:
         """Every entry holding the words of ``text`` in order with at most ``gap`` printed words
         between two of them, inside one name or one citation. Empty for one word, for more than
         ``MAX_EXPRESSION_WORDS``, for a word without Hebrew letters, when the dictionary is not
@@ -897,33 +1224,36 @@ class BlauService:
         text = " ".join(_text(text).split())
         gap = clamp_gap(gap)
         if not text or not self._answering() or not self.expressions_available():
-            return empty_expression(text, gap)
-        words = tuple(text.split())
-        candidates = tuple(word_keys(w) for w in words)
-        if not 2 <= len(words) <= MAX_EXPRESSION_WORDS or not all(candidates):
-            return empty_expression(text, gap, words, candidates)
+            return replace(empty_expression(text, gap), ordered=ordered, problem="unavailable")
+        words = expression_words(text)
+        candidates = tuple(query_keys(w, self.verb_form_index()) for w in words)
+        if not 2 <= len(text.split()) <= MAX_EXPRESSION_WORDS or not all(candidates):
+            return replace(empty_expression(text, gap, words, candidates), ordered=ordered, problem="limit" if len(text.split()) > MAX_EXPRESSION_WORDS else "unsupported")
         try:
-            return self._expression(text, words, candidates, gap, max(1, int(limit)))
+            result = self._expression(text, words, candidates, gap, max(1, int(limit)), ordered, head_only)
+            original = tuple(text.split())
+            if words != original:
+                original_keys = tuple(query_keys(w, self.verb_form_index()) for w in original)
+                intact = self._expression(text, original, original_keys, gap, max(1, int(limit)), ordered, head_only)
+                combined = {}
+                for hit in (*intact.hits, *result.hits):
+                    combined.setdefault((hit.root_id, hit.sub_entry), hit)
+                result = replace(result, hits=tuple(combined.values())[:limit],
+                                 truncated=result.truncated or intact.truncated or len(combined) > limit)
+            return replace(result, ordered=ordered)
+        except ExpressionLimitError:
+            return replace(empty_expression(text, gap), ordered=ordered, problem="work_limit")
         except Exception:
             logger.exception("BlauService: expression search failed for %r", text)
-            return empty_expression(text, gap, words, candidates)
+            return replace(empty_expression(text, gap, words, candidates), ordered=ordered, problem="error")
 
     def _expression(self, text: str, words: tuple[str, ...], candidates: tuple[tuple[str, ...], ...], gap: int,
-                    limit: int) -> BlauExpression:
+                    limit: int, ordered: bool = True, head_only: bool = False) -> BlauExpression:
         accepts = [frozenset(c) for c in candidates]
-        every = sorted(set().union(*accepts))
-        marks = ",".join("?" for _ in every)
-        # The scopes (one name, one citation) that hold some key of every typed word at all, and
-        # the unit each belongs to: an entry, or one sub-entry of it (the lookup's card scope).
-        held: dict[tuple[str, str, int], set[str]] = {}
-        unit_of: dict[tuple[str, str, int], tuple[str, str]] = {}
-        for row in self._conn.execute(
-                f"SELECT DISTINCT scope, scope_id, n, root_id, sub_entry_id, key FROM {TOKENS_TABLE} "
-                f"WHERE key IN ({marks})", every):
-            scope = (str(row["scope"]), str(row["scope_id"]), int(row["n"]))
-            held.setdefault(scope, set()).add(str(row["key"]))
-            unit_of[scope] = (_text(row["root_id"]), _text(row["sub_entry_id"]))
-        scopes = [s for s, keys in held.items() if all(keys & a for a in accepts)]
+        rows = matching_scopes(self._conn, candidates, 'scope, scope_id, n, root_id, sub_entry_id', head_only)
+        unit_of = {(str(r['scope']), str(r['scope_id']), int(r['n'])):
+                   (_text(r['root_id']), _text(r['sub_entry_id'])) for r in rows}
+        scopes = list(unit_of)
         # Then the order and the gaps, scope by scope, over its printed words.
         places: dict[tuple[str, str], list[ExpressionPlace]] = {}
         for scope in scopes:
@@ -931,7 +1261,7 @@ class BlauService:
                 f"SELECT pos, key FROM {TOKENS_TABLE} WHERE scope = ? AND scope_id = ? AND n = ? ORDER BY pos, rowid",
                 scope).fetchall()
             items = [(int(r["pos"]), str(r["key"])) for r in rows]
-            match = ordered_match(items, accepts, gap)
+            match = expression_match(items, accepts, gap, ordered)
             if match is None:
                 continue
             place = self._place(scope, items, match, words, candidates)
@@ -989,10 +1319,21 @@ class BlauService:
         if sub_id:
             row = self._conn.execute("SELECT name_ja FROM sub_entries WHERE id = ?", (sub_id,)).fetchone()
             sub_entry = _text(row["name_ja"]) if row is not None else ""
+        # The same sense may print parallel Hebrew/Arabic heads or several spellings.
+        # Keep their search keys, but do not spend the visible places on duplicate senses.
+        seen = set()
+        unique = []
+        for place in found:
+            if place.scope in ('form', 'construction') and place.form_id:
+                identity = (place.scope, place.form_id, place.binyan)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+            unique.append(place)
         return BlauExpressionHit(
             root_id=root_id, name=_text(root["name_ja"]), arabic=_text(root["arabic_spelling"]),
             page=_page(root["start_page_printed"]), url=entry_url(root_id), sub_entry=sub_entry,
-            places=tuple(found[:MAX_PLACES]), places_total=len(found))
+            places=tuple(unique[:MAX_PLACES]), places_total=len(unique))
 
     def _place(self, scope: tuple[str, str, int], items: list[tuple[int, str]], match: tuple[int, ...],
                words: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]) -> Optional[BlauPlace]:
@@ -1000,8 +1341,20 @@ class BlauService:
         disagree (not this reader's sidecar)."""
         kind, scope_id, n = scope
         quotation = None
-        form_id = form_text = gloss_he = gloss_en = ""
-        if kind == "root":
+        form_id = form_text = gloss_he = gloss_en = binyan = ""
+        requires_governing_verb = False
+        if kind == "construction":
+            row = self._conn.execute("SELECT text, source_head, stem FROM constructions WHERE id = ?", (scope_id,)).fetchone()
+            text = row["text"] if row is not None else ""
+            form = self._conn.execute("SELECT id, gloss_he, gloss_en FROM forms WHERE id = ?",
+                                      (scope_id.split(':', 1)[0],)).fetchone()
+            if row is not None:
+                from shared.ja_roots import stem_label
+                binyan = stem_label(row["stem"])
+            if form is not None and row is not None:
+                form_id, form_text = form["id"], row["source_head"]
+                gloss_he, gloss_en = _text(form["gloss_he"]), _text(form["gloss_en"])
+        elif kind == "root":
             row = self._conn.execute("SELECT names_json FROM roots WHERE id = ?", (scope_id,)).fetchone()
             names = _names_of(row["names_json"]) if row is not None else []
             text = names[n] if n < len(names) else ""
@@ -1010,21 +1363,28 @@ class BlauService:
             names = _names_of(row["names_json"]) if row is not None else []
             text = names[n] if n < len(names) else ""
         elif kind == "form":
-            row = self._conn.execute("SELECT id, ja_text, gloss_he, gloss_en FROM forms WHERE id = ?", (scope_id,)).fetchone()
-            names = name_alternatives(row["ja_text"]) if row is not None else []
+            row = self._conn.execute("SELECT id, ja_text, arabic_spelling, gloss_he, gloss_en FROM forms WHERE id = ?", (scope_id,)).fetchone()
+            names = form_head_alternatives(row["ja_text"], row["arabic_spelling"]) if row is not None else []
             text = names[n] if n < len(names) else ""
             if row is not None:
                 form_id, form_text = _text(row["id"]), text
                 gloss_he, gloss_en = _text(row["gloss_he"]), _text(row["gloss_en"])
+                if self._meta.get('version') == SCHEMA_VERSION and n >= len(name_alternatives(row['ja_text'])):
+                    # Existing JA lexical heads retain their established phrase behavior.
+                    # Newly exposed Arabic complements need their verb for auto-promotion.
+                    prefix = form_id + ':'
+                    requires_governing_verb = self._conn.execute(
+                        'SELECT 1 FROM constructions WHERE id >= ? AND id < ? LIMIT 1',
+                        (prefix, prefix + '\uffff')).fetchone() is not None
         elif kind == SCOPE_CITATION:
             row = self._conn.execute(
-                "SELECT c.ja_text, c.translation, c.citation, c.source_work, f.id AS form_id, f.ja_text AS form_text, "
+                "SELECT c.id, c.ja_text, c.translation, c.citation, c.source_work, f.id AS form_id, f.ja_text AS form_text, "
                 "f.gloss_he, f.gloss_en FROM citations c JOIN forms f ON f.id = c.form_id WHERE c.id = ?",
                 (scope_id,)).fetchone()
             if row is None:
                 return None
             text = _text(row["ja_text"])
-            quotation = BlauCitation(n, text, _text(row["translation"]), _text(row["citation"]), _text(row["source_work"]))
+            quotation = BlauCitation(n, text, _text(row["translation"]), _text(row["citation"]), _text(row["source_work"]), id=row['id'])
             form_id, form_text = _text(row["form_id"]), (name_alternatives(row["form_text"]) or [""])[0]
             gloss_he, gloss_en = _text(row["gloss_he"]), _text(row["gloss_en"])
         else:
@@ -1034,8 +1394,13 @@ class BlauService:
         if found is None:
             return None
         positions, components = found
+        if kind == 'construction' and (form_id or scope_id.endswith(':ar')) and not {0, 1}.issubset(positions):
+            # The verb and its first preposition are required, even when the reader allows
+            # intervening words. A match only inside the complement belongs to its form scope.
+            return None
         return BlauPlace(kind, n, printed, positions, components, quotation,
-                         form_id=form_id, form_text=form_text, gloss_he=gloss_he, gloss_en=gloss_en)
+                         form_id=form_id, form_text=form_text, gloss_he=gloss_he, gloss_en=gloss_en, binyan=binyan,
+                         requires_governing_verb=requires_governing_verb, details_available=self._has_details(form_id))
 
     # -- typed Arabic ---------------------------------------------------------
 
@@ -1069,6 +1434,29 @@ class BlauService:
                     self._arabic_index = {k: tuple(v) for k, v in index.items()}
         return self._arabic_index
 
+    def _radical_peeled(self, roots: dict[str, Optional[sqlite3.Row]], row: sqlite3.Row, candidate: str) -> bool:
+        """Does ``candidate`` reach the name ``row`` only with the name's first letter taken for a
+        conjunction or a preposition, where that letter is the root's first? מן is no כ̇מן without its
+        כ̇, and דר no בדר. A name printed with the article (אלד̇י: די) or with a letter before its
+        root's first (בכתאב under כתב), or that keeps the whole root without it (בברג under ברג), is
+        still reached."""
+        name = normalize_ja(_text(row["raw"]))
+        if not name or name == candidate or name.startswith(candidate) or name.startswith("אל"):
+            return False
+        paths = analysis_paths(_text(row["raw"]), candidate)
+        if not paths or not all("prefix" in path for path in paths):
+            return False
+        if row["kind"] == "root":
+            return True
+        root = self._root(roots, _text(row["root_id"]))
+        label = normalize_ja(_root_label(root)).split(" ")[0] if root is not None else ""
+        if not label or label[:1] != name[:1]:
+            return False
+        # A name really printed with a preposition that is also its root's first letter (בברג under
+        # ברג) keeps every letter of the root after the preposition is taken off.
+        letters = iter(candidate)
+        return not all(letter in letters for letter in label)
+
     def _lookup_arabic(self, word: str, key: str, candidates: tuple[str, ...]) -> BlauLookup:
         index = self._arabic()
         cards: dict[tuple[str, str, str], _CardBuild] = {}
@@ -1086,7 +1474,8 @@ class BlauService:
 
     def _lookup(self, word: str, key: str, candidates: tuple[str, ...], stem: int = 0,
                 root_text: str = "", verb_forms: frozenset[str] = frozenset(),
-                verb_form_stems: frozenset[str] = frozenset()) -> BlauLookup:
+                verb_form_stems: frozenset[str] = frozenset(), limit: int = MAX_CARDS,
+                plurals: bool = True) -> BlauLookup:
         # A card is one scope reached by one candidate: keyed by (candidate,
         # root, sub-entry), so two candidates that reach the same entry (כתאב
         # and תאב) stay two cards in candidate order, and a root hit and a
@@ -1104,17 +1493,40 @@ class BlauService:
         roots: dict[str, Optional[sqlite3.Row]] = {}
         prefix_marks = ",".join("?" * len(NAME_PREFIX_KINDS))
         names: dict[tuple[str, str], list[str]] = {}
+        # ``plurals`` False: the second pass over the word's other spellings (``lookup``); the
+        # first tried the word's noun forms already.
+        written = candidates
+        plural_kinds = ({a.key: a.steps[-1] for a in plural_analyses(key) if a.key not in candidates}
+                        if plurals and not stem else {})
+        plural_keys = tuple(plural_kinds)
+        candidates = (*candidates, *plural_keys)
+        as_written: Optional[bool] = None   # did the word reach an entry before its noun forms were tried
+        noun_keys = {k for k, kind in plural_kinds.items() if kind == PLURAL}   # and those that reach one
+        whole_entries: list[tuple[sqlite3.Row, str]] = []   # a noun form's root: after every sub-entry
+        verbal: list[bool] = []   # asked once, and only for a word a feminine plural's reading reaches
+
+        def alef_perfect() -> bool:
+            if not verbal:   # a word with the article is no perfect: אלתאמאת is תאם's plural
+                verbal.append(not article_candidates(key) and listed_alef_perfect(written, self.stem_pairs()))
+            return verbal[0]
 
         def order(r: sqlite3.Row) -> tuple[int, int]:
             # The kind first (root, sub-entry, headword, variant); then an entry or sub-entry whose
-            # FIRST name is the word before one that gives it as a later name (owner, 2026-11-11;
-            # אנג̇אץ is the second name of "אג̇אץ | אנג̇אץ" and the only name of another entry).
+            # FIRST name is the word before one that gives it as a later name
+            # (אנג̇אץ is the second name of "אג̇אץ | אנג̇אץ" and the only name of another entry).
             return _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)), self._name_position(r, names)
 
         for candidate in candidates:
+            # The entries reached before this key: a noun form does not open one of them again, but
+            # opens every noun of its name under one entry (ברכאת: both sub-entries ברכה̈ of ברך).
+            reached = frozenset(card_roots)
             rows = list(self._conn.execute(
                 "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
                 "WHERE norm = ? ORDER BY rowid", (candidate,)))
+            if self._meta.get("version") == SCHEMA_VERSION:
+                rows.extend(self._conn.execute(
+                    "SELECT key AS norm, raw, kind, root_id, sub_entry_id, form_id FROM lookup_aliases "
+                    "WHERE key = ?", (candidate,)).fetchall())
             rows.sort(key=order)
             if " " not in candidate:
                 # Entry names of several words that begin with this one (a
@@ -1127,24 +1539,91 @@ class BlauService:
                 rows.extend(named)
             for row in rows:
                 kind = row["kind"]
+                if self._radical_peeled(roots, row, candidate):
+                    continue
+                if candidate in plural_kinds:
+                    # A noun the word may be a form of (``plural_analyses``): only a heading that IS
+                    # that noun. A verb's root is no noun's heading, but for a noun's pattern
+                    # (אבראג̇ is ברג̇), and a pattern is tried only for a word that reached nothing as
+                    # written (measured 2026-11-14: beside a word's own entries it mostly named
+                    # another word, עליה as a plural of עלה̈). Beyond the sound masculine plural, an
+                    # entry the word reached already is not opened a second time.
+                    if as_written is None:   # an entry, or a verb form the lookup will show
+                        as_written = bool(cards) or any(
+                            card.kind in verb_forms
+                            for card in verb_form_cards(written, self.verb_form_index(), nominal_candidates(key)))
+                    if (plural_kinds[candidate] != PLURAL and alef_perfect()
+                            and not (plural_kinds[candidate] == FEMININE_PLURAL and candidate.endswith('ה'))):
+                        continue   # אבראת is ברא IV with its subject ending, not אבר with a plural's
+                    if plural_kinds[candidate] == ACCUSATIVE and feminine_heading(row['raw']):
+                        continue
+                    if kind not in {'root', 'sub_entry'} or lexical_key(row['raw']) != candidate:
+                        continue
+                    if (kind == 'root' and plural_kinds[candidate] != BROKEN_PLURAL
+                            and self._stem_rows(_text(row['root_id']))):
+                        continue
+                    if plural_kinds[candidate] != PLURAL and _text(row['root_id']) in reached:
+                        continue
+                    if plural_kinds[candidate] == BROKEN_PLURAL and as_written:
+                        continue
+                    # A dual's noun does not begin with the article the word reached an entry
+                    # without (אלזמאן is זמאן, not the dual of אלזם; אלפאן is the dual of אלף).
+                    if (plural_kinds[candidate] == DUAL and candidate.startswith('אל')
+                            and any(normalize_ja(build.matched_key) == candidate[2:] + 'אנ' for build in cards.values())):
+                        continue
+                    if plural_kinds[candidate] != PLURAL and kind == 'root':
+                        # אלת̇מאר is ת̇מרה̈, a noun under ת̇מר, before it is the whole entry ת̇מר.
+                        whole_entries.append((row, candidate))
+                        continue
+                    noun_keys.add(candidate)
+                if (kind in FORM_KINDS and not self._carries_root(roots, _text(row["root_id"]), candidate)
+                        and not self._carries_subentry(_text(row["sub_entry_id"]), candidate)):
+                    continue   # a word the entry's verb takes, not a form of the entry (FORM_KINDS)
                 if kind in _KIND_RANK:
                     self._add_hit(cards, card_roots, overflow, roots, row, candidate)
                 elif kind == PHRASE_KIND and not stem:
                     phrase_rows.append(row)
+        for row, candidate in whole_entries:
+            if _text(row['root_id']) not in card_roots:
+                noun_keys.add(candidate)
+                self._add_hit(cards, card_roots, overflow, roots, row, candidate)
         if stem:
             return self._stem_answer(word, key, candidates, stem, root_text, cards, overflow, roots)
-        # The cards found by verb form, only when the word itself reached no entry (their entries
-        # leave the quotes and the examples, as a card's do); beside the word's own cards, the roots
-        # its verb forms give are suggestions (owner, 2026-11-11: the graded sample).
+        # A word with the article is a noun (a verb's senses came above the noun's):
+        # its keys with the article peeled reach a verb only as a participle or a verbal noun, and an
+        # entry they reach by its name shows the senses outside its stem paragraphs first, unless the
+        # word is the participle or verbal noun of one of its stems.
+        nominal = nominal_candidates(key) | frozenset(noun_keys)
+        candidates = (*written, *(k for k in plural_keys if k in noun_keys))
+        finite = {card.entry_id for card in verb_form_cards(candidates, self.verb_form_index(), nominal)
+                  if 'B' in verb_forms and (card.kind in verb_forms or card.kind in 'CE')
+                  and not is_function_word((key,)) and card.finite_for(key)} if verb_forms else set()
+        # What follows a preposition is a noun too (לראס): the same order of senses.
+        noun_like = nominal | preposition_candidates(key)
+        for build in cards.values():
+            if build.candidate in noun_like and build.matched_kind == "root":
+                listed = self._stem_rows(_text(build.root["id"]))
+                if listed and not word_stems((build.candidate,), normalize_ja(_root_label(build.root)), listed,
+                                             noun_like):
+                    build.nouns_first = True
+        # Distinctive subject marking may supply the verb even when a noun under
+        # the same root already matched. Other generated alternatives remain
+        # suggestions beside lexical matches.
         verb_builds: list[_CardBuild] = []
         verb_more = 0
         suggestions: tuple[tuple[str, int], ...] = ()
         if cards:
             suggestions = suggested_roots(candidates, self.verb_form_index() if verb_forms else {}, verb_forms,
-                                          card_roots)
+                                          card_roots, nominal=nominal)
+            main_roots = {_text(build.root['id']) for build in cards.values() if not build.sub_entry_id}
+            if finite - main_roots:
+                possible, verb_more = self._verb_form_builds(candidates, set(main_roots), roots,
+                                                            verb_forms, verb_form_stems, nominal, eligible=finite)
+                verb_builds = possible
         else:
             verb_builds, verb_more = self._verb_form_builds(candidates, card_roots, roots, verb_forms,
-                                                            verb_form_stems)
+                                                            verb_form_stems, nominal, MAX_VERB_FORM_CARDS + max(0, limit - MAX_CARDS))
+        card_roots.update(_text(build.root['id']) for build in verb_builds)
         quotes, more_quotes = self._quotes(word, card_roots, roots)
         quote_roots = {hit.root_id for hit in quotes}
         examples: dict[str, BlauExample] = {}
@@ -1170,25 +1649,40 @@ class BlauService:
             for build in builds:
                 build.dot_mismatch = not _dots_agree(word_pattern, build.matched_key)
             builds.sort(key=lambda b: b.dot_mismatch)
+        # An entry the word spells, with a conjunction or without (ונצף: the noun נצף before the
+        # verb forms of וצף), is the word's own.
+        bare = bare_keys(key)
+        def rank(build):
+            paths = matching_paths(word, build.matched_key, build.candidate)
+            direct = any(not path for path in paths) or (
+                build.candidate in bare and normalize_ja(build.matched_key) == build.candidate)
+            finite_main = (_text(build.root['id']) in finite or build.verb_form) and not build.sub_entry_id
+            suffix = bool(article_candidates(key)) and not is_function_word((key,)) and all('suffix' in path for path in paths)
+            return (build.dot_mismatch, 0 if not finite or direct else 1 if finite_main else 2,
+                    evidence_cost(paths) + suffix)
         builds.extend(verb_builds)
+        builds.sort(key=rank)
         return BlauLookup(
             word=word, key=key, candidates=candidates,
-            cards=tuple(self._finish(build, roots) for build in builds),
-            more_cards=len(overflow) + verb_more,
+            cards=tuple(replace(self._finish(build, roots), analyses=matching_paths(word, build.matched_key, build.candidate))
+                        for build in builds[:limit]),
+            more_cards=max(0, len(builds) - limit) + len(overflow) + verb_more,
             examples=tuple(examples.values()),
             more_examples=len(example_overflow),
-            quotes=quotes, more_quotes=more_quotes, suggestions=suggestions,
+            quotes=quotes, more_quotes=more_quotes, quote_exclusions=(tuple(card_roots),), quote_offset=MAX_QUOTE_HITS, suggestions=suggestions,
         )
 
     def _verb_form_builds(self, candidates: tuple[str, ...], card_roots: set[str],
                           roots: dict[str, Optional[sqlite3.Row]], kinds: frozenset[str],
-                          stem_kinds: frozenset[str]) -> tuple[list[_CardBuild], int]:
+                          stem_kinds: frozenset[str], nominal: frozenset[str] = frozenset(),
+                          limit: int = MAX_VERB_FORM_CARDS, eligible: Optional[set[str]] = None) -> tuple[list[_CardBuild], int]:
         """The cards found by verb form (plan 4.4, PR 3): the entries the word's keys reach through the
         generated forms of a stem the entry lists (``shared.ja_verb_forms.verb_form_cards``, in the
         plan's order), other than the entries already cards (``card_roots``, which they join), of a
         kind switched on (``kinds``); at most ``MAX_VERB_FORM_CARDS``, the rest counted. A card opens
         on the word's stem when its kind is in ``stem_kinds`` and the word fits one listed stem, else
-        on the whole entry with the stems as buttons."""
+        on the whole entry with the stems as buttons. ``nominal``: the keys of a word with the article
+        (``article_candidates``), which reach a stem only as its participle or verbal noun."""
         if not kinds:
             return [], 0
         index = self.verb_form_index()
@@ -1196,10 +1690,25 @@ class BlauService:
             return [], 0
         builds: list[_CardBuild] = []
         more = 0
-        for card in verb_form_cards(candidates, index):
-            if card.kind not in kinds or card.entry_id in card_roots:
+        for card in verb_form_cards(candidates, index, nominal):
+            if card.entry_id in card_roots or (eligible is not None and card.entry_id not in eligible):
                 continue
-            if len(builds) >= MAX_VERB_FORM_CARDS:
+            inflected = card.kind == 'E' and (card.inflected_perfect or (
+                'B' in kinds and under_conjunction(card.form, candidates[0])))
+            finite = ('B' in kinds and (card.kind in kinds or card.kind in 'CE')
+                      and card.finite_for(candidates[0]) and not is_function_word(candidates[:1]))
+            nominal_form = card.form in nominal and card.form.endswith(('ינ', 'ונ')) and len(card.form) >= 5 and 'B' in kinds
+            # A word that reached nothing else keeps the reading of its form under a clitic or a
+            # pronoun (תכדמני, יעטוה): the only thing it reaches, said to be a possible analysis. Not a
+            # form of three letters (תלת, אבן: mostly another word).
+            alone = eligible is None and 'B' in kinds and card.kind == 'E' and len(card.form) >= 4
+            if card.kind not in kinds and not inflected and not nominal_form and not finite and not alone:
+                attested = card.kind in {'C', 'E'} and self._conn.execute(
+                    "SELECT 1 FROM tokens WHERE root_id=? AND scope='citation' "
+                    "AND key=? LIMIT 1", (card.entry_id, card.form)).fetchone()
+                if not attested:
+                    continue
+            if len(builds) >= limit:
                 more += 1
                 continue
             root = self._root(roots, card.entry_id)
@@ -1207,7 +1716,7 @@ class BlauService:
                 continue
             build = _CardBuild(root, card.form, "", MATCHED_VERB_FORM, "", "")
             build.verb_form, build.kind = card.evidence(), card.kind
-            if card.kind in stem_kinds:
+            if card.kind in stem_kinds or ((inflected or nominal_form or finite) and stem_kinds):
                 build.stem = card.stem
             builds.append(build)
             card_roots.add(card.entry_id)
@@ -1241,8 +1750,16 @@ class BlauService:
             more_cards=0 if chosen else len(overflow), examples=(), more_examples=0, stem=stem,
         )
 
+    def quotation_page(self, result: BlauLookup, offset: int = 0):
+        """Another bounded page, preserving the lookup's original lexical exclusions."""
+        roots = {c.root_id for c in result.cards if not c.borrowed}
+        if result.quote_exclusions:
+            roots = set(result.quote_exclusions[0])
+        return self._quotes(result.word, roots, {}, offset=offset)
+
     def _quotes(self, word: str, card_roots: set[str],
-                roots: dict[str, Optional[sqlite3.Row]]) -> tuple[tuple[BlauExpressionHit, ...], int]:
+                roots: dict[str, Optional[sqlite3.Row]], offset: int = 0,
+                limit: Optional[int] = None) -> tuple[tuple[BlauExpressionHit, ...], int]:
         """The entries (or sub-entries) whose citations or names hold ``word``, and how many more
         there are: the word as the expression search keys it (``word_keys``) against ``tokens``.
         Not the cards' entries (the reader has those), not a function word (פי is in a thousand
@@ -1250,9 +1767,11 @@ class BlauService:
         exactly, and most often, come first; then the dictionary's order."""
         if not self.expressions_available() or len(lookup_key(word).split()) != 1:
             return (), 0   # several words are the expression search's, never any-of-them
-        keys = word_keys(word)
-        if not keys or is_function_word(keys):
+        keys = query_keys(word)
+        if not keys:
             return (), 0
+        limit = MAX_QUOTE_HITS if limit is None else max(0, min(int(limit), 20))
+        offset = max(0, int(offset))
         marks = ",".join("?" for _ in keys)
         place = "scope || ' ' || scope_id || ' ' || n"
         units = [r for r in self._conn.execute(
@@ -1260,7 +1779,7 @@ class BlauService:
             f"COUNT(DISTINCT CASE WHEN key = ? AND peeled = 0 THEN {place} END) AS exact "
             f"FROM {TOKENS_TABLE} WHERE key IN ({marks}) GROUP BY root_id, sub_id", (keys[0], *keys))
             if _text(r["root_id"]) not in card_roots]
-        if not units or len(units) > MAX_QUOTE_UNITS:
+        if not units:
             return (), 0
         ids = sorted({_text(r["root_id"]) for r in units})
         root_ordinal: dict[str, int] = {}
@@ -1276,7 +1795,7 @@ class BlauService:
                                   sub_ordinal.get(r["sub_id"], -1) + 1 if r["sub_id"] else 0))
         accepts = [frozenset(keys)]
         hits: list[BlauExpressionHit] = []
-        for row in units[:MAX_QUOTE_HITS]:
+        for row in units[offset:offset + limit]:
             unit = (_text(row["root_id"]), _text(row["sub_id"]))
             scopes = self._conn.execute(
                 f"SELECT scope, scope_id, n, MAX(key = ? AND peeled = 0) AS exact FROM {TOKENS_TABLE} "
@@ -1296,7 +1815,7 @@ class BlauService:
             hit = self._hit(unit, places, roots) if places else None
             if hit is not None:
                 hits.append(replace(hit, places_total=max(int(row["places"]), len(places))))
-        return tuple(hits), max(len(units) - MAX_QUOTE_HITS, 0)
+        return tuple(hits), max(len(units) - offset - limit, 0)
 
     def _add_hit(self, cards: dict[tuple[str, str, str], _CardBuild], card_roots: set[str],
                  overflow: set[tuple[str, str, str]], roots: dict[str, Optional[sqlite3.Row]],
@@ -1315,14 +1834,14 @@ class BlauService:
                 root, root_id = target, _text(target["id"])
         # The scope: the sub-entry the key sits under, else the whole entry.
         sub_entry_id = _text(row["sub_entry_id"]) if row["kind"] != "root" else ""
-        key = (candidate, root_id, sub_entry_id)
+        key = ("", root_id, sub_entry_id)
         build = cards.get(key)
         if build is None:
-            if len(cards) >= MAX_CARDS:
-                overflow.add(key)
-                return
             build = cards[key] = _CardBuild(root, candidate, _text(row["raw"]), row["kind"], via, sub_entry_id)
             card_roots.add(root_id)
+        elif evidence_cost(analysis_paths(_text(row['raw']), candidate)) < evidence_cost(
+                analysis_paths(build.matched_key, build.candidate)):
+            build.candidate, build.matched_key, build.matched_kind = candidate, _text(row['raw']), row['kind']
         form_id = _text(row["form_id"])
         if form_id and form_id not in build.matched_form_ids:
             build.matched_form_ids.append(form_id)
@@ -1331,12 +1850,14 @@ class BlauService:
         root = build.root
         root_id = _text(root["id"])
         senses: list[BlauSense] = []
+        under: list[str] = []   # the sub-entry each sense sits under, '' for the entry itself
         seen: set[str] = set()
         for form_id in build.matched_form_ids:
             form = self._conn.execute(f"SELECT {_FORM_COLUMNS} FROM forms WHERE id = ?", (form_id,)).fetchone()
             if form is not None and form_id not in seen:
                 seen.add(form_id)
                 senses.append(self._sense(form, roots, matched=True))
+                under.append(_text(form["sub_entry_id"]))
         # The scope is the chosen stem's paragraph (its stems rows, wherever under the entry they
         # are), else the matched sub-entry, else the whole entry. All go through the root index
         # (there is none on sub_entry_id or stem_id).
@@ -1370,14 +1891,15 @@ class BlauService:
                 beyond += 1
                 continue
             senses.append(self._sense(form, roots, matched=False))
-        shown = tuple(senses[:MAX_SENSES])
+            under.append(_text(form["sub_entry_id"]))
         sub_entry_id = build.sub_entry_id
         if build.stem and stem_rows.get(build.stem):
             # A chosen stem whose paragraph sits under one sub-entry (דלל VII is under דאלה̈):
             # the card names that sub-entry, as a sub-entry hit's card does.
-            under = {_text(r[0]) for r in self._conn.execute(
+            subs = {_text(r[0]) for r in self._conn.execute(
                 f"SELECT DISTINCT sub_entry_id FROM forms WHERE {scope_sql}", scope_args)}
-            sub_entry_id = under.pop() if len(under) == 1 else ""
+            sub_entry_id = subs.pop() if len(subs) == 1 else ""
+        shown = self._head_sub_entries(senses[:MAX_SENSES], under, sub_entry_id, _text(root["name_ja"]))
         sub_entry = ""
         if sub_entry_id:
             row = self._conn.execute("SELECT name_ja FROM sub_entries WHERE id = ?",
@@ -1393,6 +1915,27 @@ class BlauService:
             stem=build.stem if stem_rows.get(build.stem) else 0,
             verb_form=build.verb_form, kind=build.kind,
         )
+
+    def _head_sub_entries(self, senses: list[BlauSense], under: list[str], scope: str,
+                          entry_name: str) -> tuple[BlauSense, ...]:
+        """The senses with a head where their sub-entry changes (``BlauSense.sub_entry``): the
+        sub-entry's name where a run under one begins, unless it is the card's own ``scope``, and
+        the entry's name where the entry's own senses come back after one."""
+        names: dict[str, str] = {}
+        out: list[BlauSense] = []
+        before = scope
+        for sense, sub_entry_id in zip(senses, under):
+            if sub_entry_id != before:
+                if sub_entry_id and sub_entry_id not in names:
+                    row = self._conn.execute("SELECT name_ja FROM sub_entries WHERE id = ?",
+                                             (sub_entry_id,)).fetchone()
+                    names[sub_entry_id] = _text(row["name_ja"]) if row is not None else ""
+                head = names[sub_entry_id] if sub_entry_id else entry_name
+                if head:
+                    sense = replace(sense, sub_entry=head)
+                before = sub_entry_id
+            out.append(sense)
+        return tuple(out)
 
     def _sense(self, form: sqlite3.Row, roots: dict[str, Optional[sqlite3.Row]], matched: bool) -> BlauSense:
         see: list[tuple[str, str]] = []
@@ -1411,7 +1954,7 @@ class BlauService:
             binyan=_text(form["binyan"]), gloss_he=_text(form["gloss_he"]), gloss_en=_text(form["gloss_en"]),
             cross_reference=_text(form["cross_reference"]), see=tuple(see), page=_page(form["page"]),
             is_classical=bool(form["is_classical"]), is_reconstructed=bool(form["is_reconstructed"]),
-            is_erroneous=bool(form["is_erroneous"]), matched=matched,
+            is_erroneous=bool(form["is_erroneous"]), matched=matched, details_available=self._has_details(form['id']),
         )
 
     def _name_position(self, row: Mapping[str, Any], cache: dict[tuple[str, str], list[str]]) -> int:
@@ -1430,12 +1973,34 @@ class BlauService:
         raw = _text(row["raw"])
         return cache[scope].index(raw) if raw in cache[scope] else 0
 
+    def _carries_root(self, cache: dict[str, Optional[sqlite3.Row]], root_id: str, key: str) -> bool:
+        """Does ``key`` carry the root of the entry ``root_id`` under one of its printed names
+        (``shared.ja_roots.carries_root``)? True when the entry cannot be read."""
+        root = self._root(cache, root_id)
+        if root is None:
+            return True
+        names = _names_of(root["names_json"]) or [_text(root["name_ja"])]
+        if _root_label(root) not in names:
+            names.append(_root_label(root))
+        return any(carries_root(key, normalize_ja(name)) for name in names)
+
     def _root(self, cache: dict[str, Optional[sqlite3.Row]], root_id: str) -> Optional[sqlite3.Row]:
         if root_id not in cache:
-            cache[root_id] = self._conn.execute(
+            row = self._conn.execute(
                 "SELECT id, name_ja, names_json, arabic_spelling, start_page_printed, is_cross_reference, target_id "
                 "FROM roots WHERE id = ?", (root_id,)).fetchone() if root_id else None
+            if row is not None and len(_text(row["name_ja"]).split()) >= 3 and " " not in _root_label(row):
+                row = dict(row) | {"name_ja": _root_label(row)}
+            cache[root_id] = row
         return cache[root_id]
+
+    def _carries_subentry(self, sub_id: str, key: str) -> bool:
+        """An explicit noun form belongs to its subentry, independently of its parent label."""
+        if not sub_id:
+            return False
+        row = self._conn.execute("SELECT name_ja FROM sub_entries WHERE id = ?", (sub_id,)).fetchone()
+        return row is not None and any(carries_root(key, normalize_ja(name))
+                                       for name in name_alternatives(row[0]) if normalize_ja(name))
 
     def _target_root(self, cache: dict[str, Optional[sqlite3.Row]], target: str) -> Optional[sqlite3.Row]:
         """A form's cross-reference target: a root, or a stem (then its root)."""
@@ -1470,6 +2035,8 @@ def _validate(conn: Any) -> tuple[str, dict[str, str]]:
     if not expected.isdigit() or int(expected) != int(actual):
         return f"meta.rows_forms_norm = {expected!r} but the table holds {actual} rows", {}
     if meta.get("version") == SCHEMA_VERSION:
+        if not {"spelling_keys", "lookup_aliases", "constructions"} <= tables:
+            return "missing spelling_keys table: rebuild the sidecar", {}
         # The expression search's table, its index, its count and the keying it was written by.
         if TOKENS_TABLE not in tables:
             return f"schema {SCHEMA_VERSION} without the {TOKENS_TABLE} table", {}

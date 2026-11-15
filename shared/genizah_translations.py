@@ -2,6 +2,23 @@
 from version import APP_VERSION
 
 TRANSLATIONS = {
+    "No match for all selected words. Related components:": "לא נמצאה התאמה לכל המילים שנבחרו. צירופים לפי חלק מהמילים:",
+    "No match was retrieved for this spelling. Try another reading or the root.": "לא נמצאה תוצאה לכתיב זה. אפשר לנסות קריאה אחרת או את השורש.",
+    "Lane supports single-word lookup. Use the other tabs for expressions.": "במילון ליין אפשר לחפש מילה אחת. לחיפוש ביטויים יש לעבור ללשוניות האחרות.",
+
+    "Construction with inherited verb": "צירוף עם הפועל של הערך הראשי",
+    "Show examples ({n})": "הצג דוגמאות ({n})",
+    "Show examples and additional information": "הצג דוגמאות ומידע נוסף",
+    "Could not load dictionary details. Try again.": "לא ניתן לטעון את פרטי המילון. נסו שוב.",
+    "No additional examples or notes for this sense.": "אין דוגמאות או הערות נוספות לערך משנה זה.",
+    "Any order": "בכל סדר",
+    "Show more examples": "הצג דוגמאות נוספות",
+    "This dictionary is currently unavailable.": "מילון זה אינו זמין כרגע.",
+    "Enter a word or expression in Hebrew or Arabic letters.": "יש להזין מילה או ביטוי באותיות עבריות או ערביות.",
+    "Expressions support up to 12 words. Edit the full selection above.": "אפשר לחפש ביטוי בן עד 12 מילים. ניתן לערוך למעלה את הקטע המלא שנבחר.",
+    "This search exceeded the component limit. Reduce the gap or use fewer words.": "החיפוש חרג ממגבלת צירופי המרכיבים. יש להקטין את המרווח או לחפש פחות מילים.",
+    "The dictionary lookup failed. Please try again.": "החיפוש במילון נכשל. נא לנסות שוב.",
+
     # --- General ---
     f"Dicta Genizah Search Pro V{APP_VERSION}": f"Dicta Genizah Search Pro V{APP_VERSION}",
     "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
@@ -6479,13 +6496,13 @@ TRANSLATIONS.update({
         "מילון בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית. "
         "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
     "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
-    # Blau's and Friedman's empty answer since step B of the dictionary lookup plan (owner, approved
-    # as proposed on 2026-11-10, 2026-11-11); Lane's tab keeps the line above.
+    # Blau's and Friedman's empty answer since step B of the dictionary lookup plan;
+    # Lane's tab keeps the line above.
     "Not found as an entry or in the examples. A verb or an inflected form may be listed under its root: "
     "type the root.":
         "המילה לא נמצאה כערך ולא בדוגמאות. פועל או צורה נוטה עשויים להופיע תחת השורש: הקלידו את השורש.",
     # A root typed with a stem its dictionary does not list under it ("דלל III"; the stem's numeral
-    # goes in {stem}). Approved by the owner, the shorter of two drafts, 2026-11-11.
+    # goes in {stem}).
     "Stem {stem} is not listed under this root.": "בניין {stem} אינו מופיע תחת השורש הזה.",
     # The digital edition's credit under the print credit (owner, 2026-11-04).
     "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
@@ -6555,18 +6572,33 @@ TRANSLATIONS.update({
 })
 TRANSLATIONS.update({
     # The rest of a card's senses, quotations and sub-entries, in place on a click
-    # (web/components/show_more.py). Approved by the owner, 2026-11-11 ("הצג", not "הצגת").
+    # (web/components/show_more.py). "הצג", not "הצגת".
     "Show {n} more senses": "הצג {n} משמעויות נוספות",
     "Show {n} more quotations": "הצג {n} מובאות נוספות",
     "Show {n} more sub-entries and verb stems": "הצג {n} ערכי משנה ובניינים נוספים",
     "Show {n} more entries": "הצג {n} ערכים נוספים",   # Lane's root card
     "Show the full entry": "הצג את הערך המלא",
     # A card or match found by the generated forms of a stem its entry lists (BlauCard.verb_form,
-    # FriedmanService VIA_VERB_FORM). Approved by the owner, 2026-11-11.
+    # FriedmanService VIA_VERB_FORM).
     "found by its verb form": "נמצא לפי צורת הפועל",
     # Beside the entries the word itself reached: the other roots its verb forms give, as chips
-    # (web/components/stem_buttons.py). Approved by the owner, 2026-11-11.
+    # (web/components/stem_buttons.py).
     "Other possible roots": "שורשים אפשריים נוספים",
+})
+TRANSLATIONS.update({
+    # The line every dictionary tab opens with (web/components/expression_panel.py AUTOMATIC_NOTE), and
+    # the head over the expressions a clicked word makes with the words beside it (CONTEXT_LABEL).
+    "Found automatically from the word's letters: an entry may belong to another word"
+    ", and the word's own entry may be missing. Check the dictionary.":
+        "נמצא אוטומטית לפי אותיות המילה: ייתכן שערך שייך למילה אחרת, וייתכן שהערך של המילה חסר. בדקו במילון.",
+    "As an expression with the words beside it": "כצירוף עם המילים הסמוכות",
+    "Nearby words found together in a quotation": "המילים הסמוכות נמצאו יחד בדוגמה",
+    "Possible spelling": "כתיב אפשרי",
+    "Possible grammatical analysis": "ניתוח דקדוקי אפשרי",
+    "Possible root from another dictionary": "שורש אפשרי על סמך מילון אחר",
+    "Plural printed in this entry": "צורת רבים המובאת בערך",
+    "Verbal noun printed in this entry": "מצדר המובא בערך",
+    "Possible root; the word itself was not matched": "שורש אפשרי; המילה עצמה לא אותרה",
 })
 # What's New in every version (shared/whats_new_history.py; web /whats-new, the desktop dialog and
 # update notice, 2026-11-05). Approved by the owner as drafted, 2026-11-05 (reviewed in the wordings docx).

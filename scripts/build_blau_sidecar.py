@@ -48,6 +48,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -58,12 +59,14 @@ _REPO_ROOT = os.path.dirname(_SCRIPTS_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from shared.blau_normalize import NORMALIZER_VERSION, normalize_arabic, normalize_ja  # noqa: E402
+from scripts.dictionary_search_indexes import CONSTRUCTION_DDL, rebuild_expression_tokens
+from shared.blau_normalize import NORMALIZER_VERSION, SPELLING_DDL, build_spelling_index, normalize_arabic, normalize_ja  # noqa: E402
 from shared.blau_service import NAME_SEPARATOR, name_alternatives  # noqa: E402
-from shared.ja_expression import KEYING_VERSION, scope_keys  # noqa: E402
+from shared.ja_expression import KEYING_VERSION, scope_keys, word_keys  # noqa: E402
+from shared.ja_roots import ja_root_of_arabic  # noqa: E402
 
 #: 1.1.0 (2026-11-08): the ``tokens`` table of the expression search; 1.0.0 had none.
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.4.0"
 SOURCE_URL = "https://blau-dict.netlify.app/"
 SOURCE_RELEASE = "1.1"
 SOURCE_RELEASE_DATE = "2026-08-25"
@@ -103,7 +106,7 @@ _NOTE_TYPES = frozenset({"freeform_note", "morph_note", "grammar_citation"})
 _JA_PHRASE_TYPES = frozenset({"freeform_note", "morph_note", "complement_ja", "hebrew_in_ja"})
 _JA_FONT_PREFIX = "Hebrew-Miriam"   # the font that marks Judeo-Arabic text in Hebrew letters
 
-DDL = """
+DDL = SPELLING_DDL + CONSTRUCTION_DDL + """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE sources (
     id TEXT PRIMARY KEY, abbreviation TEXT NOT NULL, full_reference TEXT, page INTEGER, parent TEXT
@@ -145,12 +148,16 @@ CREATE TABLE forms_norm (
     root_id TEXT NOT NULL REFERENCES roots(id), sub_entry_id TEXT REFERENCES sub_entries(id),
     form_id TEXT REFERENCES forms(id), word_count INTEGER NOT NULL
 );
+CREATE TABLE lookup_aliases (
+    key TEXT NOT NULL, raw TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL REFERENCES roots(id),
+    sub_entry_id TEXT NOT NULL, form_id TEXT NOT NULL, basis TEXT NOT NULL,
+    PRIMARY KEY (key, root_id, sub_entry_id, form_id, basis));
 CREATE TABLE tokens (
-    scope TEXT NOT NULL CHECK (scope IN ('root', 'sub_entry', 'form', 'citation')), scope_id TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('root', 'sub_entry', 'form', 'citation', 'construction')), scope_id TEXT NOT NULL,
     n INTEGER NOT NULL, root_id TEXT NOT NULL REFERENCES roots(id), sub_entry_id TEXT REFERENCES sub_entries(id),
     pos INTEGER NOT NULL, key TEXT NOT NULL, peeled INTEGER NOT NULL
 );
-CREATE INDEX idx_tokens_key ON tokens(key);
+CREATE INDEX idx_tokens_key ON tokens(key, scope, scope_id, n, root_id, sub_entry_id);
 CREATE INDEX idx_tokens_scope ON tokens(scope, scope_id, n);
 CREATE INDEX idx_tokens_root ON tokens(root_id);
 CREATE INDEX idx_forms_norm_norm ON forms_norm(norm);
@@ -535,6 +542,10 @@ def write_sidecar(path: Path, flat: Flattener, bibliography: list, facts: dict) 
         con.executemany("INSERT INTO citations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", flat.citations)
         con.executemany("INSERT INTO forms_norm VALUES (?,?,?,?,?,?,?)", flat.forms_norm)
         con.executemany("INSERT INTO tokens VALUES (?,?,?,?,?,?,?,?)", flat.tokens)
+        rebuild_expression_tokens(con, "blau")
+        build_lookup_aliases(con)
+        build_spelling_index(con, [r[0] for r in con.execute(
+            "SELECT norm FROM forms_norm UNION SELECT key FROM lookup_aliases")])
         counts = {t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in COUNTED_TABLES}
         # A source id the bibliography does not list (release 1.1 has one, blau-bib-000364): a fact
         # about the source, recorded so the gate can pin it rather than hide it.
@@ -595,12 +606,20 @@ def existing_counts(path: Path) -> dict | None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--source-dir", required=True,
+    ap.add_argument("--source-dir",
                     help=f"directory holding {DICTIONARY_FILE} and {BIBLIOGRAPHY_FILE}")
+    ap.add_argument("--rekey-existing", type=Path,
+                    help="rebuild search indexes from a preserved sidecar into a separate candidate")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help=f"the sidecar to write (default {DEFAULT_OUT})")
     ap.add_argument("--force", action="store_true",
                     help="replace an existing sidecar even when it holds more roots or forms")
     args = ap.parse_args(argv)
+
+    if args.rekey_existing:
+        rekey_existing(args.rekey_existing, Path(args.out))
+        return EXIT_OK
+    if not args.source_dir:
+        ap.error("--source-dir or --rekey-existing is required")
 
     source_dir = Path(args.source_dir)
     out = Path(args.out)
@@ -649,6 +668,83 @@ def main(argv=None) -> int:
     print(f"wrote    {out} ({out.stat().st_size:,} bytes): " + "; ".join(f"{t} {n:,}" for t, n in counts.items()))
     print("RESULT: OK")
     return EXIT_OK
+
+
+def lookup_alias_rows(con: sqlite3.Connection):
+    """Derive aliases from source forms and explicit equality notes, with sense IDs."""
+    rows = []
+    for key, raw, kind, root, sub, form in con.execute(
+            "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
+            "WHERE word_count = 1 AND kind <> 'phrase'").fetchall():
+        rows.extend((alias, raw, kind, root, sub or '', form or '', 'source_form')
+                    for alias in word_keys(key))
+    for form, root, sub, notes in con.execute(
+            "SELECT id, root_id, sub_entry_id, notes FROM forms WHERE notes LIKE '%=%'").fetchall():
+        for arabic in re.findall(r"=\s*([\u0621-\u064a\u064b-\u065f\u0670]+)", notes or ''):
+            raw = ja_root_of_arabic(arabic)
+            key = normalize_ja(raw)
+            if len(key) >= 2:
+                rows.append((key, raw, 'variant', root, sub or '', form, 'explicit_equality'))
+    # Match the table's primary key; identical source aliases can come from several variants.
+    unique = {}
+    for row in rows:
+        unique.setdefault((row[0], row[3], row[4], row[5], row[6]), row)
+    return list(unique.values())
+
+
+def build_lookup_aliases(con: sqlite3.Connection) -> None:
+    con.executemany("INSERT OR IGNORE INTO lookup_aliases VALUES (?,?,?,?,?,?,?)", lookup_alias_rows(con))
+
+
+def rekey_existing(source: Path, target: Path) -> None:
+    """Rebuild a separate candidate using the preserved source text, with source identity.
+
+    Never update the installed file in place. The normal verifier recomputes every token
+    from the retained names/citations, so this path has the same keying gate as a full build.
+    """
+    from scripts.verify_blau_sidecar import verify
+
+    if source.resolve() == target.resolve() or target.exists():
+        raise ValueError("Rekeying requires a new, separate target")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    original = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
+    temp = target.with_suffix(target.suffix + ".building")
+    con = sqlite3.connect(temp)
+    try:
+        meta = dict(original.execute("SELECT key, value FROM meta"))
+        if meta.get("version") not in ("1.1.0", SCHEMA_VERSION) or original.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise ValueError("Expected an intact supported source sidecar")
+        original.backup(con)
+        con.row_factory = sqlite3.Row
+        for table in ('constructions', 'lookup_aliases', 'spelling_keys'):
+            con.execute(f'DROP TABLE IF EXISTS {table}')
+        con.executescript(CONSTRUCTION_DDL)
+        con.execute("DROP TABLE tokens")
+        for statement in DDL.split(";"):
+            if statement.strip().startswith(("CREATE TABLE tokens", "CREATE INDEX idx_tokens_")):
+                con.execute(statement)
+        con.execute("CREATE TABLE lookup_aliases (key TEXT NOT NULL, raw TEXT NOT NULL, kind TEXT NOT NULL, "
+                    "root_id TEXT NOT NULL REFERENCES roots(id), sub_entry_id TEXT NOT NULL, form_id TEXT NOT NULL, "
+                    "basis TEXT NOT NULL, PRIMARY KEY (key, root_id, sub_entry_id, form_id, basis))")
+        token_count = rebuild_expression_tokens(con, "blau")
+        build_lookup_aliases(con)
+        build_spelling_index(con, [r[0] for r in con.execute(
+            "SELECT norm FROM forms_norm UNION SELECT key FROM lookup_aliases")])
+        updates = {"version": SCHEMA_VERSION, "keying_version": str(KEYING_VERSION),
+                   "rows_tokens": str(con.execute("SELECT COUNT(*) FROM tokens").fetchone()[0]), "rekey_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                   "built_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        con.executemany("INSERT OR REPLACE INTO meta VALUES (?,?)", updates.items())
+        con.commit()
+        con.close()
+        problems = verify(str(temp), int(meta["rows_roots"]), int(meta["rows_forms"]))
+        if problems:
+            raise ValueError("; ".join(problems))
+        os.replace(temp, target)
+        print(f"Rekeyed {token_count:,} tokens into {target}")
+    finally:
+        original.close()
+        con.close()
+        temp.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

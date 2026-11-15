@@ -62,10 +62,10 @@ def test_blau_s_tab_draws_its_expression_search_through_the_shared_parts():
     assert "expression_panel.render_components(place)" in BLAU_SRC
     assert "tr(expression_panel.NOTHING_TOGETHER)" in BLAU_SRC and "tr(expression_panel.MORE_PLACES)" in BLAU_SRC
     assert "tr(friedman_panel.UNDER)" in BLAU_SRC and "tr(friedman_panel.IN_HEAD)" in BLAU_SRC, "one string, one translation"
-    assert "_render_blau(result, credit_he, credit_en, lang, on_gap=gap, on_stem=on_stem, on_suggest=on_suggest," in BLAU_SRC
+    assert "_render_blau(displayed, credit_he, credit_en, lang, on_gap=gap, on_stem=on_stem, on_suggest=on_suggest," in BLAU_SRC
     assert "gap = (lambda value, text, _tab=name: on_gap(value, text, _tab))" in BLAU_SRC, \
         "the gap control reports the tab it is in: the same words stay on that tab"
-    assert "blau_service.answer(word, gap=dict_gap['value'], stems=stems)" in BROWSE_SRC, "several words reach Blau's expression search"
+    assert "blau_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in BROWSE_SRC, "several words reach Blau's expression search"
     assert "expression_panel.render_gap(result.gap, result.text, on_gap)" in FRIEDMAN_SRC
 
 
@@ -78,3 +78,15 @@ def test_the_lookup_event_counts_an_expression_s_words_for_blau_too():
 
 def test_render_lookup_draws_nothing_without_a_credit_line():
     assert blau_panel.render_lookup(empty_expression("כתב כטה"), credit_he="") is False
+
+
+def test_every_dictionary_tab_opens_with_the_line_that_the_lookup_is_automatic():
+    """The limitations should be clear. Blau's tab (a word and an expression),
+    Friedman's (a word and an expression) and Lane's open with ``AUTOMATIC_NOTE``, above their own
+    note; the empty answers keep theirs."""
+    from web.components import blau_panel, friedman_panel, lane_panel
+
+    for module, count in ((blau_panel, 2), (friedman_panel, 2), (lane_panel, 1)):
+        src = Path(module.__file__).read_text(encoding="utf-8")
+        assert src.count("expression_panel.render_automatic_note()") == count, module.__name__
+    assert "tr(AUTOMATIC_NOTE)" in SRC

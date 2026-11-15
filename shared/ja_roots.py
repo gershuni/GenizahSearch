@@ -2,7 +2,7 @@
 """A typed root, its dots and its verb stems: what Blau's and Friedman's lookups share for looking
 a root up and choosing one of its stems.
 
-The private dictionary lookup plan (section 4.6, owner 2026-11-11): the reader types a root, and
+The private dictionary lookup plan (section 4.6): the reader types a root, and
 possibly a stem ("דלל X", "דלל 10"), and the dictionary's card for that root shows the stems the
 dictionary lists as buttons. Nothing here guesses: a stem number is read from the dictionary's
 own label, and a typed stem is a stem only when it is written as one.
@@ -27,7 +27,7 @@ the list each service builds (``BlauService.stem_pairs``, ``FriedmanService.stem
 later generated verb forms reuse (plan section 4.2).
 
 ``BorrowedRoot`` is a root another dictionary gives for a looked-up word, for Blau's tab to show
-Blau's entry of that root after its own (owner, 2026-11-11: Blau has no list of inflected forms, so
+Blau's entry of that root after its own (Blau has no list of inflected forms, so
 קאל reached no entry of its own; Friedman finds קול through its index and Lane through its
 reading). ``borrowed_roots`` reads them off Friedman's and Lane's answers: every root Friedman's
 matches name, in its order, then Lane's first root, written in Hebrew letters as Blau spells a
@@ -38,7 +38,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any
+from typing import Sequence, Any
 
 from shared.arabic_normalize import DOTTED, LETTERS
 from shared.blau_normalize import QUOTE_MARKS, fold_finals, normalize_ja
@@ -112,8 +112,8 @@ def root_and_stem(text: str) -> tuple[str, int]:
     for stem_at, rest in ((-1, words[:-1]), (0, words[1:])):
         stem = parse_stem(words[stem_at])
         root = " ".join(rest)
-        if stem and _HEBREW_LETTER_RE.search(root) and not any(parse_stem(w) for w in rest):
-            return root, stem
+        if stem and lookup_key(root) and not any(parse_stem(w) for w in rest):
+            return (root if _HEBREW_LETTER_RE.search(root) else lookup_key(root)), stem
     return "", 0
 
 
@@ -137,7 +137,7 @@ class StemPair:
 
 
 #: The dictionaries a tab borrows a root from, and what each borrowed root says it came from: Blau's
-#: tab borrows from Friedman and Lane, Friedman's from Blau and Lane (owner, 2026-11-11).
+#: tab borrows from Friedman and Lane, Friedman's from Blau and Lane.
 BORROW_FRIEDMAN = "friedman"
 BORROW_LANE = "lane"
 BORROW_BLAU = "blau"
@@ -174,6 +174,32 @@ def ja_root_of_arabic(name: str, root_key: str = "") -> str:
     return "".join(letters)
 
 
+#: The letters a root may lose or hide in its forms (hollow, weak, hamza, the ta marbuta of a noun's
+#: name): ``carries_root`` does not ask for them.
+SOFT_LETTERS = frozenset("אויה")
+
+
+def strong_letters(root_key: str) -> str:
+    """A root's letters a form of it keeps, in order: those of ``root_key`` (a lookup key) other than
+    ``SOFT_LETTERS`` and spaces, a doubled letter once (מדד: מד)."""
+    out: list[str] = []
+    for ch in root_key or "":
+        if ch in SOFT_LETTERS or not _HEBREW_LETTER_RE.match(ch) or (out and out[-1] == ch):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def carries_root(key: str, root_key: str) -> bool:
+    """Does a lookup key hold a root's strong letters (``strong_letters``), in order? A form of the
+    root does (רבאטא of רבט, אלעאלמון of עלם); a word that only stands beside the root in a phrase
+    does not: "לה" is written in Blau's entry אכ̇ד̇ for "אכ̇ד̇ לה", "אלקול" in טלע's
+    (such words reached those entries as if they were theirs). A root with no strong
+    letter (איה̈) is carried by every key."""
+    remaining = iter(key or "")
+    return all(ch in remaining for ch in strong_letters(root_key))
+
+
 #: Where a Friedman head's first spelling ends: the book separates spellings with a slash or a comma
 #: (אَצْל/אُצْל/וَצْל, אَך̇, אُכْ̇ת).
 _SPELLING_BREAK_RE = re.compile(r"[/,]")
@@ -199,26 +225,34 @@ class BorrowedRoot:
     root: str
     source: str
     evidence: str
+    steps: tuple[str, ...] = ()
 
 
-def borrowed_roots(friedman: Any = None, lane: Any = None, blau: Any = None) -> tuple[BorrowedRoot, ...]:
+def borrowed_roots(friedman: Any = None, lane: Any = None, blau: Any = None,
+                   verb_forms: bool = False) -> tuple[BorrowedRoot, ...]:
     """The roots the other dictionaries' answers give for one word: every entry Blau's OWN cards
     show (not those it borrowed: no root comes back to the dictionary that gave it), by its first
     printed name; the roots Friedman's matches name, in Friedman's order: its index of forms, and an
     entry whose head begins with the word or its base form; then Lane's first root (the root of its
     first reading). Not a Friedman sub-entry, stem paragraph or entry that holds the word further in
-    its head (owner, 2026-11-11): such a head is mostly a phrase, the word a verb's complement, so its
+    its head: such a head is mostly a phrase, the word a verb's complement, so its
     root is the verb's (אלעלמא reached דרס through "דרס עِלْמאً", חצל and "חוז עِלْמאً").
     Blau's tab asks for Friedman's and Lane's, Friedman's for Blau's and Lane's. Each root once per
     dictionary (by its letters and dots); () for an expression, a typed stem or a dictionary not
     served (None). Never a card or match found by verb form (``shared.ja_verb_forms``, PR 3): both
     dictionaries run the same rules, so it is no second dictionary's word for the root, and each
-    shows its own. Reads the answers' fields only: no service is imported here."""
+    shows its own. ``verb_forms`` True is Lane's tab asking (``ArabicService.borrow``): Lane lists
+    other stems than Blau and Friedman do, so a root one of them reached by verb form is theirs to
+    give it. Reads the answers' fields only: no service is imported here."""
     out: list[BorrowedRoot] = []
     if blau is not None and not getattr(blau, "stem", 0):
         seen_blau: set[str] = set()
         for card in getattr(blau, "cards", ()) or ():
-            if getattr(card, "borrowed", ()) or getattr(card, "verb_form", ""):
+            by_form = bool(getattr(card, "verb_form", ""))
+            if by_form and not verb_forms or getattr(card, "borrowed", ()) and not by_form:
+                continue
+            paths = getattr(card, 'analyses', ())
+            if paths and all('mater' in path for path in paths):
                 continue
             name = str(getattr(card, "name", "") or "")
             root = str(getattr(card, "root_label", "") or "").strip() or name
@@ -227,15 +261,22 @@ def borrowed_roots(friedman: Any = None, lane: Any = None, blau: Any = None) -> 
             seen_blau.add(dot_pattern(root))
             matched = str(getattr(card, "matched_key", "") or "").strip()
             evidence = f"{matched} ({name})" if matched and normalize_ja(matched) != normalize_ja(name) else name
-            out.append(BorrowedRoot(root, BORROW_BLAU, evidence))
+            out.append(BorrowedRoot(root, BORROW_BLAU, evidence,
+                                    tuple(dict.fromkeys(step for path in getattr(card, "analyses", ()) for step in path))))
     seen: set[str] = set()   # by the root's letters and dots: ג̇לל and גלל are two roots
     if friedman is not None and not getattr(friedman, "stem", 0):
         for match in getattr(friedman, "matches", ()) or ():
+            paths = getattr(match, 'analyses', ())
+            if paths and all('mater' in path for path in paths):
+                continue
             via = getattr(match, "via", "")
             matched = str(getattr(match, "matched", "") or "").strip()
-            if via != "index":   # the word itself or its base form: an entry it heads only
+            if via == "verb_form":
+                if not verb_forms:
+                    continue
+            elif via != "index":   # the word itself or its base form: an entry it heads only
                 unit = getattr(match, "unit", None)
-                if via == "verb_form" or getattr(unit, "kind", "") != "entry" \
+                if getattr(unit, "kind", "") != "entry" \
                         or not head_begins_with(getattr(unit, "head_text", ""), lookup_key(matched)):
                     continue
             root = str(getattr(match, "root", "") or "").strip()
@@ -249,12 +290,25 @@ def borrowed_roots(friedman: Any = None, lane: Any = None, blau: Any = None) -> 
                 evidence = root
             else:   # a lookup key (finals folded): written with its final letters, "סלאם"
                 evidence = f"{with_final_letters(matched)} ({root})"
-            out.append(BorrowedRoot(root, BORROW_FRIEDMAN, evidence))
-    roots = getattr(lane, "roots", ()) if lane is not None else ()
-    if roots:
+            out.append(BorrowedRoot(root, BORROW_FRIEDMAN, evidence,
+                                    tuple(dict.fromkeys(step for path in getattr(match, "analyses", ()) for step in path))))
+    roots = [r for r in getattr(lane, "roots", ()) if not getattr(r, "borrowed", ())] if lane is not None else []
+    if roots:   # Lane's own first root: one it borrowed (``ArabicService.borrow``) is not its word
         first = roots[0]
         name = str(getattr(first, "name", "") or "")
         root = ja_root_of_arabic(name, str(getattr(first, "root_key", "") or ""))
         if normalize_ja(root):
-            out.append(BorrowedRoot(root, BORROW_LANE, name))
+            out.append(BorrowedRoot(root, BORROW_LANE, name, ("script_reading", "root")))
     return tuple(out)
+
+def supported_hollow_perfect(word: str, root: str, stems: Sequence[int]) -> bool:
+    """A short hollow perfect supported by an independently supplied root and stem I.
+
+    This ranks a borrowed possibility; it does not enable generated C/E cards.
+    Explicit dots continue to distinguish a competing consonant reading.
+    """
+    key, base = lookup_key(word), lookup_key(root)
+    if "*" in dot_pattern(word) or 1 not in stems or len(base) != 3 or base[1] not in "וי":
+        return False
+    forms = {base[0] + base[2] + ending for ending in ("ת", "תי", "נא", "תם", "תן")}
+    return key in forms or key.startswith("ו") and key[1:] in forms

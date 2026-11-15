@@ -29,10 +29,10 @@ from shared.blau_service import (
     BlauService,
     name_alternatives,
 )
-from shared.ja_expression import DEFAULT_GAP, MAX_GAP
+from shared.ja_expression import DEFAULT_GAP, MAX_GAP, context_windows, query_keys, quoted_gap, quoted_runs, word_keys
 from tests.test_build_blau_sidecar import _form, _ja, _root, _seg, dictionary, write_source
 
-E4, E5 = "blau-e-000004", "blau-e-000005"
+E4, E5, E6 = "blau-e-000004", "blau-e-000005", "blau-e-000006"
 SE2 = "blau-se-000002"
 SE2_NAME = "כתאב אלקאצי"
 
@@ -49,6 +49,24 @@ def _cited(cid: str, ja: str, translation: str) -> list[dict]:
             "commentary": [],
         }],
     }]
+
+
+def test_a_finite_verb_click_reaches_an_adjacent_governed_quotation(tmp_path):
+    data = expressions_dictionary()
+    data['כתב (كتب)']['stems'][0]['forms'][0]['references'] = _cited(
+        'blau-c-000002', 'כתבתי מעה', "'synthetic example'")
+    src = write_source(tmp_path / 'download', data=data)
+    path = tmp_path / 'blau.db'
+    assert build_main(['--source-dir', str(src), '--out', str(path)]) == EXIT_OK
+    svc = BlauService(str(path))
+    result = svc.answer('וכתבתי', after=('מעה',))
+    assert result.context
+    assert result.context[0].hits[0].root_id == E4
+    assert all(place.scope == 'citation' for place in result.context[0].hits[0].places)
+    from shared.ja_expression import governed_verb_run
+    assert not governed_verb_run('כתאב', ('מעה',), svc.verb_form_index())
+    assert not governed_verb_run('וכתבתי', ('אללה',), svc.verb_form_index())
+    svc.close()
 
 
 def expressions_dictionary() -> dict:
@@ -153,7 +171,7 @@ def test_bounds_and_fail_closed(service, monkeypatch):
     assert not service.expression("א ב ג ד ה ו ז", gap=1).found, "seven words are too many"
     assert service.expression("כתב כטה", gap=99).gap == MAX_GAP and service.expression("כתב כטה", gap="x").gap == DEFAULT_GAP
     numbered = service.expression("כתב 12", gap=0)
-    assert not numbered.found and numbered.candidates == (("כתב", "תב"), ()), "a word without Hebrew letters has no key"
+    assert not numbered.found and numbered.candidates == (("כתב", "תב", "~כתב", "~תב", "@כתב:1"), ()), "a word without Hebrew letters has no key"
     cut = service.expression("כתב כטה", gap=1, limit=1)
     assert [h.root_id for h in cut.hits] == [E4] and cut.truncated
     assert MAX_EXPRESSION_HITS >= 1
@@ -255,3 +273,105 @@ def test_the_env_var_points_the_default_path_at_a_candidate_file(tmp_path, monke
     assert blau_service.default_sidecar_path() == str(tmp_path / "candidate.db")
     monkeypatch.setenv(blau_service.ENV_DB_PATH, "  ")
     assert blau_service.default_sidecar_path() != "  "
+
+
+def test_a_clicked_word_s_runs_with_the_words_beside_it_come_longest_first():
+    """The expressions a clicked word makes with the words beside it, three words
+    then two, each run holding the clicked word, left to right; never a run of function words only."""
+    assert context_windows("אללה", ("כתאבי", "אטאל"), ("בקאך", "ואדאם")) == [
+        ["כתאבי אטאל אללה", "אטאל אללה בקאך", "אללה בקאך ואדאם"], ["אטאל אללה", "אללה בקאך"]]
+    assert context_windows("אללה", (), ("בקאך",)) == [["אללה בקאך"]]
+    assert context_windows("מלה", ("אחד", "שני", "שלישי"), ()) == [["שני שלישי מלה"], ["שלישי מלה"]], "two a side"
+    assert context_windows("אללה", ("x y", "", "אטאל"), ()) == [["אטאל אללה"]], "one word each"
+    assert context_windows("כל", ("עלי",), ()) == [], "function words only"
+    assert context_windows("אללה", (), ()) == [] and context_windows("", ("אטאל",), ()) == []
+
+
+def test_a_clicked_word_with_the_words_beside_it_brings_the_entries_that_name_them_first(service):
+    """אללה in "אטאל אללה בקאך" reached the entries of אללה, not the blessing. The
+    runs with the words beside it are searched with no word between, and an entry or sub-entry
+    whose NAME holds one is answered first, with its name places only; one that holds it in a
+    citation only is not (שהד's "כתב כטה"). The word's own card for the same scope gives way."""
+    [found] = service.context("כטה", ("כתב",), ())
+    assert found.text == "כתב כטה" and found.gap == 0
+    assert [(h.root_id, h.sub_entry, [p.scope for p in h.places]) for h in found.hits] == [(E4, "", ["form"])]
+    own = [(c.root_id, c.sub_entry) for c in service.lookup("כתאב").cards]
+    assert (E4, SE2_NAME) in own, "the word itself reaches the sub-entry by its name"
+    answer = service.answer("כתאב", stems=False, after=("אלקאצי",))
+    assert [(h.root_id, h.sub_entry) for c in answer.context for h in c.hits] == [(E4, SE2_NAME)]
+    assert (E4, SE2_NAME) not in [(c.root_id, c.sub_entry) for c in answer.cards], "shown once, first"
+    assert answer.found and service.answer("כתאב", stems=False).context == ()
+    assert service.context("כטה", (), ()) == () and service.context("כטה", ("ענב",), ()) == ()
+
+
+def test_only_runs_of_plain_words_are_searched_in_the_quotations():
+    """When no name holds a run, the quotations that do show. A run with a function word
+    or a word of a name put two words of the text side by side in a quotation by chance ("פי אלבר", "אבו
+    אלפרג"), so only the others are searched, longest first; with the selection's gap, at most the default."""
+    windows = context_windows("ואדאם", ("פי", "בקאך"), ("סלאמתך", "אבו"))
+    assert quoted_runs(windows) == ["בקאך ואדאם סלאמתך", "בקאך ואדאם", "ואדאם סלאמתך"]
+    assert quoted_runs(context_windows("אללה", ("אטאל",), ("בקאך",))) == [], "אללה is a function word here"
+    assert quoted_runs(context_windows("סעיד", ("ואבי",), ())) == []
+    assert quoted_runs([]) == []
+    assert quoted_gap(0) == 0 and quoted_gap(1) == 1 and quoted_gap(MAX_GAP) == DEFAULT_GAP
+    assert quoted_gap("x") == DEFAULT_GAP
+
+
+def test_a_clicked_word_whose_run_only_citations_hold_brings_those_citations(service, monkeypatch):
+    """ואדאם in "ואדאם סלאמתך" showed none of what selecting both words found. When no
+    name holds a run, the citations that hold one come first, with the selection's gap; the word's own
+    list of citations leaves them out; a name that holds a run keeps them away (כטה after כתב)."""
+    answer = service.answer("ראובן", gap=DEFAULT_GAP, stems=False, after=("כטה",))
+    assert answer.context_quoted and answer.found
+    assert [(c.text, [(h.root_id, [p.scope for p in h.places]) for h in c.hits]) for c in answer.context] == [
+        ("ראובן כטה", [(E4, ["citation"])])]
+    assert E4 in [h.root_id for h in service.lookup("ראובן").quotes], "the word alone lists it"
+    assert E4 not in [h.root_id for h in answer.quotes], "shown once, first"
+    assert service.context("ראובן", (), ("כטה",), gap=0) == (), "a word between"
+    assert not service.answer("כטה", stems=False, before=("כתב",)).context_quoted
+    monkeypatch.setattr(blau_service, "MAX_CONTEXT_QUOTED", 0)
+    assert service.context("ראובן", (), ("כטה",)) == ()
+
+
+@pytest.fixture
+def gapped(tmp_path):
+    """The expressions dictionary with one more root, whose headword has a word between."""
+    data = expressions_dictionary()
+    data["רסל (رسل)"] = _root("רסל (رسل)", E6, ["רסל"], ["رسل"], stems=[{
+        "id": "blau-st-000008", "stem_head": {"binyan": "IV"},
+        "forms": [_form("blau-f-000010", [_ja("ארסל אללה רחמתה", "headword_ja"), _seg("'שלח'", "definition_hebrew")])],
+    }])
+    out = tmp_path / "blau_data" / "blau.db"
+    assert build_main(["--source-dir", str(write_source(tmp_path / "download", data=data)), "--out", str(out)]) == EXIT_OK
+    svc = BlauService(str(out))
+    assert svc.expressions_available()
+    yield svc
+    svc.close()
+
+
+def test_a_name_that_holds_the_words_beside_a_clicked_word_with_a_word_between_names_them(gapped):
+    """A name that holds a run with a word between ("ארסל אללה רחמתה" for "ארסל רחמתך") is found with the
+    citations' gap, and names the run: not a context of citations only."""
+    service = gapped
+    assert service.context("ארסל", (), ("רחמתך",), gap=0) == ()
+    answer = service.answer("ארסל", gap=DEFAULT_GAP, stems=False, after=("רחמתך",))
+    assert [(h.root_id, [p.scope for p in h.places]) for c in answer.context for h in c.hits] == [(E6, ["form"])]
+    assert not answer.context_quoted
+
+
+def test_a_typed_word_whose_article_lost_its_alif_finds_the_article_written_whole(service):
+    """"יכצך בלסלאם" missed what "יכצך באלסלאם" finds. A reader's word also answers to
+    the stem its elided article gives (``query_keys``); the dictionaries' words keep ``word_keys``."""
+    assert "שטר" in query_keys("בלשטר") and "שטר" in word_keys("בלשטר")
+    assert set(word_keys("כתאב")) <= set(query_keys("כתאב"))
+    found = service.expression("כטה בלשטר", gap=1)
+    assert [(h.root_id, [p.scope for p in h.places]) for h in found.hits] == [(E4, ["citation"])]
+    assert not service.expression("כטה בלשטר", gap=0).found, "פי between"
+
+
+def test_the_words_beside_a_clicked_word_fail_closed(service, monkeypatch):
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(service, "expression", boom)
+    assert service.context("כטה", ("כתב",), ()) == ()
+    assert service.answer("כטה", stems=False, before=("כתב",)).context == ()

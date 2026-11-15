@@ -2,7 +2,7 @@
 """The forms a verb stem of a three-letter root takes in unvocalized Judeo-Arabic, and which of a
 root's stems a written word belongs to.
 
-The private dictionary lookup plan (section 4.2; owner, 2026-11-11: the rules were first used only to
+The private dictionary lookup plan (section 4.2; the rules were first used only to
 pick the stem of a root already found and open its card on that stem). Generate, do not analyse: for a
 root and a stem the dictionary LISTS, every way the stem may be written is spelled out, on the
 lookup's own keys (``normalize_ja``: no dots, finals folded), and a word belongs to the stems whose
@@ -33,8 +33,8 @@ word's own key before a peeled one, a stem with a prefix of its own (III, V to X
 I, II and IV, a longer form before a shorter. Each hit has a kind (``hit_kind``), and a card the kind
 of its best hit: A own key, prefixed stem; B own key, I/II/IV, four letters or more; C own key,
 I/II/IV, three letters; D peeled key, prefixed stem; E peeled, I/II/IV. Which kinds a dictionary
-shows is a switch (``switch_kinds``; A, B and D by default since the graded sample, owner
-2026-11-11); beside the entries the word itself reaches, the roots are only suggested
+shows is a switch (``switch_kinds``; A, B and D by default since the graded sample);
+beside the entries the word itself reaches, the roots are only suggested
 (``suggested_roots``).
 """
 from __future__ import annotations
@@ -47,7 +47,24 @@ from typing import Any, Iterable, Mapping, Sequence
 from shared.ja_roots import dot_pattern, stem_label, with_final_letters
 
 #: 2 (2026-11-11): a verb whose final weak letter is dropped takes an ending (``stem_forms``).
-VERB_FORMS_VERSION = 2
+#: 3 (2026-11-14): the verbal nouns of stems V and VI (אלתצור, אלתראסל), and a four-letter root's
+#: forms under the stems the dictionaries file them by (``_four_letter_bases``).
+VERB_FORMS_VERSION = 3
+#: The stems a four-letter root is listed under: its simple stem, which the dictionaries write II
+#: (בהדל II), and the one with ת, which they write V (תכ̇לכ̇ל V). Not I: a name of four letters
+#: listed without a stem of its own is a noun (כתאב).
+FOUR_LETTER_STEMS = (2, 5)
+
+
+def _four_letter_bases(root: str, stem: int) -> tuple[list[str], list[str], list[str]]:
+    """(perfect, imperfect, nominal) bases of a four-letter root (בהדל, כלכל, סלטן): the simple stem
+    C1C2C3C4 / מC1C2C3C4, verbal noun C1C2C3C4ה; with ת, תC1C2C3C4 / מתC1C2C3C4, the verbal noun as
+    the perfect. No other stem, and no weak variants."""
+    if stem == 5:
+        return ["ת" + root], ["ת" + root], ["מת" + root, "ת" + root]
+    if stem == 2:
+        return [root], [root], ["מ" + root, root + "ה"]
+    return [], [], []
 
 #: The letters a weak root has in second or third place (and א as a third).
 WEAK = "וי"
@@ -94,10 +111,15 @@ def _stem_bases(root: str, stem: int, weak: bool = True, assimilation: bool = Tr
     """(perfect, imperfect, nominal) bases of one stem of a three-letter root key, before endings.
     ``weak`` and ``assimilation`` off are the gate's mutation runs (plan section 6.5): the weak-root
     variants, and stem VIII's assimilated heads, left out. ``bare`` off leaves out the bases with a
-    final weak letter dropped."""
+    final weak letter dropped. A four-letter root has ``_four_letter_bases``."""
+    if len(root) == 4:
+        return _four_letter_bases(root, stem)
     c1, c2, c3 = root
     perfect_tail, imperfect_tail = _after_c1(c2, c3, weak, bare)
     long_tail = _after_long(c2, c3, weak, bare)
+    # The verbal nouns of V and VI (תצור, תראסל) keep both letters, a final weak one as י: never the
+    # contracted or the shortened base, which with a noun's ending spell other words (תלתה, תשרי).
+    noun_tail = [c2 + c3] + ([c2 + "י"] if weak and c3 in WEAK + "א" and c3 != "י" else [])
     hollow, final_weak = weak and c2 in WEAK, weak and c3 in WEAK + "א"
     first_w, first_alef, doubled = weak and c1 == "ו", weak and c1 == "א", weak and c2 == c3
     perfect: list[str] = []
@@ -133,10 +155,10 @@ def _stem_bases(root: str, stem: int, weak: bool = True, assimilation: bool = Tr
             perfect += [c1 + t for t in perfect_tail]
     elif stem == 5:
         perfect = imperfect = ["ת" + c1 + t for t in long_tail]
-        nominal = ["מת" + c1 + t for t in long_tail]
+        nominal = ["מת" + c1 + t for t in long_tail] + ["ת" + c1 + t for t in noun_tail]
     elif stem == 6:
         perfect = imperfect = ["ת" + c1 + "א" + t for t in long_tail]
-        nominal = ["מת" + c1 + "א" + t for t in long_tail]
+        nominal = ["מת" + c1 + "א" + t for t in long_tail] + ["ת" + c1 + "א" + t for t in noun_tail]
     elif stem == 7:
         perfect = ["אנ" + c1 + t for t in perfect_tail]
         imperfect = ["נ" + c1 + t for t in perfect_tail]
@@ -176,6 +198,14 @@ def _stem_bases(root: str, stem: int, weak: bool = True, assimilation: bool = Tr
     return perfect, imperfect, nominal
 
 
+def _listed(root: str, stem: int) -> bool:
+    """A root key and a stem the rules have forms for: three letters and I to X, or four letters and
+    one of ``FOUR_LETTER_STEMS``."""
+    if not root or " " in root:
+        return False
+    return (len(root) == 3 and 1 <= int(stem) <= 10) or (len(root) == 4 and int(stem) in FOUR_LETTER_STEMS)
+
+
 @lru_cache(maxsize=16384)
 def stem_forms(root: str, stem: int, *, weak: bool = True, assimilation: bool = True,
                min_letters: int = MIN_LETTERS, bare_alone: bool = False) -> frozenset[str]:
@@ -183,11 +213,11 @@ def stem_forms(root: str, stem: int, *, weak: bool = True, assimilation: bool = 
     three letters (``normalize_ja``); anything else, or a stem outside 1 to 10, has none. The
     keyword arguments are the gate's mutation runs; the lookup uses the defaults.
 
-    A verb whose final weak letter is dropped takes an ending (owner, 2026-11-11; rules version 2):
+    A verb whose final weak letter is dropped takes an ending (rules version 2):
     רמת, ירמו, ירמון, but not a bare ירמ or אסתקר of קרא, the short form after לם, which mostly
     spells another word (תלתה, "three", read as stem VIII of להו). ``bare_alone`` True is version
     1's rule, the gate's measure of the change."""
-    if len(root or "") != 3 or " " in root or not 1 <= int(stem) <= 10:
+    if not _listed(root, stem):
         return frozenset()
     perfect, imperfect, nominal = _stem_bases(root, int(stem), weak, assimilation)
     bare_perfect: set[str] = set()
@@ -206,6 +236,50 @@ def stem_forms(root: str, stem: int, *, weak: bool = True, assimilation: bool = 
     return frozenset(form for form in out if len(form) >= min_letters)
 
 
+@lru_cache(maxsize=16384)
+def nominal_forms(root: str, stem: int) -> frozenset[str]:
+    """The keys of one stem's participles and verbal nouns alone (``stem_forms``' nominal bases with
+    their endings): what a word with the article may be (``shared.blau_normalize.article_candidates``;
+    אלקאצ̇י is no perfect of stem III)."""
+    if not _listed(root, stem):
+        return frozenset()
+    nominal = _stem_bases(root, int(stem))[2]
+    return frozenset(base + end for base in nominal for end in NOMINAL_ENDINGS if len(base + end) >= MIN_LETTERS)
+
+
+#: The subject endings of a perfect that stand after a final hamza written א (אבראת, אבתדאתו).
+_ALEF_PERFECT_ENDINGS = ("תמ", "תנ", "תי", "תו", "ת")
+
+
+def final_alef_perfect(key: str) -> tuple[str, ...]:
+    """The first two root letters ``key`` gives when read as a perfect with its subject ending, of a
+    root ending in hamza and of stem IV or V: אבראת (ברא IV), תבראת (V). A dictionary seldom lists
+    that stem, so no verb form reaches the word, and its last letters read as a noun's plural
+    (אבר + את); a service asks this before it takes that reading (``listed_alef_perfect``). () for
+    any other shape: what is left of a longer stem's form is no noun's heading, and a noun of that
+    length is a plural (אסתבלאת is אסתבל's; measured 2026-11-14)."""
+    for ending in _ALEF_PERFECT_ENDINGS:
+        if key.endswith("א" + ending):
+            base = key[:-len(ending) - 1]
+            break
+    else:
+        return ()
+    return (base[1:],) if len(base) == 3 and base[0] in "את" else ()
+
+
+def listed_alef_perfect(keys: Iterable[str], pairs: Iterable[Any]) -> bool:
+    """Is one of ``keys`` such a perfect (``final_alef_perfect``) of a root the dictionary lists a
+    verb for (``pairs``: its (root, stem) pairs), the root's last letter hamza or weak (ברא, ברי)?"""
+    two = {letters for key in keys for letters in final_alef_perfect(key)}
+    return bool(two) and any(len(p.root_key) == 3 and p.root_key[:2] in two and p.root_key[2] in "איו" for p in pairs)
+
+
+def _fits(key: str, root: str, stem: int, nominal: frozenset[str]) -> bool:
+    """Does ``key`` spell a form of the stem: any form, or for a noun's key (``nominal``) a
+    participle or a verbal noun (``nominal_forms``)?"""
+    return key in (nominal_forms(root, stem) if key in nominal else stem_forms(root, stem))
+
+
 def verb_form_index(pairs: Iterable[Any], **rules: Any) -> dict[str, tuple[Any, ...]]:
     """Every form key the pairs a dictionary lists may be written as, and the pairs that give it
     (plan section 4.3: the list a service builds once from its own pairs; ``shared.ja_roots.StemPair``,
@@ -218,17 +292,19 @@ def verb_form_index(pairs: Iterable[Any], **rules: Any) -> dict[str, tuple[Any, 
     return {form: tuple(found) for form, found in index.items()}
 
 
-def word_stems(keys: Iterable[str], root: str, stems: Iterable[int]) -> tuple[int, ...]:
+def word_stems(keys: Iterable[str], root: str, stems: Iterable[int],
+               nominal: frozenset[str] = frozenset()) -> tuple[int, ...]:
     """The stems among ``stems`` (those the dictionary lists for ``root``) whose forms hold one of
-    ``keys`` (the word's lookup keys, its clitics peeled: ``candidate_stems``), in order."""
+    ``keys`` (the word's lookup keys, its clitics peeled: ``candidate_stems``), in order. A key in
+    ``nominal`` (a noun's: ``article_candidates``) counts only as a participle or a verbal noun."""
     keys = {k for k in keys if k}
-    return tuple(stem for stem in sorted(set(stems)) if keys & stem_forms(root, stem))
+    return tuple(stem for stem in sorted(set(stems)) if any(_fits(k, root, stem, nominal) for k in keys))
 
 
-def word_stem(keys: Iterable[str], root: str, stems: Iterable[int]) -> int:
+def word_stem(keys: Iterable[str], root: str, stems: Iterable[int], nominal: frozenset[str] = frozenset()) -> int:
     """The one listed stem the word belongs to, or 0 when none or several do (קרר is I and II;
     טאלב is the participle of I and the perfect of III)."""
-    found = word_stems(keys, root, stems)
+    found = word_stems(keys, root, stems, nominal)
     return found[0] if len(found) == 1 else 0
 
 
@@ -243,7 +319,7 @@ KINDS = ("A", "B", "C", "D", "E")
 #: How many cards found by verb form a lookup shows (plan 4.4); the rest are counted.
 MAX_VERB_FORM_CARDS = 3
 #: Beside the cards the word itself reaches, the roots its verb forms give are only suggested, at
-#: most this many (owner, 2026-11-11: there a card found by verb form was mostly wrong).
+#: most this many (there a card found by verb form was mostly wrong).
 MAX_SUGGESTIONS = 5
 
 
@@ -256,6 +332,13 @@ def hit_kind(stem: int, own: bool, length: int) -> str:
             return "A"
         return "B" if length >= 4 else "C"
     return "D" if stem in PREFIXED else "E"
+
+
+def under_conjunction(form: str, key: str) -> bool:
+    """Is ``form`` the word ``key`` without its conjunction ו, four letters or more? Then a form of
+    stem I, II or IV is read as for the word alone (ואשהדו is אשהדו: stem IV of שהד; kind E, shown
+    as kind B is). Not under פ, mostly a root's first letter (פצאיל is no צאיל)."""
+    return len(form) >= 4 and key[:1] == "ו" and key[1:] == form
 
 
 def hit_rank(stem: int, own: bool, length: int) -> tuple[bool, bool, int]:
@@ -275,6 +358,27 @@ def switch_kinds(name: str, default: str) -> frozenset[str]:
     (``BLAU_VERB_FORM_KINDS`` ...)."""
     value = os.environ.get(name)
     return parse_kinds(default if value is None else value)
+
+
+@lru_cache(maxsize=32768)
+def finite_form(root: str, stem: int, form: str) -> bool:
+    """Distinctive subject marking suitable for promotion beside lexical matches.
+
+    The broader generator also covers ambiguous dual/plural endings and short
+    hollow forms. Those remain candidates, but do not displace a printed noun.
+    """
+    if len(root) != 3 or not 1 <= stem <= 10 or form in nominal_forms(root, stem):
+        return False
+    if len(form) < 4 and not (len(form) == 3 and
+            (root[0] == 'ו' or root[1] == root[2])):
+        return False
+    perfect, imperfect, _nominal = _stem_bases(root, stem)
+    return (any(form == base + ending for base in perfect
+                if not (root[-1] in WEAK and base.endswith('א'))
+                for ending in ('ת', 'תי', 'תם', 'תנ', 'תו'))
+            or (len(form) == 3 and (root[0] == 'ו' or root[1] == root[2])
+                and any(form == prefix + base for prefix in 'ית' for base in imperfect))
+            or (stem == 1 and root[0] == 'ו' and len(form) == 3 and form == 'נ' + root[1:]))
 
 
 @dataclass(frozen=True)
@@ -315,6 +419,34 @@ class VerbFormCard:
         stems = self.stems
         return stems[0] if len(stems) == 1 else 0
 
+    @property
+    def inflected_perfect(self) -> bool:
+        """A retained multi-letter subject ending corroborates a peeled object suffix."""
+        return any(len(key) >= 5 and key == base + ending
+                   for (stem, _own, _length), key in zip(self.hits, self.hit_keys)
+                   for base in _stem_bases(self.root_key, stem)[0]
+                   for ending in PERFECT_ENDINGS if len(ending) >= 2)
+
+    def finite_for(self, word: str) -> bool:
+        """A finite form retaining the word's letters, apart from conjunction/object clitics.
+
+        This distinguishes כתבת from כ + תבת and from the construct noun כתבה.
+        Short initial-waw imperfects (נקף, יצל) remain possible when the listed root
+        supplies the lost waw; arbitrary three-letter verb guesses do not qualify.
+        """
+        from shared.blau_normalize import PRONOUN_SUFFIXES, article_candidates
+        from shared.ja_expression import NAME_WORDS, is_function_word
+        bases = (word, word[1:]) if word[:1] in 'ופ' else (word,)
+        if article_candidates(word) or is_function_word(bases) or any(base in NAME_WORDS for base in bases):
+            return False
+        for (stem, _own, _length), form in zip(self.hits, self.hit_keys):
+            if not any(form == base or (len(form) >= 4 and base == form + suffix)
+                       for base in bases for suffix in ('', *PRONOUN_SUFFIXES)):
+                continue
+            if finite_form(self.root_key, stem, form):
+                return True
+        return False
+
     def evidence(self) -> str:
         """What the card says reached it: the form, then the root and the stems ("אסתדלו (ד̇לל X)",
         "טאלב (טלב I, III)"): the shape of the book's index line "form (root)" and of the typed
@@ -323,14 +455,18 @@ class VerbFormCard:
         return f"{with_final_letters(self.form)} ({self.root} {', '.join(stem_label(s) for s in self.stems)})"
 
 
-def verb_form_cards(keys: Sequence[str], index: Mapping[str, Sequence[Any]]) -> list[VerbFormCard]:
+def verb_form_cards(keys: Sequence[str], index: Mapping[str, Sequence[Any]],
+                    nominal: frozenset[str] = frozenset()) -> list[VerbFormCard]:
     """The entries a word's keys reach by verb form (``index``: a service's ``verb_form_index``, or a
     part of it), one card per entry, in plan 4.4's order (stable on first reach). ``keys[0]`` is the
-    word's own key, the rest its clitics peeled (``candidate_stems``). The pairs are read through
-    ``entry_id``, ``root``, ``root_key`` and ``stem`` (``shared.ja_roots.StemPair``)."""
+    word's own key, the rest its clitics peeled (``candidate_stems``); a key in ``nominal`` (a noun's:
+    ``article_candidates``) reaches a stem only as its participle or verbal noun. The pairs are read
+    through ``entry_id``, ``root``, ``root_key`` and ``stem`` (``shared.ja_roots.StemPair``)."""
     found: dict[str, tuple[Any, list[tuple[int, bool, int]], list[str]]] = {}
     for n, key in enumerate(keys):
         for pair in index.get(key, ()) if key else ():
+            if key in nominal and key not in nominal_forms(pair.root_key, int(pair.stem)):
+                continue
             _pair, hits, hit_keys = found.setdefault(pair.entry_id, (pair, [], []))
             hit = (int(pair.stem), n == 0, len(key))
             if hit not in hits:
@@ -342,17 +478,19 @@ def verb_form_cards(keys: Sequence[str], index: Mapping[str, Sequence[Any]]) -> 
 
 
 def suggested_roots(keys: Sequence[str], index: Mapping[str, Sequence[Any]], kinds: Iterable[str],
-                    shown: Iterable[Any] = (), limit: int = MAX_SUGGESTIONS) -> tuple[tuple[str, int], ...]:
+                    shown: Iterable[Any] = (), limit: int = MAX_SUGGESTIONS,
+                    nominal: frozenset[str] = frozenset()) -> tuple[tuple[str, int], ...]:
     """The roots a word's verb forms give beside the entries the word itself reached (``shown``, by
     entry id): (the root as printed, the one stem the word fits or 0), in the order the cards would
     come (``verb_form_cards``), of a kind in ``kinds``, each (root with its dots, stem) once, at most
-    ``limit``. What both dictionaries draw as the chips "Other possible roots"."""
+    ``limit``; ``nominal`` as for ``verb_form_cards``. What both dictionaries draw as the chips
+    "Other possible roots"."""
     kinds, shown = frozenset(kinds), set(shown)
     if not kinds or not index:
         return ()
     out: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
-    for card in verb_form_cards(keys, index):
+    for card in verb_form_cards(keys, index, nominal):
         if card.kind not in kinds or card.entry_id in shown:
             continue
         key = (dot_pattern(card.root), card.stem)

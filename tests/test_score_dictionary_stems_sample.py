@@ -2,7 +2,7 @@
 """scripts/score_dictionary_stems_sample.py: the pass rule of the graded click sample (the private
 dictionary lookup plan, section 6.1, decided 2026-11-11): at most 5 wrong-only words in 100 gradable,
 cannot-tell at most 25% of those drawn, the stem opened only when right in 85% of the root-right words;
-the owner's review replaces the grader's verdict."""
+the second review replaces the grader's verdict."""
 from __future__ import annotations
 
 import json
@@ -71,7 +71,7 @@ def test_a_kind_opens_on_the_stem_only_when_it_is_right_in_85_percent(stem_right
     assert t["passes"] and t["opens_on_stem"] is opens
 
 
-def test_the_owner_s_review_replaces_the_grader_and_ungraded_words_wait():
+def test_the_second_review_replaces_the_grader_and_ungraded_words_wait():
     wrong = _item(1, [("להו", (8,))])
     pending = _item(2, [("כתב", (10,))])
     answers = [_answer(wrong, ("wrong", ""))]
@@ -123,7 +123,7 @@ def _two(n, blau, friedman, kind="B"):
 
 
 def test_a_right_root_from_either_dictionary_is_a_win_unless_strict():
-    """Owner, 2026-11-11 (recall counts more than precision): ندري got דרר from Friedman and דרי from Blau;
+    """Recall counts more than precision: ندري got דרר from Friedman and דרי from Blau;
     the reader sees both tabs, so the word is a win in both. Strict scoring keeps each dictionary apart."""
     word = _two(1, [("דרי", (1,))], [("דרר", (1, 4))])
     answers = [_answer(word, ("right", "I"), ("wrong", ""))]
@@ -149,7 +149,7 @@ def test_a_pooled_word_waits_for_the_other_dictionary_s_roots_to_be_graded():
 
 
 def test_hebrew_and_aramaic_words_are_left_out():
-    """Owner, 2026-11-11: Hebrew and Aramaic words are irrelevant (``excluded.json``)."""
+    """Hebrew and Aramaic words are irrelevant (``excluded.json``)."""
     hebrew, arabic = _item(1, [("נהו", (1,))]), _item(2, [("כתב", (10,))])
     answers = [_answer(hebrew, ("wrong", "")), _answer(arabic, ("right", "X"))]
     result = score.score([hebrew, arabic], answers, excluded={"s0001": "Hebrew"})

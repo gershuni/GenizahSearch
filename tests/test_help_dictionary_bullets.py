@@ -2,7 +2,7 @@
 """web/pages/help.py::dictionary_bullets names only the dictionaries served: with Blau and Lane
 it is the owner's approved release text of 2026-11-05, word for word; Friedman alone promises
 neither Blau nor Lane and describes the expression search (Codex, round 5 of #487). Since
-2026-11-11 the sentence on a root's stems (owner-approved) follows the box sentence wherever Blau's
+2026-11-11 the sentence on a root's stems follows the box sentence wherever Blau's
 or Friedman's dictionary is served, never with Lane alone."""
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ EXPRESSION = {
            "המילים מופיעות בסדר הזה, ואפשר לבחור כמה מילים מותרות ביניהן."),
 }
 BOX = {'en': " The box at the top", 'he': " בתיבה שבראש החלונית"}
-#: The sentence on a root's stems (approved by the owner, 2026-11-11), after the box sentence.
+#: The sentence on a root's stems, after the box sentence.
 STEMS = {
     'en': " To open a verb stem, type the root and the stem (דלל X or דלל 10), or press the stem on the root's card.",
     'he': " כדי לפתוח בניין, אפשר להקליד את השורש ואת הבניין (דלל X או דלל 10), או ללחוץ על הבניין בכרטיס של השורש.",

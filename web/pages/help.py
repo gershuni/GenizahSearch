@@ -841,7 +841,7 @@ def dictionary_bullets(lang: str, served: Mapping[str, bool], expressions: Mappi
         body += text['expression'].format(names=which)
     body += text['box']
     if any(name in names for name in _STEM_DICTIONARIES):
-        body += text['stems']   # the root's stems (owner, 2026-11-11): Blau's and Friedman's, not Lane's
+        body += text['stems']   # the root's stems: Blau's and Friedman's, not Lane's
     if 'blau' in names:
         body += text['blau_note']
     return body + '\n' + text['key']

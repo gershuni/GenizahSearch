@@ -34,7 +34,7 @@ from shared.blau_service import (
     reset_blau_service,
 )
 from shared.ja_roots import BORROW_FRIEDMAN, BORROW_LANE, BorrowedRoot
-from tests.test_build_blau_sidecar import _form, _ja, _mutate, _root, _seg, dictionary, write_source
+from tests.test_build_blau_sidecar import _ar, _form, _ja, _mutate, _root, _seg, dictionary, write_source
 
 ROOT_1, ROOT_2, ROOT_3 = "blau-e-000001", "blau-e-000002", "blau-e-000003"
 
@@ -74,6 +74,98 @@ def _flag_on(monkeypatch):
 
 def test_the_reader_and_the_builder_agree_on_the_schema_version():
     assert SCHEMA_VERSION == BUILD_SCHEMA_VERSION
+
+
+def test_sense_details_keep_examples_translations_references_and_notes_together(service, monkeypatch):
+    found = service.lookup('אכד')
+    sense = next(s for c in found.cards for s in c.senses if s.form_id == 'blau-f-000001')
+    assert sense.details_available
+    details = service.form_details(sense.form_id)
+    assert details.form_id == sense.form_id and 'אכ̇ד̇ מנה' in details.notes
+    quote = next(c for c in details.citations if c.quote)
+    assert quote.id == 'blau-c-000001' and quote.quote == 'ואכ̇ד̇ת אלכתאב להם'
+    assert quote.translation == "'ולקחתי להם את הספר'" and '10' in quote.locator
+    assert quote.bibliography and any('דוזי' in c.locator for c in details.citations)
+    other = service.form_details('blau-f-000002')
+    assert other.form_id != details.form_id and not other.citations
+    assert service.form_details('missing') is None
+    expression = service.expression('ואכדת אלכתאב')
+    place = next(p for h in expression.hits for p in h.places if p.quotation)
+    assert place.details_available and place.quotation.id == quote.id
+    monkeypatch.setenv('BLAU_DICTIONARY_ENABLED', '0')
+    assert service.form_details(sense.form_id) is None
+
+
+def test_arabic_complements_inherit_the_verb_and_show_their_own_sense(tmp_path):
+    data = dictionary()
+    data['וקף'] = _root('וקף', 'blau-e-000160', ['וקף'], ['وقف'], stems=[{
+        'id': 'blau-st-000160', 'stem_head': {'binyan': 'I'}, 'forms': [
+            _form('blau-f-000160', [_ar('عَلى فِعْلٍ', 'variant_arabic'),
+                                   _seg('synthetic decision sense', 'definition_hebrew')]),
+            _form('blau-f-000161', [_ja('עליה', 'variant_ja'), _ar('عَلَيْها', 'variant_arabic'),
+                                   _seg('synthetic other sense', 'definition_hebrew')]),
+            _form('blau-f-000162', [_ar('بِقِصّة', 'freeform_note')]),
+            _form('blau-f-000163', [_ar('وَاقِف', 'variant_arabic')]),
+            _form('blau-f-000165', [_ar('إلى شيء', 'variant_arabic'),
+                                   _seg('synthetic second stem', 'definition_hebrew')], variant_head={'binyan': 'II'}),
+            _form('blau-f-000166', [_ar('مِنْ', 'variant_arabic'),
+                                   _seg('synthetic seventh stem', 'definition_hebrew')], variant_head={'binyan': 'VII'}),
+        ]}], sub_entries=[{'id': 'blau-se-000160', 'name_ja': ['מוקף'], 'arabic_spelling': ['موقف'],
+                          'stems': [{'id': 'blau-st-000161', 'stem_head': {'binyan': 'I'},
+                                     'forms': [_form('blau-f-000164', [_ar('عند شيء', 'variant_arabic')])]}]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        for query in ('ואקפא עלי', 'וקף עלי', 'وقف على'):
+            found = svc.expression(query)
+            assert found.hits[0].root_id == 'blau-e-000160'
+            places = found.hits[0].places
+            decision = next(p for p in places if p.form_id == 'blau-f-000160')
+            assert decision.scope == 'construction' and decision.binyan == 'I'
+            assert decision.form_text == 'عَلى فِعْلٍ'
+            assert decision.gloss_he == 'synthetic decision sense'
+            assert decision.words == ('וקף', 'عَلى', 'فِعْلٍ')
+            assert len([p for p in places if p.form_id == 'blau-f-000161']) == 1
+        assert any(p.form_id == 'blau-f-000160' for h in svc.expression('עלי פעל').hits for p in h.places)
+        assert any(p.form_id == 'blau-f-000160' for x in svc.context('ואקפא', (), ('עלי',)) for h in x.hits for p in h.places)
+        second = next(p for h in svc.expression('וקף אלי').hits for p in h.places if p.form_id == 'blau-f-000165')
+        assert second.binyan == 'II', 'an explicit sense-level stem overrides the enclosing paragraph'
+        assert not svc.context('עלי', (), ('פעל',)), 'a complement alone cannot promote the absent verb'
+        assert not svc.context('ואקפא', (), ('ועלי',)), 'do not join across a conjunction automatically'
+        assert not svc.context('וקף', (), ('מן',)), 'the bare root is not a surface form of stem VII'
+        assert not any(p.scope == 'construction' for h in svc.expression('וקף פעל', gap=2).hits for p in h.places), (
+            'a gap allowance cannot erase the required preposition')
+        for query in ('וקף בקצה', 'וקף ואקף', 'וקף ענד שיא'):
+            assert not svc.expression(query, gap=0).hits, query
+    finally:
+        svc.close()
+
+
+def test_masculine_plural_reaches_a_named_noun_not_a_finite_verb(service):
+    result = service.lookup('מאכדין')
+    assert any(c.root_id == ROOT_1 and c.sub_entry == 'מאכ̇ד̇' for c in result.cards)
+    assert not any(c.root_id == ROOT_3 for c in service.lookup('בלגין').cards)
+
+
+def test_finite_verb_survives_a_noun_subentry_and_a_prefix_decoy(tmp_path, monkeypatch):
+    data = dictionary()
+    for rid, name, arabic in [('blau-e-000150', 'תבת', 'تبت'), ('blau-e-000151', 'כתב', 'كتب')]:
+        data[name] = _root(name, rid, [name], [arabic], stems=[{
+            'id': rid.replace('-e-', '-st-'), 'stem_head': {'binyan': 'I'},
+            'forms': [_form(rid.replace('-e-', '-f-'), [_seg("'synthetic verb'", 'definition_hebrew')])]}])
+    data['כתב']['sub_entries'] = [{
+        'id': 'blau-se-000150', 'name_ja': ['כתבה'], 'arabic_spelling': ['كتبة'],
+        'stems': [{'id': 'blau-st-000152', 'stem_head': {}, 'forms': [
+            _form('blau-f-000152', [_seg("'synthetic noun'", 'definition_hebrew')])]}]}]
+    monkeypatch.delenv(blau_service.ENV_VERB_FORM_KINDS)
+    monkeypatch.delenv(blau_service.ENV_VERB_FORM_STEM_KINDS)
+    svc = BlauService(str(_build(tmp_path, data)))
+    result = svc.lookup('כתבת')
+    assert (result.cards[0].root_id, result.cards[0].sub_entry) == ('blau-e-000151', '')
+    assert result.cards[0].verb_form
+    borrowed = svc.borrow(result, (BorrowedRoot('תבת', BORROW_LANE, 'تبت'),))
+    assert borrowed.cards[0].root_id == 'blau-e-000151'
+    assert svc.lookup('כתבה').cards[0].sub_entry == 'כתבה'
+    svc.close()
 
 
 def test_a_built_sidecar_is_ready_with_its_credit_lines(service):
@@ -215,10 +307,9 @@ def test_two_candidates_that_reach_the_same_entry_are_two_cards_in_candidate_ord
     result = svc.lookup("ובלג")
     assert result.candidates[:2] == ("ובלג", "בלג")  # then לג, with ב read as a preposition: no hit
     assert [(c.root_id, c.candidate, c.matched_kind, c.matched_key) for c in result.cards] == [
-        (ROOT_3, "ובלג", "variant", "ובלג"), (ROOT_3, "בלג", "root", "בלג")]
-    first, second = result.cards
+        (ROOT_3, "ובלג", "variant", "ובלג")]
+    first, = result.cards
     assert first.senses[0].matched and first.senses[0].ja_text == "ובלג"
-    assert not any(s.matched for s in second.senses)
     assert result.examples == ()
 
 
@@ -308,7 +399,7 @@ def test_quotes_leave_out_the_cards_entries_function_words_and_several_words(ser
     assert [c.root_id for c in carded.cards] == [ROOT_1] and carded.quotes == ()
     direct, _more = service._quotes("אכ̇ד̇", set(), {})
     assert ROOT_1 in [h.root_id for h in direct], "the entry's own names hold the word: only the card keeps it out"
-    assert service.lookup("להם").quotes == (), "a preposition with its pronoun is in every other citation"
+    assert service.lookup("להם").quotes, "common forms retain bounded quotation evidence"
     assert service._conn.execute("SELECT COUNT(*) FROM tokens WHERE key = 'להמ'").fetchone()[0] == 1
     phrase = service.lookup("ואכ̇ד̇ת אלכתאב להם")
     assert phrase.quotes == () and [e.root_id for e in phrase.examples] == [ROOT_1], (
@@ -317,7 +408,7 @@ def test_quotes_leave_out_the_cards_entries_function_words_and_several_words(ser
 
 def test_quotes_are_bounded_and_a_common_word_has_none(service, monkeypatch):
     monkeypatch.setattr(blau_service, "MAX_QUOTE_UNITS", 0)
-    assert service.lookup("אלכתאב").quotes == () and not service.lookup("אלכתאב").found
+    assert service.lookup("אלכתאב").quotes and service.lookup("אלכתאב").found
     monkeypatch.setattr(blau_service, "MAX_QUOTE_UNITS", 25)
     monkeypatch.setattr(blau_service, "MAX_QUOTE_HITS", 0)
     result = service.lookup("אלכתאב")
@@ -325,7 +416,7 @@ def test_quotes_are_bounded_and_a_common_word_has_none(service, monkeypatch):
 
 
 def test_a_card_carries_every_sense_and_only_a_bound_far_above_the_largest_entry_cuts(tmp_path, monkeypatch):
-    """Owner, 2026-11-11: no sense only on the site. The card carries every sense of its scope (the
+    """No sense only on the site. The card carries every sense of its scope (the
     panel shows the first few and the rest on a click); MAX_SENSES is a bound above the largest entry
     of release 1.1 (115 forms), and what lies beyond it is counted."""
     data = dictionary()
@@ -353,6 +444,8 @@ def test_cards_and_examples_are_bounded_and_the_rest_counted(tmp_path, monkeypat
     monkeypatch.setattr(blau_service, "MAX_CARDS", 1)
     result = svc.lookup("אכ̇ד̇")
     assert [c.root_id for c in result.cards] == [ROOT_1] and result.more_cards == 1
+    expanded = svc.lookup("אכ̇ד̇", limit=2)
+    assert [c.root_id for c in expanded.cards] == [ROOT_1, ROOT_3] and not expanded.more_cards
     monkeypatch.setattr(blau_service, "MAX_EXAMPLES", 0)
     result = svc.lookup("ואכ̇ד̇ת אלכתאב להם")
     assert result.examples == () and result.more_examples == 1
@@ -511,7 +604,7 @@ def test_the_default_path_is_the_repository_sidecar_unless_the_user_has_a_copy(t
 
 
 # ---------------------------------------------------------------------------
-# A root's stems (owner, 2026-11-11; the private dictionary lookup plan, section 4.6): the stems
+# A root's stems (the private dictionary lookup plan, section 4.6): the stems
 # each entry lists, read from a stem row's column, shift and printed head together; a root typed
 # with a stem ("דלל X") opens that stem's paragraph. Synthetic roots, no dictionary text.
 # ---------------------------------------------------------------------------
@@ -639,6 +732,21 @@ def test_a_stem_under_a_sub_entry_names_it_and_a_shift_counts_both_sides(stems):
                                              (ROOT_DHLL, 1, ["blau-f-000117"])]
 
 
+def test_a_feminine_noun_before_a_suffix_reaches_its_sub_entry(stems):
+    """סלאמתך reached no entry of סלאמה. A ת a pronoun suffix was peeled from is also
+    read as ה: ודאלתך reaches the sub-entry דאלה̈, by its base form."""
+    result = stems.lookup("ודאלתך")
+    assert [(c.root_id, c.sub_entry, c.candidate) for c in result.cards] == [(ROOT_DLL, "דאלה̈", "דאלה")]
+
+
+def test_a_noun_whose_article_lost_its_alif_after_a_preposition_reaches_its_sub_entry(stems):
+    """בלסלאם reached nothing. When the word as written reaches no entry, ב + (א)ל is
+    peeled apart: בלדאלה reaches the sub-entry דאלה̈."""
+    result = stems.lookup("בלדאלה")
+    assert [(c.root_id, c.sub_entry, c.candidate) for c in result.cards] == [(ROOT_DLL, "דאלה̈", "דאלה")]
+    assert stems.lookup("בלקמר").cards == ()
+
+
 def test_a_dotted_root_puts_the_dotted_entry_first_and_marks_the_other(stems):
     result = stems.lookup("ד'לל IV")
     assert [(c.root_id, c.dot_mismatch) for c in result.cards] == [(ROOT_DHLL, False), (ROOT_DLL, True)]
@@ -669,7 +777,7 @@ def test_an_entry_whose_first_name_is_the_word_comes_before_one_that_gives_it_as
                           stems=[{"id": "blau-st-000121", "stem_head": {}, "forms": [_sense("blau-f-000121", "plum")]}])
     svc = BlauService(str(_build(tmp_path, data)))
     assert [c.root_id for c in svc.lookup("אנגאץ").cards] == ["blau-e-000121", "blau-e-000120"], \
-        "the entry named אנגאץ first, though the other is earlier and gives it as its second name (owner, 2026-11-11)"
+        "the entry named אנגאץ first, though the other is earlier and gives it as its second name"
     assert [c.root_id for c in svc.lookup("אגאץ").cards] == ["blau-e-000120"]
 
 
@@ -685,7 +793,7 @@ def test_the_stems_fail_closed(stems, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Roots borrowed from Friedman and Lane (owner, 2026-11-11): Blau has no list of inflected forms, so
+# Roots borrowed from Friedman and Lane: Blau has no list of inflected forms, so
 # a verb form (קאל) reached no entry of its own; the entries of the roots the other dictionaries give
 # come after Blau's own cards. Synthetic roots, no dictionary text.
 # ---------------------------------------------------------------------------
@@ -768,10 +876,14 @@ def test_borrowed_cards_stop_at_the_card_limit_and_the_rest_are_counted(stems, m
                                 BorrowedRoot("ד̇לל", BORROW_FRIEDMAN, "ד̇לל")))
     assert [c.root_id for c in result.cards] == [ROOT_NONE, ROOT_ONE]
     assert result.more_cards == own.more_cards + 2
+    full = stems.borrow(own, (BorrowedRoot("קרב", BORROW_LANE, "قرب"),
+        BorrowedRoot("דלל", BORROW_FRIEDMAN, "דלל"), BorrowedRoot("ד̇לל", BORROW_FRIEDMAN, "ד̇לל")), limit=4)
+    assert {c.root_id for c in full.cards} == {ROOT_NONE, ROOT_ONE, ROOT_DLL, ROOT_DHLL}
+    assert not full.more_cards
 
 
 def test_a_borrowed_card_opens_on_the_stem_the_word_s_shape_gives(stems):
-    """Owner, 2026-11-11: אסתקר reached קרר and its card opened on stem I. The word's shape (stem X:
+    """אסתקר reached קרר and its card opened on stem I. The word's shape (stem X:
     אסת + the root) opens the borrowed card on that stem's paragraph, the stem marked; a word no
     listed stem holds, or several do, opens the whole entry."""
     root = (BorrowedRoot("דלל", BORROW_LANE, "دلل"),)
@@ -784,7 +896,7 @@ def test_a_borrowed_card_opens_on_the_stem_the_word_s_shape_gives(stems):
 
 
 def test_a_borrowed_card_the_word_fits_no_stem_of_shows_the_nouns_first(tmp_path):
-    """אלחרוף (owner, 2026-11-11): Lane gives حرف; Blau's entry חרף opens with its stem II verb and
+    """אלחרוף: Lane gives حرف; Blau's entry חרף opens with its stem II verb and
     then the noun sub-entry ("letter", pl. חרוף). The word fits no listed stem, so the senses outside
     the stem paragraphs come first; a word that fits the stem still opens on it."""
     data = dictionary()
@@ -797,7 +909,10 @@ def test_a_borrowed_card_the_word_fits_no_stem_of_shows_the_nouns_first(tmp_path
     }])
     svc = BlauService(str(_build(tmp_path, data)))
     root = (BorrowedRoot("חרף", BORROW_LANE, "حرف"),)
-    noun = svc.borrow(svc.lookup("אלחרוף"), root)
+    plural = svc.borrow(svc.lookup("אלחרוף"), root)
+    assert _cards(plural) == [("blau-e-000160", 0, ["blau-f-000161", "blau-f-000162"])] and not plural.cards[0].borrowed, (
+        "since 2026-11-14 the plural reaches its noun by itself (shared.blau_normalize.plural_analyses)")
+    noun = svc.borrow(svc.lookup("אלחרפיה"), root)   # no plural's pattern: the borrowed root, nouns first
     assert _cards(noun) == [("blau-e-000160", 0, ["blau-f-000161", "blau-f-000162", "blau-f-000160"])]
     verb = svc.borrow(svc.lookup("תחריף"), root)
     assert _cards(verb) == [("blau-e-000160", 2, ["blau-f-000160"])], "a form of II opens on II"
@@ -808,10 +923,11 @@ def test_a_borrowed_card_the_word_fits_no_stem_of_shows_the_nouns_first(tmp_path
 
 
 def test_blau_s_own_cards_put_the_entry_another_dictionary_names_first(tmp_path):
-    """ויכון (owner, 2026-11-11): יכון is printed under כ̇לו (in a phrase) and under כון (the verb), one
-    kind of hit each, so the book's order put כ̇לו first. Lane names כון: its card comes first."""
+    """ויכון: יכון printed under two entries, one kind of hit each, so the book's
+    order put the first first. Lane names כון: its card comes first. (The reported case was כ̇לו, which
+    prints יכון only in a phrase; such a hit is no card since 2026-11-12. Here both carry the root.)"""
     data = dictionary()
-    for rid, name, arabic, gloss in (("blau-e-000130", "כ̇לו", "خلو", "to make"), ("blau-e-000131", "כון", "كون", "to be")):
+    for rid, name, arabic, gloss in (("blau-e-000130", "כנן", "كنن", "to hide"), ("blau-e-000131", "כון", "كون", "to be")):
         data[f"{name} ({arabic})"] = _root(f"{name} ({arabic})", rid, [name], [arabic], stems=[{
             "id": rid.replace("-e-", "-st-"), "stem_head": {},
             "forms": [_form(rid.replace("-e-", "-f-"), [_seg(f"'{gloss}'", "definition_english", font="English-TNR",
@@ -824,12 +940,34 @@ def test_blau_s_own_cards_put_the_entry_another_dictionary_names_first(tmp_path)
     assert svc.borrow(own, (BorrowedRoot("קרב", BORROW_LANE, "قرب"),)).cards == own.cards, "named by none: as it was"
 
 
-def test_the_entry_another_dictionary_names_comes_first_whichever_key_reached_it(tmp_path):
-    """ואלקול (owner, 2026-11-11): with the conjunction peeled, אלקול is a variant printed under טלע;
-    with the article peeled too, קול is the entry קול. The key order put טלע first; Friedman and Lane
-    both name קול, and its card now comes first. Named by none, the key order stays."""
+def test_a_word_printed_beside_an_entry_s_verb_is_no_card_of_that_entry(tmp_path):
+    """אללה reached אכ̇ד̇, חצל, כ̇רג̇ and עמל, which print "לה" after their verb
+    ("אכ̇ד̇ לה"); ואלסלאם reached כ̇צץ. A form under an entry counts only where the word carries the
+    entry's root (``shared.ja_roots.carries_root``): a form of the root does (יכון of כון), a word
+    beside its verb does not (יכון under כ̇לו); the entry's own name always does."""
     data = dictionary()
-    for rid, name, arabic, gloss, extra in (("blau-e-000150", "טלע", "طلع", "to rise", "אלקול"),
+    for rid, name, arabic, kind in (("blau-e-000130", "כ̇לו", "خلو", "headword_ja"),
+                                    ("blau-e-000131", "כון", "كون", "headword_ja"),
+                                    ("blau-e-000132", "עמל", "عمل", "variant_ja")):
+        data[f"{name} ({arabic})"] = _root(f"{name} ({arabic})", rid, [name], [arabic], stems=[{
+            "id": rid.replace("-e-", "-st-"), "stem_head": {},
+            "forms": [_form(rid.replace("-e-", "-f-"), [_seg("'gloss'", "definition_english", font="English-TNR",
+                                                             language="English"),
+                                                        _ja("יכון" if kind == "headword_ja" else "לה", kind)])]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    assert [c.root_id for c in svc.lookup("יכון").cards] == ["blau-e-000131"], "כ̇לו prints it beside its verb"
+    assert [c.root_id for c in svc.lookup("לה").cards] == [], "עמל prints it after its verb ('עמל לה')"
+    assert [c.root_id for c in svc.lookup("כ̇לו").cards] == ["blau-e-000130"], "the entry's own name"
+
+
+def test_the_entry_another_dictionary_names_comes_first_whichever_key_reached_it(tmp_path):
+    """ואלקול: with the conjunction peeled, אלקול is a variant printed under another
+    entry (the reported one was טלע, which prints it beside its verb: no card since 2026-11-12; here קלל,
+    whose root it carries); with the article peeled too, קול is the entry קול. The key order put the
+    other first; Friedman and Lane both name קול, and its card now comes first. Named by none, the
+    key order stays."""
+    data = dictionary()
+    for rid, name, arabic, gloss, extra in (("blau-e-000150", "קלל", "قلل", "to lessen", "אלקול"),
                                            ("blau-e-000151", "קול", "قول", "to say", None)):
         segments = [_seg(f"'{gloss}'", "definition_english", font="English-TNR", language="English")]
         if extra:
@@ -890,7 +1028,7 @@ def _verb(result):
 
 
 def test_no_card_is_found_by_verb_form_unless_its_kind_is_switched_on(stems, monkeypatch):
-    """The graded sample (owner, 2026-11-11): A, B and D on by default, A and D opened on the stem;
+    """The graded sample: A, B and D on by default, A and D opened on the stem;
     a switch set empty turns them off, and then the index is not even built."""
     called = []
     with monkeypatch.context() as m:
@@ -922,7 +1060,7 @@ def test_the_switches_are_read_on_every_lookup(stems, monkeypatch):
 
 
 def test_beside_the_word_s_own_cards_the_verb_forms_are_suggestions(tmp_path):
-    """Owner, 2026-11-11 (the graded sample): beside an entry the word itself reaches, a card found by
+    """The graded sample: beside an entry the word itself reaches, a card found by
     verb form was mostly wrong; its root is a suggestion at the top instead ("קרב V", a press looks
     it up). A suggested root another dictionary also gives becomes a borrowed card, and no chip."""
     data = _with_stems()
@@ -953,7 +1091,7 @@ def test_cards_found_by_verb_form_are_bounded_and_the_rest_counted(stems, monkey
 
 def test_no_card_by_verb_form_for_a_typed_stem_or_an_arabic_word(stems):
     assert stems.lookup("דלל X", verb_forms=ALL_KINDS).cards == stems.lookup("דלל X").cards
-    assert stems.lookup("استدل", verb_forms=ALL_KINDS).cards == ()
+    assert stems.lookup("استدل", verb_forms=ALL_KINDS).cards, "Arabic gets the same lexical analyses"
 
 
 def test_a_card_found_by_verb_form_names_the_dictionaries_that_also_give_its_root(stems):
@@ -964,3 +1102,99 @@ def test_a_card_found_by_verb_form_names_the_dictionaries_that_also_give_its_roo
     assert [(c.root_id, c.kind, c.borrowed) for c in result.cards] == [
         (ROOT_DLL, "B", ()), (ROOT_DHLL, "B", ((BORROW_LANE, "ذلل"),)), (ROOT_ONE, "", ((BORROW_FRIEDMAN, "קרב"),))]
     assert stems.borrow(found, (BorrowedRoot("ד̇לל", BORROW_LANE, "ذلل"),)).cards[1].verb_form == "ידלל (ד̇לל I, IV)"
+
+
+def _reading_dictionary():
+    """An entry קול with a stem I paragraph and a noun sub-entry, and an entry קצי that lists stem III."""
+    data = dictionary()
+    data["קול (قول)"] = _root("קול (قول)", "blau-e-000170", ["קול"], ["قول"], stems=[
+        {"id": "blau-st-000170", "stem_head": _head("I", "I"), "forms": [_sense("blau-f-000170", "to say")]},
+    ], sub_entries=[{
+        "id": "blau-se-000170", "name_ja": ["אקאויל"], "arabic_spelling": ["أقاويل"],
+        "stems": [{"id": "blau-st-000171", "stem_head": {}, "forms": [_sense("blau-f-000171", "sayings")]}],
+    }])
+    data["קצ̇י (قضى)"] = _root("קצ̇י (قضى)", "blau-e-000171", ["קצ̇י"], ["قضى"], stems=[
+        {"id": "blau-st-000172", "stem_head": _head("III", "III"), "forms": [_sense("blau-f-000172", "to sue")]},
+    ])
+    return data
+
+
+def test_a_word_with_the_article_reads_as_a_noun(tmp_path):
+    """A verb's senses came above the noun's for a word with the article (אלקול), and
+    אלקאצ̇י was read as the perfect of stem III. With the article peeled, an entry reached by its name
+    shows the senses outside its stem paragraphs first, and a stem is reached only as a participle or
+    a verbal noun."""
+    svc = BlauService(str(_build(tmp_path, _reading_dictionary())))
+    noun = svc.lookup("אלקול")
+    assert _cards(noun) == [("blau-e-000170", 0, ["blau-f-000171", "blau-f-000170"])], "the noun first"
+    assert _cards(svc.lookup("קול")) == [("blau-e-000170", 0, ["blau-f-000170", "blau-f-000171"])], "the book's order"
+    assert _verb(svc.lookup("קאצי", verb_forms=ALL_KINDS)) == [("blau-e-000171", "A", "קאצי (קצ̇י III)", 0)]
+    assert svc.lookup("אלקאצי", verb_forms=ALL_KINDS).cards == (), "no perfect with the article"
+    assert _verb(svc.lookup("אלמקאצי", verb_forms=ALL_KINDS)) == [("blau-e-000171", "D", "מקאצי (קצ̇י III)", 0)], (
+        "its participle still reaches it")
+    svc.close()
+
+
+def test_the_senses_of_a_sub_entry_are_headed_by_its_name(tmp_path):
+    """קרצת's card gave 'nettle' and 'pulp', senses of the sub-entry קריץ, as the
+    verb's. Where a run of senses under a sub-entry begins its name heads it (the site's head); where
+    the entry's own senses come back after one, the entry's name; a card scoped to the sub-entry has
+    no head."""
+    svc = BlauService(str(_build(tmp_path, _reading_dictionary())))
+
+    def heads(result):
+        return [[(s.form_id, s.sub_entry) for s in c.senses] for c in result.cards]
+
+    assert heads(svc.lookup("קול")) == [[("blau-f-000170", ""), ("blau-f-000171", "אקאויל")]]
+    assert heads(svc.lookup("אלקול")) == [[("blau-f-000171", "אקאויל"), ("blau-f-000170", "קול")]]
+    assert heads(svc.lookup("אקאויל")) == [[("blau-f-000171", "")]], "the card is the sub-entry's"
+    svc.close()
+
+
+def test_a_subentry_plural_keeps_its_own_gloss_and_explicit_alias(tmp_path):
+    data = dictionary()
+    first = next(iter(data.values()))
+    sub = first['sub_entries'][0]
+    sub['name_ja'] = ['רשות']
+    sub['arabic_spelling'] = []
+    sub['stems'][0]['forms'] = [_form('blau-f-000003', [
+        _ja('רשואת', 'headword_ja'), _seg('synthetic noun sense', 'definition_hebrew'),
+        _ja(' = مخزن', 'freeform_note')])]
+    first['sub_entries'].append({
+        'id': 'blau-se-000099', 'name_ja': ['מכאזן'], 'arabic_spelling': [],
+        'stems': [{'id': 'blau-st-000099', 'stem_head': {}, 'forms': [
+            _form('blau-f-000099', [_seg('synthetic warehouse', 'definition_hebrew'),
+                                  _ja(' = مخزن', 'freeform_note')])]}]})
+    service = BlauService(str(_build(tmp_path, data)))
+    for query in ('רשואת',):
+        result = service.lookup(query)
+        own = [sense for card in result.cards for sense in card.senses if sense.form_id == 'blau-f-000003']
+        assert own and own[0].gloss_he == 'synthetic noun sense'
+    result = service.lookup('מכזן')
+    assert any(s.form_id == 'blau-f-000099' and s.gloss_he == 'synthetic warehouse'
+               for c in result.cards for s in c.senses)
+    assert not any(s.form_id == 'blau-f-000003' for c in result.cards for s in c.senses)
+    service.close()
+
+
+def test_an_article_keeps_the_plural_participle_analysis(tmp_path):
+    data = dictionary()
+    data['כתב'] = _root('כתב', 'blau-e-000901', ['כתב'], [], stems=[{
+        'id': 'blau-st-000901', 'stem_head': {'binyan': 'I'},
+        'forms': [_form('blau-f-000901', [_seg('synthetic verb', 'definition_hebrew')])],
+    }])
+    svc = BlauService(str(_build(tmp_path, data)))
+    for word in ('כאתבין', 'אלכאתבין'):
+        assert svc.lookup(word, verb_forms=frozenset('ABD')).cards[0].root_id == 'blau-e-000901'
+    assert not svc.lookup('אלכאתבין', verb_forms=frozenset()).cards
+    svc.close()
+
+
+def test_a_word_that_reaches_nothing_else_keeps_its_verb_under_a_pronoun(stems, monkeypatch):
+    """ידללהא is ידלל with a pronoun: a clitic-peeled form of stem I, II or IV (kind E) is not shown
+    beside other entries, and is the only thing this word reaches."""
+    monkeypatch.delenv(blau_service.ENV_VERB_FORM_KINDS)   # the default kinds: A, B, D
+    assert [(root, kind) for root, kind, _form, _stem in _verb(stems.lookup("ידללהא"))] == [(ROOT_DLL, "E"), (ROOT_DHLL, "E")]
+    monkeypatch.setenv(blau_service.ENV_VERB_FORM_KINDS, "A,D")
+    assert stems.lookup("ידללהא").cards == (), "with kind B switched off, not these either"
+

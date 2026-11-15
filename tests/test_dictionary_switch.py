@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """shared/dictionary_switch.py: a dictionary's switch is on, off, or ``editors`` (a preview for a
-signed-in editor or admin before release; owner, 2026-11-11), and the three services read it the
+signed-in editor or admin before release), and the three services read it the
 same way."""
 from __future__ import annotations
 

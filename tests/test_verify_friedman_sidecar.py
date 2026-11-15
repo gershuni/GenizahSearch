@@ -81,3 +81,12 @@ def test_the_gate_fails_on_counts_tampering_versions_and_a_missing_file(sidecar,
     assert gate.main(["--db", str(tmp_path / "absent.db"), "--expect-units", "1", "--expect-index-rows", "1",
                       "--expect-tokens", "1"]) == 1
     assert "REFUSED" in capsys.readouterr().err, "a missing file fails, never skips"
+
+
+@pytest.mark.parametrize("table", ["unit_forms", "spelling_keys"])
+def test_the_gate_rejects_missing_derived_lexical_relationships(sidecar, table):
+    path, units, rows, tokens = sidecar
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"DELETE FROM {table}")
+    with pytest.raises(ValueError, match="aliases|spelling"):
+        gate.verify(path, units, rows, tokens)

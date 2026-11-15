@@ -14,7 +14,8 @@ from types import SimpleNamespace
 
 from shared import blau_service
 from shared.ja_roots import (
-    BORROW_BLAU, BORROW_FRIEDMAN, BORROW_LANE, STEM_NUMERALS, BorrowedRoot, borrowed_roots, dot_pattern, dots_agree,
+    BORROW_BLAU, BORROW_FRIEDMAN, BORROW_LANE, STEM_NUMERALS, BorrowedRoot, borrowed_roots, carries_root, dot_pattern,
+    dots_agree, strong_letters,
     head_begins_with, ja_root_of_arabic, parse_stem, root_and_stem, stem_label, stem_numbers, stem_query, with_final_letters,
 )
 
@@ -71,7 +72,7 @@ def test_the_dot_however_it_is_written_and_blau_still_exports_it():
     assert blau_service.dot_pattern is dot_pattern and blau_service.DOT_LETTERS == frozenset("גדטצתכ")
 
 
-# The roots Blau's tab borrows from Friedman and Lane (owner, 2026-11-11).
+# The roots Blau's tab borrows from Friedman and Lane.
 
 @pytest.mark.parametrize("name, root_key, ja", [
     ("قول", "قWل", "קול"), ("سلم", "سلم", "סלם"),
@@ -120,7 +121,7 @@ def test_borrowed_roots_are_friedmans_in_its_order_then_lanes_first():
         BorrowedRoot("ג̇יא", BORROW_FRIEDMAN, "יגי (ג̇יא)"),     # the word, and its entry's root
         BorrowedRoot("סלאם", BORROW_FRIEDMAN, "סלאם"),          # the word is the root: the root alone
         BorrowedRoot("ג̇לו", BORROW_FRIEDMAN, "גאל (ג̇לו)"),
-        BorrowedRoot("קול", BORROW_LANE, "قول"),                 # Lane's first root only
+        BorrowedRoot("קול", BORROW_LANE, "قول", ("script_reading", "root")),                 # Lane's first root only
     )
 
 
@@ -138,7 +139,7 @@ def _blau(*cards, stem=0):
 
 
 def test_friedman_s_tab_borrows_blau_s_own_entries_then_lane_s_root():
-    """Owner, 2026-11-11: Friedman's tab borrows from Blau and Lane. Blau's OWN cards only (a card Blau
+    """Friedman's tab borrows from Blau and Lane. Blau's OWN cards only (a card Blau
     borrowed came from Friedman or Lane already), by the entry's first printed name; the evidence is
     what Blau matched and the entry, or the entry alone."""
     blau = _blau(("כון", "כון", "יכון", ()), ("ד̇לל | דאלה̈", "ד̇לל", "ד̇לל | דאלה̈", ()),
@@ -146,14 +147,14 @@ def test_friedman_s_tab_borrows_blau_s_own_entries_then_lane_s_root():
     assert borrowed_roots(lane=_lane(("كون", "كWن")), blau=blau) == (
         BorrowedRoot("כון", BORROW_BLAU, "יכון (כון)"),
         BorrowedRoot("ד̇לל", BORROW_BLAU, "ד̇לל | דאלה̈"),
-        BorrowedRoot("כון", BORROW_LANE, "كون"),
+        BorrowedRoot("כון", BORROW_LANE, "كون", ("script_reading", "root")),
     )
     assert borrowed_roots(blau=_blau(("כון", "כון", "כון", ()), stem=1)) == (), "a typed stem borrows nothing"
     assert borrowed_roots(blau=SimpleNamespace(hits=())) == (), "an expression answer has no cards"
 
 
 def test_only_an_entry_the_word_heads_and_the_index_lend_a_friedman_root():
-    """Owner, 2026-11-11: אלעלמא borrowed דרס, חצל and חוז into Blau's tab. Friedman matched עלמא in a
+    """אלעלמא borrowed דרס, חצל and חוז into Blau's tab. Friedman matched עלמא in a
     stem paragraph of דרס ("עِלْמאً"), a sub-entry of חצל and the entry "חוז עِלْמאً": phrases whose
     root is the verb's, the word its complement. Only an entry whose head begins with the word or
     its base form, and the book's index of forms, give the word's root."""
@@ -186,3 +187,16 @@ def test_nothing_is_borrowed_from_a_typed_stem_an_expression_a_root_of_several_w
     assert borrowed_roots(_friedman(("קול ו", "head", "קול ו"), ("", "head", "קול")), None) == ()
     assert borrowed_roots(None, None) == () and borrowed_roots(None, _lane()) == ()
     assert borrowed_roots(None, _lane(("abc", ""))) == (), "a root with no Arabic letter"
+
+
+def test_a_key_carries_a_root_s_strong_letters_in_order():
+    """A form of a root holds the root's letters other than א ו י ה, in order, a
+    doubled letter once (keys: no dots, finals folded); a word printed beside another root's verb
+    ("לה" after אכ̇ד̇, "אלקול" after טלע) does not."""
+    assert strong_letters("קול") == "קל" and strong_letters("מדד") == "מד" and strong_letters("בקעה") == "בקע"
+    assert strong_letters("איה") == "" and strong_letters("אללה אללה") == "ל" and strong_letters("") == ""
+    for key, root in (("רבאטא", "רבט"), ("אלעאלמונ", "עלמ"), ("יכונ", "כונ"), ("ימד", "מדד"), ("אזדחמ", "זחמ"),
+                      ("אתצל", "וצל"), ("כל", "איה"), ("ואחד", "וחד")):
+        assert carries_root(key, root), (key, root)
+    for key, root in (("לה", "אכד"), ("אלקול", "טלע"), ("מאל", "חצל"), ("נפסה", "תרכ"), ("לבק", "בקל"), ("", "קול")):
+        assert not carries_root(key, root), (key, root)

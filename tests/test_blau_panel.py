@@ -190,6 +190,13 @@ def test_a_lookup_opens_on_the_reader_s_tab_while_it_has_an_answer():
     none = {blau_panel.BLAU_TAB: False, blau_panel.LANE_TAB: False}
     assert blau_panel.pick_tab(tabs, none, "lane") == "lane", "nothing anywhere: the reader's tab stays"
     assert blau_panel.pick_tab(tabs, none) == "blau" and blau_panel.pick_tab(tabs, none, "other") == "blau"
+    # The closest answer opens first, the first of equals; an action inside a tab
+    # still stays on it; a tab with nothing is never chosen for its closeness.
+    assert blau_panel.pick_tab(tabs, both, close={"blau": 2, "lane": 0}) == "lane"
+    assert blau_panel.pick_tab(tabs, both, close={"blau": 1, "lane": 1}) == "blau"
+    assert blau_panel.pick_tab(tabs, both, "blau", close={"blau": 3, "lane": 0}) == "blau"
+    assert blau_panel.pick_tab(tabs, lane_only, close={"blau": 0, "lane": 4}) == "lane"
+    assert blau_panel.pick_tab(tabs, both, close={"blau": None, "lane": None}) == "blau"
     assert blau_panel.pick_tab(["lane"], both, "blau") == "lane", "a choice of a tab not shown is ignored"
 
 
@@ -341,8 +348,22 @@ def test_esc_closes_the_panel_from_anywhere_but_a_dialog():
 def test_a_selection_is_looked_up_by_its_words():
     assert "lookUp(pop, picked, 'selection');" in JS
     assert "dispatch(pop, 'blau-lookup', { word: picked.text, how: how });" in JS
-    assert "SELECTION_WORDS = 6" in JS and "if (/[א-ת]/.test(part)) words.push(part);" in JS
+    assert "words.length < SELECTION_WORDS" not in JS and "if (part) words.push(part);" in JS
+    assert "var part = cleanWord(parts[i]);" in JS
     assert "how: viaAlt ? 'alt' : viaKey ? 'key' : 'word'" in JS
+
+
+def test_words_dragged_over_with_the_switch_on_are_looked_up_together():
+    """With the switch on, selecting several words looked up only the word under
+    the pointer, where the key looked up the selection. The drag ends in a click; a selection there
+    (in the switched-on pane, a single click's) is the lookup, before the word under the pointer."""
+    click = JS[JS.index("document.addEventListener('click'"):]
+    drag = ("if (!viaKey && event.detail <= 1 && target && paneOf(target, false) && "
+            "lookUpSelection(pop, false)) return;")
+    assert drag in click
+    assert click.index(drag) < click.index("var caret = pane ? caretAt(event.clientX, event.clientY) : null;")
+    # Only the switched-on pane (`paneOf(..., false)`): with the switch off a selection is the key's.
+    assert "return el.closest(PANE) || (viaKey ? el.closest(KEY_PANE) : null);" in JS
 
 
 def test_a_phone_gets_a_look_up_chip_for_selected_words():
@@ -373,7 +394,8 @@ def test_how_a_lookup_started_is_counted():
     assert blau_panel.lookup_event(True, empty_lookup("x"), None, "key")["how"] == "box"
     assert blau_panel.lookup_event(False, empty_lookup("x"), None, "nonsense")["how"] == "word"
     browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
-    assert "_blau_start(word, False, blau_panel.lookup_how(e.args), stems=False)" in browse
+    assert ("_blau_start(word, False, blau_panel.lookup_how(e.args), stems=False,\n"
+            "                                        beside=blau_panel.lookup_context(e.args))") in browse
     assert "_blau_start(text, True, tab=tab, stems=False)" in browse, "the gap control keeps an expression one"
     assert "lane_word = (root_and_stem(word)[0] if stems else '') or word" in browse, "Lane reads the whole selection"
 
@@ -390,7 +412,7 @@ def test_the_switch_s_tooltip_names_the_key_in_both_languages():
 
 
 def test_the_box_and_the_stem_beside_it_make_one_query():
-    """Owner, 2026-11-11: a field for the stem beside the box; the typed shortcut still works."""
+    """A field for the stem beside the box; the typed shortcut still works."""
     assert blau_panel.box_query("דלל", 10) == "דלל X" and blau_panel.box_query(" ד'לל ", 4) == "ד'לל IV"
     assert blau_panel.box_query("דלל", None) == "דלל" and blau_panel.box_query("דלל", 0) == "דלל"
     assert blau_panel.box_query("דלל IV", 10) == "דלל IV", "a stem typed in the box wins over the selector"
@@ -405,5 +427,107 @@ def test_the_box_and_the_stem_beside_it_make_one_query():
     assert "popup-content-class={STEM_MENU_CLASS}" in PANEL_SRC
     assert f"var STEM_MENU = '{blau_panel.STEM_MENU_CLASS}';" in JS
     click = JS[JS.index("document.addEventListener('click'"):]
-    menu = click.index("event.target.closest('.' + STEM_MENU)) return;")
+    menu = click.index("event.target.closest('.dict-gap-menu')")
     assert menu < click.index("if (open) dispatch(pop, 'blau-close');")
+
+
+def test_a_clicked_word_comes_with_the_words_beside_it():
+    """The script sends the words beside a clicked word (at most two a side, not
+    across a sentence's end), read from the text nodes with a space where a line breaks and nothing of
+    the line numbers' gutter, before the word is marked; the page takes words with a Hebrew letter."""
+    from shared.ja_expression import MAX_CONTEXT_WORDS
+
+    assert f"var CONTEXT_WORDS = {MAX_CONTEXT_WORDS};" in JS
+    assert "var GUTTER = 'line-number-gutter';" in JS
+    # Reading boundaries, gutter exclusion and inline spans are executed under Node
+    # in test_blau_lookup_js.py; these assertions cover the event wiring only.
+    click = JS[JS.index("document.addEventListener('click'"):]
+    assert click.index("var beside = wordsBeside(word);") < click.index("markWord(word)")
+    assert "before: beside.before, after: beside.after });" in click
+    assert "SENTENCE_END = /[.:׃!?…]$/" in JS
+    # A word broken inside by a gap ("מ].נ") ends the words beside it, on either side.
+    assert "if (w === null) break;" in JS and "if (a === null) break;" in JS
+    args = {"detail": json.dumps({"word": "אללה", "before": ["כתאבי", "אטאל", "x", "12"],
+                                  "after": ["בקאך", "ואדאם", "סלאמתך"]})}
+    assert blau_panel.lookup_context(args) == (("כתאבי", "אטאל"), ("בקאך", "ואדאם", "סלאמתך"))
+    marked = {"before": ["וסלאמת[ך"], "after": ["וברכ[תך]"]}
+    assert blau_panel.lookup_context(marked) == (("וסלאמת[ך",), ("וברכ[תך]",))
+    long_before = {"detail": json.dumps({"before": ["אחד", "שני", "שלישי"], "after": "nope"})}
+    assert blau_panel.lookup_context(long_before) == (("אחד", "שני", "שלישי"), ()), "up to four neighbouring words"
+    for bad in (None, "x", {"detail": "{"}, {"detail": json.dumps({"before": ["a b", "א" * 41, 3, "מ].נ"]})}):
+        assert blau_panel.lookup_context(bad) == ((), ()), bad
+
+
+def test_the_panel_opens_on_the_answer_closest_to_the_word():
+    """Priority to the closest match, not only to an expression with the words beside
+    it. An answer's closeness: that expression; the word itself; its base form (a clitic peeled); a
+    guessed root (another dictionary's, a verb form, Lane's reading); only quotations. Spelled without
+    the word's dot, half a step further."""
+    from dataclasses import replace
+
+    from shared.arabic_service import LaneEntry, LaneLookup, LaneReading, LaneRoot
+    from shared.blau_service import BlauCard, BlauExpression, BlauLookup
+    from shared.friedman_service import FriedmanLookup, FriedmanMatch, FriedmanUnit
+
+    card = BlauCard(root_id="e1", name="קול", arabic="", page=1, url="u", candidate="קול", matched_key="קול",
+                    matched_kind="root", sub_entry="", via="", senses=(), more_senses=0)
+    blau = BlauLookup(word="קול", key="קול", candidates=("קול",), cards=(card,), more_cards=0, examples=(),
+                      more_examples=0)
+    close = blau_panel.closeness
+    assert close(blau) == blau_panel.CLOSE_WORD
+    assert close(replace(blau, key="אלקול")) == blau_panel.CLOSE_BASE
+    assert close(replace(blau, cards=(replace(card, dot_mismatch=True),))) == blau_panel.CLOSE_WORD + 0.5
+    assert close(replace(blau, cards=(replace(card, borrowed=(("lane", "قول"),)),))) == blau_panel.CLOSE_GUESS
+    assert close(replace(blau, cards=(replace(card, verb_form="קאל (קול I)"),))) == blau_panel.CLOSE_GUESS
+    assert close(replace(blau, cards=(replace(card, verb_form="x"), card))) == blau_panel.CLOSE_WORD, "its closest card"
+    from shared.blau_service import BlauExpressionHit
+    from shared.ja_expression import ExpressionPlace
+
+    named = BlauExpressionHit("e2", "אטאל אללה", "", 1, "u", "", (ExpressionPlace("form", 0, (), (0, 1), ()),), 1)
+    expression = BlauExpression("אטאל אללה", ("אטאל", "אללה"), (), 0, (named,), False)
+    assert close(replace(blau, context=(expression,))) == blau_panel.CLOSE_CONTEXT
+    # A quotation co-occurrence stays available but cannot displace a lexical match.
+    cited = replace(expression, hits=(replace(named, places=(ExpressionPlace("citation", 0, (), (0, 2), ()),)),))
+    assert replace(blau, context=(cited,)).context_quoted and not replace(blau, context=(expression,)).context_quoted
+    assert close(replace(blau, context=(cited,))) == blau_panel.CLOSE_WORD
+    assert close(replace(blau, cards=(replace(card, dot_mismatch=True),), context=(cited,))) \
+        == blau_panel.CLOSE_WORD + .5 < blau_panel.CLOSE_QUOTED
+    assert close(replace(blau, key="אלקול", context=(cited,))) == blau_panel.CLOSE_BASE
+    assert close(replace(blau, cards=(), context=(cited,))) == blau_panel.CLOSE_QUOTED
+    from shared.ja_expression import ExpressionComponent
+    inferred_place = replace(cited.hits[0].places[0], components=(
+        ExpressionComponent('query', 'key', 'printed', '@root:1', 'inflection'),))
+    inferred = replace(cited, hits=(replace(named, places=(inferred_place,)),))
+    assert close(replace(blau, cards=(), context=(inferred,))) == blau_panel.CLOSE_QUOTED
+    assert close(replace(blau, cards=(replace(card, analyses=(('source_suffix',),)),))) > blau_panel.CLOSE_BASE
+    assert close(expression) == blau_panel.CLOSE_WORD - 0.5, "an expression in a head precedes quotation co-occurrence"
+    assert close(replace(blau, cards=())) is None and close(None) is None
+    unit = FriedmanUnit("f1", "entry", "ק", None, "קול", "קול", "קול", "קול", "", "", "", "1", "u", (), (), 0)
+    match = FriedmanMatch(unit, "head", "קול", None, (), 0)
+    friedman = FriedmanLookup("קול", "קול", ("קול",), (match,), False, "s", "c")
+    assert close(friedman) == blau_panel.CLOSE_WORD
+    for via, level in (("stem", blau_panel.CLOSE_BASE), ("index", blau_panel.CLOSE_BASE),
+                       ("borrowed", blau_panel.CLOSE_GUESS), ("verb_form", blau_panel.CLOSE_GUESS)):
+        assert close(replace(friedman, matches=(replace(match, via=via), match))) == level, "by its first match"
+    entry = LaneEntry("l1", "قول", 1, "t", False, "u", matched=True)
+    lane = LaneLookup("קול", "ja", (LaneReading("قول", "قول", 9),), (LaneRoot("qwl", "قول", 1, "u", (entry,), 0),))
+    assert close(lane) == blau_panel.CLOSE_WORD + 0.75
+    lane_guess = replace(lane, roots=(replace(lane.roots[0], entries=(replace(entry, matched=False),)),))
+    assert close(lane_guess) == blau_panel.CLOSE_GUESS + 0.5
+    # The word itself in Friedman's head beats Blau's root borrowed from Lane; equals: the first tab.
+    tabs, found = ["blau", "friedman", "lane"], {"blau": True, "friedman": True, "lane": True}
+    borrowed = replace(blau, cards=(replace(card, borrowed=(("lane", "قول"),)),))
+    assert blau_panel.pick_tab(tabs, found, close={"blau": close(borrowed), "friedman": close(friedman),
+                                                   "lane": close(lane)}) == "friedman"
+    assert blau_panel.pick_tab(tabs, found, close={"blau": close(blau), "friedman": close(friedman),
+                                                   "lane": close(lane)}) == "blau"
+
+
+def test_nothing_in_the_dictionary_panel_is_italic():
+    """Friedman's printed words carry Arabic vowel marks (בَקאَהُ), and an italic
+    face drew them as boxes; the panel's rules never set italic."""
+    import re
+
+    rules = re.findall(r"([^{}]*\.gs-blau[^{}]*)\{([^}]*)\}", CSS)
+    assert rules
+    assert [sel.strip() for sel, body in rules if "italic" in body] == []

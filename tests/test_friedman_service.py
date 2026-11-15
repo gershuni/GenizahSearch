@@ -35,7 +35,7 @@ def unit(uid, kind, head, keys, dotted=(), parent=None, binyan=None, examples=()
 
 
 def units_result():
-    return {"recovery_version": 4, "units": [
+    return {"recovery_version": 5, "units": [
         unit("f000001", "entry", "אבד", ["אבד"], ["אבד"], examples=[("לא אבד מן", "'no escape'", "(ח1, שורה 2)")]),
         unit("f000002", "subentry", "לא אבד", ["לא אבד"], parent="f000001"),
         unit("f000003", "binyan", None, [], parent="f000001", binyan="V"),
@@ -48,6 +48,49 @@ def units_result():
         unit("f000007", "subentry", "לִאַ̇גְלִ דַ̇לִךְ/לִאַ̇גְלִ פִעְלٍ", ["לאגל דלך", "לאגל פעל"], parent="f000004"),
         unit("f000008", "subentry", "מא (ולא רק לא) בד ממא", ["מא בד ממא"], parent="f000005"),  # a note inside the head
     ]}
+
+
+def test_subject_marked_verb_precedes_feminine_and_prefix_guesses(tmp_path, monkeypatch):
+    path = tmp_path / 'finite.db'
+    units = [unit('f000001', 'entry', 'תבת', ['תבת'], ['תבת'], binyan='I'),
+             unit('f000002', 'entry', 'כתבה', ['כתבה'], ['כתבה']),
+             unit('f000003', 'entry', 'כתב', ['כתב'], ['כתב'], binyan='I'),
+             unit('f000004', 'entry', 'וקף', ['וקפ'], ['וקף'], binyan='I')]
+    write_sidecar({'recovery_version': 5, 'units': units}, {'index_version': 1, 'rows': []},
+                  {'units_sha256': 'u', 'index_sha256': 'i', 'manifest_sha256': 'm'}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, '1')
+    svc = FriedmanService(str(path))
+    for query, expected in [('כתבת', 'f000003'), ('ונקף', 'f000004')]:
+        answer = svc.lookup(query, verb_forms=frozenset('ABD'))
+        assert answer.matches[0].unit.id == expected
+        assert answer.matches[0].via == fs.VIA_VERB_FORM
+    assert {m.unit.id for m in svc.lookup('כתבת', verb_forms=frozenset()).matches} == {'f000001', 'f000002'}
+    assert svc.lookup('כתבה').matches[0].unit.id == 'f000002'
+    svc.close()
+
+
+def test_construction_parent_is_its_root_and_current_numbered_paragraph(tmp_path, monkeypatch):
+    path = tmp_path / 'frames.db'
+    rows = [unit('f000001', 'entry', 'וקף אליה', ['וקפ'], ['וקף'], binyan='I'),
+            unit('f000002', 'subentry', 'עלי', ['עלי'], parent='f000001'),
+            unit('f000003', 'binyan', 'לה', ['לה'], parent='f000001', binyan='II'),
+            unit('f000004', 'subentry', 'עליה', ['עליה'], parent='f000001'),
+            unit('f000005', 'binyan', None, [], parent='f000001', binyan='IV/II'),
+            unit('f000006', 'subentry', 'מנה', ['מנה'], parent='f000001'),
+            unit('f000007', 'entry', 'כתב', ['כתב'], ['כתב']),
+            unit('f000008', 'subentry', 'כתבה', ['כתבה'], parent='f000007')]
+    rows[1]['gloss']['references'] = 'Synthetic dictionary reference, p. 42'
+    write_sidecar({'recovery_version': 5, 'units': rows}, {'index_version': 1, 'rows': []},
+                  {'units_sha256': 'u', 'index_sha256': 'i', 'manifest_sha256': 'm'}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, '1')
+    svc = FriedmanService(str(path))
+    assert [(svc.unit(uid).entry_root, svc.unit(uid).governing_binyan) for uid in
+            ('f000002', 'f000004', 'f000006')] == [('וקף', 'I'), ('וקף', 'II'), ('וקף', 'IV/II')]
+    assert svc.unit('f000008').governing_binyan == ''
+    hit = next(h for h in svc.expression('ואקפא עלי').hits if h.unit.id == 'f000002')
+    assert hit.unit.governing_binyan == 'I' and hit.unit.references == rows[1]['gloss']['references']
+    assert hit.parent.head_text == 'וקף אליה', 'preserve the printed first expression'
+    svc.close()
 
 
 def index_result():
@@ -78,7 +121,7 @@ def test_switch_defaults_off_and_lookup_is_empty_but_safe(sidecar, monkeypatch):
 
 
 def test_an_editors_switch_serves_editors_only_and_the_lookup_answers(sidecar, monkeypatch):
-    """FRIEDMAN_DICTIONARY_ENABLED=editors: a preview for editors before release (owner, 2026-11-11)."""
+    """FRIEDMAN_DICTIONARY_ENABLED=editors: a preview for editors before release."""
     monkeypatch.setenv(fs.ENV_ENABLED, "editors")
     service = FriedmanService(str(sidecar))
     assert not fs.friedman_enabled() and not service.is_available()
@@ -166,7 +209,7 @@ def test_expression_clitic_alternatives_on_either_side_and_repeated_words(sideca
     service = FriedmanService(str(sidecar))
     typed_with_clitic = service.expression("ואבד מן", gap=0)
     assert _places(typed_with_clitic) == [("f000001", fs.SCOPE_QUOTATION, 1, (1, 2), [("אבד", "stem"), ("מן", "word")])]
-    assert typed_with_clitic.candidates[0] == ("ואבד", "אבד")
+    assert typed_with_clitic.candidates[0] == ("ואבד", "אבד", "~ואבד", "~אבד")
     printed_with_clitic = service.expression("עון אללה", gap=0)
     assert _places(printed_with_clitic) == [("f000004", fs.SCOPE_QUOTATION, 1, (0, 1), [("בעון", "stem"), ("אללה", "word")])]
     repeated = service.expression("אללה אללה", gap=0)
@@ -178,7 +221,7 @@ def test_expression_clitic_alternatives_on_either_side_and_repeated_words(sideca
     assert _places(service.expression("לאגל דלך", gap=0)) == [("f000007", fs.SCOPE_HEAD, 0, (0, 1),
                                                               [("לִאַ̇גְלִ", "word"), ("דַ̇לִךְ/לִאַ̇גְלִ", "word")])]
     numbered = service.expression("אללה 12", gap=0)
-    assert not numbered.found and numbered.candidates == (("אללה", "אלל"), ()), \
+    assert not numbered.found and numbered.candidates == (("אללה", "אלל", "~אללה", "~אלל"), ()), \
         "a word without Hebrew letters finds nothing; לה (the article peeled) is too short to be a key"
 
 
@@ -217,15 +260,15 @@ def test_ordered_match_over_keyed_alternatives():
     # A word whose own key restarts the query must not take the earlier path away from its
     # other keys: בהא בהא is בהא then ב (the second word's peeled preposition) (Codex, round 7).
     both = [(pos, key) for pos, key, _ in fs.scope_keys("בהא בהא")]
-    assert both == [(0, "בהא"), (0, "ב"), (1, "בהא"), (1, "ב")]
-    assert fs.ordered_match(both, [{"בהא"}, {"ב"}], 0) == (0, 3)
-    assert fs.scope_keys("בעון אללה 12") == [(0, "בעונ", 0), (0, "עונ", 1), (1, "אללה", 0), (1, "אלל", 1)]
+    assert [(p, k) for p, k in both if not k.startswith("~")] == [(0, "בהא"), (0, "ב"), (1, "בהא"), (1, "ב")]
+    assert tuple(both[i][0] for i in fs.ordered_match(both, [{"בהא"}, {"ב"}], 0)) == (0, 1)
+    assert [r for r in fs.scope_keys("בעון אללה 12") if not r[1].startswith("~")] == [(0, "בעונ", 0), (0, "עונ", 1), (1, "אללה", 0), (1, "אלל", 1)]
     assert fs.word_keys("לה") == ("לה", "ל"), "a word's own key is a key however short; its preposition too"
 
 
 def test_a_note_inside_the_head_is_not_among_its_words(sidecar):
     assert fs.head_scope_text("קצר: מא (א)קצר (ולא רק פי) מעה ") == "קצר: מא (א)קצר מעה (ולא רק פי)", "notes come last"
-    assert fs.scope_keys(fs.head_scope_text("אבד: לא אבד (=לא בד)"))[-2:] == [(3, "לא", 0), (4, "בד", 0)], "a note's words are searchable"
+    assert [r for r in fs.scope_keys(fs.head_scope_text("אבד: לא אבד (=לא בד)")) if not r[1].startswith("~")][-2:] == [(3, "לא", 0), (4, "בד", 0)], "a note's words are searchable"
     service = fs.FriedmanService(str(sidecar))
     hit = next(h for h in service.expression("מא בד ממא", 0).hits if h.unit.id == "f000008")
     place = next(p for p in hit.places if p.scope == fs.SCOPE_HEAD)
@@ -241,7 +284,7 @@ def test_a_note_inside_the_head_is_not_among_its_words(sidecar):
 def test_expression_hits_come_in_tiers_and_function_words_only_stand_together(tmp_path, monkeypatch):
     """Own head first, then units whose head (or entry's head) holds the words, then the rest,
     contiguous before gapped; an expression of function words only shows no gapped stranger."""
-    result = {"recovery_version": 4, "units": [
+    result = {"recovery_version": 5, "units": [
         unit("f000001", "entry", "אללה עליה", ["אללה עליה"], examples=[("חתם אללה עליה באלמות", "", "(ח1)")]),
         unit("f000002", "subentry", "-ה", [], parent="f000001", examples=[("קצא אללה אלמחתום עלי מן", "", "(ח2)")]),
         unit("f000003", "entry", "נעם", ["נעם"], examples=[("אנעם אללה עליה בכדא", "", "(ח3)")]),
@@ -276,7 +319,7 @@ def test_short_clitic_remainders_and_preposition_stems():
     assert fs.word_keys("אלהם") == ("אלהמ", "המ"), "after the article a two-letter remainder is a word"
     assert fs.word_keys("אללה") == ("אללה", "אלל") and "לה" not in fs.word_keys("ואללה"), "the name never leaves לה behind"
     assert fs.word_keys("בהא") == ("בהא", "ב") and fs.word_keys("להם") == ("להמ", "ל"), "a pronoun after a proclitic is not a word; its preposition is"
-    assert fs.word_keys("בה") == ("בה", "ב") and fs.word_keys("מנה") == ("מנה", "מנ") and fs.word_keys("עליך") == ("עליכ", "עלי")
+    assert fs.word_keys("בה") == ("בה", "ב") and fs.word_keys("מנה") == ("מנה", "מנ") and fs.word_keys("עליך") == ("עליכ", "עלי", "עלא")
     keys = fs.word_keys("ביני")
     assert keys[0] == "ביני" and "בינ" in keys and "ב" not in keys, "a preposition stem only of a key, not of a peeled scrap"
     assert fs.word_keys("(א)קצר") == ("אקצר", "קצר"), "a printed head's optional letters key both ways"
@@ -322,7 +365,7 @@ def test_quotes_leave_out_the_matches_their_sub_entries_function_words_and_sever
     assert [m.unit.id for m in matched.matches] == ["f000001"] and matched.quotes == ()
     direct, _more = service._quotes("אבד", set(), set())
     assert sorted(h.unit.id for h in direct) == ["f000001", "f000002"], "only the match keeps its own units out"
-    assert service.lookup("אללה").quotes == (), "a function word is in every other quotation"
+    assert service.lookup("אללה").quotes, "common words keep bounded source evidence"
     assert service.lookup("אחרז נפסך").quotes == (), "several words are never looked up one by one"
     assert not service.lookup("קקק").found
 
@@ -330,7 +373,7 @@ def test_quotes_leave_out_the_matches_their_sub_entries_function_words_and_sever
 def test_quotes_are_bounded_and_a_common_word_has_none(sidecar, monkeypatch):
     service = FriedmanService(str(sidecar))
     monkeypatch.setattr(fs, "MAX_QUOTE_UNITS", 0)
-    assert not service.lookup("אחרז").found
+    assert service.lookup("אחרז").found
     monkeypatch.setattr(fs, "MAX_QUOTE_UNITS", 25)
     monkeypatch.setattr(fs, "MAX_QUOTE_HITS", 0)
     result = service.lookup("אחרז")
@@ -338,14 +381,14 @@ def test_quotes_are_bounded_and_a_common_word_has_none(sidecar, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# A root's stems (owner, 2026-11-11; the private dictionary lookup plan, section 4.6): the stems an
+# A root's stems (the private dictionary lookup plan, section 4.6): the stems an
 # entry lists (its own label and its paragraphs', noisy labels read as every numeral they name), a
 # root typed with a stem ("דלל X") answering with that stem's paragraph, and the dot typed as an
 # apostrophe. Synthetic units, no dictionary text.
 # ---------------------------------------------------------------------------
 
 def stem_units():
-    return {"recovery_version": 4, "units": [
+    return {"recovery_version": 5, "units": [
         # A noun that lists וצל as a later spelling, earlier in the book than the verb וצל itself.
         unit("f000091", "entry", "אצל/אצל/וצל ר' אצול", ["אצל", "וצל", "אצול"], ["אצל"], letter="א"),
         unit("f000092", "entry", "וצל", ["וצל"], ["וצל"], letter="ו"),
@@ -389,7 +432,7 @@ def indexed_stems(tmp_path, monkeypatch):
 
 
 def test_an_entry_the_index_reached_opens_on_the_stem_the_word_s_shape_gives(indexed_stems):
-    """Owner, 2026-11-11: the index gives אסתקר the root קרר, and the entry opened on its own stem. The
+    """The index gives אסתקר the root קרר, and the entry opened on its own stem. The
     word's shape (אסת + the root: X) opens the stem X paragraph, the index still named as the way in;
     a word no listed stem holds opens the entry as before."""
     [match] = indexed_stems.lookup("אסתדלו").matches
@@ -400,7 +443,7 @@ def test_an_entry_the_index_reached_opens_on_the_stem_the_word_s_shape_gives(ind
 
 
 def test_friedman_borrows_the_entries_of_the_roots_blau_and_lane_give(stems):
-    """Owner, 2026-11-11: ויכון reached nothing in Friedman though Lane gave كون. The entries filed under
+    """ויכון reached nothing in Friedman though Lane gave كون. The entries filed under
     a borrowed root come after Friedman's own, the one spelled with the same dots, each opened on the
     word's stem; an entry already shown gets no second match; two sources make one match naming both."""
     nothing = stems.lookup("אסתדלו")
@@ -488,7 +531,7 @@ def test_a_noisy_label_and_several_entries_of_the_root(stems):
 
 def test_the_entry_s_own_stem_is_the_entry_its_children_carried_for_a_click(stems):
     """The entry is stem I's paragraph; its other units come with it, and the panel shows them only on a
-    click (owner, 2026-11-11: nothing only on the PDF page; web/components/friedman_panel.py)."""
+    click (nothing only on the PDF page; web/components/friedman_panel.py)."""
     [match] = stems.lookup("דלל I").matches
     assert (match.unit.id, match.stem, len(match.children), match.children_total) == ("f000101", 1, 4, 4)
     assert _matches(stems.lookup("קרב V")) == [("f000108", "chosen", 5)]
@@ -522,7 +565,7 @@ def test_a_stem_the_root_does_not_list_says_so_and_shows_the_root(stems):
 
 def test_an_entry_headed_by_the_word_comes_before_one_that_lists_it_as_another_spelling(stems):
     assert [(m.unit.id, m.via) for m in stems.lookup("וצל").matches] == [("f000092", "head"), ("f000091", "head")], \
-        "the verb וצל before the noun אצל/אצל/וצל, though the noun is earlier in the book (owner, 2026-11-11)"
+        "the verb וצל before the noun אצל/אצל/וצל, though the noun is earlier in the book"
     assert [m.unit.id for m in stems.lookup("אצל").matches] == ["f000091"]
     assert [m.unit.id for m in stems.lookup("ווצל").matches] == ["f000092", "f000091"], "a peeled candidate too"
     assert fs.head_begins_with("אَצْל/אُצْל/וَצْל", "אצל") and not fs.head_begins_with("אَצْל/אُצْל/וَצْל", "וצל")
@@ -565,7 +608,7 @@ def _verb(result):
 
 
 def test_no_match_is_found_by_verb_form_unless_its_kind_is_switched_on(stems, monkeypatch):
-    """The graded sample (owner, 2026-11-11): A, B and D on by default, each opened on the stem; a
+    """The graded sample: A, B and D on by default, each opened on the stem; a
     switch set empty turns them off."""
     assert stems.lookup("אסתדלו").matches == ()
     monkeypatch.delenv(fs.ENV_VERB_FORM_KINDS)
@@ -608,7 +651,7 @@ def test_matches_found_by_verb_form_are_bounded_and_never_repeat_an_entry(stems,
 
 def test_the_quotes_under_an_entry_found_by_verb_form_give_way_to_its_match(tmp_path, monkeypatch):
     path = tmp_path / "friedman.db"
-    units = {"recovery_version": 4, "units": [
+    units = {"recovery_version": 5, "units": [
         unit("f000201", "entry", "קרב", ["קרב"], ["קרב"], binyan="V", letter="ק",
              examples=[("תקרב אליה", "'drew near'", "(ח1, שורה 1)")]),
         unit("f000202", "subentry", "קרב מן", ["קרב מן"], parent="f000201",
@@ -625,11 +668,11 @@ def test_the_quotes_under_an_entry_found_by_verb_form_give_way_to_its_match(tmp_
 
 
 def test_beside_the_word_s_own_matches_the_verb_forms_are_suggestions(tmp_path, monkeypatch):
-    """Owner, 2026-11-11 (the graded sample): beside a unit the word itself reaches, the roots its verb
+    """The graded sample: beside a unit the word itself reaches, the roots its verb
     forms give are chips at the top ("קרב V"), not matches; a root another dictionary gives becomes a
     borrowed match, and no chip."""
     path = tmp_path / "friedman.db"
-    units = {"recovery_version": 4, "units": [
+    units = {"recovery_version": 5, "units": [
         unit("f000301", "entry", "קרב", ["קרב"], ["קרב"], binyan="V", letter="ק"),
         unit("f000302", "entry", "תקרב", ["תקרב"], ["תקרב"], letter="ת")]}
     write_sidecar(units, {"index_version": 1, "rows": []},
@@ -648,3 +691,259 @@ def test_a_match_found_by_verb_form_names_the_dictionaries_that_also_give_its_ro
     assert [(m.unit.id, m.via, m.borrowed) for m in result.matches] == [
         ("f000101", fs.VIA_VERB_FORM, ()), ("f000106", fs.VIA_VERB_FORM, (("blau", "ד̇לל"),)),
         ("f000108", fs.VIA_BORROWED, (("lane", "قرب"),))], "it keeps its place and gets no second match"
+
+
+# ---------------------------------------------------------------------------
+# What a word reaches, and in which order: a unit of another root that prints the
+# word only beside its verb, a word with the article read as a noun, and the expressions a clicked
+# word makes with the words beside it. Synthetic units, no dictionary text.
+# ---------------------------------------------------------------------------
+
+def reading_units():
+    return {"recovery_version": 5, "units": [
+        unit("f000401", "entry", "גלל", ["גלל"], ["גלל"], binyan="I", letter="ג"),
+        unit("f000402", "binyan", "לה/להא", ["לה", "להא"], parent="f000401", binyan="II"),
+        unit("f000403", "entry", "אללה: אללה אללה", ["אללה"], ["אללה"], letter="א"),
+        unit("f000404", "entry", "טול", ["טול"], ["טול"], binyan="I", letter="ט"),
+        unit("f000405", "subentry", "אלכלאם (מנה)", ["אלכלאמ"], parent="f000404"),
+        unit("f000406", "entry", "כלאם", ["כלאמ"], ["כלם"], letter="כ"),
+        unit("f000407", "entry", "קול", ["קול"], ["קול"], binyan="I", letter="ק"),
+        unit("f000408", "entry", "קול ר' אקאויל", ["קול"], ["קול"], letter="ק"),
+        unit("f000409", "subentry", "אטאל אללה בקאה", ["אטאל אללה בקאה", "אטאל"], parent="f000404"),
+        unit("f000410", "entry", "קלב", ["קלב"], ["קלב"], letter="ק",
+             examples=[("אטאל אללה בקאך יא סיידי", "'may God prolong your life'", "(ח1, שורה 1)")]),
+        unit("f000411", "entry", "גדד", ["גדד"], ["גדד"], letter="ג",
+             examples=[("אדאם אללה נעמתה וגדד כראמתה", "'may God keep his grace'", "(ג1, שורה 1)")]),
+        unit("f000412", "entry", "נעמה", ["נעמה"], ["נעמה"], letter="נ"),
+        *(unit(f"f00041{n}", "entry", root, [root], [root], letter=root[0],
+               examples=[(f"ואדאם אללה תעאלי נעמתה {n}", "'may God keep'", "(ג2, שורה 1)")])
+          for n, root in ((3, "עזז"), (4, "תמם"), (5, "סמו"))),
+        unit("f000416", "subentry", "אדאם אללה סעדה", ["אדאם אללה סעדה"], parent="f000411"),
+        # A stem paragraph the book prints without its root ("VIII -ה" under שכו), keyed by its suffix as the
+        # 1.0 sidecar keys it; a particle's own forms (אליה under אלי), which are no construction.
+        unit("f000417", "binyan", "-ה", ["ה"], parent="f000407", binyan="VIII"),
+        unit("f000418", "binyan", None, [], parent="f000407", binyan="X"),
+        unit("f000419", "entry", "אלי", ["אלי"], ["אלי"], letter="א"),
+        unit("f000420", "subentry", "אליה (= לה)", ["אליה"], parent="f000419"),
+        # A verb whose root is spelled as a preposition (בין, 'to explain'): its stems are constructions.
+        unit("f000421", "entry", "בין", ["בינ"], ["בין"], binyan="I", letter="ב"),
+        unit("f000422", "binyan", "עליה", ["עליה"], parent="f000421", binyan="II"),
+        # A noun quoted with its article written whole; and a word that is ל + a stem (לגאם), beside that stem.
+        unit("f000423", "entry", "סלאם", ["סלאמ"], ["סלם"], letter="ס",
+             examples=[("ארד באלסלאם עליה", "'returned the greeting'", "(ס1, שורה 1)")]),
+        unit("f000424", "entry", "לגאם", ["לגאמ"], ["לגם"], letter="ל"),
+        unit("f000425", "entry", "גאם", ["גאמ"], ["גום"], letter="ג"),
+    ]}
+
+
+@pytest.fixture
+def reading(tmp_path, monkeypatch):
+    path = tmp_path / "friedman.db"
+    write_sidecar(reading_units(), {"index_version": 1, "rows": []},
+                  {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    return FriedmanService(str(path))
+
+
+def test_a_unit_of_another_root_that_prints_the_word_beside_its_verb_comes_last_or_not_at_all(reading):
+    """אללה reached five stem paragraphs headed "לה/להא" (the verb's complement) through its peeled
+    key לה; אלכלאם reached sub-entries under טול ("אטאל אלכלאם") before the noun כלאם. A unit reached by
+    a peeled key it does not carry the root of is left out; one the word itself reaches comes after
+    the units of the word's own root."""
+    assert [m.unit.id for m in reading.lookup("אללה").matches] == ["f000403"], "not גלל's 'לה/להא'"
+    assert reading.lookup("לה").matches == (), "a construction is never the word itself"
+    assert [m.unit.id for m in reading.lookup("אלכלאם").matches] == ["f000406", "f000405"]
+
+
+def test_a_word_with_the_article_puts_the_noun_s_entry_before_the_verb_s(reading):
+    """אלקול opened on the verb קול ('to say') before the noun קול ר' אקאויל. With the
+    article peeled, an entry that lists no stems comes before one that does; without it, the book's
+    order."""
+    assert [m.unit.id for m in reading.lookup("אלקול").matches] == ["f000408", "f000407"]
+    assert [m.unit.id for m in reading.lookup("קול").matches] == ["f000407", "f000408"]
+
+
+def test_a_clicked_word_with_the_words_beside_it_brings_the_units_that_head_them_first(reading):
+    """"אטאל אללה בקאך" is one blessing, headed "אטאל אללה בקאה" under טול. The runs
+    with the words beside the clicked word are searched with no word between; a unit whose HEAD holds
+    one comes first, with its head place only; one that holds it in a quotation only (קלב) does not."""
+    [found] = reading.context("אללה", ("כתאבי", "אטאל"), ("בקאך", "ואדאם"))
+    assert found.text == "אטאל אללה בקאך" and found.gap == 0
+    assert [(h.unit.id, [p.scope for p in h.places]) for h in found.hits] == [("f000409", [fs.SCOPE_HEAD])]
+    answer = reading.answer("אללה", stems=False, before=("כתאבי", "אטאל"), after=("בקאך",))
+    assert [h.unit.id for c in answer.context for h in c.hits] == ["f000409"] and answer.found
+    assert [m.unit.id for m in answer.matches] == ["f000403"]
+    assert "f000409" in [m.unit.id for m in reading.answer("אטאל", stems=False).matches], "the word reaches it"
+    clicked = reading.answer("אטאל", stems=False, after=("אללה", "בקאך"))
+    assert [h.unit.id for c in clicked.context for h in c.hits] == ["f000409"]
+    assert "f000409" not in [m.unit.id for m in clicked.matches], "shown once, first"
+    assert reading.answer("אללה", stems=False).context == () and reading.context("אללה", (), ()) == ()
+
+
+def test_a_clicked_word_whose_run_only_quotations_hold_brings_those_quotations(reading, monkeypatch):
+    """Selecting "ואדאם סלאמתך" found "אדאם אללה סלאמתה" quoted under ג̇דד; clicking
+    either word showed Lane's entry and other words. When no unit has a run in its head, the quotations
+    that hold one come first, with the selection's gap (one word between here), at most
+    ``MAX_CONTEXT_QUOTED`` units, the closest first; the word's own list of quotations leaves them out."""
+    answer = reading.answer("ואדאם", gap=fs.DEFAULT_GAP, stems=False, before=("בקאך",), after=("נעמתך",))
+    assert answer.context_quoted and answer.found
+    [found] = answer.context
+    assert found.text == "ואדאם נעמתך" and found.gap == fs.DEFAULT_GAP
+    assert [h.unit.id for h in found.hits] == ["f000411", "f000413", "f000414"], "at most three, closest first"
+    assert all(p.scope != fs.SCOPE_HEAD for h in found.hits for p in h.places)
+    assert "f000411" in [h.unit.id for h in reading.answer("ואדאם", stems=False).quotes], "the word alone lists it"
+    assert not {"f000411", "f000413", "f000414"} & {h.unit.id for h in answer.quotes}, "shown once, first"
+    assert reading.context("ואדאם", (), ("נעמתך",), gap=0) == (), "a word between"
+    assert reading.answer("ואדאם", gap=0, stems=False, after=("נעמתך",)).context == (), "the selection's gap"
+    assert not reading.answer("אללה", stems=False, before=("אטאל",), after=("בקאך",)).context_quoted
+    monkeypatch.setattr(fs, "MAX_CONTEXT_QUOTED", 1)
+    assert [h.unit.id for c in reading.context("ואדאם", (), ("נעמתך",)) for h in c.hits] == ["f000411"]
+
+
+def test_a_head_that_holds_the_words_beside_a_clicked_word_with_a_word_between_names_them(reading):
+    """A head that holds a run with a word between ("אדאם אללה סעדה" for "ואדאם סעדך") is found with the
+    quotations' gap, and names the run: not a context of quotations only."""
+    assert reading.context("ואדאם", (), ("סעדך",), gap=0) == ()
+    answer = reading.answer("ואדאם", gap=fs.DEFAULT_GAP, stems=False, after=("סעדך",))
+    assert [(h.unit.id, [p.scope for p in h.places]) for c in answer.context for h in c.hits] == [
+        ("f000416", [fs.SCOPE_HEAD])]
+    assert not answer.context_quoted
+
+
+def test_a_feminine_noun_before_a_suffix_reaches_its_entry(reading):
+    """סלאמתך reached no entry of סלאמה. A ת a pronoun suffix was peeled from is
+    also read as ה."""
+    assert [(m.unit.id, m.matched) for m in reading.lookup("ונעמתך").matches] == [("f000412", "נעמה")]
+
+
+def test_the_service_s_frames_are_the_unit_builder_s():
+    from scripts.friedman_units import FRAME_TOKENS
+
+    assert fs.FRAME_TOKENS == FRAME_TOKENS
+
+
+def test_article_plural_participle_and_missing_mater_are_query_alternatives(tmp_path, monkeypatch):
+    path = tmp_path / 'alternatives.db'
+    data = {'recovery_version': 5, 'units': [
+        unit('f000901', 'entry', 'כתב', ['כתב'], ['כתב'], binyan='I'),
+        unit('f000902', 'entry', 'גוכאניה', ['גוכאניה'], ['גוכאניה']),
+    ]}
+    write_sidecar(data, {'index_version': 1, 'rows': []},
+                  {'units_sha256': 'u', 'index_sha256': 'i', 'manifest_sha256': 'm'}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, '1')
+    svc = FriedmanService(str(path))
+    for word in ('כאתבין', 'אלכאתבין'):
+        assert svc.lookup(word, verb_forms=frozenset('ABD')).matches[0].unit.id == 'f000901'
+    match = svc.lookup('גכאניה').matches[0]
+    assert match.unit.id == 'f000902' and ('mater',) in match.analyses
+    assert not svc.lookup('אלכאתבין', verb_forms=frozenset()).matches
+    svc.close()
+
+
+def test_quote_context_does_not_remove_the_words_own_entry(reading):
+    result = reading.answer('סלאם', before=('ארד',), after=('עליה',))
+    assert result.context_quoted
+    assert 'f000423' in {m.unit.id for m in result.matches}
+
+
+@pytest.mark.parametrize("head, construction", [
+    ("-ה", True), ("-ה באלתהדיד", True), ("-ה גרצה/אמלה/אמניתה", True), ("עליה", True), ("לה/להא (ולא רק -ה)", True),
+    ("(בהא)", True), ("(<קצו [?]) -ה", True), ("עליה (פיהא)", True), ("אן יפעל", True), ("פעלא", True),
+    ("אטאל אללה בקאה", False), ("לא עדמה אללה -ה/-הא", False), ("עליה: עליתהא", False), ("כתבה", False), ("", False),
+])
+def test_a_head_the_book_prints_without_its_root_is_a_construction(head, construction):
+    assert fs.construction_head(head) is construction
+
+
+def test_a_construction_reads_root_stem_then_suffix_and_is_never_the_word_itself(reading):
+    """"VIII -הُ" under שכו is stem VIII of שכו with a pronoun suffix, not a word "-ה";
+    and clicking a preposition (עליה) reached a dozen verbs' stem paragraphs headed by it. A sub-entry or a
+    stem paragraph whose head is a construction, or a stem paragraph with no head, carries its entry's root;
+    a lookup never reaches it as the word itself. A particle's forms (אליה under אלי) are its own words."""
+    [entry] = [m for m in reading.lookup("קול").matches if m.unit.id == "f000407"]
+    by_id = {child.id: child for child in entry.children}
+    assert by_id["f000417"].entry_root == "קול" and by_id["f000417"].binyan == "VIII"
+    assert by_id["f000418"].entry_root == "קול", "a stem paragraph with no head"
+    assert entry.unit.entry_root == "", "an entry is its own root"
+    assert reading.lookup("ה").matches == (), "the suffix is no word"
+    [particle] = [m for m in reading.lookup("אליה").matches if m.unit.id == "f000420"]
+    assert (particle.unit.entry_root, particle.via) == ("", "head")
+    [verb] = [m for m in reading.lookup("בין").matches if m.unit.id == "f000421"]
+    assert [(c.id, c.entry_root) for c in verb.children] == [("f000422", "בין")], "a verb spelled as a preposition"
+    assert "f000422" not in [m.unit.id for m in reading.lookup("עליה").matches]
+    [quoted] = [m for m in reading.lookup("אטאל").matches if m.unit.id == "f000409"]
+    assert quoted.unit.entry_root == "", "a sub-entry with a head of words"
+
+
+def test_an_article_that_lost_its_alif_after_a_preposition_is_read_when_the_word_reaches_nothing(reading):
+    """"יכצך בלסלאם" found neither סלאם nor what "יכצך באלסלאם" finds. A lookup that
+    reaches nothing reads ב + (א)ל + the stem; one that reaches something does not (בלגאם is ב + לגאם, not
+    ב + (א)ל + גאם). A reader's words in the expression search answer to the stem too."""
+    assert [(m.unit.id, m.matched) for m in reading.lookup("בלסלאם").matches] == [("f000423", "סלאמ")]
+    assert [m.unit.id for m in reading.lookup("בלגאם").matches] == ["f000424", "f000425"]
+    found = reading.expression("ארד בלסלאם", 0)
+    assert [(h.unit.id, [p.scope for p in h.places]) for h in found.hits] == [("f000423", [fs.SCOPE_QUOTATION])]
+    clicked = reading.answer("ארד", stems=False, after=("בלסלאם",))
+    assert [h.unit.id for c in clicked.context for h in c.hits] == ["f000423"]
+
+
+def test_the_words_beside_a_clicked_word_fail_closed(reading, monkeypatch):
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(reading, "expression", boom)
+    assert reading.context("אללה", ("אטאל",), ()) == ()
+    assert reading.answer("אללה", stems=False, before=("אטאל",)).context == ()
+
+
+def test_the_sidecar_reads_a_unit_in_printed_order():
+    """A word in a second typeface stays in its sentence: the bold word of "(בלי עַלַיְהִ ובלי …)", an
+    editor's note inside a quotation, Arabic inside the references."""
+    from scripts.build_friedman_sidecar import printed_order
+    u = unit("f000900", "subentry", "בהא", ["בהא"], examples=[("x", "y", "(א1)")])
+    u["gloss"].update(definition="(בלי ובלי פועל) הואיל", references="ראה ליין (שם: )", foreign="تفضّل", xrefs=["עליה"])
+    u["examples"][0].update(quote="קול מתערץ מעארץ) כנס", translation="(תוקן מן ׳חכמי התלמוד׳", locator="(א1)")
+    u["segments"] = [["subentry", "❖ "], ["head", "בהא "], ["ja", "(בלי "], ["head", "עליה "], ["ja", "ובלי פועל) הואיל "],
+                     ["he", ". ראה ליין (שם: "], ["foreign", "تفضّل"], ["he", ") "], ["bullet", "• "],
+                     ["ja", "קול מתערץ "], ["he", "(תוקן מן "], ["ja", "מעארץ) כנס "], ["he", "׳חכמי התלמוד׳ "],
+                     ["loc", "(א1)"]]
+    read = printed_order(u)
+    assert read["gloss"]["definition"] == "(בלי עליה ובלי פועל) הואיל"
+    assert read["gloss"]["references"] == ". ראה ליין (שם: تفضّل)"
+    assert read["examples"][0]["quote"] == "קול מתערץ (תוקן מן מעארץ) כנס"
+    assert read["examples"][0]["translation"] == "׳חכמי התלמוד׳"
+    spaced = dict(u, segments=[["head", "בהא "], ["ja", "הואיל ( "], ["head", "עליה "], ["ja", ") , בדבר ."]])
+    spaced["examples"], spaced["gloss"] = [], dict(u["gloss"], definition="הואיל ( ) , בדבר .", references="", foreign="")
+    assert printed_order(spaced)["gloss"]["definition"] == "הואיל (עליה), בדבר.", "the brackets and stops are kept"
+    tail = dict(u, examples=[dict(u["examples"][0], quote="קול", translation="׳stem translation׳ .", locator="(א1)")],
+                gloss=dict(u["gloss"], definition="אחריות לסיכון", references="", foreign="(hendiadys)"),
+                segments=[["head", "בהא "], ["ja", "אחריות לסיכון "], ["foreign", "(hendiadys)"], ["other", "."], ["bullet", "• "],
+                          ["ja", "קול "], ["he", "׳stem "], ["binyan", "IV "], ["he", "translation׳ "], ["loc", "(א1)"], ["he", "."],
+                          ["loc", " ראה הערך "], ["head", "כתב"]])
+    read = printed_order(tail)
+    assert read["gloss"]["definition"] == "אחריות לסיכון (hendiadys)." and read["gloss"]["references"] == "", (
+        "what a definition ends with in another typeface is still the definition")
+    assert read["examples"][0]["translation"] == "׳stem IV translation׳", "a stem numeral stays; the stop after the locator does not"
+    assert printed_order(unit("f000901", "entry", "ולד", ["ולד"]))["gloss"]["definition"] == "def f000901", (
+        "a unit without segments is left as the recovery has it")
+
+
+def test_an_expression_of_function_words_is_found_by_its_name_when_nothing_else_is(tmp_path, monkeypatch):
+    """אלדי הו is an entry of two function words: clicked with its neighbour it shows as an expression.
+    A verb's complement of two such words (לה בהא under a verb) does not, and כאן is no כ + אן."""
+    from shared.ja_expression import context_windows
+    assert context_windows("אלדי", (), ("הו",)) == [] and context_windows("אלדי", (), ("הו",), function_runs=True) == [["אלדי הו"]]
+    assert context_windows("כתב", (), ("לה",), function_runs=True) == []
+    units = [unit("f000001", "entry", "אלדי הו", ["אלדי הו"]), unit("f000002", "entry", "פצל", ["פצל"]),
+             unit("f000003", "subentry", "לה בהא", [], parent="f000002"), unit("f000004", "entry", "אלי אן", ["אלי אן"])]
+    path = tmp_path / "function.db"
+    write_sidecar({"recovery_version": 5, "units": units}, {"index_version": 1, "rows": []}, {}, path)
+    monkeypatch.setenv("FRIEDMAN_DICTIONARY_ENABLED", "1")
+    service = fs.FriedmanService(str(path))
+    assert service.is_ready(), service.unavailable_reason
+    found = lambda word, after: [hit.unit.id for part in service.context(word, (), after) for hit in part.hits]   # noqa: E731
+    assert found("אלדי", ("הו", "קימה")) == ["f000001"]
+    assert found("לה", ("בהא",)) == [], "a complement is no expression without its verb"
+    assert found("אלי", ("כאן",)) == [], "כאן is not אן under a preposition"
+    assert found("ואלי", ("אן",)) == ["f000004"], "under a conjunction it is"
+    service.close()
+

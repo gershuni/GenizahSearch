@@ -55,7 +55,7 @@ from scripts.prepare_friedman_dictionary import (  # noqa: E402
 from shared.blau_normalize import NORMALIZER_VERSION, normalize_ja  # noqa: E402
 
 UNITS_SCHEMA = "friedman-units-1"
-RECOVERY_VERSION = 4  # 3 (2026-11-08): marks attach under their ink; 4 (same day): heads keep their notes, keys drop placeholders
+RECOVERY_VERSION = 5  # 3 (2026-11-08): marks attach under their ink; 4 (same day): heads keep their notes, keys drop placeholders; 5 (2026-11-13): Arabic ligatures in reading order
 STATUS = "typographic_candidate_not_reviewed"
 TOP_BAND = 0.125     # running heads end above this share of the page height (measured: <= 0.122)
 HEADING_BAND = 0.16  # a letter heading sits above this share, below the running head
@@ -64,7 +64,9 @@ SPACE_GAP_EM = 0.15  # a horizontal gap of at least this many em between glyphs 
 NARROW_GAP_EM = 0.1   # ... or this many, when a blank glyph sits in it (the diacritic font's blanks sit in no gap)
 LINE_MERGE = 0.5     # fragments overlapping vertically by this share of the smaller height share a line
 SHORT_LINE = 12.0    # a line ending this far right of the body margin ends a paragraph
-HIDDEN_SIZE = 2.0    # the producer left 0.8 pt glyphs that print nothing
+LIGATURE_ZERO_WIDTH = 0.01  # pt: the stored width of an Arabic ligature's non-final letters
+LIGATURE_EDGE = 0.6         # pt: how far such a letter may sit from the ligature's right edge
+HIDDEN_SIZE = 2.0   # the producer left 0.8 pt glyphs that print nothing
 # Where a zero-advance mark's ink sits relative to the origin the producer gave it, in em: measured
 # 2026-11-08 from the embedded fonts' glyph outlines (fontTools, by glyph id). The diacritic font
 # (LucidaSansUnicode: the Judeo-Arabic dot, the two dots, the bar) draws 0.31 em LEFT of its origin,
@@ -257,6 +259,42 @@ def block_glyphs(block: dict) -> list[dict]:
     return glyphs
 
 
+def _arabic_letter(char: str) -> bool:
+    return "ء" <= char <= "ي"
+
+
+def ligature_positions(chars: list[dict]) -> list[tuple[dict, float, float]]:
+    """Each glyph of a span with the x extent it is sorted by.
+
+    The producer stores an Arabic ligature (lam-alif, the name of God) as its letters in
+    printed order, last letter first: every letter but the final one of the run has no width
+    and sits at the ligature's right edge, and the final one carries the whole box. Sorting
+    by position then read ``الله`` as ``هللا`` and ``لا`` as ``ال``. The run's box is cut into equal
+    slices handed out from the right to the letters in reverse stored order, which is the
+    reading order. Anything else keeps its own box.
+    """
+    placed: list[tuple[dict, float, float]] = []
+    i = 0
+    while i < len(chars):
+        j = i
+        while (j < len(chars) and _arabic_letter(chars[j]["c"])
+               and chars[j]["bbox"][2] - chars[j]["bbox"][0] < LIGATURE_ZERO_WIDTH):
+            j += 1
+        final = chars[j] if i < j < len(chars) else None
+        if (final is not None and _arabic_letter(final["c"])
+                and all(abs(c["bbox"][0] - final["bbox"][2]) <= LIGATURE_EDGE for c in chars[i:j])):
+            run = chars[i:j + 1]
+            left, right = final["bbox"][0], final["bbox"][2]
+            step = (right - left) / len(run)
+            for n, c in enumerate(reversed(run)):
+                placed.append((c, right - (n + 1) * step, right - n * step))
+            i = j + 1
+            continue
+        placed.append((chars[i], chars[i]["bbox"][0], chars[i]["bbox"][2]))
+        i += 1
+    return placed
+
+
 def page_lines(blocks: list[dict]) -> tuple[list[dict], int]:
     """Every printed line of a page in reading order, with the extractor's block index.
 
@@ -274,9 +312,9 @@ def page_lines(blocks: list[dict]) -> tuple[list[dict], int]:
                 font, size = span["font"], float(span["size"])
                 if size < HIDDEN_SIZE:
                     hidden += len(span["chars"])
-                for c in span["chars"]:
+                for c, x0, x1 in ligature_positions(span["chars"]):
                     cls = classify_char(font, size, c["c"])
-                    char = {"c": c["c"], "x0": c["bbox"][0], "x1": c["bbox"][2], "size": size, "cls": cls}
+                    char = {"c": c["c"], "x0": x0, "x1": x1, "size": size, "cls": cls}
                     if cls == "mark":
                         char["anchor"] = mark_anchor(font, size, c["c"], c.get("origin", c["bbox"])[0])
                     chars.append(char)

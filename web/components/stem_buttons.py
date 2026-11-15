@@ -2,7 +2,7 @@
 """What Blau's and Friedman's tabs draw alike for a root's verb stems on /browse: the row of stem
 buttons on a card, and the line that says a typed stem is not listed under the root.
 
-The private dictionary lookup plan, section 4.6 (owner, 2026-11-11): a card for an entry that lists
+The private dictionary lookup plan, section 4.6: a card for an entry that lists
 stems shows them as buttons (דלל: I, II, IV, V, X). Pressing one is the typed shortcut "דלל X": the
 page looks that up in every dictionary and the card opens on that stem's paragraph; pressing the
 chosen one again goes back to the root. The service decides which stems an entry has and which
@@ -26,11 +26,11 @@ NOT_LISTED_CLASS = 'dict-stem-missing'
 #: The row's label and each button's tooltip: the dictionary panel's existing word for a stem.
 STEMS_LABEL = 'verb stem'
 STEM_TITLE = 'binyan'
-#: Above the root's cards when the typed stem is not listed under it (owner, 2026-11-11); the
+#: Above the root's cards when the typed stem is not listed under it; the
 #: stem's numeral goes in ``{stem}``.
 NOT_LISTED = 'Stem {stem} is not listed under this root.'
 #: At the top of a tab whose cards the word itself reached: the other roots its verb forms give, as
-#: chips "root stem" (BlauLookup / FriedmanLookup ``suggestions``; owner's wording, 2026-11-11).
+#: chips "root stem" (BlauLookup / FriedmanLookup ``suggestions``).
 SUGGESTIONS_CLASS = 'dict-suggestions'
 SUGGESTION_CLASS = 'dict-suggestion'
 SUGGESTIONS_LABEL = 'Other possible roots'
@@ -67,7 +67,7 @@ def render_suggestions(suggestions: Sequence[tuple[str, int]], tab: str,
                        on_stem: Optional[Callable[[str, str], Any]], word: str = '', chosen: str = '') -> None:
     """The other roots the word's verb forms give, as chips: "דלל X" (the root, and the one stem the
     word fits) or the root alone. A press looks it up in the tab, as a stem button does, and the page
-    keeps drawing the same chips (owner, 2026-11-11: so the reader can check each root in turn):
+    keeps drawing the same chips (so the reader can check each root in turn):
     ``chosen`` is what is shown now, its chip marked; while it is not the ``word`` itself,
     a first chip with the word goes back to it, and so does the marked chip pressed again. Nothing is
     drawn without suggestions or without a lookup to report to."""

@@ -25,7 +25,7 @@ from typing import Any, Callable, Optional
 from nicegui import ui
 
 from shared.arabic_service import SITE_URL, LaneEntry, LaneLookup, LaneRoot
-from web.components import show_more
+from web.components import expression_panel, show_more
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -41,14 +41,14 @@ CREDIT_CLASS = 'lane-credit'
 #: Lane's tab when Lane has no reading for the word.
 EMPTY_SECTION_CLASS = 'lane-none'
 #: The entries a root card shows before "Show N more entries", and the button that shows a cut
-#: entry's whole text (web/components/show_more.py; owner, 2026-11-11).
+#: entry's whole text (web/components/show_more.py).
 ENTRIES_SHOWN = 3
 FULL_CLASS = 'lane-full'
 FULL_ENTRY = 'Show the full entry'
 
 TITLE = "Lane's Arabic-English Lexicon"
 #: The same words as Blau's tab when it has nothing (one string, one translation).
-NOTHING = 'Nothing in the dictionary for this word.'
+NOTHING = 'No match was retrieved for this spelling. Try another reading or the root.'
 READINGS_LABEL = 'Arabic readings, commonest first'
 NO_ROOT = 'No root of this reading was found in Lane.'
 #: Where the entries come from (D5) and what orders the readings (D7); the Perseus line is
@@ -88,9 +88,13 @@ def _render_entry(entry: LaneEntry) -> None:
             _arabic(entry.headword).classes('ar headword')
             if entry.page is not None:
                 ui.label(f'{tr("p.")} {entry.page}').classes('page')
+        labels = {'plural': tr('Plural printed in this entry'), 'verbal_noun': tr('Verbal noun printed in this entry'),
+                  'verb_form': tr('Possible grammatical analysis')}
+        if entry.match_kind in labels:
+            ui.label(f'{labels[entry.match_kind]}: {entry.matched_form}').classes('where dict-evidence')
         text = ui.label(entry.text).props('dir="ltr" lang="en"').classes('gloss lane-text')
         if entry.cut and entry.full:
-            # The whole text in place on a click (owner, 2026-11-11: nothing only on the site).
+            # The whole text in place on a click (nothing only on the site).
             def show_full(_e: Any = None, label: ui.label = text, whole: str = entry.full) -> None:
                 label.set_text(whole)
                 button.delete()
@@ -103,6 +107,14 @@ def _render_entry(entry: LaneEntry) -> None:
 
 def _render_root(root: LaneRoot) -> None:
     with ui.element('div').classes(f'{ROOT_CLASS} card'):
+        if root.borrowed:
+            # A root Blau or Friedman gave for the word (ArabicService.borrow): the line their own
+            # tabs put on such a match, with the dictionary and its form on the info mark.
+            expression_panel.render_match_details(root)
+        elif root.inferred:
+            ui.label(tr('Possible grammatical analysis')).classes('where dict-evidence')
+        elif not any(entry.matched for entry in root.entries):
+            ui.label(tr('Possible root; the word itself was not matched')).classes('where dict-evidence')
         with ui.element('div').classes('entry'):
             ui.label(tr('root')).classes('root-label')
             _arabic(root.name).classes('ar name root-name')
@@ -142,9 +154,10 @@ def render_lane_empty(word: str, *, titled: bool = True) -> None:
 def render_lane(result: Optional[LaneLookup], *, credit: str, lang: str = 'he',
                 on_search: Optional[Callable[[str], Any]] = None, titled: bool = True) -> bool:
     """Draw ``result`` into the current container. Returns False, drawing nothing, when there is
-    no result, no reading, or no credit line (D3: no Lane text without it). ``titled=False``
-    leaves out the section's title (the panel's head already names Lane)."""
-    if result is None or not result.readings:
+    no result, neither a reading nor a root (a root alone is one another dictionary gave for the
+    word), or no credit line (D3: no Lane text without it). ``titled=False`` leaves out the
+    section's title (the panel's head already names Lane)."""
+    if result is None or not (result.readings or result.roots):
         return False
     credit = (credit or '').strip()
     if not credit:
@@ -153,7 +166,8 @@ def render_lane(result: Optional[LaneLookup], *, credit: str, lang: str = 'he',
     with ui.element('div').classes(f'{SECTION_CLASS} lane'):
         if titled:
             ui.label(tr(TITLE)).classes('lane-title')
-        if result.script == 'ja':
+        expression_panel.render_automatic_note()
+        if result.script == 'ja' and result.readings:
             _render_readings(result, on_search)
         if result.roots:
             for root in result.roots:

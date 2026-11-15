@@ -121,7 +121,7 @@ def sidecars(tmp_path, monkeypatch):
 
 def test_a_whole_run_on_synthetic_sidecars(sidecars):
     result = gate.measure(*sidecars)
-    assert result["answer_key"]["forms"] == 4 and result["verb_forms_version"] == 2
+    assert result["answer_key"]["forms"] == 4 and result["verb_forms_version"] == 3
     friedman, blau = result["friedman"], result["blau"]
     # אסתדלו is X of דלל, listed in both; אנדל is VII of דלל, listed in Blau only; ינקרב is VII of קרב, listed
     # nowhere (Friedman and Blau list V only); מגאז's root is in neither.

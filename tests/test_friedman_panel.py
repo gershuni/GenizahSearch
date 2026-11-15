@@ -55,7 +55,7 @@ def test_every_shown_string_has_its_hebrew():
     shown = _translated_arguments()
     assert {CONSTANTS["TITLE"], CONSTANTS["STATUS_NOTE"], CONSTANTS["NOTHING"], CONSTANTS["OPEN_PAGE"],
             CONSTANTS["UNDER"], CONSTANTS["MORE_CHILDREN"], CONSTANTS["MORE_QUOTATIONS"],
-            CONSTANTS["MORE_MATCHES"], CONSTANTS["NOTHING_TOGETHER"], CONSTANTS["IN_HEAD"], CONSTANTS["MORE_PLACES"],
+            CONSTANTS["NOTHING_TOGETHER"], CONSTANTS["IN_HEAD"], CONSTANTS["MORE_PLACES"],
             *DICTS["KIND_LABELS"].values(), *DICTS["VIA_LABELS"].values()} <= shown
     # The gap control and the matched-word pairs are drawn by web/components/expression_panel.py,
     # shared with Blau's tab; this module's literals are the same (tests/test_expression_panel.py).
@@ -83,7 +83,7 @@ def test_the_panel_the_page_and_the_startup_give_friedman_its_tab():
     assert "friedman_service = get_friedman_service()" in BROWSE_SRC
     assert "_dict_served(friedman_service)" in BROWSE_SRC, "asked as the reader sees it: public, or an editor's preview"
     assert "friedman=friedman, friedman_credit=friedman_service.credit_he" in BROWSE_SRC
-    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems)" in BROWSE_SRC
+    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in BROWSE_SRC
     assert "get_friedman_service" in MAIN_SRC and "Friedman's dictionary not served" in MAIN_SRC
     assert PANEL_SRC.index("tabs.append(FRIEDMAN_TAB)") < PANEL_SRC.index("tabs.append(LANE_TAB)"), \
         "Friedman's tab beside Blau's, before Lane's (owner, 2026-11-08)"
@@ -94,10 +94,10 @@ def test_the_panel_the_page_and_the_startup_give_friedman_its_tab():
 def test_several_words_are_an_expression_search_with_the_gap_the_reader_chose():
     # The page asks ``answer`` with the reader's gap; the service routes several words to the
     # expression search and a root with a stem ("דלל X") to the lookup (tests/test_friedman_service.py).
-    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems)" in BROWSE_SRC
+    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in BROWSE_SRC
     service_src = (Path(__file__).resolve().parents[1] / "shared" / "friedman_service.py").read_text(encoding="utf-8")
     assert "if len(text.split()) > 1 and not (stems and root_and_stem(text)[1]):" in service_src
-    assert "return self.expression(text, gap)" in service_src
+    assert "expression = self.expression(text, gap, ordered=ordered)" in service_src
     assert "dict_gap = {'value': FRIEDMAN_DEFAULT_GAP}" in BROWSE_SRC
     assert "dict_gap['value'] = gap" in BROWSE_SRC and "on_gap=_choose_gap" in BROWSE_SRC
     assert "isinstance(friedman, FriedmanExpression)" in PANEL_SRC
@@ -118,6 +118,7 @@ def test_a_rejected_entry_shows_the_books_braces():
     """The book lists an entry in braces to reject it ({ } = listed elsewhere, held wrong); the
     panel shows every head through _head_label, which puts the braces back from the flag."""
     assert "'braced_head' in unit.flags" in SRC
-    assert "_rtl(_head_label(unit))" in SRC and "_rtl(_head_label(match.parent))" in SRC and "_rtl(_head_label(hit.parent))" in SRC
+    assert "_rtl(_head_label(unit))" in SRC and "_rtl(_parent_label(unit, match.parent))" in SRC and "_rtl(_parent_label(unit, hit.parent))" in SRC
+    assert "return _head_label(parent)" in SRC and "'braced_head' in parent.flags" in SRC
     assert "_rtl(unit.head_text)" not in SRC and ".parent.head_text)" not in SRC, "no head is shown without the braces"
     assert "expression_panel.render_marked(_braced_words(unit, marked.words), marked.positions" in SRC,         "a marked head keeps its braces and the printed order"

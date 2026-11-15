@@ -3,8 +3,8 @@
 ``LANE_DICTIONARY_ENABLED`` and ``FRIEDMAN_DICTIONARY_ENABLED``, read on every call.
 
 A switch is on (``1``, ``true``, ``yes``, ``on``), off (anything else), or ``editors``: the
-dictionary is served only to a signed-in editor or admin, a preview before it is released (owner,
-2026-11-11: the editors are trusted with corrections, so with the preview too). Unset, a switch is
+dictionary is served only to a signed-in editor or admin, a preview before it is released
+(the editors are trusted with corrections, so with the preview too). Unset, a switch is
 its service's default.
 
 Each service keeps two questions apart: ``is_available()`` is the public one (ready and on), which

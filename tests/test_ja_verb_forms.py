@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """shared/ja_verb_forms.py: the forms a verb stem of a three-letter root takes, and which listed stem a
-written word belongs to (the private dictionary lookup plan, section 4.2; owner, 2026-11-11: used to
+written word belongs to (the private dictionary lookup plan, section 4.2; used to
 open a root's card on the word's stem). Synthetic roots of every class the plan names, no dictionary
 text; every form is on the lookup's keys (``normalize_ja``: finals folded).
 """
@@ -14,6 +14,39 @@ from shared.ja_verb_forms import (
     KINDS, MAX_SUGGESTIONS, MAX_VERB_FORM_CARDS, MIN_LETTERS, PREFIXED, VERB_FORMS_VERSION, hit_kind, parse_kinds,
     stem_forms, suggested_roots, switch_kinds, verb_form_cards, verb_form_index, word_stem, word_stems,
 )
+
+
+@pytest.mark.parametrize('root,stem,form', [
+    ('כתב', 1, 'כתבת'), ('וצל', 1, 'וצלת'), ('דפע', 1, 'דפעת'),
+    ('קדמ', 5, 'תקדמת'), ('קרא', 1, 'קראת'), ('וקפ', 1, 'נקפ'), ('חבב', 1, 'יחב'),
+])
+def test_subject_marked_forms_include_short_weak_and_doubled_verbs(root, stem, form):
+    from shared.ja_verb_forms import finite_form
+    assert finite_form(root, stem, form)
+
+
+def test_finite_evidence_preserves_radicals_and_excludes_nominal_shapes():
+    from shared.blau_normalize import nominal_candidates, query_stems
+    from shared.ja_verb_forms import finite_form
+    pairs = [StemPair('כתב', 'כתב', 1, 'write', 'write'), StemPair('תבת', 'תבת', 1, 'other', 'other')]
+    index = verb_form_index(pairs)
+    cards = verb_form_cards(query_stems('כתבת'), index, nominal_candidates('כתבת'))
+    assert {card.entry_id for card in cards if card.finite_for('כתבת')} == {'write'}
+    assert not finite_form('כתב', 1, 'כאתב')
+    assert not finite_form('כתב', 1, 'כתב')
+    assert not finite_form('צול', 1, 'יצל')
+    assert not finite_form('נעמ', 1, 'נעמא')
+    assert not finite_form('סלמ', 3, 'סאלמא')
+    assert not finite_form('וקפ', 2, 'נקפ')
+    assert not finite_form('וקפ', 3, 'נקפ')
+
+
+@pytest.mark.parametrize('query', ['אלחט', 'ולו', 'אבן', 'ואבן', 'אלמני'])
+def test_finite_promotion_respects_articles_function_words_and_name_components(query):
+    from shared.blau_normalize import nominal_candidates, query_stems
+    pairs = [StemPair(root, root, 1, root, root) for root in ('לחט', 'ולי', 'בננ', 'אלמ')]
+    cards = verb_form_cards(query_stems(query), verb_form_index(pairs), nominal_candidates(query))
+    assert not any(card.finite_for(query) for card in cards)
 
 
 @pytest.mark.parametrize("stem, forms", [
@@ -74,7 +107,7 @@ def test_a_root_of_other_than_three_letters_or_a_stem_outside_one_to_ten_has_non
 
 
 @pytest.mark.parametrize("word, root, listed, stem", [
-    ("אסתקר", "קרר", (1, 2, 4, 5, 10), 10),        # the owner's report: X, not I
+    ("אסתקר", "קרר", (1, 2, 4, 5, 10), 10),        # reported: X, not I
     ("טאלבתה", "טלב", (1, 3, 7), 3),               # טאלבת, its pronoun peeled: III
     ("ויכון", "כונ", (1, 3, 5), 1),
     ("ואסתגאב", "גוב", (1, 3, 4, 6, 10), 10),      # the conjunction peeled by candidate_stems
@@ -110,11 +143,11 @@ def test_the_verb_form_index_maps_every_form_to_the_pairs_that_give_it():
 def test_word_stems_names_every_listed_stem_that_holds_the_word():
     assert word_stems(candidate_stems("קרר"), "קרר", (10, 2, 1, 2)) == (1, 2)
     assert word_stems([], "קרר", (1, 2)) == () and word_stems([""], "קרר", (1,)) == ()
-    assert VERB_FORMS_VERSION == 2
+    assert VERB_FORMS_VERSION == 3
 
 
 @pytest.mark.parametrize("root, stem, kept, dropped", [
-    # Owner, 2026-11-11: תלתה ("three") was read as stem VIII of להו, its last letter dropped.
+    # תלתה ("three") was read as stem VIII of להו, its last letter dropped.
     ("להו", 8, ["תלתהי", "ילתהו", "אלתהא"], ["תלתה", "ילתה", "אלתה"]),
     ("רמי", 1, ["רמת", "רמוא", "ירמו", "ירמונ", "ירמי"], ["ירמ", "תרמ"]),
     ("קרא", 10, ["אסתקרא", "אסתקרי", "יסתקרו"], ["אסתקר", "יסתקר"]),
@@ -224,3 +257,22 @@ def test_a_card_opens_on_one_stem_only_and_says_how_it_was_reached():
     assert final.evidence() == "יסתעמלון (עמל X)", "the form written with its final letter"
     [dup] = verb_form_cards(["אסתדלו"], {"אסתדלו": [_pair("דלל", 10, "e", "u1"), _pair("דלל", 10, "e", "u2")]})
     assert dup.hits == ((10, True, 6),), "two paragraphs of one stem are one hit"
+
+
+def test_a_noun_s_key_reaches_a_stem_only_as_its_participle_or_verbal_noun():
+    """אלקאצ̇י read as the perfect of stem III of קצו. A key reached by peeling the
+    article (``nominal``) matches a stem's participles and verbal nouns only (``nominal_forms``); the
+    participle of a derived stem with the article (אלמקאצי) still reaches it."""
+    from shared.ja_verb_forms import nominal_forms, suggested_roots, verb_form_index, word_stems
+
+    pair = StemPair("קצ̇י", "קצי", 3, "u3", "e1")
+    index = verb_form_index([pair])
+    assert "קאצי" in index and "קאצי" not in nominal_forms("קצי", 3) and "מקאצי" in nominal_forms("קצי", 3)
+    assert nominal_forms("קצי", 3) <= stem_forms("קצי", 3) and nominal_forms("קצ", 3) == frozenset()
+    assert [c.entry_id for c in verb_form_cards(["קאצי"], index)] == ["e1"], "without the article: the perfect of III"
+    assert verb_form_cards(["אלקאצי", "קאצי"], index, frozenset({"קאצי"})) == [], "with it: no perfect"
+    assert [c.entry_id for c in verb_form_cards(["אלמקאצי", "מקאצי"], index, frozenset({"מקאצי"}))] == ["e1"]
+    assert suggested_roots(["אלקאצי", "קאצי"], index, "ABCDE", nominal=frozenset({"קאצי"})) == ()
+    assert word_stems(["קאצי"], "קצי", (1, 3)) == (1, 3)
+    assert word_stems(["קאצי"], "קצי", (1, 3), frozenset({"קאצי"})) == (1,), "the participle of I, not the perfect of III"
+    assert word_stem(["קאצי"], "קצי", (1, 3), frozenset({"קאצי"})) == 1

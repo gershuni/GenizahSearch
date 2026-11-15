@@ -17,7 +17,6 @@ fails the recomputation of the expression search's ``tokens`` from the names and
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sqlite3
 import sys
@@ -27,10 +26,10 @@ _REPO_ROOT = os.path.dirname(_SCRIPTS_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from scripts.dictionary_search_indexes import expression_material, verify_search_indexes
 from scripts.build_blau_sidecar import DDL, SCHEMA_VERSION  # noqa: E402  -- the one schema definition
-from shared.blau_service import name_alternatives  # noqa: E402
 from shared.blau_normalize import NORMALIZER_VERSION, normalize_ja  # noqa: E402
-from shared.ja_expression import KEYING_VERSION, scope_keys  # noqa: E402
+from shared.ja_expression import KEYING_VERSION  # noqa: E402
 
 EXPECTED_TABLES = ("meta", "sources", "roots", "sub_entries", "stems", "forms", "citations", "forms_norm", "tokens")
 COUNTED_TABLES = ("roots", "sub_entries", "stems", "forms", "citations", "forms_norm", "sources", "tokens")
@@ -89,28 +88,7 @@ NORM_KINDS = ("root", "sub_entry", "headword", "variant", "phrase")
 def expected_tokens(con: sqlite3.Connection) -> list[tuple]:
     """The ``tokens`` rows the builder writes for the names and citations the file holds, recomputed
     with the keying that is running: one scope per name alternative and per quoted citation."""
-    rows: list[tuple] = []
-
-    def add(scope, scope_id, n, root_id, sub_entry_id, text):
-        for pos, key, peeled in scope_keys(text):
-            rows.append((scope, scope_id, n, root_id, sub_entry_id, pos, key, peeled))
-
-    for root_id, names_json in con.execute("SELECT id, names_json FROM roots ORDER BY ordinal"):
-        for n, name in enumerate(json.loads(names_json or "[]")):
-            add("root", root_id, n, root_id, None, name)
-    for sub_id, root_id, names_json in con.execute(
-            "SELECT id, root_id, names_json FROM sub_entries ORDER BY root_id, ordinal"):
-        for n, name in enumerate(json.loads(names_json or "[]")):
-            add("sub_entry", sub_id, n, root_id, sub_id, name)
-    for form_id, root_id, sub_entry_id, ja_text in con.execute(
-            "SELECT id, root_id, sub_entry_id, ja_text FROM forms ORDER BY id"):
-        for n, name in enumerate(name_alternatives(ja_text)):
-            add("form", form_id, n, root_id, sub_entry_id, name)
-    for cit_id, root_id, sub_entry_id, ja_text in con.execute(
-            "SELECT c.id, f.root_id, f.sub_entry_id, c.ja_text FROM citations c JOIN forms f ON f.id = c.form_id "
-            "WHERE c.ja_text IS NOT NULL AND c.ja_text <> '' ORDER BY c.id"):
-        add("citation", cit_id, 0, root_id, sub_entry_id, ja_text)
-    return rows
+    return expression_material(con, "blau")[0]
 
 
 def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: str | None = None,
@@ -273,6 +251,11 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
             problems.append("index idx_forms_norm_norm is missing")
         if "idx_tokens_key" not in idx:
             problems.append("index idx_tokens_key is missing")
+
+        try:
+            verify_search_indexes(con, "blau")
+        except ValueError as exc:
+            problems.append(str(exc))
 
         # The expression search's tokens: every row recomputed from the names and the citations with
         # the keying that is running (a dropped, edited or extra row, or a text edited under its rows).

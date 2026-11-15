@@ -52,6 +52,8 @@ EMPTY_SECTION_CLASS = 'friedman-none'
 STATUS_CLASS = 'friedman-status'
 MATCH_CLASS = 'friedman-match'
 VIA_CLASS = 'friedman-via'
+SEE_CLASS = 'friedman-see'
+REFERRED_CLASS = 'friedman-referred'
 QUOTE_CLASS = 'friedman-quote'
 CHILD_CLASS = 'friedman-child'
 CREDIT_CLASS = 'friedman-credit'
@@ -74,9 +76,8 @@ MORE_PLACES = 'more places in this unit'
 QUOTES_CLASS = 'friedman-quotes'
 EXAMPLES_LABEL = 'Also in the examples under'
 #: The same words as Blau's tab when the dictionary has nothing (one string, one translation; step B
-#: of the dictionary lookup plan, the owner's approval of 2026-11-11).
-NOTHING = ('Not found as an entry or in the examples. A verb or an inflected form may be listed under its root: '
-           'type the root.')
+#: of the dictionary lookup plan).
+NOTHING = 'No match was retrieved for this spelling. Try another reading or the root.'
 #: The tab's name for the stem buttons' report (blau_panel.FRIEDMAN_TAB, equal by test).
 TAB = 'friedman'
 #: Beside a unit whose entry is not spelled with the dot the looked-up word carries (Blau's words).
@@ -86,12 +87,16 @@ STATUS_NOTE = ("Read by machine from the dictionary's PDF files and not checked;
                "Open the linked page to verify.")
 KIND_LABELS = {'entry': 'entry', 'subentry': 'sub-entry', 'binyan': 'verb stem'}
 #: 'verb_form' (VIA_VERB_FORM, equal by test): a match found by the generated forms of a stem its entry
-#: lists (PR 3; owner's wording, 2026-11-11), followed by the form, the root and the stems; the same
+#: lists (PR 3), followed by the form, the root and the stems; the same
 #: words as blau_panel.VERB_FORM (equal by test). Literals: tests/test_friedman_panel.py reads them.
 VIA_LABELS = {'head': 'found by the word itself', 'stem': 'found by its base form',
               'index': "found through the book's index of forms", 'verb_form': 'found by its verb form'}
 OPEN_PAGE = 'Open the original page'
 UNDER = 'under'
+#: A head the book prints without its root (``FriedmanUnit.entry_root``): the root drawn before it, and
+#: the printed construction after the stem.
+ROOT_CLASS = 'entry-root'
+CONSTRUCTION_CLASS = 'construction'
 #: Only what a match does not carry (beyond MAX_CHILDREN / MAX_QUOTATIONS; none on the local sidecar)
 #: is pointed to on the page; the rest opens in place (web/components/show_more.py).
 MORE_CHILDREN = 'more sub-entries and verb stems on the page'
@@ -128,20 +133,39 @@ def _braced_words(unit: FriedmanUnit, words: Sequence[str]) -> tuple[str, ...]:
 
 
 def _render_head(unit: FriedmanUnit, main: bool, marked: Optional[FriedmanPlace] = None) -> None:
+    """A unit's head: its kind, the head as printed, its stem. A head the book prints without its root
+    (``FriedmanUnit.entry_root``: "VIII -הُ" under שכו) reads root, stem, then what the book prints
+; under its own entry (``main`` False) the entry's head names the root."""
+    construction = bool(unit.entry_root)
+    head_class = (CONSTRUCTION_CLASS if construction else 'name') + ('' if main else ' sub')
     with ui.element('div').classes('entry'):
         ui.label(tr(KIND_LABELS.get(unit.kind, unit.kind))).classes('kind')
+        if construction and main:
+            _rtl(unit.entry_root).classes(f'name {ROOT_CLASS}')
+        if construction and unit.binyan:
+            _render_binyan(unit)
         if marked is not None and marked.words:   # the printed head, in its own order, the matched words marked
-            expression_panel.render_marked(_braced_words(unit, marked.words), marked.positions,
-                                           'name' + ('' if main else ' sub'))
+            expression_panel.render_marked(_braced_words(unit, marked.words), marked.positions, head_class)
         elif unit.head_text:
-            _rtl(_head_label(unit)).classes('name' + ('' if main else ' sub'))
-        if unit.binyan:
-            ui.label(unit.binyan).classes('binyan').props(f'title="{_attr(tr("binyan"))}"')
+            _rtl(_head_label(unit)).classes(head_class)
+        if unit.binyan and not construction:
+            _render_binyan(unit)
         if main and unit.printed_page:
             ui.label(f'{tr("p.")} {unit.printed_page}').classes('page')
         if main and unit.pdf_url:
             link = ui.link(tr(OPEN_PAGE), unit.pdf_url, new_tab=True).classes('site')
             link.props(f'title="{_attr(tr(OPEN_PAGE))}"')
+
+
+def _render_binyan(unit: FriedmanUnit) -> None:
+    ui.label(unit.binyan).classes('binyan').props(f'title="{_attr(tr("binyan"))}"')
+
+
+def _foreign_apart(quote: Any) -> bool:
+    """Is the quotation's Arabic text to be drawn on its own line? Not when the quotation or its
+    translation already prints it in place."""
+    printed = set(f"{quote.quote} {quote.translation}".split())
+    return bool(quote.foreign) and not set(quote.foreign.split()) <= printed
 
 
 def _render_quotation(n: int, quote: Any) -> None:
@@ -150,7 +174,7 @@ def _render_quotation(n: int, quote: Any) -> None:
             _rtl(quote.quote).classes('ja')
         if quote.translation:
             _rtl(quote.translation).classes('gloss he')
-        if quote.foreign:
+        if _foreign_apart(quote):
             ui.label(quote.foreign).props('dir="rtl" lang="ar"').classes('ar')
         if quote.locator:
             _rtl(quote.locator).classes('locator')
@@ -161,8 +185,10 @@ def _render_child(child: FriedmanUnit) -> None:
         _render_head(child, main=False)
         if child.definition:
             _rtl(child.definition).classes('gloss he')
+        if child.references:
+            _rtl(child.references).classes('references')
         if child.quotations:
-            # Its first quotation; the rest on a click, in place (owner, 2026-11-11).
+            # Its first quotation; the rest on a click, in place.
             _render_quotation(1, child.quotations[0])
             show_more.render_more(child.quotations[1:], lambda quote: _render_quotation(0, quote),
                                   show_more.MORE_QUOTATIONS)
@@ -176,17 +202,37 @@ def _render_beyond(count: int, text: str) -> None:
         ui.label(f'+{count} {text}').classes('more')
 
 
+def _parent_label(unit: FriedmanUnit, parent: FriedmanUnit) -> str:
+    """A construction belongs to its root and numbered paragraph, not the first construction."""
+    if unit.entry_root:
+        label = ' '.join(filter(None, (unit.entry_root, unit.governing_binyan)))
+        return f'{{{label}}}' if 'braced_head' in parent.flags else label
+    return _head_label(parent)
+
+
+def _render_see(unit: FriedmanUnit, on_search: Optional[Callable[[str], Any]]) -> None:
+    """The entries the unit's references send the reader to ("ראה הערך חפי"), each a button that
+    looks it up (``FriedmanUnit.see``); the words themselves stand in the references above."""
+    if on_search is None or not unit.see:
+        return
+    with ui.element('div').classes(f'{SEE_CLASS} chips'):
+        for name in unit.see:
+            ui.button(name, on_click=lambda _e=None, text=name: on_search(text)).props(
+                'flat dense no-caps dir="rtl"').classes('chip')
+
+
 def _render_match(match: FriedmanMatch, on_stem: Optional[Callable[[str, str], Any]] = None,
-                  tab: str = TAB) -> None:
+                  tab: str = TAB, on_search: Optional[Callable[[str], Any]] = None) -> None:
     unit = match.unit
     with ui.element('div').classes(f'{MATCH_CLASS} card' + (' stem-chosen' if match.stem else '')):
         _render_head(unit, main=True)
+        expression_panel.render_match_details(match)
         if match.dot_mismatch:
             ui.label(tr(DOT_MISMATCH)).classes('flag dot-mismatch')
-        # The stems the unit's entry lists (owner, 2026-11-11): a press opens that stem's paragraph.
+        # The stems the unit's entry lists: a press opens that stem's paragraph.
         stem_buttons.render_stems(match.stems, match.stem, match.root, tab, on_stem)
         # A match for a root another dictionary gave (VIA_BORROWED) has no line at all: naming that
-        # dictionary was redundant (owner, 2026-11-12). A chosen stem is marked on its button.
+        # dictionary was redundant. A chosen stem is marked on its button.
         if match.via not in (VIA_CHOSEN, VIA_BORROWED):
             with ui.element('div').classes(f'{VIA_CLASS} via'):
                 ui.label(tr(VIA_LABELS.get(match.via, match.via))).classes('via-label')
@@ -195,13 +241,18 @@ def _render_match(match: FriedmanMatch, on_stem: Optional[Callable[[str, str], A
         if match.parent is not None and match.parent.head_text:
             with ui.element('div').classes('matched-key'):
                 ui.label(tr(UNDER)).classes('matched-label')
-                _rtl(_head_label(match.parent))
+                _rtl(_parent_label(unit, match.parent))
         if unit.definition:
             _rtl(unit.definition).classes('gloss he definition')
         if unit.references:
             _rtl(unit.references).classes('references')
+        _render_see(unit, on_search)
+        # The units the references send the reader to, as the book prints them.
+        for referred in match.referred:
+            with ui.element('div').classes(REFERRED_CLASS):
+                _render_child(referred)
         # The first quotations, sub-entries and stem paragraphs; the rest on a click, in place
-        # (owner, 2026-11-11: never only on the PDF page). A chosen stem that is the entry's own
+        # (never only on the PDF page). A chosen stem that is the entry's own
         # paragraph shows the entry's other units only on the click.
         for n, quote in enumerate(unit.quotations[:QUOTATIONS_SHOWN], 1):
             _render_quotation(n, quote)
@@ -239,15 +290,18 @@ def _render_place(place: FriedmanPlace) -> None:
     """One quotation (its words, the matched ones marked, its translation and locator) or the
     head; then, when a word was reached by a clitic alternative, which printed word carried it."""
     with ui.element('div').classes(f'{PLACE_CLASS} place'):
-        if place.scope == SCOPE_QUOTATION and place.quotation is not None:
+        if place.scope in (SCOPE_QUOTATION, "arabic_quotation") and place.quotation is not None:
             with ui.element('div').classes(f'{QUOTE_CLASS} quotation'):
                 expression_panel.render_marked(place.words, place.positions, 'ja')
                 if place.quotation.translation:
                     _rtl(place.quotation.translation).classes('gloss he')
-                if place.quotation.foreign:
+                if _foreign_apart(place.quotation) and place.scope != "arabic_quotation":
                     ui.label(place.quotation.foreign).props('dir="rtl" lang="ar"').classes('ar')
                 if place.quotation.locator:
                     _rtl(place.quotation.locator).classes('locator')
+        elif place.scope == "construction":
+            ui.label(tr("Construction with inherited verb")).classes('where')
+            expression_panel.render_marked(place.words, place.positions, 'ja')
         else:
             ui.label(tr(IN_HEAD)).classes('where')
         expression_panel.render_components(place)
@@ -260,11 +314,16 @@ def _render_hit(hit: FriedmanExpressionHit) -> None:
         if hit.parent is not None and hit.parent.head_text:
             with ui.element('div').classes('matched-key'):
                 ui.label(tr(UNDER)).classes('matched-label')
-                _rtl(_head_label(hit.parent))
+                _rtl(_parent_label(unit, hit.parent))
         if unit.definition:
             _rtl(unit.definition).classes('gloss he definition')
+        if unit.references:
+            _rtl(unit.references).classes('references')
         for place in hit.places:
             _render_place(place)
+        shown = {place.quotation.n for place in hit.places if place.quotation is not None}
+        remaining = tuple(q for q in unit.quotations if q.n not in shown)
+        show_more.render_more(remaining, lambda q: _render_quotation(q.n, q), show_more.EXAMPLES, collapsed=True)
         if hit.places_total > len(hit.places):
             ui.label(f'+{hit.places_total - len(hit.places)} {tr(MORE_PLACES)}').classes('more')
 
@@ -282,7 +341,8 @@ def render_friedman_expression_empty(result: FriedmanExpression, *, on_gap: Opti
 
 
 def render_friedman_expression(result: Optional[FriedmanExpression], *, credit: str, lang: str = 'he',
-                               on_gap: Optional[Callable[[int, str], Any]] = None, titled: bool = True) -> bool:
+                               on_gap: Optional[Callable[[int, str], Any]] = None, titled: bool = True,
+                               on_more_entries=None) -> bool:
     """Draw an expression search's answer into the current container. Returns False, drawing
     nothing, when there is no result, no hit, or no credit line."""
     if result is None or not result.found:
@@ -294,12 +354,14 @@ def render_friedman_expression(result: Optional[FriedmanExpression], *, credit: 
     with ui.element('div').classes(f'{SECTION_CLASS} {EXPRESSION_CLASS} friedman'):
         if titled:
             ui.label(tr(TITLE)).classes('friedman-title')
+        expression_panel.render_automatic_note()
         ui.label(tr(STATUS_NOTE)).classes(f'{STATUS_CLASS} disclaimer')
         _render_gap(result, on_gap)
         for hit in result.hits:
             _render_hit(hit)
-        if result.truncated:
-            ui.label(f'+ {tr(MORE_MATCHES)}').classes('more')
+        expression_panel.render_related(result, _render_hit)
+        expression_panel.render_more_entries(result.hits, result.truncated, on_more_entries,
+            _render_hit, lambda hit: hit.unit.id, 20)
         _render_credit(credit, lang)
     return True
 
@@ -307,7 +369,8 @@ def render_friedman_expression(result: Optional[FriedmanExpression], *, credit: 
 def render_friedman(result: Optional[FriedmanLookup], *, credit: str, lang: str = 'he',
                     on_search: Optional[Callable[[str], Any]] = None, titled: bool = True,
                     on_stem: Optional[Callable[[str, str], Any]] = None, tab: str = TAB,
-                    on_suggest: Optional[Callable[[str, str], Any]] = None, chips: tuple[str, str] = ('', '')) -> bool:
+                    on_suggest: Optional[Callable[[str, str], Any]] = None, chips: tuple[str, str] = ('', ''),
+                    on_more_entries=None) -> bool:
     """Draw ``result`` into the current container. Returns False, drawing nothing, when there is
     no result, no match, or no credit line (no dictionary text without its credit).
     ``titled=False`` leaves out the section's title (the panel's head already names it). A stem
@@ -322,16 +385,24 @@ def render_friedman(result: Optional[FriedmanLookup], *, credit: str, lang: str 
     with ui.element('div').classes(f'{SECTION_CLASS} friedman'):
         if titled:
             ui.label(tr(TITLE)).classes('friedman-title')
+        expression_panel.render_automatic_note()
         ui.label(tr(STATUS_NOTE)).classes(f'{STATUS_CLASS} disclaimer')
         if result.stem_missing:
             stem_buttons.render_not_listed(result.stem)
         # The other roots the word's verb forms give, beside the matches the word itself reached; a
         # press opens one and the chips stay (``chips``: the word, the chip shown now).
         stem_buttons.render_suggestions(result.suggestions, tab, on_suggest or on_stem, *chips)
+        # The units that print the word with the words beside it in the text, first.
+        if not result.context_quoted:
+            for found in result.context:
+                expression_panel.render_context(found, _render_hit)
         for match in result.matches:
-            _render_match(match, on_stem, tab)
-        if result.truncated:
-            ui.label(f'+ {tr(MORE_MATCHES)}').classes('more')
+            _render_match(match, on_stem, tab, on_search)
+        expression_panel.render_more_entries(result.matches, result.truncated, on_more_entries,
+            lambda match: _render_match(match, on_stem, tab, on_search), lambda match: match.unit.id, 12)
+        if result.context_quoted:
+            for found in result.context:
+                expression_panel.render_context(found, _render_hit)
         if result.quotes:   # the units whose quotations or head print the word, the word marked
             with ui.element('div').classes(f'{QUOTES_CLASS} examples'):
                 ui.label(tr(EXAMPLES_LABEL)).classes('examples-label')

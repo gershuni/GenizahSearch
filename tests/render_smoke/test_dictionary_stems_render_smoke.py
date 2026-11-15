@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Render-smoke: a root's stems in Blau's and Friedman's tabs on /browse (the private dictionary
-lookup plan, section 4.6; owner, 2026-11-11).
+lookup plan, section 4.6).
 
 Drives the real ``/browse`` over stubbed browse, Blau and Friedman services (harness:
 test_blau_panel_render_smoke.py) and fires the events the click script would. Pinned: a root's card
@@ -8,7 +8,7 @@ shows the stems its dictionary lists as buttons under the existing label 'verb s
 pressing one looks up "<root> <stem>" in every dictionary (the box then holds it), stays on the tab
 that was pressed, and the card opens on that stem's paragraph with the button marked as chosen;
 pressing the chosen one goes back to the root; a typed stem the root does not list says so above
-the root's cards (the owner's wording, both languages), and the buttons are still there; PostHog
+the root's cards (the approved wording, both languages), and the buttons are still there; PostHog
 counts a press as how 'stem', never the word.
 """
 from __future__ import annotations
@@ -19,8 +19,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nicegui import ui
 
-from shared.blau_service import BlauCard, BlauLookup
-from shared.friedman_service import VIA_CHOSEN, FriedmanLookup, FriedmanMatch
+from shared.blau_service import BlauCard, BlauExpression, BlauExpressionHit, BlauLookup, BlauPlace
+from shared.friedman_service import (
+    VIA_CHOSEN, FriedmanExpression, FriedmanExpressionHit, FriedmanLookup, FriedmanMatch,
+)
+from shared.ja_expression import ExpressionPlace
 from shared.ja_roots import root_and_stem
 from tests.render_smoke.test_blau_panel_render_smoke import (
     CREDIT_HE, _fire, _lane, _open, _popover, _sense, _shown_word, _switch, _tab_of, _tab_row, _texts, _turn_on,
@@ -31,7 +34,7 @@ from tests.render_smoke.test_browse_button_icons_render_smoke import (
 )
 from tests.render_smoke.test_friedman_panel_render_smoke import CREDIT as FRIEDMAN_CREDIT
 from tests.render_smoke.test_friedman_panel_render_smoke import STATUS, _unit
-from web.components import blau_panel, friedman_panel, stem_buttons
+from web.components import blau_panel, expression_panel, friedman_panel, stem_buttons
 from web.pages import browse
 
 ROOT_URL = 'https://blau-dict.netlify.app/entry/blau-e-000866'
@@ -46,7 +49,7 @@ STEM_IV = _unit('f001152', 'binyan', 'עלי', "'סמך על'", parent='f001149'
 SUB = _unit('f001150', 'subentry', '-ה אן', "'הורה לו'", parent='f001149')
 
 
-def _blau_answer(word, gap=None, stems=True):
+def _blau_answer(word, gap=None, stems=True, before=(), after=(), ordered=True):
     """Blau as the service answers: the root's card with its stems; with stem X typed, that
     stem's paragraph; with a stem the root does not list, the root's card and the stem asked."""
     _root, stem = root_and_stem(word) if stems else ('', 0)
@@ -62,7 +65,7 @@ def _blau_answer(word, gap=None, stems=True):
                       more_examples=0, stem=stem)
 
 
-def _friedman_answer(word, gap=None, stems=True):
+def _friedman_answer(word, gap=None, stems=True, before=(), after=(), ordered=True):
     _root, stem = root_and_stem(word) if stems else ('', 0)
     if stem == 4:
         matches = (FriedmanMatch(STEM_IV, VIA_CHOSEN, 'דלל', ENTRY, (), 0, stems=FRIEDMAN_STEMS, root='דלל', stem=4),)
@@ -113,6 +116,12 @@ def _answered(svc, word):
     return any(c.args and c.args[0] == word for c in svc.answer.call_args_list)
 
 
+def _current_tab(user):
+    """The tab the panel shows now (None while it is redrawn)."""
+    row = _tab_row(user)
+    return row.value if row is not None else None
+
+
 def _stem_field(user):
     """The verb-stem field beside the panel's box."""
     [field] = [e for e in _all_elements(user) if isinstance(e, ui.select) and blau_panel.STEM_SELECT_CLASS in e.classes]
@@ -160,6 +169,34 @@ def test_the_stem_field_beside_the_box_looks_the_root_up_with_that_stem():
         with user._client:
             _stem_field(user).set_value(None)
         await _wait_until(lambda: blau.answer.call_args_list[-1].args[0] == 'דלל')
+
+    _run(driver, blau, friedman)
+
+
+def test_quotation_context_follows_lexical_cards_and_cannot_take_the_opening_tab():
+    blau, friedman = _services()
+    words = ('דלל', 'סלאם')
+    hit = FriedmanExpressionHit(
+        unit=_unit('f009099', 'entry', 'קלב', 'synthetic quotation owner'), parent=None,
+        places=(ExpressionPlace('quotation', 0, words, (0, 1), ()),), places_total=1)
+    context = FriedmanExpression('דלל סלאם', words, (), 0, (hit,), False, STATUS, FRIEDMAN_CREDIT)
+
+    def answer(word, gap=None, stems=True, before=(), after=(), ordered=True):
+        return replace(_friedman_answer(word, gap, stems), context=(context,))
+
+    friedman.answer.side_effect = answer
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'דלל', 'after': ['סלאם']})
+        await _wait_until(lambda: _with_class(user, expression_panel.CONTEXT_CLASS))
+        assert _current_tab(user) == blau_panel.BLAU_TAB
+        [block] = _with_class(user, expression_panel.CONTEXT_CLASS)
+        cards = _with_class(user, friedman_panel.MATCH_CLASS)
+        # Expression hits also carry MATCH_CLASS inside the context block.
+        assert cards and cards[0].id < block.id < cards[-1].id
+        assert expression_panel.QUOTED_CONTEXT_LABEL in _texts(user)
 
     _run(driver, blau, friedman)
 
@@ -326,13 +363,13 @@ def test_words_selected_in_the_manuscript_are_never_a_typed_stem():
 
 @pytest.mark.parametrize('lang, label', [('en', 'Other possible roots'), ('he', 'שורשים אפשריים נוספים')])
 def test_the_other_roots_a_word_s_verb_forms_give_are_chips_that_open_that_root_on_that_stem(lang, label):
-    """Owner, 2026-11-11 (the graded sample): beside the cards the word itself reached, the roots its
+    """The graded sample: beside the cards the word itself reached, the roots its
     verb forms give are a line of chips at the top of the tab ("קרב V", or the root alone when several
     stems fit); a press looks that up in every dictionary, as a stem button does, on the same tab, and
     the word's chips stay, the pressed one marked, with the word first to go back to its answer."""
     blau, friedman = _services()
 
-    def blau_answer(word, gap=None, stems=True):
+    def blau_answer(word, gap=None, stems=True, before=(), after=(), ordered=True):
         answer = _blau_answer(word, gap)
         return replace(answer, suggestions=(('קרב', 5), ('ד̇לל', 0))) if word == 'תדלל' else answer
     blau.answer.side_effect = blau_answer
@@ -359,7 +396,7 @@ def test_the_other_roots_a_word_s_verb_forms_give_are_chips_that_open_that_root_
         assert _answered(friedman, 'קרב V') and _tab_row(user).value == blau_panel.BLAU_TAB
         await _wait_until(lambda: hows(captured)[-1:] == [blau_panel.SUGGEST_HOW])
         assert hows(captured)[-1] == blau_panel.SUGGEST_HOW, 'PostHog counts a chip press as a suggestion'
-        # The chips stay (owner, 2026-11-11), the pressed one marked, the word first to go back.
+        # The chips stay, the pressed one marked, the word first to go back.
         assert [(c.text, stem_buttons.CHOSEN_CLASS in c.classes) for c in chips(user)] == [
             ('תדלל', False), ('קרב V', True), ('ד̇לל', False)]
         _click(user, chips(user)[0])   # the word: back to its own answer
@@ -379,7 +416,7 @@ def test_the_other_roots_a_word_s_verb_forms_give_are_chips_that_open_that_root_
 
 @pytest.mark.parametrize("editor", [False, True])
 def test_a_dictionary_switched_to_editors_only_is_on_the_page_for_an_editor_alone(editor):
-    """BLAU_/FRIEDMAN_DICTIONARY_ENABLED=editors (shared/dictionary_switch.py; owner, 2026-11-11): a
+    """BLAU_/FRIEDMAN_DICTIONARY_ENABLED=editors (shared/dictionary_switch.py): a
     preview before release. The services answer the public question (``is_available``) no; the page
     asks once whether the reader is an editor or admin (``GlobalAuthState.is_editor``) and, if so,
     whether the dictionary is served to them (``served_to``). A visitor gets no switch and no panel;
@@ -413,3 +450,81 @@ def test_a_dictionary_switched_to_editors_only_is_on_the_page_for_an_editor_alon
             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=editor), \
             patch.object(browse.GlobalAuthState, 'is_editor', return_value=editor):
         _run_home_smoke(driver, lang='en')
+
+
+def test_the_words_beside_a_clicked_word_reach_both_dictionaries_and_their_expressions_come_first():
+    """אללה clicked in "אטאל אללה בקאך" reached the entries of אללה, not the blessing.
+    The script's words beside the clicked word go to both dictionaries; each tab draws the units that
+    name them first, under the head, the words, and the unit as its expression search draws it. A
+    card's senses of a sub-entry are headed by its name (קרצת's 'nettle', which was the verb's)."""
+    blau, friedman = _services()
+    text, printed = 'אטאל אללה בקאך', ('אטאל', 'אללה', 'בקאה')
+    blau_hit = BlauExpressionHit(root_id='blau-e-000900', name='טול', arabic='طول', page=420, url=ROOT_URL,
+                                 sub_entry='אטאל אללה בקאה', places_total=1,
+                                 places=(BlauPlace('sub_entry', 0, printed, (0, 1, 2), ()),))
+    friedman_hit = FriedmanExpressionHit(unit=_unit('f009001', 'subentry', 'אטאל אללה בקאה', "'יאריך האל ימיך'",
+                                                    parent='f001149'),
+                                         parent=ENTRY, places=(ExpressionPlace('head', 0, printed, (0, 1, 2), ()),),
+                                         places_total=1)
+    blau_context = BlauExpression(text, tuple(text.split()), (), 0, (blau_hit,), False)
+    friedman_context = FriedmanExpression(text, tuple(text.split()), (), 0, (friedman_hit,), False, STATUS,
+                                          FRIEDMAN_CREDIT)
+
+    def blau_answer(word, gap=None, stems=True, before=(), after=(), ordered=True):
+        result = _blau_answer(word, gap, stems)
+        card = result.cards[0]
+        headed = (card.senses[0], replace(card.senses[1], sub_entry='דאלה̈'))
+        result = replace(result, cards=(replace(card, senses=headed),))
+        return replace(result, context=(blau_context,)) if before or after else result
+
+    def friedman_answer(word, gap=None, stems=True, before=(), after=(), ordered=True):
+        result = _friedman_answer(word, gap, stems)
+        return replace(result, context=(friedman_context,)) if before or after else result
+
+    blau.answer.side_effect = blau_answer
+    friedman.answer.side_effect = friedman_answer
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT,
+              {'word': 'אללה', 'before': ['כתאבי', 'אטאל'], 'after': ['בקאך', 'ואדאם']})
+        await _wait_until(lambda: _with_class(user, expression_panel.CONTEXT_CLASS))
+        for svc in (blau, friedman):
+            call = svc.answer.call_args_list[-1]
+            assert call.args[0] == 'אללה' and call.kwargs['stems'] is False
+            assert (call.kwargs['before'], call.kwargs['after']) == (('כתאבי', 'אטאל'), ('בקאך', 'ואדאם'))
+        blocks = _with_class(user, expression_panel.CONTEXT_CLASS)
+        assert sorted(_tab_of(b) for b in blocks) == sorted([blau_panel.BLAU_TAB, friedman_panel.TAB])
+        assert _current_tab(user) == blau_panel.BLAU_TAB, "both name one: the first"
+        texts = _texts(user)
+        assert texts.count(expression_panel.CONTEXT_LABEL) == 2 and texts.count(text) == 2
+        # Every tab opens with the line that the lookup is automatic.
+        notes = _with_class(user, expression_panel.AUTOMATIC_NOTE_CLASS)
+        assert sorted(_tab_of(n) for n in notes) == sorted([blau_panel.BLAU_TAB, friedman_panel.TAB])
+        assert all(n.text == expression_panel.AUTOMATIC_NOTE for n in notes)
+        for block in blocks:   # first in its tab: every card of the tab is drawn after it
+            tab = _tab_of(block)
+            cards = [e for e in _all_elements(user) if _tab_of(e) == tab and (
+                blau_panel.CARD_CLASS in e.classes or friedman_panel.MATCH_CLASS in e.classes)]
+            assert len(cards) == 2 and all(card.id > block.id for card in cards), tab
+        [head] = _with_class(user, blau_panel.SUB_ENTRY_HEAD_CLASS)
+        senses = _with_class(user, blau_panel.SENSE_CLASS)
+        assert head.text == 'דאלה̈' and senses[0].id < head.id < senses[1].id, "the sub-entry's name heads its senses"
+        # Only Friedman names one: its tab opens first, though Blau's comes first and has an answer.
+        blau.answer.side_effect = lambda word, gap=None, stems=True, before=(), after=(), ordered=True: _blau_answer(word, gap, stems)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'אללה', 'before': ['ואטאל'], 'after': ['בקאך']})
+        await _wait_until(lambda: len(_with_class(user, expression_panel.CONTEXT_CLASS)) == 1)
+        await _wait_until(lambda: _current_tab(user) == friedman_panel.TAB)
+        assert _current_tab(user) == friedman_panel.TAB
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'אללה'})
+        await _wait_until(lambda: not _with_class(user, expression_panel.CONTEXT_CLASS))
+        assert _current_tab(user) == blau_panel.BLAU_TAB, "no words beside it: the first tab with an answer"
+        blau.answer.side_effect = blau_answer
+        # The box and the stem buttons send no words beside them.
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'דלל'})
+        await _wait_until(lambda: blau.answer.call_args_list[-1].args[0] == 'דלל')
+        assert blau.answer.call_args_list[-1].kwargs['before'] == ()
+        await _wait_until(lambda: not _with_class(user, expression_panel.CONTEXT_CLASS))
+
+    _run(driver, blau, friedman)

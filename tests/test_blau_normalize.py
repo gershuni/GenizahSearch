@@ -8,6 +8,26 @@ Transcriptions.txt), final letters, and the brackets/hyphens the dictionary's he
 """
 from __future__ import annotations
 
+
+def test_query_aliases_do_not_change_stored_dictionary_keys():
+    from shared.blau_normalize import query_stems, lookup_stems
+    assert 'מולאי' in query_stems('וימולאי')
+    assert 'מולאי' not in lookup_stems('וימולאי')
+    assert 'דלכ' in query_stems('[דא]לך')
+    assert 'דלכ' not in lookup_stems('[דא]לך')
+    assert 'כתב' not in query_stems('יכתב'), 'not every initial yod is a vocative'
+
+
+def test_mater_alternatives_preserve_consonants_boundaries_and_short_words():
+    from shared.blau_normalize import mater_variants, analysis_paths, evidence_cost
+    assert 'גוכאניה' in mater_variants('גכאניה')
+    assert 'תפצל' in mater_variants('תפוצל')
+    assert not mater_variants('מני')
+    assert not mater_variants('כתאב אחר')
+    assert 'כתב' not in mater_variants('כתאב'), 'alif deletion is not a general rule'
+    assert ('mater',) in analysis_paths('גכאניה', 'גוכאניה')
+    assert evidence_cost((('mater',),)) > evidence_cost((('prefix', 'suffix'),))
+
 import unicodedata
 
 import pytest
@@ -110,6 +130,41 @@ def test_candidate_stems(word, expected):
     assert candidate_stems(word) == expected
 
 
+def test_a_lookup_also_reads_a_feminine_ending_before_a_suffix_as_the_noun_s():
+    """סלאמתך and וסעאדתך in a letter's opening reached no entry of סלאמה or
+    סעאדה. A lookup reads a ת a pronoun suffix was peeled from also as ה, right after it; never
+    a ת the word ends in (בית, סלאמת), never below three letters, and the expression search's
+    keys (``candidate_stems``, the sidecars' keying) are unchanged."""
+    from shared.blau_normalize import lookup_stems
+
+    assert lookup_stems("סלאמתך") == ["סלאמתכ", "סלאמת", "סלאמה"]
+    assert lookup_stems("וסעאדתך") == ["וסעאדתכ", "וסעאדת", "וסעאדה", "סעאדתכ", "סעאדת", "סעאדה"]
+    assert lookup_stems("עזתהא") == ["עזתהא", "עזת", "עזה"]
+    assert lookup_stems("סלאמת") == ["סלאמת", "סלאמה"]
+    assert lookup_stems("בית")[0] == "בית", "retain the literal word alongside noun hypotheses"
+    assert "לה" not in lookup_stems("לתך"), "never below three letters"
+    assert "סלאמה" not in candidate_stems("סלאמתך")
+    for word in ("ואלכתאב", "סואלהם", "כתאבה", "ללה", "לא אבד", "", "أبد"):
+        assert lookup_stems(word) == candidate_stems(word), word
+
+
+def test_an_article_that_lost_its_alif_after_a_preposition_is_peeled_apart():
+    """בלסלאם (bi-l-salām) reached nothing: ב, ל or כ (after ו or פ), then the
+    article's ל without its alif, then the stem, of three letters or more. Not in ``candidate_stems``,
+    which keys the sidecars; a noun's keys (``article_candidates``)."""
+    from shared.blau_normalize import article_candidates, elided_article_stems
+
+    assert elided_article_stems("בלסלאם") == ["סלאמ"]
+    assert elided_article_stems("ללנאס") == ["נאס"] and elided_article_stems("כלכתאב") == ["כתאב"]
+    assert elided_article_stems("ובלסלאמה") == ["סלאמה", "סלאמ"] and elided_article_stems("פבלסלאם") == ["סלאמ"]
+    assert elided_article_stems("באלסלאם") == [], "the article written whole: candidate_stems"
+    assert elided_article_stems("בלאד") == [], "never below three letters"
+    assert elided_article_stems("לסלאם") == [] and elided_article_stems("סלאם") == [], "no preposition before it"
+    assert elided_article_stems("וללה") == [] and elided_article_stems("") == [] and elided_article_stems("בל סלאם") == []
+    assert "סלאמ" not in candidate_stems("בלסלאם") and article_candidates("בלסלאם") == {"סלאמ"}
+    assert article_candidates("ובאלסלאם") == {"סלאמ"}
+
+
 def test_candidate_stems_has_no_duplicates_and_starts_with_the_word():
     cands = candidate_stems("והם")
     assert cands[0] == "והמ"
@@ -118,3 +173,26 @@ def test_candidate_stems_has_no_duplicates_and_starts_with_the_word():
 
 def test_normalizer_version_is_an_int():
     assert isinstance(NORMALIZER_VERSION, int) and NORMALIZER_VERSION >= 1
+
+
+def test_demonstrative_alif_is_a_query_alias_without_changing_stored_keys():
+    from shared.blau_normalize import query_stems, word_analyses
+    for query, target in [('האדא', 'הדא'), ('והאדא', 'הדא'), ('האדה', 'הדה')]:
+        assert target in query_stems(query)
+        assert target not in {a.key for a in word_analyses(query)}
+        assert query_stems(query)[0] == query
+
+
+def test_the_keys_reached_only_by_peeling_the_article_are_a_noun_s():
+    """A word with the article is no finite verb. ``article_candidates`` are the
+    candidates reached only by peeling אל (and a pronoun suffix after it); never the word's own key
+    (אלתזם is stem VIII of לזם), never a word without the article."""
+    from shared.blau_normalize import article_candidates
+
+    assert article_candidates("אלקאצ'י") == {"קאצי", "קאצ"}
+    assert article_candidates("ואלסלאם") == {"סלאמ"}
+    assert article_candidates("אלתזם") == {"תזמ"} and "אלתזמ" in candidate_stems("אלתזם")
+    assert article_candidates("כתאב") == frozenset() and article_candidates("וכתאב") == frozenset()
+    assert article_candidates("אלי") == frozenset(), "too short to peel"
+    assert article_candidates("") == frozenset() and article_candidates("אל כתאב") == frozenset()
+    assert article_candidates("אלכתאב") <= set(candidate_stems("אלכתאב"))

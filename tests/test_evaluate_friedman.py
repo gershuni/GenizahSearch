@@ -36,7 +36,7 @@ def unit(uid, kind, head, keys, dotted=(), parent=None, binyan=None, examples=()
 
 
 def units_result():
-    return {"recovery_version": 4, "units": [
+    return {"recovery_version": 5, "units": [
         unit("f000001", "entry", "אבד", ["אבד"], ["אבד"],
              examples=[("לא אבד מן", "'no escape'", "(ח1, שורה 2)")]),
         unit("f000002", "subentry", "לא אבד", ["לא אבד"], parent="f000001", pages=2,
@@ -88,7 +88,7 @@ def test_every_measure_counts_what_the_book_gives_and_can_fail(evaluated):
     assert by_n[("f000002", 1)]["first_gap"] == 1 and by_n[("f000002", 1)]["positions"] == [0, 2]
     assert by_n[("f000002", 2)]["first_gap"] == 0 and by_n[("f000002", 2)]["stem"], "ואבד reached from אבד by a clitic"
     assert by_n[("f000002", 3)]["first_gap"] is None and by_n[("f000002", 3)]["positions"] is None
-    assert e["own_quotations"] == 3 and e["own_quotations_found_by_gap_cumulative"] == {"0": 1, "1": 2, "2": 2, "3": 2, "4": 2, "5": 2}
+    assert e["own_quotations"] == 3 and e["own_quotations_found_by_gap_cumulative"] == {str(gap): 1 if gap == 0 else 2 for gap in range(21)}
     assert e["own_quotations_missed_at_max_gap"] == 1 and e["own_quotations_found_through_a_clitic"] == 1
     assert [(o["other"], o["scope"], o["n"]) for o in expr["others"]] == [("f000001", "quotation", 1)]
     assert e["reversed_two_word_places"] == 1 and rev[0]["other"] == "f000005" and not rev[0]["own"]

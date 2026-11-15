@@ -46,6 +46,105 @@ def test_the_reader_understands_the_builder_s_schema():
     assert set(arabic_service.COUNTED_TABLES) == set(build.COUNTED_TABLES)
 
 
+def test_explicit_plural_lists_skip_qualifications_and_do_not_index_examples():
+    extract = arabic_service.explicit_plural_forms
+    assert extract('the pl. (of the former, S) is بُلْدَانٌ (S) and (or) بِلَادٌ: text') == ('بلدان', 'بلاد')
+    assert extract('pl. كُتُبٌ; a sentence كتاب آخر') == ('كتب',)
+    assert extract('pl. of كِتَابٌ; and an example كتب') == ()
+    assert extract('The text happens to contain بلاد.') == ()
+    assert extract('the pl. of مَعْنًى is مَعَانٍ.', 'عنW') == ('معان', 'معاني')
+    assert extract('pl. كِتَابٍ.', 'كتب') == ('كتاب',), 'kasratan alone does not license a final yod'
+
+
+def test_verbal_noun_lists_are_explicit_and_stop_before_examples():
+    extract = arabic_service.explicit_verbal_nouns
+    assert extract('inf. n. سُلُوكٌ (X) and سَلْكٌ; example طريق') == ('سلوك', 'سلك')
+    assert extract('inf. n. [of this verb]; an example سلوك') == ()
+    assert extract('An unrelated quotation سلوك الطريق.') == ()
+
+
+def test_printed_verbal_noun_keeps_a_final_root_consonant(sidecar):
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET text='synthetic; inf. n. كُتُوبٌ; example كلام' WHERE id='lane:t:1'")
+    svc = _service(sidecar)
+    result = svc.lookup('والكتوب')
+    first = result.roots[0].entries[0]
+    assert first.entry_id == 'lane:t:1' and first.match_kind == 'verbal_noun'
+    assert first.matched_form == 'كتوب' and first.matched
+    svc.close()
+
+
+def test_closed_class_matches_survive_conjunctions_and_spelling_aliases(sidecar):
+    svc = _service(sidecar)
+    for word in ('דאלך', '[דא]לך', 'ודאלך', 'ודלך'):
+        result = svc.lookup(word)
+        assert result.roots[0].entries[0].entry_id == 'lane:t:5', word
+    svc.close()
+
+
+def test_missing_personal_pronoun_does_not_fall_back_to_an_unrelated_verb(sidecar):
+    svc = _service(sidecar)
+    for query in ('نحن', 'ونحن'):
+        result = svc.lookup(query)
+        assert result.readings and not result.roots
+    svc.close()
+
+
+def test_numbered_finite_verb_precedes_an_inferred_feminine_noun(sidecar):
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET text='1. A synthetic verb.' WHERE id='lane:t:1'")
+        con.execute("UPDATE lane_entries SET headword='كُتْبَةٌ' WHERE id='lane:t:2'")
+        con.execute("UPDATE lane_forms SET skeleton='كتبه' WHERE entry_id='lane:t:2'")
+    svc = _service(sidecar)
+    result = svc.lookup('كتبت')
+    first = result.roots[0].entries[0]
+    assert (first.entry_id, first.match_kind) == ('lane:t:1', 'verb_form')
+    assert any(e.entry_id == 'lane:t:2' for e in result.roots[0].entries)
+    assert svc.lookup('كتبه').roots[0].entries[0].entry_id == 'lane:t:2'
+    svc.close()
+
+
+def test_article_prefers_a_noun_to_a_homographic_numbered_verb(sidecar):
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET text='1. A synthetic verb.' WHERE id='lane:t:1'")
+        con.execute("UPDATE lane_forms SET skeleton='كتب' WHERE entry_id='lane:t:2'")
+    svc = _service(sidecar)
+    assert svc.lookup('الكتب').roots[0].entries[0].entry_id == 'lane:t:2'
+    assert svc.lookup('كتب').roots[0].entries[0].entry_id == 'lane:t:1'
+    svc.close()
+
+
+def test_attested_conjoined_noun_keeps_priority_over_a_possible_imperfect(sidecar):
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET text='1. A synthetic verb.' WHERE id='lane:t:1'")
+        con.execute("UPDATE lane_entries SET headword='يَكْتُبٌ' WHERE id='lane:t:2'")
+        con.execute("UPDATE lane_forms SET skeleton='يكتب' WHERE entry_id='lane:t:2'")
+    svc = _service(sidecar)
+    assert svc.lookup('ويكتب').roots[0].entries[0].entry_id == 'lane:t:2'
+    svc.close()
+
+
+def test_a_direct_headword_precedes_a_printed_plural_homograph(sidecar):
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET text='sample; pl. كِتَابٌ: sample' WHERE id='lane:t:1'")
+    service = _service(sidecar)
+    result = service.lookup('كِتَاب')
+    assert result.roots[0].entries[0].entry_id == 'lane:t:2'
+    assert result.roots[0].entries[0].matched
+    assert next(e for e in result.roots[0].entries if e.entry_id == 'lane:t:1').match_kind == 'plural'
+
+
+def test_prefixed_construct_noun_uses_its_lexical_form_without_a_frequency_hit(sidecar):
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET headword='كِتَابَةٌ' WHERE id='lane:t:2'")
+        con.execute("UPDATE lane_forms SET skeleton='كتابه' WHERE entry_id='lane:t:2'")
+    service = _service(sidecar)
+    for query in ('בכתאבת', 'وبكتابتك'):
+        result = service.lookup(query)
+        assert result.roots[0].entries[0].entry_id == 'lane:t:2'
+        assert result.roots[0].entries[0].matched
+
+
 def test_the_commonest_reading_first_and_its_closed_class_root(sidecar):
     """דלך: ذلك is counted 4 times, دلك once (not stored); the closed-class table files ذلك under
     Lane's ذا and names that headword."""
@@ -109,7 +208,7 @@ def test_the_entries_are_bounded_and_the_rest_counted(sidecar, monkeypatch):
 
 
 def test_a_root_carries_every_entry_and_a_cut_entry_its_whole_text(sidecar, monkeypatch):
-    """Owner, 2026-11-11: nothing only on the site. MAX_ENTRIES is a bound above Lane's largest root (69
+    """Nothing only on the site. MAX_ENTRIES is a bound above Lane's largest root (69
     entries); a cut entry carries its whole text for the panel's "Show the full entry"."""
     assert arabic_service.MAX_ENTRIES >= 69
     monkeypatch.setattr(arabic_service, "MAX_TEXT", 5)
@@ -236,3 +335,38 @@ def test_the_service_titles_a_merged_root_card_with_its_entry_s_heading(sidecar)
     con.close()
     [root] = _service(sidecar).lookup("כתב").roots
     assert root.root_key == "كتب" and root.name == "كتبى" and root.url == root_url("كتبى")
+
+
+@pytest.mark.parametrize('closed_homograph', [False, True])
+def test_unfrequent_feminine_construct_reaches_the_exact_noun_first(sidecar, closed_homograph):
+    with sqlite3.connect(sidecar) as conn:
+        conn.execute("INSERT INTO lane_roots VALUES ('مدن', 'مدن', '[]', 99, 2, 1)")
+        conn.execute("INSERT INTO lane_entries VALUES ('synthetic:verb', 'مدن', 'مدن', 99, 'مَدَنَ', 1, '1', 'synthetic verb')")
+        conn.execute("INSERT INTO lane_entries VALUES ('synthetic:city', 'مدن', 'مدن', 100, 'مَدِينَةٌ', 1, '1', 'synthetic city noun')")
+        conn.execute("INSERT INTO lane_forms VALUES ('مدينه', 'مدن', 'synthetic:city')")
+        if closed_homograph:
+            conn.execute("INSERT INTO closed_class VALUES ('مدينه', 'مدينه', 'مدن', 'synthetic:verb', 'synthetic homograph', 99)")
+        for table in ('lane_roots', 'lane_entries', 'lane_forms', 'closed_class'):
+            conn.execute('UPDATE meta SET value=? WHERE key=?',
+                         (str(conn.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]), f'rows_{table}'))
+    service = _service(sidecar)
+    for query in ('מדינת', 'מדינתך'):
+        result = service.lookup(query)
+        assert result.roots[0].entries[0].entry_id == 'synthetic:city'
+        assert result.roots[0].entries[0].matched
+        assert result.roots[0].inferred
+    service.close()
+
+
+def test_an_arabic_word_reaches_a_numbered_stem_as_the_judeo_arabic_one_does(sidecar):
+    """يكتتبون reached no entry while יכתתבון reached stem 8 of كتب: the verb forms are generated in
+    Hebrew letters, and an Arabic word is now read into them letter for letter."""
+    with sqlite3.connect(sidecar) as con:
+        con.execute("UPDATE lane_entries SET text='8. A synthetic verb.' WHERE id='lane:t:1'")
+    svc = _service(sidecar)
+    for word in ("יכתתבון", "يكتتبون"):
+        roots = svc.lookup(word).roots
+        assert roots and roots[0].root_key == "كتب", word
+        assert any(e.entry_id == "lane:t:1" and e.matched for e in roots[0].entries), word
+    svc.close()
+

@@ -2,7 +2,7 @@
 """Score the graded click sample of the cards found by verb form (the private dictionary lookup plan,
 section 6.1, decided 2026-11-11 before any draw). Reads the draw (``sample.jsonl``, written by
 ``scripts/draw_dictionary_stems_sample.py``), the grader's answers (``grading/answers/*.json``) and the
-owner's review (``review.json``: a root id's verdict that replaces the grader's), and reports, for each
+second review (``review.json``: a root id's verdict that replaces the grader's), and reports, for each
 dictionary and each graded kind:
 
 - **wrong-only**: words whose cards found by verb form name no right root (none graded right, and not
@@ -14,11 +14,11 @@ dictionary and each graded kind:
   whole entry and are counted apart;
 - the same split by whether the dictionary also found the word itself.
 
-The pass rule (owner, 2026-11-11): a kind is shown in a dictionary when at most 5 in 100 of its
+The pass rule: a kind is shown in a dictionary when at most 5 in 100 of its
 gradable words are wrong-only and cannot-tell words are at most 25% of those drawn; a kind that passes
 opens on the stem only if the stem is right in at least 85% of its words whose root is right.
 
-Two rulings after the first results (owner, 2026-11-11: recall counts more than precision): a word is a win
+Two rulings after the first results (recall counts more than precision): a word is a win
 when any root proposed for it is right, whichever dictionary proposed it (``pooled``, the default; the
 reader sees both tabs); and Hebrew and Aramaic words are irrelevant (``excluded.json`` in the sample
 folder: item id -> why; they are left out of every count). ``--strict`` scores each dictionary on its
@@ -37,7 +37,7 @@ from typing import Any, Iterable, Optional
 
 from shared.ja_roots import dot_pattern, stem_label
 
-#: 2: pooled wins and excluded words (owner, 2026-11-11).
+#: 2: pooled wins and excluded words.
 SCORE_VERSION = 2
 DICTIONARIES = ("blau", "friedman")
 GRADED_KINDS = ("A", "B", "D")
@@ -59,7 +59,7 @@ def wilson_upper(k: int, n: int, z: float = 1.959964) -> float:
 def verdicts(sample: Iterable[dict[str, Any]], answers: Iterable[dict[str, Any]],
              review: Optional[dict[str, dict[str, str]]] = None) -> dict[str, dict[str, dict[str, str]]]:
     """Per item id, per root (its letters and dots), the verdict {'root': ..., 'stem': ...}: the
-    grader's, replaced by the owner's review where it gives one (by root id)."""
+    grader's, replaced by the second review where it gives one (by root id)."""
     by_rid = {r["rid"]: r for item in answers for r in item.get("roots", ())}
     review = review or {}
     out: dict[str, dict[str, dict[str, str]]] = {}
@@ -155,7 +155,7 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
 
 def load(folder: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, str]],
                                 dict[str, str]]:
-    """The sample, the grader's answers, the owner's review and the excluded items of a sample folder."""
+    """The sample, the grader's answers, the second review and the excluded items of a sample folder."""
     sample = _jsonl(folder / "sample.jsonl")
     answers = [item for path in sorted((folder / "grading" / "answers").glob("batch_*.json"))
                if ".rejected" not in path.name

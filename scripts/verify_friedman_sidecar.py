@@ -29,8 +29,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.dictionary_search_indexes import expression_material, verify_search_indexes
 from shared.friedman_service import (  # noqa: E402
-    SCOPE_HEAD, SCOPE_QUOTATION, check_sidecar, head_scope_text, scope_keys,
+    check_sidecar,
 )
 
 
@@ -52,18 +53,13 @@ def verify(db: Path, expect_units: int, expect_index_rows: int, expect_tokens: i
                 raise ValueError(f"meta claims {name} = {claimed!r}, expected {expected}")
         stored = Counter(tuple(row) for row in conn.execute(
             "SELECT unit_id, scope, n, pos, key, peeled FROM tokens"))
-        recomputed: Counter = Counter()
-        for unit_id, head_text in conn.execute("SELECT id, head_text FROM units"):
-            for pos, key, peeled in scope_keys(head_scope_text(head_text or "")):
-                recomputed[(unit_id, SCOPE_HEAD, 0, pos, key, peeled)] += 1
-        for unit_id, n, quote in conn.execute("SELECT unit_id, n, quote FROM quotations"):
-            for pos, key, peeled in scope_keys(quote or ""):
-                recomputed[(unit_id, SCOPE_QUOTATION, n, pos, key, peeled)] += 1
+        recomputed = Counter(expression_material(conn, "friedman")[0])
         if stored != recomputed:
             extra = sum((stored - recomputed).values())
             missing = sum((recomputed - stored).values())
             raise ValueError(f"tokens differ from the texts: {extra} row(s) the texts do not give, "
                              f"{missing} missing; the file was keyed another way")
+        verify_search_indexes(conn, "friedman")
         if not conn.execute("SELECT 1 FROM unit_keys LIMIT 1").fetchone():
             raise ValueError("no head keys at all")
     finally:

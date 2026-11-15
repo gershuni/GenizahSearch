@@ -211,6 +211,28 @@ def test_a_dot_whose_origin_lies_in_the_previous_letter_attaches_under_its_ink()
     assert fu.mark_anchor("Unknown", 10.0, "̇", 5.0) == 5.0, "an unmeasured font keeps the origin"
 
 
+def _arabic_line(chars):
+    spans = [{"font": "ABCDEF+TimesNewRomanPSMT", "size": 12.0,
+              "chars": [{"c": c, "bbox": [x0, 295, x1, 309]} for c, x0, x1 in chars]}]
+    return {"bbox": [min(c[1] for c in chars), 295, max(c[2] for c in chars), 309], "spans": spans}
+
+
+def test_an_arabic_ligature_stored_last_letter_first_is_read_in_order():
+    """The book's own geometry (1.pdf pages 1 and 4): a ligature's letters arrive in printed
+    order, all but the final one with no width at the ligature's right edge."""
+    god = _arabic_line([("ب", 321.92, 324.85), ("إ", 319.17, 321.92), ("ذ", 315.13, 319.17), ("ن", 308.81, 315.13),
+                        ("ه", 305.27, 305.27), ("ل", 305.27, 305.27), ("ل", 305.27, 305.27), ("ا", 295.75, 305.27)])
+    assert fu.text_of(fu.block_glyphs(block(god))) == "بإذن الله"
+    lam_alif = _arabic_line([("أ", 145.75, 145.75), ("ل", 139.23, 145.75), ("ج", 132.87, 139.23), ("ل", 126.79, 132.87)])
+    assert fu.text_of(fu.block_glyphs(block(lam_alif))) == "لأجل"
+    article = _arabic_line([("ا", 354.38, 356.86), ("ل", 351.90, 354.38), ("ى", 344.84, 351.90)])
+    assert fu.text_of(fu.block_glyphs(block(article))) == "الى", "letters with their own width keep their place"
+    latin = [{"c": "i", "bbox": [100.0, 0, 100.0, 9]}, {"c": "c", "bbox": [100.0, 0, 104.0, 9]}]
+    assert [(c["c"], x0, x1) for c, x0, x1 in fu.ligature_positions(latin)] == [("i", 100.0, 100.0), ("c", 100.0, 104.0)]
+    far = [{"c": "ا", "bbox": [200.0, 0, 200.0, 9]}, {"c": "ل", "bbox": [100.0, 0, 106.0, 9]}]
+    assert [x0 for _, x0, _ in fu.ligature_positions(far)] == [200.0, 100.0], "a letter away from the box is no ligature"
+
+
 @pytest.mark.parametrize("font,size,char,expected", [
     ("ABCDEF+Hadassah-Bold", 13.5, "א", "head"), ("Hadassah-Regular", 11.0, "א", "ja"),
     ("FrankRuehl", 11.5, "א", "he"), ("FrankRuehl", 9.5, "(", "loc"), ("TimesNewRomanPSMT", 7.5, "T", "shelf"),
