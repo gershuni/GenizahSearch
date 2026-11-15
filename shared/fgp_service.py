@@ -1319,6 +1319,15 @@ class FgpService:
         """
         if not _fgp_enabled():
             return []
+        return self.chooser_sources(sys_id)
+
+    def chooser_sources(self, sys_id: str) -> List[Dict[str, Any]]:
+        """The chooser's FGP sources for a manuscript, whatever the feature flag says.
+
+        What :meth:`get_fgp_sources_for_fragment` returns when FGP is switched on: the
+        editions index (``shared/editions_indexer.py``) is built from exactly this list,
+        so search and the chooser never disagree about which FGP texts a manuscript has.
+        """
         if not sys_id or not self.is_available() or "sys_id" not in self._columns:
             return []
 

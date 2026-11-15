@@ -88,6 +88,8 @@ EXTRACTED_MODULES = [
     "shared/catalog_criteria.py",        # catalogue criteria plan, PR 1a, 2026-11-01
     "shared/catalog_text_normalize.py",  # catalogue text search keys, PR 1, 2026-11-05
     "shared/catalog_text_service.py",    # catalogue text search sidecar reader, PR 1, 2026-11-05
+    "shared/edition_search_text.py",     # editions search: an edition's search text, PR 1, 2026-11-15
+    "shared/editions_indexer.py",        # editions search: the editions index builder, PR 1, 2026-11-15
     "shared/cudl_identity.py",           # structural CUDL identity, 2026-10-29
     "shared/arabic_normalize.py",        # Arabic dictionary readings and keys, 2026-11-04
     "shared/arabic_method.py",           # Arabic layer method v1-v4 (served and measured), 2026-11-04
