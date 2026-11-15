@@ -51,6 +51,9 @@ class RefinementStep:
     # The variant settings the step was searched with (the website records them, so a
     # replay searches exactly as the step first did; None = not recorded).
     variant_settings: Optional[dict] = None
+    # The texts the step read (editions plan §3.4, D1): 'all', 'editions' or 'automatic';
+    # None for a step saved before the source choice existed, replayed as today's search.
+    sources: Optional[str] = None
 
     # Runtime-only fields (not serialized, rebuilt on replay)
     _result_uids: set = field(default_factory=set, repr=False, compare=False)
@@ -152,6 +155,12 @@ def step_partial(cutoff, parent=None) -> bool:
                 and not cutoff.get('capped') and not cutoff.get('interrupted'))
 
 
+def _sources_argument(step: RefinementStep) -> dict:
+    """The step's source choice for execute_search, when it recorded one (a searcher that
+    predates the choice is never handed the argument)."""
+    return {'sources': step.sources} if step.sources else {}
+
+
 def _last_search_cutoff() -> dict:
     """The cut-off signal of the search just run on this thread (none from a searcher
     that is not the real engine)."""
@@ -205,6 +214,7 @@ def replay_chain(
             restrict_sys_ids=effective,
             text_position=step.text_position,
             corpus_scope=step.corpus_scope,
+            **_sources_argument(step),
         )
 
         result_sys_ids = {
@@ -303,6 +313,7 @@ def complete_chain(
                 corpus_scope=step.corpus_scope,
                 progress_callback=progress_callback,
                 ids_only=True,
+                **_sources_argument(step),
             )
             cutoff = _last_search_cutoff()
             if cutoff.get('interrupted'):

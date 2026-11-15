@@ -203,7 +203,7 @@ def test_query_local_index_never_raises_cancellation_at_its_callers():
 def test_local_only_call_site_does_not_reraise_cancellation():
     """Guards the other half: even with the function behaving, a re-raise at the
     call site would put us straight back to emitting []."""
-    src = inspect.getsource(SearchEngine.execute_search)
+    src = inspect.getsource(SearchEngine._execute_search_leg)   # execute_search's body (editions PR 2)
     head = src[:src.index('if not self.searcher:')]      # the LOCAL-only branch
     assert 'except InterruptedError' not in head, (
         'the LOCAL-only branch re-raises cancellation again; partial results are lost')
@@ -307,5 +307,5 @@ def test_lab_search_local_lab_loop_ticks():
 def test_execute_search_threads_both_callbacks_to_local(call_site):
     """All four _query_local_index call sites must forward them, or the LOCAL
     pass silently keeps its old un-cancellable behaviour."""
-    src = inspect.getsource(SearchEngine.execute_search)
+    src = inspect.getsource(SearchEngine._execute_search_leg)   # execute_search's body (editions PR 2)
     assert src.count(call_site) >= 3, src.count(call_site)

@@ -179,6 +179,7 @@ Never treat a flag alone as proof a feature is live.
 | `PASSAGE_MULTI_WITNESS_ENABLED` | `false` | the Witnesses panel + `witnesses[]` on the API | `passage_available()` |
 | `IDENTIFICATION_REVIEWS_ENABLED` | `true` | community identification reviews (beta) | — |
 | `FGP_TRANSCRIPTIONS_ENABLED` | `true` | FGP transcriptions as a version-chooser source | presence of `fgp_data/` |
+| `EDITIONS_SEARCH_ENABLED` | `false` | scholarly editions in the text search (`sources`, one result per page; also `editors`) | `<INDEX_DIR>/Editions` coherent (`shared/editions_search.py::check_generation`) |
 | `BLAU_DICTIONARY_ENABLED` | `true` | Blau's dictionary on `/browse` (click a word; several words are the expression search, once the 1.1.0 sidecar with its `tokens` table is deployed) | `shared/blau_service.py::BlauService.is_ready()` -- `blau_data/blau.db` present and checked |
 | `LANE_DICTIONARY_ENABLED` | `true` | Lane's Lexicon, its own tab in the dictionary panel | `shared/arabic_service.py::ArabicService.is_ready()` -- `arabic_data/arabic.db` present and checked |
 | `FRIEDMAN_DICTIONARY_ENABLED` | `false` — turned ON in production with v9.15.0 (owner, after the sidecar) | Friedman's Judeo-Arabic dictionary, its own tab, with the expression search (a machine reading; the tab and Help say it may contain errors) | `shared/friedman_service.py::FriedmanService.is_available()` -- `friedman_data/friedman.db` present and checked |

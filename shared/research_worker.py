@@ -177,7 +177,13 @@ def main(directory):
     from shared.config import Config
     from shared.local_index_leases import index_leases
     write_progress(root, {'status': 'Waiting for local index maintenance', 'progress': (0, 0)})
-    with index_leases([Config.LOCAL_INDEX_DIR, Config.LOCAL_LAB_INDEX_DIR]):
+    leased = [Config.LOCAL_INDEX_DIR, Config.LOCAL_LAB_INDEX_DIR]
+    if wants_editions(payload):
+        # A read lease for this request on the editions generation: its promotion waits
+        # for the search to end (editions plan §3.7).
+        from shared.editions_indexer import default_generation_dir
+        leased.append(default_generation_dir())
+    with index_leases(leased):
         write_progress(root, {'status': 'Starting search worker', 'progress': (0, 0)})
         try:
             run_query(root, payload, report, native_matching=native_matching, meta=meta)
@@ -185,6 +191,24 @@ def main(directory):
             # Drop engine cycles/native handles before releasing the read lease.
             import gc
             gc.collect()
+
+
+def wants_editions(payload):
+    """Does this request read the editions (its source choice ``all`` or ``editions``)? The
+    web caller decided it may (the switch, and who is an editor: editions plan §3.6); an
+    off switch here still opens nothing."""
+    if payload.get('kind') != 'search' or payload.get('method') != 'execute_search':
+        return False
+    from shared.dictionary_switch import OFF
+    from shared.editions_search import SOURCES_AUTOMATIC, editions_switch, normalize_sources
+    try:
+        # Read as execute_search reads it ("ALL", " editions "): Codex review of PR #16.
+        sources = normalize_sources((payload.get('arguments') or {}).get('sources'))
+    except ValueError:
+        return False          # execute_search refuses it with its own message
+    if sources == SOURCES_AUTOMATIC:
+        return False
+    return editions_switch() != OFF
 
 
 def _time_limited(report, seconds, stopped, started=None):
@@ -229,6 +253,8 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         scope = payload['arguments'].get('corpus_scope',
                                          'all' if payload['method'] == 'execute_search' else 'genizah')
         searcher = SearchEngine(meta, variants, worker_mode=True, open_local=scope != 'genizah')
+        if wants_editions(payload):
+            searcher.attach_editions()
         kind = payload['kind']
         if kind == 'search' and searcher.searcher is None and payload['arguments'].get('mode') not in ('Title', 'Shelfmark'):
             raise ValueError('The transcription search index is unavailable.')

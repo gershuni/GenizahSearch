@@ -57,7 +57,7 @@ from shared.edition_search_text import CLEANER_VERSION, SOURCE_FGP, SOURCE_PGP, 
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
-BUILDER_VERSION = 1
+BUILDER_VERSION = 2   # 2: each edition's credit in the browse map
 EDITIONS_DIRNAME = "Editions"
 DB_DIRNAME = "tantivy_db"
 BROWSE_MAP_FILENAME = "editions_browse_map.pkl"
@@ -101,6 +101,8 @@ class EditionDoc:
     shelfmark: str = ""
     also_ids: List[Any] = field(default_factory=list)
     boundaries: List[Dict[str, Any]] = field(default_factory=list)
+    #: Who made the edition, as the version chooser credits it: ``{'en': ..., 'he': ...}``.
+    credit: Dict[str, Optional[str]] = field(default_factory=dict)
 
     @property
     def uid(self) -> str:
@@ -238,7 +240,8 @@ def _connect_ro(path: str) -> sqlite3.Connection:
 def fgp_documents(fgp_db: str, locator: PageLocator, rules: Optional[Counter] = None) -> Iterator[EditionDoc]:
     """Every FGP edition document, by the canonical rule (module docstring)."""
     from shared.fgp_marks_legend import uses_genuzot_marks
-    from shared.fgp_service import FgpService, _fgp_match_folio, _fgp_match_image_number, source_relation_kind
+    from shared.fgp_service import (FgpService, _fgp_match_folio, _fgp_match_image_number, pick_fgp_credit,
+                                    source_relation_kind)
 
     service = FgpService(db_path=fgp_db, thread_safe=False)
     if not service.is_available():
@@ -267,7 +270,8 @@ def fgp_documents(fgp_db: str, locator: PageLocator, rules: Optional[Counter] = 
                     twin.also_ids.append(src.get("id"))
                     continue
                 doc = EditionDoc(kind=SOURCE_FGP, edition_id=src.get("id"), sys_id=sys_id, search=st,
-                                 shelfmark=str(src.get("full_shelfmark") or ""))
+                                 shelfmark=str(src.get("full_shelfmark") or ""),
+                                 credit={"en": pick_fgp_credit(src, "en"), "he": pick_fgp_credit(src, "he")})
                 image_number = _fgp_match_image_number(src)
                 folio = _fgp_match_folio(src)
                 if image_number or folio:
@@ -296,6 +300,7 @@ def pgp_canonical_pairs(con: sqlite3.Connection) -> List[sqlite3.Row]:
     from shared.fgp_service import source_relation_kind
     rows = con.execute(
         "SELECT s.id AS id, s.pgpid AS pgpid, s.doc_relation AS doc_relation, s.content AS content, "
+        "s.source_scholar AS source_scholar, "
         "s.sections AS sections, f.sys_id AS sys_id, f.page_info AS page_info, f.shelfmark AS shelfmark "
         "FROM document_sources s JOIN document_fragments f ON f.document_id = s.pgpid "
         "WHERE f.sys_id IS NOT NULL AND f.sys_id <> '' AND s.content IS NOT NULL AND s.content <> '' "
@@ -338,8 +343,9 @@ def pgp_documents(pgp_db: str, locator: PageLocator, rules: Optional[Counter] = 
                     rules[name] += 1
         if not st.text.strip():
             continue
+        scholar = str(r["source_scholar"] or "").strip() or None
         doc = EditionDoc(kind=SOURCE_PGP, edition_id=r["id"], sys_id=sys_id, search=st,
-                         shelfmark=str(r["shelfmark"] or ""))
+                         shelfmark=str(r["shelfmark"] or ""), credit={"en": scholar, "he": scholar})
         try:
             sections = json.loads(r["sections"]) if r["sections"] else None
         except (TypeError, ValueError):
@@ -545,6 +551,7 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
         edition_map[doc.sys_id].append({
             "uid": doc.uid, "full_header": doc.header, "source": INDEX_SOURCES[doc.kind],
             "edition_id": doc.edition_id, "also_ids": list(doc.also_ids), "page_uid": doc.page_uid,
+            "credit": dict(doc.credit),
         })
     writer.commit()
     writer.wait_merging_threads()

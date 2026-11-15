@@ -7,6 +7,7 @@ existing ``from genizah_core import SearchEngine`` callers continue working.
 """
 
 import bisect
+import copy
 import functools
 import sys
 import logging
@@ -145,6 +146,23 @@ def _note_search_cutoff(capped=False, interrupted=False, partial=False) -> None:
         value['partial'] = True
         value['limited'] = bool(cur.get('limited', cur['capped'] and not cur.get('partial')) or capped)
     _LAST_SEARCH_CUTOFF.value = value
+
+
+def _search_interrupted() -> bool:
+    """Has the search running on this thread been stopped so far (without clearing the
+    signal)? A stopped first leg starts no second (editions plan §3.3 item 5)."""
+    return bool((getattr(_LAST_SEARCH_CUTOFF, 'value', None) or {}).get('interrupted'))
+
+
+def _joined_warnings(*warnings):
+    """The legs' warnings as one, each part once (both legs compile the same query, so
+    the guard's downgrade is said by both)."""
+    parts = []
+    for w in warnings:
+        for part in (w or '').split('; '):
+            if part and part not in parts:
+                parts.append(part)
+    return '; '.join(parts) or None
 
 
 def consume_last_search_cutoff() -> dict:
@@ -1214,6 +1232,26 @@ class _FuzzyMatcher:
                     best, best_distance = m, d
         return best
 
+    def nearness(self, text, m):
+        """How far the occurrence *m* is from the word as typed (0 for a query of several
+        words, or one matched as typed): an edition page shows its nearest occurrence, as
+        ``closest`` does for a page row."""
+        if len(self._terms) != 1 or self._typed_rx[0] is not None:
+            return 0
+        return OSA.distance(self._terms[0], _FUZZY_FOLD_RE.sub('', text[m.start():m.end()]))
+
+    def exact_occurrence(self, text, pos, endpos):
+        """The word as typed, whole, in text[pos:endpos] (one C regex, not the near-spelling
+        walk), or None; None also for a query of several words or a typed pattern. An edition
+        page that first matched a near spelling shows the word itself when it holds it."""
+        if len(self._terms) != 1 or self._typed_rx[0] is not None:
+            return None
+        rx = getattr(self, '_exact_rx', None)
+        if rx is None:
+            rx = self._exact_rx = re.compile(
+                '(?<![\u05D0-\u05EA])' + re.escape(self._terms[0]) + '(?![\u05D0-\u05EA])')
+        return rx.search(text, pos, endpos)
+
     def _forms(self, text):
         """Per query word, its near spellings that are words of *text* (the word
         itself for one matched as typed), or None when one has none: the text's
@@ -1267,6 +1305,9 @@ RRF_K = 60
 # translated label and switches the progress bar to indeterminate, so it must
 # never have to pattern-match on prose.  A phase is not a status message.
 PHASE_LOCAL_SEARCH = 'local_search'
+# The editions leg of a search with editions (plan §3.3 item 5): the desktop ignores phases
+# it does not know.
+PHASE_EDITIONS_SEARCH = 'editions_search'
 
 
 #: Padding (characters) kept either side of a matched span in composition
@@ -1334,12 +1375,35 @@ class _CrossingPlan:
 
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
-    def __init__(self, meta_mgr, variants_mgr, *, worker_mode=False, open_local=True):
+    # Editions search (plan §3.3), as class defaults so an engine made without __init__
+    # (tests' stand-ins) is a main engine with no editions child. Never mutated in place.
+    _edition_leaf = False
+    _editions = None
+    _editions_dir = None
+    _editions_wanted = False
+    _edition_entries = {}
+    _edition_generation = {}
+
+    def __init__(self, meta_mgr, variants_mgr, *, worker_mode=False, open_local=True,
+                 index_path=None, edition_leaf=False):
         self._worker_mode = worker_mode
         self.meta_mgr = meta_mgr
         self.var_mgr = variants_mgr
         self.index = None
         self.searcher = None
+        # Editions search (plan §3.3): *index_path* opens another index than
+        # <INDEX_DIR>/tantivy_db; *edition_leaf* makes this engine the editions index's leaf
+        # (its own browse map, every edition uid kept, no seams, no child, no My Library).
+        # A main engine holds the leaf as its child (attach_editions).
+        self._index_path = index_path
+        self._edition_leaf = bool(edition_leaf)
+        self._editions = None
+        self._editions_dir = None
+        self._editions_wanted = False
+        self._edition_generation = {}
+        self._edition_entries = {}
+        if self._edition_leaf:
+            self._browse_map_cache = None
         # Responsa plan §6.1: the seam index and the reversed-words field, when the
         # open index has them (_open_index_format); off for an old index.
         self.index_format = None
@@ -1360,7 +1424,7 @@ class SearchEngine:
         # nothing and goes again from the new one.
         self._fl_id_index_generation = 0
         self.reload_index()
-        if not worker_mode:
+        if not worker_mode and not self._edition_leaf:
             self.start_fl_id_index_build()
         # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
         self.local_index = None            # tantivy.Index for LOCAL side-index
@@ -1379,8 +1443,70 @@ class SearchEngine:
         self._my_library_tab_ref: weakref.ref | None = None
         # Phase 97 R-02: error from last atomic rebuild attempt; surfaced in UI banner.
         self._local_open_error: str | None = None
-        if open_local:
+        if open_local and not self._edition_leaf:
             self._open_local_searcher()
+
+    # --- Editions (plan §3.3): the leaf engine on the editions index ----------------------
+
+    def set_edition_generation(self, gen_dir, meta, edition_map):
+        """A leaf's generation (shared/editions_search.py::open_editions_engine, after its
+        readiness check): its browse map (sys_id -> edition documents, never passed
+        through dedupe_browse_map or the automatic-page repair) and the build it is of."""
+        self._editions_dir = gen_dir
+        self._browse_map_cache = {str(k): v for k, v in (edition_map or {}).items()}
+        self._edition_entries = {e.get('uid'): e for pages in self._browse_map_cache.values()
+                                 for e in pages if e.get('uid')}
+        inputs = (meta or {}).get('inputs') or {}
+        self._edition_generation = {'build_id': (meta or {}).get('build_id'),
+                                    'cleaner_version': inputs.get('cleaner_version')}
+
+    def attach_editions(self, gen_dir=None):
+        """Open the editions generation at *gen_dir* (default <INDEX_DIR>/Editions) as this
+        engine's child when it is ready (shared/editions_search.py::check_generation).
+        Returns whether it is open. Never from __init__ or the UI thread: it opens an index."""
+        from shared.editions_search import open_editions_engine
+        if self._edition_leaf:
+            return False
+        self.close_editions()
+        self._editions_dir = gen_dir
+        self._editions_wanted = True      # reload_index reopens it (plan §3.3 item 12)
+        self._editions = open_editions_engine(self.meta_mgr, self.var_mgr, gen_dir)
+        return self._editions is not None
+
+    def detach_editions(self):
+        """Close the editions child for good: reload_index no longer reopens it."""
+        self._editions_wanted = False
+        self.close_editions()
+
+    def close_editions(self):
+        """Release the editions child (before its generation is promoted: plan §3.7)."""
+        child = getattr(self, '_editions', None)
+        self._editions = None
+        if child is not None:
+            child.close_index()
+
+    def reload_editions(self):
+        """Reopen the editions child from its directory (after a promotion)."""
+        return self.attach_editions(getattr(self, '_editions_dir', None))
+
+    def editions_ready(self) -> bool:
+        """An editions index is open beside this one."""
+        child = getattr(self, '_editions', None)
+        return child is not None and child.searcher is not None
+
+    def _editions_for_request(self):
+        """The child bound to this engine's variant and metadata managers: a request-scoped
+        copy of the engine (desktop engine_with_variant_settings) gets a copy of the child
+        that expands variants with the same settings (plan §3.3 item 6)."""
+        child = getattr(self, '_editions', None)
+        if child is None or child.searcher is None:
+            return None
+        if child.var_mgr is self.var_mgr and child.meta_mgr is self.meta_mgr:
+            return child
+        view = copy.copy(child)
+        view.var_mgr = self.var_mgr
+        view.meta_mgr = self.meta_mgr
+        return view
 
     def attach_my_library_tab(self, tab) -> None:
         """Phase 97 R-01: attach a weakref to the MyLibraryTab for is_searchable gate.
@@ -2059,6 +2185,8 @@ class SearchEngine:
         from it, and build that lookup again. A build running from the old map stores
         nothing and goes again (Codex round 2 on PR #446: Browse by FL id answered from
         the old map's offsets until a restart)."""
+        if getattr(self, '_edition_leaf', False):
+            return              # its map is its generation's: replaced only with it
         SearchEngine._shared_browse_map = None
         self._browse_map_cache = None
         # The cross-manuscript order Browse walks (get_browse_page / the neighbour lookup)
@@ -2104,11 +2232,15 @@ class SearchEngine:
             return re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', escaped)
 
     def close_index(self):
-        """Release Tantivy index and searcher to unlock files (required before rebuild on Windows)."""
+        """Release Tantivy index and searcher to unlock files (required before rebuild on Windows).
+        The editions child too (plan §3.3 item 12)."""
         self.searcher = None
         self.index = None
         self.seam_searcher = None
         self.seam_index = None
+        if getattr(self, '_editions', None) is not None:
+            self._editions.close_index()
+            self._editions = None
         import gc
         gc.collect()
 
@@ -2155,12 +2287,15 @@ class SearchEngine:
         seams = self.seam_searcher is not None
         reversed_words = bool(getattr(self, '_has_reversed_words', False))
         fmt = (getattr(self, 'index_format', None) or {}).get('format', 1)
+        # An editions index has no seams by design (plan §3.3 item 3): current with its
+        # reversed words.
+        current = reversed_words if getattr(self, '_edition_leaf', False) else bool(seams and reversed_words)
         return {'format': fmt, 'reversed_words': reversed_words, 'seams': seams,
                 'seam_words': getattr(self, 'seam_words', 0) if seams else 0,
-                'current': bool(seams and reversed_words)}
+                'current': current}
 
     def reload_index(self):
-        db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
+        db_path = getattr(self, '_index_path', None) or os.path.join(Config.INDEX_DIR, "tantivy_db")
         if os.path.exists(db_path):
             try:
                 self.index = tantivy.Index.open(db_path)
@@ -2181,6 +2316,10 @@ class SearchEngine:
                 self.searcher = self.index.searcher()
                 self._page_scope_complete = None  # re-checked for the new index
                 self._open_index_format(db_path)
+                if getattr(self, '_editions_wanted', False) and not getattr(self, '_edition_leaf', False):
+                    # The main index was reopened (after a rebuild's close_index): its
+                    # editions child with it (editions plan §3.3 item 12).
+                    self.attach_editions(self._editions_dir)
                 return True
             except MemoryError:
                 raise
@@ -2255,7 +2394,12 @@ class SearchEngine:
 
         Uses class-level cache shared across all SearchEngine instances to avoid
         redundant file I/O, repair scans, and pickle write race conditions.
+
+        An editions leaf answers with its own map (set_edition_generation): sys_id -> the
+        manuscript's edition documents, so a search within manuscripts keeps their uids.
         """
+        if getattr(self, '_edition_leaf', False):
+            return self._browse_map_cache or {}
         if SearchEngine._shared_browse_map is not None:
             return SearchEngine._shared_browse_map
 
@@ -2923,6 +3067,110 @@ class SearchEngine:
             **({'_page_text': _matched_page_text(content, span, boundaries)} if page_text else {}),
         }
 
+    def _edition_members(self, doc, content, regex, accept, *, strip_br, score, pattern_for,
+                         ids_only=False, excluded=None, page_text=False, count=False,
+                         word_span=None, nearness=None):
+        """The rows of one editions-index document (editions plan §3.3 item 13): every
+        occurrence of *regex* that *accept* takes, placed on the page its FIRST character
+        lies on -- strictly: the part holding it, never _map_span_to_pages's fallback to the
+        first part -- one member per page, its occurrences on that page counted
+        (``_matches``). An occurrence in no located part is the edition's own: keyed by the
+        edition uid, "page not identified". A match running from its part into the next is
+        cross-page. Members keep their edition identity (uid, header, source, span) beside
+        the separate ``group_key``.
+
+        The regex runs on the text as the index retrieves it -- points folded, and brackets
+        out for a bracket-free query (*strip_br*): editions_search.MatchText, whose spans map
+        back by binary search. Unless the occurrences are counted (an all-star query), the
+        scan moves on once a page's occurrence is settled, to the next part on a page not yet
+        found: one occurrence per page is what a member shows. *word_span*: the words of a
+        match (a line-break match is whole lines). *nearness*: Fuzzy's distance of an
+        occurrence: a page whose first hit is a near spelling shows the word itself when its
+        part holds it (``_FuzzyMatcher.exact_occurrence``), else that first hit. *excluded*
+        (ids_only) / *page_text*: what the exclusion step reads -- the member's own text, its
+        page's parts of the edition (item 14), folded as the words are."""
+        from shared.editions_indexer import search_fold
+        from shared.editions_search import MatchText, edition_record, key_text, member_header, part_index_at
+        boundaries = self._parse_boundaries(doc)
+        uid = doc['unique_id'][0]
+        source = doc['source'][0]
+        sys_id = doc['full_header'][0].split('_ED_', 1)[0]
+        exact = getattr(regex, 'exact_occurrence', None) if nearness is not None else None
+        mt = MatchText(content, strip_br)
+        match_content = mt.text
+        part_keys = [b.get('uid') or uid for b in boundaries]
+        part_starts = [mt.to_match(b.get('start', 0)) for b in boundaries]
+        settled = set()
+        found = {}
+        end = len(match_content)
+        m = regex.search(match_content)
+        while m is not None:
+            pos = m.start() + 1
+            if accept(match_content, m):
+                s0, e0 = word_span(m) if word_span is not None else (m.start(), m.end())
+                span = mt.span(s0, e0)
+                first = part_index_at(boundaries, span[0])
+                page = boundaries[first].get('uid') if first is not None else None
+                key = page or uid
+                cross = part_index_at(boundaries, max(span[0], span[1] - 1)) != first
+                near = nearness(match_content, m) if nearness is not None else 0
+                entry = found.get(key)
+                if entry is None:
+                    entry = found[key] = {'span': span, 'n': 1, 'cross': cross, 'near': near, 'page': page}
+                else:
+                    entry['n'] += 1
+                    if near < entry['near']:
+                        entry.update(span=span, cross=cross, near=near)
+                pos = max(m.end(), pos)
+                if not count and first is not None:
+                    if entry['near'] > 0 and exact is not None:
+                        # Fuzzy: the page's first hit is a near spelling; the word itself,
+                        # if this part holds it, is what the page shows (one C regex: the
+                        # near-spelling walk over the rest of a long edition cost Fuzzy
+                        # searches more than the main index's whole leg).
+                        x = exact(match_content, m.end(), mt.to_match(boundaries[first].get('end', 0)))
+                        if x is not None and accept(match_content, x):
+                            xspan = mt.span(x.start(), x.end())
+                            entry.update(span=xspan, near=0, cross=part_index_at(
+                                boundaries, max(xspan[0], xspan[1] - 1)) != first)
+                    settled.add(key)
+                    nxt = next((part_starts[i] for i in range(first + 1, len(boundaries))
+                                if part_keys[i] not in settled), None)
+                    if nxt is None:
+                        break
+                    pos = max(pos, nxt)
+            if pos > end:
+                break
+            m = regex.search(match_content, pos)
+        rows = []
+        for key, f in found.items():
+            if ids_only:
+                row = {'uid': key, 'display': {'id': sys_id, 'source': source}, 'scope': 'page',
+                       'edition_uid': uid}
+                if excluded is not None:
+                    row['_excluded'] = excluded(search_fold(key_text(content, boundaries, key, uid)))
+                rows.append(row)
+                continue
+            hl_c, hl_f = self._highlight_pair(content, f['span'])
+            if not hl_c:
+                continue
+            header = member_header(uid, sys_id, f['page'])
+            row = {
+                'display': self.meta_mgr.get_display_data(header, source),
+                'snippet': hl_c, 'full_text': content, 'uid': uid, 'raw_header': header,
+                'raw_file_hl': hl_f, 'highlight_pattern': pattern_for(key_text(content, boundaries, key, uid)),
+                'scope': 'page', 'score': float(score), 'group_key': key, 'cross_page': f['cross'],
+                'edition': edition_record(uid, sys_id, page_uid=f['page'], span=f['span'],
+                                          cross_page=f['cross'], entry=self._edition_entries.get(uid),
+                                          generation=self._edition_generation),
+            }
+            if count:
+                row['_matches'] = f['n']
+            if page_text:
+                row['_page_text'] = search_fold(key_text(content, boundaries, key, uid))
+            rows.append(row)
+        return rows
+
     def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip,
                           whole_words=False, page_start=None):
         """Spans (in *content* coordinates) of every match that runs across a page
@@ -3464,12 +3712,15 @@ class SearchEngine:
     def _execute_line_break_search(self, line_groups, line_gaps, query_str,
                                     responsa_options=None, progress_callback=None,
                                     exclude_words=None, restrict_sys_ids=None,
-                                    text_position=None):
+                                    text_position=None, _leg=None):
         """Execute a line-break search using | syntax.
 
         Compiled by the word compiler (shared/responsa_match.py::compile_line_groups):
         the same refused stars, guard, whole words and bracket rule as the main path.
         Uses regex for both matching and highlighting.
+
+        *_leg* (a dict): one leg of a search with editions (execute_search): the rows come
+        back excluded but neither ordered nor carrying the warning, which the dict gets.
         """
         if not self.searcher:
             return []
@@ -3499,6 +3750,12 @@ class SearchEngine:
             """Every word a whole word, and the text position when one is set."""
             if not compiled.accept(text, m):
                 return False
+            if self._edition_leaf and text_position in ('start', 'end'):
+                # An edition's start and end are read past signs and points (editions
+                # plan §3.3 item 11).
+                from shared.editions_search import edition_position_ok
+                return edition_position_ok(text, m, text_position,
+                                           strip_brackets=not has_brackets)
             if text_position == 'start':
                 pre = text[:m.start()]
                 return not (pre if has_brackets else _strip_brackets(pre)).strip()
@@ -3525,7 +3782,7 @@ class SearchEngine:
             # whole-manuscript documents for lines across a page break, with a limit of
             # their own (a star query: only when few enough to read in time).
             crossings = (self._responsa_crossings(compiled, opts, text_position, [], 0, line=True)
-                         if self._every_doc_has_scope() else None)
+                         if self._every_doc_has_scope() and not self._edition_leaf else None)
             if crossings is not None:
                 hits, capped = _top_hits(self.searcher, self._and_query(query, 'scope:page'),
                                          Config.RESPONSA_PAGE_LIMIT)
@@ -3636,6 +3893,17 @@ class SearchEngine:
                     # with its brackets out, and the row is kept, marked in the original.
                     match_content = content if has_brackets else _strip_brackets(content)
 
+                    if self._edition_leaf:
+                        # Every matching line pair of the edition, one member per page.
+                        members = self._edition_members(
+                            doc, content, regex, ok, strip_br=not has_brackets, score=score,
+                            pattern_for=lambda _t: pattern_str, page_text=True,
+                            count=compiled.all_star, word_span=compiled.word_span)
+                        if not members:
+                            regex_filtered += 1
+                        results.extend(members)
+                        continue
+
                     if scope != 'page' and crossings is not None and crossings.bounded:
                         # A star query (plan §7, Phase 3 point 7): every match of the
                         # manuscript that runs across a page break, each its own row --
@@ -3716,12 +3984,25 @@ class SearchEngine:
         deduped = self._deduplicate(results, first_wins=crossings is not None, pages_win=crossings is None)
 
         deduped = _without_excluded(deduped, exclude_words)
-        if compiled.all_star:
+        if compiled.all_star and _leg is None:
             deduped = self._order_all_star(deduped, regex, not has_brackets)
 
         # The guard's downgrade, reported as on the main path (plan §5.3), with what was
         # not searched across pages (plan §7, Phase 3 point 8).
         warning = '; '.join(([compiled.warning] if compiled.warning else []) + crossing_notes) or None
+        if _leg is not None:
+            _leg.update(local=[], regex=regex, strip=not has_brackets, all_star=bool(compiled.all_star),
+                        warning=warning, responsa=True, expanded=compiled.expanded_count,
+                        pattern_count=compiled.pattern_count)
+            if warning:
+                _set_last_responsa_downgrade(warning)
+                _set_last_responsa_downgrade_meta({
+                    'variants': bool(compiled.options['variants_on']),
+                    'ja': bool(compiled.options['ja_on']),
+                    'flex_spacing': bool(opts.get('flex_spacing', False)),
+                    'bidirectional': bool(opts.get('bidirectional', False)),
+                })
+            return deduped
         if warning:
             _set_last_responsa_downgrade(warning)
             _set_last_responsa_downgrade_meta({
@@ -3877,8 +4158,102 @@ class SearchEngine:
         return results
 
     @bounded_search
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None,
+                       responsa_options=None, restrict_sys_ids: set = None, text_position: str = None,
+                       corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False,
+                       metadata_sys_ids=None, sources=None):
         """Search the Genizah (and/or LOCAL) index; return the verified result rows.
+
+        *sources* (editions plan §3.4, D1): which texts are read -- ``'automatic'`` (or
+        None: today's search, row for row), ``'all'`` (the automatic transcriptions and the
+        scholarly editions) or ``'editions'`` (editions only). With editions, this is the
+        one coordinator (§3.3 item 4): it clears the request's state once, runs the legs
+        the choice asks for -- the main index, then the editions index (attach_editions) --
+        and returns ONE RESULT PER PAGE (shared/editions_search.py::group_results): the
+        automatic hit and every edition hit on a page are one row whose ``uid`` is the page,
+        with ``members`` (each with its ``edition`` record), ordered with My Library's rows
+        by reciprocal rank fusion. The editions leg runs only for the text modes in the
+        Genizah / all scope; whenever it does not run (no editions index, Title/Shelfmark,
+        My Library only), the search is today's. Previews are off when editions are read.
+        """
+        from shared.editions_search import SOURCES_ALL, SOURCES_AUTOMATIC, normalize_sources
+        sources = normalize_sources(sources)
+        args = dict(progress_callback=progress_callback, exclude_words=exclude_words,
+                    responsa_options=responsa_options, restrict_sys_ids=restrict_sys_ids,
+                    text_position=text_position, corpus_scope=corpus_scope, phase_callback=phase_callback,
+                    ids_only=ids_only)
+        editions = None
+        if sources != SOURCES_AUTOMATIC and mode not in ('Title', 'Shelfmark') and corpus_scope != 'local':
+            editions = self._editions_for_request()
+        if editions is None:
+            if sources in (SOURCES_AUTOMATIC, SOURCES_ALL) or mode in ('Title', 'Shelfmark') or corpus_scope == 'local':
+                return self._execute_search_leg(query_str, mode, gap, preview_callback=preview_callback,
+                                                metadata_sys_ids=metadata_sys_ids, **args)
+            # Editions only, and no editions index open: nothing is searched.
+            self._clear_search_state()
+            _validate_word_gap(mode, gap, responsa_options)
+            LOGGER.info("Editions-only search with no editions index: no rows")
+            return []
+        self._clear_search_state()
+        _validate_word_gap(mode, gap, responsa_options)
+        main_leg, editions_leg = {}, {}
+        main_rows, edition_rows = [], []
+        if sources == SOURCES_ALL:
+            main_rows = self._execute_search_leg(query_str, mode, gap, _leg=main_leg, **args)
+        if not _search_interrupted():
+            if phase_callback is not None:
+                phase_callback(PHASE_EDITIONS_SEARCH)
+            # Its own corpus: the editions index only (My Library is fused once, here).
+            edition_args = dict(args, corpus_scope='genizah', phase_callback=None)
+            edition_rows = editions._execute_search_leg(query_str, mode, gap, _leg=editions_leg, **edition_args)
+        return self._grouped_rows(main_rows, edition_rows, main_leg, editions_leg, ids_only)
+
+    @staticmethod
+    def _clear_search_state():
+        """A new request: no downgrade, cascade or cut-off signal from an earlier one."""
+        _consume_last_responsa_downgrade()
+        _consume_last_responsa_downgrade_meta()
+        consume_last_search_cutoff()
+
+    def _grouped_rows(self, main_rows, edition_rows, main_leg, editions_leg, ids_only):
+        """The legs' rows as one result per page (shared/editions_search.py::group_results),
+        My Library's rows fused in, an all-star query ordered by matches across the groups,
+        and the warnings said once on the first row, as on a one-index search."""
+        from shared.editions_search import group_results
+        leg = main_leg if main_leg else editions_leg
+        count = None
+        if leg.get('all_star'):
+            regex, strip = leg['regex'], leg['strip']
+
+            def count(row):
+                n = row.pop('_matches', None)
+                if n is None:
+                    if row.get('cross_page') or row.get('scope', 'page') != 'page':
+                        return 1
+                    n = _count_matches(regex, row.get('full_text') or '', strip)
+                return n
+        rows = group_results(main_rows, edition_rows, main_leg.get('local') or [], ids_only=ids_only,
+                             match_count=count, k=RRF_K)
+        if count is not None:
+            rows = self._order_all_star(rows, leg['regex'], leg['strip'])
+        warning = _joined_warnings(main_leg.get('warning'), editions_leg.get('warning'))
+        if warning:
+            _set_last_responsa_downgrade(warning)
+            if rows:
+                rows[0]['responsa_warning'] = warning
+        if leg.get('responsa') and rows:
+            rows[0]['responsa_expanded_count'] = leg.get('expanded')
+            rows[0]['responsa_pattern_count'] = leg.get('pattern_count')
+        return rows
+
+    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, _leg=None):
+        """One index's search (execute_search's docstring, below); today's whole search
+        when *_leg* is None. *_leg* (a dict): one leg of a search with editions -- the state
+        is not cleared (the coordinator did), no previews, My Library's rows go to
+        ``_leg['local']`` instead of being fused, the rows come back excluded but not in
+        all-star order, and the warning and counts go to the dict instead of the first row.
+
+        Search the Genizah (and/or LOCAL) index; return the verified result rows.
 
         *metadata_sys_ids* (Title/Shelfmark only): the manuscripts the search is
         for, resolved by the caller with ``metadata_search_ids`` (the web app, in the
@@ -3904,16 +4279,17 @@ class SearchEngine:
         before search-within or the all-terms filter rely on it.
         """
         search_started = time.perf_counter()
-        # R2-#1: discard any stale per-thread downgrade signal from a prior
-        # invocation (e.g., a prior request that crashed before consuming).
-        # Keeps the signal one-shot per execute_search call, so it cannot
-        # leak across requests on the same worker thread.
-        _consume_last_responsa_downgrade()
-        # Phase 81A (Codex MEDIUM-2) — drain the structured-meta channel
-        # symmetrically so a direct-core caller cannot leave a stale meta
-        # dict that a later web request would read as "the cascade fired."
-        _consume_last_responsa_downgrade_meta()
-        consume_last_search_cutoff()
+        if _leg is None:
+            # R2-#1: discard any stale per-thread downgrade signal from a prior
+            # invocation (e.g., a prior request that crashed before consuming).
+            # Keeps the signal one-shot per execute_search call, so it cannot
+            # leak across requests on the same worker thread.
+            _consume_last_responsa_downgrade()
+            # Phase 81A (Codex MEDIUM-2) — drain the structured-meta channel
+            # symmetrically so a direct-core caller cannot leave a stale meta
+            # dict that a later web request would read as "the cascade fired."
+            _consume_last_responsa_downgrade_meta()
+            consume_last_search_cutoff()
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids,
@@ -4037,6 +4413,7 @@ class SearchEngine:
                     exclude_words=exclude_words,
                     restrict_sys_ids=restrict_sys_ids,
                     text_position=text_position,
+                    _leg=_leg,
                 )
 
             # c. Parse, refuse what is not searched yet, expand under the guard.
@@ -4172,6 +4549,10 @@ class SearchEngine:
 
         _parse_header = getattr(type(self.meta_mgr), 'parse_header_smart', None) if ids_only else None
         _excluded = _exclusion_test(exclude_words)
+        if self._edition_leaf:
+            from shared.editions_search import edition_position_ok as _position_check
+        else:
+            _position_check = Indexer._validate_position_match
 
         def _id_row_of_span(doc, content, span, boundaries, scope):
             """ids_only's row for a match: the identity a full row would carry -- the
@@ -4242,7 +4623,8 @@ class SearchEngine:
                     reversed_field=self._reversed_words_field(self.index))
                 if t_query_obj is None:
                     return []
-                if self._every_doc_has_scope():
+                if self._every_doc_has_scope() and not self._edition_leaf:
+                    # An editions document holds its whole text: no crossings to read.
                     _crossings = self._responsa_crossings(
                         _responsa, responsa_options, text_position, extract_per_pair_gaps(query_str), gap)
                     if _crossings.note:          # some crossings cannot be read: "N+"
@@ -4263,7 +4645,8 @@ class SearchEngine:
             # total limit. In score order the long aggregate docs often came first
             # and took seconds before the first row (they rarely add one); now the
             # rows only an aggregate gives come after the page rows.
-            elif (not _page_only and _responsa is None and self._every_doc_has_scope()):
+            elif (not _page_only and _responsa is None and self._every_doc_has_scope()
+                  and not self._edition_leaf):
                 if t_query_obj is not None:
                     page_q = self._and_query(t_query_obj, 'scope:page')
                 else:
@@ -4379,13 +4762,14 @@ class SearchEngine:
                 return False
             if _responsa is not None and not _responsa.accept(text, m):
                 return False
-            return (not text_position or Indexer._validate_position_match(
+            # An edition's position is read on its folded words (editions plan §3.3 item 11).
+            return (not text_position or _position_check(
                 text, m, text_position, _line_constraints or None, strip_brackets=strip_br))
 
         # Early rows for the desktop (see the docstring): only where nothing after
         # this loop can drop or move them.
         _preview = (preview_callback
-                    if (preview_callback is not None and not ids_only
+                    if (preview_callback is not None and not ids_only and _leg is None
                         and corpus_scope == 'genizah' and not exclude_words
                         and not (responsa_options and responsa_options.get('responsa_mode')))
                     else None)
@@ -4494,6 +4878,25 @@ class SearchEngine:
                             continue
 
                     content = self._get_field(doc, 'content', [""])[0]
+
+                    if self._edition_leaf:
+                        # Every accepted occurrence, one member per page (editions plan
+                        # §3.3 item 13).
+                        _strip_br = not _query_has_brackets(query_str)
+                        match_started = time.perf_counter()
+                        try:
+                            members = self._edition_members(
+                                doc, content, regex, lambda _t, _m: _accept(_t, _m, _strip_br),
+                                strip_br=_strip_br, score=score,
+                                pattern_for=_row_pattern, ids_only=ids_only, excluded=_excluded,
+                                page_text=bool(exclude_words), count=_count_rows,
+                                nearness=regex.nearness if isinstance(regex, _FuzzyMatcher) else None)
+                        finally:
+                            candidate_match_seconds += time.perf_counter() - match_started
+                        if not members:
+                            regex_filtered_count += 1
+                        results.extend(members)
+                        continue
 
                     # Multi-word Literal, and a Responsa sequence with a star on an index
                     # without seams: a whole-manuscript / part doc adds only the matches
@@ -4730,15 +5133,21 @@ class SearchEngine:
                 )
                 local_hits = []
             if local_hits:
-                deduped = self._rrf_merge(deduped, local_hits, k=RRF_K)
+                if _leg is not None:
+                    # Fused once, by the coordinator, with the grouped results.
+                    _leg['local'] = local_hits
+                else:
+                    deduped = self._rrf_merge(deduped, local_hits, k=RRF_K)
             local_merge_elapsed_ms = (time.perf_counter() - local_merge_started) * 1000.0
         # End Phase 95 D-08 LOCAL merge.
 
         # --- Apply Exclusion Filter (NOT Filter): on the page the match is on ---
         deduped = _without_excluded(deduped, exclude_words)
+        if _leg is not None:
+            _leg['local'] = _without_excluded(_leg.get('local') or [], exclude_words)
         # An all-star query has no score to order by (decision 2): matches on the page,
         # then shelfmark.
-        if _count_rows:
+        if _count_rows and _leg is None:
             deduped = self._order_all_star(deduped, regex, _strip_q)
         # What was not searched across pages joins the guard's note (plan §7, Phase 3
         # point 8): the results line, the API, MCP.
@@ -4775,6 +5184,13 @@ class SearchEngine:
                 'flex_spacing':  bool(flex_spacing),
                 'bidirectional': bool(bidirectional),
             })
+        if _leg is not None:
+            _leg.update(regex=regex, strip=_strip_q, all_star=bool(_count_rows), warning=responsa_warning,
+                        responsa=_responsa is not None,
+                        expanded=total_expanded if _responsa is not None else None,
+                        pattern_count=_responsa.pattern_count if _responsa is not None else None)
+            return deduped
+
         if responsa_warning and deduped:
             deduped[0]['responsa_warning'] = responsa_warning
 
@@ -4786,6 +5202,16 @@ class SearchEngine:
         return deduped
 
     def _deduplicate(self, results, first_wins=False, pages_win=False):
+        if getattr(self, '_edition_leaf', False):
+            # Every edition uid is kept (editions plan §3.3 item 2): one member per
+            # (page, edition), in hit order.
+            seen, kept = set(), []
+            for r in results:
+                key = (r.get('group_key') or r.get('uid'), r.get('edition_uid') or r.get('uid'))
+                if key not in seen:
+                    seen.add(key)
+                    kept.append(r)
+            return kept
         # V0.8 wins outright on a uid collision. V0.7 rows must ALSO dedupe against
         # each other: the same uid arrives twice for one page -- once from the
         # aggregated scope='system' continuous doc and once from its scope='page'
@@ -5739,6 +6165,23 @@ class SearchEngine:
         return main_list, appendix, summary
 
     def get_full_text_by_id(self, uid):
+        from shared.editions_search import is_edition_uid
+        if is_edition_uid(uid):
+            # An edition's indexed text (editions plan §3.3 item 10): from the editions index.
+            if not self._edition_leaf:
+                child = getattr(self, '_editions', None)
+                return child.get_full_text_by_id(uid) if child is not None else None
+            try:
+                res = self.searcher.search(self.index.parse_query(f'unique_id:"{uid}"', ["unique_id"]), 5)
+                for _score, addr in res.hits:
+                    doc = self.searcher.doc(addr)
+                    if doc['unique_id'][0] == uid:
+                        return doc['content'][0]
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("Failed to retrieve edition text for uid %s: %s", uid, e)
+            return None
         try:
             q = self.index.parse_query(f'unique_id:"{uid}"', ["unique_id"])
             res = self.searcher.search(q, 1)
@@ -5781,6 +6224,14 @@ class SearchEngine:
                 "[A-Za-z0-9_]+ character set (value withheld)"
             )
             return None
+        from shared.editions_search import parse_edition_header
+        from shared.editions_indexer import edition_uid
+        edition = parse_edition_header(full_header)
+        if edition is not None:
+            # An edition member's header names the page it is shown on, which no stored
+            # header need hold: read the edition by its uid (editions plan §3.3 item 10).
+            sys_id, kind, eid, _page = edition
+            return self.get_full_text_by_id(edition_uid(kind, eid, sys_id))
         try:
             q = self.index.parse_query(f'full_header:"{full_header}"', ["full_header"])
             res = self.searcher.search(q, 5)

@@ -561,7 +561,7 @@ class TestSchemaSourceGuards:
 
     def test_main_word_search_gates_content_search_on_position(self):
         # The fallback must be disabled when text_position is set.
-        src = inspect.getsource(SearchEngine.execute_search)
+        src = inspect.getsource(SearchEngine._execute_search_leg)   # execute_search's body (editions PR 2)
         assert "not text_position" in src and "_has_content_search" in src
 
     def test_local_composition_has_content_search_parity(self):
