@@ -1981,6 +1981,42 @@ def create_layout():
             lang_label = "EN" if resolved_lang == 'he' else "\u05E2\u05D1"
             ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
 
+            # Theme toggle: one button cycling light -> parchment -> dark. The icon
+            # shows the CURRENT theme; the sidebar switcher keeps it in sync.
+            _theme_icons = {'light': 'light_mode', 'parchment': 'history_edu', 'dark': 'dark_mode'}
+            _theme_next = {'light': 'parchment', 'parchment': 'dark', 'dark': 'light'}
+
+            async def cycle_theme():
+                # Advance from the theme THIS tab shows: user storage is shared
+                # by every open tab, so another tab may have changed it.
+                cur = None
+                try:
+                    cur = await ui.run_javascript(
+                        'return document.body.getAttribute("data-theme")'
+                        ' || document.documentElement.getAttribute("data-theme")'
+                    )
+                except Exception:
+                    pass
+                if cur not in _theme_next:
+                    cur = safe_user_get('theme', 'light')
+                new_theme = _theme_next.get(cur, 'light')
+                safe_user_set('theme', new_theme)
+                ui.run_javascript(f'''
+                    document.documentElement.setAttribute("data-theme", "{new_theme}");
+                    document.body.setAttribute("data-theme", "{new_theme}");
+                    document.querySelectorAll(".theme-btn").forEach(b => b.classList.remove("active"));
+                    const sb = document.querySelector(".theme-btn-{new_theme}");
+                    if (sb) sb.classList.add("active");
+                    const hi = document.querySelector(".theme-btn-header i");
+                    if (hi) hi.textContent = "{_theme_icons[new_theme]}";
+                ''')
+
+            _header_theme = safe_user_get('theme', 'light')
+            _theme_label = tr('Change theme (light, parchment, dark)')
+            ui.button(icon=_theme_icons.get(_header_theme, 'light_mode'), on_click=cycle_theme).props(
+                f'flat round text-color=white aria-label="{_theme_label}"'
+            ).tooltip(_theme_label).classes('theme-btn-header')
+
             # "What's New" — a header button with an unread dot, NOT a toast.
             #
             # This used to be a fixed-position card over the page. On a first
@@ -2336,6 +2372,8 @@ def create_layout():
                             document.body.setAttribute("data-theme", "{theme_name}");
                             document.querySelectorAll(".theme-btn").forEach(btn => btn.classList.remove("active"));
                             document.querySelector(".theme-btn-{theme_name}").classList.add("active");
+                            const hi = document.querySelector(".theme-btn-header i");
+                            if (hi) hi.textContent = {{light: "light_mode", parchment: "history_edu", dark: "dark_mode"}}["{theme_name}"];
                         ''')
 
                     current_theme = safe_user_get('theme', 'light')

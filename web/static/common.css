@@ -1326,6 +1326,9 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     }
     /* Hide help button on mobile (keyboard shortcuts not relevant for touch) */
     .help-btn-header { display: none !important; }
+    /* The header has no room for the theme button on a phone; the sidebar's
+       theme switcher stays reachable from the menu. */
+    .theme-btn-header { display: none !important; }
     /* Hide logo text on mobile - only show icon */
     .header-logo-text { display: none !important; }
 }

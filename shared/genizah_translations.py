@@ -3884,6 +3884,7 @@ TRANSLATIONS.update({
     "Light theme": "ערכת נושא בהירה",
     "Parchment theme": "ערכת נושא קלף",
     "Switch language": "החלף שפה",
+    "Change theme (light, parchment, dark)": "החלף ערכת נושא (בהירה, קלף, כהה)",
     "Open navigation menu": "פתח תפריט ניווט",
     "Toggle sidebar": "הצג/הסתר סרגל צד",
     "February 2025": "פברואר 2025",
