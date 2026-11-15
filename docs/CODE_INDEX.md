@@ -1124,6 +1124,19 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/blau_panel.py
 
+- **Function** `box_query` / **Constant** `STEM_SELECT_CLASS` — the box and the verb-stem field beside it (where Blau or Friedman is served) make one query: "דלל" and X are "דלל X"; a stem typed in the box wins, and several words stay an expression search whatever the field holds (2026-11-11)
+- **Constant** `STEM_HOW` — a stem button pressed, counted as `how: 'stem'`
+- A card for a root Friedman or Lane gave (`BlauCard.borrowed`) is drawn with no line naming the source (2026-11-12); a lookup with such cards is counted as `borrowed: n`
+- **Constant** `SENSES_SHOWN` — a card's first senses; the rest behind "Show N more senses" (`show_more.render_more`), the site link only for senses beyond `MAX_SENSES` (2026-11-11)
+- **Function** `pick_tab` — a new word opens on the first tab with an answer, no tab remembered; `tab` is the tab an action inside the panel came from (a stem button, a gap control, a Lane reading: `on_search(text, tab)`, `on_gap(gap, text, tab)`) (2026-11-11)
+- **Constant** `BODY_CLASS`; **Function** `scroll_to_top_js` — the body scrolls for all tabs; choosing a tab puts it back to its top in the browser (`js_handler` on the tab row) (2026-11-11)
+
+## web/components/show_more.py
+
+The rest of a dictionary card behind one button that draws it in place (2026-11-11: never only on the site or the PDF page).
+
+- **Function** `render_more` — `items` behind "Show N more …"; a click draws them in the button's place; one item is drawn without a button
+- **Constant** `MORE_SENSES` / `MORE_QUOTATIONS` / `MORE_CHILDREN` — the owner's wording ("הצג N …"); `MORE_CLASS`, `BUTTON_CLASS`
 - **Function** `lookup_on` (Line 168) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
 - **Function** `set_lookup_on` (Line 173) — The reader's choice; turning it on also marks the switch as no longer new.
 - **Function** `switch_is_new` (Line 180) — Is the switch still new to this visitor (highlighted, its label saying so)? Yes until
@@ -1147,6 +1160,7 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/lane_panel.py
 
+- **Constant** `ENTRIES_SHOWN` / `FULL_ENTRY` / `FULL_CLASS` — a root card's first entries, the rest behind "Show N more entries" (`show_more`); a cut entry's whole text on "Show the full entry"; the site links only beyond `MAX_ENTRIES` (2026-11-11)
 - **Function** `_attr` (Line 56)
 - **Function** `_arabic` (Line 60)
 - **Function** `_render_readings` (Line 64)
@@ -3605,6 +3619,7 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 
 ## shared/arabic_service.py
 
+- **Function** `_head_shapes` — a reading as a Lane headword cites it (أيضا -> أيض, طالبته -> طالبه, استقر -> استقرر): which entries are matched and first, never which root; `LaneEntry.full`, `MAX_ENTRIES` a bound (a root carries all its entries) (2026-11-11)
 - **Function** `lane_enabled` (Line 92) — The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
 - **Function** `entry_url` (Line 100) — One Lane entry on Ephraim Meiri's site.
 - **Function** `root_url` (Line 105) — Lane's entries under a root on Ephraim Meiri's site (a headword search in Lane).
@@ -3638,7 +3653,8 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
     - Property `credit` (Line 360) — The Perseus credit line (D3), verbatim; shown on every Lane card.
     - Method `close` (Line 364)
     - Method `lookup` (Line 375) — What Lane has for one clicked or typed word. Hebrew letters are read as Judeo-Arabic;
-    - Method `_matched_entries` (Line 412) — The entries of ``root_key`` whose headword is the reading, or the reading with a
+    - Method `_matched_entries` (Line 445) — The entries of ``root_key`` whose headword is the reading, or the reading with a
+    - Method `_forms_matching` (Line 462) — The entries whose headword is one of the shapes given (``_matched_entries`` tries the reading first, its other shapes only when it names none)
     - Method `_root` (Line 436)
 - **Function** `_validate` (Line 467) — '' and the meta when the open file is one this reader serves; else the reason.
 - **Function** `get_arabic_service` (Line 509) — The default service, created on first use (per-thread connections by default: safe under
@@ -3648,8 +3664,13 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 
 - **Function** `blau_enabled` (Line 117) — The ``BLAU_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
 - **Function** `entry_url` (Line 125) — The dictionary site's page for one entry.
-- **Function** `dot_pattern` (Line 133) — The Hebrew letters of ``text`` (finals folded, other marks dropped, words
-- **Function** `_dots_agree` (Line 151) — The dictionary spelling's first word, dots included, sits inside the
+- **Function** `dot_pattern` / `_dots_agree` — imported from `shared/ja_roots.py` since 2026-11-11 (still exported here)
+- **Function** `stem_row_numbers` — a stems row's numbers from its column, shift and printed head together (2026-11-11)
+- **Method** `BlauService.stem_pairs` / `root_stems` / `_stems` / `_stem_answer` — the (root, stem) pairs and each entry's stems, built once; a root typed with a stem ("דלל X") scoped to that stem's paragraph; `BlauCard.root_label` / `stems` / `stem`, `BlauLookup.stem` / `stem_missing` (2026-11-11)
+- **Method** `BlauService._name_position` — which of its names a root or sub-entry hit matched: an entry named first by the word before one giving it as a later name (2026-11-11)
+- **Method** `BlauService.borrow` / `_borrow` — after Blau's own cards, a card for each entry of a root Friedman or Lane gives (`BlauCard.borrowed`: the source and its evidence); the entry spelled with the same dots where several share the letters; their examples and quotes give way; Blau's own cards put the entry another dictionary names first, whichever key reached it (ויכון: כון; ואלקול: קול before טלע) (2026-11-11)
+- **Method** `BlauService._open_on_word_stem` — a borrowed card opens on the stem the word's shape gives (`ja_verb_forms.word_stems`, exactly one); a word that fits none shows the senses outside the stem paragraphs first (`_CardBuild.nouns_first`, אלחרוף) (2026-11-11)
+- **Method** `BlauService._verb_form_builds` / `_verb_form_suggestions`; **Function** `verb_form_kinds` / `verb_form_stem_kinds` — the cards found by verb form when the word itself reaches no entry (`BlauCard.verb_form` / `kind`, `MATCHED_VERB_FORM`); beside its own cards, the roots as `BlauLookup.suggestions` (root, stem; `MAX_SUGGESTIONS`); kinds from `BLAU_VERB_FORM_KINDS` (default `DEFAULT_VERB_FORM_KINDS` A,B,D; set empty: off), opened on the stem for `BLAU_VERB_FORM_STEM_KINDS` (default A,D); `lookup(verb_forms=, verb_form_stems=)` overrides the switches (PR 3, 2026-11-11)
 - **Function** `arabic_key` (Line 165) — One Arabic spelling as a lookup key: ``normalize_arabic``, the dictionary's
 - **Function** `arabic_keys` (Line 176) — The keys of a stored Arabic spelling: one per alternative (the dictionary
 - **Function** `arabic_candidates` (Line 187) — A typed Arabic word's candidates: the word, then without a conjunction
@@ -3687,7 +3708,7 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `name_alternatives` — the names a `forms.ja_text` column holds (headword and variants), one scope each; the builder and the gate split it the same way
 - **Class** `BlauCitation` / `BlauPlace` / `BlauExpressionHit` / `BlauExpression` — the expression search's answer (2026-11-08); `BlauAnswer` is a lookup or an expression
 - **Method** `BlauService.expressions_available` — the open file carries the `tokens` table (schema 1.1.0; a 1.0.0 file is served without it)
-- **Method** `BlauService.answer` — what the panel asks: one word a lookup, several words an expression search (or the lookup on a 1.0.0 file)
+- **Method** `BlauService.answer` — what the panel asks: one word a lookup, several words an expression search (or the lookup on a 1.0.0 file), a root with a typed stem ("דלל X") that stem; `stems=False` (words clicked or selected in the manuscript, and the gap control) reads no stem, as `FriedmanService.answer`
 - **Method** `BlauService.expression` / `_expression` / `_place` / `_hit` — the search over the `tokens` table, tiered by `shared.ja_expression.tiered`
 - **Function** `get_blau_service` (Line 692) — The default service, created on first use (per-thread connections by
 - **Function** `reset_blau_service` (Line 702) — Forget the default service (after the sidecar file is replaced).
@@ -3769,7 +3790,66 @@ a gap. Friedman's reader and Blau's import it; their sidecar builders write its 
 - **Function** `components_for` — the matched positions and components of one scope, or None when the rows and the text disagree
 - **Function** `tiered` — the units ranked: the name that IS the expression, then names holding the words in order, then the rest; function words only stand together among strangers
 
+## shared/ja_roots.py
+
+A typed root's dots and verb stems, shared by Blau's and Friedman's lookups (2026-11-11): the stem buttons on a
+root's card and the typed shortcut "דלל X".
+
+- **Constant** `DOT_LETTERS` / `DOT_ABOVE`; **Function** `dot_pattern` / `dots_agree` — the dot above however it is written (moved from `shared/blau_service.py`, which still exports them)
+- **Constant** `STEM_NUMERALS`; **Function** `stem_numbers` — every stem number a label names ("IV/II" is II and IV, "(" none); `stem_label` — 4 -> "IV"
+- **Function** `parse_stem` / `root_and_stem` — a typed stem (I to X or 1 to 10) beside a root with a Hebrew letter, either order; `stem_query` — what the box holds to open a root with a stem
+- **Class** `StemPair` — one (root, stem) pair a dictionary lists, with the unit holding its paragraph and the entry it is under
+- **Class** `BorrowedRoot` / **Function** `borrowed_roots` — the roots the other dictionaries give for a word: Blau's OWN cards, Friedman's index matches and the entries headed by the word or its base form (never a sub-entry or stem paragraph: their heads are mostly phrases, `head_begins_with`), Lane's first root (`BORROW_BLAU`, `BORROW_FRIEDMAN`, `BORROW_LANE`); Blau's tab borrows from Friedman and Lane, Friedman's from Blau and Lane; never a card or match found by verb form (PR 3); `ja_root_of_arabic` — Lane's Arabic root in Hebrew letters as Blau spells a root (قول קול, جوب ג̇וב); `with_final_letters` — a lookup key with its final letters (2026-11-11)
+
+## shared/dictionary_switch.py
+
+The dictionaries' switches (`BLAU_`, `LANE_`, `FRIEDMAN_DICTIONARY_ENABLED`): on, off, or `editors`, a preview for a signed-in editor or admin before release (2026-11-11).
+
+- **Function** `read_switch` / `serves`; **Constant** `ON` / `OFF` / `EDITORS` — a switch's value, read live, and whether it shows the dictionary to this reader
+- **Method** `BlauService.served_to` / `FriedmanService.served_to` / `ArabicService.served_to` — ready and shown to this reader; `is_available()` stays the public answer (ready and on), and the lookups answer while the switch is not off (`_answering`). /browse (`_dict_served`), `web/keyboard_shortcuts.py::served_dictionaries(editor)` and Help ask with `GlobalAuthState.is_editor()`
+
+## shared/ja_verb_forms.py
+
+The forms of a verb stem of a three-letter root, and which listed stem a written word belongs to (plan section 4.2, PR 2's rules; 2026-11-11). Pure functions.
+
+- **Function** `stem_forms` — every key one stem of a root may be written as: the table, the weak-root variants (doubled, hollow, final weak, first ו / א, VIII assimilation), the endings; none under three letters; a final weak letter dropped only before an ending (rules version 2; `bare_alone=True` is version 1)
+- **Function** `word_stems` / `word_stem` — the listed stems whose forms hold one of the word's keys; `word_stem` only when exactly one does (קרר is I and II: none). Used to open a borrowed Blau card and a Friedman entry reached through its root on the word's stem (אסתקר: X)
+- **Function** `verb_form_index` — every form key a dictionary's pairs may be written as, and the pairs that give it; `stem_forms`' keyword switches (`weak`, `assimilation`, `min_letters`) are the gate's mutation runs
+- **Method** `BlauService.verb_form_index` / `FriedmanService.verb_form_index` — that index, built once from the open sidecar, only when a kind of card found by verb form is switched on (PR 2; used by PR 3); `web/main.py::_start_verb_form_prewarm` builds it in the background after startup for each dictionary served with a kind shown, so the first click does not wait
+- **Constant** `PREFIXED` / `KINDS` / `MAX_VERB_FORM_CARDS` / `MAX_SUGGESTIONS`; **Function** `hit_kind` / `hit_rank` / `parse_kinds` / `switch_kinds` — a hit's kind (A to E, plan 6.1), the order of plan 4.4, a switch's value read as kinds, an environment switch read live (unset: its default; set empty: none) (PR 3, 2026-11-11)
+- **Function** `suggested_roots` — the roots a word's verb forms give beside the entries it reached itself: the chips "Other possible roots" in both tabs, (root, stem) once each with its dots, of a kind shown, at most `MAX_SUGGESTIONS`
+- **Class** `VerbFormCard` / **Function** `verb_form_cards` — one card per entry the word's keys reach by verb form, in plan 4.4's order: its kind (its best hit's), the stems the word fits, the one stem it may open on, its evidence ("אסתדלו (דלל X)"); the lookups and the gate share it (PR 3)
+
+## scripts/measure_dictionary_stems.py
+
+The gate of PR 2 (plan section 6; read-only, reports, sets no threshold): reach, first card and wrong-only on Friedman's index of forms (index route off) against today's lookup, today's wrong-only split by why; quotations under a listed stem that hold its generated form, misses explained; right share by stem, key and length; the offer rate on running text; the mutation runs; build time and memory (2026-11-11).
+
+- **Function** `measure` / `summary` / `main` — the run; `--out` JSON of numbers and shapes, `--samples N` adds example forms (private repository only)
+- **Function** `word_keys`, `cards_for` (plan 4.4's order: `ja_verb_forms.verb_form_cards` since PR 3), `restricted_index`, `score_forms`, `score_baseline`, `quotation_coverage`, `offer_rate`, `build_cost`, `has_root_letters`, `shape`
+
+## scripts/draw_dictionary_stems_sample.py
+
+The graded click sample's draw (plan section 6.1; read-only, writes to `--out`, the private repository): words of the Judaeo-Arabic editions in `pgp.db`, token-sampled with a seed, kept when the lookup shows a card found by verb form of a graded kind (A, B, D) until each kind has its quota in each dictionary (2026-11-11).
+
+- **Function** `clean_word` / `eligible` / `editions` / `occurrences` / `context` — the population and a word's sentence
+- **Function** `blau_answer` / `friedman_answer` (`blau_cards` / `friedman_cards`) — the cards found by verb form as the panel orders them, and how many cards the word itself reached
+- **Function** `roots_to_grade` / `draw` / `stem_glosses` / `grading_item` / `batches` / `main` — the quota walk; what the grader sees (no dictionary, no kind)
+
+## scripts/score_dictionary_stems_sample.py
+
+The pass rule of plan 6.1 on the graded sample (2026-11-11): per dictionary and kind, wrong-only with its Wilson 95% bound, cannot-tell, first right, stem right, split by whether the dictionary also found the word itself; the owner's `review.json` replaces the grader's verdicts.
+
+- **Function** `verdicts` / `judge` / `tally` / `score` / `load` / `summary` / `wilson_upper` — `MAX_WRONG_ONLY` 5%, `MAX_CANNOT_TELL` 25%, `MIN_STEM_RIGHT` 85%
+
 ## shared/friedman_service.py
+
+- **Method** `FriedmanService.answer` — one word a lookup, several an expression search, a root with a stem the lookup with that stem chosen (2026-11-11)
+- **Function** `head_begins_with` — does a head's first spelling begin with the key: the units headed by the word come before those listing it as another spelling (וצל, 2026-11-11); defined in `shared/ja_roots.py` since `borrowed_roots` uses it, importable from here
+- **Method** `FriedmanService.stem_pairs` / `entry_stems` / `_stems` / `_lookup_stem` / `_dot_mismatch` — the (root, stem) pairs and each entry's stems, built once; a root typed with a stem; the dot typed as an apostrophe (2026-11-11)
+- **Constant** `VIA_CHOSEN` — a match that is a chosen stem's paragraph; `FriedmanMatch.stems` / `root` / `stem` / `dot_mismatch`, `FriedmanLookup.stem` / `stem_missing`
+- **Method** `FriedmanService.borrow` / `_borrow`; **Constant** `VIA_BORROWED` — after Friedman's own matches, the entries filed under a root Blau or Lane gives (`FriedmanMatch.borrowed`) (2026-11-11)
+- **Method** `FriedmanService._word_stem_match` — an entry reached through its root (the index, or borrowed) opens on the stem the word's shape gives (2026-11-11)
+- **Method** `FriedmanService._verb_form_matches` / `_verb_form_suggestions`; **Constant** `VIA_VERB_FORM`; **Function** `verb_form_kinds` / `verb_form_stem_kinds` — the matches found by verb form when the word itself reaches nothing (`FriedmanMatch.kind`), beside its own matches `FriedmanLookup.suggestions`; kinds from `FRIEDMAN_VERB_FORM_KINDS` (default A,B,D; set empty: off), the stem's paragraph for `FRIEDMAN_VERB_FORM_STEM_KINDS` (default A,B,D); their entries leave the quotes (PR 3, 2026-11-11)
 
 - **Function** `friedman_enabled` (Line 76) — The switch, read live; OFF unless set, because the sidecar is a candidate.
 - **Function** `default_sidecar_path` (Line 81) — Where the sidecar lives: the env var, the user's data folder, then the repository.
@@ -3828,8 +3908,19 @@ What the dictionaries' expression searches draw alike (2026-11-08): Friedman's t
 - **Function** `render_gap` — the gap control; a change runs the search again through `on_gap(gap, text)`
 - **Function** `render_components` — which printed word carried which typed word, when a clitic alternative did
 
+## web/components/stem_buttons.py
+
+What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
+
+- **Constant** `STEMS_CLASS` / `STEM_CLASS` / `CHOSEN_CLASS` / `NOT_LISTED_CLASS` — styled under `.gs-blau`; `STEMS_LABEL` / `STEM_TITLE` reuse "verb stem" / "binyan"; `NOT_LISTED` (owner-approved, 2026-11-11)
+- **Function** `render_stems` — the stems as buttons; a press reports `(tab, "root stem")` to `on_stem`, the chosen one goes back to the root
+- **Function** `render_not_listed` — the line above a root's cards when the typed stem is not listed under it
+- **Function** `render_suggestions`; **Constant** `SUGGESTIONS_CLASS` / `SUGGESTION_CLASS` / `SUGGESTIONS_LABEL` ("Other possible roots", owner-approved 2026-11-11) — the other roots a word's verb forms give, as chips at the top of a tab; a press reports `(tab, "root stem")`; with `word` and `chosen`, the chip shown now is marked and the word comes first to go back (pressing the marked chip goes back too)
+- **Function** `blau_panel.keep_chips`; **Constant** `blau_panel.SUGGEST_HOW` — the page's memory of a word's chips: a chip or stem press keeps them on the new answers, any other lookup replaces them (`web/pages/browse.py` `_blau_chips`, `_choose_suggestion`; `render_lookup(on_suggest=, chips=)`) (2026-11-11)
+
 ## web/components/friedman_panel.py
 
+- **Constant** `QUOTATIONS_SHOWN` / `CHILDREN_SHOWN`; **Function** `_render_beyond` — a unit's first quotations, a sub-entry's first, the first sub-entries and stem paragraphs (none for a chosen stem that is the entry's own paragraph); the rest behind "Show N more …" (`show_more.render_more`); "on the page" only beyond `MAX_QUOTATIONS` / `MAX_CHILDREN` (2026-11-11)
 - **Function** `_attr` (Line 86)
 - **Function** `_rtl` (Line 90)
 - **Function** `_render_marked` (Line 94) — The printed words, the matched ones marked (the text escaped; the marks are the only HTML).

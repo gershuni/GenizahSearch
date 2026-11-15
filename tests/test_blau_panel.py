@@ -373,7 +373,9 @@ def test_how_a_lookup_started_is_counted():
     assert blau_panel.lookup_event(True, empty_lookup("x"), None, "key")["how"] == "box"
     assert blau_panel.lookup_event(False, empty_lookup("x"), None, "nonsense")["how"] == "word"
     browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
-    assert "_blau_start(word, False, blau_panel.lookup_how(e.args))" in browse
+    assert "_blau_start(word, False, blau_panel.lookup_how(e.args), stems=False)" in browse
+    assert "_blau_start(text, True, tab=tab, stems=False)" in browse, "the gap control keeps an expression one"
+    assert "lane_word = (root_and_stem(word)[0] if stems else '') or word" in browse, "Lane reads the whole selection"
 
 
 def test_the_switch_s_tooltip_names_the_key_in_both_languages():
@@ -385,3 +387,23 @@ def test_the_switch_s_tooltip_names_the_key_in_both_languages():
                                    "or select words and press D or M")
     assert TRANSLATIONS[blau_panel.KEY_HINT].strip()
     assert f".{blau_panel.TIP_CLASS} .{blau_panel.KEY_HINT_CLASS}" in CSS
+
+
+def test_the_box_and_the_stem_beside_it_make_one_query():
+    """Owner, 2026-11-11: a field for the stem beside the box; the typed shortcut still works."""
+    assert blau_panel.box_query("דלל", 10) == "דלל X" and blau_panel.box_query(" ד'לל ", 4) == "ד'לל IV"
+    assert blau_panel.box_query("דלל", None) == "דלל" and blau_panel.box_query("דלל", 0) == "דלל"
+    assert blau_panel.box_query("דלל IV", 10) == "דלל IV", "a stem typed in the box wins over the selector"
+    assert blau_panel.box_query("", 10) == "" and blau_panel.box_query("   ", 4) == ""
+    # Several words are an expression search: a stem left chosen for an earlier root stays out of it.
+    assert blau_panel.box_query("כתב כטה", 10) == "כתב כטה" and blau_panel.box_query(" כתב  כטה ", 4) == "כתב כטה"
+    assert f".{blau_panel.PANEL_CLASS} .panel-head .stem-select {{" in CSS
+    assert "stems=BLAU_TAB in tabs or FRIEDMAN_TAB in tabs" in PANEL_SRC, "no stem field where only Lane is served"
+    # The field's list is drawn outside the popover; a choice there closed the panel (seen in the
+    # browser, 2026-11-11). The script and the field name the list alike, and the script returns
+    # on it before its "click elsewhere" close.
+    assert "popup-content-class={STEM_MENU_CLASS}" in PANEL_SRC
+    assert f"var STEM_MENU = '{blau_panel.STEM_MENU_CLASS}';" in JS
+    click = JS[JS.index("document.addEventListener('click'"):]
+    menu = click.index("event.target.closest('.' + STEM_MENU)) return;")
+    assert menu < click.index("if (open) dispatch(pop, 'blau-close');")

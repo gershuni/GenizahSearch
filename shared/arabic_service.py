@@ -26,8 +26,9 @@ language (owner, D11): a reader who asks for Arabic gets the Arabic readings.
 Each root card holds Lane's entries under that root: the entries whose headword is the reading, or
 the reading with a proclitic and a pronoun peeled, or the closed-class table's headword, first;
 then the rest in Lane's order. Everything is bounded (``MAX_ROOTS``, ``MAX_ENTRIES``, ``MAX_TEXT``)
-so one click never renders a page; what is left out is counted and linked on Ephraim Meiri's site,
-where the entries come from (D5).
+so one click never renders a page; a root carries all its entries and their whole text (the panel
+shows the first few and the rest on a click; owner, 2026-11-11), and only what lies beyond the
+bound is counted and linked on Ephraim Meiri's site, where the entries come from (D5).
 """
 from __future__ import annotations
 
@@ -61,6 +62,7 @@ from shared.arabic_normalize import (
     strip_harakat,
 )
 from shared.blau_normalize import BRACKETS, QUOTE_MARKS
+from shared.dictionary_switch import OFF, ON, read_switch, serves
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -85,16 +87,25 @@ LOOKUP_INDEXES = ("idx_lane_entries_root", "idx_lane_forms_skeleton")
 METHOD_VERSION = "v4"
 MAX_READINGS = 3
 MAX_ROOTS = 1  # the gate measured the first root only (P1)
-MAX_ENTRIES = 3
+#: A root card carries every entry of its root, each with its whole text (owner, 2026-11-11: nothing
+#: only on the site); the panel shows the first few, each cut at ``MAX_TEXT``, and the rest on a
+#: click. A bound, not a cut: the largest root has 69 entries (34,090 characters in all).
+MAX_ENTRIES = 100
 MAX_TEXT = 600
 
 
+ENV_ENABLED = "LANE_DICTIONARY_ENABLED"
+
+
+def lane_switch() -> str:
+    """The ``LANE_DICTIONARY_ENABLED`` switch, read on every call (default on): on, off, or
+    ``editors`` (``shared.dictionary_switch``)."""
+    return read_switch(ENV_ENABLED, ON)
+
+
 def lane_enabled() -> bool:
-    """The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on)."""
-    value = os.environ.get("LANE_DICTIONARY_ENABLED")
-    if value is None:
-        return True
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    """The switch is on for everyone (not ``editors`` only)."""
+    return lane_switch() == ON
 
 
 def entry_url(entry_id: str) -> str:
@@ -142,6 +153,8 @@ class LaneEntry:
     url: str
     #: Its headword is the reading (or the reading's stem, or the closed-class table's headword).
     matched: bool
+    #: The whole text when ``text`` is cut ('' otherwise): the panel shows it on a click.
+    full: str = ""
 
 
 @dataclass(frozen=True)
@@ -205,6 +218,33 @@ def _page(value: Any) -> Optional[int]:
         return int(value) if value is not None and str(value).strip() != "" else None
     except (TypeError, ValueError):
         return None
+
+
+#: A perfect verb's subject endings, longest first, that a Lane headword never carries (it cites the
+#: third person: طالبهُ, not طالبتهُ).
+_SUBJECT_ENDINGS = ("تما", "تم", "تن", "نا", "ت")
+_OBJECT_PRONOUNS = tuple(p for p in BACKOFF_ENCLITICS if p)
+
+
+def _head_shapes(root_key: str, reading: str) -> list[str]:
+    """The reading as a Lane headword may cite it (owner, 2026-11-11: Lane matched none of its entries
+    for أيضا, طالبته, استقر): the reading; without the alif of an adverbial accusative (أيضا -> أيض);
+    without a perfect's subject ending, keeping an object pronoun (طالبته -> طالبه, طالبت -> طالب);
+    and, for a doubled root, with its contracted last letter written twice (استقر -> استقرر).
+    Matching only: which entries are marked and come first, never which root is found."""
+    shapes = [reading]
+    if reading.endswith("ا") and len(reading) >= 4 and not reading.endswith(("نا", "وا", "تما")):
+        shapes.append(reading[:-1])   # not a verb's ending: كتبنا, كتبوا
+    for shape in list(shapes):
+        for pronoun in ("", *_OBJECT_PRONOUNS):
+            for ending in _SUBJECT_ENDINGS:
+                if shape.endswith(ending + pronoun) and len(shape) - len(ending + pronoun) >= 2:
+                    shapes.append(shape[:len(shape) - len(ending + pronoun)] + pronoun)
+                    break
+    if len(root_key) == 3 and root_key[1] == root_key[2] and root_key[2] not in "Wء":
+        last = root_key[2]
+        shapes += [s + last for s in list(shapes) if s.endswith(last) and not s.endswith(last + last)]
+    return list(dict.fromkeys(shapes))
 
 
 def cut_text(text: str, limit: int = MAX_TEXT) -> tuple[str, bool]:
@@ -350,8 +390,18 @@ class ArabicService:
         return self._conn is not None
 
     def is_available(self) -> bool:
-        """Ready AND the kill switch is on. The only question a surface asks."""
+        """Ready AND the switch is on for everyone: what a surface asks that does not know who
+        is reading (an ``editors`` switch stays hidden there)."""
         return self.is_ready() and lane_enabled()
+
+    def served_to(self, editor: bool) -> bool:
+        """Ready AND shown to this reader: on for everyone, or ``editors`` and the reader an editor
+        or admin (``shared.dictionary_switch``; owner, 2026-11-11: a preview before release)."""
+        return self.is_ready() and serves(lane_switch(), editor)
+
+    def _answering(self) -> bool:
+        """The lookups answer while the switch is not off: the page decided who may ask."""
+        return self.is_ready() and lane_switch() != OFF
 
     def meta(self, key: str) -> str:
         return self._meta.get(key, "")
@@ -377,7 +427,7 @@ class ArabicService:
         Arabic letters only are their own reading. Never raises; empty when unavailable, when the
         word is an abbreviation or has neither script, or on any error."""
         word = _text(word)
-        if not word or not self.is_available():
+        if not word or not self._answering():
             return empty_lane(word)
         script = "ja"
         try:
@@ -412,26 +462,40 @@ class ArabicService:
     def _matched_entries(self, root_key: str, reading: str) -> set[str]:
         """The entries of ``root_key`` whose headword is the reading, or the reading with a
         proclitic and a pronoun peeled (as ``form_roots`` peels them), or whose closed-class row
-        names them."""
-        stems = {reading}
-        for pro in BACKOFF_PROCLITICS:
-            if not reading.startswith(pro):
-                continue
-            for enc in BACKOFF_ENCLITICS:
-                if reading.endswith(enc):
-                    stem = reading[len(pro):len(reading) - len(enc)]
-                    if len(stem) >= 2:
-                        stems.add(stem)
-        marks = ",".join("?" * len(stems))
-        ids = {r[0] for r in self._conn.execute(
-            f"SELECT entry_id FROM lane_forms WHERE root_key = ? AND skeleton IN ({marks})",
-            (root_key, *sorted(stems)))}
+        names them. Only when the reading itself names no entry, its other shapes a headword cites it
+        by (``_head_shapes``: أيضا as أيض, طالبته as طالبه, استقر as استقرر): a reading Lane cites as
+        it is (بنت) never marks another headword its shapes spell (بن)."""
+        shapes = _head_shapes(root_key, reading)
+        ids = self._forms_matching(root_key, shapes[:1])
+        if not ids and len(shapes) > 1:
+            ids = self._forms_matching(root_key, shapes[1:])
         closed = {reading} | {reading[1:] for pro in ("و", "ف") if reading.startswith(pro)}
         marks = ",".join("?" * len(closed))
         ids |= {r[0] for r in self._conn.execute(
             f"SELECT entry_id FROM closed_class WHERE root_key = ? AND entry_id IS NOT NULL "
             f"AND skeleton IN ({marks})", (root_key, *sorted(closed)))}
         return ids
+
+    def _forms_matching(self, root_key: str, shapes: list[str]) -> set[str]:
+        """The entries of ``root_key`` whose headword is one of ``shapes``, or one of them with a
+        proclitic and a pronoun peeled (as ``form_roots`` peels them)."""
+        stems = set()
+        for shape in shapes:
+            stems.add(shape)
+            for pro in BACKOFF_PROCLITICS:
+                if not shape.startswith(pro):
+                    continue
+                for enc in BACKOFF_ENCLITICS:
+                    if shape.endswith(enc):
+                        stem = shape[len(pro):len(shape) - len(enc)]
+                        if len(stem) >= 2:
+                            stems.add(stem)
+        if not stems:
+            return set()
+        marks = ",".join("?" * len(stems))
+        return {r[0] for r in self._conn.execute(
+            f"SELECT entry_id FROM lane_forms WHERE root_key = ? AND skeleton IN ({marks})",
+            (root_key, *sorted(stems)))}
 
     def _root(self, root_key: str, reading: str) -> Optional[LaneRoot]:
         row = self._conn.execute("SELECT name, first_page, names_json FROM lane_roots WHERE root_key = ?",
@@ -457,9 +521,11 @@ class ArabicService:
         for entry_id in shown:
             e = self._conn.execute("SELECT headword, page, text FROM lane_entries WHERE id = ?",
                                    (entry_id,)).fetchone()
-            text, cut = cut_text(_text(e[2]))
+            whole = " ".join(_text(e[2]).split())
+            text, cut = cut_text(whole, MAX_TEXT)
             entries.append(LaneEntry(entry_id=entry_id, headword=_text(e[0]), page=_page(e[1]), text=text,
-                                     cut=cut, url=entry_url(entry_id), matched=entry_id in matched))
+                                     cut=cut, url=entry_url(entry_id), matched=entry_id in matched,
+                                     full=whole if cut else ""))
         return LaneRoot(root_key=root_key, name=name, page=_page(page), url=root_url(name),
                         entries=tuple(entries), more_entries=max(0, len(chosen) - len(shown)))
 

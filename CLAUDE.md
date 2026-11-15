@@ -186,6 +186,9 @@ Never treat a flag alone as proof a feature is live.
 | `MCP_ENABLED` | `false` | the public MCP server at `POST /mcp` (replaces the GPT; `integrations/mcp/README.md`) | the `/api/chatgpt` facade being registered |
 | `SEARCH_API_MODE` | `open` | the public API (`open`/`localhost-only`/`disabled`) | — |
 
+The three `*_DICTIONARY_ENABLED` switches also take `editors`: served only to a signed-in editor or
+admin, a preview before release (`shared/dictionary_switch.py`); `is_available()` stays the public answer.
+
 Four more you will hit directly while working:
 
 - `GENIZAH_STORAGE_SECRET` — **required** to run the web app anywhere (32+ characters, no

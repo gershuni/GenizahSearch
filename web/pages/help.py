@@ -768,6 +768,8 @@ def _render_visual_atlas_help(lang: str) -> None:
 #: Friedman alone must not promise Blau or Lane (Codex, round 5 of #487).
 _DICTIONARY_NAMES = ('blau', 'friedman', 'lane')
 _EXPRESSION_DICTIONARIES = ('blau', 'friedman')
+#: The dictionaries whose cards show a root's stems and open one typed after the root ("דלל X").
+_STEM_DICTIONARIES = ('blau', 'friedman')
 _DICTIONARY_HELP = {
     'en': {
         'open': "- **Judeo-Arabic dictionaries:** the **עع** button (labelled *Judeo-Arabic dictionaries*) at the "
@@ -787,6 +789,8 @@ _DICTIONARY_HELP = {
         'expression_names': {'blau': "Blau's dictionary", 'friedman': "Friedman's dictionary",
                              'both': "Blau's and Friedman's dictionaries"},
         'box': " The box at the top of the panel takes a typed or corrected word, in Hebrew or Arabic letters.",
+        'stems': " To open a verb stem, type the root and the stem (דלל X or דלל 10), or press the stem on the "
+                 "root's card.",
         'blau_note': " Note: Blau's dictionary records mainly meanings particular to Judeo-Arabic; for verbs "
                      "and inflected forms, type the root or the base form.",
         'key': "- **Looking up a word without the switch:** press **D** or **M**, then click a word (or click "
@@ -807,6 +811,8 @@ _DICTIONARY_HELP = {
                       "במובאותיהם המילים מופיעות בסדר הזה, ואפשר לבחור כמה מילים מותרות ביניהן.",
         'expression_names': {'blau': "מילון בלאו", 'friedman': "מילון פרידמן", 'both': "מילוני בלאו ופרידמן"},
         'box': " בתיבה שבראש החלונית אפשר להקליד מילה או לתקן אותה, באותיות עבריות או ערביות.",
+        'stems': " כדי לפתוח בניין, אפשר להקליד את השורש ואת הבניין (דלל X או דלל 10), או ללחוץ על הבניין "
+                 "בכרטיס של השורש.",
         'blau_note': " שימו לב: מילון בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית: כדי לחפש פעלים ונטיות "
                      "יש להקליד את השורש או את צורת הבסיס.",
         'key': "- **חיפוש במילון בלי להפעיל את הכפתור:** לחצו על **D** או **M** (או מ) ואז על מילה (או "
@@ -834,15 +840,20 @@ def dictionary_bullets(lang: str, served: Mapping[str, bool], expressions: Mappi
         which = text['expression_names']['both' if len(searched) == 2 else searched[0]]
         body += text['expression'].format(names=which)
     body += text['box']
+    if any(name in names for name in _STEM_DICTIONARIES):
+        body += text['stems']   # the root's stems (owner, 2026-11-11): Blau's and Friedman's, not Lane's
     if 'blau' in names:
         body += text['blau_note']
     return body + '\n' + text['key']
 
 
 def _dictionary_bullets(lang: str) -> str:
-    """The dictionaries' bullets, or nothing where no dictionary is served."""
+    """The dictionaries' bullets, or nothing where no dictionary is served to this reader (an
+    editor also reads those switched to editors only, as /browse shows them)."""
+    from web.auth_state import GlobalAuthState
     from web.keyboard_shortcuts import expression_dictionaries, served_dictionaries
-    return dictionary_bullets(lang, served_dictionaries(), expression_dictionaries())
+    editor = GlobalAuthState.is_editor()
+    return dictionary_bullets(lang, served_dictionaries(editor), expression_dictionaries(editor))
 
 
 #: The section after the Introduction (owner, 2026-11-05): the side menu's icon rail, the one

@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from nicegui import ui
 
@@ -111,23 +111,29 @@ def head_html() -> str:
 BLAU, FRIEDMAN, LANE = 'blau', 'friedman', 'lane'
 
 
-def served_dictionaries() -> dict[str, bool]:
+def _served(service: Any, editor: bool) -> bool:
+    """As /browse asks: served to everyone, or a preview for an editor (shared/dictionary_switch.py)."""
+    return bool(service.is_available() or (editor and service.served_to(True)))
+
+
+def served_dictionaries(editor: bool = False) -> dict[str, bool]:
     """Which dictionaries are served now, by name in the panel's tab order: the same three
-    services /browse asks before it puts the panel on the page. All False when a service
-    cannot be asked (the card and the Help page never cost the page)."""
+    services /browse asks before it puts the panel on the page; with ``editor``, also those
+    switched to editors only. All False when a service cannot be asked (the card and the Help
+    page never cost the page)."""
     try:
         from shared.arabic_service import get_arabic_service
         from shared.blau_service import get_blau_service
         from shared.friedman_service import get_friedman_service
-        return {BLAU: bool(get_blau_service().is_available()),
-                FRIEDMAN: bool(get_friedman_service().is_available()),
-                LANE: bool(get_arabic_service().is_available())}
+        return {BLAU: _served(get_blau_service(), editor),
+                FRIEDMAN: _served(get_friedman_service(), editor),
+                LANE: _served(get_arabic_service(), editor)}
     except Exception:  # noqa: BLE001 - the card never costs the page
         logger.warning('keyboard_shortcuts: dictionary availability unknown', exc_info=True)
         return {BLAU: False, FRIEDMAN: False, LANE: False}
 
 
-def expression_dictionaries() -> dict[str, bool]:
+def expression_dictionaries(editor: bool = False) -> dict[str, bool]:
     """Which served dictionaries have the expression search now: Friedman's whenever it is
     served (its sidecar carries the tokens by schema), Blau's only on a 1.1.0 sidecar
     (``BlauService.expressions_available``): a 1.0.0 file is served without it while the code
@@ -137,17 +143,17 @@ def expression_dictionaries() -> dict[str, bool]:
         from shared.blau_service import get_blau_service
         from shared.friedman_service import get_friedman_service
         blau = get_blau_service()
-        return {BLAU: bool(blau.is_available() and blau.expressions_available()),
-                FRIEDMAN: bool(get_friedman_service().is_available())}
+        return {BLAU: bool(_served(blau, editor) and blau.expressions_available()),
+                FRIEDMAN: _served(get_friedman_service(), editor)}
     except Exception:  # noqa: BLE001 - the Help page never costs the page
         logger.warning('keyboard_shortcuts: expression-search availability unknown', exc_info=True)
         return {BLAU: False, FRIEDMAN: False}
 
 
-def dictionaries_served() -> bool:
+def dictionaries_served(editor: bool = False) -> bool:
     """Is a dictionary served now (the M key's rows belong on the card)? Blau's, Friedman's
-    or Lane's."""
-    return any(served_dictionaries().values())
+    or Lane's; with ``editor``, also one switched to editors only."""
+    return any(served_dictionaries(editor).values())
 
 
 def build_card(rtl: bool, dictionaries: Optional[bool] = None) -> ui.dialog:

@@ -21,9 +21,33 @@ candidate against the book's index of forms, whose roots reach the entries by th
 (ג̇לב is not גלב) and only by the plain key when the dotted root reaches nothing. Every match says
 how it was reached (``via``: head, stem, index) and what matched; an entry brings its sub-entries
 and binyan paragraphs, a sub-entry its entry. Everything is bounded (``MAX_MATCHES``,
-``MAX_CHILDREN``, ``MAX_QUOTATIONS``) so one click never renders a page. No morphology beyond
-the stems: an inflected form the index does not list is not found, and the lookup says nothing
-about which sense fits.
+``MAX_CHILDREN``, ``MAX_QUOTATIONS``) so one click never renders a page; the last two are far above
+the book's largest entry, so a match carries all its sub-entries and quotations, and the panel shows
+the first few and the rest on a click (owner, 2026-11-11). No morphology beyond
+the stems. The word is also looked up in ``tokens``, every word of every quotation and head: the
+units holding it, other than the matches and the units under a matched entry, are ``quotes``, each
+with the places and the word marked (``MAX_QUOTE_HITS``, ``MAX_QUOTE_PLACES``; never for a function
+word or a word more than ``MAX_QUOTE_UNITS`` units hold). An inflected form the index does not list is found only where a quotation prints it, and the
+lookup says nothing about which sense fits.
+
+A root's stems (owner, 2026-11-11; the private dictionary lookup plan, section 4.6). Every match
+carries the stems its entry lists (``entry_stems``: the entry's own stem label and its paragraphs',
+each read as every stem number it names) and the root the entry is filed under. A root typed with a
+stem ("דלל X", "דלל 10", ``shared.ja_roots.root_and_stem``) answers with that stem's paragraph under
+each entry of the root that lists it (``via`` "chosen"); when none does, it says so
+(``FriedmanLookup.stem_missing``) and shows the root as a plain lookup does. ``stem_pairs`` is the
+whole list of (root, stem) pairs, built once in memory. A word written with the dot (ד'לל, ד̇לל)
+puts the units of the dotted reading first and marks the rest (``dot_mismatch``), the rule of
+Blau's lookup (``shared.ja_roots.dot_pattern``); an undotted word gives no preference.
+
+Matches found by verb form (the plan's PR 3, sections 4.4 and 6.1): when the word itself, its base
+form and the index reach nothing, the entries whose listed stems have the word among their generated
+forms (``verb_form_index``, ``shared.ja_verb_forms.verb_form_cards``), at most ``MAX_VERB_FORM_CARDS``,
+``via`` "verb_form" with the form, the root and the stems as ``matched``. Beside matches the word
+itself reaches, those roots are only suggested (``FriedmanLookup.suggestions``). Only the kinds the
+switch names are shown (``FRIEDMAN_VERB_FORM_KINDS``, default A, B, D: the graded sample, owner
+2026-11-11); a shown kind opens on the stem's paragraph only if ``FRIEDMAN_VERB_FORM_STEM_KINDS`` names
+it too (default A, B, D).
 
 The expression search (plan step 4): ``expression(text, gap)`` takes two to ``MAX_EXPRESSION_WORDS``
 words and answers with every unit holding them IN ORDER, with at most ``gap`` printed words
@@ -43,7 +67,7 @@ import os
 import re
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -52,6 +76,19 @@ from shared.ja_expression import (  # noqa: F401 - the names the builders, the e
     DEFAULT_GAP, FUNCTION_WORDS, MAX_EXPRESSION_WORDS, MAX_GAP, MIN_EXPRESSION_STEM, NO_ARTICLE_PEEL,
     OPTIONAL_LETTERS_RE, PREPOSITIONS, PROCLITIC_RE, ExpressionComponent, ExpressionPlace, clamp_gap, components_for,
     is_function_word, lookup_key, ordered_match, preposition_stems, scope_keys, short_remainder, tiered, word_keys,
+)
+from shared.ja_roots import (  # head_begins_with: moved there (borrowed_roots uses it); importable from here
+    BorrowedRoot, StemPair, dot_pattern, dots_agree, head_begins_with, root_and_stem, stem_numbers,
+)
+from shared.dictionary_switch import OFF, ON, read_switch, serves
+from shared.ja_verb_forms import MAX_SUGGESTIONS  # noqa: F401 - importable from here, as before the move
+from shared.ja_verb_forms import (
+    MAX_VERB_FORM_CARDS,
+    suggested_roots,
+    switch_kinds,
+    verb_form_cards,
+    verb_form_index,
+    word_stem,
 )
 from shared.thread_local_db import ThreadLocalConnection
 
@@ -68,25 +105,73 @@ SIDECAR_DIR = "friedman_data"
 SIDECAR_FILENAME = "friedman.db"
 ENV_DB_PATH = "GENIZAH_FRIEDMAN_DB_PATH"
 ENV_ENABLED = "FRIEDMAN_DICTIONARY_ENABLED"
+#: The switches of the matches found by verb form (PR 3): the kinds shown ("A,B,D"), and those of
+#: them that open on the stem's paragraph. Read live; unset is the default below, set and empty is none.
+ENV_VERB_FORM_KINDS = "FRIEDMAN_VERB_FORM_KINDS"
+ENV_VERB_FORM_STEM_KINDS = "FRIEDMAN_VERB_FORM_STEM_KINDS"
+#: The graded sample (owner, 2026-11-11: recall counts more than precision): where Friedman finds
+#: nothing for the word itself, a match found by verb form names a right root for 87-95% of words of
+#: kinds A, B and D; its guessed stem is right for 98% (A), 88% (B) and 94% (D) of them.
+DEFAULT_VERB_FORM_KINDS = "A,B,D"
+DEFAULT_VERB_FORM_STEM_KINDS = "A,B,D"
 REQUIRED_TABLES = ("meta", "units", "unit_keys", "unit_roots", "quotations", "index_forms", "tokens")
 MAX_MATCHES = 12
-MAX_CHILDREN = 30
-MAX_QUOTATIONS = 8
+#: Bounds, not cuts (owner, 2026-11-11: nothing only on the PDF page): the local sidecar's largest
+#: entry has 44 sub-entries and stem paragraphs, its largest unit 16 quotations. The panel shows the
+#: first few and the rest on a click; any beyond these are counted (``children_total``,
+#: ``quotations_total``) and pointed to on the page.
+MAX_CHILDREN = 100
+MAX_QUOTATIONS = 50
 #: The expression search (its words, gaps and keys are shared.ja_expression's): units answered,
 #: places shown per unit.
 MAX_EXPRESSION_HITS = 20
 MAX_PLACES = 4
+#: One word's lookup also reads ``tokens``: the units whose quotations or head hold the word
+#: (``FriedmanLookup.quotes``), and the places shown under each.
+MAX_QUOTE_HITS = 5
+MAX_QUOTE_PLACES = 2
+#: A word held by more units than this is a common word (קאל, כתאב: over a hundred), and five of
+#: them say nothing about it: no quotes at all. Measured 2026-11-10: nine keys in ten are in six
+#: units or fewer.
+MAX_QUOTE_UNITS = 25
 SCOPE_HEAD = "head"
 SCOPE_QUOTATION = "quotation"
+#: How a match was reached when the reader typed a root with a stem ("דלל X"): the stem's
+#: paragraph itself, chosen, not found by the word.
+VIA_CHOSEN = "chosen"
+#: How a match was reached when another dictionary gave its root (``FriedmanService.borrow``; owner,
+#: 2026-11-11): ``FriedmanMatch.borrowed`` names which, and with what.
+VIA_BORROWED = "borrowed"
+#: How a match was reached through the generated forms of a stem its entry lists (PR 3):
+#: ``FriedmanMatch.matched`` is the form, the root and the stems ("אסתדלו (ד̇לל X)").
+VIA_VERB_FORM = "verb_form"
 #: The keying rules live in shared.ja_expression; these names stay for the evaluation and the tests.
 _short_remainder = short_remainder
 _preposition_stems = preposition_stems
 _is_function_word = is_function_word
 
 
+def friedman_switch() -> str:
+    """The switch, read live: on, off, or ``editors`` (``shared.dictionary_switch``); OFF unless
+    set, because the sidecar is a candidate."""
+    return read_switch(ENV_ENABLED, OFF)
+
+
 def friedman_enabled() -> bool:
-    """The switch, read live; OFF unless set, because the sidecar is a candidate."""
-    return os.environ.get(ENV_ENABLED, "0").strip().lower() in ("1", "true", "yes", "on")
+    """The switch is on for everyone (not ``editors`` only)."""
+    return friedman_switch() == ON
+
+
+def verb_form_kinds() -> frozenset[str]:
+    """The kinds of match found by verb form the lookup shows (``FRIEDMAN_VERB_FORM_KINDS``, read on
+    every call); ``DEFAULT_VERB_FORM_KINDS`` unless set; set and empty, none."""
+    return switch_kinds(ENV_VERB_FORM_KINDS, DEFAULT_VERB_FORM_KINDS)
+
+
+def verb_form_stem_kinds() -> frozenset[str]:
+    """The kinds whose matches open on the stem's paragraph (``FRIEDMAN_VERB_FORM_STEM_KINDS``);
+    ``DEFAULT_VERB_FORM_STEM_KINDS`` unless set. Any other match is the whole entry."""
+    return switch_kinds(ENV_VERB_FORM_STEM_KINDS, DEFAULT_VERB_FORM_STEM_KINDS)
 
 
 def default_sidecar_path() -> Optional[str]:
@@ -166,11 +251,24 @@ class FriedmanUnit:
 @dataclass(frozen=True)
 class FriedmanMatch:
     unit: FriedmanUnit
-    via: str            # "head" (the word itself), "stem" (a peeled candidate), "index" (the book's index of forms)
+    via: str            # "head" (the word itself), "stem" (a peeled candidate), "index" (the book's index of forms), "chosen" (a typed stem), "borrowed" (another dictionary's root), "verb_form" (a generated form of a listed stem)
     matched: str        # the key or index form that reached the unit
     parent: Optional[FriedmanUnit]
     children: tuple[FriedmanUnit, ...]
     children_total: int
+    #: The stems the dictionary lists under the unit's entry (its own and its binyan paragraphs'),
+    #: I to X; the entry's root as printed, which opens one of them ("ד̇לל X"); the stem chosen (typed,
+    #: or the one the word's shape gives, ``shared.ja_verb_forms``).
+    stems: tuple[int, ...] = ()
+    root: str = ""
+    stem: int = 0
+    #: The looked-up word carries the dot and this unit's entry is not spelled with it there.
+    dot_mismatch: bool = False
+    #: A match for a root another dictionary gave (``VIA_BORROWED``): each (source, evidence),
+    #: ``shared.ja_roots.BorrowedRoot``'s.
+    borrowed: tuple[tuple[str, str], ...] = ()
+    #: A match found by verb form (``VIA_VERB_FORM``): its kind, A to E (plan 6.1). '': not one.
+    kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -182,10 +280,25 @@ class FriedmanLookup:
     truncated: bool
     status: str
     credit_he: str
+    #: The units whose quotations or head hold the word (the ``tokens`` table), other than the
+    #: matches and the units under a matched entry; and how many more there are.
+    quotes: tuple["FriedmanExpressionHit", ...] = ()
+    more_quotes: int = 0
+    #: The stem typed after the root ("דלל X"), 0 for a plain lookup.
+    stem: int = 0
+    #: Beside the matches the word itself reached: the other roots its verb forms give, (root as
+    #: printed, stem; 0 when several fit), at most ``MAX_SUGGESTIONS``; a press looks "root stem" up.
+    suggestions: tuple[tuple[str, int], ...] = ()
 
     @property
     def found(self) -> bool:
-        return bool(self.matches)
+        return bool(self.matches or self.quotes)
+
+    @property
+    def stem_missing(self) -> bool:
+        """A stem was typed, the root was found, and no entry filed under it lists that stem: the
+        matches are the root's, with the stems they have."""
+        return bool(self.stem and self.matches and not any(m.stem == self.stem for m in self.matches))
 
 
 def empty_lookup(word: str = "", key: str = "", candidates: tuple[str, ...] = (), status: str = "",
@@ -290,6 +403,14 @@ class FriedmanService:
     def __init__(self, db_path: Optional[str] = None, thread_safe: bool = False):
         self._conn: Any = None
         self._meta: dict[str, str] = {}
+        # Built on first use, then read-only (``_stems``): the (root, stem) pairs, each entry's
+        # stems with the units holding them, each entry's roots, and the entries under each root.
+        self._index_lock = threading.Lock()
+        self._stem_pairs: Optional[tuple[StemPair, ...]] = None
+        self._entry_stem_units: dict[str, dict[int, tuple[str, ...]]] = {}
+        self._entry_roots: dict[str, tuple[str, ...]] = {}
+        self._root_entries: dict[str, tuple[str, ...]] = {}
+        self._verb_forms: Optional[dict[str, tuple[StemPair, ...]]] = None
         self.unavailable_reason = "not opened"
         self._db_path = db_path or default_sidecar_path()
         if not self._db_path:
@@ -335,8 +456,18 @@ class FriedmanService:
         return self._conn is not None
 
     def is_available(self) -> bool:
-        """Ready AND switched on. The only question a surface asks."""
+        """Ready AND switched on for everyone: what a surface asks that does not know who is
+        reading (an ``editors`` switch stays hidden there)."""
         return self.is_ready() and friedman_enabled()
+
+    def served_to(self, editor: bool) -> bool:
+        """Ready AND shown to this reader: on for everyone, or ``editors`` and the reader an editor
+        or admin (``shared.dictionary_switch``; owner, 2026-11-11: a preview before release)."""
+        return self.is_ready() and serves(friedman_switch(), editor)
+
+    def _answering(self) -> bool:
+        """The lookups answer while the switch is not off: the page decided who may ask."""
+        return self.is_ready() and friedman_switch() != OFF
 
     def meta(self, key: str) -> str:
         return self._meta.get(key, "")
@@ -360,26 +491,163 @@ class FriedmanService:
 
     # -- the lookup ----------------------------------------------------------
 
-    def lookup(self, word: str, limit: int = MAX_MATCHES) -> FriedmanLookup:
-        """What the dictionary has for one clicked or typed word. Never raises."""
+    def answer(self, text: str, gap: int = DEFAULT_GAP, stems: bool = True) -> FriedmanAnswer:
+        """What the panel asks for what the reader clicked, selected or typed: several words are an
+        expression search, one word a lookup, and a root with a typed stem ("דלל X") the lookup of
+        that root with the stem chosen; ``stems`` False (words clicked or selected in the
+        manuscript) reads no stem: "פרק 2" there is two words."""
+        text = " ".join(str(text or "").split())
+        if len(text.split()) > 1 and not (stems and root_and_stem(text)[1]):
+            return self.expression(text, gap)
+        return self.lookup(text)
+
+    def lookup(self, word: str, limit: int = MAX_MATCHES, verb_forms: Optional[frozenset[str]] = None,
+               verb_form_stems: Optional[frozenset[str]] = None) -> FriedmanLookup:
+        """What the dictionary has for one clicked or typed word, or for a root with a typed stem
+        ("דלל X", ``shared.ja_roots.root_and_stem``). ``verb_forms`` / ``verb_form_stems``: the kinds
+        of match found by verb form shown, and those opened on the stem's paragraph; None reads the
+        switches (``verb_form_kinds``; the graded sample passes every kind). Never raises."""
         word = str(word or "").strip()
-        if not word or not self.is_available():
+        kinds = verb_form_kinds() if verb_forms is None else frozenset(verb_forms)
+        stem_kinds = verb_form_stem_kinds() if verb_form_stems is None else frozenset(verb_form_stems)
+        if not word or not self._answering():
             return empty_lookup(word, status=self.status, credit_he=self.credit_he)
         try:
+            root, stem = root_and_stem(word)
+            if stem:
+                return self._lookup_stem(word, root, stem, max(1, int(limit)))
             key = lookup_key(word)
             # The stems come from the cleaned key: on the raw word the PDF's presentation-form
             # harakat would split it and no clitic would be peeled (Codex, round 4 of #487).
             candidates = tuple(dict.fromkeys([key, *candidate_stems(key)])) if key else ()
             if not candidates:
                 return empty_lookup(word, key, (), self.status, self.credit_he)
-            return self._lookup(word, key, candidates, max(1, int(limit)))
+            return self._lookup(word, key, candidates, max(1, int(limit)), verb_forms=kinds,
+                                verb_form_stems=stem_kinds)
         except Exception:
             logger.exception("FriedmanService: lookup failed for %r", word)
             return empty_lookup(word, status=self.status, credit_he=self.credit_he)
 
+    # -- the stems an entry lists ---------------------------------------------
+
+    def _stems(self) -> tuple[StemPair, ...]:
+        """Built once from the open file (plan section 4.1): a unit with a stem label (an entry's
+        own, a ``binyan`` paragraph's, a sub-entry's) gives its entry every stem number the label
+        names (``stem_numbers``: "IV/II" is II and IV, "(" none), and a (root, stem) pair for each
+        root the entry is filed under (``unit_roots``, dotted). Nothing is stored."""
+        if self._stem_pairs is None:
+            with self._index_lock:
+                if self._stem_pairs is None:
+                    entry_roots: dict[str, list[str]] = {}
+                    root_entries: dict[str, list[str]] = {}
+                    for row in self._conn.execute(
+                            "SELECT r.unit_id, r.dotted FROM unit_roots r JOIN units u ON u.id = r.unit_id "
+                            "WHERE u.kind = 'entry' ORDER BY u.ord, r.rowid"):
+                        dotted = str(row["dotted"] or "").strip()
+                        key = lookup_key(dotted)
+                        if not key:
+                            continue
+                        roots = entry_roots.setdefault(row["unit_id"], [])
+                        if dotted not in roots:
+                            roots.append(dotted)
+                        entries = root_entries.setdefault(key, [])
+                        if row["unit_id"] not in entries:
+                            entries.append(row["unit_id"])
+                    stem_units: dict[str, dict[int, list[str]]] = {}
+                    pairs: list[StemPair] = []
+                    for row in self._conn.execute(
+                            "SELECT id, kind, parent, binyan FROM units WHERE binyan IS NOT NULL AND binyan <> '' "
+                            "ORDER BY ord"):
+                        entry_id = row["id"] if row["kind"] == "entry" else row["parent"]
+                        numbers = stem_numbers(row["binyan"])
+                        if not entry_id or not numbers:
+                            continue
+                        for number in numbers:
+                            stem_units.setdefault(entry_id, {}).setdefault(number, []).append(row["id"])
+                            for dotted in entry_roots.get(entry_id, ()):
+                                pairs.append(StemPair(dotted, lookup_key(dotted), number, row["id"], entry_id))
+                    self._entry_roots = {e: tuple(r) for e, r in entry_roots.items()}
+                    self._root_entries = {k: tuple(e) for k, e in root_entries.items()}
+                    self._entry_stem_units = {e: {n: tuple(u) for n, u in sorted(s.items())}
+                                              for e, s in stem_units.items()}
+                    self._stem_pairs = tuple(pairs)
+        return self._stem_pairs
+
+    def stem_pairs(self) -> tuple[StemPair, ...]:
+        """Every (root, stem) pair the dictionary lists, in the book's order (plan section 4.1);
+        () when the dictionary is not available or on any error. Never raises."""
+        if not self._answering():
+            return ()
+        try:
+            return self._stems()
+        except Exception:
+            logger.exception("FriedmanService: the stem pairs could not be read")
+            return ()
+
+    def verb_form_index(self) -> dict[str, tuple[StemPair, ...]]:
+        """Every form key the (root, stem) pairs the book lists may be written as, and the pairs that
+        give it (``shared.ja_verb_forms.verb_form_index``; plan section 4.3, PR 2): built once from
+        the open file, held in memory. Nothing in the lookup calls it yet: the gate
+        (``scripts/measure_dictionary_stems.py``) measures it first. {} when unavailable or on any
+        error. Never raises."""
+        if not self.is_ready():
+            return {}
+        try:
+            if self._verb_forms is None:
+                pairs = self._stems()
+                with self._index_lock:
+                    if self._verb_forms is None:
+                        self._verb_forms = verb_form_index(pairs)
+            return self._verb_forms
+        except Exception:
+            logger.exception("FriedmanService: the verb form index could not be built")
+            return {}
+
+    def entry_stems(self, entry_id: str) -> tuple[int, ...]:
+        """The stem numbers the dictionary lists under one entry, I to X in order; () for an entry
+        with none, when unavailable, or on any error. Never raises."""
+        return tuple(self._stem_units(entry_id))
+
+    def _stem_units(self, entry_id: Optional[str]) -> dict[int, tuple[str, ...]]:
+        if not entry_id or not self.is_ready():
+            return {}
+        try:
+            self._stems()
+            return self._entry_stem_units.get(entry_id, {})
+        except Exception:
+            logger.exception("FriedmanService: the stems of %r could not be read", entry_id)
+            return {}
+
+    def _lookup_stem(self, word: str, root: str, stem: int, limit: int) -> FriedmanLookup:
+        """A root with a typed stem: the paragraph of that stem (the ``binyan`` unit, or the entry
+        when the stem is its own) under every entry filed under the root that lists it, the entries
+        whose dotted root agrees with a dotted typed root first; when none lists it, the root as a
+        plain lookup of it shows it (``stem_missing``), with each entry's stems."""
+        key = lookup_key(root)
+        self._stems()
+        pattern = dot_pattern(root)
+        found: list[tuple[str, bool]] = []
+        for entry_id in self._root_entries.get(key, ()):
+            units = self._entry_stem_units.get(entry_id, {}).get(stem, ())
+            if not units:
+                continue
+            mismatch = "*" in pattern and not any(dots_agree(pattern, r) for r in self._entry_roots.get(entry_id, ()))
+            found.extend((unit_id, mismatch) for unit_id in units if unit_id not in {u for u, _m in found})
+        if not found:
+            plain = self._lookup(root, key, (key,), limit, quotes=False)
+            return replace(plain, word=word, stem=stem)
+        found.sort(key=lambda hit: hit[1])
+        matches = []
+        for unit_id, mismatch in found[:limit]:
+            row = self._conn.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+            if row is not None:
+                matches.append(self._match(row, VIA_CHOSEN, root, stem=stem, dot_mismatch=mismatch))
+        return FriedmanLookup(word, key, (key,), tuple(matches), len(found) > limit, self.status, self.credit_he,
+                              stem=stem)
+
     def unit(self, unit_id: str) -> Optional[FriedmanUnit]:
         """One unit by id, with its quotations; None when unknown or unavailable."""
-        if not self.is_available():
+        if not self._answering():
             return None
         try:
             row = self._conn.execute("SELECT * FROM units WHERE id = ?", (str(unit_id),)).fetchone()
@@ -400,7 +668,7 @@ class FriedmanService:
         without Hebrew letters, or when the dictionary is not available."""
         text = " ".join(str(text or "").split())
         gap = clamp_gap(gap)
-        if not text or not self.is_available():
+        if not text or not self._answering():
             return empty_expression(text, gap, self.status, self.credit_he)
         words = tuple(text.split())
         candidates = tuple(word_keys(w) for w in words)
@@ -500,19 +768,28 @@ class FriedmanService:
                                  search_positions=positions)
         return FriedmanPlace(scope, n, printed, positions, components, quotation)
 
-    def _lookup(self, word: str, key: str, candidates: tuple[str, ...], limit: int) -> FriedmanLookup:
-        hits: list[tuple[sqlite3.Row, str, str]] = []
+    def _lookup(self, word: str, key: str, candidates: tuple[str, ...], limit: int,
+                quotes: bool = True, verb_forms: frozenset[str] = frozenset(),
+                verb_form_stems: frozenset[str] = frozenset()) -> FriedmanLookup:
+        # A hit: the unit, how it was reached, what reached it, and the index form when the book's
+        # index did (a spelling whose dots count, ``_dot_mismatch``).
+        hits: list[tuple[sqlite3.Row, str, str, str]] = []
         seen: set[str] = set()
 
-        def add(row: sqlite3.Row, via: str, matched: str) -> None:
+        def add(row: sqlite3.Row, via: str, matched: str, form: str = "") -> None:
             if row["id"] not in seen:
                 seen.add(row["id"])
-                hits.append((row, via, matched))
+                hits.append((row, via, matched, form))
 
         for candidate in candidates:
-            for row in self._conn.execute(
-                    "SELECT u.* FROM units u JOIN unit_keys k ON k.unit_id = u.id WHERE k.key = ? ORDER BY u.ord",
-                    (candidate,)):
+            rows = self._conn.execute(
+                "SELECT u.* FROM units u JOIN unit_keys k ON k.unit_id = u.id WHERE k.key = ? ORDER BY u.ord",
+                (candidate,)).fetchall()
+            # The units whose own head begins with the word first, then those that list it as another
+            # spelling or inside a longer head, each in the book's order (owner, 2026-11-11: וצל
+            # reached the noun אَצْל/אُצْל/וَצْל before the verb וצל).
+            rows.sort(key=lambda row: not head_begins_with(row["head_text"], candidate))
+            for row in rows:
                 add(row, "head" if candidate == key else "stem", candidate)
         for candidate in candidates:
             for form in self._conn.execute(
@@ -528,12 +805,243 @@ class FriedmanService:
                             "SELECT u.* FROM units u JOIN unit_keys k ON k.unit_id = u.id "
                             "WHERE k.key = ? AND u.kind = 'entry' ORDER BY u.ord", (form["root_key"],)).fetchall()
                 for row in rows:
-                    add(row, "index", f"{form['form']} ({form['root_text']})")
+                    add(row, "index", f"{form['form']} ({form['root_text']})", str(form["form"] or ""))
+        # The word written with the dot (an apostrophe or geresh after the letter, or U+0307): the
+        # units of the dotted reading first, the rest marked, as Blau's lookup does (owner,
+        # 2026-11-11). An undotted word gives no preference.
+        pattern = dot_pattern(word)
+        mismatch = {row["id"]: self._dot_mismatch(row, form, pattern) for row, _via, _matched, form in hits} \
+            if "*" in pattern else {}
+        if mismatch:
+            hits.sort(key=lambda hit: mismatch[hit[0]["id"]])
         truncated = len(hits) > limit
-        matches = tuple(self._match(row, via, matched) for row, via, matched in hits[:limit])
-        return FriedmanLookup(word, key, candidates, matches, truncated, self.status, self.credit_he)
+        # An entry the book's index reached opens on the stem the word's shape gives (אסתקר: stem X
+        # of קרר; owner, 2026-11-11); the word itself or its base form reached what it names.
+        matches = tuple(self._word_stem_match(row, via, matched, candidates, mismatch.get(row["id"], False))
+                        if via == "index" else
+                        self._match(row, via, matched, dot_mismatch=mismatch.get(row["id"], False))
+                        for row, via, matched, _form in hits[:limit])
+        # The matches found by verb form, only when the word itself reached nothing (their entries
+        # leave the quotes, as a matched entry's do); beside the word's own matches, the roots its verb
+        # forms give are suggestions (owner, 2026-11-11: the graded sample).
+        entries = {row["id"] if row["kind"] == "entry" else row["parent"] for row, *_rest in hits}
+        verb_matches: list[FriedmanMatch] = []
+        verb_more = 0
+        suggestions: tuple[tuple[str, int], ...] = ()
+        if hits:
+            suggestions = suggested_roots(candidates, self.verb_form_index() if verb_forms else {}, verb_forms,
+                                          entries)
+        else:
+            verb_matches, verb_more = self._verb_form_matches(candidates, entries, verb_forms, verb_form_stems)
+        matched_entries = {row["id"] for row, *_rest in hits if row["kind"] == "entry"}
+        for match in verb_matches:
+            seen.add(match.unit.id)
+            matched_entries.add(match.unit.id if match.unit.kind == "entry" else (match.unit.parent or match.unit.id))
+        found_quotes, more_quotes = (self._quotes(word, seen, matched_entries) if quotes else ((), 0))
+        return FriedmanLookup(word, key, candidates, matches + tuple(verb_matches), truncated or verb_more > 0,
+                              self.status, self.credit_he, found_quotes, more_quotes, suggestions=suggestions)
 
-    def _match(self, row: sqlite3.Row, via: str, matched: str) -> FriedmanMatch:
+    def _verb_form_matches(self, candidates: tuple[str, ...], shown: set[Optional[str]], kinds: frozenset[str],
+                           stem_kinds: frozenset[str]) -> tuple[list[FriedmanMatch], int]:
+        """The matches found by verb form (plan 4.4, PR 3): the entries the word's keys reach through
+        the generated forms of a stem the entry lists (``shared.ja_verb_forms.verb_form_cards``, in the
+        plan's order), other than the entries the word already reached (``shown``, which they join),
+        of a kind switched on (``kinds``); at most ``MAX_VERB_FORM_CARDS``, the rest counted. A match
+        is the stem's paragraph when its kind is in ``stem_kinds`` and the word fits one listed stem
+        (as "דלל X" opens it), else the entry with its stems as buttons."""
+        if not kinds:
+            return [], 0
+        index = self.verb_form_index()
+        if not index:
+            return [], 0
+        self._stems()
+        out: list[FriedmanMatch] = []
+        more = 0
+        for card in verb_form_cards(candidates, index):
+            if card.kind not in kinds or card.entry_id in shown:
+                continue
+            if len(out) >= MAX_VERB_FORM_CARDS:
+                more += 1
+                continue
+            stem = card.stem if card.kind in stem_kinds else 0
+            units = self._entry_stem_units.get(card.entry_id, {}).get(stem, ()) if stem else ()
+            row = self._conn.execute("SELECT * FROM units WHERE id = ?",
+                                     (units[0] if units else card.entry_id,)).fetchone()
+            if row is None:
+                continue
+            match = self._match(row, VIA_VERB_FORM, card.evidence(), stem=stem if units else 0)
+            out.append(replace(match, kind=card.kind))
+            shown.add(card.entry_id)
+        return out, more
+
+    def _word_stem_match(self, row: sqlite3.Row, via: str, matched: str, keys: tuple[str, ...],
+                         dot_mismatch: bool = False) -> FriedmanMatch:
+        """An entry reached through its root, opened on the stem the word's shape gives
+        (``shared.ja_verb_forms.word_stem``): that stem's paragraph (the entry itself when the stem is
+        its own) with the stem chosen, as "קרר X" opens it. The entry as it is when none of its
+        listed stems, or several, hold the word."""
+        if row["kind"] == "entry":
+            self._stems()
+            units = self._entry_stem_units.get(row["id"], {})
+            stem = 0
+            for dotted in self._entry_roots.get(row["id"], ()):
+                stem = word_stem(keys, lookup_key(dotted), units) if units else 0
+                if stem:
+                    break
+            if stem:
+                unit_id = units[stem][0]
+                unit_row = row if unit_id == row["id"] else self._conn.execute(
+                    "SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+                if unit_row is not None:
+                    return self._match(unit_row, via, matched, stem=stem, dot_mismatch=dot_mismatch)
+        return self._match(row, via, matched, dot_mismatch=dot_mismatch)
+
+    # -- roots borrowed from the other dictionaries -------------------------
+
+    def borrow(self, result: FriedmanAnswer, borrowed: tuple[BorrowedRoot, ...]) -> FriedmanAnswer:
+        """Friedman's answer with a match for each entry filed under a root another dictionary gives
+        for the word (``shared.ja_roots.borrowed_roots``: Blau's own entries, Lane's first root),
+        after Friedman's own (owner, 2026-11-11: ויכון reached nothing here though Lane gave كون). The
+        entries spelled with the same dots where several share the letters; an entry Friedman's own
+        matches already show gets no second match, and two dictionaries giving one entry make one
+        match naming both; each opens on the stem the word's shape gives. The quotes under a
+        borrowed entry go (its match shows it). Not for an expression or a typed stem. Never
+        raises: on any error, the answer as it was."""
+        if not isinstance(result, FriedmanLookup) or result.stem or not borrowed or not self._answering():
+            return result
+        try:
+            return self._borrow(result, borrowed)
+        except Exception:
+            logger.exception("FriedmanService: borrowing roots for %r failed", result.word)
+            return result
+
+    def _borrow(self, result: FriedmanLookup, borrowed: tuple[BorrowedRoot, ...]) -> FriedmanLookup:
+        self._stems()
+
+        def entry_of(unit: FriedmanUnit) -> str:
+            return unit.id if unit.kind == "entry" else (unit.parent or unit.id)
+
+        shown = {entry_of(match.unit) for match in result.matches}
+        # A match found by verb form (PR 3) whose root another dictionary also gives keeps its place
+        # and names that dictionary too.
+        verb_entries = {entry_of(match.unit) for match in result.matches if match.via == VIA_VERB_FORM}
+        verb_sources: dict[str, list[tuple[str, str]]] = {}
+        sources: dict[str, list[tuple[str, str]]] = {}
+        overflow = False
+        for item in borrowed:
+            key = lookup_key(item.root)
+            if not key or " " in key:
+                continue
+            entries = self._root_entries.get(key, ())
+            pattern = dot_pattern(item.root)
+            same = [e for e in entries if any(dot_pattern(r) == pattern for r in self._entry_roots.get(e, ()))]
+            for entry_id in same or entries:
+                given = (item.source, item.evidence)
+                if entry_id in verb_entries:
+                    if given not in verb_sources.setdefault(entry_id, []):
+                        verb_sources[entry_id].append(given)
+                    continue
+                if entry_id in shown:
+                    continue
+                if entry_id not in sources:
+                    if len(result.matches) + len(sources) >= MAX_MATCHES:
+                        overflow = True
+                        continue
+                    sources[entry_id] = []
+                if given not in sources[entry_id]:
+                    sources[entry_id].append(given)
+        if verb_sources:
+            result = replace(result, matches=tuple(
+                replace(match, borrowed=match.borrowed + tuple(verb_sources[entry_of(match.unit)]))
+                if match.via == VIA_VERB_FORM and verb_sources.get(entry_of(match.unit)) else match
+                for match in result.matches))
+        added = []
+        # An entry two dictionaries agree on first (ויכון: כון, which Blau and Lane both give, before
+        # כלו, which only Blau's phrase gives); otherwise in the order the roots came.
+        for entry_id, given in sorted(sources.items(), key=lambda item: -len(item[1])):
+            row = self._conn.execute("SELECT * FROM units WHERE id = ?", (entry_id,)).fetchone()
+            if row is not None:
+                match = self._word_stem_match(row, VIA_BORROWED, "", result.candidates)
+                added.append(replace(match, borrowed=tuple(given)))
+        if not added:
+            return replace(result, truncated=True) if overflow else result
+        quotes = tuple(hit for hit in result.quotes
+                       if (hit.parent.id if hit.parent is not None else hit.unit.id) not in sources)
+        # A suggested root another dictionary also gives is now a match: no chip for it.
+        taken = {dot_pattern(match.root) for match in added}
+        return replace(result, matches=result.matches + tuple(added), truncated=result.truncated or overflow,
+                       quotes=quotes,
+                       suggestions=tuple(s for s in result.suggestions if dot_pattern(s[0]) not in taken))
+
+    def _dot_mismatch(self, row: sqlite3.Row, form: str, pattern: str) -> bool:
+        """The looked-up word carries the dot (``pattern``) and none of the unit's spellings has it on
+        the same letters: the roots its entry is filed under (``unit_roots``, dotted), the entry's
+        head when the unit is the entry, and the index form that reached it. A sub-entry's or a
+        stem paragraph's own head is not a spelling of the word (it is mostly its complement)."""
+        self._stems()
+        entry_id = row["id"] if row["kind"] == "entry" else row["parent"]
+        spellings = list(self._entry_roots.get(entry_id, ()))
+        if row["kind"] == "entry" and row["head_text"]:
+            spellings.append(row["head_text"])
+        if form:
+            spellings.append(form)
+        return not any(dots_agree(pattern, spelling) for spelling in spellings)
+
+    def _quotes(self, word: str, matched: set[str], matched_entries: set[str]
+                ) -> tuple[tuple[FriedmanExpressionHit, ...], int]:
+        """The units whose quotations or head hold ``word``, and how many more there are: the word
+        as the expression search keys it (``word_keys``) against ``tokens``. Not the matched units
+        or the units under a matched entry (the reader has those), not a function word (פי is in
+        two thousand units and none of them is about it). The units that print the word exactly,
+        and most often, come first; then the book's order."""
+        if len(lookup_key(word).split()) != 1:
+            return (), 0   # several words are the expression search's, never any-of-them
+        keys = word_keys(word)
+        if not keys or is_function_word(keys):
+            return (), 0
+        marks = ",".join("?" for _ in keys)
+        place = "t.scope || ' ' || t.n"
+        units = [r for r in self._conn.execute(
+            f"SELECT u.id, u.ord, u.parent, COUNT(DISTINCT {place}) AS places, "
+            f"COUNT(DISTINCT CASE WHEN t.key = ? AND t.peeled = 0 THEN {place} END) AS exact "
+            f"FROM tokens t JOIN units u ON u.id = t.unit_id WHERE t.key IN ({marks}) GROUP BY u.id", (keys[0], *keys))
+            if r["id"] not in matched and r["parent"] not in matched_entries]
+        if len(units) > MAX_QUOTE_UNITS:
+            return (), 0
+        units.sort(key=lambda r: (-int(r["exact"]), -int(r["places"]), int(r["ord"])))
+        accepts = [frozenset(keys)]
+        hits: list[FriedmanExpressionHit] = []
+        for row in units[:MAX_QUOTE_HITS]:
+            scopes = self._conn.execute(
+                "SELECT scope, n, MAX(key = ? AND peeled = 0) AS exact FROM tokens "
+                f"WHERE unit_id = ? AND key IN ({marks}) GROUP BY scope, n ORDER BY exact DESC, scope = ?, n LIMIT ?",
+                (keys[0], row["id"], *keys, SCOPE_QUOTATION, MAX_QUOTE_PLACES)).fetchall()
+            places: list[FriedmanPlace] = []
+            for found in scopes:
+                items = [(int(r["pos"]), str(r["key"])) for r in self._conn.execute(
+                    "SELECT pos, key FROM tokens WHERE unit_id = ? AND scope = ? AND n = ? ORDER BY pos, rowid",
+                    (row["id"], found["scope"], found["n"]))]
+                match = ordered_match(items, accepts, 0)
+                place_found = (self._place(row["id"], found["scope"], int(found["n"]), items, match, (word,), (keys,))
+                               if match is not None else None)
+                if place_found is not None:
+                    places.append(place_found)
+            if not places:
+                continue
+            unit = self._unit(self._conn.execute("SELECT * FROM units WHERE id = ?", (row["id"],)).fetchone())
+            parent = None
+            if unit.parent:
+                prow = self._conn.execute("SELECT * FROM units WHERE id = ?", (unit.parent,)).fetchone()
+                parent = self._unit(prow) if prow is not None else None
+            hits.append(FriedmanExpressionHit(unit, parent, tuple(places), max(int(row["places"]), len(places))))
+        return tuple(hits), max(len(units) - MAX_QUOTE_HITS, 0)
+
+    def _match(self, row: sqlite3.Row, via: str, matched: str, stem: int = 0,
+               dot_mismatch: bool = False) -> FriedmanMatch:
+        """One unit as a match: an entry brings its sub-entries and stem paragraphs (when a stem
+        was chosen and the entry is that stem's paragraph, the panel opens them only on a click:
+        the entry's own text is the stem), a sub-entry or a stem paragraph its entry. Every match
+        carries the stems its entry lists and the entry's root, which opens one of them."""
         unit = self._unit(row)
         parent = None
         children: tuple[FriedmanUnit, ...] = ()
@@ -545,7 +1053,12 @@ class FriedmanService:
         elif unit.parent:
             prow = self._conn.execute("SELECT * FROM units WHERE id = ?", (unit.parent,)).fetchone()
             parent = self._unit(prow) if prow is not None else None
-        return FriedmanMatch(unit, via, matched, parent, children, total)
+        entry = unit if unit.kind == "entry" else parent
+        stems = tuple(self._stem_units(entry.id)) if entry is not None else ()
+        roots = self._entry_roots.get(entry.id, ()) if entry is not None else ()
+        root = roots[0] if roots else (entry.root if entry is not None else "")
+        return FriedmanMatch(unit, via, matched, parent, children, total, stems=stems, root=root,
+                             stem=stem if stem in stems else 0, dot_mismatch=dot_mismatch)
 
     def _unit(self, row: sqlite3.Row) -> FriedmanUnit:
         quotes = self._conn.execute(

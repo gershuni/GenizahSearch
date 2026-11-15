@@ -2870,6 +2870,15 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     font-size: 1.15rem; font-weight: 600;
 }
 .gs-blau .panel-head .word-input + .blau-search + .blau-close { margin-inline-start: 0; }
+/* The verb stem beside the box (owner, 2026-11-11): narrow, the numerals left to right. On a
+   phone the head's small title gives way to it. */
+.gs-blau .panel-head .stem-select { flex: none; width: 7.5em; }
+.gs-blau .panel-head .stem-select .q-field__native { direction: ltr; font-weight: 600; }
+.gs-blau .panel-head .stem-select + .blau-search + .blau-close { margin-inline-start: 0; }
+@media (max-width: 640px) {
+    .gs-blau .panel-head .stem-select { width: 7em; }
+    .gs-blau .panel-head:has(.stem-select) .title { display: none; }
+}
 .gs-blau .type-note { font-size: 0.82rem; color: var(--text-muted, #64748b); padding: 4px 0 8px; }
 /* What the dictionary records, on every panel (owner, 2026-11-04). */
 .gs-blau .disclaimer {
@@ -2917,9 +2926,35 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 .gs-blau .flag { background: var(--bg-secondary, #f8fafc); color: var(--text-muted, #64748b); }
 /* The looked-up word has the dot and this entry's spelling does not. */
 .gs-blau .flag.dot-mismatch { border: 1px dashed var(--border-light, #e2e8f0); }
+/* A root's stems as buttons (web/components/stem_buttons.py): the chosen one filled. Left to
+   right whatever the UI direction, as the dictionaries print the numerals. */
+.gs-blau .dict-stems, .gs-blau .dict-suggestions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 0 4px; font-size: 0.8rem;
+}
+.gs-blau .dict-stems .stems-label, .gs-blau .dict-suggestions .stems-label {
+    color: var(--text-muted, #64748b); margin-inline-end: 2px;
+}
+/* The other roots the word's verb forms give, at the top of a tab (stem_buttons.render_suggestions). */
+.gs-blau .dict-suggestions { padding: 4px 0 8px; }
+.gs-blau .dict-suggestion.q-btn { font-size: 0.8rem; letter-spacing: normal; padding: 0 8px; }
+.gs-blau .dict-stem.q-btn {
+    min-height: 0; min-width: 2.2em; padding: 0 6px; font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.04em; line-height: 1.6; border-radius: 999px; direction: ltr;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
+.gs-blau .dict-stem.chosen.q-btn {
+    background: var(--primary-600, #059669); border-color: var(--primary-600, #059669); color: #fff;
+}
+.gs-blau .dict-stem-missing { color: var(--text-secondary, #475569); font-size: 0.85rem; }
 .gs-blau .gloss { line-height: 1.45; }
 .gs-blau .gloss + .gloss { font-size: 0.82rem; color: var(--text-secondary, #475569); }
 .gs-blau .more { font-size: 0.78rem; }
+/* "Show N more senses / quotations / sub-entries" (web/components/show_more.py): a link-like button
+   whose click draws the rest in its place. */
+.gs-blau .dict-show-more.q-btn {
+    min-height: 0; padding: 2px 4px; margin: 2px 0; font-weight: 600;
+    color: var(--primary-600, #059669);
+}
 .gs-blau .examples { padding-top: 8px; font-size: 0.82rem; }
 .gs-blau .example-links { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .gs-blau .empty { padding: 4px 0 8px; }

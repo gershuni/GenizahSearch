@@ -54,6 +54,7 @@
   var HIT = 'blau-word-hit';
   var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
   var OPEN = 'blau-open';     // the "type a word" button (this script opens the panel)
+  var STEM_MENU = 'blau-stem-menu';   // the verb-stem field's list (blau_panel.STEM_MENU_CLASS)
   // Hebrew letters; the Hebrew combining marks (U+0591-05BD, 05BF, 05C1-05C2,
   // 05C4-05C5, 05C7 -- NOT the punctuation between them: maqaf 05BE, paseq
   // 05C0, sof pasuq 05C3, nun hafukha 05C6, which end a word as they do for
@@ -322,6 +323,9 @@
       if (closing) clearHit();              // the page hides the popover; the word's mark goes with it
       return;
     }
+    // The verb-stem field's list is drawn outside the popover, at the end of <body>: a choice
+    // there is the panel's own control, not a click elsewhere (it closed the panel, 2026-11-11).
+    if (event.target && event.target.nodeType === 1 && event.target.closest('.' + STEM_MENU)) return;
     var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
     var opener = target ? target.closest('.' + OPEN) : null;
     if (opener) {

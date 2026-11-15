@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """web/pages/help.py::dictionary_bullets names only the dictionaries served: with Blau and Lane
 it is the owner's approved release text of 2026-11-05, word for word; Friedman alone promises
-neither Blau nor Lane and describes the expression search (Codex, round 5 of #487)."""
+neither Blau nor Lane and describes the expression search (Codex, round 5 of #487). Since
+2026-11-11 the sentence on a root's stems (owner-approved) follows the box sentence wherever Blau's
+or Friedman's dictionary is served, never with Lane alone."""
 from __future__ import annotations
 
 from web.pages.help import dictionary_bullets
@@ -45,17 +47,29 @@ EXPRESSION = {
            "המילים מופיעות בסדר הזה, ואפשר לבחור כמה מילים מותרות ביניהן."),
 }
 BOX = {'en': " The box at the top", 'he': " בתיבה שבראש החלונית"}
+#: The sentence on a root's stems (approved by the owner, 2026-11-11), after the box sentence.
+STEMS = {
+    'en': " To open a verb stem, type the root and the stem (דלל X or דלל 10), or press the stem on the root's card.",
+    'he': " כדי לפתוח בניין, אפשר להקליד את השורש ואת הבניין (דלל X או דלל 10), או ללחוץ על הבניין בכרטיס של השורש.",
+}
+NOTE = {'en': " Note: Blau's", 'he': " שימו לב: מילון בלאו"}
+
+
+def _with_stems(text, lang):
+    """The approved text with the stems sentence where it goes: just before Blau's note."""
+    return text.replace(NOTE[lang], STEMS[lang] + NOTE[lang], 1)
 
 
 def test_blau_and_lane_are_the_approved_text_plus_the_expression_sentence():
     served = {'blau': True, 'lane': True, 'friedman': False}
     for lang in ('en', 'he'):
-        expected = APPROVED[lang].replace(BOX[lang], EXPRESSION[lang] + BOX[lang], 1)
-        assert expected != APPROVED[lang]
+        approved = _with_stems(APPROVED[lang], lang)
+        expected = approved.replace(BOX[lang], EXPRESSION[lang] + BOX[lang], 1)
+        assert expected != approved != APPROVED[lang]
         assert dictionary_bullets(lang, served, {'blau': True, 'friedman': False}) == expected, lang
         # A 1.0.0 Blau sidecar (no tokens) is served without the expression search while the code
         # is on the server ahead of the rebuilt file: the approved text, no promise (Codex on #488).
-        assert dictionary_bullets(lang, served, {'blau': False, 'friedman': False}) == APPROVED[lang], lang
+        assert dictionary_bullets(lang, served, {'blau': False, 'friedman': False}) == approved, lang
 
 
 def test_friedman_alone_promises_neither_blau_nor_lane():
@@ -80,3 +94,12 @@ def test_all_three_in_the_tab_order_and_none_is_nothing():
     assert dictionary_bullets('en', {}, {}) == '' and dictionary_bullets('he', {'blau': False}, both) == ''
     lane_only = dictionary_bullets('en', {'lane': True}, both)
     assert "Lane's" in lane_only and "Note: Blau's" not in lane_only and "expression" not in lane_only
+
+
+def test_the_stems_sentence_is_said_where_blau_or_friedman_is_served_and_never_for_lane_alone():
+    for lang in ('en', 'he'):
+        for served in ({'blau': True}, {'friedman': True}, {'blau': True, 'friedman': True, 'lane': True}):
+            text = dictionary_bullets(lang, served, {})
+            assert text.count(STEMS[lang]) == 1, (lang, served)
+            assert text.index(BOX[lang]) < text.index(STEMS[lang]), "after the box sentence"
+        assert STEMS[lang] not in dictionary_bullets(lang, {'lane': True}, {}), "Lane lists no stems here"

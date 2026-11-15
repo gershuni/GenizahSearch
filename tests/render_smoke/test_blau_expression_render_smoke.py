@@ -16,7 +16,7 @@ from nicegui import ui
 from shared.blau_service import BlauCitation, BlauExpression, BlauExpressionHit, BlauPlace, entry_url
 from shared.ja_expression import DEFAULT_GAP, ExpressionComponent
 from tests.render_smoke.test_blau_panel_render_smoke import (
-    CREDIT_HE, _dictionary, _fire, _open, _popover, _run, _shown_word, _texts, _turn_on, _with_class,
+    CREDIT_HE, _dictionary, _fire, _links, _open, _popover, _run, _shown_word, _texts, _turn_on, _with_class,
 )
 from tests.render_smoke.test_browse_button_icons_render_smoke import _all_elements, _wait_until
 from tests.render_smoke.test_friedman_panel_render_smoke import _box_search
@@ -48,7 +48,7 @@ def _marked_html(user):
 
 def test_several_words_in_the_box_search_blau_as_an_expression_with_marks_and_a_gap_control():
     dictionary = _dictionary()
-    dictionary.answer.side_effect = lambda word, gap=DEFAULT_GAP: (
+    dictionary.answer.side_effect = lambda word, gap=DEFAULT_GAP, stems=True: (
         _blau_expression(word, gap) if len(word.split()) > 1 else dictionary.lookup(word))
 
     def sent(captured, name):
@@ -60,12 +60,12 @@ def test_several_words_in_the_box_search_blau_as_an_expression_with_marks_and_a_
             await _turn_on(user)
             _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
             await _wait_until(lambda: _with_class(user, blau_panel.CARD_CLASS))
-            dictionary.answer.assert_called_once_with('כתאב', gap=DEFAULT_GAP)
+            dictionary.answer.assert_called_once_with('כתאב', gap=DEFAULT_GAP, stems=False)
             dictionary.lookup.assert_called_once_with('כתאב')
             assert not _with_class(user, blau_panel.EXPRESSION_CLASS), 'one word is a lookup'
             _box_search(user, ' לא בד ')
             await _wait_until(lambda: _with_class(user, blau_panel.EXPRESSION_CLASS))
-            dictionary.answer.assert_called_with('לא בד', gap=DEFAULT_GAP)
+            dictionary.answer.assert_called_with('לא בד', gap=DEFAULT_GAP, stems=True)
             assert _shown_word(user) == ['לא בד']
             texts = _texts(user)
             assert blau_panel.DISCLAIMER in texts and CREDIT_HE in texts
@@ -85,7 +85,7 @@ def test_several_words_in_the_box_search_blau_as_an_expression_with_marks_and_a_
             with user._client:
                 select.set_value(0)
             await _wait_until(lambda: dictionary.answer.call_count == 3)
-            dictionary.answer.assert_called_with('לא בד', gap=0)
+            dictionary.answer.assert_called_with('לא בד', gap=0, stems=False)
             await _wait_until(lambda: any(isinstance(e, ui.select) and e.value == 0 for e in _all_elements(user)))
             assert _shown_word(user) == ['לא בד'], 'the same words, with the gap the reader chose'
             events = sent(captured, blau_panel.POSTHOG_LOOKUP)
@@ -97,7 +97,7 @@ def test_several_words_in_the_box_search_blau_as_an_expression_with_marks_and_a_
 
 def test_an_expression_blau_lacks_keeps_the_gap_control():
     dictionary = _dictionary()
-    dictionary.answer.side_effect = lambda word, gap=DEFAULT_GAP: (
+    dictionary.answer.side_effect = lambda word, gap=DEFAULT_GAP, stems=True: (
         BlauExpression(word, tuple(word.split()), (('לא',), ('בד',)), gap, (), False)
         if len(word.split()) > 1 else dictionary.lookup(word))
 
@@ -115,3 +115,34 @@ def test_an_expression_blau_lacks_keeps_the_gap_control():
         assert not _with_class(user, blau_panel.CARD_CLASS)
 
     _run(driver, dictionary)
+
+
+def test_a_word_found_only_in_a_citation_is_listed_under_its_entry_with_the_word_marked():
+    """One word, no entry of its own: the entry that quotes it is drawn under "Also in the
+    examples under", the citation with the word marked, and the answer is not "nothing"."""
+    from shared.blau_service import BlauLookup
+    component = (ExpressionComponent('השמור', 'השמור', 'השמור', 'השמור', 'word'),)
+    citation = BlauPlace('citation', 0, ('לאנהם', 'מן', 'השמור', 'ולא', 'בד'), (2,), component,
+                         BlauCitation(0, 'לאנהם מן השמור ולא בד', TRANSLATION, LOCATOR, 'חיבור יפה'),
+                         form_id='blau-f-1', form_text='בד', gloss_he="'הכרח'", gloss_en="'necessity'")
+    hit = BlauExpressionHit(root_id=ROOT, name='בדד', arabic='بدد', page=32, url=entry_url(ROOT), sub_entry='בד',
+                            places=(citation,), places_total=1)
+    result = BlauLookup(word='השמור', key='השמור', candidates=('השמור',), cards=(), more_cards=0,
+                        examples=(), more_examples=0, quotes=(hit,), more_quotes=3)
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'השמור'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        texts = _texts(user)
+        assert len(_with_class(user, blau_panel.EXAMPLES_CLASS)) == 1
+        assert blau_panel.EXAMPLES_LABEL in texts and 'בדד' in texts and TRANSLATION in texts
+        assert '+3 more entries' in texts and entry_url(ROOT) in _links(user)
+        assert blau_panel.NOTHING not in texts and not _with_class(user, blau_panel.EMPTY_CLASS)
+        marked = [e.content for e in _all_elements(user) if isinstance(e, ui.html)
+                  and any(blau_panel.EXAMPLES_CLASS in a.classes for a in e.ancestors())]
+        assert any(expression_panel.HIT_MARK_CLASS in html and 'השמור' in html for html in marked)
+
+    _run(driver, _dictionary(result=result))

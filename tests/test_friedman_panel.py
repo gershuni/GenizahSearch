@@ -81,9 +81,9 @@ def test_the_panel_the_page_and_the_startup_give_friedman_its_tab():
     assert "friedman_panel.render_friedman(" in PANEL_SRC and "friedman_panel.render_friedman_empty(" in PANEL_SRC
     assert "friedman: Optional[FriedmanAnswer] = None, friedman_credit: str = ''" in PANEL_SRC
     assert "friedman_service = get_friedman_service()" in BROWSE_SRC
-    assert "friedman_service.is_available()" in BROWSE_SRC
+    assert "_dict_served(friedman_service)" in BROWSE_SRC, "asked as the reader sees it: public, or an editor's preview"
     assert "friedman=friedman, friedman_credit=friedman_service.credit_he" in BROWSE_SRC
-    assert "return friedman_service.lookup(word)" in BROWSE_SRC
+    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems)" in BROWSE_SRC
     assert "get_friedman_service" in MAIN_SRC and "Friedman's dictionary not served" in MAIN_SRC
     assert PANEL_SRC.index("tabs.append(FRIEDMAN_TAB)") < PANEL_SRC.index("tabs.append(LANE_TAB)"), \
         "Friedman's tab beside Blau's, before Lane's (owner, 2026-11-08)"
@@ -92,8 +92,12 @@ def test_the_panel_the_page_and_the_startup_give_friedman_its_tab():
 
 
 def test_several_words_are_an_expression_search_with_the_gap_the_reader_chose():
-    assert "if len(word.split()) > 1:" in BROWSE_SRC
-    assert "return friedman_service.expression(word, gap=dict_gap['value'])" in BROWSE_SRC
+    # The page asks ``answer`` with the reader's gap; the service routes several words to the
+    # expression search and a root with a stem ("דלל X") to the lookup (tests/test_friedman_service.py).
+    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems)" in BROWSE_SRC
+    service_src = (Path(__file__).resolve().parents[1] / "shared" / "friedman_service.py").read_text(encoding="utf-8")
+    assert "if len(text.split()) > 1 and not (stems and root_and_stem(text)[1]):" in service_src
+    assert "return self.expression(text, gap)" in service_src
     assert "dict_gap = {'value': FRIEDMAN_DEFAULT_GAP}" in BROWSE_SRC
     assert "dict_gap['value'] = gap" in BROWSE_SRC and "on_gap=_choose_gap" in BROWSE_SRC
     assert "isinstance(friedman, FriedmanExpression)" in PANEL_SRC

@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 from nicegui import ui
 
 from shared.arabic_service import SITE_URL, LaneEntry, LaneLookup, LaneRoot
+from web.components import show_more
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,11 @@ NO_ROOT_CLASS = 'lane-no-root'
 CREDIT_CLASS = 'lane-credit'
 #: Lane's tab when Lane has no reading for the word.
 EMPTY_SECTION_CLASS = 'lane-none'
+#: The entries a root card shows before "Show N more entries", and the button that shows a cut
+#: entry's whole text (web/components/show_more.py; owner, 2026-11-11).
+ENTRIES_SHOWN = 3
+FULL_CLASS = 'lane-full'
+FULL_ENTRY = 'Show the full entry'
 
 TITLE = "Lane's Arabic-English Lexicon"
 #: The same words as Blau's tab when it has nothing (one string, one translation).
@@ -82,8 +88,16 @@ def _render_entry(entry: LaneEntry) -> None:
             _arabic(entry.headword).classes('ar headword')
             if entry.page is not None:
                 ui.label(f'{tr("p.")} {entry.page}').classes('page')
-        ui.label(entry.text).props('dir="ltr" lang="en"').classes('gloss lane-text')
-        if entry.cut:
+        text = ui.label(entry.text).props('dir="ltr" lang="en"').classes('gloss lane-text')
+        if entry.cut and entry.full:
+            # The whole text in place on a click (owner, 2026-11-11: nothing only on the site).
+            def show_full(_e: Any = None, label: ui.label = text, whole: str = entry.full) -> None:
+                label.set_text(whole)
+                button.delete()
+
+            button = ui.button(tr(FULL_ENTRY), on_click=show_full).props('flat dense no-caps').classes(
+                f'{show_more.BUTTON_CLASS} {FULL_CLASS} more')
+        elif entry.cut:
             ui.link(tr('full entry'), entry.url, new_tab=True).classes('more')
 
 
@@ -96,9 +110,11 @@ def _render_root(root: LaneRoot) -> None:
                 ui.label(f'{tr("p.")} {root.page}').classes('page')
             link = ui.link(tr('All entries of this root'), root.url, new_tab=True).classes('site')
             link.props(f'title="{_attr(tr("All entries of this root"))}"')
-        for entry in root.entries:
+        # The first entries (the matched ones are first); the rest on a click, in place.
+        for entry in root.entries[:ENTRIES_SHOWN]:
             _render_entry(entry)
-        if root.more_entries:
+        show_more.render_more(root.entries[ENTRIES_SHOWN:], _render_entry, show_more.MORE_ENTRIES)
+        if root.more_entries:   # beyond what a root carries (MAX_ENTRIES): none in Lane's largest root
             ui.link(f'+{root.more_entries} {tr("more entries under this root")}', root.url,
                     new_tab=True).classes('more')
 

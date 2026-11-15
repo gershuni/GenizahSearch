@@ -15,6 +15,7 @@ import pytest
 from scripts.build_friedman_sidecar import STATUS, write_sidecar
 from shared import friedman_service as fs
 from shared.friedman_service import FriedmanService, get_friedman_service, reset_friedman_service
+from shared.ja_roots import BORROW_BLAU, BORROW_LANE, BorrowedRoot
 
 VIEWER = "https://ja.genizah.org/JA_Dictionary_pdfjs/web/viewer.html?file=PDF/"
 
@@ -74,6 +75,17 @@ def test_switch_defaults_off_and_lookup_is_empty_but_safe(sidecar, monkeypatch):
     assert not result.found and result.status == STATUS and result.credit_he
     monkeypatch.setenv(fs.ENV_ENABLED, "1")
     assert service.is_available() and service.lookup("אבד").found
+
+
+def test_an_editors_switch_serves_editors_only_and_the_lookup_answers(sidecar, monkeypatch):
+    """FRIEDMAN_DICTIONARY_ENABLED=editors: a preview for editors before release (owner, 2026-11-11)."""
+    monkeypatch.setenv(fs.ENV_ENABLED, "editors")
+    service = FriedmanService(str(sidecar))
+    assert not fs.friedman_enabled() and not service.is_available()
+    assert service.served_to(True) and not service.served_to(False)
+    assert service.lookup("אבד").found and service.expression("לא אבד").status == STATUS
+    monkeypatch.delenv(fs.ENV_ENABLED)
+    assert not service.served_to(True) and not service.lookup("אבד").found, "unset is off"
 
 
 def test_head_stem_and_index_routes(sidecar):
@@ -283,3 +295,356 @@ def test_singleton_and_thread_safe_connection(sidecar, monkeypatch):
     finally:
         reset_friedman_service()
     assert fs.default_sidecar_path() == str(sidecar)
+
+
+def _quote_places(result):
+    return [(h.unit.id, h.parent.id if h.parent else None, h.places_total,
+             [(p.scope, p.n, p.positions, [(c.printed, c.via) for c in p.components]) for p in h.places])
+            for h in result.quotes]
+
+
+def test_a_word_inside_a_quotation_or_a_longer_head_is_found_with_its_place_marked(sidecar):
+    service = FriedmanService(str(sidecar))
+    quoted = service.lookup("אחרז")
+    assert quoted.matches == () and quoted.found and quoted.more_quotes == 0
+    assert _quote_places(quoted) == [("f000006", None, 1, [(fs.SCOPE_QUOTATION, 2, (2,), [("אחרז", "word")])])]
+    assert quoted.quotes[0].places[0].quotation.translation == "'by God, guard yourself'"
+    peeled = service.lookup("אמר")
+    assert _quote_places(peeled) == [("f000006", None, 1, [(fs.SCOPE_QUOTATION, 1, (1,), [("אלאמר", "stem")])])]
+    in_head = service.lookup("לאגל")
+    assert [(h.unit.id, h.parent.id, [p.scope for p in h.places]) for h in in_head.quotes] == [
+        ("f000007", "f000004", [fs.SCOPE_HEAD])], "a word of a longer head reaches the sub-entry, under its entry"
+
+
+def test_quotes_leave_out_the_matches_their_sub_entries_function_words_and_several_words(sidecar):
+    service = FriedmanService(str(sidecar))
+    matched = service.lookup("אבד")
+    assert [m.unit.id for m in matched.matches] == ["f000001"] and matched.quotes == ()
+    direct, _more = service._quotes("אבד", set(), set())
+    assert sorted(h.unit.id for h in direct) == ["f000001", "f000002"], "only the match keeps its own units out"
+    assert service.lookup("אללה").quotes == (), "a function word is in every other quotation"
+    assert service.lookup("אחרז נפסך").quotes == (), "several words are never looked up one by one"
+    assert not service.lookup("קקק").found
+
+
+def test_quotes_are_bounded_and_a_common_word_has_none(sidecar, monkeypatch):
+    service = FriedmanService(str(sidecar))
+    monkeypatch.setattr(fs, "MAX_QUOTE_UNITS", 0)
+    assert not service.lookup("אחרז").found
+    monkeypatch.setattr(fs, "MAX_QUOTE_UNITS", 25)
+    monkeypatch.setattr(fs, "MAX_QUOTE_HITS", 0)
+    result = service.lookup("אחרז")
+    assert result.quotes == () and result.more_quotes == 1
+
+
+# ---------------------------------------------------------------------------
+# A root's stems (owner, 2026-11-11; the private dictionary lookup plan, section 4.6): the stems an
+# entry lists (its own label and its paragraphs', noisy labels read as every numeral they name), a
+# root typed with a stem ("דלל X") answering with that stem's paragraph, and the dot typed as an
+# apostrophe. Synthetic units, no dictionary text.
+# ---------------------------------------------------------------------------
+
+def stem_units():
+    return {"recovery_version": 4, "units": [
+        # A noun that lists וצל as a later spelling, earlier in the book than the verb וצל itself.
+        unit("f000091", "entry", "אצל/אצל/וצל ר' אצול", ["אצל", "וצל", "אצול"], ["אצל"], letter="א"),
+        unit("f000092", "entry", "וצל", ["וצל"], ["וצל"], letter="ו"),
+        unit("f000101", "entry", "דלל אן", ["דלל"], ["דלל"], binyan="I", letter="ד"),
+        unit("f000102", "binyan", "עליה", [], parent="f000101", binyan="II(<IV)"),   # names II and IV
+        unit("f000103", "binyan", None, [], parent="f000101", binyan="IV"),
+        unit("f000104", "subentry", "-ה אן", [], parent="f000101"),
+        unit("f000105", "binyan", "מנהא", [], parent="f000101", binyan="X"),
+        unit("f000106", "entry", "ד̇לל", ["דלל"], ["ד̇לל"], binyan="(", letter="ד̇"),  # a label naming none
+        unit("f000107", "binyan", None, [], parent="f000106", binyan="IV"),
+        unit("f000108", "entry", "קרב", ["קרב"], ["קרב"], binyan="V", letter="ק"),
+        unit("f000109", "entry", "כתב", ["כתב"], ["כתב"], letter="כ"),
+    ]}
+
+
+@pytest.fixture
+def stems(tmp_path, monkeypatch):
+    path = tmp_path / "friedman.db"
+    write_sidecar(stem_units(), {"index_version": 1, "rows": []},
+                  {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    return FriedmanService(str(path))
+
+
+def _matches(result):
+    return [(m.unit.id, m.via, m.stem) for m in result.matches]
+
+
+@pytest.fixture
+def indexed_stems(tmp_path, monkeypatch):
+    """The stem units, and the book's index giving אסתדלו and יקרב their roots."""
+    def row(form, root):
+        return {"form": form, "form_key": fs.normalize_ja(form), "line": form, "pdf_page": 1, "printed_page": "969",
+                "url": f"{VIEWER}Value_Keys.pdf#page=1",
+                "roots": [{"text": root, "dotted": root, "key": fs.normalize_ja(root), "alternatives": 1}]}
+    path = tmp_path / "friedman.db"
+    write_sidecar(stem_units(), {"index_version": 1, "rows": [row("אסתדלו", "דלל"), row("יקרב", "קרב")]},
+                  {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    return FriedmanService(str(path))
+
+
+def test_an_entry_the_index_reached_opens_on_the_stem_the_word_s_shape_gives(indexed_stems):
+    """Owner, 2026-11-11: the index gives אסתקר the root קרר, and the entry opened on its own stem. The
+    word's shape (אסת + the root: X) opens the stem X paragraph, the index still named as the way in;
+    a word no listed stem holds opens the entry as before."""
+    [match] = indexed_stems.lookup("אסתדלו").matches
+    assert (match.unit.id, match.via, match.stem, match.matched) == ("f000105", "index", 10, "אסתדלו (דלל)")
+    assert match.parent is not None and match.parent.id == "f000101" and match.stems == (1, 2, 4, 10)
+    [entry] = indexed_stems.lookup("יקרב").matches
+    assert (entry.unit.id, entry.via, entry.stem) == ("f000108", "index", 0), "V's forms are תקרב, יתקרב"
+
+
+def test_friedman_borrows_the_entries_of_the_roots_blau_and_lane_give(stems):
+    """Owner, 2026-11-11: ויכון reached nothing in Friedman though Lane gave كون. The entries filed under
+    a borrowed root come after Friedman's own, the one spelled with the same dots, each opened on the
+    word's stem; an entry already shown gets no second match; two sources make one match naming both."""
+    nothing = stems.lookup("אסתדלו")
+    assert nothing.matches == ()
+    result = stems.borrow(nothing, (BorrowedRoot("דלל", BORROW_BLAU, "דלל"), BorrowedRoot("דלל", BORROW_LANE, "دلل")))
+    assert [(m.unit.id, m.via, m.stem, m.borrowed) for m in result.matches] == [
+        ("f000105", fs.VIA_BORROWED, 10, (("blau", "דלל"), ("lane", "دلل")))]
+    dotted = stems.borrow(nothing, (BorrowedRoot("ד̇לל", BORROW_LANE, "ذلل"),))
+    assert [(m.unit.id, m.stem) for m in dotted.matches] == [("f000106", 0)], "ד̇לל lists IV only: the entry"
+    agreed = stems.borrow(nothing, (BorrowedRoot("קרב", BORROW_BLAU, "קרב"), BorrowedRoot("דלל", BORROW_BLAU, "דלל"),
+                                    BorrowedRoot("דלל", BORROW_LANE, "دلل")))
+    assert [m.unit.id for m in agreed.matches] == ["f000105", "f000108"], "the entry two dictionaries give first"
+    own = stems.lookup("דלל")
+    assert stems.borrow(own, (BorrowedRoot("דלל", BORROW_BLAU, "דלל"),)).matches == own.matches
+    chosen = stems.lookup("דלל X")
+    assert stems.borrow(chosen, (BorrowedRoot("קרב", BORROW_LANE, "قرب"),)) is chosen, "a typed stem borrows nothing"
+    assert stems.borrow(nothing, ()) is nothing
+
+
+def test_the_verb_form_index_is_built_once_from_the_listed_pairs(stems, monkeypatch):
+    """PR 2 (plan 4.3): the book's pairs, three-letter roots only, every form they may be written as."""
+    index = stems.verb_form_index()
+    assert [(p.entry_id, p.unit_id, p.stem) for p in index["אסתדלו"]] == [("f000101", "f000105", 10)]
+    assert stems.verb_form_index() is index, "built once"
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+    fresh = FriedmanService(stems.db_path)
+    monkeypatch.setattr(fresh, "_stems", boom)
+    assert fresh.verb_form_index() == {}, "fails closed"
+
+
+def test_friedman_s_borrowing_fails_closed(stems, monkeypatch):
+    nothing = stems.lookup("אסתדלו")
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(stems, "_borrow", boom)
+    assert stems.borrow(nothing, (BorrowedRoot("דלל", BORROW_BLAU, "דלל"),)) is nothing
+
+
+def test_the_stem_pairs_read_every_numeral_of_a_label(stems):
+    assert [(p.entry_id, p.stem, p.unit_id, p.root, p.root_key) for p in stems.stem_pairs()] == [
+        ("f000101", 1, "f000101", "דלל", "דלל"),
+        ("f000101", 2, "f000102", "דלל", "דלל"), ("f000101", 4, "f000102", "דלל", "דלל"),
+        ("f000101", 4, "f000103", "דלל", "דלל"), ("f000101", 10, "f000105", "דלל", "דלל"),
+        ("f000106", 4, "f000107", "ד̇לל", "דלל"),
+        ("f000108", 5, "f000108", "קרב", "קרב"),
+    ], 'the entry\'s own stem is a pair; "(" names no stem and gives none'
+    assert stems.entry_stems("f000101") == (1, 2, 4, 10) and stems.entry_stems("f000106") == (4,)
+    assert stems.entry_stems("f000108") == (5,) and stems.entry_stems("f000109") == ()
+    assert stems.entry_stems("f000102") == () and stems.entry_stems("nope") == ()
+
+
+def test_a_plain_lookup_carries_each_entry_s_stems_and_root(stems):
+    result = stems.lookup("דלל")
+    assert [(m.unit.id, m.stems, m.root, m.stem, m.dot_mismatch) for m in result.matches] == [
+        ("f000101", (1, 2, 4, 10), "דלל", 0, False), ("f000106", (4,), "ד̇לל", 0, False)]
+    assert [c.id for c in result.matches[0].children] == ["f000102", "f000103", "f000104", "f000105"]
+    assert result.stem == 0 and not result.stem_missing
+
+
+@pytest.mark.parametrize("typed", ["דלל X", "דלל 10", "X דלל"])
+def test_a_typed_stem_answers_with_that_stem_s_paragraph(stems, typed):
+    result = stems.answer(typed)
+    assert isinstance(result, fs.FriedmanLookup), "a root with a stem is never an expression search"
+    assert _matches(result) == [("f000105", fs.VIA_CHOSEN, 10)] and result.stem == 10 and not result.stem_missing
+    [match] = result.matches
+    assert match.parent.id == "f000101" and match.stems == (1, 2, 4, 10) and match.root == "דלל"
+    assert result.quotes == () and result.word == " ".join(typed.split())
+
+
+@pytest.mark.parametrize("typed", ["דלל X", "דלל 10"])
+def test_words_from_the_manuscript_are_never_a_typed_stem(stems, typed):
+    """``stems=False`` (words clicked or selected in the manuscript): two words are the expression
+    search, whatever the second one looks like."""
+    assert isinstance(stems.answer(typed, stems=False), fs.FriedmanExpression)
+
+
+def test_a_noisy_label_and_several_entries_of_the_root(stems):
+    assert _matches(stems.lookup("דלל IV")) == [("f000102", "chosen", 4), ("f000103", "chosen", 4),
+                                                ("f000107", "chosen", 4)]
+    assert _matches(stems.lookup("דלל II")) == [("f000102", "chosen", 2)]
+
+
+def test_the_entry_s_own_stem_is_the_entry_its_children_carried_for_a_click(stems):
+    """The entry is stem I's paragraph; its other units come with it, and the panel shows them only on a
+    click (owner, 2026-11-11: nothing only on the PDF page; web/components/friedman_panel.py)."""
+    [match] = stems.lookup("דלל I").matches
+    assert (match.unit.id, match.stem, len(match.children), match.children_total) == ("f000101", 1, 4, 4)
+    assert _matches(stems.lookup("קרב V")) == [("f000108", "chosen", 5)]
+
+
+def test_a_dotted_root_puts_the_dotted_entry_first_and_marks_the_other(stems):
+    result = stems.lookup("ד'לל IV")
+    assert [(m.unit.id, m.dot_mismatch) for m in result.matches] == [
+        ("f000107", False), ("f000102", True), ("f000103", True)]
+    only_undotted = stems.lookup("ד'לל X")
+    assert [(m.unit.id, m.dot_mismatch) for m in only_undotted.matches] == [("f000105", True)]
+
+
+@pytest.mark.parametrize("word", ["ד'לל", "ד׳לל", "ד̇לל"])
+def test_a_word_written_with_the_dot_puts_the_dotted_reading_first(stems, word):
+    result = stems.lookup(word)
+    assert [(m.unit.id, m.dot_mismatch) for m in result.matches] == [("f000106", False), ("f000101", True)]
+
+
+def test_a_stem_the_root_does_not_list_says_so_and_shows_the_root(stems):
+    result = stems.lookup("דלל III")
+    assert result.stem == 3 and result.stem_missing
+    assert [(m.unit.id, m.via, m.stem, m.stems) for m in result.matches] == [
+        ("f000101", "head", 0, (1, 2, 4, 10)), ("f000106", "head", 0, (4,))]
+    assert len(result.matches[0].children) == 4, "the root as a plain lookup shows it"
+    none = stems.lookup("כתב II")
+    assert none.stem_missing and [(m.unit.id, m.stems) for m in none.matches] == [("f000109", ())]
+    unknown = stems.lookup("קקק X")
+    assert not unknown.found and not unknown.stem_missing
+
+
+def test_an_entry_headed_by_the_word_comes_before_one_that_lists_it_as_another_spelling(stems):
+    assert [(m.unit.id, m.via) for m in stems.lookup("וצל").matches] == [("f000092", "head"), ("f000091", "head")], \
+        "the verb וצל before the noun אצל/אצל/וצל, though the noun is earlier in the book (owner, 2026-11-11)"
+    assert [m.unit.id for m in stems.lookup("אצל").matches] == ["f000091"]
+    assert [m.unit.id for m in stems.lookup("ווצל").matches] == ["f000092", "f000091"], "a peeled candidate too"
+    assert fs.head_begins_with("אَצْל/אُצْל/וَצْל", "אצל") and not fs.head_begins_with("אَצْל/אُצْל/וَצْל", "וצל")
+    assert fs.head_begins_with("אול בِהِ אלאَמْרُ", "אול"), "a head that begins with the word, then a complement"
+    assert fs.head_begins_with("דלל אן", "דלל אנ") and not fs.head_begins_with("דלל אן", "אנ")
+    assert not fs.head_begins_with(None, "וצל") and not fs.head_begins_with("", "וצל")
+
+
+def test_the_stems_fail_closed(stems, monkeypatch):
+    monkeypatch.delenv(fs.ENV_ENABLED)
+    assert stems.stem_pairs() == () and not stems.lookup("דלל X").found
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(stems, "_stems", boom)
+    assert stems.stem_pairs() == () and stems.entry_stems("f000101") == ()
+    assert not stems.lookup("דלל X").found, "a lookup never raises"
+    assert not stems.lookup("אסתדלו", verb_forms=frozenset("ABCDE")).found, "nor one by verb form"
+
+
+# ---------------------------------------------------------------------------
+# Matches found by verb form (the plan's PR 3, sections 4.4 and 6.1): after the word's own matches,
+# the entries whose listed stems have the word among their generated forms; only the kinds the switch
+# names (FRIEDMAN_VERB_FORM_KINDS), none by default. Synthetic units, no dictionary text.
+# ---------------------------------------------------------------------------
+
+ALL_KINDS = frozenset("ABCDE")
+
+
+@pytest.fixture(autouse=True)
+def _verb_form_switches_off(monkeypatch):
+    """On by default (A, B, D); set empty, off, so the other tests see Friedman's own lookup."""
+    monkeypatch.setenv(fs.ENV_VERB_FORM_KINDS, "")
+    monkeypatch.setenv(fs.ENV_VERB_FORM_STEM_KINDS, "")
+
+
+def _verb(result):
+    return [(m.unit.id, m.via, m.kind, m.matched, m.stem) for m in result.matches]
+
+
+def test_no_match_is_found_by_verb_form_unless_its_kind_is_switched_on(stems, monkeypatch):
+    """The graded sample (owner, 2026-11-11): A, B and D on by default, each opened on the stem; a
+    switch set empty turns them off."""
+    assert stems.lookup("אסתדלו").matches == ()
+    monkeypatch.delenv(fs.ENV_VERB_FORM_KINDS)
+    monkeypatch.delenv(fs.ENV_VERB_FORM_STEM_KINDS)
+    assert fs.verb_form_kinds() == {"A", "B", "D"} and fs.verb_form_stem_kinds() == {"A", "B", "D"}
+    assert _matches(stems.lookup("אסתדלו")) == [("f000105", fs.VIA_VERB_FORM, 10)], "on by default, on the stem"
+    assert stems.lookup("אסתדלו", verb_forms=frozenset("BCDE")).matches == (), "kind A not switched on"
+    assert _verb(stems.lookup("אסתדלו", verb_forms=frozenset("A"), verb_form_stems=frozenset())) == [
+        ("f000101", fs.VIA_VERB_FORM, "A", "אסתדלו (דלל X)", 0)], "no stem kind: the entry, its stems as buttons"
+    [opened] = stems.lookup("אסתדלו", verb_forms=frozenset("A"), verb_form_stems=frozenset("A")).matches
+    assert (opened.unit.id, opened.stem, opened.parent.id, opened.stems) == ("f000105", 10, "f000101", (1, 2, 4, 10)), (
+        "a stem kind opens the stem's paragraph, as 'דלל X' does")
+
+
+def test_the_switches_are_read_on_every_lookup(stems, monkeypatch):
+    monkeypatch.setenv(fs.ENV_VERB_FORM_KINDS, "d")
+    assert fs.verb_form_kinds() == {"D"}
+    assert _verb(stems.lookup("ואסתדלו")) == [("f000101", fs.VIA_VERB_FORM, "D", "אסתדלו (דלל X)", 0)]
+    monkeypatch.setenv(fs.ENV_VERB_FORM_STEM_KINDS, "D")
+    assert [(m.unit.id, m.stem) for m in stems.lookup("ואסתדלו").matches] == [("f000105", 10)]
+    assert stems.lookup("ואסתדלו", verb_forms=frozenset()).matches == (), "an explicit kind set wins over the switch"
+
+
+def test_the_entry_the_book_s_index_reached_gets_no_match_by_verb_form(indexed_stems):
+    assert _matches(indexed_stems.lookup("אסתדלו", verb_forms=ALL_KINDS)) == [("f000105", "index", 10)]
+
+
+def test_matches_found_by_verb_form_are_bounded_and_never_repeat_an_entry(stems, monkeypatch):
+    both = stems.lookup("ידלל", verb_forms=ALL_KINDS, verb_form_stems=ALL_KINDS)
+    assert _verb(both) == [("f000101", fs.VIA_VERB_FORM, "B", "ידלל (דלל I, II, IV)", 0),
+                           ("f000107", fs.VIA_VERB_FORM, "B", "ידלל (ד̇לל IV)", 4)], (
+        "several stems fit the first entry: the entry; one fits the second: its paragraph")
+    assert stems.lookup("דלל", verb_forms=ALL_KINDS).matches == stems.lookup("דלל").matches, (
+        "the entries the word reaches are not repeated")
+    assert stems.lookup("דלל X", verb_forms=ALL_KINDS).matches == stems.lookup("דלל X").matches, "nor a typed stem"
+    monkeypatch.setattr(fs, "MAX_VERB_FORM_CARDS", 1)
+    one = stems.lookup("ידלל", verb_forms=ALL_KINDS)
+    assert [m.unit.id for m in one.matches] == ["f000101"] and one.truncated
+
+
+def test_the_quotes_under_an_entry_found_by_verb_form_give_way_to_its_match(tmp_path, monkeypatch):
+    path = tmp_path / "friedman.db"
+    units = {"recovery_version": 4, "units": [
+        unit("f000201", "entry", "קרב", ["קרב"], ["קרב"], binyan="V", letter="ק",
+             examples=[("תקרב אליה", "'drew near'", "(ח1, שורה 1)")]),
+        unit("f000202", "subentry", "קרב מן", ["קרב מן"], parent="f000201",
+             examples=[("ותקרב מנה", "'and drew near him'", "(ח1, שורה 2)")])]}
+    write_sidecar(units, {"index_version": 1, "rows": []},
+                  {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    plain = svc.lookup("תקרב")
+    assert plain.matches == () and sorted(h.unit.id for h in plain.quotes) == ["f000201", "f000202"]
+    found = svc.lookup("תקרב", verb_forms=ALL_KINDS)
+    assert _verb(found) == [("f000201", fs.VIA_VERB_FORM, "A", "תקרב (קרב V)", 0)] and found.quotes == (), (
+        "neither the entry's quotations nor its sub-entry's")
+
+
+def test_beside_the_word_s_own_matches_the_verb_forms_are_suggestions(tmp_path, monkeypatch):
+    """Owner, 2026-11-11 (the graded sample): beside a unit the word itself reaches, the roots its verb
+    forms give are chips at the top ("קרב V"), not matches; a root another dictionary gives becomes a
+    borrowed match, and no chip."""
+    path = tmp_path / "friedman.db"
+    units = {"recovery_version": 4, "units": [
+        unit("f000301", "entry", "קרב", ["קרב"], ["קרב"], binyan="V", letter="ק"),
+        unit("f000302", "entry", "תקרב", ["תקרב"], ["תקרב"], letter="ת")]}
+    write_sidecar(units, {"index_version": 1, "rows": []},
+                  {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    result = svc.lookup("תקרב", verb_forms=ALL_KINDS)
+    assert _matches(result) == [("f000302", "head", 0)] and result.suggestions == (("קרב", 5),)
+    borrowed = svc.borrow(result, (BorrowedRoot("קרב", BORROW_LANE, "قرب"),))
+    assert [m.unit.id for m in borrowed.matches] == ["f000302", "f000301"] and borrowed.suggestions == ()
+
+
+def test_a_match_found_by_verb_form_names_the_dictionaries_that_also_give_its_root(stems):
+    found = stems.lookup("ידלל", verb_forms=ALL_KINDS)
+    result = stems.borrow(found, (BorrowedRoot("ד̇לל", BORROW_BLAU, "ד̇לל"), BorrowedRoot("קרב", BORROW_LANE, "قرب")))
+    assert [(m.unit.id, m.via, m.borrowed) for m in result.matches] == [
+        ("f000101", fs.VIA_VERB_FORM, ()), ("f000106", fs.VIA_VERB_FORM, (("blau", "ד̇לל"),)),
+        ("f000108", fs.VIA_BORROWED, (("lane", "قرب"),))], "it keeps its place and gets no second match"

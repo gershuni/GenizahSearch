@@ -29,10 +29,17 @@ scope it reaches -- a dictionary entry, or one sub-entry of it -- per
 candidate, in candidate order, with the matched senses first and then the
 senses under that scope. A key found only inside the dictionary's own example
 phrases (kind ``phrase``) is listed apart, under "also in examples": the entry
-it sits in defines some OTHER word. Ambiguity is the norm, not an error:
+it sits in defines some OTHER word. On a 1.1.0 file the word is also looked up
+in ``tokens``, every word of every citation and name: the entries holding it,
+other than the cards', are ``quotes``, each with the places and the word marked
+(``MAX_QUOTE_HITS``, ``MAX_QUOTE_PLACES``; never for a function word or a word
+more than ``MAX_QUOTE_UNITS`` entries hold). An
+inflected form the dictionary quotes under its root is reached this way and by
+no other. Ambiguity is the norm, not an error:
 several candidates that hit are several cards, never one merged answer.
 Everything is bounded (``MAX_CARDS``, ``MAX_SENSES``, ``MAX_EXAMPLES``) so one
-click never renders a page.
+click never renders a page; a card's senses are all of its scope's (``MAX_SENSES`` is
+far above the largest entry), and the panel shows the first few and the rest on a click.
 
 A single word also reaches an entry whose NAME is several words and begins
 with it (``NAME_PREFIX_KINDS``): ذلك is the entry "ד̇לך ו", and before this a
@@ -45,6 +52,22 @@ geresh after the letter, which is how the automatic text and any keyboard
 write it (``dot_pattern``) -- the cards whose spelling has the dot on the same
 letters come first. Only the letters Judeo-Arabic dots count (``DOT_LETTERS``),
 so an abbreviation mark (ר', מ') changes nothing.
+
+A root's stems (owner, 2026-11-11; the private dictionary lookup plan, section 4.6). Every card
+carries the stems the dictionary lists under its entry (``root_stems``: a ``stems`` row's column,
+shift and printed head together, ``stem_row_numbers``), and a root typed with a stem ("דלל X",
+"דלל 10", ``shared.ja_roots.root_and_stem``) opens that stem's paragraph on each entry of the root
+that lists it; when none does, the answer says so (``BlauLookup.stem_missing``) and shows the
+root's cards. ``stem_pairs`` is the whole list of (root, stem) pairs, built once in memory.
+
+Cards found by verb form (the plan's PR 3, sections 4.4 and 6.1): when the word itself reaches no
+entry, the entries whose listed stems have the word among their generated forms
+(``verb_form_index``, ``shared.ja_verb_forms.verb_form_cards``), at most ``MAX_VERB_FORM_CARDS``,
+each saying how it was reached (``BlauCard.verb_form``). Beside cards the word itself reaches, those
+roots are only suggested (``BlauLookup.suggestions``: a root and a stem a press looks up). Each card
+has a kind (A to E), and only the kinds the switch names are shown (``BLAU_VERB_FORM_KINDS``,
+default A, B, D: the graded sample, owner 2026-11-11); a shown kind opens on the word's stem only if
+``BLAU_VERB_FORM_STEM_KINDS`` names it too (default A, D).
 
 A typed word may be Arabic script (the panel's box): it is looked up against
 the Arabic spellings of the entries, sub-entries and forms, by a key that
@@ -78,17 +101,14 @@ import os
 import re
 import sqlite3
 import threading
-import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union
 from urllib.parse import quote
 
 from shared.blau_normalize import (
     NORMALIZER_VERSION,
-    QUOTE_MARKS,
     candidate_stems,
-    fold_finals,
     normalize_arabic,
     normalize_ja,
 )
@@ -100,9 +120,26 @@ from shared.ja_expression import (
     ExpressionPlace,
     clamp_gap,
     components_for,
+    is_function_word,
+    lookup_key,
     ordered_match,
     tiered,
     word_keys,
+)
+# The dot above (DOT_LETTERS, dot_pattern) lives in shared.ja_roots since 2026-11-11, so Friedman's
+# lookup reads it the same way; the names stay importable from here.
+from shared.ja_roots import DOT_LETTERS, StemPair, dot_pattern, root_and_stem, stem_numbers  # noqa: F401 - DOT_LETTERS: importable from here, as before the move
+from shared.ja_roots import BorrowedRoot
+from shared.ja_roots import dots_agree as _dots_agree
+from shared.dictionary_switch import OFF, ON, read_switch, serves
+from shared.ja_verb_forms import MAX_SUGGESTIONS  # noqa: F401 - importable from here, as before the move
+from shared.ja_verb_forms import (
+    MAX_VERB_FORM_CARDS,
+    suggested_roots,
+    switch_kinds,
+    verb_form_cards,
+    verb_form_index,
+    word_stems,
 )
 from shared.thread_local_db import ThreadLocalConnection
 
@@ -120,6 +157,18 @@ SERVED_SCHEMA_VERSIONS = ("1.0.0", SCHEMA_VERSION)
 SIDECAR_DIR = "blau_data"
 SIDECAR_FILENAME = "blau.db"
 ENV_DB_PATH = "GENIZAH_BLAU_DB_PATH"
+ENV_ENABLED = "BLAU_DICTIONARY_ENABLED"
+#: The switches of the cards found by verb form (PR 3): the kinds shown ("A,B,D"), and those of
+#: them that open on the word's stem. Read live; unset is the default below, set and empty is none.
+ENV_VERB_FORM_KINDS = "BLAU_VERB_FORM_KINDS"
+ENV_VERB_FORM_STEM_KINDS = "BLAU_VERB_FORM_STEM_KINDS"
+#: The graded sample (owner, 2026-11-11: recall counts more than precision): where Blau finds nothing
+#: for the word itself, a card found by verb form names a right root for 91-93% of words of kinds A,
+#: B and D; its guessed stem is right for 94% (A) and 92% (D) of them, 80% (B) is under the 85% bar.
+DEFAULT_VERB_FORM_KINDS = "A,B,D"
+DEFAULT_VERB_FORM_STEM_KINDS = "A,D"
+#: ``BlauCard.matched_kind`` of a card found by verb form.
+MATCHED_VERB_FORM = "verb_form"
 #: The dictionary's site; an entry page is ``entry/<root id>`` (its
 #: ``js/search.js::openInReader``).
 SITE_URL = "https://blau-dict.netlify.app/"
@@ -129,12 +178,14 @@ HEADWORD_KINDS = ("root", "sub_entry", "headword", "variant")
 #: a multi-word variant is mostly a verb with its preposition, and would bury a
 #: common word under cards.
 NAME_PREFIX_KINDS = ("root", "sub_entry", "headword")
-#: The letters Judeo-Arabic writes with a dot above for a second Arabic letter
-#: (finals folded): ג̇ ד̇ ט̇ צ̇ ת̇ כ̇.
-DOT_LETTERS = frozenset("גדטצתכ")
 PHRASE_KIND = "phrase"
+#: The segments of a stem's printed head that name its stem number (``stems.head_json``).
+STEM_HEAD_TYPES = ("binyan", "binyan_shift")
 MAX_CARDS = 10
-MAX_SENSES = 4
+#: A card carries every sense of its scope that has content (the panel shows the first few and the
+#: rest on a click; owner, 2026-11-11: no sense only on the site). A bound, not a cut: the largest
+#: entry of release 1.1 has 115 forms; any beyond it are counted in ``BlauCard.more_senses``.
+MAX_SENSES = 200
 MAX_EXAMPLES = 8
 REQUIRED_TABLES = ("meta", "roots", "sub_entries", "stems", "forms", "forms_norm")
 LOOKUP_INDEX = "idx_forms_norm_norm"
@@ -144,6 +195,14 @@ TOKENS_TABLE = "tokens"
 TOKENS_INDEX = "idx_tokens_key"
 MAX_EXPRESSION_HITS = 20
 MAX_PLACES = 4
+#: One word's lookup also reads ``tokens``: the entries whose citations or names hold the word
+#: (``BlauLookup.quotes``), and the places shown under each.
+MAX_QUOTE_HITS = 5
+MAX_QUOTE_PLACES = 2
+#: A word held by more units than this is a common word (קאל, כתאב: over a hundred), and five of
+#: them say nothing about it: no quotes at all. Measured 2026-11-10: nine keys in ten are in six
+#: units or fewer.
+MAX_QUOTE_UNITS = 25
 NAME_SCOPES = ("root", "sub_entry", "form")
 SCOPE_CITATION = "citation"
 #: ``forms.ja_text`` joins a form's headword and its variants with this; each is one name.
@@ -154,12 +213,27 @@ _FORM_COLUMNS = ("id, ja_text, arabic_spelling, binyan, gloss_he, gloss_en, cros
                  "page, is_classical, is_reconstructed, is_erroneous")
 
 
+def blau_switch() -> str:
+    """The ``BLAU_DICTIONARY_ENABLED`` switch, read on every call (default on): on, off, or
+    ``editors`` (``shared.dictionary_switch``)."""
+    return read_switch(ENV_ENABLED, ON)
+
+
 def blau_enabled() -> bool:
-    """The ``BLAU_DICTIONARY_ENABLED`` kill switch, read on every call (default on)."""
-    value = os.environ.get("BLAU_DICTIONARY_ENABLED")
-    if value is None:
-        return True
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    """The switch is on for everyone (not ``editors`` only)."""
+    return blau_switch() == ON
+
+
+def verb_form_kinds() -> frozenset[str]:
+    """The kinds of card found by verb form the lookup shows (``BLAU_VERB_FORM_KINDS``, read on
+    every call); ``DEFAULT_VERB_FORM_KINDS`` unless set; set and empty, none."""
+    return switch_kinds(ENV_VERB_FORM_KINDS, DEFAULT_VERB_FORM_KINDS)
+
+
+def verb_form_stem_kinds() -> frozenset[str]:
+    """The kinds whose cards open on the word's stem (``BLAU_VERB_FORM_STEM_KINDS``);
+    ``DEFAULT_VERB_FORM_STEM_KINDS`` unless set. Any other card opens on the whole entry."""
+    return switch_kinds(ENV_VERB_FORM_STEM_KINDS, DEFAULT_VERB_FORM_STEM_KINDS)
 
 
 def entry_url(root_id: str) -> str:
@@ -174,32 +248,27 @@ def name_alternatives(ja_text: Any) -> list[str]:
     return [part for part in str(ja_text or "").split(NAME_SEPARATOR) if part.strip()]
 
 
-_DOT_ABOVE = "̇"
+def stem_row_numbers(binyan: Any, binyan_shift: Any, head_json: Any) -> tuple[int, ...]:
+    """The stem numbers of one ``stems`` row, read from the three places the dictionary writes
+    them, together (plan section 4.1): the ``binyan`` column, the ``binyan_shift`` ("IV > I" names
+    both) and the printed head's binyan segments. 355 rows of release 1.1 have a column that
+    disagrees with the printed head (דלל: the column says IV where the head prints V); such a
+    row answers to both numbers until the builder is fixed."""
+    found = set(stem_numbers(binyan)) | set(stem_numbers(binyan_shift))
+    try:
+        head = json.loads(head_json or "{}")
+    except (TypeError, ValueError):
+        head = {}
+    for segment in (head.get("segments") or []) if isinstance(head, dict) else []:
+        if isinstance(segment, dict) and segment.get("text_type") in STEM_HEAD_TYPES:
+            found.update(stem_numbers(segment.get("text")))
+    return tuple(sorted(found))
 
 
-def dot_pattern(text: str) -> str:
-    """The Hebrew letters of ``text`` (finals folded, other marks dropped, words
-    split by one space) with ``*`` after each letter of ``DOT_LETTERS`` that
-    carries the dot above: U+0307 as the dictionary writes it, or an apostrophe
-    or geresh after the letter as the automatic text and a keyboard write it.
-    ``ד'לך`` and ``ד̇לך`` are both ``ד*לכ``; ``ר'`` is ``ר``."""
-    out: list[str] = []
-    for ch in unicodedata.normalize("NFC", text or ""):
-        if "א" <= ch <= "ת":
-            out.append(fold_finals(ch))
-        elif ch == _DOT_ABOVE or ch in QUOTE_MARKS:
-            if out and out[-1] in DOT_LETTERS:
-                out.append("*")
-        elif ch.isspace() and out and out[-1] != " ":
-            out.append(" ")
-    return "".join(out).strip()
-
-
-def _dots_agree(word_pattern: str, spelling: str) -> bool:
-    """The dictionary spelling's first word, dots included, sits inside the
-    looked-up word (whose proclitics the candidate may have peeled)."""
-    first = dot_pattern(spelling).split(" ", 1)[0]
-    return bool(first) and first in word_pattern
+def _root_label(root: Mapping[str, Any]) -> str:
+    """A root's first printed name, dots kept (what the box holds to open it again)."""
+    names = _names_of(root["names_json"]) if "names_json" in root.keys() else []
+    return names[0] if names else _text(root["name_ja"]).split(NAME_SEPARATOR, 1)[0].strip()
 
 
 # The Arabic key: on top of normalize_arabic, the letters a typist writes either
@@ -303,11 +372,26 @@ class BlauCard:
     matched_kind: str
     sub_entry: str
     via: str
+    #: Every sense of the card's scope with content, the matched first; the panel shows the first
+    #: few and the rest on a click. ``more_senses``: those beyond ``MAX_SENSES`` (on the site only).
     senses: tuple[BlauSense, ...]
     more_senses: int
     #: The looked-up word carries the dot (``dot_pattern``) and this entry's
     #: spelling does not have it on the same letters: another word, probably.
     dot_mismatch: bool = False
+    #: The entry's first printed name (dots kept): with a stem, what opens that stem's paragraph.
+    root_label: str = ""
+    #: The stems the dictionary lists under this entry, I to X (``BlauService.root_stems``).
+    stems: tuple[int, ...] = ()
+    #: The stem chosen ("דלל X"): the senses are that stem's paragraph. 0: none chosen.
+    stem: int = 0
+    #: A card for a root another dictionary gives for the word (``BlauService.borrow``): each
+    #: (source, evidence) that gave it, ``BorrowedRoot.source`` and ``.evidence``. (): Blau's own.
+    borrowed: tuple[tuple[str, str], ...] = ()
+    #: A card found by verb form (PR 3): what reached it, the word's form with the root and the
+    #: stems it fits ("אסתדלו (דלל X)"), and the card's kind (A to E, plan 6.1). '': not one.
+    verb_form: str = ""
+    kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -330,10 +414,26 @@ class BlauLookup:
     more_examples: int
     #: "ja" (Hebrew letters) or "arabic" (a typed Arabic-script word).
     script: str = "ja"
+    #: The entries whose citations or names hold the word (the ``tokens`` table), other than
+    #: the cards' entries: each with the places, the word marked. Empty on a 1.0.0 file, for a
+    #: function word and for a typed Arabic word.
+    quotes: tuple["BlauExpressionHit", ...] = ()
+    more_quotes: int = 0
+    #: The stem typed after the root ("דלל X"), 0 for a plain lookup.
+    stem: int = 0
+    #: Beside the cards the word itself reached: the other roots its verb forms give, (root as
+    #: printed, stem; 0 when several fit), at most ``MAX_SUGGESTIONS``; a press looks "root stem" up.
+    suggestions: tuple[tuple[str, int], ...] = ()
 
     @property
     def found(self) -> bool:
-        return bool(self.cards or self.examples)
+        return bool(self.cards or self.examples or self.quotes)
+
+    @property
+    def stem_missing(self) -> bool:
+        """A stem was typed, the root was found, and no entry it reached lists that stem: the
+        cards are the root's, with the stems they have."""
+        return bool(self.stem and self.cards and not any(card.stem == self.stem for card in self.cards))
 
 
 def empty_lookup(word: str = "", key: str = "", candidates: tuple[str, ...] = (),
@@ -410,7 +510,7 @@ class _CardBuild:
     sub-entries) reached by one candidate."""
 
     __slots__ = ("root", "candidate", "matched_key", "matched_kind", "via", "sub_entry_id",
-                 "matched_form_ids", "dot_mismatch")
+                 "matched_form_ids", "dot_mismatch", "stem", "verb_form", "kind", "nouns_first")
 
     def __init__(self, root: sqlite3.Row, candidate: str, matched_key: str, matched_kind: str, via: str,
                  sub_entry_id: str):
@@ -422,6 +522,11 @@ class _CardBuild:
         self.sub_entry_id = sub_entry_id
         self.matched_form_ids: list[str] = []
         self.dot_mismatch = False
+        self.stem = 0
+        self.verb_form = ""
+        self.kind = ""
+        #: The senses outside the entry's stem paragraphs first (``_open_on_word_stem``).
+        self.nouns_first = False
 
 
 def _text(value: Any) -> str:
@@ -454,9 +559,13 @@ class BlauService:
     def __init__(self, db_path: Optional[str] = None, thread_safe: bool = False):
         self._conn: Any = None
         self._meta: dict[str, str] = {}
-        # Built on first use, then read-only: the Arabic-spelling index (typed Arabic).
+        # Built on first use, then read-only: the Arabic-spelling index (typed Arabic), and the
+        # (root, stem) pairs with each root's stems (``_stems``).
         self._index_lock = threading.Lock()
         self._arabic_index: Optional[dict[str, tuple[dict[str, str], ...]]] = None
+        self._stem_pairs: Optional[tuple[StemPair, ...]] = None
+        self._root_stem_rows: dict[str, dict[int, tuple[str, ...]]] = {}
+        self._verb_forms: Optional[dict[str, tuple[StemPair, ...]]] = None
         self.unavailable_reason = "not opened"
         self._db_path = db_path or default_sidecar_path()
         if not self._db_path:
@@ -504,8 +613,18 @@ class BlauService:
         return self._conn is not None
 
     def is_available(self) -> bool:
-        """Ready AND the kill switch is on. The only question a surface asks."""
+        """Ready AND the switch is on for everyone: what a surface asks that does not know who
+        is reading (an ``editors`` switch stays hidden there)."""
         return self.is_ready() and blau_enabled()
+
+    def served_to(self, editor: bool) -> bool:
+        """Ready AND shown to this reader: on for everyone, or ``editors`` and the reader an editor
+        or admin (``shared.dictionary_switch``; owner, 2026-11-11: a preview before release)."""
+        return self.is_ready() and serves(blau_switch(), editor)
+
+    def _answering(self) -> bool:
+        """The lookups answer while the switch is not off: the page decided who may ask."""
+        return self.is_ready() and blau_switch() != OFF
 
     def expressions_available(self) -> bool:
         """The open file carries the expression search's ``tokens`` (schema 1.1.0); a 1.0.0
@@ -535,18 +654,31 @@ class BlauService:
 
     # -- the lookup ----------------------------------------------------------
 
-    def lookup(self, word: str) -> BlauLookup:
+    def lookup(self, word: str, verb_forms: Optional[frozenset[str]] = None,
+               verb_form_stems: Optional[frozenset[str]] = None, stems: bool = True) -> BlauLookup:
         """What the dictionary has for one clicked or typed word. A word with
         Hebrew letters is looked up as Judeo-Arabic; a word with Arabic letters
-        only, against the Arabic spellings. Never raises; empty when
-        unavailable, when the word has neither, or on any error."""
+        only, against the Arabic spellings. ``verb_forms`` / ``verb_form_stems``: the kinds of
+        card found by verb form shown, and those opened on the word's stem; None reads the switches
+        (``verb_form_kinds``; the graded sample passes every kind). ``stems`` False: the text came
+        from the manuscript, and a number after a word ("פרק 2") is no typed stem. Never raises;
+        empty when unavailable, when the word has neither, or on any error."""
         word = _text(word)
-        if not word or not self.is_available():
+        kinds = verb_form_kinds() if verb_forms is None else frozenset(verb_forms)
+        stem_kinds = verb_form_stem_kinds() if verb_form_stems is None else frozenset(verb_form_stems)
+        if not word or not self._answering():
             return empty_lookup(word)
         key = ""
         candidates: tuple[str, ...] = ()
         script = "ja"
         try:
+            root, stem = root_and_stem(word) if stems else ("", 0)
+            if stem:
+                # "דלל X": the root as typed (no clitic peeled: the reader typed a root), with
+                # that stem's paragraph opened on every entry of the root that lists it.
+                key = normalize_ja(root)
+                candidates = (key,)
+                return self._lookup(word, key, candidates, stem=stem, root_text=root)
             key = normalize_ja(word)
             if not key:
                 script = "arabic"
@@ -556,21 +688,206 @@ class BlauService:
                 key = candidates[0]
                 return self._lookup_arabic(word, key, candidates)
             candidates = tuple(candidate_stems(key))
-            return self._lookup(word, key, candidates)
+            return self._lookup(word, key, candidates, verb_forms=kinds, verb_form_stems=stem_kinds)
         except Exception:
             logger.exception("BlauService: lookup of %r failed", word)
             return empty_lookup(word, key, candidates, script)
 
     # -- the expression search -----------------------------------------------
 
-    def answer(self, text: str, gap: int = DEFAULT_GAP) -> BlauAnswer:
+    def answer(self, text: str, gap: int = DEFAULT_GAP, stems: bool = True) -> BlauAnswer:
         """What the panel asks for what the reader clicked, selected or typed: several words
         are an expression search where the sidecar supports it, else (one word, or a 1.0.0
-        file) the lookup of the text as one key."""
+        file) the lookup of the text as one key. A root with a typed stem ("דלל X") is the
+        lookup of that root with the stem chosen, never an expression; ``stems`` False (words
+        clicked or selected in the manuscript) reads no stem: "פרק 2" there is two words."""
         text = " ".join(_text(text).split())
-        if len(text.split()) > 1 and self.expressions_available():
+        if len(text.split()) > 1 and self.expressions_available() and not (stems and root_and_stem(text)[1]):
             return self.expression(text, gap)
-        return self.lookup(text)
+        return self.lookup(text, stems=stems)
+
+    # -- roots borrowed from the other dictionaries -------------------------
+
+    def borrow(self, result: BlauAnswer, borrowed: tuple[BorrowedRoot, ...]) -> BlauAnswer:
+        """Blau's answer with a card for each root another dictionary gives for the word
+        (``shared.ja_roots.borrowed_roots``), after Blau's own cards (owner, 2026-11-11: Blau has
+        no list of inflected forms; Friedman's matches and Lane's first root reach קול for קאל).
+        A root reaches the entries named by it, the one spelled with the same dots where several
+        share the letters; an entry Blau's own cards already show gets no second card, and two
+        dictionaries giving the same entry make one card that names both. The examples and quotes
+        under a borrowed entry go (its card shows it). A borrowed card opens on the stem the word's
+        shape gives (``_open_on_word_stem``), and among Blau's own cards an entry another dictionary
+        names comes first, whichever key reached it. A card found by verb form keeps its place, after the word's
+        own and before the borrowed, and names the dictionaries that also give its root. Not for an
+        expression or a typed stem. Never raises: on any error, the answer as it was."""
+        if not isinstance(result, BlauLookup) or result.stem or not borrowed or not self._answering():
+            return result
+        try:
+            return self._borrow(result, borrowed)
+        except Exception:
+            logger.exception("BlauService: borrowing roots for %r failed", result.word)
+            return result
+
+    def _borrow(self, result: BlauLookup, borrowed: tuple[BorrowedRoot, ...]) -> BlauLookup:
+        shown = {card.root_id for card in result.cards}
+        # A card found by verb form (PR 3) whose root another dictionary also gives keeps its place
+        # and names that dictionary too; the word's own cards come first, the borrowed ones last.
+        verb = tuple(card for card in result.cards if card.verb_form)
+        verb_ids = {card.root_id for card in verb}
+        verb_sources: dict[str, list[tuple[str, str]]] = {}
+        roots: dict[str, Optional[sqlite3.Row]] = {}
+        builds: dict[str, _CardBuild] = {}
+        sources: dict[str, list[tuple[str, str]]] = {}
+        overflow: set[str] = set()
+        for item in borrowed:
+            key = normalize_ja(item.root)
+            if not key or " " in key:
+                continue
+            rows = list(self._conn.execute(
+                "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
+                "WHERE norm = ? AND kind = 'root' ORDER BY rowid", (key,)))
+            pattern = dot_pattern(item.root)
+            same_dots = [row for row in rows if dot_pattern(_text(row["raw"])) == pattern]
+            for row in same_dots or rows:
+                found: dict[tuple[str, str, str], _CardBuild] = {}
+                self._add_hit(found, set(), set(), roots, row, key)
+                for build in found.values():
+                    root_id = _text(build.root["id"])
+                    given = (item.source, item.evidence)
+                    if root_id in verb_ids:
+                        if given not in verb_sources.setdefault(root_id, []):
+                            verb_sources[root_id].append(given)
+                        continue
+                    if root_id in shown:
+                        continue
+                    if root_id not in builds:
+                        if len(result.cards) + len(builds) >= MAX_CARDS:
+                            overflow.add(root_id)
+                            continue
+                        builds[root_id] = build
+                    if given not in sources.setdefault(root_id, []):
+                        sources[root_id].append(given)
+        # Blau's own cards: the entry another dictionary names first, whichever key reached it (owner,
+        # 2026-11-11: ויכון: כון, which Lane names, before כ̇לו, which also prints יכון in a phrase; and
+        # ואלקול: קול, reached with the article peeled, before טלע, which prints אלקול as a variant).
+        # The dotted reading first; among the named, and among the rest, the key order the lookup made.
+        named = {normalize_ja(item.root) for item in borrowed}
+        key_order = {key: n for n, key in enumerate(result.candidates)}
+        own = tuple(sorted((card for card in result.cards if not card.verb_form), key=lambda card: (
+            card.dot_mismatch, normalize_ja(card.root_label or card.name) not in named,
+            key_order.get(card.candidate, len(key_order)))))
+        own += tuple(replace(card, borrowed=card.borrowed + tuple(verb_sources[card.root_id]))
+                     if verb_sources.get(card.root_id) else card for card in verb)
+        if not builds and not overflow:
+            return replace(result, cards=own) if own != result.cards else result
+        if result.script == "ja":
+            for build in builds.values():
+                self._open_on_word_stem(build, result.candidates)
+        # An entry two dictionaries agree on first; otherwise in the order the roots came.
+        added = tuple(replace(self._finish(build, roots), borrowed=tuple(sources[root_id]))
+                      for root_id, build in sorted(builds.items(), key=lambda item: -len(sources[item[0]])))
+        # A suggested root another dictionary also gives is now a card: no chip for it.
+        taken = {dot_pattern(card.root_label or card.name) for card in added}
+        return replace(
+            result, cards=own + added, more_cards=result.more_cards + len(overflow),
+            examples=tuple(e for e in result.examples if e.root_id not in builds),
+            quotes=tuple(q for q in result.quotes if q.root_id not in builds),
+            suggestions=tuple(s for s in result.suggestions if dot_pattern(s[0]) not in taken),
+        )
+
+    # -- the stems a root lists ----------------------------------------------
+
+    def _stems(self) -> tuple[tuple[StemPair, ...], dict[str, dict[int, tuple[str, ...]]]]:
+        """Every (root, stem) pair the dictionary lists, and per root its stem numbers with the
+        ``stems`` rows of each. Built once from the open file (plan section 4.1): a stems row
+        under a root or under one of its sub-entries gives a pair for every number it names
+        (``stem_row_numbers``); a row that names none gives none. Nothing is stored."""
+        if self._stem_pairs is None:
+            with self._index_lock:
+                if self._stem_pairs is None:
+                    pairs: list[StemPair] = []
+                    by_root: dict[str, dict[int, list[str]]] = {}
+                    for row in self._conn.execute(
+                            "SELECT s.id, s.root_id, s.binyan, s.binyan_shift, s.head_json, r.name_ja, r.names_json "
+                            "FROM stems s JOIN roots r ON r.id = s.root_id ORDER BY r.ordinal, s.rowid"):
+                        numbers = stem_row_numbers(row["binyan"], row["binyan_shift"], row["head_json"])
+                        if not numbers:
+                            continue
+                        root_id, stem_id = _text(row["root_id"]), _text(row["id"])
+                        label = _root_label(row)
+                        key = normalize_ja(label)
+                        for number in numbers:
+                            pairs.append(StemPair(label, key, number, stem_id, root_id))
+                            by_root.setdefault(root_id, {}).setdefault(number, []).append(stem_id)
+                    self._root_stem_rows = {root_id: {n: tuple(ids) for n, ids in sorted(stems.items())}
+                                            for root_id, stems in by_root.items()}
+                    self._stem_pairs = tuple(pairs)
+        return self._stem_pairs, self._root_stem_rows
+
+    def stem_pairs(self) -> tuple[StemPair, ...]:
+        """Every (root, stem) pair the dictionary lists, in the dictionary's order (plan section
+        4.1); () when the dictionary is not available or on any error. Never raises."""
+        if not self._answering():
+            return ()
+        try:
+            return self._stems()[0]
+        except Exception:
+            logger.exception("BlauService: the stem pairs could not be read")
+            return ()
+
+    def verb_form_index(self) -> dict[str, tuple[StemPair, ...]]:
+        """Every form key the (root, stem) pairs the dictionary lists may be written as, and the
+        pairs that give it (``shared.ja_verb_forms.verb_form_index``; plan section 4.3, PR 2): built
+        once from the open file, held in memory. Nothing in the lookup calls it yet: the gate
+        (``scripts/measure_dictionary_stems.py``) measures it first. {} when unavailable or on any
+        error. Never raises."""
+        if not self.is_ready():
+            return {}
+        try:
+            if self._verb_forms is None:
+                pairs = self._stems()[0]
+                with self._index_lock:
+                    if self._verb_forms is None:
+                        self._verb_forms = verb_form_index(pairs)
+            return self._verb_forms
+        except Exception:
+            logger.exception("BlauService: the verb form index could not be built")
+            return {}
+
+    def root_stems(self, root_id: str) -> tuple[int, ...]:
+        """The stem numbers the dictionary lists under one entry, I to X in order; () for an entry
+        with none, when unavailable, or on any error. Never raises."""
+        return tuple(self._stem_rows(root_id))
+
+    def _open_on_word_stem(self, build: _CardBuild, keys: tuple[str, ...]) -> None:
+        """Open a borrowed card on the stem the word's shape gives (``shared.ja_verb_forms.word_stem``;
+        owner, 2026-11-11: אסתקר is stem X of קרר and its card opened on stem I): the one stem the
+        entry lists whose generated forms hold one of the word's keys. Only for a root another
+        dictionary gave: Blau's own card already shows the form the word matched first, and a
+        typed root is the whole entry. Not for a card scoped to a sub-entry or with a stem already
+        chosen; nothing when several listed stems hold the word. When none does, the word is no form
+        of the entry's verbs, and the senses outside its stem paragraphs come first (owner,
+        2026-11-11: אלחרוף, the plural of the noun חרף, opened on the verb's stem II sense)."""
+        if build.stem or build.sub_entry_id or not keys:
+            return
+        root_id = _text(build.root["id"])
+        listed = self._stem_rows(root_id)
+        if not listed:
+            return
+        fits = word_stems(keys, normalize_ja(_root_label(build.root)), listed)
+        if len(fits) == 1:
+            build.stem = fits[0]
+        elif not fits:
+            build.nouns_first = True
+
+    def _stem_rows(self, root_id: str) -> dict[int, tuple[str, ...]]:
+        if not self.is_ready():
+            return {}
+        try:
+            return self._stems()[1].get(_text(root_id), {})
+        except Exception:
+            logger.exception("BlauService: the stems of %r could not be read", root_id)
+            return {}
 
     def expression(self, text: str, gap: int = DEFAULT_GAP, limit: int = MAX_EXPRESSION_HITS) -> BlauExpression:
         """Every entry holding the words of ``text`` in order with at most ``gap`` printed words
@@ -579,7 +896,7 @@ class BlauService:
         available or has no ``tokens``, and on any error. Never raises."""
         text = " ".join(_text(text).split())
         gap = clamp_gap(gap)
-        if not text or not self.is_available() or not self.expressions_available():
+        if not text or not self._answering() or not self.expressions_available():
             return empty_expression(text, gap)
         words = tuple(text.split())
         candidates = tuple(word_keys(w) for w in words)
@@ -767,23 +1084,38 @@ class BlauService:
             more_cards=len(overflow), examples=(), more_examples=0, script="arabic",
         )
 
-    def _lookup(self, word: str, key: str, candidates: tuple[str, ...]) -> BlauLookup:
+    def _lookup(self, word: str, key: str, candidates: tuple[str, ...], stem: int = 0,
+                root_text: str = "", verb_forms: frozenset[str] = frozenset(),
+                verb_form_stems: frozenset[str] = frozenset()) -> BlauLookup:
         # A card is one scope reached by one candidate: keyed by (candidate,
         # root, sub-entry), so two candidates that reach the same entry (כתאב
         # and תאב) stay two cards in candidate order, and a root hit and a
         # sub-entry hit under it are not one card with mixed senses (plan §6.2;
         # Codex on #473).
+        #
+        # With a typed stem (``stem``, the root in ``root_text``): the entries the root's name
+        # reaches that list the stem are one card each, scoped to that stem's paragraph; when none
+        # does, the cards are the root's as a plain lookup of it shows them (``stem_missing``).
+        # No examples or quotes: the reader asked for a root.
         cards: dict[tuple[str, str, str], _CardBuild] = {}
         card_roots: set[str] = set()
         overflow: set[tuple[str, str, str]] = set()
         phrase_rows: list[sqlite3.Row] = []
         roots: dict[str, Optional[sqlite3.Row]] = {}
         prefix_marks = ",".join("?" * len(NAME_PREFIX_KINDS))
+        names: dict[tuple[str, str], list[str]] = {}
+
+        def order(r: sqlite3.Row) -> tuple[int, int]:
+            # The kind first (root, sub-entry, headword, variant); then an entry or sub-entry whose
+            # FIRST name is the word before one that gives it as a later name (owner, 2026-11-11;
+            # אנג̇אץ is the second name of "אג̇אץ | אנג̇אץ" and the only name of another entry).
+            return _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)), self._name_position(r, names)
+
         for candidate in candidates:
             rows = list(self._conn.execute(
                 "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
                 "WHERE norm = ? ORDER BY rowid", (candidate,)))
-            rows.sort(key=lambda r: _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)))
+            rows.sort(key=order)
             if " " not in candidate:
                 # Entry names of several words that begin with this one (a
                 # range on the lookup index: every key "candidate <more>").
@@ -791,19 +1123,36 @@ class BlauService:
                     "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
                     f"WHERE norm > ? AND norm < ? AND kind IN ({prefix_marks}) ORDER BY rowid",
                     (candidate + " ", candidate + " \U0010ffff", *NAME_PREFIX_KINDS)))
-                named.sort(key=lambda r: _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)))
+                named.sort(key=order)
                 rows.extend(named)
             for row in rows:
                 kind = row["kind"]
                 if kind in _KIND_RANK:
                     self._add_hit(cards, card_roots, overflow, roots, row, candidate)
-                elif kind == PHRASE_KIND:
+                elif kind == PHRASE_KIND and not stem:
                     phrase_rows.append(row)
+        if stem:
+            return self._stem_answer(word, key, candidates, stem, root_text, cards, overflow, roots)
+        # The cards found by verb form, only when the word itself reached no entry (their entries
+        # leave the quotes and the examples, as a card's do); beside the word's own cards, the roots
+        # its verb forms give are suggestions (owner, 2026-11-11: the graded sample).
+        verb_builds: list[_CardBuild] = []
+        verb_more = 0
+        suggestions: tuple[tuple[str, int], ...] = ()
+        if cards:
+            suggestions = suggested_roots(candidates, self.verb_form_index() if verb_forms else {}, verb_forms,
+                                          card_roots)
+        else:
+            verb_builds, verb_more = self._verb_form_builds(candidates, card_roots, roots, verb_forms,
+                                                            verb_form_stems)
+        quotes, more_quotes = self._quotes(word, card_roots, roots)
+        quote_roots = {hit.root_id for hit in quotes}
         examples: dict[str, BlauExample] = {}
         example_overflow: set[str] = set()
         for row in phrase_rows:
             root_id = _text(row["root_id"])
-            if not root_id or root_id in card_roots or root_id in examples or root_id in example_overflow:
+            if (not root_id or root_id in card_roots or root_id in quote_roots or root_id in examples
+                    or root_id in example_overflow):
                 continue
             root = self._root(roots, root_id)
             if root is None:
@@ -821,13 +1170,133 @@ class BlauService:
             for build in builds:
                 build.dot_mismatch = not _dots_agree(word_pattern, build.matched_key)
             builds.sort(key=lambda b: b.dot_mismatch)
+        builds.extend(verb_builds)
         return BlauLookup(
             word=word, key=key, candidates=candidates,
             cards=tuple(self._finish(build, roots) for build in builds),
-            more_cards=len(overflow),
+            more_cards=len(overflow) + verb_more,
             examples=tuple(examples.values()),
             more_examples=len(example_overflow),
+            quotes=quotes, more_quotes=more_quotes, suggestions=suggestions,
         )
+
+    def _verb_form_builds(self, candidates: tuple[str, ...], card_roots: set[str],
+                          roots: dict[str, Optional[sqlite3.Row]], kinds: frozenset[str],
+                          stem_kinds: frozenset[str]) -> tuple[list[_CardBuild], int]:
+        """The cards found by verb form (plan 4.4, PR 3): the entries the word's keys reach through the
+        generated forms of a stem the entry lists (``shared.ja_verb_forms.verb_form_cards``, in the
+        plan's order), other than the entries already cards (``card_roots``, which they join), of a
+        kind switched on (``kinds``); at most ``MAX_VERB_FORM_CARDS``, the rest counted. A card opens
+        on the word's stem when its kind is in ``stem_kinds`` and the word fits one listed stem, else
+        on the whole entry with the stems as buttons."""
+        if not kinds:
+            return [], 0
+        index = self.verb_form_index()
+        if not index:
+            return [], 0
+        builds: list[_CardBuild] = []
+        more = 0
+        for card in verb_form_cards(candidates, index):
+            if card.kind not in kinds or card.entry_id in card_roots:
+                continue
+            if len(builds) >= MAX_VERB_FORM_CARDS:
+                more += 1
+                continue
+            root = self._root(roots, card.entry_id)
+            if root is None:
+                continue
+            build = _CardBuild(root, card.form, "", MATCHED_VERB_FORM, "", "")
+            build.verb_form, build.kind = card.evidence(), card.kind
+            if card.kind in stem_kinds:
+                build.stem = card.stem
+            builds.append(build)
+            card_roots.add(card.entry_id)
+        return builds, more
+
+    def _stem_answer(self, word: str, key: str, candidates: tuple[str, ...], stem: int, root_text: str,
+                     cards: dict[tuple[str, str, str], _CardBuild], overflow: set[tuple[str, str, str]],
+                     roots: dict[str, Optional[sqlite3.Row]]) -> BlauLookup:
+        """The cards of a root with a typed stem: one per entry whose NAME the root is (a root hit,
+        not a form or sub-entry spelled the same) and which lists the stem, scoped to that stem's
+        paragraph; else every card the root reaches, unscoped, so the reader sees the stems each
+        entry has. The dotted reading first, as for a word (``dot_pattern`` of the typed root)."""
+        builds = list(cards.values())
+        pattern = dot_pattern(root_text)
+        if "*" in pattern:
+            for build in builds:
+                build.dot_mismatch = not _dots_agree(pattern, build.matched_key)
+            builds.sort(key=lambda b: b.dot_mismatch)
+        chosen: list[_CardBuild] = []
+        chosen_roots: set[str] = set()
+        for build in builds:
+            root_id = _text(build.root["id"])
+            if build.matched_kind == "root" and root_id not in chosen_roots and stem in self._stem_rows(root_id):
+                build.stem, build.sub_entry_id = stem, ""
+                chosen.append(build)
+                chosen_roots.add(root_id)
+        shown = chosen or builds
+        return BlauLookup(
+            word=word, key=key, candidates=candidates,
+            cards=tuple(self._finish(build, roots) for build in shown),
+            more_cards=0 if chosen else len(overflow), examples=(), more_examples=0, stem=stem,
+        )
+
+    def _quotes(self, word: str, card_roots: set[str],
+                roots: dict[str, Optional[sqlite3.Row]]) -> tuple[tuple[BlauExpressionHit, ...], int]:
+        """The entries (or sub-entries) whose citations or names hold ``word``, and how many more
+        there are: the word as the expression search keys it (``word_keys``) against ``tokens``.
+        Not the cards' entries (the reader has those), not a function word (פי is in a thousand
+        entries and none of them is about it), not a 1.0.0 file. The entries that print the word
+        exactly, and most often, come first; then the dictionary's order."""
+        if not self.expressions_available() or len(lookup_key(word).split()) != 1:
+            return (), 0   # several words are the expression search's, never any-of-them
+        keys = word_keys(word)
+        if not keys or is_function_word(keys):
+            return (), 0
+        marks = ",".join("?" for _ in keys)
+        place = "scope || ' ' || scope_id || ' ' || n"
+        units = [r for r in self._conn.execute(
+            f"SELECT root_id, COALESCE(sub_entry_id, '') AS sub_id, COUNT(DISTINCT {place}) AS places, "
+            f"COUNT(DISTINCT CASE WHEN key = ? AND peeled = 0 THEN {place} END) AS exact "
+            f"FROM {TOKENS_TABLE} WHERE key IN ({marks}) GROUP BY root_id, sub_id", (keys[0], *keys))
+            if _text(r["root_id"]) not in card_roots]
+        if not units or len(units) > MAX_QUOTE_UNITS:
+            return (), 0
+        ids = sorted({_text(r["root_id"]) for r in units})
+        root_ordinal: dict[str, int] = {}
+        sub_ordinal: dict[str, int] = {}
+        for start in range(0, len(ids), 500):   # under SQLite's bound on parameters
+            chunk = ids[start:start + 500]
+            chunk_marks = ",".join("?" for _ in chunk)
+            root_ordinal.update((str(r["id"]), int(r["ordinal"])) for r in self._conn.execute(
+                f"SELECT id, ordinal FROM roots WHERE id IN ({chunk_marks})", chunk))
+            sub_ordinal.update((str(r["id"]), int(r["ordinal"])) for r in self._conn.execute(
+                f"SELECT id, ordinal FROM sub_entries WHERE root_id IN ({chunk_marks})", chunk))
+        units.sort(key=lambda r: (-int(r["exact"]), -int(r["places"]), root_ordinal.get(_text(r["root_id"]), 0),
+                                  sub_ordinal.get(r["sub_id"], -1) + 1 if r["sub_id"] else 0))
+        accepts = [frozenset(keys)]
+        hits: list[BlauExpressionHit] = []
+        for row in units[:MAX_QUOTE_HITS]:
+            unit = (_text(row["root_id"]), _text(row["sub_id"]))
+            scopes = self._conn.execute(
+                f"SELECT scope, scope_id, n, MAX(key = ? AND peeled = 0) AS exact FROM {TOKENS_TABLE} "
+                f"WHERE root_id = ? AND COALESCE(sub_entry_id, '') = ? AND key IN ({marks}) "
+                "GROUP BY scope, scope_id, n ORDER BY exact DESC, scope = ? , scope_id, n LIMIT ?",
+                (keys[0], *unit, *keys, SCOPE_CITATION, MAX_QUOTE_PLACES)).fetchall()
+            places: list[ExpressionPlace] = []
+            for found in scopes:
+                scope = (str(found["scope"]), str(found["scope_id"]), int(found["n"]))
+                items = [(int(r["pos"]), str(r["key"])) for r in self._conn.execute(
+                    f"SELECT pos, key FROM {TOKENS_TABLE} WHERE scope = ? AND scope_id = ? AND n = ? ORDER BY pos, rowid",
+                    scope)]
+                match = ordered_match(items, accepts, 0)
+                place_found = self._place(scope, items, match, (word,), (keys,)) if match is not None else None
+                if place_found is not None:
+                    places.append(place_found)
+            hit = self._hit(unit, places, roots) if places else None
+            if hit is not None:
+                hits.append(replace(hit, places_total=max(int(row["places"]), len(places))))
+        return tuple(hits), max(len(units) - MAX_QUOTE_HITS, 0)
 
     def _add_hit(self, cards: dict[tuple[str, str, str], _CardBuild], card_roots: set[str],
                  overflow: set[tuple[str, str, str]], roots: dict[str, Optional[sqlite3.Row]],
@@ -868,39 +1337,61 @@ class BlauService:
             if form is not None and form_id not in seen:
                 seen.add(form_id)
                 senses.append(self._sense(form, roots, matched=True))
-        # The scope is the matched sub-entry, else the whole entry. Both go
-        # through the root index (there is none on sub_entry_id).
-        if build.sub_entry_id:
+        # The scope is the chosen stem's paragraph (its stems rows, wherever under the entry they
+        # are), else the matched sub-entry, else the whole entry. All go through the root index
+        # (there is none on sub_entry_id or stem_id).
+        stem_rows = self._stem_rows(root_id)
+        if build.stem and stem_rows.get(build.stem):
+            ids = stem_rows[build.stem]
+            scope_sql = f"root_id = ? AND stem_id IN ({','.join('?' for _ in ids)})"
+            scope_args: tuple[str, ...] = (root_id, *ids)
+        elif build.sub_entry_id:
             scope_sql, scope_args = "root_id = ? AND sub_entry_id = ?", (root_id, build.sub_entry_id)
         else:
             scope_sql, scope_args = "root_id = ?", (root_id,)
-        total = int(self._conn.execute(f"SELECT COUNT(*) FROM forms WHERE {scope_sql}",
-                                       scope_args).fetchone()[0])
-        # Form ids follow the dictionary's own order (the builder numbers the
-        # forms as it reads the entries); `ordinal` is per stem and would
-        # interleave the stems.
-        if len(senses) < MAX_SENSES:
-            for form in self._conn.execute(
-                    f"SELECT {_FORM_COLUMNS} FROM forms WHERE {scope_sql} ORDER BY id", scope_args):
-                if len(senses) >= MAX_SENSES:
-                    break
-                form_id = _text(form["id"])
-                if form_id in seen or not _has_content(form):
-                    continue
-                seen.add(form_id)
-                senses.append(self._sense(form, roots, matched=False))
+        # Every sense of the scope with content, the matched ones first (the panel shows the first
+        # few and the rest on a click); beyond MAX_SENSES, counted only. Form ids follow the
+        # dictionary's own order (the builder numbers the forms as it reads the entries);
+        # `ordinal` is per stem and would interleave the stems.
+        beyond = max(0, len(senses) - MAX_SENSES)
+        forms = self._conn.execute(f"SELECT {_FORM_COLUMNS}, stem_id FROM forms WHERE {scope_sql} ORDER BY id",
+                                   scope_args).fetchall()
+        if build.nouns_first:
+            # The word fits none of the entry's stems: the senses outside the stem paragraphs first,
+            # each part in the dictionary's order.
+            stem_ids = {stem_id for ids in stem_rows.values() for stem_id in ids}
+            forms.sort(key=lambda form: _text(form["stem_id"]) in stem_ids)
+        for form in forms:
+            form_id = _text(form["id"])
+            if form_id in seen or not _has_content(form):
+                continue
+            seen.add(form_id)
+            if len(senses) >= MAX_SENSES:
+                beyond += 1
+                continue
+            senses.append(self._sense(form, roots, matched=False))
         shown = tuple(senses[:MAX_SENSES])
+        sub_entry_id = build.sub_entry_id
+        if build.stem and stem_rows.get(build.stem):
+            # A chosen stem whose paragraph sits under one sub-entry (דלל VII is under דאלה̈):
+            # the card names that sub-entry, as a sub-entry hit's card does.
+            under = {_text(r[0]) for r in self._conn.execute(
+                f"SELECT DISTINCT sub_entry_id FROM forms WHERE {scope_sql}", scope_args)}
+            sub_entry_id = under.pop() if len(under) == 1 else ""
         sub_entry = ""
-        if build.sub_entry_id:
+        if sub_entry_id:
             row = self._conn.execute("SELECT name_ja FROM sub_entries WHERE id = ?",
-                                     (build.sub_entry_id,)).fetchone()
+                                     (sub_entry_id,)).fetchone()
             sub_entry = _text(row["name_ja"]) if row is not None else ""
         return BlauCard(
             root_id=root_id, name=_text(root["name_ja"]), arabic=_text(root["arabic_spelling"]),
             page=_page(root["start_page_printed"]), url=entry_url(root_id),
             candidate=build.candidate, matched_key=build.matched_key, matched_kind=build.matched_kind,
             sub_entry=sub_entry, via=build.via, senses=shown,
-            more_senses=max(0, total - len(shown)), dot_mismatch=build.dot_mismatch,
+            more_senses=beyond, dot_mismatch=build.dot_mismatch,
+            root_label=_root_label(root), stems=tuple(stem_rows),
+            stem=build.stem if stem_rows.get(build.stem) else 0,
+            verb_form=build.verb_form, kind=build.kind,
         )
 
     def _sense(self, form: sqlite3.Row, roots: dict[str, Optional[sqlite3.Row]], matched: bool) -> BlauSense:
@@ -923,10 +1414,26 @@ class BlauService:
             is_erroneous=bool(form["is_erroneous"]), matched=matched,
         )
 
+    def _name_position(self, row: Mapping[str, Any], cache: dict[tuple[str, str], list[str]]) -> int:
+        """Which of its scope's names a root or sub-entry hit matched (0: the first); 0 for any
+        other kind. ``cache`` keeps each scope's names for one lookup."""
+        kind = row["kind"]
+        if kind == "root":
+            scope = ("roots", _text(row["root_id"]))
+        elif kind == "sub_entry":
+            scope = ("sub_entries", _text(row["sub_entry_id"]))
+        else:
+            return 0
+        if scope not in cache:
+            found = self._conn.execute(f"SELECT names_json FROM {scope[0]} WHERE id = ?", (scope[1],)).fetchone()
+            cache[scope] = _names_of(found["names_json"]) if found is not None else []
+        raw = _text(row["raw"])
+        return cache[scope].index(raw) if raw in cache[scope] else 0
+
     def _root(self, cache: dict[str, Optional[sqlite3.Row]], root_id: str) -> Optional[sqlite3.Row]:
         if root_id not in cache:
             cache[root_id] = self._conn.execute(
-                "SELECT id, name_ja, arabic_spelling, start_page_printed, is_cross_reference, target_id "
+                "SELECT id, name_ja, names_json, arabic_spelling, start_page_printed, is_cross_reference, target_id "
                 "FROM roots WHERE id = ?", (root_id,)).fetchone() if root_id else None
         return cache[root_id]
 

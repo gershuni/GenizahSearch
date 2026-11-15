@@ -6479,6 +6479,14 @@ TRANSLATIONS.update({
         "מילון בלאו מתעד בעיקר הוראות ייחודיות בערבית-יהודית. "
         "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
     "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
+    # Blau's and Friedman's empty answer since step B of the dictionary lookup plan (owner, approved
+    # as proposed on 2026-11-10, 2026-11-11); Lane's tab keeps the line above.
+    "Not found as an entry or in the examples. A verb or an inflected form may be listed under its root: "
+    "type the root.":
+        "המילה לא נמצאה כערך ולא בדוגמאות. פועל או צורה נוטה עשויים להופיע תחת השורש: הקלידו את השורש.",
+    # A root typed with a stem its dictionary does not list under it ("דלל III"; the stem's numeral
+    # goes in {stem}). Approved by the owner, the shorter of two drafts, 2026-11-11.
+    "Stem {stem} is not listed under this root.": "בניין {stem} אינו מופיע תחת השורש הזה.",
     # The digital edition's credit under the print credit (owner, 2026-11-04).
     "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
         "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
@@ -6544,6 +6552,21 @@ TRANSLATIONS.update({
     "Matched words": "המילים שנמצאו",
     "in the headword": "בראש הערך",
     "more places in this unit": "מקומות נוספים בערך זה",
+})
+TRANSLATIONS.update({
+    # The rest of a card's senses, quotations and sub-entries, in place on a click
+    # (web/components/show_more.py). Approved by the owner, 2026-11-11 ("הצג", not "הצגת").
+    "Show {n} more senses": "הצג {n} משמעויות נוספות",
+    "Show {n} more quotations": "הצג {n} מובאות נוספות",
+    "Show {n} more sub-entries and verb stems": "הצג {n} ערכי משנה ובניינים נוספים",
+    "Show {n} more entries": "הצג {n} ערכים נוספים",   # Lane's root card
+    "Show the full entry": "הצג את הערך המלא",
+    # A card or match found by the generated forms of a stem its entry lists (BlauCard.verb_form,
+    # FriedmanService VIA_VERB_FORM). Approved by the owner, 2026-11-11.
+    "found by its verb form": "נמצא לפי צורת הפועל",
+    # Beside the entries the word itself reached: the other roots its verb forms give, as chips
+    # (web/components/stem_buttons.py). Approved by the owner, 2026-11-11.
+    "Other possible roots": "שורשים אפשריים נוספים",
 })
 # What's New in every version (shared/whats_new_history.py; web /whats-new, the desktop dialog and
 # update notice, 2026-11-05). Approved by the owner as drafted, 2026-11-05 (reviewed in the wordings docx).

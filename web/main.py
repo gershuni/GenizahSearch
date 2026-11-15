@@ -2117,6 +2117,7 @@ def create_layout():
     # neither the card nor a search box, so there "?" and "/" are the browser's
     # (Codex, PR #484).
     from web.keyboard_shortcuts import SHORTCUT_EVENT, TRIGGER_CLASS, build_card
+    from web.keyboard_shortcuts import dictionaries_served as _shortcut_dictionaries_served
     from web.keyboard_shortcuts import head_html as _shortcuts_head_html
     ui.add_head_html(_shortcuts_head_html())
     shortcuts_trigger = ui.element('div').classes(f'{TRIGGER_CLASS} hidden')
@@ -2126,7 +2127,9 @@ def create_layout():
         dialog = _shortcuts_card['dialog']
         if dialog is None or dialog.is_deleted:
             with shortcuts_trigger:
-                dialog = _shortcuts_card['dialog'] = build_card(rtl_mode)
+                # The dictionaries' keys as this reader sees the panel: an editor's preview too.
+                dialog = _shortcuts_card['dialog'] = build_card(
+                    rtl_mode, dictionaries=_shortcut_dictionaries_served(GlobalAuthState.is_editor()))
         dialog.open()
 
     shortcuts_trigger.on(SHORTCUT_EVENT, lambda _e: open_shortcuts_card())
@@ -3761,6 +3764,7 @@ async def open_blau_sidecar_on_startup():
     companion; nothing here can stop the app.
     """
     from shared.blau_service import get_blau_service
+    service = None
     try:
         service = await run.io_bound(get_blau_service)
         if service is not None and not service.is_ready():
@@ -3779,12 +3783,54 @@ async def open_blau_sidecar_on_startup():
     # Friedman's dictionary (shared/friedman_service.py; the private Friedman plan step 3):
     # the same panel, a third tab, off unless FRIEDMAN_DICTIONARY_ENABLED is set (a candidate sidecar).
     from shared.friedman_service import get_friedman_service
+    friedman = None
     try:
         friedman = await run.io_bound(get_friedman_service)
         if friedman is not None and not friedman.is_ready():
             print(f"[init] Friedman's dictionary not served: {friedman.unavailable_reason}", flush=True)
     except Exception as e:
         print(f"[init] Friedman sidecar check failed (non-fatal): {e}", flush=True)
+    _start_verb_form_prewarm(service, friedman)
+
+
+#: The background build of the dictionaries' verb forms (``_prewarm_verb_forms``), kept referenced.
+_VERB_FORM_PREWARM: set = set()
+
+
+def _serves_verb_forms(service, kinds) -> bool:
+    """A dictionary served to anyone (everyone, or editors only: shared/dictionary_switch.py) that
+    shows cards found by verb form (its switch names a kind)."""
+    served = getattr(service, 'served_to', None)
+    return callable(served) and bool(served(True)) and bool(kinds()) \
+        and callable(getattr(service, 'verb_form_index', None))
+
+
+def _start_verb_form_prewarm(blau, friedman) -> None:
+    """Build Blau's and Friedman's verb forms (shared/ja_verb_forms.py: one to two seconds and about
+    75 MB for both) in the background after startup, so the first reader to click a word does not
+    wait for them, nor do the lookups queued behind that build. Only for a dictionary served with a
+    kind switched on; a failure only leaves the build to the first lookup."""
+    import shared.blau_service as blau_module
+    import shared.friedman_service as friedman_module
+    services = [(name, svc) for name, svc, kinds in (("Blau", blau, blau_module.verb_form_kinds),
+                                                      ("Friedman", friedman, friedman_module.verb_form_kinds))
+                if _serves_verb_forms(svc, kinds)]
+    if services:
+        task = asyncio.create_task(_prewarm_verb_forms(services), name='dictionary-verb-forms-prewarm')
+        _VERB_FORM_PREWARM.add(task)
+        task.add_done_callback(_VERB_FORM_PREWARM.discard)
+
+
+async def _prewarm_verb_forms(services: list) -> None:
+    import time
+    for name, service in services:
+        try:
+            started = time.perf_counter()
+            index = await run.io_bound(service.verb_form_index)
+            print(f"[init] {name} verb forms built in the background ({len(index):,} forms, "
+                  f"{time.perf_counter() - started:.1f} s).", flush=True)
+        except Exception as e:
+            print(f"[init] {name} verb forms not built at startup (non-fatal): {e}", flush=True)
 
 
 app.on_startup(compact_export_storage_on_startup)

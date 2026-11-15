@@ -94,8 +94,11 @@ EXTRACTED_MODULES = [
     "shared/arabic_service.py",          # Arabic (Lane) sidecar reader, 2026-11-04
     "shared/blau_normalize.py",          # Blau dictionary lookup keys, 2026-11-03
     "shared/blau_service.py",            # Blau dictionary sidecar reader, 2026-11-04
+    "shared/dictionary_switch.py",       # the dictionaries' switches: on, off, or editors only, 2026-11-11
     "shared/friedman_service.py",        # Friedman dictionary sidecar reader and expression search, 2026-11-08
     "shared/ja_expression.py",           # the expression search's keys, matcher and tiers, shared by Blau's and Friedman's readers, 2026-11-08
+    "shared/ja_roots.py",                # a typed root's dots and stems, and the (root, stem) pair, shared by Blau's and Friedman's readers, 2026-11-11
+    "shared/ja_verb_forms.py",           # the forms of a verb stem, and which listed stem a word belongs to (plan 4.2), 2026-11-11
     "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24
     "shared/keyboard_layout.py",         # the /search box's wrong-layout suggestion, 2026-11-03
     "shared/search_box_input.py",        # what a search or go-to box holds (moved from web/), 2026-11-04

@@ -16,20 +16,24 @@ PostHog counts an expression lookup by its number of words, never the words.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from nicegui import ui
 
 from shared.friedman_service import (
-    DEFAULT_GAP, SCOPE_HEAD, SCOPE_QUOTATION, FriedmanComponent, FriedmanExpression, FriedmanExpressionHit,
+    DEFAULT_GAP, SCOPE_HEAD, SCOPE_QUOTATION, VIA_BORROWED, VIA_VERB_FORM, FriedmanComponent, FriedmanExpression, FriedmanExpressionHit,
     FriedmanLookup, FriedmanMatch, FriedmanPlace, FriedmanQuotation, FriedmanUnit, empty_expression,
 )
+from shared.ja_roots import BORROW_BLAU, BORROW_LANE, BorrowedRoot
 from tests.render_smoke.test_blau_panel_render_smoke import (
-    _dictionary, _fire, _lane, _links, _open, _popover, _shown_word, _tab_of, _tabs, _texts, _turn_on, _with_class,
+    _choose, _dictionary, _fire, _lane, _links, _open, _popover, _shown_word, _tab_of, _tab_row, _tabs, _texts,
+    _turn_on, _with_class,
 )
 from tests.render_smoke.test_browse_button_icons_render_smoke import OPEN_PAGE, _all_elements, _click, _run_home_smoke, _service, _wait_until
 from tests.render_smoke.test_browse_button_icons_render_smoke import _wait_until as _wait
-from web.components import blau_panel, friedman_panel
+from web.components import blau_panel, friedman_panel, show_more
 from web.pages import browse
 
 CREDIT = 'מרדכי עקיבא פרידמן, מילון הערבית-היהודית מימי הביניים (שורת קרדיט לבדיקה)'
@@ -71,15 +75,21 @@ def _friedman(available=True, credit=CREDIT, expression=None):
     svc.status = STATUS
     svc.lookup.side_effect = _lookup
     svc.expression.side_effect = expression or (lambda text, gap=DEFAULT_GAP: _expression(text, gap))
+    # The page asks ``answer`` (several words an expression search, one word a lookup); the double
+    # routes it to ``expression`` / ``lookup`` so a test that replaces either, or counts its calls,
+    # still holds (as Blau's double does).
+    svc.answer.side_effect = lambda text, gap=DEFAULT_GAP, stems=True: (
+        svc.expression(text, gap=gap) if len(text.split()) > 1 else svc.lookup(text))
+    svc.borrow.side_effect = lambda result, borrowed: result   # the page's borrowed roots: none added here
     return svc
 
 
-def _run(driver, dictionary, friedman, lang='en'):
+def _run(driver, dictionary, friedman, lang='en', lane=None):
     crossref = MagicMock()
     crossref.is_available.return_value = False
     with patch.object(browse, 'get_service', return_value=_service(OPEN_PAGE)), \
             patch.object(browse, 'get_blau_service', return_value=dictionary), \
-            patch.object(browse, 'get_arabic_service', return_value=_lane(available=False)), \
+            patch.object(browse, 'get_arabic_service', return_value=lane or _lane(available=False)), \
             patch.object(browse, 'get_friedman_service', return_value=friedman), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
             patch.object(browse, 'load_connected_fragments_into', AsyncMock()), \
@@ -130,6 +140,114 @@ def test_friedman_has_its_tab_with_the_status_the_units_and_the_credit():
     _run(driver, dictionary, friedman)
 
 
+def _show_buttons(user):
+    return [e for e in _all_elements(user) if isinstance(e, ui.button) and show_more.BUTTON_CLASS in e.classes]
+
+
+def _quotes_drawn(user):
+    return len(_with_class(user, friedman_panel.QUOTE_CLASS))
+
+
+def test_quotations_and_sub_entries_beyond_the_first_open_in_place_on_a_click():
+    """Owner, 2026-11-11: nothing only on the PDF page. A unit's first QUOTATIONS_SHOWN quotations, a
+    sub-entry's first quotation, then "Show N more quotations" in place; an entry that is a chosen
+    stem's own paragraph shows its sub-entries and stem paragraphs only on "Show N more sub-entries and
+    verb stems". The owner's Hebrew: "הצג N מובאות נוספות", "הצג N ערכי משנה ובניינים נוספים"."""
+    quotes = [FriedmanQuotation(n, f'קול {n}', f"'תרגום {n}'", f'(ח{n})', '') for n in range(1, 11)]
+    entry = _unit('f000900', 'entry', 'קול', "'דיבור'", quotes)
+    children = tuple(_unit(f'f00090{n}', 'binyan', 'קאל', "'אמר'", quotes[:3], parent='f000900', binyan=label)
+                     for n, label in ((1, 'II'), (2, 'IV')))
+    friedman = _friedman()
+    friedman.lookup.side_effect = lambda word: FriedmanLookup(
+        word, 'קול', ('קול',), (FriedmanMatch(entry, 'chosen', 'קול', None, children, 2, stems=(1, 2, 4), root='קול',
+                                              stem=1),), False, STATUS, CREDIT, stem=1)
+
+    for lang, more_quotes, more_children in (
+            ('en', 'Show 2 more quotations', 'Show 2 more sub-entries and verb stems'),
+            ('he', 'הצג 2 מובאות נוספות', 'הצג 2 ערכי משנה ובניינים נוספים')):
+        async def driver(user, more_quotes=more_quotes, more_children=more_children):
+            await _open(user)
+            await _turn_on(user)
+            _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'קול'})
+            await _wait_until(lambda: _sections(user))
+            assert _quotes_drawn(user) == friedman_panel.QUOTATIONS_SHOWN == 8
+            assert not _with_class(user, friedman_panel.CHILD_CLASS), 'a chosen stem: its siblings wait for a click'
+            assert [b.text for b in _show_buttons(user)] == [more_quotes, more_children]
+            assert not [t for t in _texts(user) if 'on the page' in t or 'בעמוד' in t]
+            _click(user, _show_buttons(user)[0])
+            await _wait_until(lambda: _quotes_drawn(user) == 10)
+            assert "'תרגום 10'" in _texts(user)
+            _click(user, _show_buttons(user)[0])
+            await _wait_until(lambda: len(_with_class(user, friedman_panel.CHILD_CLASS)) == 2)
+            # Each stem paragraph shows its first quotation; its other two wait for their own click.
+            assert [b.text for b in _show_buttons(user)] == [more_quotes] * 2
+            _click(user, _show_buttons(user)[0])
+            await _wait_until(lambda: _quotes_drawn(user) == 10 + 2 + 2)
+            assert not [t for t in _texts(user) if 'on the page' in t or 'בעמוד' in t]
+
+        _run(driver, _dictionary(), friedman, lang=lang)
+
+
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_friedman_s_tab_shows_the_entries_of_the_roots_blau_and_lane_give(lang):
+    """Owner, 2026-11-11: ויכון reached nothing in Friedman though Lane gave كون. The page hands Friedman
+    the roots of Blau's OWN cards (כתב, which כתאב matched) and Lane's first root (ذا, in Hebrew letters
+    as Blau spells a root), and Friedman's tab shows its entries for them after its own, with no line at
+    all: neither the dictionary that gave the root (owner, 2026-11-12: redundant) nor "found by"."""
+    dictionary, friedman, lane = _dictionary(), _friedman(), _lane()
+    asked = []
+
+    def borrow(result, borrowed):
+        asked.append(borrowed)
+        extra = FriedmanMatch(_unit('f000500', 'entry', 'כתב', "'כתב'"), VIA_BORROWED, '', None, (), 0,
+                              borrowed=tuple((b.source, b.evidence) for b in borrowed))
+        return replace(result, matches=result.matches + (extra,))
+    friedman.borrow.side_effect = borrow
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+        await _wait_until(lambda: len(_with_class(user, friedman_panel.MATCH_CLASS)) == 2)
+        assert asked == [(BorrowedRoot('כתב', BORROW_BLAU, 'כתאב (כתב)'), BorrowedRoot('ד̇א', BORROW_LANE, 'ذا'))]
+        matches = _with_class(user, friedman_panel.MATCH_CLASS)
+        texts = [e.text for e in matches[1].descendants() if isinstance(e, ui.label)]
+        assert not any(t in texts for t in ("Root from Blau's dictionary", "Root from Lane's Lexicon",
+                                            'השורש לפי מילון בלאו', 'השורש לפי הלקסיקון של ליין',
+                                            'כתאב (כתב)', 'ذا')), "no line names the dictionary nor its evidence"
+        vias = [v for v in _with_class(user, friedman_panel.VIA_CLASS)]
+        assert len(vias) == 1 and matches[0].id in {a.id for a in vias[0].ancestors()}, \
+            'only the own match says how it was found'
+
+    _run(driver, dictionary, friedman, lang=lang, lane=lane)
+
+
+@pytest.mark.parametrize('lang, label', [('en', 'found by its verb form'), ('he', 'נמצא לפי צורת הפועל')])
+def test_a_match_found_by_verb_form_says_so_with_the_form_the_root_and_the_stem(lang, label):
+    """PR 3 (the owner's wording, 2026-11-11): a fourth way of being found beside the word itself, its
+    base form and the index, followed by the form, the root and the stem."""
+    dictionary, friedman = _dictionary(), _friedman()
+
+    def lookup(word):
+        own = _lookup(word)
+        verb = FriedmanMatch(_unit('f000600', 'entry', 'דלל', "'הוכיח'"), VIA_VERB_FORM, 'אסתדלו (דלל X)', None, (), 0,
+                             stems=(1, 10), root='דלל', kind='A')
+        return replace(own, matches=own.matches + (verb,))
+    friedman.lookup.side_effect = lookup
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'אסתדלו'})
+        await _wait_until(lambda: len(_with_class(user, friedman_panel.MATCH_CLASS)) == 2)
+        matches = _with_class(user, friedman_panel.MATCH_CLASS)
+        vias = _with_class(user, friedman_panel.VIA_CLASS)
+        assert len(vias) == 2 and matches[1].id in {a.id for a in vias[1].ancestors()}
+        assert [e.text for e in vias[1].descendants() if isinstance(e, ui.label)] == [label, 'אסתדלו (דלל X)']
+
+    _run(driver, dictionary, friedman, lang=lang)
+
+
 def test_several_words_in_the_box_are_an_expression_search_with_marks_and_a_gap_control():
     dictionary, friedman = _dictionary(), _friedman()
 
@@ -164,12 +282,15 @@ def test_several_words_in_the_box_are_an_expression_search_with_marks_and_a_gap_
             assert 'under' in texts, "the sub-entry names its entry"
             [select] = [e for e in _all_elements(user) if isinstance(e, ui.select) and 'gap-select' in e.classes]
             assert select.value == DEFAULT_GAP and friedman_panel.GAP_LABEL in texts
+            assert _tab_row(user).value == 'blau', 'Blau has an answer too: the first tab'
+            _choose(user, 'friedman')
             with user._client:
                 select.set_value(0)
             await _wait_until(lambda: friedman.expression.call_count == 2)
             friedman.expression.assert_called_with('עון אללה', gap=0)
             await _wait_until(lambda: any(isinstance(e, ui.select) and e.value == 0 for e in _all_elements(user)))
             assert _shown_word(user) == ['עון אללה'], 'the same words, with the gap the reader chose'
+            assert _tab_row(user).value == 'friedman', "the gap control's tab stays (owner, 2026-11-11)"
             events = sent(captured, blau_panel.POSTHOG_LOOKUP)
             assert events[-1] == {'how': 'box', 'blau': True, 'lane': None, 'friedman': True, 'expression': 2}
             assert all('אללה' not in json.dumps(c.args, ensure_ascii=False) for c in captured.call_args_list)
@@ -212,5 +333,29 @@ def test_a_result_without_a_credit_line_is_not_shown():
         await _wait(lambda: friedman.expression.called)
         await _wait(lambda: False, timeout=0.3)
         assert not _with_class(user, friedman_panel.EXPRESSION_CLASS)
+
+    _run(driver, dictionary, friedman)
+
+
+def test_a_word_found_only_in_a_quotation_is_listed_under_its_unit_with_the_word_marked():
+    place = FriedmanPlace(SCOPE_QUOTATION, 1, tuple(QUOTE.quote.split()), (0,),
+                          (FriedmanComponent('נתכלם', 'נתכלמ', 'נתכלם', 'נתכלמ', 'word'),), QUOTE)
+    quoted = FriedmanLookup('נתכלם', 'נתכלמ', ('נתכלמ',), (), False, STATUS, CREDIT,
+                            quotes=(FriedmanExpressionHit(ENTRY, None, (place,), 3),), more_quotes=2)
+    dictionary, friedman = _dictionary(), _friedman()
+    friedman.lookup.side_effect = lambda word: quoted
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'נתכלם'})
+        await _wait_until(lambda: _sections(user))
+        assert ('friedman', 'Friedman', True) in _tabs(user), 'a quotation is an answer: the tab is not greyed'
+        assert len(_with_class(user, friedman_panel.QUOTES_CLASS)) == 1
+        texts = _texts(user)
+        assert friedman_panel.EXAMPLES_LABEL in texts and 'עַוְן' in texts and QUOTE.translation in texts
+        assert '+2 more places in this unit' in texts and '+2 more entries' in texts
+        assert friedman_panel.NOTHING not in texts and friedman_panel.STATUS_NOTE in texts and CREDIT in texts
+        assert any(friedman_panel.HIT_MARK_CLASS in html and 'נתכלם' in html for html in _marked_html(user))
 
     _run(driver, dictionary, friedman)

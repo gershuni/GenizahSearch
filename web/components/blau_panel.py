@@ -29,11 +29,13 @@ can be corrected and looked up again.
 
 The panel holds every dictionary the site serves, one tab each (owner,
 2026-11-04): Blau's, and Lane's Lexicon (web/components/lane_panel.py, plan
-docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12). It opens on the tab the
-reader last chose while that dictionary has something for the word, else on
-the first that has (``pick_tab``); a tab with nothing is greyed, not hidden,
-and says so when opened. With one dictionary served there is no tab row, and
-the head is titled with its name.
+docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12). A new word opens on the
+first dictionary that has something for it (``pick_tab``; owner, 2026-11-11: no
+tab is remembered); an action inside a tab (a stem button, a gap control, a
+Lane reading) stays on that tab while it has an answer. A tab chosen opens at
+its top. A tab with nothing is greyed, not hidden, and says so when opened.
+With one dictionary served there is no tab row, and the head is titled with
+its name.
 
 Every class here lives in web/static/common.css under ``.gs-blau``; the root
 element carries that class or none of it applies.
@@ -43,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
@@ -52,8 +55,9 @@ from shared.arabic_service import LaneLookup
 from shared.blau_service import (
     SCOPE_CITATION, SITE_URL, BlauAnswer, BlauCard, BlauExpression, BlauExpressionHit, BlauLookup, BlauPlace, BlauSense,
 )
-from shared.friedman_service import FriedmanAnswer, FriedmanExpression
-from web.components import expression_panel, friedman_panel, lane_panel
+from shared.friedman_service import FriedmanAnswer, FriedmanExpression, FriedmanLookup
+from shared.ja_roots import STEM_NUMERALS, root_and_stem, stem_label, stem_query
+from web.components import expression_panel, friedman_panel, lane_panel, show_more, stem_buttons
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr
 
@@ -102,6 +106,13 @@ GLYPH_SVG = (
 #: The box at the top of the panel and its search button.
 INPUT_CLASS = 'blau-input'
 SEARCH_CLASS = 'blau-search'
+#: Beside the box, where Blau's or Friedman's dictionary is served: the verb stem to open with the
+#: root in the box (owner, 2026-11-11). Empty: the box is looked up as typed. Labelled with the
+#: panel's existing word for a stem.
+STEM_SELECT_CLASS = 'blau-stem-select'
+#: The field's list, which Quasar draws outside the popover: the click script must know a choice
+#: there is the panel's own (web/static/js/blau_lookup.js, ``STEM_MENU``).
+STEM_MENU_CLASS = 'blau-stem-menu'
 #: The disclaimer at the top of EVERY panel (owner, 2026-11-04, the Hebrew in the
 #: owner's words): a word with no entry is usually an ordinary Arabic word, which
 #: Blau does not record, or a verb or inflected form whose base was not found.
@@ -139,6 +150,11 @@ KEY_HINT_CLASS = 'blau-key-hint'
 #: How a lookup started (``lookup_how``): a click with the switch on, a click with D or M
 #: armed, a click with Alt held, selected words and the key, or the phone's chip.
 LOOKUP_HOWS = ('word', 'key', 'alt', 'selection', 'chip')
+#: A stem button pressed on a root's card (web/components/stem_buttons.py): the page's own lookup.
+STEM_HOW = 'stem'
+#: A chip of the other possible roots pressed (stem_buttons.render_suggestions): the page keeps the
+#: word's chips while the reader checks them.
+SUGGEST_HOW = 'suggestion'
 #: The span the script wraps the clicked word in (keeps it highlighted).
 HIT_CLASS = 'blau-word-hit'
 #: The events the script dispatches on the popover element.
@@ -157,6 +173,8 @@ POSTHOG_TAB = 'dictionary_tab'
 #: on some other element's text.
 CARD_CLASS = 'blau-card'
 SENSE_CLASS = 'blau-sense'
+#: The senses a card shows before "Show N more senses" (web/components/show_more.py).
+SENSES_SHOWN = 4
 #: The expression search's section in Blau's tab (several words selected or typed; the gap
 #: control, the marks and the matched-word pairs are web/components/expression_panel.py's).
 EXPRESSION_CLASS = 'blau-expression'
@@ -177,12 +195,23 @@ FRIEDMAN_TAB = 'friedman'
 TABS_CLASS = 'dict-tabs'
 TAB_CLASS = 'dict-tab'
 TAB_PANELS_CLASS = 'dict-tab-panels'
+#: The scrolling body under the head and the tab row (one for all the tabs).
+BODY_CLASS = 'panel-body'
 #: The head's title when the panel has tabs; with one dictionary, its name.
 TITLE = 'Dictionaries'
 BLAU_TITLE = "Blau's dictionary"
 TAB_LABELS = {BLAU_TAB: 'Blau', LANE_TAB: 'Lane', FRIEDMAN_TAB: 'Friedman'}
-#: Inside a dictionary's tab: it has nothing for the word.
-NOTHING = 'Nothing in the dictionary for this word.'
+#: Over the entries that hold the word in a citation, a name or an example phrase (Friedman's
+#: tab uses the same words over its quotations).
+EXAMPLES_LABEL = 'Also in the examples under'
+#: A card found by the generated forms of a stem its entry lists (BlauCard.verb_form, PR 3; owner's
+#: wording, 2026-11-11), before the form, the root and the stems. friedman_panel.VERB_FORM (equal by test).
+VERB_FORM_CLASS = 'blau-verb-form'
+VERB_FORM = 'found by its verb form'
+#: Inside Blau's and Friedman's tabs: the dictionary has nothing for the word (step B of the
+#: dictionary lookup plan; the owner's approval, 2026-11-11). Lane's tab keeps its own line.
+NOTHING = ('Not found as an entry or in the examples. A verb or an inflected form may be listed under its root: '
+           'type the root.')
 
 _JS_PATH = Path(__file__).resolve().parents[1] / 'static' / 'js' / 'blau_lookup.js'
 
@@ -230,12 +259,24 @@ def switch_tooltip(on: bool) -> str:
 def lookup_event(typed: bool, result: Optional[BlauLookup], lane: Optional[LaneLookup],
                  how: str = 'word', friedman: Optional[FriedmanAnswer] = None) -> dict:
     """The ``POSTHOG_LOOKUP`` properties of one answered lookup (never the word; an expression
-    search says how many words, never which)."""
-    event = {'how': 'box' if typed else (how if how in LOOKUP_HOWS else 'word'),
+    search says how many words, never which; a root with a stem says that a stem was asked)."""
+    event = {'how': 'box' if typed else (how if how in (*LOOKUP_HOWS, STEM_HOW, SUGGEST_HOW) else 'word'),
              'blau': None if result is None else bool(result.found),
              'lane': None if lane is None else bool(lane.readings)}
     if isinstance(result, BlauExpression):
         event['expression'] = len(result.words)
+    if isinstance(result, BlauLookup) and any(card.borrowed for card in result.cards):
+        event['borrowed'] = sum(1 for card in result.cards if card.borrowed)
+    if isinstance(result, BlauLookup) and any(card.verb_form for card in result.cards):
+        event['verb_forms'] = sum(1 for card in result.cards if card.verb_form)
+    if isinstance(friedman, FriedmanLookup) and any(m.kind for m in friedman.matches):
+        event['friedman_verb_forms'] = sum(1 for m in friedman.matches if m.kind)
+    suggested = (len(result.suggestions) if isinstance(result, BlauLookup) else 0) + (
+        len(friedman.suggestions) if isinstance(friedman, FriedmanLookup) else 0)
+    if suggested:
+        event['suggestions'] = suggested
+    if (isinstance(result, BlauLookup) and result.stem) or (isinstance(friedman, FriedmanLookup) and friedman.stem):
+        event['stem'] = True
     if friedman is not None:
         event['friedman'] = bool(friedman.found)
         if isinstance(friedman, FriedmanExpression):
@@ -243,10 +284,33 @@ def lookup_event(typed: bool, result: Optional[BlauLookup], lane: Optional[LaneL
     return event
 
 
+def keep_chips(state: dict, word: str, how: str, result: Optional[BlauAnswer],
+               friedman: Optional[FriedmanAnswer]) -> tuple[Optional[BlauAnswer], Optional[FriedmanAnswer], tuple[str, str]]:
+    """The chips of the other possible roots, kept while the reader checks them (owner, 2026-11-11: as
+    they were first drawn). ``state`` is the page's memory of them: the word they belong
+    to, Blau's and Friedman's chips, and the one shown now. A chip pressed (``SUGGEST_HOW``) or a stem
+    button pressed (``STEM_HOW``) while there are chips keeps them: the answers get the word's chips
+    again, and what is shown now is marked ('' when it is the word itself). Any other lookup is a new
+    word: its own chips, if any, are remembered. Returns the answers to draw and (word, shown now)."""
+    if how in (SUGGEST_HOW, STEM_HOW) and state.get('word'):
+        state['chosen'] = '' if word == state['word'] else word
+        if isinstance(result, BlauLookup):
+            result = replace(result, suggestions=state['blau'])
+        if isinstance(friedman, FriedmanLookup):
+            friedman = replace(friedman, suggestions=state['friedman'])
+    else:
+        blau = result.suggestions if isinstance(result, BlauLookup) else ()
+        own = friedman.suggestions if isinstance(friedman, FriedmanLookup) else ()
+        state.update(word=word if blau or own else '', blau=blau, friedman=own, chosen='')
+    return result, friedman, (state['word'], state['chosen'])
+
+
 def pick_tab(tabs: Sequence[str], found: Mapping[str, bool], preferred: Optional[str] = None) -> str:
-    """The tab a lookup opens on: the one the reader last chose while it has
-    something for the word; else the first that has; else the reader's (or
-    the first). ``tabs`` is in display order and never empty."""
+    """The tab a lookup opens on: ``preferred`` -- the tab an action inside the
+    panel came from (a stem button, a gap control, a Lane reading), never one
+    remembered from an earlier word (owner, 2026-11-11) -- while it has something
+    for the word; else the first that has; else ``preferred`` (or the first).
+    ``tabs`` is in display order and never empty."""
     if preferred in tabs and found.get(preferred):
         return preferred
     for name in tabs:
@@ -344,8 +408,8 @@ def _render_sense(sense: BlauSense, lang: str) -> None:
                     ui.label(sense.cross_reference).props('dir="rtl" lang="ar"').classes('ar')
 
 
-def _render_card(card: BlauCard, lang: str) -> None:
-    with ui.element('div').classes(f'{CARD_CLASS} card'):
+def _render_card(card: BlauCard, lang: str, on_stem: Optional[Callable[[str, str], Any]] = None) -> None:
+    with ui.element('div').classes(f'{CARD_CLASS} card' + (' stem-chosen' if card.stem else '')):
         with ui.element('div').classes('entry'):
             if card.name:
                 _rtl(card.name).classes('name')
@@ -360,6 +424,14 @@ def _render_card(card: BlauCard, lang: str) -> None:
                 ui.label(tr('spelled without the dot')).classes('flag dot-mismatch')
             link = ui.link(tr('Open on the dictionary site'), card.url, new_tab=True).classes('site')
             link.props(f'title="{_attr(tr("Open on the dictionary site"))}"')
+        # A card for a root another dictionary gave (BlauCard.borrowed) has no line naming that
+        # dictionary: the owner found it redundant (2026-11-12). Found by verb form (PR 3): the word's form, the root and the stems it fits.
+        if card.verb_form:
+            with ui.element('div').classes(f'{VERB_FORM_CLASS} via'):
+                ui.label(tr(VERB_FORM)).classes('via-label')
+                _rtl(card.verb_form)
+        # The stems the entry lists (owner, 2026-11-11): a press opens that stem's senses.
+        stem_buttons.render_stems(card.stems, card.stem, card.root_label, BLAU_TAB, on_stem)
         if card.via:
             with ui.element('div').classes('via'):
                 ui.label(tr('via')).classes('via-label')
@@ -368,23 +440,34 @@ def _render_card(card: BlauCard, lang: str) -> None:
             with ui.element('div').classes('matched-key'):
                 ui.label(tr('matched')).classes('matched-label')
                 _rtl(card.matched_key)
-        for sense in card.senses:
+        # The first senses; the rest on a click, in place (owner, 2026-11-11: never only on the site).
+        for sense in card.senses[:SENSES_SHOWN]:
             _render_sense(sense, lang)
-        if card.more_senses:
+        show_more.render_more(card.senses[SENSES_SHOWN:], lambda sense: _render_sense(sense, lang),
+                              show_more.MORE_SENSES)
+        if card.more_senses:   # beyond what a card carries (MAX_SENSES): none in release 1.1
             ui.link(f'+{card.more_senses} {tr("more senses on the site")}', card.url,
                     new_tab=True).classes('more')
 
 
 def _render_examples(result: BlauLookup, lang: str) -> None:
+    """The entries that hold the word without being about it: first those whose citations or
+    names print it (``quotes``: the place shown, the word marked), then the entries whose
+    example phrases are the word (links)."""
     with ui.element('div').classes(f'{EXAMPLES_CLASS} examples'):
-        ui.label(tr('Also in the examples under')).classes('examples-label')
-        with ui.element('div').classes('example-links'):
-            for example in result.examples:
-                link = ui.link(example.name or example.root_id, example.url, new_tab=True).props('dir="rtl"')
-                if example.phrase:
-                    link.props(f'title="{_attr(example.phrase)}"')
-            if result.more_examples:
-                ui.label(f'+{result.more_examples}').classes('more')
+        ui.label(tr(EXAMPLES_LABEL)).classes('examples-label')
+        for hit in result.quotes:
+            _render_expression_hit(hit, lang)
+        if result.more_quotes:
+            ui.label(f'+{result.more_quotes} {tr("more entries")}').classes('more')
+        if result.examples:
+            with ui.element('div').classes('example-links'):
+                for example in result.examples:
+                    link = ui.link(example.name or example.root_id, example.url, new_tab=True).props('dir="rtl"')
+                    if example.phrase:
+                        link.props(f'title="{_attr(example.phrase)}"')
+                if result.more_examples:
+                    ui.label(f'+{result.more_examples}').classes('more')
 
 
 def _render_credit(credit_he: str, credit_en: str, lang: str) -> None:
@@ -400,15 +483,51 @@ def _render_credit(credit_he: str, credit_en: str, lang: str) -> None:
             'dir="rtl"' if lang == 'he' else 'dir="ltr"').classes(f'{MIDRASH_CREDIT_CLASS} credit-midrash')
 
 
-def _render_box(word: str, on_search: Callable[[str], Any], focus: bool) -> None:
+def box_query(text: str, stem: Optional[int]) -> str:
+    """What the box and the stem beside it look up: the root in the box with the stem chosen after
+    it ("דלל" and X: "דלל X"; another root typed later keeps the stem). The text as typed when no
+    stem is chosen, when the box is empty, when the text already carries a typed stem ("דלל IV"
+    wins over the selector), or when it is several words: an expression search, which a stem
+    chosen for an earlier root must not turn into a root lookup ("כתב כטה" after "דלל X")."""
+    text = ' '.join((text or '').split())
+    if not text or not stem or ' ' in text or root_and_stem(text)[1]:
+        return text
+    return stem_query(text, int(stem))
+
+
+def _render_box(word: str, on_search: Callable[[str], Any], focus: bool, stems: bool = False) -> None:
     """The box at the top of the panel: the word shown, editable; Enter or the
-    search button looks up what it holds."""
-    box = ui.input(value=word, placeholder=tr("A word in Hebrew or Arabic letters (ד' for ד̇)")).props(
+    search button looks up what it holds. With ``stems`` (Blau's or Friedman's
+    dictionary served), a selector beside it chooses a verb stem: a root with a
+    stem shows the root in the box and the stem in the selector, and choosing a
+    stem, or clearing it, looks the box up again with it. Several words in the box
+    are looked up as typed, whatever the stem (``box_query``)."""
+    root, stem = root_and_stem(word) if stems else ('', 0)
+    box = ui.input(value=root if stem else word,
+                   placeholder=tr("A word in Hebrew or Arabic letters (ד' for ד̇)")).props(
         'dense outlined autocomplete=off spellcheck=false' + (' autofocus' if focus else '')
     ).classes(f'{INPUT_CLASS} word-input')
     box.props(f'aria-label="{_attr(tr("Type a word to look up"))}"')
-    box.on('keydown.enter', lambda: on_search(box.value or ''))
-    search = ui.button(icon='search', on_click=lambda: on_search(box.value or '')).props(
+    chosen: dict[str, Optional[int]] = {'stem': stem or None}
+
+    def look_up() -> None:
+        query = box_query(box.value or '', chosen['stem'])
+        if query:
+            on_search(query)
+
+    box.on('keydown.enter', look_up)
+    if stems:
+        def choose(e: Any) -> None:
+            chosen['stem'] = e.value or None
+            look_up()
+
+        select = ui.select({n: stem_label(n) for n in range(1, len(STEM_NUMERALS) + 1)}, value=chosen['stem'],
+                           label=tr(stem_buttons.STEMS_LABEL), on_change=choose).props(
+            f'dense outlined clearable hide-dropdown-icon options-dense behavior=menu popup-content-class={STEM_MENU_CLASS} '
+            f'aria-label="{_attr(tr(stem_buttons.STEMS_LABEL))}"'
+        ).classes(f'{STEM_SELECT_CLASS} stem-select')
+        select.tooltip(tr(stem_buttons.STEMS_LABEL))
+    search = ui.button(icon='search', on_click=look_up).props(
         f'flat round dense size=sm aria-label="{_attr(tr("Look up"))}"').classes(SEARCH_CLASS)
     search.tooltip(tr('Look up'))
 
@@ -496,20 +615,28 @@ def _render_blau_expression(result: BlauExpression, credit_he: str, credit_en: s
 
 
 def _render_blau(result: BlauAnswer, credit_he: str, credit_en: str, lang: str,
-                 on_gap: Optional[Callable[[int, str], Any]] = None) -> None:
+                 on_gap: Optional[Callable[[int, str], Any]] = None,
+                 on_stem: Optional[Callable[[str, str], Any]] = None,
+                 on_suggest: Optional[Callable[[str, str], Any]] = None, chips: tuple[str, str] = ('', '')) -> None:
     """Blau's tab: the disclaimer, the cards and the examples, or what was
     looked for, then the credit (ruling (a): on every panel). Several words are
-    the expression search's section."""
+    the expression search's section. A root typed with a stem it does not list
+    says so above the root's cards."""
     if isinstance(result, BlauExpression):
         _render_blau_expression(result, credit_he, credit_en, lang, on_gap)
         return
     ui.label(tr(DISCLAIMER)).classes(f'{DISCLAIMER_CLASS} disclaimer')
+    if result.stem_missing:
+        stem_buttons.render_not_listed(result.stem)
+    # The other roots the word's verb forms give, beside the entries the word itself reached (owner,
+    # 2026-11-11): chips at the top, a press opens that root on that stem and the chips stay.
+    stem_buttons.render_suggestions(result.suggestions, BLAU_TAB, on_suggest or on_stem, *chips)
     if result.cards:
         for card in result.cards:
-            _render_card(card, lang)
+            _render_card(card, lang, on_stem)
         if result.more_cards:
             ui.label(f'+{result.more_cards} {tr("more entries")}').classes('more')
-    if result.examples:
+    if result.examples or result.quotes:
         _render_examples(result, lang)
     if result.word and not result.found:
         with ui.element('div').classes(f'{EMPTY_CLASS} empty'):
@@ -532,7 +659,9 @@ def _render_lane(lane: LaneLookup, credit: str, lang: str, on_search: Optional[C
 
 
 def _render_friedman(friedman: FriedmanAnswer, credit: str, lang: str, on_search: Optional[Callable[[str], Any]],
-                     titled: bool, on_gap: Optional[Callable[[int, str], Any]] = None) -> None:
+                     titled: bool, on_gap: Optional[Callable[[int, str], Any]] = None,
+                     on_stem: Optional[Callable[[str, str], Any]] = None,
+                     on_suggest: Optional[Callable[[str, str], Any]] = None, chips: tuple[str, str] = ('', '')) -> None:
     """Friedman's tab: its section (web/components/friedman_panel.py), or its title and,
     for a word, that nothing was found. Several words are an expression search (plan step 4):
     its hits with the gap control, or that the words were not found together."""
@@ -541,7 +670,8 @@ def _render_friedman(friedman: FriedmanAnswer, credit: str, lang: str, on_search
                                                          titled=titled):
             friedman_panel.render_friedman_expression_empty(friedman, on_gap=on_gap, titled=titled)
         return
-    if friedman_panel.render_friedman(friedman, credit=credit, lang=lang, on_search=on_search, titled=titled):
+    if friedman_panel.render_friedman(friedman, credit=credit, lang=lang, on_search=on_search, titled=titled,
+                                      on_stem=on_stem, tab=FRIEDMAN_TAB, on_suggest=on_suggest, chips=chips):
         return
     friedman_panel.render_friedman_empty(friedman.word, titled=titled)
 
@@ -552,7 +682,9 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
                   lane: Optional[LaneLookup] = None, lane_credit: str = '',
                   tab: Optional[str] = None, on_tab: Optional[Callable[[str], Any]] = None,
                   friedman: Optional[FriedmanAnswer] = None, friedman_credit: str = '',
-                  on_gap: Optional[Callable[[int, str], Any]] = None) -> bool:
+                  on_gap: Optional[Callable[[int, str], Any]] = None,
+                  on_stem: Optional[Callable[[str, str], Any]] = None,
+                  on_suggest: Optional[Callable[[str, str], Any]] = None, chips: tuple[str, str] = ('', '')) -> bool:
     """Draw the dictionaries' answers for one word into the current container:
     ``result`` is Blau's (None when Blau is not served; for several words its
     expression search), ``lane`` Lane's (None when Lane is not served), ``friedman``
@@ -561,9 +693,14 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
     Each dictionary with its credit line gets a tab (ruling (a), D3: no
     dictionary's text without its credit); without any, nothing is drawn and
     the answer is False. With several, the tab row opens on
-    ``pick_tab(..., tab)`` and a tab the reader chooses is reported to
-    ``on_tab``. With ``on_search`` the head holds the box (the word in it); a
-    lookup with no word is the panel opened to type one."""
+    ``pick_tab(..., tab)`` (``tab``: the tab an action inside the panel came from),
+    a tab the reader chooses is reported to ``on_tab`` and opens at its top. An
+    action inside a tab calls ``on_search(text, tab)`` / ``on_gap(gap, text, tab)``
+    with its tab. With ``on_search`` the head holds the box (the word in it); a
+    lookup with no word is the panel opened to type one. A stem button on a
+    root's card reports its tab and what to look up ("דלל X") to ``on_stem``; a chip of the
+    other possible roots to ``on_suggest`` (else ``on_stem``). ``chips``: (the word the chips
+    belong to, the chip shown now; '' while the word's own answer is shown)."""
     credit_he = (credit_he or '').strip()
     lane_credit = (lane_credit or '').strip()
     friedman_credit = (friedman_credit or '').strip()
@@ -595,17 +732,23 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
     several = len(tabs) > 1
 
     def draw(name: str) -> None:
+        # An action inside a tab (a Lane reading chip, a gap control) looks up again on that tab:
+        # ``on_search`` and ``on_gap`` are told which (owner, 2026-11-11: no tab is remembered).
+        search = (lambda text, _tab=name: on_search(text, _tab)) if on_search is not None else None
+        gap = (lambda value, text, _tab=name: on_gap(value, text, _tab)) if on_gap is not None else None
         if name == BLAU_TAB:
-            _render_blau(result, credit_he, credit_en, lang, on_gap=on_gap)
+            _render_blau(result, credit_he, credit_en, lang, on_gap=gap, on_stem=on_stem, on_suggest=on_suggest,
+                         chips=chips)
         elif name == LANE_TAB:
-            _render_lane(lane, lane_credit, lang, on_search, titled=several)
+            _render_lane(lane, lane_credit, lang, search, titled=several)
         else:
-            _render_friedman(friedman, friedman_credit, lang, on_search, titled=several, on_gap=on_gap)
+            _render_friedman(friedman, friedman_credit, lang, search, titled=several, on_gap=gap,
+                             on_stem=on_stem, on_suggest=on_suggest, chips=chips)
 
     with ui.element('div').classes('panel-head'):
         ui.label(tr(TITLE if several else titles[tabs[0]])).classes('title')
         if on_search is not None:
-            _render_box(word, on_search, focus_input)
+            _render_box(word, on_search, focus_input, stems=BLAU_TAB in tabs or FRIEDMAN_TAB in tabs)
         elif word:
             _rtl(word).classes('word')
         close = ui.button(icon='close', on_click=on_close).props(
@@ -623,7 +766,7 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
             for name in tabs:
                 ui.tab(name, label=tr(TAB_LABELS[name])).classes(
                     f'{TAB_CLASS} ' + ('found' if found[name] else 'not-found'))
-    with ui.element('div').classes('panel-body'):
+    with ui.element('div').classes(BODY_CLASS) as body:
         if not word:
             ui.label(tr('Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.')).classes(
                 'type-note')
@@ -634,4 +777,13 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
                 for name in tabs:
                     with ui.tab_panel(name):
                         draw(name)
+    if several:
+        # A tab chosen opens at its top (owner, 2026-11-11): the body that scrolls is one for all
+        # the tabs, so it is put back to the top in the browser, at once.
+        tab_row.on('update:model-value', js_handler=scroll_to_top_js(body.id))
     return True
+
+
+def scroll_to_top_js(element_id: int) -> str:
+    """The browser-side handler that puts the element with this NiceGUI id back to its top."""
+    return f'() => {{ const body = getHtmlElement({int(element_id)}); if (body) body.scrollTop = 0; }}'

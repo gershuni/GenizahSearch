@@ -108,6 +108,59 @@ def test_the_entries_are_bounded_and_the_rest_counted(sidecar, monkeypatch):
     assert [e.entry_id for e in root.entries] == ["lane:t:1"] and root.more_entries == 1
 
 
+def test_a_root_carries_every_entry_and_a_cut_entry_its_whole_text(sidecar, monkeypatch):
+    """Owner, 2026-11-11: nothing only on the site. MAX_ENTRIES is a bound above Lane's largest root (69
+    entries); a cut entry carries its whole text for the panel's "Show the full entry"."""
+    assert arabic_service.MAX_ENTRIES >= 69
+    monkeypatch.setattr(arabic_service, "MAX_TEXT", 5)
+    [root] = _service(sidecar).lookup("כתב").roots
+    assert root.more_entries == 0 and len(root.entries) == 2
+    for entry in root.entries:
+        assert entry.cut and len(entry.full) > len(entry.text) - 1 and entry.full.startswith(entry.text[:3])
+    monkeypatch.setattr(arabic_service, "MAX_TEXT", 10_000)
+    [root] = _service(sidecar).lookup("כתב").roots
+    assert all(not e.cut and e.full == "" for e in root.entries), "an uncut entry carries no second copy"
+
+
+@pytest.mark.parametrize("root, reading, shapes", [
+    # An adverbial accusative's alif: أيضا is cited as أيض.
+    ("ءWض", "ايضا", ["ايضا", "ايض"]),
+    # A perfect's subject ending goes, an object pronoun stays: طالبته is cited as طالبه.
+    ("طلب", "طالبته", ["طالبته", "طالبه"]),
+    ("طلب", "طالبت", ["طالبت", "طالب"]),
+    ("كتب", "كتبنا", ["كتبنا", "كتب"]),
+    # A doubled root's contracted last letter, written twice: استقر is cited as استقرر.
+    ("قرر", "استقر", ["استقر", "استقرر"]),
+    # Nothing to undo; a weak root's key is not a doubled one.
+    ("كWن", "يكون", ["يكون"]),
+    ("ذWW", "ذا", ["ذا"]),
+    ("ءWض", "اضا", ["اضا"]),   # three letters: no alif taken off
+])
+def test_the_shapes_a_lane_headword_cites_a_reading_by(root, reading, shapes):
+    from shared.arabic_service import _head_shapes
+    assert _head_shapes(root, reading) == shapes
+
+
+def test_the_other_shapes_count_only_when_the_reading_itself_names_no_entry(sidecar, monkeypatch):
+    """بنت is cited as it is: its shape بن (a perfect's ending taken off) must not mark another
+    headword. طالبته names none of its root's headwords as it is, so طالبه is tried."""
+    service = _service(sidecar)
+    asked: list[list[str]] = []
+
+    def forms(found):
+        def matching(root_key, shapes):
+            asked.append(list(shapes))
+            return {"lane:t:own"} if found(shapes) else set()
+        return matching
+
+    monkeypatch.setattr(service, "_forms_matching", forms(lambda shapes: "بنت" in shapes))
+    assert service._matched_entries("بنو", "بنت") == {"lane:t:own"} and asked == [["بنت"]], asked
+    asked.clear()
+    monkeypatch.setattr(service, "_forms_matching", forms(lambda shapes: "طالبه" in shapes))
+    assert service._matched_entries("طلب", "طالبته") == {"lane:t:own"}
+    assert asked == [["طالبته"], ["طالبه"]], asked
+
+
 def test_a_long_text_is_cut_at_a_space():
     text, cut = cut_text("word " * 200, limit=100)
     assert cut and text.endswith("…") and len(text) <= 101 and not text[:-1].endswith(" ")
@@ -149,6 +202,13 @@ def test_a_missing_file_and_the_kill_switch(sidecar, tmp_path, monkeypatch):
     assert not service.is_available() and not service.lookup("דלך").found
     monkeypatch.setenv("LANE_DICTIONARY_ENABLED", "1")
     assert service.lookup("דלך").found
+
+
+def test_an_editors_switch_serves_editors_only_and_the_lookup_answers(sidecar, monkeypatch):
+    service = _service(sidecar)
+    monkeypatch.setenv("LANE_DICTIONARY_ENABLED", "editors")
+    assert not arabic_service.lane_enabled() and not service.is_available()
+    assert service.served_to(True) and not service.served_to(False) and service.lookup("דלך").found
 
 
 def test_a_card_on_a_merged_root_is_titled_with_the_heading_of_its_entry():
