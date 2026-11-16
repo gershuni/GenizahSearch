@@ -16,7 +16,10 @@ A search result found in an FGP or PGP edition links to ``/browse?...&version=fg
 """
 import html
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+# The pure pieces are shared with the desktop's viewers (shared/edition_target.py).
+from shared.edition_target import keep_target, occurrence_at, source_version  # noqa: F401 (re-exported)
 
 _VERSION_RE = re.compile(r'^(fgp|pgp):(\d+)$')
 _SPAN_RE = re.compile(r'^(\d+)-(\d+)$')
@@ -163,76 +166,28 @@ def edition_target_notice(target: Optional[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
-def source_version(source: Dict[str, Any]) -> Optional[str]:
-    """A chooser source's version (``fgp:<id>`` / ``pgp:<id>``), the edition records' key."""
-    from shared.fgp_service import SOURCE_FGP, source_provider
-    if source.get('id') is None:
-        return None
-    if source_provider(source) == SOURCE_FGP:
-        return source.get('uid') or f'fgp:{source.get("id")}'
-    return f'pgp:{source.get("id")}'
-
-
-def keep_target(all_sources: List[Dict[str, Any]], filtered: Optional[List[Dict[str, Any]]],
-                version: Optional[str]) -> Optional[List[Dict[str, Any]]]:
-    """The page's sources after its filter, with the linked edition kept when the filter left
-    it out (it is the text the search matched on this page)."""
-    if not version:
-        return filtered
-    kept = list(filtered or [])
-    if any(source_version(s) == version for s in kept):
-        return kept
-    wanted = [s for s in all_sources or [] if source_version(s) == version]
-    return (kept + wanted[:1]) or filtered
-
-
 def resolve_mark(sys_id: str, version: str, span: Optional[Tuple[int, int]],
                  fp: Optional[str] = None) -> Dict[str, Any]:
     """``{'stale': bool, 'mark': str or None, 'occurrence': int}``: the edition's own characters
     the search matched, and which occurrence of them in the edition it is. *fp*: what the
     span held when the search read it; a span that no longer holds it is stale, even where
     the edition's version and its index agree (both rebuilt since; Codex review of PR #18).
-    Blocking (a sidecar read and an index lookup): call it off the event loop."""
-    from web.editions_assets import edition_for_page
+    Blocking (a sidecar read and an index lookup): call it off the event loop. The rule is
+    shared with the desktop (shared/edition_target.py::resolve_mark)."""
+    from shared.edition_target import resolve_mark as _resolve_mark
+    from web.editions_assets import resolver
     from web.state import state
-    found = edition_for_page(sys_id, version)
-    if found is None:
-        return {'stale': True, 'mark': None, 'occurrence': 0}
-    entry, resolved = found
-    try:
-        indexed = state.searcher.get_full_text_by_id(entry['uid'])
-    except Exception:
-        indexed = None
-    search = resolved.get('search')
-    if indexed is None or search is None or search.text != indexed:
-        # The edition's text is not the one the search read (refreshed since the build).
-        return {'stale': True, 'mark': None, 'occurrence': 0}
-    if not span or not (0 <= span[0] < span[1] <= len(search.text)):
-        # A span past the end of the text the edition has now cannot be the search's.
-        return {'stale': bool(span and fp), 'mark': None, 'occurrence': 0}
-    from shared.editions_search import span_fingerprint
-    if fp and span_fingerprint(search.text, span) != fp:
-        return {'stale': True, 'mark': None, 'occurrence': 0}
-    start, end = search.span_to_original(*span)
-    original = resolved.get('original') or ''
-    mark = original[start:end]
-    return {'stale': False, 'mark': mark or None, 'occurrence': original[:start].count(mark) if mark else 0}
+    return _resolve_mark(state.searcher, resolver(), sys_id, version, span, fp)
 
 
 def mark_html(text: str, mark: Optional[str], occurrence: int = 0) -> Optional[str]:
     """*text*, escaped, with the *occurrence*-th stretch equal to *mark* marked as a search hit
     (the first one when the shown text has fewer: the chooser may show the edition's sections
     apart). None when the shown text does not hold it."""
-    if not text or not mark:
+    where = occurrence_at(text, mark, occurrence)
+    if where is None:
         return None
-    positions = []
-    at = text.find(mark)
-    while at != -1:
-        positions.append(at)
-        at = text.find(mark, at + len(mark))
-    if not positions:
-        return None
-    at = positions[occurrence] if occurrence < len(positions) else positions[0]
+    at = where[0]
     # A match that crosses a line break is marked on each of its lines: the reading view
     # lays the text out line by line.
     marked = html.escape(mark).replace('\n', '</span>\n<span class="highlight-term">')

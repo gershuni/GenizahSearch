@@ -2060,6 +2060,50 @@ class ResultDialog(QDialog):
                 except Exception as e:
                     logger.debug("Error loading version: %s", e)
 
+    #: What makes a result row a scholarly-transcription hit grouped by page: a copy that
+    #: follows another folio drops them.
+    _EDITION_ROW_KEYS = ('edition', 'members', 'sources', 'edition_match', 'page_identified',
+                         'group_key', 'edition_uid')
+
+    def _rd_align_data_with_page(self, page_data):
+        """Keep the dialog's row aligned with the folio shown -- its header, uid, text and
+        manuscript, which the actions read (Browse, lists, Composition). A hit in a scholarly
+        transcription keeps the edition's identity while its own folio shows (editions plan
+        section 3.4); once navigation leaves that folio the dialog follows the folio shown on a
+        copy, so the results table's row keeps the edition's identity, and coming back to the
+        folio puts the row back (Codex review of #28)."""
+        if self.data is None:
+            return
+        target = getattr(self, '_rd_edition_target', None)
+        row = getattr(self, '_rd_edition_row', None)
+        if target is not None and row is not None and target.owns(self._rd_page_key()):
+            # The hit's own folio (again): the edition's identity, as the chooser shows it.
+            self.data = row
+            return
+        if self.data.get('edition'):
+            self.data = {k: v for k, v in self.data.items() if k not in self._EDITION_ROW_KEYS}
+            self.data['display'] = dict(self.data.get('display') or {})
+        self.data['raw_header'] = page_data.get('full_header', self.data.get('raw_header', ''))
+        self.data['uid'] = page_data.get('uid', self.data.get('uid'))
+        self.data['full_text'] = page_data.get('text', self.data.get('full_text', ''))
+        display_block = self.data.get('display', {})
+        display_block['id'] = self.current_sys_id
+        self.data['display'] = display_block
+
+    def _rd_page_key(self):
+        """The folio shown (sys_id, volume, page): what a scholarly-transcription hit claims."""
+        return (getattr(self, 'current_sys_id', None), getattr(self, 'current_volume_ie', None),
+                getattr(self, 'current_p_num', None))
+
+    def _rd_show_edition_notice(self, target):
+        """Tell the reader, once, that a scholarly-transcription hit's edition has changed since
+        the search, or that its page could not be identified (desktop/edition_view.py)."""
+        message = target.notice() if target is not None else None
+        if not message:
+            return
+        anchor = getattr(self, 'rd_version_combo', None) or self
+        QToolTip.showText(anchor.mapToGlobal(anchor.rect().bottomLeft()), tr(message), anchor)
+
     def _mark_search_hits(self, text):
         """Re-derive the `*...*` search-hit markers from `highlight_pattern`.
 
@@ -2110,7 +2154,12 @@ class ResultDialog(QDialog):
         # SEED-033 picks the source that CONTAINS the searched phrase, and then
         # this path rendered it with no highlighting whatsoever. Mark it the
         # same way V0.8 is marked (no-op when the phrase isn't in this edition).
-        text = self._mark_search_hits(text)
+        # The edition a scholarly-transcription hit opened on: its match itself, mapped
+        # from the search's span (desktop/edition_view.py).
+        target = getattr(self, '_rd_edition_target', None)
+        exact = (target.marked(text, self.rd_version_combo.currentData(), self._rd_page_key())
+                 if target and hasattr(self, 'rd_version_combo') else None)
+        text = exact if exact is not None else self._mark_search_hits(text)
         # Escaped, as _htmlify does: editions carry `<...>` marks that setHtml
         # would drop with their contents.
         html_text = text_lines_to_html(text)
@@ -2120,7 +2169,9 @@ class ResultDialog(QDialog):
         # would delete the stars and show the word as a red hit nobody
         # searched for (Codex P2, PR #334). The Browse twin is
         # GenizahGUI._browse_markers_are_ours, which documents the residue.
-        if '*' in text and (getattr(self, 'data', None) or {}).get('highlight_pattern'):
+        # The exact mark of a scholarly-transcription hit is a search marker too, with or
+        # without a pattern on the row (Codex review of #28).
+        if '*' in text and (exact is not None or (getattr(self, 'data', None) or {}).get('highlight_pattern')):
             html_text = markers_to_bold_html(html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
@@ -2201,11 +2252,18 @@ class ResultDialog(QDialog):
             # must_contain: the search-hit phrase for THIS page (SEED-033 Option
             # A) — None on a page with no search-hit markers (e.g. reached via
             # manuscript nav rather than a matched search).
-            edition_data = parent._auto_select_pgp_edition(
-                self.rd_version_combo, sources=sources,
-                htr_text=getattr(self, '_rd_original_text', None) or self.text_ms.toPlainText(),
-                sys_id=self.current_sys_id,
-                must_contain=getattr(self, '_rd_search_match_text', None))
+            # A hit in a scholarly transcription opens on that edition (its folio only);
+            # otherwise, or when it is stale, the default choice.
+            target = getattr(self, '_rd_edition_target', None)
+            edition_data = (target.choose(self.rd_version_combo, self._rd_page_key(), self.searcher)
+                            if target else None)
+            self._rd_show_edition_notice(target)
+            if edition_data is None:
+                edition_data = parent._auto_select_pgp_edition(
+                    self.rd_version_combo, sources=sources,
+                    htr_text=getattr(self, '_rd_original_text', None) or self.text_ms.toPlainText(),
+                    sys_id=self.current_sys_id,
+                    must_contain=getattr(self, '_rd_search_match_text', None))
             if edition_data:
                 content = edition_data.get('content', '')
                 if content:
@@ -2890,6 +2948,12 @@ class ResultDialog(QDialog):
                 else:
                     data['full_text'] = data.get('text', '')
         self.data = data
+        # A hit in a scholarly transcription opens on that edition, its match marked
+        # (desktop/edition_view.py); None for any other result.
+        from desktop.edition_view import EditionTarget
+        self._rd_edition_target = EditionTarget.from_row(data)
+        # The row itself, put back whenever the hit's own folio shows again.
+        self._rd_edition_row = data if self._rd_edition_target is not None else None
 
         # Phase 95 smoke-fix (E): show "Open file" button for LOCAL hits only.
         try:
@@ -3377,14 +3441,9 @@ class ResultDialog(QDialog):
         self._update_add_to_list_button()
         self._refresh_compound_strip()
 
-        # Keep the dialog's data object aligned with the currently displayed folio
-        if self.data is not None:
-            self.data['raw_header'] = page_data.get('full_header', self.data.get('raw_header', ''))
-            self.data['uid'] = page_data.get('uid', self.data.get('uid'))
-            self.data['full_text'] = page_data.get('text', self.data.get('full_text', ''))
-            display_block = self.data.get('display', {})
-            display_block['id'] = self.current_sys_id
-            self.data['display'] = display_block
+        # Keep the dialog's data object aligned with the currently displayed folio (a hit in a
+        # scholarly transcription: see _rd_align_data_with_page).
+        self._rd_align_data_with_page(page_data)
 
         # Update Info Label
         info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
@@ -3514,10 +3573,12 @@ class ResultDialog(QDialog):
             # and must NOT be queried from the worker QThread) and pass them in.
             _rd_folio, _rd_imgnum = self._rd_displayed_image_keys(
                 page_data.get('total_pages', 0))
+            _rd_target = getattr(self, '_rd_edition_target', None)
             self._rd_pgp_worker = PGPSourceWorker(
                 self.current_sys_id, self.current_p_num or 1,
                 folio_label=_rd_folio, image_number=_rd_imgnum,
-                page_text=page_data.get('text') or '')
+                page_text=page_data.get('text') or '',
+                keep_version=_rd_target.keep_version(self._rd_page_key(), self.searcher) if _rd_target else '')
             self._rd_pgp_worker.finished_signal.connect(self._on_rd_pgp_loaded)
             self._rd_pgp_worker.error_signal.connect(self._on_rd_pgp_error)
             self._rd_pgp_worker.start()

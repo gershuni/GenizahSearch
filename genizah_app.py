@@ -1172,7 +1172,7 @@ def _build_search_results_xlsx_bytes(
         title = (meta.get('title') if meta else (display_dict.get('title') or ''))
         library_name = (meta.get('library_name') if meta else '')
         img_page = str(display_dict.get('img', '') or '')
-        source_label = display_dict.get('source', '') or ''
+        source_label = _export_source_label(res)
 
         snippet_raw = res.get('raw_file_hl', '') or res.get('snippet', '') or ''
         # The sanitizer drops line breaks, gluing the words on either side;
@@ -1432,7 +1432,7 @@ def _build_export_data_row(result_dict, filepath_fn=None):
             snippet,
         ]
     else:
-        row = [sid, '', '', '', '', d.get('source', ''), snippet]
+        row = [sid, '', '', '', '', _export_source_label(result_dict), snippet]
     return row, is_local
 
 
@@ -1596,6 +1596,137 @@ def _editions_not_searched_note(skipped):
     desktop/editions_index.py), or ''. A function, not a method: the results line's
     composers are borrowed by stand-ins in the tests."""
     return f" · {tr('The scholarly transcriptions could not be searched this time')}" if skipped else ''
+
+
+#: The Transcriptions choice's values and labels (the website's: web/pages/search_editions.py).
+_SOURCE_CHOICES = (('all', "All"), ('editions', "Scholarly"), ('automatic', "Automatic"))
+
+
+def _restore_sources_choice(window, choice):
+    """Put a saved Transcriptions choice in place (session JSON, a history entry) on *window*,
+    without saving it again, and show the choice where it applies. Anything but a known value
+    (an older file, a damaged one) leaves the current choice. A function, not a method: the
+    session-restore methods that call it are borrowed by stand-ins in the tests."""
+    if choice in {key for key, _label in _SOURCE_CHOICES}:
+        window._search_sources_choice = choice
+        combo = getattr(window, 'sources_combo', None)
+        if combo is not None:
+            idx = combo.findData(choice)
+            if idx >= 0:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+    update = getattr(window, '_update_sources_visibility', None)
+    if callable(update):
+        update()
+
+
+#: A result's sources as the website names them (web/pages/search_editions.py::_SOURCE_NAMES).
+_MATCH_SOURCE_NAMES = {'automatic': "Automatic transcription", 'fgp_edition': "FGP edition",
+                       'pgp_edition': "PGP edition", 'local': "My Library"}
+_CREDIT_CHARS = 40
+
+
+def _edition_credit(edition, cut=True):
+    """Who made an edition, in the interface's language (the other when it has none), cut to
+    _CREDIT_CHARS -- as the website's cards credit it -- unless *cut* is False (exports)."""
+    # Live read: the module-level CURRENT_LANG is the snapshot taken at import.
+    from genizah_core import CURRENT_LANG as lang
+    credit = (edition or {}).get('credit') or {}
+    first, second = ('he', 'en') if lang == 'he' else ('en', 'he')
+    text = ' '.join(str(credit.get(first) or credit.get(second) or '').split())
+    if not cut or len(text) <= _CREDIT_CHARS:
+        return text
+    return text[:_CREDIT_CHARS - 1].rstrip() + '\u2026'
+
+
+def _match_member_label(member, cut=True):
+    """One matching text of a result: "Automatic transcription", "FGP edition (credit)", ..."""
+    from shared.editions_search import source_label
+    label = tr(_MATCH_SOURCE_NAMES.get(source_label(member), "Automatic transcription"))
+    credit = _edition_credit(member.get('edition'), cut=cut)
+    return f"{label} ({credit})" if credit else label
+
+
+def _export_source_label(res):
+    """A result's Source cell in the exports: every text of its page that matched
+    ("Automatic transcription, PGP edition (Ben-Sasson)") for a result grouped by page, as the
+    website's exports write it (web/export_service.py::_sources_cell); else the row's source."""
+    members = (res or {}).get('members')
+    if members:
+        return ', '.join(dict.fromkeys(_match_member_label(m, cut=False) for m in members))
+    return ((res or {}).get('display') or {}).get('source', '') or ''
+
+
+def _export_row_with_sources(res):
+    """*res* for a writer that reads the row's display source (shared/docx_export.py): a
+    result grouped by page carries every matched text there; any other row is *res* itself."""
+    if not (res or {}).get('members'):
+        return res
+    out = dict(res)
+    out['display'] = dict(res.get('display') or {}, source=_export_source_label(res))
+    return out
+
+
+def _result_sources_cell(res):
+    """``(text, tooltip)`` of the Src cell of a result grouped by page (a search with the
+    scholarly transcriptions: editions plan section 3.4), or None for any other row. The text
+    names every source that matched, short (``V0.8, FGP``); the tooltip says them in full
+    ("Matched in: Automatic transcription, FGP edition (credit)")."""
+    members = res.get('members')
+    if not members:
+        return None
+    codes, labels = [], []
+    for member in members:
+        edition = member.get('edition')
+        code = (edition.get('kind') or '').upper() if edition else \
+            str((member.get('display') or {}).get('source') or '')
+        if code and code not in codes:
+            codes.append(code)
+        label = _match_member_label(member)
+        if label not in labels:
+            labels.append(label)
+    return ', '.join(codes), f"{tr('Matched in')}: {', '.join(labels)}"
+
+
+def _editions_match_note(rows):
+    """' · N in scholarly transcriptions' when results grouped by page have an edition among
+    their matches, or '' (the website's count line: never "only in", which a capped automatic
+    search cannot establish)."""
+    rows = rows or []
+    if not any(isinstance(r, dict) and 'members' in r for r in rows):
+        return ''
+    from shared.editions_search import results_summary
+    n = results_summary(rows)['with_edition']
+    return f" · {n} {tr('in scholarly transcriptions')}" if n else ''
+
+
+#: What session.json keeps of each matching text of a result grouped by page: enough to name
+#: it (the Src cell, the exports' Source) and open its edition -- not its text, which the
+#: result itself holds for its best member, and which would repeat every edition in full.
+_SESSION_MEMBER_DISPLAY_KEYS = ('id', 'source', 'img')
+
+
+def _session_rows(rows):
+    """The shown rows as session.json keeps them: a result grouped by page (a search with the
+    scholarly transcriptions) keeps its members light -- uid, header, the display keys the
+    table reads, the edition record -- as the website's stored rows do
+    (web/export_state.py). Measured 2026-11-16 on 5,000 rows: 34-51 MB with whole members,
+    against 12-20 MB for today's search. Any other row is kept as it is."""
+    out = []
+    for row in rows or []:
+        members = row.get('members') if isinstance(row, dict) else None
+        if not isinstance(members, list):
+            out.append(row)
+            continue
+        light = dict(row)
+        light['members'] = [
+            {'uid': m.get('uid', ''), 'raw_header': m.get('raw_header', ''),
+             'display': {k: v for k, v in (m.get('display') or {}).items() if k in _SESSION_MEMBER_DISPLAY_KEYS},
+             'edition': m.get('edition')}
+            for m in members if isinstance(m, dict)]
+        out.append(light)
+    return out
 
 
 def _snapshot_has_compound_rows(*lists):
@@ -1801,6 +1932,8 @@ class GenizahGUI(QMainWindow):
         self._local_filter_inactive_chip_visible = False
         # Phase 95-08 smoke-fix — corpus scope selector persistence (session JSON, not QSettings)
         self._search_corpus_scope = 'genizah'          # 'all' | 'genizah' | 'local'
+        # Which transcriptions a search reads (editions plan D1): 'all' | 'editions' | 'automatic'
+        self._search_sources_choice = 'all'
         self._comp_results_from_parallels = False      # track source surface for comp_tree
         self._domain_worker = None
         self._pgp_tags_worker = None
@@ -2033,9 +2166,15 @@ class GenizahGUI(QMainWindow):
             # The scholarly transcriptions' index (editions plan §3.7, D3; desktop/editions_index.py).
             # Made here, before the "Index Missing" offer below can start a main-index build,
             # so that build suspends it and its end checks it (Codex review of PR #25). Nothing
-            # runs at construction: the first check is timed at the end of this method.
-            self._editions_index = EditionsIndex(lambda: self.searcher, readers_busy=self._index_readers_busy,
-                                                 parent=self)
+            # runs at construction: the first check is timed at the end of this method. A failure
+            # here leaves the scholarly transcriptions out, never the rest of the startup.
+            try:
+                self._editions_index = EditionsIndex(lambda: self.searcher, readers_busy=self._index_readers_busy,
+                                                     parent=self)
+            except Exception:
+                logger.exception("The scholarly transcriptions' index could not be set up; "
+                                 "searches read the automatic transcriptions")
+                self._editions_index = None
 
             # Phase 97 R-01: wire is_searchable gate from SearchEngine -> MyLibraryTab.
             # attach_my_library_tab stores a weakref so _query_local_index can check
@@ -2185,7 +2324,8 @@ class GenizahGUI(QMainWindow):
             # The scholarly transcriptions' index: checked against the installed sidecars, and
             # built when it is missing or stale, in a background thread once the startup work
             # above has settled (a main-index build started above makes this wait for its end).
-            QTimer.singleShot(self._EDITIONS_CHECK_DELAY_MS, self._editions_index.check)
+            if self._editions_index is not None:
+                QTimer.singleShot(self._EDITIONS_CHECK_DELAY_MS, self._editions_index.check)
 
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
@@ -6264,6 +6404,24 @@ class GenizahGUI(QMainWindow):
         self.corpus_scope_combo.currentIndexChanged.connect(self._on_corpus_scope_changed)
         row1.addWidget(self.corpus_scope_combo)
 
+        # Which transcriptions a search reads: the automatic ones, the scholarly ones (the FGP
+        # and PGP editions: editions plan D1, the website's words), or both. Shown only where
+        # they are read (_sources_apply): not for My Library alone, Title / Shelfmark or Lab Mode.
+        self.sources_label = QLabel(tr("Transcriptions") + ":")
+        self.sources_combo = QComboBox()
+        for _key, _label in self._SOURCE_CHOICES:
+            self.sources_combo.addItem(tr(_label), _key)
+        _sources_tip = tr("Search the automatic transcriptions, the scholarly transcriptions (FGP and PGP), "
+                          "or both")
+        self.sources_combo.setToolTip(_sources_tip)
+        self.sources_label.setToolTip(_sources_tip)
+        _sources_idx = self.sources_combo.findData(getattr(self, '_search_sources_choice', 'all'))
+        if _sources_idx >= 0:
+            self.sources_combo.setCurrentIndex(_sources_idx)
+        self.sources_combo.currentIndexChanged.connect(self._on_sources_changed)
+        row1.addWidget(self.sources_label)
+        row1.addWidget(self.sources_combo)
+
         # "New" button to reset/clear search state
         self.btn_reset_search = QPushButton(tr("New"))
         self.btn_reset_search.setToolTip(tr("Clear and start a new search"))
@@ -9164,7 +9322,8 @@ class GenizahGUI(QMainWindow):
             self.current_browse_sid, self.current_browse_p or 1,
             folio_label=self._displayed_folio_label_for_pgp(),
             image_number=self._displayed_fgp_image_number_for_pgp(),
-            page_text=getattr(self, 'browse_original_page_text', '') or '')
+            page_text=getattr(self, 'browse_original_page_text', '') or '',
+            keep_version=self._browse_keep_version())
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
         self._browse_pgp_worker.start()
@@ -9241,11 +9400,19 @@ class GenizahGUI(QMainWindow):
             # user may have switched to an FGP/PGP version, so toPlainText() could
             # clobber the V0.8 baseline with the wrong text.
 
-            # Auto-select first PGP edition and display it
-            edition_data = self._auto_select_pgp_edition(
-                self.browse_version_combo, sources=sources,
-                htr_text=getattr(self, 'browse_original_page_text', '') or '',
-                sys_id=self.current_browse_sid)
+            # A scholarly-transcription hit opened here shows its edition (its folio only);
+            # otherwise, or when it is stale, the first PGP edition is auto-selected.
+            target = getattr(self, '_browse_edition_target', None)
+            edition_data = (target.choose(self.browse_version_combo, self._browse_page_key(), self.searcher)
+                            if target else None)
+            message = target.notice() if target is not None else None
+            if message and hasattr(self, 'status_label'):
+                self.status_label.setText(tr(message))
+            if edition_data is None:
+                edition_data = self._auto_select_pgp_edition(
+                    self.browse_version_combo, sources=sources,
+                    htr_text=getattr(self, 'browse_original_page_text', '') or '',
+                    sys_id=self.current_browse_sid)
             if edition_data:
                 content = edition_data.get('content', '')
                 if content:
@@ -10206,6 +10373,18 @@ class GenizahGUI(QMainWindow):
                     tree.setCurrentItem(child_item)
                     return
 
+    def _browse_page_key(self):
+        """The folio Browse shows (sys_id, volume, page): what a scholarly-transcription hit
+        opened here claims (desktop/edition_view.py)."""
+        return (getattr(self, 'current_browse_sid', None), getattr(self, 'current_browse_volume_ie', None),
+                getattr(self, 'current_browse_p', None))
+
+    def _browse_keep_version(self):
+        """The edition the page's sources must keep on the folio a scholarly-transcription hit
+        arrived for (PGPSourceWorker ``keep_version``), else ''."""
+        target = getattr(self, '_browse_edition_target', None)
+        return target.keep_version(self._browse_page_key(), self.searcher) if target is not None else ''
+
     def _browse_display_pgp_text(self, text, is_rtl=True):
         """Display PGP edition/translation text with proper directionality."""
         if not text:
@@ -10216,14 +10395,21 @@ class GenizahGUI(QMainWindow):
         # SEED-033 picks the source that CONTAINS the searched phrase, and
         # then this path rendered it with no highlighting at all. Mark it the
         # same way the page render does (no-op when the phrase isn't here).
-        text = self._browse_mark_search_hits(text)
+        # The edition a scholarly-transcription hit opened on: its match itself, mapped
+        # from the search's span (desktop/edition_view.py).
+        target = getattr(self, '_browse_edition_target', None)
+        exact = (target.marked(text, self.browse_version_combo.currentData(), self._browse_page_key())
+                 if target and hasattr(self, 'browse_version_combo') else None)
+        text = exact if exact is not None else self._browse_mark_search_hits(text)
         # Escaped: editions carry `<...>` marks (FGP's `<רא>` line fillers,
         # PGP's `מיב<מ>נא` added letters) that setHtml would drop with their
         # contents.
         browse_html_text = text_lines_to_html(text)
         # Bold asterisks ONLY where they can be search markers -- see
-        # _browse_markers_are_ours. Outside a search they are the page's own.
-        if self._browse_markers_are_ours(text):
+        # _browse_markers_are_ours. Outside a search they are the page's own. The exact
+        # mark of a scholarly-transcription hit is ours whatever browse_load() cleared
+        # (Codex review of #28).
+        if exact is not None or self._browse_markers_are_ours(text):
             browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
@@ -10265,7 +10451,8 @@ class GenizahGUI(QMainWindow):
             self.current_browse_sid, self.current_browse_p or 1,
             folio_label=self._displayed_folio_label_for_pgp(),
             image_number=self._displayed_fgp_image_number_for_pgp(),
-            page_text=getattr(self, 'browse_original_page_text', '') or '')
+            page_text=getattr(self, 'browse_original_page_text', '') or '',
+            keep_version=self._browse_keep_version())
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
         self._browse_pgp_worker.start()
@@ -18253,6 +18440,8 @@ class GenizahGUI(QMainWindow):
             self.search_row1_container.setVisible(not is_pgp_tags)
             self.tag_search_combo.setVisible(is_pgp_tags)
             self.search_params_container.setVisible(not is_pgp_tags)
+        # The transcriptions choice: no text is read in Title / Shelfmark.
+        self._update_sources_visibility()
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
@@ -22382,6 +22571,8 @@ class GenizahGUI(QMainWindow):
         # Search Tab
         if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
         if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
+        # The transcriptions choice: a Lab search reads the automatic transcriptions only.
+        self._update_sources_visibility()
         # Deep Scan means something only in Lab Mode: shown with it, not greyed
         # out without it (space on small screens, 2026-09-24).
         if hasattr(self, 'chk_lab_deep'):
@@ -23191,6 +23382,45 @@ class GenizahGUI(QMainWindow):
         self._search_corpus_scope = scope
         self._save_session()
         self._set_local_scope_strip_visible(False)
+        self._update_sources_visibility()
+
+    # -- Which transcriptions a search reads (editions plan D1) ---------------
+
+    #: The choice's values and their labels (module level: _SOURCE_CHOICES).
+    _SOURCE_CHOICES = _SOURCE_CHOICES
+    #: mode_combo rows whose searches read no transcription text: Title, Shelfmark, PGP Tags.
+    _NO_SOURCES_MODE_INDEXES = (5, 6, 7)
+
+    def _set_sources_choice(self, choice):
+        """Put a saved choice in place (_restore_sources_choice)."""
+        _restore_sources_choice(self, choice)
+
+    def _on_sources_changed(self, _index):
+        """Remember the choice (session JSON, as the corpus scope)."""
+        choice = self.sources_combo.currentData()
+        if choice in {key for key, _label in self._SOURCE_CHOICES}:
+            self._search_sources_choice = choice
+            self._save_session()
+
+    def _sources_apply(self):
+        """Whether the choice decides anything for the next search: the Genizah corpus is read
+        (not My Library alone), in a text mode, outside Lab Mode -- the searches the scholarly
+        transcriptions take part in (shared/search_engine.py::execute_search)."""
+        if getattr(self, '_search_corpus_scope', 'genizah') == 'local':
+            return False
+        lab = getattr(self, 'btn_lab_mode_toggle', None)
+        if lab is not None and lab.isChecked():
+            return False
+        mode = getattr(self, 'mode_combo', None)
+        return not (mode is not None and mode.currentIndex() in self._NO_SOURCES_MODE_INDEXES)
+
+    def _update_sources_visibility(self):
+        """The choice is shown only where it applies (_sources_apply)."""
+        shown = self._sources_apply()
+        for name in ('sources_label', 'sources_combo'):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(shown)
 
     # -- Zero-result LOCAL search: "did you mean the Genizah corpus?" -------
 
@@ -23559,7 +23789,10 @@ class GenizahGUI(QMainWindow):
             _corpus_scope = "genizah"
             if hasattr(self, 'corpus_scope_combo'):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=self._search_sources())
+            # Which transcriptions this run reads (editions plan D1): the thread searches them
+            # and the step built from the run replays them.
+            _run_sources = self._search_sources()
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=_run_sources)
             # What this run searched, for the refinement step built from it: a replay
             # (session restore, a removed step, scope change) re-runs exactly this --
             # the widgets may have changed since, and the query lost its mode prefix.
@@ -23568,7 +23801,9 @@ class GenizahGUI(QMainWindow):
                 responsa_options=responsa_options, corpus_scope=_corpus_scope,
                 # The level and x1-x3 this run searched with (set above): a replay of
                 # its step searches with them, not with what a later search left.
-                variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)))
+                variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)),
+                # And the transcriptions it read (editions plan §3.3 item 8): a step replays them.
+                sources=_run_sources)
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
         self._run_responsa_downgrade = None    # and so does its downgrade (downgrade_signal)
         self._run_editions_unavailable = False    # and whether it read the editions (editions_signal)
@@ -24351,10 +24586,20 @@ class GenizahGUI(QMainWindow):
             self.results_table.setCellWidget(row_idx, self.COL_SNIPPET, lbl)
 
             # Img
-            self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(str(meta.get('img', ''))))
+            img_item = QTableWidgetItem(str(meta.get('img', '')))
+            if res.get('page_identified') is False:
+                # A scholarly transcription's hit on no identified page (editions plan §3.4).
+                img_item.setToolTip(tr("Page not identified"))
+            self.results_table.setItem(row_idx, self.COL_IMG, img_item)
             # Src — Phase 95 D-11: LOCAL source rendered in blue #3498db (symmetric with PGP green).
             source_val = str(meta.get('source', ''))
-            if source_val == 'LOCAL':
+            grouped = _result_sources_cell(res)
+            if grouped is not None:
+                # Every text of this page that matched: the automatic one, the editions.
+                src_item = QTableWidgetItem(grouped[0])
+                src_item.setToolTip(grouped[1])
+                self.results_table.setItem(row_idx, self.COL_SRC, src_item)
+            elif source_val == 'LOCAL':
                 src_item = QTableWidgetItem('LOCAL')
                 src_item.setForeground(QColor("#3498db"))
                 self.results_table.setItem(row_idx, self.COL_SRC, src_item)
@@ -24688,7 +24933,10 @@ class GenizahGUI(QMainWindow):
             (r.get('display', {}) or {}).get('source')
             for r in (self.last_results or [])
         }
-        self.results_table.setColumnHidden(self.COL_SRC, not (row_sources & {'V0.7', 'LOCAL'}))
+        # ...or when a scholarly transcription matched (results grouped by page).
+        edition_match = any(r.get('edition_match') for r in (self.last_results or []))
+        self.results_table.setColumnHidden(self.COL_SRC,
+                                           not (row_sources & {'V0.7', 'LOCAL'} or edition_match))
         _pt.append(('setup', time.perf_counter()))
         # Phase 95 REQ-6 — update LOCAL filter button visibility after search results land.
         self._update_local_filter_visibility_search()
@@ -25021,6 +25269,9 @@ class GenizahGUI(QMainWindow):
         step.corpus_scope = params['corpus_scope']
         recorded = params.get('variant_settings')
         step.variant_settings = dict(recorded) if recorded else None
+        # The transcriptions the run read (None: today's search); replay_chain and
+        # complete_chain pass it on (shared/refinement.py::_sources_argument).
+        step.sources = params.get('sources')
 
     def _refinement_step_searcher(self):
         """searcher_for_step for replay_chain / complete_chain: each step searches with
@@ -25750,10 +26001,14 @@ class GenizahGUI(QMainWindow):
 
     def _search_sources(self):
         """The source choice a search runs with (editions plan D1: 'all' / 'editions' /
-        'automatic'). None -- today's search, the automatic transcriptions -- until the
-        choice is offered in the window; the index it reads is kept by
-        desktop/editions_index.py meanwhile."""
-        return None
+        'automatic'), or None where it does not apply (_sources_apply): My Library alone,
+        Title / Shelfmark, Lab Mode -- today's search. Until the scholarly transcriptions'
+        index is open (desktop/editions_index.py builds it in the background) a search with
+        them reads the automatic ones and its result line says so."""
+        if not self._sources_apply():
+            return None
+        choice = getattr(self, '_search_sources_choice', 'all')
+        return choice if choice in {key for key, _label in self._SOURCE_CHOICES} else 'all'
 
     def _on_editions_unavailable(self, unavailable):
         self._run_editions_unavailable = bool(unavailable)
@@ -25828,8 +26083,10 @@ class GenizahGUI(QMainWindow):
             text += f" ({tr('Partial results')})"
         if getattr(self, '_responsa_warning', None):
             text += f" · {self._responsa_warning}"
-        # The scholarly transcriptions not searched for these results (their index not open).
-        return text + _editions_not_searched_note(getattr(self, '_results_editions_unavailable', False))
+        # How many results matched in a scholarly transcription, and whether they could not
+        # be searched for these results (their index not open yet).
+        return (text + _editions_match_note(getattr(self, 'last_results', None))
+                + _editions_not_searched_note(getattr(self, '_results_editions_unavailable', False)))
 
     def _with_search_summary(self, message):
         """`message`, followed by the results summary when any row is hidden,
@@ -27651,6 +27908,10 @@ class GenizahGUI(QMainWindow):
                     pass
         except Exception:
             pass
+        # A hit in a scholarly transcription opens on that edition, its match marked, on the
+        # folio it arrived for (desktop/edition_view.py); any other result clears it.
+        from desktop.edition_view import EditionTarget
+        self._browse_edition_target = EditionTarget.from_row(res) if isinstance(res, dict) else None
         self.browse_load()
 
     def _lookup_local_filepath(self, sys_id: str):
@@ -28556,7 +28817,7 @@ class GenizahGUI(QMainWindow):
 
                 data_rows.append([
                     sid, library_name, shelf, title,
-                    str(d.get('img', '')), d.get('source', ''), snippet,
+                    str(d.get('img', '')), _export_source_label(r), snippet,
                 ])
 
         credit_text = self._get_credit_header(local_only=_local_only_export)
@@ -28571,6 +28832,11 @@ class GenizahGUI(QMainWindow):
         ]
         if self.btn_lab_mode_toggle.isChecked():
             search_info_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep.isChecked() else 'Off'}")
+        # The transcriptions the shown results read (editions plan D1), when the choice applied.
+        _sources_run = (getattr(self, '_last_search_params', None) or {}).get('sources')
+        _sources_names = dict(self._SOURCE_CHOICES)
+        if _sources_run in _sources_names:
+            search_info_lines.append(tr("Transcriptions") + f": {tr(_sources_names[_sources_run])}")
         search_info_text = "\n".join(search_info_lines)
 
         # --- XLSX with 3-sheet citation-grade workbook (Phase 94 EXPORT-META-09) ---
@@ -28834,7 +29100,8 @@ class GenizahGUI(QMainWindow):
                     sid = d.get('id') or r.get('sys_id') or ''
                     fp = _export_filepath(sid) if d.get('source') == 'LOCAL' else ''
                     # EXPUX-04: pass fuller matched-passage text (capped + highlighted inside the writer).
-                    write_docx_result_block(doc, r, filepath=fp, lang=CURRENT_LANG, full_text=_full_text_for_export(r))
+                    write_docx_result_block(doc, _export_row_with_sources(r), filepath=fp, lang=CURRENT_LANG,
+                                            full_text=_full_text_for_export(r))
 
                 if CURRENT_LANG == "he":
                     # No right alignment on the Normal style: Word reads it
@@ -35546,6 +35813,8 @@ class GenizahGUI(QMainWindow):
                         self.corpus_scope_combo.blockSignals(True)
                         self.corpus_scope_combo.setCurrentIndex(_idx)
                         self.corpus_scope_combo.blockSignals(False)
+            # The transcriptions choice it ran with (an entry saved before it existed: as is).
+            _restore_sources_choice(self, params.get('sources'))
             # Restore pre-search filters, as they run today (a copy).
             psf, old_measurements = self._migrate_saved_pre_search_filters(
                 entry.get('pre_search_filters'))
@@ -35719,6 +35988,8 @@ class GenizahGUI(QMainWindow):
                 # re-use restores the dropdown to the same value as when the
                 # search was originally run.
                 'corpus_scope': getattr(self, '_search_corpus_scope', 'genizah'),
+                # And the transcriptions choice (editions plan D1), restored with it.
+                'sources': getattr(self, '_search_sources_choice', 'all'),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots are intentionally NOT stored here. Storing
@@ -35876,6 +36147,8 @@ class GenizahGUI(QMainWindow):
                 self.corpus_scope_combo.blockSignals(True)
                 self.corpus_scope_combo.setCurrentIndex(scope_idx)
                 self.corpus_scope_combo.blockSignals(False)
+        # The transcriptions choice (editions plan D1), kept as the corpus scope is.
+        _restore_sources_choice(self, reg.get('search_sources', 'all'))
 
         # Phase 110 (COMP-LOC-01 / Round-2 #2): the composition corpus scope is ALSO
         # restored on the persistent-prefs path, so it survives even when full session
@@ -35977,7 +36250,7 @@ class GenizahGUI(QMainWindow):
                     'gap': int(self.gap_input.text()) if hasattr(self, 'gap_input') and self.gap_input.text().isdigit() else 0,
                     'text_position': self.text_position_combo.currentIndex() if hasattr(self, 'text_position_combo') else 0,
                     'variant_preset': getattr(self, '_current_variant_preset', 70),
-                    'results': getattr(self, 'last_results', [])[:5000],
+                    'results': _session_rows(getattr(self, 'last_results', [])[:5000]),
                     # D8: the restored count shows "+" if the search was cut off or the
                     # snapshot above drops rows.
                     'search_cutoff': saved_cutoff(getattr(self, '_search_cutoff', None),
@@ -35986,6 +36259,7 @@ class GenizahGUI(QMainWindow):
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),
                     'search_corpus_scope': getattr(self, '_search_corpus_scope', 'genizah'),
+                    'search_sources': getattr(self, '_search_sources_choice', 'all'),
                     'printed_ids': sorted(getattr(self, '_printed_sys_ids', set())),
                     'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),

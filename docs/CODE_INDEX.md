@@ -4001,3 +4001,23 @@ What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
     - Method `_on_finished` (Line 479)
     - Method `_promote_later` (Line 533) — Try a promotion that failed again (PROMOTE_LATER_MS on), unless something else
     - Method `_promote_when_idle` (Line 544) — Promote the built generation once nothing reads the index; a second at a time.
+
+## shared/edition_target.py
+
+- **Function** `source_version` (Line 26) — A chooser source's version (``fgp:<id>`` / ``pgp:<id>``), the edition records' key.
+- **Function** `keep_target` (Line 46) — The page's sources after its filter, with the linked edition kept when the filter left
+- **Function** `resolve_mark` (Line 59) — ``{'stale': bool, 'mark': str or None, 'occurrence': int}``: the edition's own characters
+- **Function** `occurrence_at` (Line 96) — Where the *occurrence*-th stretch equal to *mark* lies in *text* (the first one when the
+- **Function** `target_of` (Line 113) — The edition a search result opens on: ``{'version', 'span', 'fp', 'sys_id', 'located'}``
+
+## desktop/edition_view.py
+
+- **Function** `editions_resolver` (Line 37) — The process's EditionResolver (the sidecars' paths, found once).
+- **Class** `EditionTarget` (Line 46) — The edition one opened result names, and what its folio shows of it.
+    - Method `from_row` (Line 63)
+    - Method `owns` (Line 67) — Is *key* (a folio: sys_id, volume, page) the one this hit arrived for? The first
+    - Method `keep_version` (Line 74) — The version the page's sources must keep (PGPSourceWorker ``keep_version``), on the
+    - Method `resolve` (Line 79) — Find the match in the edition's own text (once): a sidecar read and an index lookup.
+    - Method `choose` (Line 93) — On the folio this hit owns, choose its edition in the version chooser *combo*
+    - Method `marked` (Line 112) — *text* with the match marked (``*...*``, one stretch per line: the viewers lay the
+    - Method `notice` (Line 127) — What the reader should be told about this hit (in English, translated where shown),

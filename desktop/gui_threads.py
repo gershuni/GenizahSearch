@@ -1695,10 +1695,14 @@ class PGPSourceWorker(QThread):
     error_signal = pyqtSignal(str, str)  # sys_id, error_message
 
     def __init__(self, sys_id: str, page_num: int = 1, folio_label: str = '',
-                 image_number: str = '', page_text: str = ''):
+                 image_number: str = '', page_text: str = '', keep_version: str = ''):
         super().__init__()
         self.sys_id = sys_id
         self.page_num = page_num
+        # A scholarly transcription a search hit opens on (``fgp:<id>`` / ``pgp:<id>``):
+        # kept among the page's sources even where the page filter leaves it out
+        # (shared/edition_target.py::keep_target; desktop/edition_view.py). '' -> none.
+        self.keep_version = keep_version or ''
         # Folio label ('1r','2v',…) of the image currently displayed, resolved
         # by the caller on the MAIN thread (the NLI crossref singleton is not
         # thread-safe on desktop, so it must NOT be queried from this QThread).
@@ -1744,6 +1748,9 @@ class PGPSourceWorker(QThread):
             page_sources = filter_sources_for_page(
                 all_sources, self.page_num, self.folio_label, self.image_number,
                 page_text=self.page_text, translations_every_page=True)
+            if self.keep_version:
+                from shared.edition_target import keep_target
+                page_sources = keep_target(all_sources, page_sources, self.keep_version)
 
             # Get document metadata
             pgp_doc = get_document_for_fragment(self.sys_id, self.page_num)

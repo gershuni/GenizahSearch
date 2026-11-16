@@ -2790,3 +2790,54 @@ def test_completing_the_chain_runs_each_step_with_its_own_settings(completing, m
     assert w.searcher.shared_seen == [(150, 3), (150, 3)]
     assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
     assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+
+
+# --------------------------------------------------------------------------
+# Results grouped by page (a search with the scholarly transcriptions, editions plan 3.4)
+# --------------------------------------------------------------------------
+
+def _grouped(sid, page, located=True):
+    """A result grouped by page: an FGP edition matched first, then the automatic page."""
+    row = _res(sid, page)
+    edition = {"kind": "fgp", "id": "7", "uid": "ED:fgp:7", "version": "fgp:7", "sys_id": sid,
+               "located": located, "credit": {"en": "Team Seven", "he": "Team Seven"}}
+    member = {"uid": "ED:fgp:7", "display": {"id": sid, "source": "FGP", "img": str(page) if located else ""},
+              "edition": edition}
+    members = [member, dict(row, edition=None)] if located else [member]
+    row.update(members=members, sources=["fgp_edition"] + (["automatic"] if located else []),
+               edition=edition, edition_match=True, page_identified=located)
+    if not located:
+        row["display"] = dict(row["display"], img="", source="FGP")
+        row["uid"] = "ED:fgp:7"
+    return row
+
+
+@pytest.fixture
+def english(monkeypatch):
+    monkeypatch.setattr(app, "CURRENT_LANG", "en", raising=False)
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")
+
+
+def test_a_result_grouped_by_page_names_every_text_that_matched_in_src(window, english):
+    w = window
+    _search(w, [_grouped(A, 1), _res(B, 1)])
+    item = w.results_table.item(_row_of(w, A)[0], w.COL_SRC)
+    assert item.text() == "FGP, V0.8"
+    assert item.toolTip() == "Matched in: FGP edition (Team Seven), Automatic transcription"
+    assert w.results_table.item(_row_of(w, B)[0], w.COL_SRC).text() == "V0.8"
+    assert not w.results_table.isColumnHidden(w.COL_SRC)          # shown for an edition match
+
+
+def test_an_unplaced_edition_hit_says_its_page_is_not_identified(window, english):
+    w = window
+    _search(w, [_grouped(A, 1, located=False)])
+    item = w.results_table.item(_row_of(w, A)[0], w.COL_IMG)
+    assert item.text() == "" and item.toolTip() == "Page not identified"
+
+
+def test_the_src_column_stays_hidden_for_todays_search(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w.results_table.isColumnHidden(w.COL_SRC)
+

@@ -738,7 +738,7 @@ def test_the_search_sends_its_source_choice_and_its_results_keep_the_note():
     import genizah_app
     with open(genizah_app.__file__, encoding="utf-8") as f:
         src = f.read()
-    assert "sources=self._search_sources())" in src
+    assert "_run_sources = self._search_sources()" in src and "sources=_run_sources)" in src
     assert "self.search_thread.editions_signal.connect(_live(self._on_editions_unavailable))" in src
     assert "self._run_editions_unavailable = False" in src
     assert ("self._results_editions_unavailable = bool(getattr(self, '_run_editions_unavailable', False))"

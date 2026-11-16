@@ -101,6 +101,8 @@ DESKTOP_MODULES = [
     "desktop/export_save.py",
     # 2026-11-16: the scholarly transcriptions' index, built and promoted in the background.
     "desktop/editions_index.py",
+    # 2026-11-16: a search hit opens on its scholarly transcription, its match marked.
+    "desktop/edition_view.py",
 ]
 
 # Compound statement types whose bodies run at import time
