@@ -75,6 +75,7 @@ from typing import Any, Optional, Union
 from shared.blau_normalize import matching_paths, analysis_paths, evidence_cost, grammatical_placeholder, plural_analyses, query_stems
 from shared.blau_normalize import BROKEN_PLURAL, FEMININE_PLURAL, PLURAL, PRONOUN_SUFFIXES
 from shared.blau_normalize import ACCUSATIVE, DUAL, bare_keys, feminine_heading, preposition_candidates, spelling_variant
+from shared.blau_normalize import stacked_variant
 from shared.blau_normalize import NORMALIZER_VERSION, article_candidates, nominal_candidates, spelling_candidates, lookup_stems, normalize_ja  # noqa: F401 - normalize_ja: the index builder and the tests key through this module
 from shared.ja_expression import (
     clitic_governed, matching_scopes, governed_runs, governed_verb_run, names_expression, verb_keys,
@@ -1195,6 +1196,8 @@ class FriedmanService:
                     spelling_variant(path) for path in query_paths) else (('index',),)
             else:
                 evidence = matching_paths(word, literal or matched, matched)
+            if stacked_variant(evidence):
+                return   # another word, not this one's spelling (ממלוך -> ממלכה̈)
             if uid not in seen:
                 seen.add(uid)
                 hits.append((row, via, matched, form))

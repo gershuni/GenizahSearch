@@ -37,6 +37,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from nicegui import ui
 
+from shared.ja_roots import with_final_letters
 from shared.friedman_service import (
     SCOPE_HEAD, SCOPE_QUOTATION, VIA_BORROWED, VIA_CHOSEN, FriedmanExpression, FriedmanExpressionHit, FriedmanLookup, FriedmanMatch,
     FriedmanPlace, FriedmanUnit,
@@ -237,7 +238,7 @@ def _render_match(match: FriedmanMatch, on_stem: Optional[Callable[[str, str], A
             with ui.element('div').classes(f'{VIA_CLASS} via'):
                 ui.label(tr(VIA_LABELS.get(match.via, match.via))).classes('via-label')
                 if match.matched and match.via != 'head':
-                    _rtl(match.matched)
+                    _rtl(with_final_letters(match.matched))   # a lookup key: מלכ is shown מלך
         if match.parent is not None and match.parent.head_text:
             with ui.element('div').classes('matched-key'):
                 ui.label(tr(UNDER)).classes('matched-label')

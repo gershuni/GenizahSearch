@@ -1130,6 +1130,7 @@ desktop.Y.X` identity holds via the facades.
 - **Constant** `SENSES_SHOWN` — a card's first senses; the rest behind "Show N more senses" (`show_more.render_more`), the site link only for senses beyond `MAX_SENSES` (2026-11-11)
 - **Function** `pick_tab` — a new word opens on the first tab with an answer, no tab remembered; `tab` is the tab an action inside the panel came from (a stem button, a gap control, a Lane reading: `on_search(text, tab)`, `on_gap(gap, text, tab)`) (2026-11-11)
 - **Constant** `BODY_CLASS`; **Function** `scroll_to_top_js` — the body scrolls for all tabs; choosing a tab puts it back to its top in the browser (`js_handler` on the tab row) (2026-11-11)
+- **Function** `_render_source`; **Constant** `SOURCES` / `SOURCE_URLS` / `SOURCE_CLASS` — each tab opens on its dictionary's author and title (Hebrew UI, other UIs), linked to its site; under tabs Friedman's and Lane's section titles are left out (`titled=False`); the full credit stays at the foot (2026-11-16)
 
 ## web/components/dictionary_lookup.py
 
@@ -3615,6 +3616,7 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 
 ## shared/blau_normalize.py
 
+- **Function** `stacked_variant` — every way to a match needs a spelling the word lacks (`mater`/`interchange`) and a form the entry lacks (a `source_` step): another word (ממלוך -> ממלכה̈), dropped by both lookups (2026-11-16)
 - **Function** `strip_site_diacritics` (Line 78) — The site's own "strip diacritics": exactly its regex, nothing more.
 - **Function** `strip_marks` (Line 83) — NFC, then every combining mark (category Mn, Mc, Me) removed.
 - **Function** `fold_finals` (Line 90)
@@ -3926,6 +3928,8 @@ The pass rule of plan 6.1 on the graded sample (2026-11-11): per dictionary and 
 ## web/components/expression_panel.py
 
 What the dictionaries' expression searches draw alike (2026-11-08): Friedman's tab and Blau's call these.
+
+- **Function** `render_match_details` — the hedged label over a match (possible spelling, grammatical analysis, root from another dictionary); no tooltip explaining how it was reached (removed 2026-11-16)
 
 - **Constant** `GAP_CLASS` / `HIT_MARK_CLASS` / `PLACE_CLASS` / `COMPONENTS_CLASS` — styled under `.gs-blau` in web/static/common.css; friedman_panel keeps the same literals
 - **Constant** `NOTHING_TOGETHER` / `GAP_LABEL` / `MATCHED_LABEL` / `MORE_PLACES` — the shared strings (owner-approved, 2026-11-08)

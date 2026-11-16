@@ -3025,6 +3025,12 @@ html.blau-armed [data-blau-pane] { cursor: help; }
 .gs-blau .dict-tab-panels { background: transparent; color: inherit; }
 .gs-blau .dict-tab-panels > .q-panel > .q-tab-panel,
 .gs-blau .dict-tab-panels .q-tab-panel { padding: 0; }
+/* Each tab's first line: the dictionary's author and title (blau_panel.SOURCES). */
+.gs-blau .dict-source {
+    display: block; padding: 4px 0 2px; font-size: 0.8rem; font-weight: 600;
+    color: var(--text-secondary, #475569); text-decoration: none;
+}
+.gs-blau .dict-source:hover { text-decoration: underline; }
 /* Lane's Lexicon (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12;
    web/components/lane_panel.py). It reuses the card, entry, sense and credit rules above;
    these are only what Lane adds: the title, the reading chips, the English text. */

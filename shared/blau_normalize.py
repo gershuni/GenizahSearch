@@ -147,6 +147,16 @@ def spelling_variant(path: tuple[str, ...]) -> bool:
     """Was this match path reached through a spelling the word does not have as written?"""
     return any(step in path for step in SPELLING_VARIANT_STEPS)
 
+
+def stacked_variant(paths: tuple[tuple[str, ...], ...]) -> bool:
+    """Does every way to this match need both a spelling the word does not have (``spelling_variant``)
+    and a form the dictionary's head does not have as printed (a ``source_`` step)? Such a match is
+    another word: ממלוך less its waw is ממלך, which with the feminine ending is ממלכה̈ ("fiancée").
+    Of 4,000 corpus words (2026-11-16), Friedman reached 35 such matches for 30 words, all but two or
+    three of them wrong (יהודה -> באליהודיה, לעולם -> לעלמה); Blau none. The lookups drop them."""
+    return bool(paths) and all(spelling_variant(path) and any(step.startswith('source_') for step in path)
+                               for path in paths)
+
 # The regex the site's search page applies under "strip diacritics" (js/search.js,
 # stripDiacritics, release 1.1): Hebrew points and accents, Arabic harakat and Quranic
 # marks, and the combining diacriticals block. Kept verbatim for the parity test; the

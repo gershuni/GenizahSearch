@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional, Sequence
 from nicegui import ui
 
 from shared.blau_normalize import BROKEN_PLURAL, spelling_variant
+from shared.ja_roots import with_final_letters
 from shared.ja_expression import MAX_GAP, MAX_EXPRESSION_WORDS
 from web.translations import tr
 
@@ -120,7 +121,8 @@ def render_problem(answer: Any) -> bool:
 def render_match_details(record: Any) -> None:
     analyses = getattr(record, 'analyses', ())
     if analyses and all(spelling_variant(path) for path in analyses):
-        spelling = getattr(record, 'candidate', '') or getattr(record, 'matched', '')
+        # The key is a lookup key (final letters folded, ממלכ); the reader sees the word as written.
+        spelling = with_final_letters(getattr(record, 'candidate', '') or getattr(record, 'matched', ''))
         ui.label(f'{tr("Possible spelling")}: {spelling}').classes('where dict-evidence')
     elif (getattr(record, 'via', '') == 'verb_form' or getattr(record, 'verb_form', '')
           or analyses and all(BROKEN_PLURAL in path for path in analyses)):
@@ -128,10 +130,6 @@ def render_match_details(record: Any) -> None:
         ui.label(tr('Possible grammatical analysis')).classes('where dict-evidence')
     elif getattr(record, 'borrowed', ()):
         ui.label(tr('Possible root from another dictionary')).classes('where dict-evidence')
-    paths = [" → ".join(path) for path in getattr(record, "analyses", ()) if path]
-    paths += [f"{source}: {evidence}" for source, evidence in getattr(record, "borrowed", ())]
-    if paths:
-        ui.icon('info_outline', size='14px').classes('dict-match-details').tooltip("; ".join(paths))
 
 
 def render_related(result: Any, render_hit: Callable[[Any], Any]) -> None:

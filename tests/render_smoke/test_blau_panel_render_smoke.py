@@ -358,8 +358,11 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
         assert {ENTRY_URL, EXAMPLE_URL, SITE_URL} <= _links(user)
         assert CREDIT_HE in texts and CREDIT_EN in texts
         assert blau_panel.DISCLAIMER in texts, 'the disclaimer is on every panel'
-        credit_links = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == SITE_URL]
+        site_links = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == SITE_URL]
+        credit_links = [e for e in site_links if blau_panel.SOURCE_CLASS not in e.classes]
         assert sorted(e.text for e in credit_links) == sorted([CREDIT_HE, CREDIT_EN])
+        sources = [e.text for e in site_links if blau_panel.SOURCE_CLASS in e.classes]
+        assert sources == [blau_panel.SOURCES[blau_panel.BLAU_TAB][1]], 'the tab opens on author and title'
         midrash = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == blau_panel.ABOUT_URL]
         assert [e.text for e in midrash] == [blau_panel.MIDRASH_CREDIT], 'the digital edition is credited, linked'
         [close] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.CLOSE_CLASS in e.classes]
@@ -703,7 +706,10 @@ def test_lane_has_its_own_tab_beside_blau_s_with_the_perseus_line():
         [lane_credit] = _with_class(user, lane_panel.CREDIT_CLASS)
         assert _tab_of(blau_credit) == 'blau' and _tab_of(lane_credit) == 'lane', 'each credit in its own tab'
         texts = _texts(user)
-        assert lane_panel.TITLE in texts and lane_panel.READINGS_LABEL in texts
+        assert lane_panel.READINGS_LABEL in texts
+        assert lane_panel.TITLE not in texts, 'under tabs the source line names Lane, not a second title'
+        assert {_tab_of(e): e.text for e in _with_class(user, blau_panel.SOURCE_CLASS)} == {
+            'blau': blau_panel.SOURCES[blau_panel.BLAU_TAB][1], 'lane': blau_panel.SOURCES[blau_panel.LANE_TAB][1]}
         chips = [e for e in _all_elements(user) if isinstance(e, ui.button) and lane_panel.CHIP_CLASS in e.classes]
         assert [c.text for c in chips] == ['ذلك', 'دلك']
         assert ['active' in c.classes for c in chips] == [True, False]
@@ -922,7 +928,9 @@ def test_lane_s_tab_says_when_it_has_no_reading():
         [none] = _with_class(user, lane_panel.EMPTY_SECTION_CLASS)
         assert _tab_of(none) == 'lane'
         said = [e.text for e in _all_elements(user) if isinstance(e, ui.label) and none.id in {a.id for a in e.ancestors()}]
-        assert said == [lane_panel.TITLE, blau_panel.NOTHING]
+        assert said == [blau_panel.NOTHING], 'the tab is named by its source line, not a second title'
+        assert [e.text for e in _with_class(user, blau_panel.SOURCE_CLASS) if _tab_of(e) == 'lane'] == [
+            blau_panel.SOURCES[blau_panel.LANE_TAB][1]]
 
     _run(driver, dictionary, lane=lane)
 

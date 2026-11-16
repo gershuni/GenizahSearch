@@ -110,6 +110,7 @@ from urllib.parse import quote
 from shared.blau_normalize import matching_paths, evidence_cost, plural_analyses, query_stems
 from shared.blau_normalize import ACCUSATIVE, BROKEN_PLURAL, DUAL, FEMININE_PLURAL, PLURAL, feminine_heading
 from shared.blau_normalize import analysis_paths, article_candidates, bare_keys, preposition_candidates, spelling_variant
+from shared.blau_normalize import stacked_variant
 from shared.blau_normalize import (
     NORMALIZER_VERSION,
     nominal_candidates,
@@ -1561,6 +1562,12 @@ class BlauService:
                 verbal.append(not article_candidates(key) and listed_alef_perfect(written, self.stem_pairs()))
             return verbal[0]
 
+        def other_word(row: sqlite3.Row, candidate: str) -> bool:
+            # Another word, not this one's spelling (``stacked_variant``; none in Blau on 2026-11-16):
+            # never a card, so it cannot stand in for the word in the gates below (``as_written``,
+            # the dual's check) or in the verb-form fallback, quotations and examples.
+            return stacked_variant(matching_paths(word, _text(row['raw']), candidate))
+
         def order(r: sqlite3.Row) -> tuple[int, int]:
             # The kind first (root, sub-entry, headword, variant); then an entry or sub-entry whose
             # FIRST name is the word before one that gives it as a later name
@@ -1630,12 +1637,12 @@ class BlauService:
                 if (kind in FORM_KINDS and not self._carries_root(roots, _text(row["root_id"]), candidate)
                         and not self._carries_subentry(_text(row["sub_entry_id"]), candidate)):
                     continue   # a word the entry's verb takes, not a form of the entry (FORM_KINDS)
-                if kind in _KIND_RANK:
+                if kind in _KIND_RANK and not other_word(row, candidate):
                     self._add_hit(cards, card_roots, overflow, roots, row, candidate)
                 elif kind == PHRASE_KIND and not stem:
                     phrase_rows.append(row)
         for row, candidate in whole_entries:
-            if _text(row['root_id']) not in card_roots:
+            if _text(row['root_id']) not in card_roots and not other_word(row, candidate):
                 noun_keys.add(candidate)
                 self._add_hit(cards, card_roots, overflow, roots, row, candidate)
         if stem:

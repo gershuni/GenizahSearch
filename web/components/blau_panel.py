@@ -59,7 +59,7 @@ from shared.friedman_service import FriedmanAnswer, FriedmanExpression, Friedman
 from shared.blau_normalize import evidence_cost
 from shared.blau_normalize import normalize_ja
 from shared.ja_expression import MAX_CONTEXT_WORDS
-from shared.ja_roots import STEM_NUMERALS, root_and_stem, stem_label, stem_query
+from shared.ja_roots import STEM_NUMERALS, root_and_stem, stem_label, stem_query, with_final_letters
 from web.components import expression_panel, friedman_panel, lane_panel, show_more, stem_buttons
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr
@@ -206,6 +206,17 @@ BODY_CLASS = 'panel-body'
 TITLE = 'Dictionaries'
 BLAU_TITLE = "Blau's dictionary"
 TAB_LABELS = {BLAU_TAB: 'Blau', LANE_TAB: 'Lane', FRIEDMAN_TAB: 'Friedman'}
+#: Each tab opens on the dictionary's author and title (Hebrew UI, other UIs), always in view
+#: at the top; the full credit line stays at the foot. Linked to the dictionary's own site.
+SOURCE_CLASS = 'dict-source'
+SOURCES = {
+    BLAU_TAB: ('י׳ בלאו, מילון לטקסטים ערביים־יהודיים מימי הביניים',
+               'J. Blau, A Dictionary of Mediaeval Judaeo-Arabic Texts'),
+    FRIEDMAN_TAB: ('מ״ע פרידמן, מילון הערבית־היהודית מימי הביניים',
+                   'M. A. Friedman, A Dictionary of Medieval Judeo-Arabic'),
+    LANE_TAB: ('E. W. Lane, An Arabic-English Lexicon', 'E. W. Lane, An Arabic-English Lexicon'),
+}
+SOURCE_URLS = {BLAU_TAB: SITE_URL, FRIEDMAN_TAB: friedman_panel.SITE_URL, LANE_TAB: lane_panel.SITE_URL}
 #: Over the entries that hold the word in a citation, a name or an example phrase (Friedman's
 #: tab uses the same words over its quotations).
 EXAMPLES_LABEL = 'Also in the examples under'
@@ -803,8 +814,8 @@ def _render_blau(result: BlauAnswer, credit_he: str, credit_en: str, lang: str,
             if result.candidates:
                 with ui.element('div').classes('looked-for'):
                     ui.label(tr('Looked for')).classes('looked-label')
-                    for candidate in result.candidates:
-                        _rtl(candidate).classes('candidate')
+                    for candidate in result.candidates:   # lookup keys: ממלוכ is shown ממלוך
+                        _rtl(with_final_letters(candidate)).classes('candidate')
     _render_credit(credit_he, credit_en, lang)
 
 
@@ -901,6 +912,7 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
         search = (lambda text, _tab=name: on_search(text, _tab)) if on_search is not None else None
         gap = (lambda value, text, _tab=name: on_gap(value, text, _tab)) if on_gap is not None else None
         answer = {BLAU_TAB: result, LANE_TAB: lane, FRIEDMAN_TAB: friedman}[name]
+        _render_source(name, lang)
         if expression_panel.render_problem(answer):
             ui.label({BLAU_TAB: credit_he, LANE_TAB: lane_credit, FRIEDMAN_TAB: friedman_credit}[name])
             return
@@ -924,9 +936,10 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
             _render_blau(displayed, credit_he, credit_en, lang, on_gap=gap, on_stem=on_stem, on_suggest=on_suggest,
                          chips=chips, on_more_entries=more_entries, on_details=on_blau_details)
         elif name == LANE_TAB:
-            _render_lane(lane, lane_credit, lang, search, titled=several)
+            # The source line above names the dictionary: no second title under it.
+            _render_lane(lane, lane_credit, lang, search, titled=False)
         else:
-            _render_friedman(displayed, friedman_credit, lang, search, titled=several, on_gap=gap,
+            _render_friedman(displayed, friedman_credit, lang, search, titled=False, on_gap=gap,
                              on_stem=on_stem, on_suggest=on_suggest, chips=chips, on_more_entries=more_entries)
         if on_more_quotes is not None and getattr(answer, 'more_quotes', 0):
             extra = ui.column().classes('dict-more-quotations')
@@ -994,6 +1007,14 @@ def render_lookup(result: Optional[BlauAnswer], *, credit_he: str = '', credit_e
         # the tabs, so it is put back to the top in the browser, at once.
         tab_row.on('update:model-value', js_handler=scroll_to_top_js(body.id))
     return True
+
+
+def _render_source(name: str, lang: str) -> None:
+    """The dictionary's author and title at the top of its tab, linked to its site."""
+    he, other = SOURCES[name]
+    text = he if lang == 'he' else other
+    direction = 'ltr' if text.isascii() else 'rtl'
+    ui.link(text, SOURCE_URLS[name], new_tab=True).props(f'dir="{direction}"').classes(SOURCE_CLASS)
 
 
 def scroll_to_top_js(element_id: int) -> str:
