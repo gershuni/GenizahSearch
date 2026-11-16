@@ -1434,6 +1434,28 @@ def open_advanced_dialog(search_state, refs, index, result):
             with ui.scroll_area().classes('flex-grow adv-scroll'):
                 adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-2 adv-content adv-tab-text')
 
+            # The dictionary popover (web/components/dictionary_lookup.py): once per dialog, in the
+            # card beside the scroll area. Not inside it: Quasar's scroll area has `contain: strict`,
+            # which clips a fixed child and places it against the area, while the click script
+            # places the popover in window coordinates. It outlives `render_content`, which hides it.
+            dictionaries = getattr(search_state, 'dictionaries', None)
+            dict_popover = dictionaries.popover() if dictionaries is not None and dictionaries.on else None
+
+    def _dict_hide():
+        """The dictionary panel's word is no longer on screen: hide the panel and make a lookup in
+        flight stale. At the START of a change (another result or page while it loads, another tab,
+        the dialog closing), not when its content is drawn: an answer arriving between the two would
+        open the panel over what the reader moved to (Codex on the Quick View PR). A lookup of
+        selected words leaves no marked word, so the click script sends no close for it."""
+        if dict_popover is not None:
+            dict_popover.hide()
+
+    if dict_popover is not None:
+        # Closing the dialog makes a lookup in flight stale, as soon as the close starts: the dialog
+        # and its elements outlive the close (NiceGUI keeps them; Quasar emits `hide` only after the
+        # closing transition), so neither the deletion check nor the request counter would stop it.
+        dialog.on_value_change(lambda e: None if e.value else _dict_hide())
+
     def navigate_result(direction: int):
         """Navigate to prev/next result with in-place update (no dialog close/reopen)."""
         new_idx = adv_state.current_result_idx + direction
@@ -1506,6 +1528,7 @@ def open_advanced_dialog(search_state, refs, index, result):
 
     def load_result(idx: int):
         """Load a result into the dialog, updating UI in-place."""
+        _dict_hide()
         result = adv_state.results[idx]
         display = result.get('display', {})
         adv_state.current_sys_id = display.get('id', '')
@@ -1644,6 +1667,7 @@ def open_advanced_dialog(search_state, refs, index, result):
         """Load a specific page within the current manuscript."""
         if not adv_state.current_sys_id:
             return
+        _dict_hide()
 
         selected = (adv_state.current_result_idx, adv_state.current_sys_id)
         target_p_num = p_num if p_num is not None else adv_state.current_p_num
@@ -1786,6 +1810,8 @@ def open_advanced_dialog(search_state, refs, index, result):
 
     def render_content(result):
         """Render the main content area."""
+        # Another result, page, edit mode or fullscreen: the dictionary panel's word is gone.
+        _dict_hide()
         adv_state.content_container.clear()
         adv_state.image_el = adv_state.image_credit_el = None  # set again below when drawn
 
@@ -2071,7 +2097,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                             with ui.element('div').classes('p-6').style(
                                 'direction: rtl; text-align: right; '
                                 'line-height: 2.4; font-size: 1.3rem; font-family: "SBL Hebrew", "David", serif;'
-                            ):
+                            ) as _fs_text:
+                                # The dictionary works here too; its switch is in the normal layout.
+                                if dict_popover is not None:
+                                    dictionaries.mark_pane(_fs_text)
                                 if text_html:
                                     ui.html(text_html, sanitize=False)
                                 else:
@@ -2326,6 +2355,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                 _active_tab = 'text'
 
             def _set_adv_tab(value):
+                _dict_hide()   # another tab: the text, and the word looked up, are out of sight
                 adv_state.active_tab = value
                 adv_state.content_container.classes(
                     remove='adv-tab-text adv-tab-image adv-tab-info', add=f'adv-tab-{value}')
@@ -2354,6 +2384,7 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                     # Define text container and render function at this scope for version switching
                     text_content_container = None
+                    dict_pane_on = False   # the reader's dictionary switch, once the pane is marked
                     current_display_text = {'value': display_text, 'html': text_html}
 
                     def render_text_section(html_to_render: str):
@@ -2369,6 +2400,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                         nonlocal text_content_container
                         if text_content_container is None:
                             return
+                        # Every redraw of the text (a version, the line-number toggle) removes the word
+                        # the dictionary panel looked up: hide it and make its lookup stale (Codex on #21).
+                        _dict_hide()
                         # D-07: line numbers ON by default; coerced to bool against type drift.
                         show_ln = bool(safe_user_get('ui.show_line_numbers', True))
                         source_text = current_display_text.get('value') or ''
@@ -2489,6 +2523,9 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                                 # Text content - create container (same scope as outer text_content_container)
                                 text_content_container = ui.element('div').classes('w-full')
+                                # The dictionary lookup's marks (they survive the text's redraws).
+                                if dict_popover is not None:
+                                    dict_pane_on = dictionaries.mark_pane(text_content_container)
 
                                 # Initial render (use highlighted HTML)
                                 render_text_section(text_html)
@@ -2500,6 +2537,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 create_version_selector,
                                 create_comment_button, create_joins_button
                             )
+
+                            # The dictionary switch, its hint and the "type a word" button, as in Browse.
+                            if dict_popover is not None and text_content_container is not None:
+                                dictionaries.switch(text_content_container, dict_popover, dict_pane_on)
 
                             def handle_version_change(new_text: str, version_info: dict):
                                 """Handle version selection - update displayed text."""

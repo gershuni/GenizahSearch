@@ -481,6 +481,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     ui.add_head_html(ADVANCED_VIEWER_STYLES.replace(
         '/static/manuscript_viewer.js"', f'/static/manuscript_viewer.js?v={_viewer_js_version()}"', 1))
 
+    # The dictionary lookup in Quick View (web/components/dictionary_lookup.py), as on /browse:
+    # which dictionaries are served is decided once per page build, and the click script is in
+    # the head from the build (a script added when Quick View opens would not run).
+    from shared.arabic_service import get_arabic_service
+    from shared.blau_service import get_blau_service
+    from shared.friedman_service import get_friedman_service
+    from web.analytics import posthog_capture as _dict_capture
+    from web.components.dictionary_lookup import DictionaryLookup
+    search_state.dictionaries = DictionaryLookup(
+        get_blau_service(), get_arabic_service(), get_friedman_service(), editor=_Auth.is_editor(),
+        capture=lambda *a, **k: _dict_capture(*a, **k))
+    search_state.dictionaries.head()
+
     # Domain filter dialog JS helpers (must be at page level for inline onchange handlers)
     # Functions accept containerId parameter for unique dialog instances
     # Library filter dialog JS helpers (BUG-B fix: must be at page level, NOT inside ui.html)

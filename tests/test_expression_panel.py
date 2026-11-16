@@ -16,7 +16,8 @@ REPO = Path(__file__).resolve().parents[1]
 SRC = (REPO / "web" / "components" / "expression_panel.py").read_text(encoding="utf-8")
 BLAU_SRC = (REPO / "web" / "components" / "blau_panel.py").read_text(encoding="utf-8")
 FRIEDMAN_SRC = (REPO / "web" / "components" / "friedman_panel.py").read_text(encoding="utf-8")
-BROWSE_SRC = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+# The page side of the lookup, shared by /browse and Quick View.
+BROWSE_SRC = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
 CSS = (REPO / "web" / "static" / "common.css").read_text(encoding="utf-8")
 
 

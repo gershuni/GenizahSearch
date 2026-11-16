@@ -15,6 +15,8 @@ REPO = Path(__file__).resolve().parents[1]
 SRC = (REPO / "web" / "components" / "friedman_panel.py").read_text(encoding="utf-8")
 PANEL_SRC = (REPO / "web" / "components" / "blau_panel.py").read_text(encoding="utf-8")
 BROWSE_SRC = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+# The page side of the lookup, shared by /browse and Quick View.
+DICT_SRC = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
 MAIN_SRC = (REPO / "web" / "main.py").read_text(encoding="utf-8")
 CSS = (REPO / "web" / "static" / "common.css").read_text(encoding="utf-8")
 TREE = ast.parse(SRC)
@@ -81,9 +83,9 @@ def test_the_panel_the_page_and_the_startup_give_friedman_its_tab():
     assert "friedman_panel.render_friedman(" in PANEL_SRC and "friedman_panel.render_friedman_empty(" in PANEL_SRC
     assert "friedman: Optional[FriedmanAnswer] = None, friedman_credit: str = ''" in PANEL_SRC
     assert "friedman_service = get_friedman_service()" in BROWSE_SRC
-    assert "_dict_served(friedman_service)" in BROWSE_SRC, "asked as the reader sees it: public, or an editor's preview"
-    assert "friedman=friedman, friedman_credit=friedman_service.credit_he" in BROWSE_SRC
-    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in BROWSE_SRC
+    assert "_dict_served(friedman_service)" in DICT_SRC, "asked as the reader sees it: public, or an editor's preview"
+    assert "friedman=friedman, friedman_credit=friedman_service.credit_he" in DICT_SRC
+    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in DICT_SRC
     assert "get_friedman_service" in MAIN_SRC and "Friedman's dictionary not served" in MAIN_SRC
     assert PANEL_SRC.index("tabs.append(FRIEDMAN_TAB)") < PANEL_SRC.index("tabs.append(LANE_TAB)"), \
         "Friedman's tab beside Blau's, before Lane's (owner, 2026-11-08)"
@@ -94,12 +96,12 @@ def test_the_panel_the_page_and_the_startup_give_friedman_its_tab():
 def test_several_words_are_an_expression_search_with_the_gap_the_reader_chose():
     # The page asks ``answer`` with the reader's gap; the service routes several words to the
     # expression search and a root with a stem ("דלל X") to the lookup (tests/test_friedman_service.py).
-    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in BROWSE_SRC
+    assert "friedman_service.answer(word, gap=dict_gap['value'], stems=stems, before=before, after=after, ordered=dict_ordered['value'])" in DICT_SRC
     service_src = (Path(__file__).resolve().parents[1] / "shared" / "friedman_service.py").read_text(encoding="utf-8")
     assert "if len(text.split()) > 1 and not (stems and root_and_stem(text)[1]):" in service_src
     assert "expression = self.expression(text, gap, ordered=ordered)" in service_src
-    assert "dict_gap = {'value': FRIEDMAN_DEFAULT_GAP}" in BROWSE_SRC
-    assert "dict_gap['value'] = gap" in BROWSE_SRC and "on_gap=_choose_gap" in BROWSE_SRC
+    assert "self.gap = {'value': FRIEDMAN_DEFAULT_GAP}" in DICT_SRC
+    assert "dict_gap['value'] = gap" in DICT_SRC and "on_gap=_choose_gap" in DICT_SRC
     assert "isinstance(friedman, FriedmanExpression)" in PANEL_SRC
     assert "friedman_panel.render_friedman_expression(" in PANEL_SRC
     assert "friedman_panel.render_friedman_expression_empty(" in PANEL_SRC

@@ -1131,6 +1131,17 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `pick_tab` — a new word opens on the first tab with an answer, no tab remembered; `tab` is the tab an action inside the panel came from (a stem button, a gap control, a Lane reading: `on_search(text, tab)`, `on_gap(gap, text, tab)`) (2026-11-11)
 - **Constant** `BODY_CLASS`; **Function** `scroll_to_top_js` — the body scrolls for all tabs; choosing a tab puts it back to its top in the browser (`js_handler` on the tab row) (2026-11-11)
 
+## web/components/dictionary_lookup.py
+
+The page side of the dictionary lookup, shared by /browse and the search page's Quick View (2026-11-16).
+
+- **Class** `DictionaryLookup` — one page build's dictionaries: `on` (any served, editor previews included), `served(service)`, the visit's gap and order; the page passes its own services and PostHog capture
+    - Method `head` — the click script in the page's head, from the build (a script added later would not run)
+    - Method `popover` — the popover with its handlers and request counter, here in the tree; returns a `Popover` (`element`, `hide()`: hides it and makes every lookup in flight stale)
+    - Method `mark_pane` — the pane's marks (`PANE_ATTR` while the reader's switch is on, `KEY_PANE_ATTR`, the chip's label); returns the switch's state
+    - Method `switch` — the switch, its hint and the "type a word" button for one pane
+- Quick View (`search_results.open_advanced_dialog`) makes one popover per dialog in the card beside the scroll area, hides it on every `render_content`, version change and the start of the dialog's close; `blau_lookup.js` stands down for a menu or a dialog that does not hold the panel, uses up the Esc that closes the panel in a dialog, and puts the phone chip beside the panel (`tests/js/blau_lookup_dialog_check.js`)
+
 ## web/components/show_more.py
 
 The rest of a dictionary card behind one button that draws it in place (2026-11-11: never only on the site or the PDF page).
@@ -3932,7 +3943,7 @@ What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
 - **Function** `render_stems` — the stems as buttons; a press reports `(tab, "root stem")` to `on_stem`, the chosen one goes back to the root
 - **Function** `render_not_listed` — the line above a root's cards when the typed stem is not listed under it
 - **Function** `render_suggestions`; **Constant** `SUGGESTIONS_CLASS` / `SUGGESTION_CLASS` / `SUGGESTIONS_LABEL` ("Other possible roots") — the other roots a word's verb forms give, as chips at the top of a tab; a press reports `(tab, "root stem")`; with `word` and `chosen`, the chip shown now is marked and the word comes first to go back (pressing the marked chip goes back too)
-- **Function** `blau_panel.keep_chips`; **Constant** `blau_panel.SUGGEST_HOW` — the page's memory of a word's chips: a chip or stem press keeps them on the new answers, any other lookup replaces them (`web/pages/browse.py` `_blau_chips`, `_choose_suggestion`; `render_lookup(on_suggest=, chips=)`) (2026-11-11)
+- **Function** `blau_panel.keep_chips`; **Constant** `blau_panel.SUGGEST_HOW` — the page's memory of a word's chips: a chip or stem press keeps them on the new answers, any other lookup replaces them (`web/components/dictionary_lookup.py` `_blau_chips`, `_choose_suggestion`; `render_lookup(on_suggest=, chips=)`) (2026-11-11)
 
 ## web/components/friedman_panel.py
 

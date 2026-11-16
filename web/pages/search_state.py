@@ -34,6 +34,9 @@ class SearchUIState:
         self.status = ""
         self.is_running = False
         self.is_cancelled = False  # For stop button functionality
+        # The dictionary lookup Quick View offers (web/components/dictionary_lookup.py), set by
+        # the page's build; None: no dictionary in Quick View.
+        self.dictionaries = None
         self.results = []
         # The Responsa guard's downgrade of these results (shown on the count line)
         self.responsa_warning = None

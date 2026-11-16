@@ -170,7 +170,7 @@ def test_the_page_s_hint_names_no_one_dictionary():
     does not say Blau."""
     from shared.genizah_translations import TRANSLATIONS
 
-    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    browse = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
     hint = "Click a word to look it up in the dictionaries"
     assert f"ui.label(tr('{hint}'))" in browse
     assert TRANSLATIONS[hint] == "לחיצה על מילה מחפשת אותה במילונים"
@@ -229,7 +229,7 @@ def test_enter_in_a_box_that_works_in_the_page_does_not_start_the_top_bar():
     main = (REPO / "web" / "main.py").read_text(encoding="utf-8")
     enter = main[main.index("// 2. Trigger on Enter key"):main.index("// 3. KEY FIX")]
     assert "closest('[data-no-loading-bar]')) return;" in enter
-    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    browse = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
     assert "aria-live=\"polite\" data-no-loading-bar" in browse
     search = (REPO / "web" / "pages" / "search.py").read_text(encoding="utf-8")
     assert "data-ux-enter=search_results data-no-loading-bar" in search
@@ -295,12 +295,15 @@ def test_the_look_up_key_works_wherever_a_dictionary_is_served():
     """Owner, 2026-11-05: D or M tapped arms the next click, Alt + a click, selected words and
     the key, with the switch on or off. Held M + a touchpad failed: Windows ignores the
     touchpad while a letter key is held, so the key is tapped, not held."""
-    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    browse = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
     assert f"'[{blau_panel.KEY_PANE_ATTR}]'" in JS
-    marked = browse[browse.index("blau_lookup_on = dict_on and blau_panel.lookup_on()"):]
-    marked = marked[:marked.index("current_text = {'value': page.text}")]
-    assert "if dict_on:\n                                text_container.props(blau_panel.KEY_PANE_ATTR)" in marked
-    assert "text_container.props[blau_panel.CHIP_LABEL_ATTR] = tr(blau_panel.CHIP_LABEL)" in marked
+    marked = browse[browse.index("    def mark_pane(self, container) -> bool:"):]
+    marked = marked[:marked.index("    def switch(")]
+    assert "lookup_on = self.on and blau_panel.lookup_on()" in marked
+    assert "if self.on:\n            container.props(blau_panel.KEY_PANE_ATTR)" in marked
+    assert "container.props[blau_panel.CHIP_LABEL_ATTR] = tr(blau_panel.CHIP_LABEL)" in marked
+    page = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    assert "blau_lookup_on = dictionaries.mark_pane(text_container)" in page
     # D and M by name, by the Hebrew letter, or by the physical key.
     assert ("event.code === 'KeyD' || event.code === 'KeyM' || event.key === 'd' || event.key === 'D' ||\n"
             "      event.key === 'm' || event.key === 'M' || event.key === 'מ'") in JS
@@ -330,17 +333,20 @@ def test_the_look_up_key_works_wherever_a_dictionary_is_served():
     keydown = JS[JS.index("document.addEventListener('keydown'"):JS.index("document.addEventListener('keyup'")]
     for guard in ("if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;",
                   "if (inABox(event.target) || inABox(document.activeElement)) return;",
-                  "if (overlayOpen()) return;"):
+                  "if (overlayOpen(pop)) return;"):
         assert guard in keydown and keydown.index(guard) < keydown.index("down = true;"), guard
         assert keydown.index(guard) < keydown.index("arm(true);"), guard
-    assert "return document.querySelector('.q-dialog, .q-menu') !== null;" in JS
+    # A menu always; a dialog unless it holds the panel (Quick View): tests/js/blau_lookup_dialog_check.js.
+    assert "if (document.querySelector('.q-menu') !== null) return true;" in JS
+    assert "if (!pop || !dialogs[i].contains(pop)) return true;" in JS
 
 
 def test_esc_closes_the_panel_from_anywhere_but_a_dialog():
     keydown = JS[JS.index("document.addEventListener('keydown'"):JS.index("document.addEventListener('keyup'")]
     esc = keydown[keydown.index("if (event.key === 'Escape') {"):keydown.index("if (event.ctrlKey")]
-    assert "if (overlayOpen()) return;" in esc
-    assert "if (had) dispatch(pop, 'blau-close');" in esc and "arm(false);" in esc
+    assert "if (overlayOpen(pop)) return;" in esc and "escape(pop, event);" in esc
+    closing = JS[JS.index("function escape(pop, event) {"):JS.index("var escUsed = false;")]
+    assert "if (had) dispatch(pop, 'blau-close');" in closing and "arm(false);" in closing
     # Before the box guard: Esc closes the panel from its own box too.
     assert keydown.index("if (event.key === 'Escape') {") < keydown.index("inABox(event.target)")
 
@@ -393,9 +399,9 @@ def test_how_a_lookup_started_is_counted():
     assert blau_panel.lookup_event(False, empty_lookup("x"), None, "key")["how"] == "key"
     assert blau_panel.lookup_event(True, empty_lookup("x"), None, "key")["how"] == "box"
     assert blau_panel.lookup_event(False, empty_lookup("x"), None, "nonsense")["how"] == "word"
-    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    browse = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
     assert ("_blau_start(word, False, blau_panel.lookup_how(e.args), stems=False,\n"
-            "                                        beside=blau_panel.lookup_context(e.args))") in browse
+            "                            beside=blau_panel.lookup_context(e.args))") in browse
     assert "_blau_start(text, True, tab=tab, stems=False)" in browse, "the gap control keeps an expression one"
     assert "lane_word = (root_and_stem(word)[0] if stems else '') or word" in browse, "Lane reads the whole selection"
 
@@ -403,7 +409,7 @@ def test_how_a_lookup_started_is_counted():
 def test_the_switch_s_tooltip_names_the_key_in_both_languages():
     from shared.genizah_translations import TRANSLATIONS
 
-    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    browse = (REPO / "web" / "components" / "dictionary_lookup.py").read_text(encoding="utf-8")
     assert "ui.label(tr(blau_panel.KEY_HINT)).classes(" in browse
     assert blau_panel.KEY_HINT == ("Press D or M, then click a word (or click it with Alt held); "
                                    "or select words and press D or M")

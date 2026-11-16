@@ -1,8 +1,10 @@
-/* The Blau dictionary companion on /browse: the click side (plan §6.2).
+/* The Blau dictionary companion on /browse and in the search page's Quick View: the
+ * click side (plan §6.2).
  *
- * On a page where the dictionary is served, the browse page creates one
- * element `.gs-blau-popover` and marks the transcription pane with
- * `data-blau-lookup`. This script, on any click:
+ * On a page where the dictionary is served, the page creates one element
+ * `.gs-blau-popover` (web/components/dictionary_lookup.py; in Quick View inside
+ * the dialog) and marks the transcription pane with `data-blau-lookup`. This
+ * script, on any click:
  *   - inside the popover: nothing (its links and buttons are its own);
  *   - at the end of a drag over words of the marked pane: looks up the selection,
  *     as the key does below (`how: 'selection'`);
@@ -40,7 +42,8 @@
  *   - Esc closes the panel and disarms the key.
  * D and M are the keys by name, the Hebrew letter on a Hebrew layout (`מ`), or
  * the physical keys on any layout; never while a box has the focus, while a
- * dialog or menu is open, or with Ctrl, Alt or Cmd (those are the browser's).
+ * menu or another dialog than the panel's own is open, or with Ctrl, Alt or Cmd
+ * (those are the browser's).
  * A word can span inline text nodes and contain reading brackets. Its letters,
  * marks and brackets are sent unchanged; whitespace, punctuation and an empty
  * lacuna separate words. Highlighting preserves the original inline elements.
@@ -259,9 +262,21 @@
   }
 
   // A dialog or menu above the page (the shortcuts card, a confirmation, the account menu):
-  // its keys are its own (Codex, PR #484). The dictionary panel is neither.
-  function overlayOpen() {
-    return document.querySelector('.q-dialog, .q-menu') !== null;
+  // its keys are its own (Codex, PR #484). The dictionary panel is neither, and neither is the
+  // dialog the panel is in (the search page's Quick View): a menu always is, a dialog unless it
+  // holds the panel. A second dialog over Quick View holds no panel, so it stands the script down.
+  function overlayOpen(pop) {
+    if (document.querySelector('.q-menu') !== null) return true;
+    var dialogs = document.querySelectorAll('.q-dialog');
+    for (var i = 0; i < dialogs.length; i++) {
+      if (!pop || !dialogs[i].contains(pop)) return true;
+    }
+    return false;
+  }
+
+  // The dialog the panel is in (Quick View), or null on a page (/browse).
+  function dialogOf(pop) {
+    return pop && pop.closest ? pop.closest('.q-dialog') : null;
   }
 
   function inABox(el) {
@@ -322,9 +337,16 @@
     chipPick = null;
   }
 
+  // Where the chip lives: the page's body, or, when the panel is in a dialog, the panel's own
+  // parent there. A chip in the body sits under the dialog (z-index 2400 against Quasar's 6000),
+  // and a dialog closed and opened again is a new parent: the chip moves along.
+  function chipHost(pop) {
+    return dialogOf(pop) ? pop.parentNode : document.body;
+  }
+
   function showChip() {
     var pop = document.querySelector(POPOVER);
-    var picked = pop && !overlayOpen() ? selectedWords(true) : null;
+    var picked = pop && !overlayOpen(pop) ? selectedWords(true) : null;
     // Nothing selected, or the very words the open panel already shows.
     if (!picked || (picked.text === chipDone && shown(pop))) { hideChip(); return; }
     var pane = document.querySelector(KEY_PANE);
@@ -340,8 +362,9 @@
         var p = document.querySelector(POPOVER);
         if (p && chipPick) lookUp(p, chipPick, 'chip');
       });
-      document.body.appendChild(chip);
     }
+    var host = chipHost(pop);
+    if (chip.parentNode !== host) host.appendChild(chip);
     chip.textContent = (pane && pane.getAttribute('data-blau-chip')) || 'Look up';
     chipPick = picked;
     chip.style.display = 'block';
@@ -363,24 +386,50 @@
     window.addEventListener('scroll', hideChip, true);
   }
 
+  // Esc closes the panel (owner, 2026-11-05), from its own box too, and disarms the key.
+  // True when there was a panel or a marked word to close.
+  function escape(pop, event) {
+    var had = shown(pop) || document.querySelector('.' + HIT) !== null;
+    var wasArmed = armed;
+    arm(false);
+    hideChip();
+    clearHit();
+    if (had) dispatch(pop, 'blau-close');
+    if (had || wasArmed) event.preventDefault();
+    return had;
+  }
+
+  // In a dialog (Quick View), the Esc that closes the panel closes only the panel: the dialog
+  // closes on Esc (Quasar: keydown, then keyup, both on window) and the search page toggles its
+  // form on it (ui.keyboard, on document). So it is handled first, on window as it comes down,
+  // and goes no further; its keyup too. Esc with nothing to close passes on and closes the dialog.
+  var escUsed = false;
+  window.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    var pop = document.querySelector(POPOVER);
+    if (!dialogOf(pop) || overlayOpen(pop)) return;
+    if (!shown(pop) && document.querySelector('.' + HIT) === null) return;
+    escape(pop, event);
+    escUsed = true;
+    event.stopImmediatePropagation();
+  }, true);
+  window.addEventListener('keyup', function (event) {
+    if (event.key !== 'Escape' || !escUsed) return;
+    escUsed = false;
+    event.stopImmediatePropagation();
+  }, true);
+
   document.addEventListener('keydown', function (event) {
     var pop = document.querySelector(POPOVER);
     if (!pop) return;                       // no dictionary on this page
     if (event.key === 'Escape') {
-      // Esc closes the panel (owner, 2026-11-05), from its own box too, and disarms the key.
-      if (overlayOpen()) return;
-      var had = shown(pop) || document.querySelector('.' + HIT) !== null;
-      var wasArmed = armed;
-      arm(false);
-      hideChip();
-      clearHit();
-      if (had) dispatch(pop, 'blau-close');
-      if (had || wasArmed) event.preventDefault();
+      if (overlayOpen(pop)) return;
+      escape(pop, event);
       return;
     }
     if (event.ctrlKey || event.altKey || event.metaKey || !isLookupKey(event)) return;
     if (inABox(event.target) || inABox(document.activeElement)) return;
-    if (overlayOpen()) return;
+    if (overlayOpen(pop)) return;
     down = true;
     if (event.repeat) {                     // held: every click while it is down
       held = true;
@@ -399,6 +448,7 @@
   // Back from another window: a held key's release was never seen here.
   window.addEventListener('blur', function () {
     if (down) { down = false; arm(false); }
+    escUsed = false;                        // nor an Esc's
   });
 
   document.addEventListener('click', function (event) {
