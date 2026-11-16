@@ -255,7 +255,8 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         from shared.variants import VariantManager
         from shared.lab_engine import LabEngine
         from shared.search_engine import (SearchEngine, _consume_last_responsa_downgrade,
-                                          _consume_last_responsa_downgrade_meta, consume_last_search_cutoff)
+                                          _consume_last_responsa_downgrade_meta, consume_editions_unavailable,
+                                          consume_last_search_cutoff)
         from shared.search_regex import isolated_matching
 
         if meta is None:
@@ -330,6 +331,8 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
                   'cascade': _consume_last_responsa_downgrade_meta(),
                   'cutoff': consume_last_search_cutoff(),
+                  # Asked to read the editions, and none could be opened here.
+                  'editions_unavailable': consume_editions_unavailable(),
                   'time_limit': stopped['time_limit']}
     except InterruptedError:
         # The limit stopped a part of the search that cannot return what it had.

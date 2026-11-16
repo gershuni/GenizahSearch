@@ -133,8 +133,8 @@ _LABELS_EN: Dict[str, str] = {
 }
 
 _LABELS_HE: Dict[str, str] = {
-    "title": "סימני התעתוק",
-    "button_tooltip": "מה פירוש הסימנים בתעתוק זה",
+    "title": "סימני התעתיק",
+    "button_tooltip": "מה פירוש הסימנים בתעתיק זה",
     "col_mark": "סימן",
     "col_meaning": "פירוש",
     "prayer_heading": "סיגלה צוות גנוזות - קטעי תפילה ופיוט",

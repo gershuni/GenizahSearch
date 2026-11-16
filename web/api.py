@@ -2901,6 +2901,10 @@ def init_api_routes(app_override=None):
             _results = [r for r in all_results if r.get('uid', '') in _sel_set]
         else:
             _results = all_results
+        # The stored rows keep no text: each excerpt is read again, an edition's from the
+        # edition, a page's from the index (Codex review of PR #18).
+        from web.export_service import with_excerpts
+        _results = with_excerpts(_results)
 
         try:
             payload = serialize_search_payload(

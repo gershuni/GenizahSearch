@@ -214,6 +214,21 @@ def consume_last_search_cutoff() -> dict:
     return value or {'capped': False, 'interrupted': False}
 
 
+_EDITIONS_UNAVAILABLE = threading.local()
+
+
+def consume_editions_unavailable() -> bool:
+    """Read and clear whether the last search on this thread was asked to read the editions
+    (``sources`` 'all' or 'editions', in a text mode) and had no editions index open: an
+    editions-only search then searched nothing, an 'all' one the automatic transcriptions
+    alone. A research worker hands it on (shared/research_worker.py), and the website says
+    the scholarly transcriptions could not be searched rather than showing a plain "0
+    results" (Codex review of PR #18)."""
+    value = bool(getattr(_EDITIONS_UNAVAILABLE, 'value', False))
+    _EDITIONS_UNAVAILABLE.value = False
+    return value
+
+
 def _top_hits(searcher, query, limit):
     """(the first `limit` hits of `query` in score order, whether more matched).
 
@@ -3149,7 +3164,8 @@ class SearchEngine:
         (ids_only) / *page_text*: what the exclusion step reads -- the member's own text, its
         page's parts of the edition (item 14), folded as the words are."""
         from shared.editions_indexer import search_fold
-        from shared.editions_search import MatchText, edition_record, key_text, member_header, part_index_at
+        from shared.editions_search import (MatchText, edition_record, key_text, member_header, part_index_at,
+                                            span_fingerprint)
         boundaries = self._parse_boundaries(doc)
         uid = doc['unique_id'][0]
         source = doc['source'][0]
@@ -3214,14 +3230,21 @@ class SearchEngine:
             if not hl_c:
                 continue
             header = member_header(uid, sys_id, f['page'])
+            display = dict(self.meta_mgr.get_display_data(header, source) or {})
+            if f['page'] is None:
+                # No page could be named for this hit, so no page number either: never the
+                # header parser's "Unknown", which the card, Quick View and the exports read
+                # as one.
+                display['img'] = ''
             row = {
-                'display': self.meta_mgr.get_display_data(header, source),
+                'display': display,
                 'snippet': hl_c, 'full_text': content, 'uid': uid, 'raw_header': header,
                 'raw_file_hl': hl_f, 'highlight_pattern': pattern_for(key_text(content, boundaries, key, uid)),
                 'scope': 'page', 'score': float(score), 'group_key': key, 'cross_page': f['cross'],
                 'edition': edition_record(uid, sys_id, page_uid=f['page'], span=f['span'],
                                           cross_page=f['cross'], entry=self._edition_entries.get(uid),
-                                          generation=self._edition_generation),
+                                          generation=self._edition_generation,
+                                          span_fp=span_fingerprint(content, f['span'])),
             }
             if count:
                 row['_matches'] = f['n']
@@ -4230,6 +4253,7 @@ class SearchEngine:
         """
         from shared.editions_search import SOURCES_ALL, SOURCES_AUTOMATIC, normalize_sources
         sources = normalize_sources(sources)
+        _EDITIONS_UNAVAILABLE.value = False
         args = dict(progress_callback=progress_callback, exclude_words=exclude_words,
                     responsa_options=responsa_options, restrict_sys_ids=restrict_sys_ids,
                     text_position=text_position, corpus_scope=corpus_scope, phase_callback=phase_callback,
@@ -4238,13 +4262,20 @@ class SearchEngine:
         if sources != SOURCES_AUTOMATIC and mode not in ('Title', 'Shelfmark') and corpus_scope != 'local':
             editions = self._editions_for_request()
         if editions is None:
+            # Asked for the editions where they are read (a text mode, the Genizah corpus) and
+            # none is open: said, not passed off as their having no match.
+            unavailable = (sources != SOURCES_AUTOMATIC and mode not in ('Title', 'Shelfmark')
+                           and corpus_scope != 'local')
             if sources in (SOURCES_AUTOMATIC, SOURCES_ALL) or mode in ('Title', 'Shelfmark') or corpus_scope == 'local':
-                return self._execute_search_leg(query_str, mode, gap, preview_callback=preview_callback,
+                rows = self._execute_search_leg(query_str, mode, gap, preview_callback=preview_callback,
                                                 metadata_sys_ids=metadata_sys_ids, **args)
+                _EDITIONS_UNAVAILABLE.value = unavailable
+                return rows
             # Editions only, and no editions index open: nothing is searched.
             self._clear_search_state()
             _validate_word_gap(mode, gap, responsa_options)
             LOGGER.info("Editions-only search with no editions index: no rows")
+            _EDITIONS_UNAVAILABLE.value = True
             return []
         self._clear_search_state()
         _validate_word_gap(mode, gap, responsa_options)

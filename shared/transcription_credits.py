@@ -102,7 +102,7 @@ KIND_NONE = 'none'
 
 # Headings are whole localized TEMPLATES, not a shared label glued to a value
 # with a colon. Composition read fine in English and produced nonsense in
-# Hebrew: "תעתוק" + ": " + "תעתוק אוטומטי" is "transcription: transcription
+# Hebrew: "תעתיק" + ": " + "תעתיק אוטומטי" is "transcription: transcription
 # automatic", and "{language} {Translation}" inverts to "עברית תרגום" where
 # Hebrew wants "תרגום לעברית". Each language owns its own word order.
 _LABELS_EN: Dict[str, str] = {
@@ -144,15 +144,15 @@ _LABELS_EN: Dict[str, str] = {
 }
 
 _LABELS_HE: Dict[str, str] = {
-    'htr_heading': "תעתוק אוטומטי (MiDRASH)",
-    'fgp_heading': "תעתוק: פרויקט הגניזה של פרידברג",
-    'pgp_heading': "תעתוק: פרויקט הגניזה של פרינסטון",
+    'htr_heading': "תעתיק אוטומטי (MiDRASH)",
+    'fgp_heading': "תעתיק: פרויקט הגניזה של פרידברג",
+    'pgp_heading': "תעתיק: פרויקט הגניזה של פרינסטון",
     'translation_heading': "תרגום",
     'translation_heading_lang': "תרגום ל{language}",
     'community_correction': "תיקון קהילתי מאת {author}",
     'community_correction_anon': "תיקון קהילתי",
     'pending_correction': "תיקון קהילתי שטרם אושר",
-    'based_on': "מבוסס על התעתוק האוטומטי:",
+    'based_on': "מבוסס על התעתיק האוטומטי:",
     'cite': "בכל פרסום של החומר המוצג כאן, אנא צטטו את:",
     'how_to_cite': "כיצד לצטט דף זה",
     'how_to_cite_site': "כיצד לצטט את האתר",
@@ -161,19 +161,19 @@ _LABELS_HE: Dict[str, str] = {
     # transcription a page RESTS ON, which is a statement about provenance;
     # "על פי" reads as conformity to an authority, which is a different claim.
     'using': "על בסיס",
-    'fgp_inline': "תעתוק פרויקט הגניזה של פרידברג",
+    'fgp_inline': "תעתיק פרויקט הגניזה של פרידברג",
     'pgp_inline': "מהדורת פרויקט הגניזה של פרינסטון",
     'translation_inline': "התרגום",
     'translation_inline_lang': "התרגום ל{language}",
     'folio': "דף",
     'page_word': "עמוד",
-    # "לתעתוק", not "המבוסס על": the connector above is now "על בסיס", and
+    # "לתעתיק", not "המבוסס על": the connector above is now "על בסיס", and
     # the two together gave "על בסיס תיקון קהילתי ... המבוסס על ..." -- the
-    # same root twice in one clause. "לתעתוק" says what a correction is a
+    # same root twice in one clause. "לתעתיק" says what a correction is a
     # correction OF, which is the fact that matters anyway.
-    'community_correction_of': "תיקון קהילתי מאת {author} לתעתוק",
-    'anon_correction_of': "תיקון קהילתי לתעתוק",
-    'pending_correction_of': "תיקון קהילתי שטרם אושר לתעתוק",
+    'community_correction_of': "תיקון קהילתי מאת {author} לתעתיק",
+    'anon_correction_of': "תיקון קהילתי לתעתיק",
+    'pending_correction_of': "תיקון קהילתי שטרם אושר לתעתיק",
     'retrieved_on': "נצפה בתאריך {date}",
     'retrieved_on_inline': "נצפה בתאריך {date}",
     'source_url': "זמין בכתובת {url}",

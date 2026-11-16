@@ -117,8 +117,89 @@ def _localize_search_mode(raw_mode: Optional[str], lang: str = 'en') -> Optional
         return label_key
 
 
+_SOURCE_NAMES = {
+    'automatic': ('Automatic transcription', 'תעתיק אוטומטי'),
+    'fgp_edition': ('FGP edition', 'מהדורת FGP'),
+    'pgp_edition': ('PGP edition', 'מהדורת PGP'),
+    'local': ('My Library', None),
+}
+
+
+def _sources_cell(result: Dict[str, Any], lang: str = 'en') -> Optional[str]:
+    """Every text of a result's page that matched, for its Source cell -- "Automatic
+    transcription, PGP edition (Ben-Sasson)" -- when the search read the scholarly
+    transcriptions (editions plan section 3.5); None for today's rows."""
+    members = result.get('members')
+    if not isinstance(members, list) or not members:
+        return None
+    from shared.editions_search import source_label
+    labels = []
+    for m in members:
+        en, he = _SOURCE_NAMES.get(source_label(m), ('Edition', None))
+        name = (he or en) if lang == 'he' else en
+        credit = ((m.get('edition') or {}).get('credit') or {})
+        who = credit.get(lang) or credit.get('en')
+        label = f'{name} ({who})' if who else name
+        if label not in labels:
+            labels.append(label)
+    return ', '.join(labels)
+
+
+#: The JSON export's excerpt length (shared/search_serializer.py: ``full_text[:500]``).
+_EXCERPT_CHARS = 500
+
+
+def with_excerpts(rows: List[Any]) -> List[Any]:
+    """The stored search's rows for the JSON export, each with the start of its text for the
+    ``excerpt``. The stored rows keep no text (web/export_state.py), so every excerpt came
+    out empty; the text is read again as the spreadsheet reads it -- a scholarly
+    transcription's from its edition by version, never the page's automatic text; the
+    automatic transcription's from the index by uid -- and cut to the excerpt's length
+    (Codex review of PR #18). A row that kept its text, or whose text cannot be read, is
+    unchanged."""
+    out = []
+    for row in rows:
+        if isinstance(row, dict) and not row.get('full_text') and not row.get('full_text_excerpt'):
+            text = _resolve_result_full_text(row)
+            if text:
+                row = dict(row, full_text_excerpt=text[:_EXCERPT_CHARS])
+        out.append(row)
+    return out
+
+
+def _image_url_cell(result: Dict[str, Any], sys_id: str, library_code: str, img_page: Any) -> str:
+    """The Image URL cell: the row's folio, or empty for a scholarly transcription's hit whose
+    page could not be identified -- its blank page number would otherwise link the first
+    folio (Codex review of PR #18)."""
+    if result.get('page_identified') is False:
+        return ''
+    from shared.export_dossier import build_image_url_for_row
+    return build_image_url_for_row(sys_id, library_code, img_page)
+
+
+def _edition_unchanged(edition: Dict[str, Any], resolved: Dict[str, Any]) -> bool:
+    """shared/editions_search.py::edition_unchanged: the sidecar's edition is still the text
+    the search matched."""
+    from shared.editions_search import edition_unchanged
+    return edition_unchanged(edition, resolved)
+
+
 def _resolve_result_full_text(result: Dict[str, Any]) -> str:
-    """Return full text for export, rehydrating compact session rows if needed."""
+    """Return full text for export, rehydrating compact session rows if needed. A result led
+    by a scholarly transcription exports that edition's own text (editions plan section 3.5),
+    never the page's automatic transcription."""
+    version = (result.get('edition') or {}).get('version')
+    if version:
+        try:
+            from web.editions_assets import resolver
+            resolved = resolver().resolve(version)
+            if resolved and resolved.get('original') and _edition_unchanged(result['edition'], resolved):
+                return str(resolved['original'])
+        except Exception:
+            pass
+        # Changed since the search, or gone: only the text the row itself kept (a live row's
+        # indexed text), never another text under the same version.
+        return str(result.get('full_text_excerpt') or result.get('full_text') or '')
     full_text = result.get('full_text') or ''
     if full_text:
         return str(full_text)
@@ -669,7 +750,7 @@ class ExportService:
             main_header_row, manuscript_header_row, bibliography_header_row,
             sheet_titles,
             apply_manuscript_row_hyperlinks,
-            build_image_url_for_row, apply_main_row_image_url_hyperlink,
+            apply_main_row_image_url_hyperlink,
         )
         from shared_export_utils import build_rich_snippet_cell
         from genizah_core import get_library_display as core_get_library_display
@@ -830,7 +911,8 @@ class ExportService:
             # expose display.img/display.source; compacted rows expose
             # top-level img/source. Either path yields non-empty cells.
             img_page = display_dict.get('img') or res.get('img') or ''
-            source_label = display_dict.get('source') or res.get('source') or ''
+            source_label = (_sources_cell(res, lang) or display_dict.get('source')
+                            or res.get('source') or '')
 
             # MUST-FIX 94-03-D: snippet read after compaction.
             # _SEARCH_ROW_ALLOWLIST keeps only 'snippet' (which already
@@ -860,9 +942,7 @@ class ExportService:
             # nli_image_by_sysid/{sys_id}?page=N or /api/oxford_image/...
             # for Oxford). Synthetic sys_ids return '' so the cell stays
             # empty for advanced-search-only manuscripts.
-            image_url_cell = build_image_url_for_row(
-                sys_id_for_cell, lib_code_for_cell, img_page,
-            )
+            image_url_cell = _image_url_cell(res, sys_id_for_cell, lib_code_for_cell, img_page)
 
             row_cells = [
                 sanitize_text_for_excel(sys_id_for_cell),

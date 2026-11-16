@@ -29,6 +29,14 @@
 #
 # Every step here is followed by an exit-code check. Nothing after a failed step runs.
 #
+# THE UPLOAD LANDS UNDER A TEMPORARY NAME (2026-11, the editions search plan section 3.7), as the FGP
+# script's does: pgp.db.new, then a swap that keeps the served file as pgp.db.prev-<stamp>. Where the
+# server has an editions index (Genizah_Index/Editions), it is derived from this sidecar and is rebuilt
+# with it: Editions.new is built from pgp.db.new and gated while the site keeps serving; then the
+# service is STOPPED (closing every reader), the sidecar swapped and the generation put in place, and
+# the service started. If the build or its gate fails nothing is touched; if the swap, the start or the
+# final check fails, both are put back from their .prev copies and the service started again.
+#
 #   powershell -File scripts/deploy_pgp_sidecar.ps1            # guard, code check, upload, restart
 #   powershell -File scripts/deploy_pgp_sidecar.ps1 -DryRun    # guard only; print the rest
 param(
@@ -47,8 +55,52 @@ function Fail([string]$message) {
     [Console]::Error.WriteLine("DEPLOY ABORTED: $message")
     exit 1
 }
+
+# Whether a directory exists on the server, read from an explicit answer: a failed connection
+# (ssh exits 255) is never taken for "absent" -- the deploy stops instead (Codex review of PR #18).
+function Test-RemoteDir([string]$dir) {
+    $answer = @(ssh $RemoteHost "if test -d $dir; then echo present; else echo absent; fi")
+    $code = $LASTEXITCODE
+    $last = if ($answer.Count) { "$($answer[-1])".Trim() } else { "" }
+    if ($code -ne 0 -or ($last -ne "present" -and $last -ne "absent")) {
+        Fail "could not ask the server whether $dir exists (ssh exit $code); the served files are untouched"
+    }
+    return ($last -eq "present")
+}
+
+# After a failed step with the service stopped: run *undo* on the server (or nothing), start
+# genizah-web whatever the undo did, and say what is true -- the undo's status and the start's are
+# both checked before the script reports a recovery (Codex review of PR #18).
+function Invoke-Recovery([string]$undo, [string]$why, [string]$recovered) {
+    if (-not $undo) { $undo = "true" }
+    ssh $RemoteHost "$undo; s=`$?; sudo systemctl start genizah-web; sleep 5; systemctl is-active genizah-web || exit 1; exit `$s"
+    if ($LASTEXITCODE -eq 0) { Fail "$why; $recovered" }
+    Fail "$why; THE RECOVERY FAILED TOO (exit $LASTEXITCODE): check the server by hand (genizah-web, the sidecar, Genizah_Index)"
+}
 if (-not $RemoteRepo) { Fail "set GENIZAH_REMOTE_REPO (the server checkout, e.g. in your user environment) or pass -RemoteRepo" }
 if (-not $RemotePath) { $RemotePath = "$RemoteRepo/pgp_data/" }
+$RemoteDir = $RemotePath.TrimEnd('/')
+$Stamp = Get-Date -Format "yyyyMMdd-HHmm"
+$Served = "pgp.db"
+$Incoming = "pgp.db.new"
+$Previous = "pgp.db.prev-$Stamp"
+$Py = "./venv/bin/python"
+$EdBuild = "nice -n 19 ionice -c 3 $Py scripts/build_editions_index.py --force --out Genizah_Index/Editions.new --pgp-db $RemoteDir/$Incoming"
+$EdGate = "nice -n 19 ionice -c 3 $Py scripts/verify_editions_index.py --gen Genizah_Index/Editions.new --pgp-db $RemoteDir/$Incoming"
+$EdPromote = "$Py scripts/build_editions_index.py --promote-only Genizah_Index/Editions.new"
+$EdRestore = "$Py scripts/build_editions_index.py --restore-previous"
+$EdCheck = "$Py scripts/build_editions_index.py --check-live"
+# Puts BOTH back -- each attempted whatever the other did -- starts the service whatever happened,
+# and exits non-zero when either undo or the start failed, so the message says what is true (Codex
+# review of PR #18).
+$RollbackBoth = "sudo systemctl stop genizah-web || exit 2; cd $RemoteDir && mv $Previous $Served; s=`$?; cd $RemoteRepo && $EdRestore; e=`$?; sudo systemctl start genizah-web; sleep 5; systemctl is-active genizah-web || exit 1; test `$s -eq 0 && test `$e -eq 0"
+function Invoke-RollbackBoth([string]$why) {
+    ssh $RemoteHost $RollbackBoth
+    if ($LASTEXITCODE -eq 0) {
+        Fail "$why; the sidecar and the editions generation were put back and genizah-web is running again"
+    }
+    Fail "$why; THE ROLLBACK FAILED TOO (exit $LASTEXITCODE): check $RemoteDir ($Served, $Previous), $RemoteRepo/Genizah_Index and genizah-web by hand"
+}
 
 Write-Host "== 1/4 shipping guard: $Sidecar"
 python scripts/check_shipping_sidecar.py --sidecar $Sidecar
@@ -58,8 +110,13 @@ if ($DryRun) {
     Write-Host ""
     Write-Host "Dry run. Would now run:"
     Write-Host "  ssh $RemoteHost (confirm the server is running this tree's code)"
-    Write-Host "  scp $Sidecar ${RemoteHost}:$RemotePath"
-    Write-Host "  ssh $RemoteHost `"sudo systemctl restart genizah-web`""
+    Write-Host "  scp $Sidecar ${RemoteHost}:$RemoteDir/$Incoming"
+    Write-Host "  where Genizah_Index/Editions exists:"
+    Write-Host "    ssh: $EdBuild"
+    Write-Host "         $EdGate"
+    Write-Host "    ssh: sudo systemctl stop genizah-web; mv $Served $Previous; mv $Incoming $Served; $EdPromote; sudo systemctl start genizah-web; $EdCheck"
+    Write-Host "  otherwise:"
+    Write-Host "    ssh: mv $Served $Previous; mv $Incoming $Served; sudo systemctl restart genizah-web"
     exit 0
 }
 
@@ -84,14 +141,53 @@ Write-Host "   this sidecar was built from $Contract"
 ssh $RemoteHost "set -e; cd $RemoteRepo; test -s .deployed_revision; git fetch -q origin; git merge-base --is-ancestor $Contract `$(cat .deployed_revision)"
 if ($LASTEXITCODE -ne 0) { Fail "the running genizah-web does not have $Contract, the commit this sidecar was built from -- or $RemoteRepo/.deployed_revision is missing, which means the service has not completed a ./deploy.sh run since this check was introduced. A checkout alone is not enough: the process in memory is what reads the sidecar. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main <published commit id>'), then re-run this. Nothing was uploaded" }
 
-Write-Host "== 3/4 upload: $Sidecar -> ${RemoteHost}:$RemotePath"
-scp $Sidecar "${RemoteHost}:$RemotePath"
-if ($LASTEXITCODE -ne 0) { Fail "scp failed (exit $LASTEXITCODE); the service was NOT restarted" }
+Write-Host "== 3/4 upload under a temporary name: $Sidecar -> ${RemoteHost}:$RemoteDir/$Incoming"
+scp $Sidecar "${RemoteHost}:$RemoteDir/$Incoming"
+if ($LASTEXITCODE -ne 0) { Fail "scp failed (exit $LASTEXITCODE); the served file is untouched" }
 
-Write-Host "== 4/4 restart genizah-web"
+$HasEditions = Test-RemoteDir "$RemoteRepo/Genizah_Index/Editions"
+if ($HasEditions) {
+    Write-Host "== 3b/4 the server has an editions index: build Editions.new from the new sidecar and gate it (the site keeps serving)"
+    ssh $RemoteHost "cd $RemoteRepo && $EdBuild && $EdGate"
+    if ($LASTEXITCODE -ne 0) { Fail "the editions build or its gate failed (exit $LASTEXITCODE); nothing was swapped; remove $RemoteDir/$Incoming (Genizah_Index/Editions.new is left for a look)" }
+
+    Write-Host "== 4/4 stop genizah-web, keep the served file as $Previous, swap, put the editions generation in place, start"
+    ssh $RemoteHost "sudo systemctl stop genizah-web"
+    if ($LASTEXITCODE -ne 0) { Fail "genizah-web did not stop (exit $LASTEXITCODE); nothing was swapped; remove $RemoteDir/$Incoming" }
+    ssh $RemoteHost "set -e; cd $RemoteDir; test -f $Served; mv $Served $Previous; mv $Incoming $Served"
+    if ($LASTEXITCODE -ne 0) {
+        # The first rename may have run: the served file then waits as $Previous; put it back.
+        Invoke-Recovery "cd $RemoteDir && { test -e $Served || mv $Previous $Served; }" "the sidecar swap failed (exit $LASTEXITCODE)" "$Served is the served file again and genizah-web is running"
+    }
+    ssh $RemoteHost "cd $RemoteRepo && $EdPromote"
+    if ($LASTEXITCODE -ne 0) {
+        # The served generation is still in place (promote_generation puts it back on a failure).
+        Invoke-Recovery "cd $RemoteDir && mv $Previous $Served" "the editions promotion failed (exit $LASTEXITCODE)" "the sidecar was put back and genizah-web is running again"
+    }
+    ssh $RemoteHost "sudo systemctl start genizah-web && sleep 5 && systemctl is-active genizah-web && cd $RemoteRepo && $EdCheck"
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-RollbackBoth "genizah-web or the served editions generation failed its check (exit $LASTEXITCODE)"
+    }
+    Write-Host ""
+    Write-Host "Deployed $Sidecar, rebuilt the editions index from it, and started genizah-web."
+    Write-Host "Rollback: ssh $RemoteHost `"$RollbackBoth`""
+    exit 0
+}
+
+Write-Host "== 4/4 keep the served file as $Previous, swap, restart genizah-web"
+ssh $RemoteHost "set -e; cd $RemoteDir; test -f $Served; mv $Served $Previous; mv $Incoming $Served"
+if ($LASTEXITCODE -ne 0) {
+    $why = "the swap failed (exit $LASTEXITCODE)"
+    # The first rename may have run: the served file then waits as $Previous; put it back
+    # (the service still runs and reads it after its next restart; Codex review of PR #18).
+    ssh $RemoteHost "cd $RemoteDir && { test -e $Served || mv $Previous $Served; }"
+    if ($LASTEXITCODE -eq 0) { Fail "$why; $Served is the served file again; nothing else was changed" }
+    Fail "$why; $Served COULD NOT BE PUT BACK (exit $LASTEXITCODE): restore it from $Previous by hand"
+}
 ssh $RemoteHost "sudo systemctl restart genizah-web"
-if ($LASTEXITCODE -ne 0) { Fail "restart failed (exit $LASTEXITCODE); the new sidecar is on the server but not yet served" }
+if ($LASTEXITCODE -ne 0) { Fail "restart failed (exit $LASTEXITCODE); roll back: ssh $RemoteHost `"cd $RemoteDir && mv $Previous $Served && sudo systemctl restart genizah-web`"" }
 
 Write-Host ""
 Write-Host "Deployed $Sidecar and restarted genizah-web."
+Write-Host "Rollback: ssh $RemoteHost `"cd $RemoteDir && mv $Previous $Served && sudo systemctl restart genizah-web`""
 exit 0

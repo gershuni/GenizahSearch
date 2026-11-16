@@ -68,8 +68,10 @@ from web.document_service import (
     get_fragments_by_tag, get_all_distinct_tags,
 )
 from web.search_load_control import enrichment_batch_slot
-from web.research_jobs import (ResearchJobError, consume_time_limit_stop, run_research_call,
-                                shared_time_limit, with_request_settings)
+from web.research_jobs import (ResearchJobError, consume_editions_skipped, consume_time_limit_stop,
+                                run_research_call, shared_time_limit, with_request_settings)
+from web.pages.search_editions import (NO_SOURCES_MODES, SOURCE_CHOICES, drop_source_choice, edition_text,
+                                       editions_count_suffix)
 from shared.config import Config
 from web import variant_preferences
 from shared.fgp_service import get_sys_ids_with_fgp_sources
@@ -190,6 +192,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     raw_saved_query = _safe_get('search_query', '')
     saved_preset = _safe_get('search_preset', 30)
     saved_gap = _safe_get('search_gap', 0)
+    # Which texts are searched (editions plan section 3.4, D1), where the scholarly
+    # transcriptions are served to this reader (web/editions_assets.py): remembered per visitor.
+    from web.auth_state import GlobalAuthState as _Auth
+    from web.editions_assets import served_to as _editions_served_to
+    _editions_served = _editions_served_to(_Auth.is_editor())
+    saved_sources = _safe_get('search_sources', 'all')
+    if saved_sources not in SOURCE_CHOICES:
+        saved_sources = 'all'
+    # Set when a search finds them no longer served to this reader (_editions_still_served).
+    _editions_access = {'lost': False}
 
     use_slider = bool(variant_preferences.get('variant_use_slider'))
     # Num Changes shows the x1-x3 of the level the page opens on.
@@ -229,7 +241,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     _live_run = live_search_run(initial_run)
     if _live_run is not None and _live_run.scoped:
         _live_run = None
-
     bootstrap_state = resolve_search_bootstrap(
         initial_query=initial_query,
         initial_tag=initial_tag,
@@ -255,6 +266,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     restore_saved_results = bootstrap_state['restore_saved_results']
     restore_saved_filters = bootstrap_state['restore_saved_filters']
     restore_saved_exclusions = bootstrap_state['restore_saved_exclusions']
+
+    # A page that rejoins a run, or restores the rows of one, shows the texts that run
+    # searched, not the visitor's current choice; with the run's snapshot gone (a restart, an
+    # eviction) the rows come back from user storage with the run that made them. A fresh
+    # search -- an address without its run -- keeps the current choice (Codex reviews of
+    # PR #18).
+    if _live_run is not None:
+        _restored_run = _live_run.snapshot.get('last_run')
+    elif restore_saved_results and _saved_results_count:
+        _restored_run = _saved_run
+    else:
+        _restored_run = None
+    _restored_sources = _restored_run.get('sources') if isinstance(_restored_run, dict) else None
+    if _editions_served and _restored_sources in SOURCE_CHOICES:
+        saved_sources = _restored_sources
 
     # Restore domain exclusions / printed filter from storage only for session restores
     if restore_saved_exclusions:
@@ -437,6 +463,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             restore_search_snapshot(search_state, initial_run)
         except Exception:
             pass  # Snapshot restore failed; page starts empty
+        if not _editions_served:
+            # Searched while the editions were served to this reader (an editor's preview),
+            # restored after they are not: replays and completions read the automatic
+            # transcriptions only (Codex review of PR #18).
+            drop_source_choice(search_state)
 
 
     # === UI Layout ===
@@ -760,6 +791,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             value=saved_mode
                         ).classes('w-48').props(f'outlined dense label="{tr("Mode")}"')
 
+                    # Which texts are searched, beside the mode (editions plan section 3.4):
+                    # only where the scholarly transcriptions are served to this reader.
+                    sources_col = sources_select = None
+                    if _editions_served:
+                        with ui.column().classes('gap-1') as sources_col:
+                            h3(tr('Transcriptions'), classes='text-sm font-medium search-field-label',
+                               style='color: var(--text-secondary);')
+                            sources_select = ui.select(
+                                {k: tr(v) for k, v in SOURCE_CHOICES.items()}, value=saved_sources,
+                            ).classes('w-40').props(f'outlined dense label="{tr("Transcriptions")}"')
+                            ui.tooltip(tr('Search the automatic transcriptions, the scholarly transcriptions '
+                                          '(FGP and PGP), or both'))
+                        sources_col.set_visibility(saved_mode not in NO_SOURCES_MODES)
+                        sources_select.on('update:model-value',
+                                          lambda: _safe_set('search_sources', sources_select.value))
+
 
                     # Track current preset level based on mode
                     def get_level_from_mode(mode):
@@ -1055,12 +1102,40 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Responsa sub-options: visible only in Responsa mode
                 responsa_sub_row.set_visibility(is_responsa)
+                _sync_sources_visibility()
 
                 # Save mode to storage (don't persist pgp_tags)
                 if not is_tags:
                     _safe_set('search_mode', mode)
 
             mode_select.on('update:model-value', on_mode_change)
+
+            def _sync_sources_visibility(*_):
+                """The Transcriptions selector shows only where the search reads it: a mode
+                that reads text, outside Lab Mode, whose search never takes it (Codex review
+                of PR #18). Lab Mode set in code -- a restored Lab run -- fires this too."""
+                if sources_col is not None:
+                    sources_col.set_visibility(mode_select.value not in NO_SOURCES_MODES
+                                               and not lab_mode.value
+                                               and not _editions_access['lost'])
+
+            def _editions_still_served() -> bool:
+                """Whether the scholarly transcriptions are still served to this reader, read
+                again for each search: an editor's preview (EDITIONS_SEARCH_ENABLED=editors)
+                ends when they sign out in another tab, and the worker has no reader to check
+                (Codex review of PR #18). When it has ended, the page's choice, the shown run's
+                and every search-within step's are dropped and the selector hidden: what runs
+                reads the automatic transcriptions only."""
+                if not _editions_served or _editions_access['lost']:
+                    return False
+                if _editions_served_to(_Auth.is_editor()):
+                    return True
+                _editions_access['lost'] = True
+                drop_source_choice(search_state)
+                _sync_sources_visibility()
+                return False
+
+            lab_mode.on_value_change(_sync_sources_visibility)
 
         # === Search only in... Filter Panel (BEFORE Advanced Options & progress bar) ===
         _pos_pref = _safe_get('search_text_position', 'anywhere') or 'anywhere'
@@ -2574,6 +2649,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         {'restrict', 'interrupted'} -- interrupted also when it failed or was
         stopped (the steps completed so far keep their complete sets). Runs in a
         search worker like any search, with progress and Stop."""
+        # A step's own choice runs again only while the reader is still served them.
+        _editions_still_served()
         chain = search_state.refinement_chain
         if not chain_needs_completion(chain, upto):
             return None
@@ -2672,9 +2749,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _downgrade_suffix():
         """The Responsa guard's downgrade of the results shown, on every line that
         counts them: it stays while they show (plan §5.3) -- a filter or exclusion
-        re-render dropped it (Codex review of PR #433)."""
+        re-render dropped it (Codex review of PR #433). With the scholarly transcriptions
+        (editions plan section 3.4): how many results matched in one, and a note when they
+        could not be searched this time."""
         note = search_state.responsa_warning
-        return (" · " + tr_engine_message(note)) if note else ''
+        suffix = (" · " + tr_engine_message(note)) if note else ''
+        return suffix + editions_count_suffix(search_state)
 
     def _update_search_within_btn():
         """D-01: Show/hide search within button based on result availability."""
@@ -3001,6 +3081,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Clear results
         search_state.results = []
         search_state.responsa_warning = None
+        search_state.editions_skipped = False
         search_state.displayed_results = []
         search_state.selected_indices.clear()
         search_state.transcription_sys_ids = set()
@@ -3295,13 +3376,31 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.notify(tr('No valid selections'), type='warning')
             return
 
+        # The editions leading selected results, read off the event loop in one batch (a
+        # sidecar read and a cleaner run each; Codex review of PR #18).
+        _ed_rows = [r for r in selected_results if r.get('edition')]
+
+        def _read_editions():
+            out = {}
+            for r in _ed_rows:
+                try:
+                    out[id(r)] = edition_text(r) or ''
+                except Exception:
+                    out[id(r)] = ''
+            return out
+        _ed_texts = (await run.io_bound(_read_editions) or {}) if _ed_rows else {}
+
         # Compile all text
         compiled_text = []
         for i, res in enumerate(selected_results, 1):
             display = res.get('display', {})
             shelfmark = display.get('shelfmark', 'Unknown')
-            full_text = res.get('full_text', '')
-            if not full_text and res.get('uid') and state.searcher:
+            full_text = '' if res.get('edition') else res.get('full_text', '')
+            if res.get('edition'):
+                # Led by a scholarly transcription: that edition's text, never the page's
+                # automatic transcription (editions plan section 3.4).
+                full_text = _ed_texts.get(id(res), '')
+            elif not full_text and res.get('uid') and state.searcher:
                 try:
                     full_text = state.searcher.get_full_text_by_id(res.get('uid')) or ''
                 except Exception:
@@ -4871,6 +4970,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             gap_input.value = params['gap']
         if params.get('text_position'):
             text_position_select.value = params['text_position']
+        if sources_select is not None:
+            # An item with no choice searched the automatic transcriptions (saved before the
+            # scholarly transcriptions were offered, or while they were not): it reruns so
+            # (Codex review of PR #18).
+            _item_sources = params.get('sources')
+            sources_select.value = _item_sources if _item_sources in SOURCE_CHOICES else 'automatic'
 
         # Restore filters if present
         filters = params.get('filters')
@@ -5255,6 +5360,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.search_start_time = time.time()
         search_state.results = []
         search_state.responsa_warning = None
+        search_state.editions_skipped = False
         # SEED-022 (Codex #303 review): clear enrichment presence sets at new-search
         # START, not only at the later common reset (~line 4460) which a cancelled/
         # partial render path can skip — otherwise the prior search's PGP / manual-
@@ -5273,6 +5379,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         responsa_options = _responsa_options_from_controls()
 
         _tp = text_position_select.value
+        # The source choice this search runs with; None: the automatic transcriptions only,
+        # today's search (no choice shown, or a mode that reads no text).
+        run_sources = (sources_select.value or 'all') if (sources_select is not None
+                                                          and mode not in NO_SOURCES_MODES
+                                                          and not lab_mode.value
+                                                          and _editions_still_served()) else None
         search_state.last_run = {
             'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
             # Lab Mode is not in the address either: a page back on this run shows it.
@@ -5283,11 +5395,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # What a stamped Back restores with the rows (search_state.RUN_FILTER_FIELDS).
             'pre_search_filters': run_filter_state(search_state),
         }
+        if run_sources is not None:
+            # Recorded with the step, so search-within replays the same choice.
+            search_state.last_run['sources'] = run_sources
         if attach is not None:
             # The run as it started (its gap, NOT-words, position and code are not in
             # the address), and its clock.
             search_state.last_run = dict(attach.snapshot.get('last_run') or search_state.last_run)
             search_state.last_variant_settings = attach.snapshot.get('last_variant_settings')
+            # The run's own source choice, for the selector and for a job not yet started
+            # (Codex review of PR #18).
+            run_sources = search_state.last_run.get('sources') if _editions_served else None
+            if run_sources is None:
+                search_state.last_run.pop('sources', None)
+            if sources_select is not None and run_sources in SOURCE_CHOICES:
+                sources_select.value = run_sources
             search_state.search_start_time = attach.started
 
         # This search's run (web/search_runs.py), registered before the first await:
@@ -5488,7 +5610,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # them (no NOT-words, not Responsa) and no post-search filter could hide
         # one; the completed search then renders the whole list as before.
         _preview_wanted = (not lab_mode.value and not not_words and responsa_options is None
-                           and preview_shows_final_rows(search_state))
+                           and preview_shows_final_rows(search_state)
+                           # With the scholarly transcriptions the order is known only at
+                           # the end: no early rows (editions plan section 5).
+                           and run_sources in (None, 'automatic'))
         _loop = asyncio.get_running_loop()
         _preview_ready = asyncio.Event()
         _preview_box = {'rows': None}
@@ -5557,6 +5682,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _run_cutoff.update(consume_last_search_cutoff())
                 _run_cutoff['time_limit'] = consume_time_limit_stop()
                 _run_cutoff['downgrade'] = _consume_last_responsa_downgrade()
+                _run_cutoff['editions_skipped'] = consume_editions_skipped()
 
         def _run_core_search():
             try:
@@ -5584,6 +5710,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # what lets the engine hand over early rows.
                         corpus_scope='genizah',
                         preview_callback=preview_cb if _preview_wanted else None,
+                        **({'sources': run_sources} if run_sources else {}),
                     )
             except InterruptedError:
                 return []
@@ -5699,6 +5826,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.progress = 1.0
             search_state.results = results
             search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
+            search_state.editions_skipped = bool(_run_cutoff.get('editions_skipped'))
             search_state.domain_excluded_results = []
 
             # Phase 88: populate per-session export payload on the cancelled-partial path so
@@ -5743,6 +5871,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             results = compact_result_rows(results)
             search_state.results = results
             search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
+            search_state.editions_skipped = bool(_run_cutoff.get('editions_skipped'))
             # A stopped search within results is still the chain's next step: marked
             # "+", it is completed before anything searches within it.
             if search_state._refine_mode and results:
@@ -5924,6 +6053,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # line, for as long as these results show (plan §5.3: not a 5-second toast) --
         # "0 Results" too, from the engine's own signal.
         search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
+        search_state.editions_skipped = bool(_run_cutoff.get('editions_skipped'))
         if expanded_count > 0 or pattern_count > 0:
             _searched = ' + '.join(
                 ([f"{expanded_count} {tr('expanded terms')}"] if expanded_count else [])
@@ -5985,6 +6115,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
                         'gap': int(gap_input.value or 0),
                         'text_position': text_position_select.value,
+                        # Which texts were searched (editions plan section 3.4): an item reruns
+                        # with its own choice, not the visitor's current one (Codex, PR #18).
+                        'sources': (search_state.last_run or {}).get('sources'),
                         # COPIES: a live list loaded from storage is stored
                         # as-is, so the entry would share it and a later chip
                         # removal would rewrite the saved history.

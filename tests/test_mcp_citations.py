@@ -43,7 +43,9 @@ CASES = [None, {'source': 'original'},
          {'source': 'fgp', 'is_translation': True, 'language': 'English', 'source_credit': 'FGP translation'},
          {'source': 'translation', 'language': 'Hebrew', 'attribution': 'Translator Y'},
          {'source': 'user', 'author': 'Reader Z'}, {'source': 'pending'}, {'source': 'unknown-thing'}]
-REFERENCE_DIGEST = 'b48148bb230d91066b801526fb1cd13eb6dfec23f07c0d9eca6be1efe0d7c26a'
+# Re-recorded 2026-11-16 when the Hebrew headings moved from תעתוק to תעתיק: that substitution
+# reversed on the new output gives the old digest (b48148bb...) exactly, in 6 of the 40 rows.
+REFERENCE_DIGEST = 'de8c39dc4639f5c2b0820490328bb1f24f0843f8e084ba92a4cf6e8ea5e28815'
 
 
 def test_existing_page_citations_are_byte_identical():

@@ -87,6 +87,12 @@ class BrowseState:
         # `must_contain` override applies on that folio only; None until the
         # first folio claims it (Codex P2, 2026-09-02).
         self.highlight_scope: Optional[tuple] = None
+        # A scholarly transcription's hit (?version=&span=, web/pages/browse_editions.py):
+        # {'version', 'span', 'scope', 'resolved', 'stale', 'mark', 'occurrence', 'notified'};
+        # the first folio rendered owns it, as highlight_scope does.
+        self.edition_target: Optional[dict] = None
+        # The exact stretch to mark while that edition is the text shown.
+        self.exact_mark: Optional[dict] = None
         self.page_input_value: int = 1
         self.view_all: bool = False
         self.full_manuscript: List[DocumentPage] = []

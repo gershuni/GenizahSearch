@@ -257,7 +257,7 @@ def test_the_hebrew_correction_clause_does_not_double_the_root():
     """"על בסיס ... המבוסס על" put the same root twice in one clause."""
     text = _page('user', 'he').text
     assert 'המבוסס על' not in text
-    assert 'לתעתוק' in text
+    assert 'לתעתיק' in text
 
 
 # ---------------------------------------------------------------------------

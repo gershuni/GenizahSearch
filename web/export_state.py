@@ -124,6 +124,8 @@ _PARALLELS_CHUNK_TEXT_STORAGE_CHARS = 1000
 # display.source happens BEFORE allowlist filtering in
 # _compact_search_result_row, mirroring the SEED-002 sys_id synthesis at
 # _extract_sys_id_from_row.
+#: A member's snippet as kept in a search export's snapshot (editions plan section 3.5).
+_MEMBER_SNIPPET_CHARS = 300
 _SEARCH_ROW_ALLOWLIST = frozenset((
     'uid', 'sys_id', 'sort_score', 'snippet', 'match_terms', 'raw_header',
     'img', 'source',
@@ -214,6 +216,20 @@ def _compact_chunk_hit(hit: Any) -> Tuple[Any, bool]:
     return (tuple(items) if original_type is tuple else items), changed
 
 
+def _stored_edition(edition: Dict[str, Any]) -> Dict[str, Any]:
+    """An edition record as a stored export row keeps it: its public fields, and its match's
+    span and fingerprint, so the export reads the edition's text again only while it is the
+    text the search matched (web/export_service.py::_edition_unchanged; Codex review of PR
+    #18). The JSON serializer still writes the public fields alone."""
+    from shared.search_serializer import public_edition
+    kept = public_edition(edition)
+    span = edition.get('span')
+    if isinstance(span, (list, tuple)) and len(span) == 2 and edition.get('span_fp'):
+        kept['span'] = [int(span[0]), int(span[1])]
+        kept['span_fp'] = str(edition['span_fp'])
+    return kept
+
+
 def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
     """Return an allowlist-pruned search result row plus a changed flag.
 
@@ -256,6 +272,24 @@ def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
             src_v = display.get('source')
             if isinstance(src_v, str) and src_v:
                 kept['source'] = src_v
+
+    # One result per page with the scholarly transcriptions (editions plan section 3.5):
+    # what matched, the leading edition's public record (its version and credit: its text is
+    # read again by version at export), and each member light.
+    if isinstance(row.get('sources'), list):
+        kept['sources'] = [str(s) for s in row['sources']]
+    if row.get('page_identified') is False:
+        # An edition hit with no page named: the JSON export must not claim one (Codex, #18).
+        kept['page_identified'] = False
+    if isinstance(row.get('edition'), dict):
+        kept['edition'] = _stored_edition(row['edition'])
+    if isinstance(row.get('members'), list):
+        from shared.search_serializer import public_edition
+        kept['members'] = [
+            {'uid': m.get('uid', ''), 'raw_header': m.get('raw_header', ''),
+             'snippet': str(m.get('snippet') or '')[:_MEMBER_SNIPPET_CHARS],
+             'edition': public_edition(m.get('edition'))}
+            for m in row['members'] if isinstance(m, dict)]
 
     changed = bool(set(row.keys()) - _SEARCH_ROW_ALLOWLIST)
     # Also flag changed when we ADDED sys_id (caller didn't supply it but we

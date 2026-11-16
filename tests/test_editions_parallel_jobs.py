@@ -45,7 +45,7 @@ else:
     value = {'method': request['method'], 'arguments': args}
 cutoff = {'capped': 'capped' in query and leg == 'editions', 'interrupted': False}
 out = {'value': value, 'downgrade': None, 'cascade': None, 'cutoff': cutoff, 'time_limit': False,
-       'payload': request}
+       'payload': request, 'editions_unavailable': 'edunavailable' in query}
 (root / 'output.pkl').write_bytes(pickle.dumps(out))
 '''
 
@@ -141,6 +141,15 @@ def test_a_failed_editions_worker_leaves_the_main_rows_with_a_note(queues):
     assert all(r['sources'] == ['automatic'] for r in rows)
     assert consume_editions_skipped() is True
     assert consume_editions_skipped() is False           # said once
+
+
+def test_a_worker_with_no_editions_open_is_said_not_passed_off_as_no_match(queues):
+    """A Scholarly search whose worker could not open the editions: the note, not a plain
+    "0 results" (Codex review of PR #18)."""
+    _engine().execute_search('edunavailable', 'literal', 0, sources='editions')
+    assert consume_editions_skipped() is True
+    _engine().execute_search('x', 'literal', 0, sources='editions')
+    assert consume_editions_skipped() is False
 
 
 def test_a_full_editions_queue_leaves_the_main_rows_with_a_note(queues, monkeypatch):

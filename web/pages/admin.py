@@ -1024,3 +1024,15 @@ async def create_stats_view(users=None, pending=None, total_corrections=None):
                 ui.icon('rate_review').classes('text-4xl').style('color: var(--info);')
                 h3(str(total_corrections), classes='text-3xl font-bold')
                 ui.label(tr('Total Corrections')).style('color: var(--text-secondary);')
+
+    # The editions index built from other inputs than those installed (editions search plan
+    # section 3.7; web/editions_assets.py checks it after startup): which ones changed.
+    from web.editions_assets import editions_drift
+    _drift = editions_drift()
+    if _drift:
+        with ui.card().classes('w-full p-4 mt-4').style('border: 1px solid var(--accent-amber);'):
+            with ui.row().classes('items-center gap-2'):
+                ui.icon('warning').style('color: var(--accent-amber);')
+                ui.label(f"{tr('The scholarly transcriptions index must be rebuilt')} "
+                         f"(scripts/deploy_editions_index.ps1). "
+                         f"{tr('Changed since it was built')}: {', '.join(tr(x) for x in _drift)}.")

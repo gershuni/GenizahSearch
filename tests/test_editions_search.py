@@ -208,7 +208,21 @@ def test_editions_only_runs_no_main_leg(world):
 
 
 def test_editions_only_without_an_editions_index_is_empty(world):
+    from shared.search_engine import consume_editions_unavailable
+    consume_editions_unavailable()
     assert _search(world["plain"], "שלום", sources="editions") == []
+    # ... and says the editions were not read, which a worker hands on (Codex review of PR #18).
+    assert consume_editions_unavailable() is True
+    assert consume_editions_unavailable() is False                       # said once
+    assert _search(world["plain"], "שלום", sources="all")                # today's rows ...
+    assert consume_editions_unavailable() is True                        # ... said too
+    for sources in (None, "automatic"):
+        _search(world["plain"], "שלום", sources=sources)
+        assert consume_editions_unavailable() is False
+    _search(world["plain"], "x", "Title", sources="all", metadata_sys_ids=[])
+    assert consume_editions_unavailable() is False                       # Title reads no editions
+    _search(world["eng"], "שלום", sources="editions")
+    assert consume_editions_unavailable() is False                       # read
 
 
 def test_title_and_shelfmark_never_group(world):
@@ -267,6 +281,11 @@ def test_one_result_per_page(world):
     assert groups["ED:fgp:4"] == ["ED:fgp:4"]
     by_uid = {r["uid"]: r for r in rows}
     assert by_uid["ED:fgp:4"]["page_identified"] is False
+    # ... and has no page number: never the header parser's "Unknown", which the website's card
+    # read as one and stopped rendering the page's cards at.
+    assert all(m["display"]["img"] == "" for m in by_uid["ED:fgp:4"]["members"])
+    assert by_uid["ED:fgp:4"]["display"]["img"] == ""
+    assert by_uid[P11]["display"]["img"] and by_uid[P12]["display"]["img"]
     assert by_uid[P11]["page_identified"] is True and by_uid[P12]["page_identified"] is True
     assert set(by_uid[P11]["sources"]) == {"automatic", "fgp_edition", "pgp_edition"}
     assert by_uid[P11]["edition"] is None and by_uid[P12]["edition"]["kind"] == "pgp"

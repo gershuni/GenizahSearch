@@ -139,6 +139,20 @@ async def fetch_version_menu_data_async(
     return await run.io_bound(_read)
 
 
+def decision_for_version(sources, version):
+    """choose_default_source's decision for the source named by *version* (a search hit in
+    that scholarly transcription), or None when it is not among *sources*."""
+    if not version:
+        return None
+    from web.pages.browse_editions import source_version
+    from shared.fgp_service import source_provider
+    for src in sources or []:
+        if source_version(src) == version and (src.get('content') or src.get('sections')):
+            return {'source': src, 'reason': 'search_hit', 'eligible': True,
+                    'provider': source_provider(src), 'must_contain_matched': True}
+    return None
+
+
 def create_version_selector(
     document_id: str,
     page_number: int,
@@ -149,6 +163,7 @@ def create_version_selector(
     all_sources: Optional[List[Dict[str, Any]]] = None,
     full_original_text: Optional[str] = None,
     must_contain: Optional[str] = None,
+    prefer_version: Optional[str] = None,
 ):
     """Create a version selector dropdown.
 
@@ -171,6 +186,9 @@ def create_version_selector(
             whichever source (PGP edition -> FGP edition -> V0.8) actually
             CONTAINS it, so the reading view never silently shows a
             transcription that does not contain what was searched.
+        prefer_version: a scholarly transcription's search hit (``fgp:<id>`` /
+            ``pgp:<id>``, editions plan section 3.4): that source is the default, ahead of
+            every rule above, when it is among *all_sources*.
     """
     container = ui.row().classes('items-center gap-2')
     # The default is applied from a task started below, which has no page of
@@ -243,7 +261,7 @@ def create_version_selector(
             function only renders the returned decision.
             """
             if all_sources:
-                decision = choose_default_source(
+                decision = decision_for_version(all_sources, prefer_version) or choose_default_source(
                     all_sources, original_text,
                     full_htr_getter=lambda: full_original_text,
                     must_contain=must_contain,

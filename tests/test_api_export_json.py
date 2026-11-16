@@ -188,6 +188,38 @@ def test_export_json_handler_populated(client, populated_search_state):
     assert 'results' in body and isinstance(body['results'], list)
 
 
+def test_export_json_reads_each_rows_excerpt_again(client, mock_meta_mgr, monkeypatch):
+    """The stored rows keep no text; the route reads each row's text again for its excerpt --
+    an edition's by version, a page's by uid -- instead of exporting it empty (Codex review
+    of PR #18)."""
+    from web.api import state
+    from web import export_service, export_state
+    monkeypatch.setattr(state, 'meta_mgr', mock_meta_mgr)
+    monkeypatch.setattr('web.safe_storage.app', _make_stub({}))
+    reads = []
+
+    def resolve(row):
+        version = (row.get('edition') or {}).get('version')
+        reads.append(version or row['uid'])
+        return 'EDITION TEXT' if version else 'PAGE TEXT ' * 100
+    monkeypatch.setattr(export_service, '_resolve_result_full_text', resolve)
+    export_state.set_search_export(
+        results=[{'uid': 'ED:fgp:4', 'display': {'id': '9912345678901234', 'library_code': 'CUL'},
+                  'raw_header': '9912345678901234_ED_fgp_4', 'snippet': 'a *match*',
+                  'full_text': 'the edition text, not stored', 'page_identified': False,
+                  'edition': {'kind': 'fgp', 'id': 4, 'version': 'fgp:4', 'sys_id': '9912345678901234'}},
+                 {'uid': 'IE99_P7_FL1', 'display': {'id': '9912345678901234', 'library_code': 'CUL'},
+                  'raw_header': 'header_9912345678901234_IE99_P7', 'snippet': 'a *match*',
+                  'full_text': 'the page text, not stored'}],
+        query='foo', mode='text', gap=None, filters=None, warnings=[], selected_uids=None)
+    r = client.get('/api/export/json')
+    assert r.status_code == 200, r.content
+    assert reads == ['fgp:4', 'IE99_P7_FL1']
+    edition_row, page_row = r.json()['results']
+    assert edition_row['excerpt'] == 'EDITION TEXT'
+    assert page_row['excerpt'] == ('PAGE TEXT ' * 100)[:500]
+
+
 def test_export_parallels_json_handler_empty(client, empty_parallels_state):
     """EXPORT-02: empty parallels state -> 400 + body 'No parallels results to export'."""
     r = client.get('/api/export/parallels/json')

@@ -2892,7 +2892,8 @@ def parallels_page_route(text: str = None):
         create_parallels_page(initial_text=text)
 
 @ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
-def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None, computed: str = None):
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None, computed: str = None,
+                      version: str = None, span: str = None, fp: str = None):
     # R2-1 discovery-review iframe: ?embed=1 renders a bare viewer (no nav shell,
     # no snapshot write, no current_page write) so it can be framed inside the
     # standalone discovery-review deck without stomping normal browse state.
@@ -3013,7 +3014,8 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     content = ui.column().classes('w-full items-stretch').style('padding:0;margin:0') if _embed else create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed, open_computed=_open_computed)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed, open_computed=_open_computed,
+                           initial_version=version, initial_span=span, initial_fp=fp)
 
 @ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
 def joins_lab_page_route(

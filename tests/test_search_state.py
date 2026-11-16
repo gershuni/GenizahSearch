@@ -370,3 +370,32 @@ def test_clearing_the_snapshot_drops_the_partial_state():
         from web.pages.search_state import clear_search_snapshot
         clear_search_snapshot()
     assert 'search_result_partial' not in storage
+
+
+@pytest.mark.parametrize('path', ['run snapshot', 'user snapshot'])
+@pytest.mark.parametrize('skipped', [True, False])
+def test_a_restored_search_keeps_its_skipped_editions_note(path, skipped):
+    """The scholarly transcriptions could not be searched for these rows: the note comes back
+    with them from the run's snapshot and from the user-storage fallback (Codex review of #18)."""
+    from web import search_runs
+    from web.pages import search_state as ss
+    storage = {'search_snapshot_schema_version': 1}
+    search_runs.clear()
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app, \
+         patch('web.pages.search_state._browser_id', lambda: 'browser-1'):
+        mock_app.storage.user = storage
+        mock_safe_app.storage.user = storage
+        state = ss.SearchUIState()
+        state.results = [{'display': {'id': 'M1'}}]
+        state.editions_skipped = skipped
+        if path == 'run snapshot':
+            search_runs.finish_run('browser-1', 'code', dict(ss.search_run_snapshot(state),
+                                                             search_exclusion_sources=[]))
+        else:
+            ss.persist_search_snapshot(state)
+            search_runs.clear()
+        restored = ss.SearchUIState()
+        ss.restore_search_snapshot(restored, 'code')
+        search_runs.clear()
+    assert restored.editions_skipped is skipped

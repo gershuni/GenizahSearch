@@ -603,6 +603,35 @@ def read_generation(gen_dir: str) -> Tuple[Optional[Dict[str, Any]], Optional[Di
     return meta, payload
 
 
+def restore_previous_generation(live_dir: str) -> bool:
+    """Put ``<live>.prev`` back in place of *live_dir* (a deploy's rollback, plan section 3.7).
+    The generation it replaces is kept as ``<live>.failed`` (an older one is deleted first), for
+    a look at what went wrong. False when there is no ``.prev`` to restore. Readers must have
+    closed the live generation (the deploy stops the service first)."""
+    prev, failed = live_dir + ".prev", live_dir + ".failed"
+    if not os.path.isdir(prev):
+        return False
+    if os.path.exists(live_dir):
+        if os.path.exists(failed):
+            shutil.rmtree(failed)
+        os.replace(live_dir, failed)
+    os.replace(prev, live_dir)
+    return True
+
+
+def set_aside_generation(live_dir: str) -> bool:
+    """Take *live_dir* out of service, kept as ``<live>.failed`` (an older one is deleted first):
+    the rollback of a FIRST install, which has no ``.prev`` to put back -- the site then serves
+    without editions, as before the install. False when there is nothing live."""
+    failed = live_dir + ".failed"
+    if not os.path.isdir(live_dir):
+        return False
+    if os.path.exists(failed):
+        shutil.rmtree(failed)
+    os.replace(live_dir, failed)
+    return True
+
+
 def promote_generation(new_dir: str, live_dir: str) -> None:
     """Replace *live_dir* with *new_dir*, keeping the old one as ``<live>.prev`` (an older
     ``.prev`` is deleted first). Readers must have closed the live generation (plan §3.7);

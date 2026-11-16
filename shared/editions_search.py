@@ -22,6 +22,7 @@ choice the search is today's, row for row.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import itertools
 import logging
 import operator
@@ -171,13 +172,40 @@ def edition_version(kind: str, edition_id: Any) -> str:
     return f"{kind}:{edition_id}"
 
 
+def span_fingerprint(text: str, span: Sequence[int]) -> str:
+    """A short fingerprint of the stretch *span* of an edition's indexed text. A hit's link
+    carries it, and the reading page marks that span only while the text there is still the
+    same: a rebuilt edition keeps its version, not necessarily its text (Codex review of PR
+    #18)."""
+    a, b = int(span[0]), int(span[1])
+    return hashlib.sha256(text[a:b].encode('utf-8')).hexdigest()[:12]
+
+
+def edition_unchanged(edition: Dict[str, Any], resolved: Optional[Dict[str, Any]]) -> bool:
+    """Whether *resolved* (EditionResolver.resolve: the sidecar's edition now) is still the
+    text an edition record's match was found in: the stretch of its search text under the
+    record's span holds what it held (span_fingerprint). A rebuilt edition keeps its version,
+    not necessarily its text (Codex review of PR #18). A record without a fingerprint (kept
+    before it was) is taken as it is."""
+    span, fp = edition.get('span'), edition.get('span_fp')
+    if not fp or not isinstance(span, (list, tuple)) or len(span) != 2:
+        return True
+    resolved = resolved or {}
+    text = getattr(resolved.get('search'), 'text', None) or resolved.get('search_text')
+    if not text or not 0 <= int(span[0]) < int(span[1]) <= len(text):
+        return False
+    return span_fingerprint(text, span) == fp
+
+
 def edition_record(uid: str, sys_id: str, *, page_uid: Optional[str], span: Tuple[int, int],
                    cross_page: bool, entry: Optional[Dict[str, Any]] = None,
-                   generation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                   generation: Optional[Dict[str, Any]] = None,
+                   span_fp: Optional[str] = None) -> Dict[str, Any]:
     """The ``edition`` record of an edition row (plan §3.4): consumers branch on it, never on uid
     syntax. *page_uid*: the main index's page the match starts on, None when unlocated. *span*:
     the match in the indexed search text (the viewer maps it to the original through the
-    versioned cleaner). *entry*: the edition's browse-map entry (credit, also_ids)."""
+    versioned cleaner). *entry*: the edition's browse-map entry (credit, also_ids).
+    *span_fp*: span_fingerprint of that stretch."""
     kind, eid, _sys = parse_edition_uid(uid) or ("", "", None)
     entry = entry or {}
     generation = generation or {}
@@ -195,6 +223,7 @@ def edition_record(uid: str, sys_id: str, *, page_uid: Optional[str], span: Tupl
         "also_ids": list(entry.get("also_ids") or []),
         "cleaner_version": generation.get("cleaner_version"),
         "build_id": generation.get("build_id"),
+        "span_fp": span_fp,
     }
 
 

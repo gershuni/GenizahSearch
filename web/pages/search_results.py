@@ -16,6 +16,10 @@ from nicegui import background_tasks, ui, run
 from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
+from web.pages.browse_editions import keep_target
+from web.components.version_selector import decision_for_version
+from web.pages.search_editions import (browse_url as editions_browse_url, edition_text, matched_in,
+                                       member_label, page_not_identified)
 from web.translations import tr, is_rtl, get_language, in_visitor_language
 from web.ux_timing import ux_done
 from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
@@ -134,9 +138,34 @@ def _hit_scope_phrase(snippet, adv_state, page):
     return phrase if adv_state.hit_scope == current else None
 
 
+def _hit_scope_version(result, adv_state, page):
+    """The scholarly transcription leading *result* (its edition's version), on the page the
+    hit belongs to only -- the same scope as _hit_scope_phrase: Next/Previous browse on as
+    usual (editions plan section 3.4). None for a hit whose page could not be identified:
+    the page Quick View opens on is not its page, so the edition is not pinned there (Codex
+    review of PR #18); the dialog's Browse link opens the edition with its match."""
+    version = (result.get('edition') or {}).get('version')
+    if not version or page is None or page_not_identified(result):
+        return None
+    current = (getattr(page, 'sys_id', None),
+               getattr(adv_state, 'volume_ie', None),
+               getattr(page, 'p_num', None))
+    if getattr(adv_state, 'hit_scope', None) is None:
+        adv_state.hit_scope = current
+    return version if adv_state.hit_scope == current else None
+
+
 def _page_of_pages(p_num, total_pages) -> str:
     """'Page 2/4'; just 'Page 2' while the count is not known (0) -- never 'Page 1/0'."""
     return f"{tr('Page')} {p_num}/{total_pages}" if total_pages else f"{tr('Page')} {p_num}"
+
+
+def _quick_view_result_label(idx: int, total: int, result) -> str:
+    """Quick View's header: "Result 3 / 50", and "Page not identified" for a scholarly
+    transcription's hit whose page could not be named (the dialog then browses the
+    manuscript as usual)."""
+    label = f"{tr('Result')} {idx + 1} / {total}"
+    return f"{label} · {tr('Page not identified')}" if page_not_identified(result) else label
 
 
 def _quick_view_has_reading_view(sys_id, page, current_text) -> bool:
@@ -668,6 +697,37 @@ def render_preview_results(search_state, refs, rows):
                 create_result_card(search_state, refs, i, res)
 
 
+def _render_matched_in(result):
+    """A result found with the scholarly transcriptions (editions plan section 3.4): every text
+    of its page that matched, each edition a link to it; and a hit whose page could not be named
+    says so. Nothing for today's rows."""
+    if page_not_identified(result):
+        ui.label(tr('Page not identified')).classes('text-xs result-page-unknown').style(
+            'color: var(--text-tertiary);')
+    if not matched_in(result):
+        return
+    with ui.row().classes('items-center gap-1 text-xs flex-wrap result-matched-in').style(
+            'color: var(--text-tertiary);'):
+        ui.label(f"{tr('Matched in')}:")
+        members = result.get('members') or []
+        for i, member in enumerate(members):
+            label = member_label(member) + (',' if i < len(members) - 1 else '')
+            url = editions_browse_url(member, state.meta_mgr) if member.get('edition') else None
+            if url:
+                ui.link(label, url).classes('result-member-link')
+            else:
+                ui.label(label)
+
+
+def _page_index(img) -> int:
+    """The 0-based image index of a result's page number (``display['img']``): 0 when it is
+    missing or not a number, so one odd row never stops the page's cards from rendering."""
+    try:
+        return max(0, int(img) - 1) if img else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def create_result_card(search_state, refs, index, result):
     display = result.get('display', {})
     shelfmark = display.get('shelfmark', 'Unknown')
@@ -980,6 +1040,10 @@ def create_result_card(search_state, refs, index, result):
                     _card_phrase = _snippet_match_phrase(snippet)
                     if _card_phrase:
                         _card_browse_url += f'&highlight={quote(_card_phrase)}'
+                    if result.get('edition'):
+                        # A scholarly transcription leads this result: open that edition,
+                        # its match mapped from the search (editions plan section 3.4).
+                        _card_browse_url = editions_browse_url(result, state.meta_mgr) or _card_browse_url
                     with ui.link(target=_card_browse_url).classes('no-underline'):
                         ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
 
@@ -1082,6 +1146,7 @@ def create_result_card(search_state, refs, index, result):
                 'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
             ):
                 ui.html(snippet_html, sanitize=False)
+        _render_matched_in(result)
 
         # === Inline accordion expansion (image + full text only) ===
         # #25: use NiceGUI visibility/state instead of imperative display:none/block.
@@ -1094,7 +1159,7 @@ def create_result_card(search_state, refs, index, result):
         # Build the URL now, but defer the hidden accordion's image request.
         _img_url = None
         if sys_id:
-            page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
+            page_idx = _page_index(display.get('img'))
             # Add volume suffix for multi-IE manuscripts
             _thumb_suffix = ''
             if _card_ie_id:
@@ -1195,7 +1260,9 @@ def create_result_card(search_state, refs, index, result):
                         ui.label(tr('Full text not available')).style('color: var(--text-muted);')
 
             # Populate text: immediately if available, lazy-load if not
-            full_text = result.get('full_text', '')
+            # A result led by a scholarly transcription shows that edition's own text, read
+            # from its sidecar (its indexed search text has the apparatus taken out).
+            full_text = '' if result.get('edition') else result.get('full_text', '')
             highlight_pattern = result.get('highlight_pattern', '')
             if full_text:
                 _render_full_text(_text_col, full_text, highlight_pattern)
@@ -1224,9 +1291,14 @@ def create_result_card(search_state, refs, index, result):
                         except (ValueError, TypeError):
                             p_num = 1
                         from web.services import get_service
-                        page_data = await run.io_bound(in_visitor_language(
-                            lambda: get_service().get_browse_page(sid, p_num=p_num)
-                        ))
+                        if r.get('edition'):
+                            from types import SimpleNamespace
+                            _ed_text = await run.io_bound(edition_text, r)
+                            page_data = SimpleNamespace(text=_ed_text) if _ed_text else None
+                        else:
+                            page_data = await run.io_bound(in_visitor_language(
+                                lambda: get_service().get_browse_page(sid, p_num=p_num)
+                            ))
                         if page_data and page_data.text:
                             r['full_text'] = page_data.text
                             _render_full_text(tc, page_data.text, hp)
@@ -1443,9 +1515,7 @@ def open_advanced_dialog(search_state, refs, index, result):
         adv_state.crossref_data = None
 
         # Update header label
-        adv_state.result_label.set_text(
-            f"{tr('Result')} {idx + 1} / {len(adv_state.results)}"
-        )
+        adv_state.result_label.set_text(_quick_view_result_label(idx, len(adv_state.results), result))
 
         # Update navigation button states
         adv_state.prev_btn.set_enabled(idx > 0)
@@ -1783,6 +1853,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                 all_sources = filter_sources_for_page(
                     all_sources_raw, current_p_num, _folio, _img_num,
                     page_text=current_text or '') or None
+                # A result led by a scholarly transcription keeps that edition on its page
+                # even where the page filter would leave it out.
+                all_sources = keep_target(all_sources_raw, all_sources,
+                                          _hit_scope_version(result, adv_state, page)) or None
 
                 # SEED-030: whole-MS HTR for the FGP coverage check — only when a
                 # whole-document FGP edition is present (protects the hot path).
@@ -1888,10 +1962,11 @@ def open_advanced_dialog(search_state, refs, index, result):
             # ``*...*`` snippet markers), so pass it -- this inline reader must
             # never show a transcription that lacks the hit while the card right
             # above it highlights that very hit.
-            _dec = choose_default_source(
-                all_sources, current_text or '',
-                full_htr_getter=lambda: _fgp_full_htr,
-                must_contain=_hit_scope_phrase(snippet, adv_state, page))
+            _dec = decision_for_version(all_sources, _hit_scope_version(result, adv_state, page)) or \
+                choose_default_source(
+                    all_sources, current_text or '',
+                    full_htr_getter=lambda: _fgp_full_htr,
+                    must_contain=_hit_scope_phrase(snippet, adv_state, page))
             if _dec.get('eligible') and _dec.get('source'):
                 display_text = _dec['source'].get('content', current_text or '')
                 if _dec['source'].get('is_fgp'):
@@ -1971,6 +2046,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                             _phrase = _snippet_match_phrase(snippet)
                             if _phrase:
                                 browse_url += f'&highlight={quote(_phrase)}'
+                            # A scholarly transcription leading this result, on its own page: that
+                            # edition, its exact match marked (as the card's link; Codex review of #18).
+                            if _hit_scope_version(result, adv_state, page):
+                                browse_url = editions_browse_url(result, state.meta_mgr) or browse_url
                             # Use ui.link for full page reload to ensure browse page recreates with PGP data
                             with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
                                 ui.button(icon='menu_book').props(f'flat round size=sm aria-label="{tr("Browse")}"')
@@ -2107,6 +2186,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 _phrase = _snippet_match_phrase(snippet)
                                 if _phrase:
                                     browse_url += f'&highlight={quote(_phrase)}'
+                                # A scholarly transcription leading this result, on its own page: that
+                                # edition, its exact match marked (as the card's link; Codex review of #18).
+                                if _hit_scope_version(result, adv_state, page):
+                                    browse_url = editions_browse_url(result, state.meta_mgr) or browse_url
                                 with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
                                     ui.button(icon='menu_book').props(f'flat round size=sm color=green aria-label="{tr("Browse Full Manuscript")}"')
 
@@ -2456,6 +2539,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 # later, replaced the hit-containing text with a
                                 # transcription that does not contain the hit.
                                 must_contain=_hit_scope_phrase(snippet, adv_state, page),
+                                prefer_version=_hit_scope_version(result, adv_state, page),
                             )
 
                             create_comment_button(
@@ -2596,6 +2680,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                         _phrase = _snippet_match_phrase(snippet)
                         if _phrase:
                             browse_url += f'&highlight={quote(_phrase)}'
+                        # A scholarly transcription leading this result, on its own page: that
+                        # edition, its exact match marked (as the card's link; Codex review of #18).
+                        if _hit_scope_version(result, adv_state, page):
+                            browse_url = editions_browse_url(result, state.meta_mgr) or browse_url
                         # Use ui.link for full page reload to ensure browse page recreates with PGP data
                         with ui.link(target=browse_url).classes('btn-primary no-underline'):
                             ui.icon('menu_book').classes('mr-2')

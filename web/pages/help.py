@@ -847,6 +847,14 @@ def dictionary_bullets(lang: str, served: Mapping[str, bool], expressions: Mappi
     return body + '\n' + text['key']
 
 
+def _editions_served() -> bool:
+    """The scholarly transcriptions are searched for this reader (web/editions_assets.py): only
+    then does Help describe the choice."""
+    from web.auth_state import GlobalAuthState
+    from web.editions_assets import served_to
+    return served_to(GlobalAuthState.is_editor())
+
+
 def _dictionary_bullets(lang: str) -> str:
     """The dictionaries' bullets, or nothing where no dictionary is served to this reader (an
     editor also reads those switched to editors only, as /browse shows them)."""
@@ -1044,6 +1052,15 @@ The site fetches metadata and images from:
         _md('''
 The **Search History** button (clock icon) near the **Search** button lists your recent searches. Clicking one restores its query with all its settings, then runs the search again.
         ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        if _editions_served():
+            h3('Scholarly transcriptions in the search', classes='text-lg font-semibold mb-2 mt-2',
+               style='color: var(--text-primary);')
+            _md('''
+Beside the **Mode**, **Transcriptions** chooses what is searched: **All** -- the automatic and the scholarly transcriptions together (the default), **Scholarly** -- the scholarly transcriptions only, or **Automatic** -- the automatic transcriptions only. The scholarly transcriptions are the editions of the Friedberg Genizah Project (FGP) and of the Princeton Geniza Project (PGP).
+
+Each page is one result. Its card says where the search matched — the automatic transcription, an FGP edition, a PGP edition, with whom to credit — and each edition opens with the match marked in it. When an edition's page could not be identified, the result says so and opens the manuscript. Points and signs in an edition do not stop a match: a pointed word is found by its plain spelling. Search Within keeps the choice of the search it narrows.
+            ''').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Text Position (for join detection)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary);')
         _md('''
@@ -1852,6 +1869,15 @@ def _create_hebrew_content(precision=None, band_counts=None):
         _md('''
 כפתור **היסטוריית חיפוש** (סמל השעון) שליד כפתור **חפש** מציג את החיפושים האחרונים שלכם. לחיצה על אחד מהם משחזרת את השאילתה כולל כל מאפייניה, ואז מריצה את החיפוש מחדש.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        if _editions_served():
+            h3('תעתיקים מדעיים בחיפוש', classes='text-lg font-semibold mb-2 mt-2',
+               style='color: var(--text-primary); direction: rtl; text-align: right;')
+            _md('''
+ליד **מצב**, **תעתיקים** קובע במה מחפשים: **הכל** — בתעתיקים האוטומטיים ובתעתיקים המדעיים יחד (ברירת המחדל), **מדעיים** — בתעתיקים המדעיים בלבד, או **אוטומטיים** — בתעתיקים האוטומטיים בלבד. התעתיקים המדעיים הם המהדורות של פרויקט הגניזה של פרידברג (FGP) ושל פרויקט הגניזה של פרינסטון (PGP).
+
+כל עמוד הוא תוצאה אחת. הכרטיס שלה מציין היכן נמצאה ההתאמה — בתעתיק האוטומטי, במהדורת FGP או במהדורת PGP, יחד עם מי שיש לזקוף לזכותו את התעתיק — וכל מהדורה נפתחת כשההתאמה מסומנת בה. כשלא ניתן היה לזהות את העמוד של מהדורה, התוצאה אומרת זאת ונפתח כתב היד. ניקוד וסימנים במהדורה אינם מונעים התאמה: מילה מנוקדת נמצאת לפי כתיבה ללא ניקוד. חיפוש בתוך התוצאות שומר על הבחירה של החיפוש שהוא מצמצם.
+            ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         h3('מיקום בטקסט (לאיתור צירופים)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
         _md('''

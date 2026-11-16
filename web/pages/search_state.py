@@ -37,6 +37,9 @@ class SearchUIState:
         self.results = []
         # The Responsa guard's downgrade of these results (shown on the count line)
         self.responsa_warning = None
+        # The scholarly transcriptions could not be searched for these results (their
+        # worker failed or was busy: web/research_jobs.py::consume_editions_skipped)
+        self.editions_skipped = False
         self.selected_result = None
         self.total_count = 0
         self.current_page_idx = 0  # For browse within viewer
@@ -242,7 +245,7 @@ _SEARCH_SNAPSHOT_KEYS = (
     'word_search_excluded_ids', 'search_exclusion_sources',
     'search_refinement_chain', 'search_results',
     'search_all_terms_filter', 'search_result_count_capped', 'search_result_partial',
-    'search_last_variant_settings', 'search_last_run',
+    'search_last_variant_settings', 'search_last_run', 'search_editions_skipped',
 )
 
 # Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
@@ -325,26 +328,32 @@ def url_stamp_of(state: 'SearchUIState') -> Optional[str]:
     return stamp if isinstance(stamp, str) and stamp else None
 
 
+def _compact_row(r):
+    sr = dict(r) if isinstance(r, dict) else r
+    if isinstance(sr, dict):
+        full_text = sr.pop('full_text', None)
+        if full_text:
+            sr['full_text_excerpt'] = str(full_text)[:_SEARCH_RESULT_EXCERPT_CHARS]
+        sr.pop('raw_file_hl', None)
+        sr.pop('content', None)
+        disp = sr.get('display')
+        if disp and isinstance(disp, dict):
+            d = dict(disp)
+            d.pop('full_text', None)
+            d.pop('raw_file_hl', None)
+            d.pop('content', None)
+            sr['display'] = d
+        members = sr.get('members')
+        if isinstance(members, list):
+            # One result per page with the scholarly transcriptions (editions plan section
+            # 3.4): each member carries a whole edition's text, stripped the same way.
+            sr['members'] = [_compact_row(m) for m in members]
+    return sr
+
+
 def _compact_result_rows(results: list) -> list:
-    """Strip heavy text fields before persisting result rows."""
-    compacted = []
-    for r in results or []:
-        sr = dict(r) if isinstance(r, dict) else r
-        if isinstance(sr, dict):
-            full_text = sr.pop('full_text', None)
-            if full_text:
-                sr['full_text_excerpt'] = str(full_text)[:_SEARCH_RESULT_EXCERPT_CHARS]
-            sr.pop('raw_file_hl', None)
-            sr.pop('content', None)
-            disp = sr.get('display')
-            if disp and isinstance(disp, dict):
-                d = dict(disp)
-                d.pop('full_text', None)
-                d.pop('raw_file_hl', None)
-                d.pop('content', None)
-                sr['display'] = d
-        compacted.append(sr)
-    return compacted
+    """Strip heavy text fields before persisting result rows (and from a result's members)."""
+    return [_compact_row(r) for r in results or []]
 
 
 def compact_result_rows(results: list) -> list:
@@ -474,6 +483,7 @@ def search_run_snapshot(state: 'SearchUIState', *, with_results: bool = True) ->
         'last_run': dict(state.last_run) if isinstance(state.last_run, dict) else None,
         # The Responsa guard's downgrade: with no rows, no first row carries it.
         'responsa_warning': state.responsa_warning,
+        'editions_skipped': bool(getattr(state, 'editions_skipped', False)),
         **_post_filters(state),
     }
 
@@ -537,6 +547,7 @@ def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] 
     state.last_run = _settings_or_none(raw.get('last_run'))
     warning = raw.get('responsa_warning')
     state.responsa_warning = warning if isinstance(warning, str) and warning else responsa_note_of(state.results)
+    state.editions_skipped = raw.get('editions_skipped') is True
     restore_post_filters(state, raw)
     return True
 
@@ -681,6 +692,9 @@ def restore_search_snapshot(state: 'SearchUIState', stamp: Optional[str] = None)
         state.responsa_warning = responsa_note_of(state.results)
         state.result_count_capped = bool(safe_user_get('search_result_count_capped', False))
         state.result_partial = bool(safe_user_get('search_result_partial', False))
+        # The scholarly transcriptions could not be searched for these rows: the note comes
+        # back with them on this path too (Codex review of PR #18).
+        state.editions_skipped = safe_user_get('search_editions_skipped', False) is True
         state.printed_filter = safe_user_get('search_printed_filter', 'all')
         _de = safe_user_get('domain_exclusions')
         state.domain_exclusions = set(_de) if _de else set()
@@ -727,6 +741,7 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
             state.result_count_capped or len(state.results or []) > _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
         safe_user_set('search_result_partial', bool(
             state.result_partial and len(state.results or []) <= _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
+        safe_user_set('search_editions_skipped', bool(getattr(state, 'editions_skipped', False)))
         safe_user_set('search_printed_filter', state.printed_filter)
         safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
         # refinement_chain (list[RefinementStep] -> list[dict])
@@ -779,7 +794,7 @@ def clear_search_snapshot() -> None:
         safe_user_set(key, value)
     # Remaining snapshot keys: drop them.
     for key in ('search_refinement_chain', 'search_result_count_capped', 'search_result_partial',
-                'search_last_variant_settings', 'search_last_run',
+                'search_last_variant_settings', 'search_last_run', 'search_editions_skipped',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
     # Filter keys (match search.py:806-832 reset block).

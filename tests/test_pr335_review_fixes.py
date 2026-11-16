@@ -171,7 +171,7 @@ def test_an_fgp_translation_is_not_called_a_transcription(lang):
     assert credit.kind == KIND_TRANSLATION, credit.kind
     heading = credit.heading
     assert ('Transcription' not in heading if lang == 'en'
-            else 'תעתוק' not in heading), (
+            else 'תעתיק' not in heading and 'תעתוק' not in heading), (
         'a translation is headed as a transcription: %r' % heading)
     # Still credited to FGP -- only the KIND and heading change.
     assert 'FGP team' in ' '.join(credit.citation_lines)

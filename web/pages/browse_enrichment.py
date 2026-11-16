@@ -30,6 +30,7 @@ from shared.fgp_service import (
     fgp_image_number_for_displayed_page, fgp_needs_full_htr,
 )
 from web.pages.browse_state import BrowseState, _crossref_cache, page_has_reading_view
+from web.pages.browse_editions import claim_target, keep_target, resolve_target, target_version_for
 from web.page_count import apply_page_count, count_pages
 from web.safe_storage import safe_user_get, safe_user_set
 from shared.synthetic_sys_id import is_synthetic_sys_id
@@ -251,6 +252,10 @@ def _consume_initial_panel_open(refs: BrowsePageRefs, open_state: Dict[str, bool
 async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, generation):
     """Phase B: Load PGP + FJMS enrichment data in background."""
     state.enrichment_loading = True
+    # The edition link (?version=&span=) belongs to the first folio whose enrichment starts:
+    # claimed here, on the event loop, before any worker runs -- a folio reached while the
+    # first one is still loading cannot win it (Codex review of PR #18).
+    claim_target(state, page)
 
     async def fetch_pgp():
         _page_sys_id = page.sys_id
@@ -262,6 +267,9 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             if web_fgp_enabled():
                 all_sources = all_sources + (get_fgp_sources_for_fragment(_page_sys_id) or [])
             pgp_doc = get_document_for_fragment(_page_sys_id, _page_p_num)
+            # A scholarly transcription's hit (?version=&span=): its exact match, read
+            # here, off the event loop (web/pages/browse_editions.py).
+            resolve_target(state, page)
             # SEED-030: a whole-document FGP edition must be judged against the
             # WHOLE-manuscript HTR (to demote selective excerpts while keeping
             # comprehensive ones). Fetch it here — off the event loop — but ONLY
@@ -587,6 +595,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         state.all_sources = filter_sources_for_page(
             all_sources, page.p_num, _folio, _img_num,
             page_text=getattr(page, 'text', '') or '') or None
+        # The linked edition stays even where the page filter would leave it out: it is
+        # the text the search matched on this page (editions plan section 3.4).
+        state.all_sources = keep_target(all_sources, state.all_sources,
+                                        target_version_for(state, page)) or None
     else:
         state.all_sources = None
     # SEED-030: whole-MS HTR for the FGP coverage check (None unless a whole-doc

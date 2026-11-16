@@ -780,6 +780,12 @@ class IsolatedEngine:
                     # due (_wait_for): the main rows are complete and stand alone, with the note.
                     log.warning('Editions leg not used; the main rows stand alone: %r', w.error)
                     _editions_skipped.value = True
+            if any(r.get('editions_unavailable') for r in results):
+                # A worker asked to read the editions had none open: an editions-only search
+                # searched nothing, which the page says rather than "0 results" (Codex review
+                # of PR #18).
+                log.warning('Editions asked for, but the worker had no editions index open')
+                _editions_skipped.value = True
             for result in results:
                 cutoff = result.get('cutoff') or {}
                 partial = bool(cutoff.get('partial'))

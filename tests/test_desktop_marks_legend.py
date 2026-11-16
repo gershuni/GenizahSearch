@@ -188,4 +188,4 @@ def test_the_dialog_shows_the_marks_as_typed(monkeypatch, lang):
     text = dialog.browser.toPlainText()
     for form in ("<…>", "&…&", "$…$", "?א/ב?", "{א//ב}"):
         assert form in text
-    assert ("סימני התעתוק" if lang == "he" else "Transcription marks") == dialog.windowTitle()
+    assert ("סימני התעתיק" if lang == "he" else "Transcription marks") == dialog.windowTitle()

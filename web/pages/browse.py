@@ -87,6 +87,10 @@ from web.pages.browse_state import (
     clamp_zoom, zoom_percent,
 )
 from web.browse_bootstrap import resolve_browse_bootstrap
+from web.pages.browse_editions import (link_target as _edition_link_target, mark_html,
+                                      note_stale_edition as _note_stale_edition,
+                                      on_target_folio, target_mark_for,
+                                      target_version_for)
 from web.pages.browse_enrichment import (
     BrowsePageRefs,
     discovery_panel_enabled,
@@ -809,8 +813,14 @@ def _recents_lock_for(user_id: str) -> asyncio.Lock:
     return lock
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False):
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False,
+                       initial_version: Optional[str] = None, initial_span: Optional[str] = None,
+                       initial_fp: Optional[str] = None):
     """Create the professional manuscript viewer page UI.
+
+    initial_version / initial_span (editions plan section 3.4): a scholarly transcription's
+    search hit -- that edition, chosen on the folio the link arrived for, its match marked
+    on its own characters (web/pages/browse_editions.py).
 
     embedded=True (R2-1 discovery-review iframe): renders a bare viewer — the
     page-title h1 and shelfmark-search card are hidden, and browse-position
@@ -958,6 +968,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.volume_ie = initial_volume_ie
     if highlight:
         state.highlight_terms = highlight
+    state.edition_target = _edition_link_target(initial_version, initial_span,
+                                                placed=bool(initial_page or initial_fl_id),
+                                                fp=initial_fp)
 
 
     def _search_scope_phrase(page):
@@ -999,6 +1012,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         if new_sys_id and state.sys_id and new_sys_id != state.sys_id:
             state.highlight_terms = None
             state.highlight_scope = None
+            state.edition_target = None
+            state.exact_mark = None
             _url_state['highlight'] = None
 
 
@@ -1025,6 +1040,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             params['volume_ie'] = state.volume_ie
         if _url_state['highlight']:
             params['highlight'] = _url_state['highlight']
+        if state.edition_target and on_target_folio(state, page):
+            # A scholarly transcription's hit stays in the address on the folio it arrived for,
+            # so a reload opens the same edition with the same mark; on any other folio it is
+            # left out, or a reload there would claim it (Codex review of PR #18).
+            params['version'] = state.edition_target['version']
+            span = state.edition_target.get('span')
+            if span:
+                params['span'] = f'{span[0]}-{span[1]}'
+                if state.edition_target.get('fp'):
+                    params['fp'] = state.edition_target['fp']
         qs = urlencode(params)
         new_url = f'/browse?{qs}'
         shelfmark = page.shelfmark or state.sys_id
@@ -5481,7 +5506,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 with text_container:
                                     with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
                                         if text:
-                                            highlight_html = highlight_text(text) if state.highlight_terms else None
+                                            # The edition's exact mark, on the folio its link arrived
+                                            # for only (Codex review of PR #18).
+                                            highlight_html = (mark_html(text, state.exact_mark['mark'],
+                                                                        state.exact_mark['occurrence'])
+                                                              if state.exact_mark and on_target_folio(state, page)
+                                                              else None)
+                                            if highlight_html is None and state.highlight_terms:
+                                                highlight_html = highlight_text(text)
                                             html_str = _render_line_numbered_html(
                                                 text=text,
                                                 highlight_html=highlight_html,
@@ -5505,6 +5537,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             def handle_version_change(new_text: str, version_info: dict):
                                 """Handle version selection - update displayed text."""
                                 current_text['value'] = new_text
+                                state.exact_mark = target_mark_for(state, page, version_info)
                                 # The DISPLAYED text goes into `enrichment_refs`
                                 # beside the source it came from, because the
                                 # Word export reads the source from there and
@@ -5644,7 +5677,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             # deep link, when this page was reached
                                             # from a search hit.
                                             must_contain=_search_scope_phrase(page),
+                                            # A scholarly transcription's hit: that edition.
+                                            prefer_version=target_version_for(state, page),
                                         )
+                                        _note_stale_edition(state)
 
                             # Initial render
                             render_text_content(page.text if page.text else None)
