@@ -713,12 +713,35 @@ def test_no_new_translation_key_introduces_the_word_discoveries():
         assert key != "Identifications"
 
 
+# value -> (its one tr() key, its one display-string producer: callable, key path).
+# The editions search's version label "Automatic transcription" (tr) and the
+# findings' note on a fragment with only an automatic transcription, "automated
+# transcription", read the same in Hebrew; they are separate strings on separate
+# surfaces. Only that pair is exempt: a third producer of the value still fails.
+COINCIDENT_WORDING = {
+    "תעתיק אוטומטי": ("Automatic transcription", ("excerpt_strings", ("frag_htr_note",))),
+}
+
+
+def _string_paths(value, path=()):
+    """(key path, string) for every string in a display-strings return value."""
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield from _string_paths(v, path + (k,))
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for v in value:
+            yield from _string_paths(v, path)
+
+
 def test_no_translation_key_duplicates_a_display_string():
     """A string lives in exactly ONE of `tr()` and
     `shared/discovery_display_strings.py` -- never both."""
     from shared import genizah_translations as gt
 
     display_values = set()
+    producers = {value: set() for value in COINCIDENT_WORDING}
     functions = public_callables()
     for name, fn in functions.items():
         signature = inspect.signature(fn)
@@ -727,9 +750,11 @@ def test_no_translation_key_duplicates_a_display_string():
                 call_kwargs = dict(kwargs)
                 if "lang" in signature.parameters:
                     call_kwargs["lang"] = lang
-                for value in flatten_strings(fn(**call_kwargs)):
+                for path, value in _string_paths(fn(**call_kwargs)):
                     if value.strip():
                         display_values.add(value)
+                    if value in producers:
+                        producers[value].add((name, path))
 
     # Delegated strings legitimately live in their own home modules, and the
     # methods page already pins the rule sentence -- exclude only those.
@@ -744,6 +769,15 @@ def test_no_translation_key_duplicates_a_display_string():
             "shared.discovery_band_labels", fromlist=["BAND_LABELS"]
         ).BAND_LABELS.values():
             delegated.add(entry[lang])
+
+    # Two different strings that read the same, not one string kept twice. The value
+    # is exempt only while the named pair are its ONLY producers on both sides: it
+    # ends when either wording changes, and a third producer still fails.
+    for value, (tr_key, display_producer) in COINCIDENT_WORDING.items():
+        tr_producers = {k for k, v in gt.TRANSLATIONS.items() if value in (k, v)}
+        assert tr_producers == {tr_key}, (value, tr_producers)
+        assert producers[value] == {display_producer}, (value, producers[value])
+        delegated.add(value)
 
     overlap = sorted(
         v for v in (display_values - delegated)

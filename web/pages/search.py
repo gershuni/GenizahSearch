@@ -3229,7 +3229,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         persist_search_snapshot(s)
         filter_shelfmark.value = filter_title.value = filter_snippet.value = ''
         s.post_filter_criteria = {}
-        save_post_filters_with_run(s)
+        save_post_filters_with_run(search_state)  # the name the run-save check reads
         _update_printed_filter_btn()
         _update_pgp_filter_btn()
         _update_scholarly_filter_btn()

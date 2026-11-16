@@ -604,8 +604,9 @@ def _display_filter_saves(tree):
 
 
 def test_every_display_filter_save_also_updates_the_run():
-    # search.py: PGP, library, printed, and five manuscript-exclusion changes.
-    for module, expected in (('web/pages/search.py', 8), ('web/pages/search_results.py', 2)):
+    # search.py: PGP, library, printed, five manuscript-exclusion changes, and
+    # Reset filters' printed, PGP and library.
+    for module, expected in (('web/pages/search.py', 11), ('web/pages/search_results.py', 2)):
         saved, followed = _display_filter_saves(_module_tree(module))
         assert saved == expected, f'{module}: {saved} saves; update this test'
         assert followed == saved, module
