@@ -17,7 +17,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from nicegui import ui
 
-from shared.blau_normalize import BROKEN_PLURAL
+from shared.blau_normalize import BROKEN_PLURAL, spelling_variant
 from shared.ja_expression import MAX_GAP, MAX_EXPRESSION_WORDS
 from web.translations import tr
 
@@ -119,7 +119,7 @@ def render_problem(answer: Any) -> bool:
 
 def render_match_details(record: Any) -> None:
     analyses = getattr(record, 'analyses', ())
-    if analyses and all('mater' in path for path in analyses):
+    if analyses and all(spelling_variant(path) for path in analyses):
         spelling = getattr(record, 'candidate', '') or getattr(record, 'matched', '')
         ui.label(f'{tr("Possible spelling")}: {spelling}').classes('where dict-evidence')
     elif (getattr(record, 'via', '') == 'verb_form' or getattr(record, 'verb_form', '')

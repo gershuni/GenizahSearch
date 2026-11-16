@@ -311,6 +311,8 @@ def _render_hit(hit: FriedmanExpressionHit) -> None:
     unit = hit.unit
     with ui.element('div').classes(f'{MATCH_CLASS} card'):
         _render_head(unit, main=True, marked=next((p for p in hit.places if p.scope == SCOPE_HEAD), None))
+        if getattr(hit, 'possible_spelling', False):
+            ui.label(tr('Possible spelling')).classes('where dict-evidence')
         if hit.parent is not None and hit.parent.head_text:
             with ui.element('div').classes('matched-key'):
                 ui.label(tr(UNDER)).classes('matched-label')

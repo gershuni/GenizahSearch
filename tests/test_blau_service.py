@@ -1198,3 +1198,139 @@ def test_a_word_that_reaches_nothing_else_keeps_its_verb_under_a_pronoun(stems, 
     monkeypatch.setenv(blau_service.ENV_VERB_FORM_KINDS, "A,D")
     assert stems.lookup("ידללהא").cards == (), "with kind B switched off, not these either"
 
+
+
+def test_a_word_with_tsade_reaches_an_entry_spelled_with_tet_after_its_own(tmp_path):
+    """ض and ظ are written for one another: עצ̇ם reaches the root עט̇ם as a possible spelling, and
+    a root spelled as the word is written comes first."""
+    from tests.test_build_blau_sidecar import _root
+    data = dictionary()
+    data["עט̇ם (عظم)"] = _root("עט̇ם (عظم)", "blau-e-000004", ["עט̇ם"], ["عظم"], stems=[{
+        "id": "blau-st-000005", "stem_head": {"binyan": "I"}, "forms": [
+            _form("blau-f-000006", [_seg("'גדל'", "definition_hebrew")])]}])
+    data["קמט (قمط)"] = _root("קמט (قمط)", "blau-e-000005", ["קמט"], ["قمط"], stems=[{
+        "id": "blau-st-000006", "stem_head": {"binyan": "I"}, "forms": [
+            _form("blau-f-000007", [_seg("'קשר'", "definition_hebrew")])]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        card, = svc.lookup("עצ̇ם").cards
+        assert card.root_id == "blau-e-000004"
+        assert all('interchange' in path for path in card.analyses)
+        own, = svc.lookup("עט̇ם").cards
+        assert own.root_id == "blau-e-000004" and not any('interchange' in p for p in own.analyses)
+        assert not svc.lookup("עצ̇").cards, 'two letters are never exchanged'
+        assert [c.root_id for c in svc.lookup("עצם").cards] == ["blau-e-000004"], "the word's own dot is not needed"
+        assert not svc.lookup("קמץ").cards, "ט printed without the dot is ط: no exchange"
+        assert [c.root_id for c in svc.lookup("קמט").cards] == ["blau-e-000005"]
+    finally:
+        svc.close()
+
+
+def test_an_exchange_reaching_a_dotted_sub_entry_under_an_undotted_root_is_kept(tmp_path):
+    """The dot is read on the spelling the exchange reached: עצם reaches the sub-entry עט̇ם filed
+    under the root כתב, which carries no dot itself."""
+    from tests.test_build_blau_sidecar import _root
+    data = dictionary()
+    data["כתב (كتب)"] = _root("כתב (كتب)", "blau-e-000006", ["כתב"], ["كتب"], stems=[{
+        "id": "blau-st-000007", "stem_head": {"binyan": "I"}, "forms": [
+            _form("blau-f-000008", [_seg("'כתב'", "definition_hebrew")])]}],
+        sub_entries=[{"id": "blau-se-000006", "name_ja": ["עט̇ם"], "arabic_spelling": ["عظم"],
+                      "stems": [{"id": "blau-st-000008", "stem_head": {}, "forms": [
+                          _form("blau-f-000009", [_seg("'עצם'", "definition_hebrew")])]}]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        assert [(c.root_id, c.sub_entry) for c in svc.lookup("עצם").cards] == [("blau-e-000006", "עט̇ם")]
+    finally:
+        svc.close()
+
+
+def test_an_exchange_reaching_a_dotted_alternate_name_of_a_root_is_kept(tmp_path, monkeypatch):
+    """A root named כתב and also עט̇ם: עצם reaches the second name, whose dot is read; and the pass
+    widens past its first window to find it behind undotted roots."""
+    from tests.test_build_blau_sidecar import _root
+    monkeypatch.setattr(blau_service, "LATER_PASS_FETCH", 1)
+    data = dictionary()
+    data["כתב (كتب)"] = _root("כתב (كتب)", "blau-e-000006", ["כתב", "עט̇ם"], ["كتب"], stems=[{
+        "id": "blau-st-000007", "stem_head": {"binyan": "I"}, "forms": [
+            _form("blau-f-000008", [_seg("'כתב'", "definition_hebrew")])]}])
+    for n in range(3):
+        data[f"עטם{n}"] = _root(f"עטם{n}", f"blau-e-00002{n}", ["עטם"], ["عطم"], stems=[{
+            "id": f"blau-st-00002{n}", "stem_head": {}, "forms": [
+                _form(f"blau-f-00002{n}", [_seg("'x'", "definition_hebrew")])]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        assert [c.root_id for c in svc.lookup("עצם", limit=1).cards] == ["blau-e-000006"]
+    finally:
+        svc.close()
+
+
+def test_an_exchanged_sub_entry_under_the_root_the_word_reached_is_its_own_card(tmp_path):
+    """A root named עצם with a sub-entry עט̇ם: עצם reaches the root as written and the sub-entry by
+    the exchange, two scopes and two cards, the root first."""
+    from tests.test_build_blau_sidecar import _root
+    data = dictionary()
+    data["עצם (عصم)"] = _root("עצם (عصم)", "blau-e-000007", ["עצם"], ["عصم"], stems=[{
+        "id": "blau-st-000009", "stem_head": {"binyan": "I"}, "forms": [
+            _form("blau-f-000010", [_seg("'שמר'", "definition_hebrew")])]}],
+        sub_entries=[{"id": "blau-se-000007", "name_ja": ["עט̇ם"], "arabic_spelling": ["عظم"],
+                      "stems": [{"id": "blau-st-000010", "stem_head": {}, "forms": [
+                          _form("blau-f-000011", [_seg("'עצם'", "definition_hebrew")])]}]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        cards = svc.lookup("עצם").cards
+        assert [(c.root_id, c.sub_entry) for c in cards] == [("blau-e-000007", ""), ("blau-e-000007", "עט̇ם")]
+        assert all('interchange' in p for p in cards[1].analyses)
+    finally:
+        svc.close()
+
+
+def test_only_the_spelling_the_exchange_reached_vouches_for_its_dot(tmp_path):
+    """An undotted sub-entry עטם filed under the dotted root ט̇וב: the root's dot is on another
+    letter, so עצם does not reach the sub-entry."""
+    from tests.test_build_blau_sidecar import _root
+    data = dictionary()
+    data["ט̇וב (ظوب)"] = _root("ט̇וב (ظوب)", "blau-e-000008", ["ט̇וב"], ["ظوب"], stems=[{
+        "id": "blau-st-000011", "stem_head": {"binyan": "I"}, "forms": [
+            _form("blau-f-000012", [_seg("'x'", "definition_hebrew")])]}],
+        sub_entries=[{"id": "blau-se-000008", "name_ja": ["עטם"], "arabic_spelling": ["عطم"],
+                      "stems": [{"id": "blau-st-000012", "stem_head": {}, "forms": [
+                          _form("blau-f-000013", [_seg("'y'", "definition_hebrew")])]}]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        assert not svc.lookup("עצם").cards
+    finally:
+        svc.close()
+
+
+def test_more_entries_counts_only_exchanged_cards_that_pass_the_dot(tmp_path, monkeypatch):
+    """A page of one: the dotted עט̇ם fills it, and the undotted עטם after it is not counted as
+    more (pressing "more" would add nothing)."""
+    from tests.test_build_blau_sidecar import _root
+    monkeypatch.setattr(blau_service, "LATER_PASS_FETCH", 1)
+    data = dictionary()
+    for rid, name, arabic in (("blau-e-000009", "עט̇ם", "عظم"), ("blau-e-000010", "עטם", "عطم")):
+        data[f"{name} ({arabic})"] = _root(f"{name} ({arabic})", rid, [name], [arabic], stems=[{
+            "id": rid + "-st", "stem_head": {}, "forms": [_form(rid + "-f", [_seg("'x'", "definition_hebrew")])]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        result = svc.lookup("עצם", limit=1)
+        assert [c.root_id for c in result.cards] == ["blau-e-000009"] and result.more_cards == 0
+    finally:
+        svc.close()
+
+
+def test_a_root_past_the_page_is_not_counted_again_as_an_exchanged_spelling(tmp_path):
+    """Two roots named עצם, the second also עט̇ם: with room for one card, the second root is one more
+    entry, not two (its own name past the page, and again by the exchange)."""
+    from tests.test_build_blau_sidecar import _root
+    data = dictionary()
+    for rid, names in (("blau-e-000011", ["עצם"]), ("blau-e-000012", ["עצם", "עט̇ם"])):
+        data[rid] = _root(rid, rid, names, ["عصم"], stems=[{
+            "id": rid + "-st", "stem_head": {}, "forms": [_form(rid + "-f", [_seg("'x'", "definition_hebrew")])]}])
+    svc = BlauService(str(_build(tmp_path, data)))
+    try:
+        page = svc.lookup("עצם", limit=1)
+        everything = svc.lookup("עצם", limit=10)
+        assert len(page.cards) == 1 and page.more_cards == len(everything.cards) - 1 == 1
+    finally:
+        svc.close()

@@ -38,10 +38,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Sequence, Any
+from typing import Any, Optional, Sequence
 
 from shared.arabic_normalize import DOTTED, LETTERS
-from shared.blau_normalize import QUOTE_MARKS, fold_finals, normalize_ja
+from shared.blau_normalize import (QUOTE_MARKS, fold_finals, interchange_variants, normalize_ja, query_stems,
+                                   spelling_key, spelling_variant)
 from shared.ja_expression import lookup_key
 
 #: The letters Judeo-Arabic writes with a dot above for a second Arabic letter (finals folded):
@@ -79,6 +80,125 @@ def dots_agree(word_pattern: str, spelling: str) -> bool:
     ``dot_pattern`` (whose proclitics the candidate may have peeled)."""
     first = dot_pattern(spelling).split(" ", 1)[0]
     return bool(first) and first in word_pattern
+
+
+#: The exchange of צ and ט (``shared.blau_normalize.interchange_variants``) is shown only where the
+#: dictionary prints the letter reached with the dot: the ض/ظ pair, not ص/ط. Measured on the
+#: automatic text (``scripts/measure_dictionary_interchange.py``): 73% of what an exchange reached
+#: in Blau without the rule had a ط/ص root, and Blau printed the dot on every ض/ظ root reached.
+#: The measurement sets it False to count both rules.
+INTERCHANGE_DOTTED_ONLY = True
+_EXCHANGED_FOR = {"צ": "ט", "ט": "צ"}
+#: The later pass (a spelling the word does not have as written) is fetched this deep before the
+#: dotted rule filters it, then four times deeper each round until the page holds ``limit`` valid
+#: cards or the dictionary has no more: a valid card behind undotted ones still makes the page.
+#: ``LATER_PASS_MAX`` is more than either dictionary's entries, so the widening reaches the end.
+LATER_PASS_FETCH = 200
+LATER_PASS_MAX = 200 * 4 ** 6
+
+
+def exchanged_letters(word: str, matched: str) -> Optional[tuple[tuple[str, int], ...]]:
+    """The letters ``matched`` has where ``word`` (one of its ``query_stems``) was exchanged to
+    reach it, each as (letter, which occurrence of that letter in ``matched``, from 0): טצא
+    reaching טטא is (("ט", 1),), the second ט. None when no exchange of the word's stems
+    reaches ``matched``."""
+    target = spelling_key(matched)
+    for stem in query_stems(normalize_ja(word)):
+        for variant in interchange_variants(stem):
+            if spelling_key(variant) == target:
+                return tuple((variant[i], variant[:i].count(variant[i]))
+                             for i in range(len(variant)) if variant[i] != stem[i])
+    return None
+
+
+def _dotted_occurrences(spelling: str, places: tuple[tuple[str, int], ...]) -> bool:
+    """Does the spelling's first word print each (letter, occurrence) of ``places`` with the dot?"""
+    pattern = dot_pattern(spelling).split(" ", 1)[0]
+    seen: dict[str, int] = {}
+    dotted: set[tuple[str, int]] = set()
+    for i, ch in enumerate(pattern):
+        if ch == "*" or ch not in _EXCHANGED_FOR:
+            continue
+        n = seen.get(ch, 0)
+        seen[ch] = n + 1
+        if pattern[i + 1:i + 2] == "*":
+            dotted.add((ch, n))
+    return all(place in dotted for place in places)
+
+
+#: The marks a printed spelling separates alternatives with (עטם/עט̇ם).
+_ALTERNATIVES_RE = re.compile(r"[/|]")
+
+
+def interchange_dotted(word: str, spellings: Sequence[str], matched: str = "") -> bool:
+    """Does a dictionary spelling print, with the dot, the letter the ``word``'s צ or ט was
+    exchanged for to reach ``matched`` (ט̇ for a word's צ, צ̇ for its ט), at that letter? The
+    letter is counted by its occurrence (``exchanged_letters``), so a root spelling reached by a
+    form (עט̇ם by עטימ) is read at the same ט, and a dot on an unchanged letter never counts.
+    Without ``matched`` (or when no exchange reaches it), any dotted letter of the kind exchanged
+    for. Only the spellings that ARE the matched one are read, when any is (a dotted root label
+    never vouches for an undotted sub-entry filed under it); ``matched`` may carry its own printed
+    form, as an index row's "עט̇ם (כתב)" does. A spelling written with alternatives (עטם/עט̇ם) is
+    read alternative by alternative. True for every spelling when the rule is off."""
+    if not INTERCHANGE_DOTTED_ONLY:
+        return True
+    spellings = [part for s in spellings if s for part in _ALTERNATIVES_RE.split(s) if part.strip()]
+    form = (matched or "").split(" (", 1)[0].strip()
+    key = normalize_ja(form)
+    places = exchanged_letters(word, key) if key else None
+    if places:
+        # ``matched`` is a printed spelling only when it carries marks; a bare key says nothing.
+        printed = [s for s in ((form,) if form != key else ()) + tuple(spellings) if s]
+        same = [s for s in printed if spelling_key((normalize_ja(s).split(" ", 1) or [""])[0]) == spelling_key(key)]
+        return any(_dotted_occurrences(s, places) for s in (same or printed))
+    letters = {_EXCHANGED_FOR[ch] for ch in fold_finals(normalize_ja(word)) if ch in _EXCHANGED_FOR}
+    patterns = [dot_pattern(s) for s in spellings if s]
+    return any(f"{letter}*" in p for p in patterns for letter in letters)
+
+
+def place_rejects(place: Any, candidates: Sequence[Sequence[str]]) -> Optional[set[tuple[int, str, int]]]:
+    """None for a place that passes ``place_dotted``; else (position, key, word) for each key a
+    typed word matched only by an exchange whose letter is printed without the dot: that key is
+    refused to that word alone (``shared.ja_expression.match_scope``), and the scope is matched
+    again, so a later occurrence printed with the dot is still found (חפט אללה ... חפט̇ אללה), and
+    another word that has the key as written may still take the token ("עצם עטם", in either order)."""
+    if place_dotted(place, candidates):
+        return None
+    components = tuple(getattr(place, "components", ()) or ())
+    positions = tuple(getattr(place, "search_positions", ()) or ()) or tuple(getattr(place, "positions", ()) or ())
+    out: set[tuple[int, str, int]] = set()
+    for n, (component, pos) in enumerate(zip(components, positions)):
+        own = candidates[n] if n < len(candidates) else ()
+        if component.matched in own or interchange_dotted(component.word, (component.printed,),
+                                                          component.matched.lstrip("~")):
+            continue
+        # Only the key that failed: another exchanged key of the same printed word (an alternative,
+        # טטא/צצ̇א) may still pass; each retry refuses one more key, so the retries end.
+        out.add((pos, component.matched, n))
+    return out
+
+
+def place_dotted(place: Any, candidates: Sequence[Sequence[str]]) -> bool:
+    """An expression's place (``shared.ja_expression.ExpressionPlace``) reached with צ and ט
+    exchanged: does every printed word that a typed word reached only by the exchange print the
+    letter exchanged for with the dot, at that letter? ``candidates`` are each typed word's keys
+    as written, in the expression's order."""
+    components = tuple(getattr(place, "components", ()) or ())
+    for n, component in enumerate(components):
+        own = candidates[n] if n < len(candidates) else ()
+        if component.matched in own:
+            continue
+        if not interchange_dotted(component.word, (component.printed,), component.matched.lstrip("~")):
+            return False
+    return True
+
+
+def exchanged_only(record: Any) -> bool:
+    """A card, match or hit reached only with צ and ט exchanged."""
+    if getattr(record, "possible_spelling", False):
+        return True
+    paths = getattr(record, "analyses", ())
+    return bool(paths) and all("interchange" in path for path in paths)
 
 
 def stem_numbers(label: object) -> tuple[int, ...]:
@@ -252,7 +372,7 @@ def borrowed_roots(friedman: Any = None, lane: Any = None, blau: Any = None,
             if by_form and not verb_forms or getattr(card, "borrowed", ()) and not by_form:
                 continue
             paths = getattr(card, 'analyses', ())
-            if paths and all('mater' in path for path in paths):
+            if paths and all(spelling_variant(path) for path in paths):
                 continue
             name = str(getattr(card, "name", "") or "")
             root = str(getattr(card, "root_label", "") or "").strip() or name
@@ -267,7 +387,7 @@ def borrowed_roots(friedman: Any = None, lane: Any = None, blau: Any = None,
     if friedman is not None and not getattr(friedman, "stem", 0):
         for match in getattr(friedman, "matches", ()) or ():
             paths = getattr(match, 'analyses', ())
-            if paths and all('mater' in path for path in paths):
+            if paths and all(spelling_variant(path) for path in paths):
                 continue
             via = getattr(match, "via", "")
             matched = str(getattr(match, "matched", "") or "").strip()

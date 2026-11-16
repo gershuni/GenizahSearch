@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Collection, Hashable, Mapping, Optional, Sequence, TypeVar
 
-from shared.blau_normalize import PRONOUN_SUFFIXES, lookup_stems, normalize_ja, lexical_key, nominal_candidates, spelling_key, query_stems
+from shared.blau_normalize import PRONOUN_SUFFIXES, interchange_variants, lookup_stems, normalize_ja, lexical_key, nominal_candidates, spelling_key, query_stems
 
 #: The rules below, as a number a sidecar's ``meta.keying_version`` carries: bump it when
 #: ``word_keys`` or ``scope_keys`` changes what they write, and rebuild every sidecar's tokens.
@@ -174,6 +174,23 @@ def query_keys(word: str, verb_index=None, kinds: Collection[str] = ALL_VERB_KIN
     if lookup_key(word) == "יא":
         extra.append("^יא")
     return (*keys, *dict.fromkeys("~" + spelling_key(k) for k in keys), *dict.fromkeys(extra))
+
+
+def interchange_candidates(words: Sequence[str], candidates: Sequence[tuple[str, ...]],
+                            keys_of) -> Optional[tuple[tuple[str, ...], ...]]:
+    """Each word's keys with the keys of its spellings with צ and ט exchanged
+    (``interchange_variants``; ``keys_of`` is the reader's ``query_keys``), so an expression
+    written with one letter reaches a dictionary that prints the other. None when no word has
+    such a spelling with new keys: the expression search runs this pass only after its own."""
+    out: list[tuple[str, ...]] = []
+    changed = False
+    for word, keys in zip(words, candidates):
+        extra: list[str] = []
+        for variant in interchange_variants(lookup_key(word)):
+            extra.extend(k for k in keys_of(variant) if k not in keys and k not in extra)
+        changed = changed or bool(extra)
+        out.append((*keys, *extra))
+    return tuple(out) if changed else None
 
 
 def scope_keys(text: str, verb_index=None, kinds: Collection[str] = ALL_VERB_KINDS) -> list[tuple[int, str, int]]:
@@ -341,6 +358,43 @@ def vocative_parts(word):
 def expression_words(text):
     """Separate an attached vocative for component discovery; keep text for display."""
     return tuple(part for word in text.split() for part in (vocative_parts(word) or (word,)))
+
+
+def match_scope(items, accepts, gap, ordered, build, keep=None):
+    """The place ``build(match)`` makes of the best match of ``accepts`` in one scope's ``items``,
+    or None. ``keep(place)``: None to keep it, else (position, key, word) tokens refused to that
+    typed word alone; the scope is then matched again with each refused token renamed so that only
+    the other words still accept it, until a place is kept or nothing new is refused. ``build``
+    always receives indices into the scope's own ``items``."""
+    refused: dict[tuple[int, str], frozenset[int]] = {}
+    while True:
+        if refused:
+            def tag(pos, key):
+                barred = refused.get((pos, key))
+                return f"{key}\x00{','.join(map(str, sorted(barred)))}" if barred else key
+            tokens = [(pos, tag(pos, key)) for pos, key in items]
+            query = [frozenset(a) | {tag(pos, key) for (pos, key), barred in refused.items()
+                                     if key in a and n not in barred}
+                     for n, a in enumerate(accepts)]
+        else:
+            tokens, query = items, accepts
+        match = expression_match(tokens, query, gap, ordered)
+        if match is None:
+            return None
+        place = build(match)
+        if place is None or keep is None:
+            return place
+        refusal = keep(place)
+        if refusal is None:
+            return place
+        grew = False
+        for pos, key, n in refusal:
+            barred = refused.get((pos, key), frozenset())
+            if n not in barred:
+                refused[(pos, key)] = barred | {n}
+                grew = True
+        if not grew:
+            return None
 
 
 def expression_match(tokens, query, gap, ordered=True):

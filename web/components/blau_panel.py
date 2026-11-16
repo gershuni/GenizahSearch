@@ -732,6 +732,8 @@ def _render_expression_hit(hit: BlauExpressionHit, lang: str, on_details=None) -
                 ui.label(f'{tr("p.")} {hit.page}').classes('page')
             link = ui.link(tr('Open on the dictionary site'), hit.url, new_tab=True).classes('site')
             link.props(f'title="{_attr(tr("Open on the dictionary site"))}"')
+        if getattr(hit, 'possible_spelling', False):
+            ui.label(tr('Possible spelling')).classes('where dict-evidence')
         offered = set()
         shown = frozenset(p.quotation.id for p in hit.places if p.quotation is not None and p.quotation.id)
         for place in hit.places:

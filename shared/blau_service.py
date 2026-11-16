@@ -109,7 +109,7 @@ from urllib.parse import quote
 
 from shared.blau_normalize import matching_paths, evidence_cost, plural_analyses, query_stems
 from shared.blau_normalize import ACCUSATIVE, BROKEN_PLURAL, DUAL, FEMININE_PLURAL, PLURAL, feminine_heading
-from shared.blau_normalize import analysis_paths, article_candidates, bare_keys, preposition_candidates
+from shared.blau_normalize import analysis_paths, article_candidates, bare_keys, preposition_candidates, spelling_variant
 from shared.blau_normalize import (
     NORMALIZER_VERSION,
     nominal_candidates,
@@ -125,7 +125,7 @@ from shared.ja_expression import (
     is_function_word,
     component_runs, context_component_runs, context_quality,
     DEFAULT_GAP,
-    expression_match, expression_words, ExpressionLimitError,
+    expression_words, ExpressionLimitError, match_scope,
     KEYING_VERSION,
     MAX_CONTEXT_QUOTED,
     MAX_EXPRESSION_WORDS,
@@ -136,6 +136,7 @@ from shared.ja_expression import (
     components_for,
     lookup_key,
     ordered_match,
+    interchange_candidates,
     query_keys,
     quoted_gap,
     quoted_runs,
@@ -145,7 +146,8 @@ from shared.ja_expression import (
 # lookup reads it the same way; the names stay importable from here.
 from shared.ja_roots import supported_hollow_perfect
 from shared.ja_roots import DOT_LETTERS, StemPair, dot_pattern, root_and_stem, stem_numbers  # noqa: F401 - DOT_LETTERS: importable from here, as before the move
-from shared.ja_roots import BorrowedRoot, carries_root, ja_root_of_arabic
+from shared.ja_roots import BorrowedRoot, carries_root, ja_root_of_arabic, exchanged_only, interchange_dotted
+from shared.ja_roots import LATER_PASS_FETCH, LATER_PASS_MAX, place_rejects
 from shared.ja_roots import dots_agree as _dots_agree
 from shared.dictionary_switch import OFF, ON, read_switch, serves
 from shared.ja_verb_forms import listed_alef_perfect
@@ -564,6 +566,9 @@ class BlauExpressionHit:
     sub_entry: str
     places: tuple[BlauPlace, ...]
     places_total: int
+    #: Reached only with צ and ט exchanged in a word (``interchange_candidates``): shown after the
+    #: hits of the words as written, as a possible spelling.
+    possible_spelling: bool = False
 
 
 @dataclass(frozen=True)
@@ -624,6 +629,13 @@ class _CardBuild:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _printed_spellings(card: BlauCard) -> tuple[str, ...]:
+    """A card's spellings as printed, dots included: the matched forms and sub-entry (the
+    spelling the key reached, when it is not the root's), then the root's name and label."""
+    return (*(sense.ja_text for sense in card.senses if sense.matched), card.matched_key, card.sub_entry,
+            card.name, card.root_label)
 
 
 def _page(value: Any) -> Optional[int]:
@@ -826,9 +838,34 @@ class BlauService:
                 expanded = spelling_candidates(self._conn, query_stems(key), matres=True)
                 extra = tuple(k for k in expanded if k not in candidates)
                 if extra:
-                    additional = self._lookup(word, key, extra, limit=limit, plurals=False)
+                    # Fetched deep, filtered, then cut: the dotted rule must not run on a page
+                    # already cut to ``limit`` (a valid card behind undotted ones would be lost).
+                    # Widened until nothing is left, so the cards past the page are counted only
+                    # when they pass the dotted rule (an undotted one would be a "more" that adds nothing).
+                    # A spelling with a yod or waw added or dropped adds only roots not yet shown; an
+                    # exchanged one is its own scope (a root or one of its sub-entries), as ``_lookup``
+                    # makes cards: the sub-entry עט̇ם under the root עצם the word reached as written.
                     seen = {c.root_id for c in result.cards}
-                    added = tuple(c for c in additional.cards if c.root_id not in seen)
+                    scopes = {(c.root_id, c.sub_entry) for c in result.cards}
+                    fetch = max(limit, LATER_PASS_FETCH)
+                    while True:
+                        additional = self._lookup(word, key, extra, limit=fetch, plurals=False)
+                        added = tuple(c for c in additional.cards if (
+                            (c.root_id, c.sub_entry) not in scopes
+                            and interchange_dotted(key, _printed_spellings(c), c.candidate)
+                            if exchanged_only(c) else c.root_id not in seen))
+                        if not additional.more_cards or fetch >= LATER_PASS_MAX:
+                            break
+                        fetch *= 4
+                    if added and result.more_cards:
+                        # The word's own cards past the page are not shown again as a later spelling
+                        # (nor counted twice in "more"): read them all, only when it can matter.
+                        everything = self._lookup(word, key, candidates, verb_forms=kinds, verb_form_stems=stem_kinds,
+                                                  limit=LATER_PASS_MAX)
+                        roots = {c.root_id for c in everything.cards}
+                        overflow = {(c.root_id, c.sub_entry) for c in everything.cards}
+                        added = tuple(c for c in added if ((c.root_id, c.sub_entry) not in overflow
+                                                           if exchanged_only(c) else c.root_id not in roots))
                     combined = result.cards + added
                     result = replace(result, cards=combined[:limit],
                                      more_cards=result.more_cards + additional.more_cards + max(0, len(combined) - limit),
@@ -1076,7 +1113,7 @@ class BlauService:
         # The dotted reading first; among the named, and among the rest, the key order the lookup made.
         named = {normalize_ja(item.root) for item in borrowed}
         key_order = {key: n for n, key in enumerate(result.candidates)}
-        weak = tuple(card for card in result.cards if card.analyses and all('mater' in path for path in card.analyses))
+        weak = tuple(card for card in result.cards if card.analyses and all(spelling_variant(path) for path in card.analyses))
         nominal = nominal_candidates(result.key)
         article = article_candidates(result.key) and not is_function_word((result.key,))
         finite_ids = {card.root_id for card in verb if card.verb_form and
@@ -1240,6 +1277,18 @@ class BlauService:
                     combined.setdefault((hit.root_id, hit.sub_entry), hit)
                 result = replace(result, hits=tuple(combined.values())[:limit],
                                  truncated=result.truncated or intact.truncated or len(combined) > limit)
+            exchanged = interchange_candidates(words, candidates, lambda w: query_keys(w, self.verb_form_index()))
+            # Also when the first page is exactly full: a valid exchanged hit then marks it truncated.
+            if exchanged is not None and not result.truncated:
+                seen = {(hit.root_id, hit.sub_entry) for hit in result.hits}
+                more = self._expression(text, words, exchanged, gap, max(int(limit), LATER_PASS_FETCH), ordered, head_only,
+                                        keep=lambda place: place_rejects(place, candidates))
+                added = tuple(replace(hit, possible_spelling=True) for hit in more.hits
+                              if (hit.root_id, hit.sub_entry) not in seen)
+                if added:
+                    hits = result.hits + added
+                    result = replace(result, hits=hits[:limit],
+                                     truncated=result.truncated or more.truncated or len(hits) > limit)
             return replace(result, ordered=ordered)
         except ExpressionLimitError:
             return replace(empty_expression(text, gap), ordered=ordered, problem="work_limit")
@@ -1248,7 +1297,11 @@ class BlauService:
             return replace(empty_expression(text, gap, words, candidates), ordered=ordered, problem="error")
 
     def _expression(self, text: str, words: tuple[str, ...], candidates: tuple[tuple[str, ...], ...], gap: int,
-                    limit: int, ordered: bool = True, head_only: bool = False) -> BlauExpression:
+                    limit: int, ordered: bool = True, head_only: bool = False, keep=None) -> BlauExpression:
+        """``keep``: None for a place to keep, else the (position, key) tokens to drop before the
+        scope is matched again (``shared.ja_roots.place_rejects``); applied before the hits are
+        ranked and their places cut to the few shown (the exchanged pass keeps only places printed
+        with the dot)."""
         accepts = [frozenset(c) for c in candidates]
         rows = matching_scopes(self._conn, candidates, 'scope, scope_id, n, root_id, sub_entry_id', head_only)
         unit_of = {(str(r['scope']), str(r['scope_id']), int(r['n'])):
@@ -1261,10 +1314,8 @@ class BlauService:
                 f"SELECT pos, key FROM {TOKENS_TABLE} WHERE scope = ? AND scope_id = ? AND n = ? ORDER BY pos, rowid",
                 scope).fetchall()
             items = [(int(r["pos"]), str(r["key"])) for r in rows]
-            match = expression_match(items, accepts, gap, ordered)
-            if match is None:
-                continue
-            place = self._place(scope, items, match, words, candidates)
+            place = match_scope(items, accepts, gap, ordered,
+                                lambda match: self._place(scope, items, match, words, candidates), keep)
             if place is not None:
                 places.setdefault(unit_of[scope], []).append(place)
         if not places:

@@ -200,3 +200,30 @@ def test_a_key_carries_a_root_s_strong_letters_in_order():
         assert carries_root(key, root), (key, root)
     for key, root in (("לה", "אכד"), ("אלקול", "טלע"), ("מאל", "חצל"), ("נפסה", "תרכ"), ("לבק", "בקל"), ("", "קול")):
         assert not carries_root(key, root), (key, root)
+
+
+def test_the_dot_is_read_at_the_letter_that_was_exchanged():
+    """טצא reaches טטא by exchanging its second letter: only a dot on that ט counts, not one on the
+    first, unchanged ט. A root reached by a form is read at the same occurrence (עצים: עט̇ם)."""
+    from types import SimpleNamespace
+    from shared.ja_roots import exchanged_letters, interchange_dotted, place_dotted
+    assert exchanged_letters("טצא", "טטא") == (("ט", 1),)
+    assert not interchange_dotted("טצא", ["ט̇טא"], "טטא")
+    assert interchange_dotted("טצא", ["טט̇א"], "טטא")
+    assert interchange_dotted("עצים", ["עט̇ם"], "עטימ")
+    assert not interchange_dotted("עצים", ["עטם"], "עטימ")
+    assert exchanged_letters("עצים", "כתב") is None
+    own = SimpleNamespace(word="אללה", key="אללה", printed="אללה", matched="אללה")
+    dotted = SimpleNamespace(word="חפצ", key="חפצ", printed="חפט̇", matched="חפט")
+    plain = SimpleNamespace(word="חפצ", key="חפצ", printed="חפט", matched="~חפט")
+    assert place_dotted(SimpleNamespace(components=(dotted, own)), [("חפצ",), ("אללה",)])
+    assert not place_dotted(SimpleNamespace(components=(plain, own)), [("חפצ",), ("אללה",)])
+
+
+def test_alternatives_written_with_a_slash_are_read_one_by_one():
+    """עטם/עט̇ם: the dotted ט is the first of its own alternative, not the second of the pair glued
+    together; either order reaches it."""
+    from shared.ja_roots import interchange_dotted
+    assert interchange_dotted("עצם", ["עטם/עט̇ם", "כתב"], "עטמ")
+    assert interchange_dotted("עצם", ["עט̇ם/עטם"], "עטמ")
+    assert not interchange_dotted("עצם", ["עטם/עטים"], "עטמ")

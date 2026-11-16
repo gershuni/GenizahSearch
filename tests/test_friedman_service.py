@@ -947,3 +947,214 @@ def test_an_expression_of_function_words_is_found_by_its_name_when_nothing_else_
     assert found("ואלי", ("אן",)) == ["f000004"], "under a conjunction it is"
     service.close()
 
+
+
+def test_a_word_with_tet_reaches_an_entry_spelled_with_tsade_as_a_possible_spelling(tmp_path, monkeypatch):
+    """ض and ظ are written for one another: אלקאט̇י reaches קאצ̇י, ranked after an entry spelled as
+    the word is written."""
+    path = tmp_path / 'interchange.db'
+    data = {'recovery_version': 5, 'units': [
+        unit('f000951', 'entry', 'קאצ̇י', ['קאצי'], ['קאצ̇י']),
+        unit('f000952', 'entry', 'נט̇ר', ['נטר'], ['נט̇ר']),
+        unit('f000953', 'entry', 'צוב', ['צוב'], ['צוב']),
+    ]}
+    write_sidecar(data, {'index_version': 1, 'rows': []},
+                  {'units_sha256': 'u', 'index_sha256': 'i', 'manifest_sha256': 'm'}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, '1')
+    svc = FriedmanService(str(path))
+    try:
+        match = svc.lookup('אלקאט̇י').matches[0]
+        assert match.unit.id == 'f000951' and any('interchange' in p for p in match.analyses)
+        own = svc.lookup('נט̇ר').matches
+        assert [m.unit.id for m in own] == ['f000952']
+        assert not any('interchange' in p for p in own[0].analyses)
+        assert svc.lookup('אלקאטי').matches[0].unit.id == 'f000951', "the word's own dot is not needed"
+        assert not svc.lookup('טוב').matches, "צ printed without the dot is ص: no exchange"
+    finally:
+        svc.close()
+
+
+def test_an_expression_with_tet_reaches_a_head_printed_with_tsade_after_its_own(tmp_path, monkeypatch):
+    """ض and ظ are written for one another: "חפט̇ אללה" reaches the head "חפצ̇ אללה" as a possible
+    spelling, after the head spelled as the words are written."""
+    data = {"recovery_version": 5, "units": [
+        unit("f000961", "entry", "חפצ̇ אללה", ["חפצ אללה"], ["חפצ̇ אללה"]),
+        unit("f000962", "entry", "חפט̇ אללה", ["חפט אללה"], ["חפט̇ אללה"]),
+        unit("f000963", "entry", "חפס אללה", ["חפס אללה"]),
+        unit("f000964", "entry", "פקס אלאמר", ["פקס אלאמר"]),
+        unit("f000965", "entry", "קמט אלאמר", ["קמט אלאמר"]),
+    ]}
+    path = tmp_path / "friedman.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        found = svc.expression("חפט̇ אללה", 2)
+        assert [(h.unit.id, h.possible_spelling) for h in found.hits] == [("f000962", False), ("f000961", True)]
+        assert [h.unit.id for h in svc.expression("קמט אלאמר", 2).hits] == ["f000965"]
+        assert not svc.expression("קמץ אלאמר", 2).hits, "ט printed without the dot is ط: no exchange"
+    finally:
+        svc.close()
+
+
+def test_a_dotted_exchanged_match_behind_undotted_ones_still_makes_a_short_page(tmp_path, monkeypatch):
+    """The dotted rule runs before the page is cut: with room for one match, טוב shows the entry
+    printed צ̇וב even when entries printed צוב (ص) reach the same key."""
+    path = tmp_path / 'deep.db'
+    data = {'recovery_version': 5, 'units': [
+        *(unit(f'f00097{n}', 'entry', 'צוב', ['צוב'], ['צוב']) for n in range(5)),
+        unit('f000979', 'entry', 'צ̇וב', ['צוב'], ['צ̇וב']),
+    ]}
+    write_sidecar(data, {'index_version': 1, 'rows': []},
+                  {'units_sha256': 'u', 'index_sha256': 'i', 'manifest_sha256': 'm'}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, '1')
+    svc = FriedmanService(str(path))
+    try:
+        assert [m.unit.id for m in svc.lookup('טוב', limit=1).matches] == ['f000979']
+    finally:
+        svc.close()
+
+
+def test_a_full_first_page_of_an_expression_still_looks_for_exchanged_hits(tmp_path, monkeypatch):
+    """An expression whose own hits fill the page exactly still runs the exchange: a valid
+    exchanged hit marks the page truncated, so the reader can ask for more."""
+    data = {"recovery_version": 5, "units": [
+        unit("f000981", "entry", "חפצ̇ אללה", ["חפצ אללה"], ["חפצ̇ אללה"]),
+        unit("f000982", "entry", "חפט̇ אללה", ["חפט אללה"], ["חפט̇ אללה"]),
+    ]}
+    path = tmp_path / "full.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        page = svc.expression("חפט̇ אללה", 2, limit=1)
+        assert [h.unit.id for h in page.hits] == ["f000982"] and page.truncated
+        assert [(h.unit.id, h.possible_spelling) for h in svc.expression("חפט̇ אללה", 2, limit=2).hits] == [
+            ("f000982", False), ("f000981", True)]
+    finally:
+        svc.close()
+
+
+def test_an_exchanged_hit_is_judged_on_every_place_before_its_places_are_cut(tmp_path, monkeypatch):
+    """A unit whose first quotations print ט without the dot and a later one ט̇: the exchanged
+    pass keeps the unit, with the dotted quotation as its place."""
+    undotted = [(f"חפט אללה מן {n}", "", f"(ח{n})") for n in range(fs.MAX_PLACES + 2)]
+    data = {"recovery_version": 5, "units": [
+        unit("f000991", "entry", "שמר", ["שמר"], examples=[*undotted, ("חפט̇ אללה עליך", "", "(ח9)")]),
+    ]}
+    path = tmp_path / "places.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        hit, = svc.expression("חפצ אללה", 2).hits
+        assert hit.unit.id == "f000991" and hit.possible_spelling
+        assert [p.words[:2] for p in hit.places] == [("חפט̇", "אללה")] and hit.places_total == 1
+    finally:
+        svc.close()
+
+
+def test_the_later_pass_widens_past_its_first_window(tmp_path, monkeypatch):
+    """More undotted entries than the first window holds, then the dotted one: the pass widens until
+    the page holds a valid match."""
+    monkeypatch.setattr(fs, "LATER_PASS_FETCH", 2)
+    path = tmp_path / 'wide.db'
+    data = {'recovery_version': 5, 'units': [
+        *(unit(f'f00098{n}', 'entry', 'צוב', ['צוב'], ['צוב']) for n in range(7)),
+        unit('f000989', 'entry', 'צ̇וב', ['צוב'], ['צ̇וב']),
+    ]}
+    write_sidecar(data, {'index_version': 1, 'rows': []},
+                  {'units_sha256': 'u', 'index_sha256': 'i', 'manifest_sha256': 'm'}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, '1')
+    svc = FriedmanService(str(path))
+    try:
+        assert [m.unit.id for m in svc.lookup('טוב', limit=1).matches] == ['f000989']
+    finally:
+        svc.close()
+
+
+def test_an_exchange_reaching_a_dotted_index_form_reads_that_form(tmp_path, monkeypatch):
+    """The book's index lists עט̇ם under the root כתב, whose entry has no dot: עצם reaches it
+    through the index form, whose dot is read."""
+    row = {"form": "עט̇ם", "form_key": fs.normalize_ja("עט̇ם"), "line": "עט̇ם", "pdf_page": 1, "printed_page": "969",
+           "url": f"{VIEWER}Value_Keys.pdf#page=1",
+           "roots": [{"text": "כתב", "dotted": "כתב", "key": fs.normalize_ja("כתב"), "alternatives": 1}]}
+    data = {"recovery_version": 5, "units": [unit("f000993", "entry", "כתב", ["כתב"])]}
+    path = tmp_path / "index.db"
+    write_sidecar(data, {"index_version": 1, "rows": [row]},
+                  {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        assert [m.unit.id for m in svc.lookup("עצם").matches] == ["f000993"]
+    finally:
+        svc.close()
+
+
+def test_an_undotted_occurrence_first_in_a_quotation_does_not_hide_a_dotted_one_after_it(tmp_path, monkeypatch):
+    """One quotation holds חפט אללה and later חפט̇ אללה: the exchanged pass drops the undotted
+    occurrence and matches the quotation again, finding the dotted one."""
+    data = {"recovery_version": 5, "units": [
+        unit("f000995", "entry", "שמר", ["שמר"], examples=[("חפט אללה ופי חפט̇ אללה", "", "(ח1)")]),
+    ]}
+    path = tmp_path / "retry.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        hit, = svc.expression("חפצ אללה", 0).hits
+        assert hit.possible_spelling and [p.positions for p in hit.places] == [(3, 4)]
+    finally:
+        svc.close()
+
+
+def test_an_exchanged_key_that_is_another_word_s_own_key_is_still_retried(tmp_path, monkeypatch):
+    """"עצם עטם" in "עטם עט̇ם עטם": the first match reads עצם at the undotted first word, where עטם
+    is also the second typed word's own key; the retry drops it there and finds the dotted second
+    word followed by the third."""
+    data = {"recovery_version": 5, "units": [
+        unit("f000997", "entry", "שמר", ["שמר"], examples=[("עטם עט̇ם עטם", "", "(ח1)")]),
+    ]}
+    path = tmp_path / "collide.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        hit, = svc.expression("עצם עטם", 0).hits
+        assert hit.possible_spelling and [p.positions for p in hit.places] == [(1, 2)]
+    finally:
+        svc.close()
+
+
+def test_an_unordered_retry_keeps_a_token_for_the_word_that_has_it_as_written(tmp_path, monkeypatch):
+    """"עצם עטם" in any order in "עטם עט̇ם": the first match gives עצם the undotted first word; the
+    retry refuses that word to עצם alone, so עטם still takes it and עצם the dotted second."""
+    data = {"recovery_version": 5, "units": [
+        unit("f000998", "entry", "שמר", ["שמר"], examples=[("עטם עט̇ם", "", "(ח1)")]),
+    ]}
+    path = tmp_path / "unordered.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        hit, = svc.expression("עצם עטם", 0, ordered=False).hits
+        assert hit.possible_spelling and sorted(hit.places[0].positions) == [0, 1]
+    finally:
+        svc.close()
+
+
+def test_a_retry_refuses_only_the_key_that_failed_not_the_word_s_other_alternative(tmp_path, monkeypatch):
+    """"צטא אללה" in "טטא/צצ̇א אללה": the first match reads the undotted alternative טטא; the retry
+    refuses that key alone, so the dotted alternative צצ̇א of the same printed word is found."""
+    data = {"recovery_version": 5, "units": [
+        unit("f000999", "entry", "שמר", ["שמר"], examples=[("טטא/צצ̇א אללה", "", "(ח1)")]),
+    ]}
+    path = tmp_path / "alternatives.db"
+    write_sidecar(data, index_result(), {"units_sha256": "u", "index_sha256": "i", "manifest_sha256": "m"}, path)
+    monkeypatch.setenv(fs.ENV_ENABLED, "1")
+    svc = FriedmanService(str(path))
+    try:
+        hit, = svc.expression("צטא אללה", 0).hits
+        assert hit.possible_spelling
+    finally:
+        svc.close()

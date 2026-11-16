@@ -43,6 +43,7 @@ than silently missing matches. Bump it for ANY change to what this module drops 
 """
 from __future__ import annotations
 
+import itertools
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -84,7 +85,7 @@ def spelling_candidates(conn, candidates: tuple[str, ...], *, matres: bool = Fal
                 out.append(literal)
     if matres:
         alternatives = tuple(dict.fromkeys(spelling_key(variant) for key in candidates
-                                           for variant in mater_variants(key)))
+                                           for variant in (*mater_variants(key), *interchange_variants(key))))
         if alternatives:
             marks = ','.join('?' * len(alternatives))
             for (literal,) in conn.execute(
@@ -108,6 +109,43 @@ def mater_variants(key: str) -> tuple[str, ...]:
     out += [key[:i] + letter + key[i:] for i in range(1, len(key)) for letter in 'וי'
             if key[i - 1] != letter and key[i] != letter]
     return tuple(dict.fromkeys(out))
+
+
+#: Letters Judeo-Arabic writes for one another: ض (צ̇) and ظ (ט̇) are interchanged, so a word
+#: written with צ may stand in the dictionary under ט and the reverse (עצ̇ים for עט̇ים).
+INTERCHANGED_LETTERS = {"צ": "ט", "ט": "צ"}
+#: At most this many letters of one word are exchanged at once.
+MAX_INTERCHANGES = 2
+#: The longest word exchanged (as ``mater_variants``), and how many of its צ and ט are considered:
+#: at most 28 variants a word, whatever is pasted.
+MAX_INTERCHANGE_LETTERS = 24
+MAX_INTERCHANGE_PLACES = 7
+#: The steps that name a spelling the dictionary's vocabulary validated, not the word as written:
+#: a match reached only through one of them is a possible spelling, ranked after the word's own.
+SPELLING_VARIANT_STEPS = ("mater", "interchange")
+
+
+def interchange_variants(key: str) -> tuple[str, ...]:
+    """The key with one or two of its צ and ט exchanged for the other (``INTERCHANGED_LETTERS``);
+    dictionary vocabulary validates each. A word of three to ``MAX_INTERCHANGE_LETTERS`` letters,
+    never a phrase, and only its first ``MAX_INTERCHANGE_PLACES`` צ and ט: a pasted run of them
+    must not grow the variants (and the query) with its square. עצים -> עטים; רצי -> רטי."""
+    if not 3 <= len(key) <= MAX_INTERCHANGE_LETTERS or ' ' in key:
+        return ()
+    places = [i for i, ch in enumerate(key) if ch in INTERCHANGED_LETTERS][:MAX_INTERCHANGE_PLACES]
+    out: list[str] = []
+    for n in range(1, min(MAX_INTERCHANGES, len(places)) + 1):
+        for chosen in itertools.combinations(places, n):
+            letters = list(key)
+            for i in chosen:
+                letters[i] = INTERCHANGED_LETTERS[letters[i]]
+            out.append("".join(letters))
+    return tuple(dict.fromkeys(out))
+
+
+def spelling_variant(path: tuple[str, ...]) -> bool:
+    """Was this match path reached through a spelling the word does not have as written?"""
+    return any(step in path for step in SPELLING_VARIANT_STEPS)
 
 # The regex the site's search page applies under "strip diacritics" (js/search.js,
 # stripDiacritics, release 1.1): Hebrew points and accents, Arabic harakat and Quranic
@@ -525,7 +563,8 @@ def analysis_paths(word: str, matched: str) -> tuple[tuple[str, ...], ...]:
     # when no plainer analysis does: the order of what a word reached as written stays as it was.
     nouns = plural_analyses(key)
     plain = (*query_analyses(key), *(a for a in nouns if a.steps[-1] == PLURAL))
-    reached = {spelling_key(a.key) for a in plain} | {spelling_key(v) for a in plain for v in mater_variants(a.key)}
+    reached = ({spelling_key(a.key) for a in plain} | {spelling_key(v) for a in plain for v in mater_variants(a.key)}
+               | {spelling_key(v) for a in plain for v in interchange_variants(a.key)})
     others = () if spelling_key(matched) in reached else tuple(a for a in nouns if a.steps[-1] != PLURAL)
     for analysis in (*plain, *others):
         if analysis.key == matched or spelling_key(analysis.key) == spelling_key(matched):
@@ -537,6 +576,8 @@ def analysis_paths(word: str, matched: str) -> tuple[tuple[str, ...], ...]:
             paths.append(steps)
         elif spelling_key(matched) in {spelling_key(v) for v in mater_variants(analysis.key)}:
             paths.append((*analysis.steps, 'mater'))
+        elif spelling_key(matched) in {spelling_key(v) for v in interchange_variants(analysis.key)}:
+            paths.append((*analysis.steps, 'interchange'))
     return tuple(dict.fromkeys(paths)) or (("source_alias",),)
 
 
@@ -551,7 +592,7 @@ def matching_paths(word: str, literal: str, matched: str) -> tuple[tuple[str, ..
 def evidence_cost(paths: tuple[tuple[str, ...], ...]) -> float:
     """Less direct source forms are weaker evidence than ordinary query clitics."""
     weights = {'prefix': .25, 'suffix': .75, 'feminine': .35, 'vocative': .35,
-               'article': .25, 'spelling': .1, 'spelling_alias': .15, 'mater': 2.25, 'script': 0,
+               'article': .25, 'spelling': .1, 'spelling_alias': .15, 'mater': 2.25, 'interchange': 2.25, 'script': 0,
                FEMININE_PLURAL: .6, DUAL: 1.0, ACCUSATIVE: 1.0, BROKEN_PLURAL: 2.5,
                # On the dictionary's side a noun form weighs what an unexplained form does, as before.
                'source_' + FEMININE_PLURAL: 1.8, 'source_' + DUAL: 1.8, 'source_' + ACCUSATIVE: 1.8,

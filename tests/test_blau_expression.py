@@ -375,3 +375,49 @@ def test_the_words_beside_a_clicked_word_fail_closed(service, monkeypatch):
     monkeypatch.setattr(service, "expression", boom)
     assert service.context("כטה", ("כתב",), ()) == ()
     assert service.answer("כטה", stems=False, before=("כתב",)).context == ()
+
+
+def test_an_expression_with_tsade_reaches_a_name_printed_with_dotted_tet_as_a_possible_spelling(tmp_path):
+    """ض and ظ are written for one another: "חפצ̇ אללה" reaches the name "חפט̇ אללה" of the root
+    חפט̇, after any hit of the words as written and flagged as a possible spelling. "כתב כצה" reaches
+    nothing: כטה is printed under roots without the dot, so the exchange is not the ض/ظ pair."""
+    data = expressions_dictionary()
+    data["חפט̇ (حفظ)"] = _root("חפט̇ (حفظ)", E6, ["חפט̇"], ["حفظ"], stems=[{
+        "id": "blau-st-000009", "stem_head": {"binyan": "I"},
+        "forms": [_form("blau-f-000011", [_ja("חפט̇ אללה", "headword_ja"), _seg("'שמר'", "definition_hebrew")])],
+    }])
+    src = write_source(tmp_path / "download", data=data)
+    path = tmp_path / "blau.db"
+    assert build_main(["--source-dir", str(src), "--out", str(path)]) == EXIT_OK
+    svc = BlauService(str(path))
+    try:
+        own = svc.expression("חפט̇ אללה", gap=DEFAULT_GAP)
+        exchanged = svc.expression("חפצ̇ אללה", gap=DEFAULT_GAP)
+        assert [(h.root_id, h.possible_spelling) for h in own.hits] == [(E6, False)]
+        assert [(h.root_id, h.possible_spelling) for h in exchanged.hits] == [(E6, True)]
+        assert [(h.root_id, h.possible_spelling) for h in svc.expression("חפצ אללה", gap=DEFAULT_GAP).hits] == [
+            (E6, True)], "the word's own dot is not needed"
+        assert svc.expression("כתב כטה", gap=DEFAULT_GAP).hits
+        assert not svc.expression("כתב כצה", gap=DEFAULT_GAP).hits, "ט printed without the dot is ط"
+    finally:
+        svc.close()
+
+
+def test_an_undotted_occurrence_first_in_a_citation_does_not_hide_a_dotted_one_after_it(tmp_path):
+    """One citation holds חפט אללה and later חפט̇ אללה: the exchanged pass drops the undotted
+    occurrence and matches the citation again, finding the dotted one."""
+    data = expressions_dictionary()
+    data["שמר (حرس)"] = _root("שמר (حرس)", E6, ["שמר"], ["حرس"], stems=[{
+        "id": "blau-st-000009", "stem_head": {"binyan": "I"},
+        "forms": [_form("blau-f-000011", [_ja("שמר", "headword_ja"), _seg("'שמר'", "definition_hebrew")],
+                        references=_cited("blau-c-000009", "חפט אללה ופי חפט̇ אללה", "'x'"))],
+    }])
+    src = write_source(tmp_path / "download", data=data)
+    path = tmp_path / "blau.db"
+    assert build_main(["--source-dir", str(src), "--out", str(path)]) == EXIT_OK
+    svc = BlauService(str(path))
+    try:
+        hit, = svc.expression("חפצ אללה", gap=0).hits
+        assert hit.possible_spelling and [p.positions for p in hit.places] == [(3, 4)]
+    finally:
+        svc.close()

@@ -196,3 +196,48 @@ def test_the_keys_reached_only_by_peeling_the_article_are_a_noun_s():
     assert article_candidates("אלי") == frozenset(), "too short to peel"
     assert article_candidates("") == frozenset() and article_candidates("אל כתאב") == frozenset()
     assert article_candidates("אלכתאב") <= set(candidate_stems("אלכתאב"))
+
+
+def test_tsade_and_tet_are_exchanged_as_a_possible_spelling():
+    """Judeo-Arabic writes ض (צ̇) and ظ (ט̇) for one another: עצ̇ים may stand in the dictionary as
+    עט̇ים. One or two letters at a time, on a word of three letters or more, never a phrase."""
+    from shared.blau_normalize import (analysis_paths, evidence_cost, interchange_variants,
+                                       spelling_candidates, spelling_variant)
+    assert interchange_variants('עצימ') == ('עטימ',)
+    assert interchange_variants('עטמ') == ('עצמ',)
+    assert set(interchange_variants('צבט')) == {'טבט', 'צבצ', 'טבצ'}
+    assert len(interchange_variants('צצצ')) == 6, 'one or two letters, never all three'
+    assert not interchange_variants('צט'), 'a word of three letters or more'
+    assert not interchange_variants('עצם עטם'), 'never a phrase'
+    assert not interchange_variants('כתב')
+    assert analysis_paths('עצ̇ים', 'עטימ') == (('interchange',),)
+    assert analysis_paths('ואלעצים', 'עטימ') == (('prefix', 'interchange'),)
+    assert analysis_paths('עצים', 'עצימ') == ((),), 'the word as written needs no exchange'
+    assert spelling_variant(('prefix', 'interchange')) and spelling_variant(('mater',))
+    assert not spelling_variant(('prefix', 'suffix'))
+    assert evidence_cost((('interchange',),)) > evidence_cost((('prefix', 'suffix'),))
+
+    import sqlite3
+    from shared.blau_normalize import build_spelling_index
+    conn = sqlite3.connect(':memory:')
+    build_spelling_index(conn, ['עטמ', 'עצמה'])
+    assert spelling_candidates(conn, ('עצמ',)) == ('עצמ',), 'only the fallback pass exchanges letters'
+    assert 'עטמ' in spelling_candidates(conn, ('עצמ',), matres=True)
+    conn.close()
+
+
+def test_a_word_final_tav_is_also_read_as_the_feminine_he():
+    """A feminine noun spelled with ת at the end (the construct, סלאמת אללה) reaches its ה
+    heading, with or without a proclitic."""
+    from shared.blau_normalize import query_stems
+    assert 'סלאמה' in query_stems('סלאמת')
+    assert 'סלאמה' in query_stems('ובסלאמת')
+    assert 'סלאמה' in query_stems('סלאמתך')
+
+
+def test_a_pasted_run_of_tsade_and_tet_is_bounded():
+    """A word of hundreds of צ and ט makes no variants, and a long real word at most 28."""
+    from shared.blau_normalize import MAX_INTERCHANGE_LETTERS, interchange_variants
+    assert not interchange_variants("צט" * 300)
+    word = ("צט" * 12)[:MAX_INTERCHANGE_LETTERS]
+    assert 0 < len(interchange_variants(word)) <= 28

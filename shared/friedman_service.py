@@ -74,23 +74,29 @@ from typing import Any, Optional, Union
 
 from shared.blau_normalize import matching_paths, analysis_paths, evidence_cost, grammatical_placeholder, plural_analyses, query_stems
 from shared.blau_normalize import BROKEN_PLURAL, FEMININE_PLURAL, PLURAL, PRONOUN_SUFFIXES
-from shared.blau_normalize import ACCUSATIVE, DUAL, bare_keys, feminine_heading, preposition_candidates
+from shared.blau_normalize import ACCUSATIVE, DUAL, bare_keys, feminine_heading, preposition_candidates, spelling_variant
 from shared.blau_normalize import NORMALIZER_VERSION, article_candidates, nominal_candidates, spelling_candidates, lookup_stems, normalize_ja  # noqa: F401 - normalize_ja: the index builder and the tests key through this module
 from shared.ja_expression import (
     clitic_governed, matching_scopes, governed_runs, governed_verb_run, names_expression, verb_keys,
 )
 from shared.ja_expression import (  # noqa: F401 - public compatibility exports
     component_runs, context_component_runs, context_quality,
-    expression_match, expression_words, ExpressionLimitError,
+    expression_match, expression_words, ExpressionLimitError, match_scope,
     KEYING_VERSION, DEFAULT_GAP, FUNCTION_WORDS, MAX_EXPRESSION_WORDS, MAX_GAP, MIN_EXPRESSION_STEM, NO_ARTICLE_PEEL,
     OPTIONAL_LETTERS_RE, PREPOSITIONS, PROCLITIC_RE, ExpressionComponent, ExpressionPlace, clamp_gap, components_for,
     MAX_CONTEXT_QUOTED, context_windows, fuller_first, function_reading, is_function_word, lookup_key, ordered_match, preposition_stems, quoted_gap,
-    query_keys, quoted_runs, scope_keys, short_remainder, tiered, word_keys,
+    query_keys, quoted_runs, scope_keys, short_remainder, tiered, word_keys, interchange_candidates,
 )
 from shared.ja_roots import supported_hollow_perfect
 from shared.ja_roots import (  # head_begins_with: moved there (borrowed_roots uses it); importable from here
     BorrowedRoot, StemPair, carries_root, dot_pattern, dots_agree, head_begins_with, root_and_stem, stem_numbers,
+    exchanged_only, interchange_dotted, LATER_PASS_FETCH, LATER_PASS_MAX, place_rejects,
 )
+
+
+def _spellings(unit: "FriedmanUnit") -> tuple[str, ...]:
+    """A unit's spellings as printed, dots included: its head and its entry's root."""
+    return (unit.head_text, unit.root, unit.entry_root)
 from shared.dictionary_switch import OFF, ON, read_switch, serves
 from shared.ja_verb_forms import listed_alef_perfect
 from shared.ja_verb_forms import MAX_SUGGESTIONS  # noqa: F401 - importable from here, as before the move
@@ -470,6 +476,9 @@ class FriedmanExpressionHit:
     parent: Optional[FriedmanUnit]
     places: tuple[FriedmanPlace, ...]
     places_total: int
+    #: Reached only with צ and ט exchanged in a word (``interchange_candidates``): shown after the
+    #: hits of the words as written, as a possible spelling.
+    possible_spelling: bool = False
 
 
 @dataclass(frozen=True)
@@ -857,9 +866,26 @@ class FriedmanService:
             expanded = spelling_candidates(self._conn, query_stems(key), matres=True)
             extra = tuple(k for k in expanded if k not in candidates)
             if extra:
-                additional = self._lookup(word, key, extra, max(1, int(limit)), quotes=False, plurals=False)
+                # Fetched deep, filtered, then cut: the dotted rule must not run on a page already
+                # cut to ``limit`` (a valid match behind undotted ones would be lost).
+                # Widened until nothing is left, so the matches past the page count as more only when
+                # they pass the dotted rule (an undotted one would be a "more" that adds nothing).
                 seen = {m.unit.id for m in result.matches}
-                added = tuple(m for m in additional.matches if m.unit.id not in seen)
+                fetch = max(int(limit), LATER_PASS_FETCH)
+                while True:
+                    additional = self._lookup(word, key, extra, fetch, quotes=False, plurals=False)
+                    added = tuple(m for m in additional.matches if m.unit.id not in seen and (
+                        not exchanged_only(m) or interchange_dotted(key, _spellings(m.unit) + (m.root,), m.matched)))
+                    if not additional.truncated or fetch >= LATER_PASS_MAX:
+                        break
+                    fetch *= 4
+                if added and result.truncated:
+                    # The word's own matches past the page are not shown again as a later spelling:
+                    # read them all, only when it can matter.
+                    everything = self._lookup(word, key, candidates, LATER_PASS_MAX, verb_forms=kinds,
+                                              verb_form_stems=stem_kinds)
+                    own = {m.unit.id for m in everything.matches}
+                    added = tuple(m for m in added if m.unit.id not in own)
                 combined = result.matches + added
                 result = replace(result, matches=combined[:limit],
                                  truncated=result.truncated or additional.truncated or len(combined) > limit,
@@ -1033,6 +1059,17 @@ class FriedmanService:
                     combined.setdefault(hit.unit.id, hit)
                 result = replace(result, hits=tuple(combined.values())[:limit],
                                  truncated=result.truncated or intact.truncated or len(combined) > limit)
+            exchanged = interchange_candidates(words, candidates, lambda w: query_keys(w, self.verb_form_index()))
+            # Also when the first page is exactly full: a valid exchanged hit then marks it truncated.
+            if exchanged is not None and not result.truncated:
+                seen = {hit.unit.id for hit in result.hits}
+                more = self._expression(text, words, exchanged, gap, max(int(limit), LATER_PASS_FETCH), ordered, head_only,
+                                        keep=lambda place: place_rejects(place, candidates))
+                added = tuple(replace(hit, possible_spelling=True) for hit in more.hits if hit.unit.id not in seen)
+                if added:
+                    hits = result.hits + added
+                    result = replace(result, hits=hits[:limit],
+                                     truncated=result.truncated or more.truncated or len(hits) > limit)
             return replace(result, ordered=ordered)
         except ExpressionLimitError:
             return replace(empty_expression(text, gap), ordered=ordered, problem="work_limit")
@@ -1041,7 +1078,11 @@ class FriedmanService:
             return replace(empty_expression(text, gap, self.status, self.credit_he, words, candidates), ordered=ordered, problem="error")
 
     def _expression(self, text: str, words: tuple[str, ...], candidates: tuple[tuple[str, ...], ...], gap: int,
-                    limit: int, ordered: bool = True, head_only: bool = False) -> FriedmanExpression:
+                    limit: int, ordered: bool = True, head_only: bool = False, keep=None) -> FriedmanExpression:
+        """``keep``: None for a place to keep, else the (position, key) tokens to drop before the
+        scope is matched again (``shared.ja_roots.place_rejects``); applied before the hits are
+        ranked and their places cut to the few shown (the exchanged pass keeps only places printed
+        with the dot)."""
         accepts = [frozenset(c) for c in candidates]
         scopes = matching_scopes(self._conn, candidates, 'unit_id, scope, n', head_only)
         # Then the order and the gaps, scope by scope, over its printed words.
@@ -1051,10 +1092,8 @@ class FriedmanService:
                 "SELECT pos, key FROM tokens WHERE unit_id = ? AND scope = ? AND n = ? ORDER BY pos, rowid",
                 (unit_id, scope, n)).fetchall()
             items = [(int(r["pos"]), str(r["key"])) for r in rows]
-            match = expression_match(items, accepts, gap, ordered)
-            if match is None:
-                continue
-            place = self._place(unit_id, scope, n, items, match, words, candidates)
+            place = match_scope(items, accepts, gap, ordered,
+                                lambda match: self._place(unit_id, scope, n, items, match, words, candidates), keep)
             if place is not None:
                 places.setdefault(unit_id, []).append(place)
         order: dict[str, int] = {}
@@ -1153,7 +1192,7 @@ class FriedmanService:
             if via == 'index':
                 query_paths = analysis_paths(word, literal)
                 evidence = tuple((*path, 'index') for path in query_paths) if all(
-                    'mater' in path for path in query_paths) else (('index',),)
+                    spelling_variant(path) for path in query_paths) else (('index',),)
             else:
                 evidence = matching_paths(word, literal or matched, matched)
             if uid not in seen:
@@ -1279,7 +1318,7 @@ class FriedmanService:
             row, via, matched, _form = hit
             source_cost = evidence_cost(tuple(tuple(step for step in path if step.startswith('source_'))
                                              for path in paths[row['id']]))
-            spelling_cost = min((1.25 if 'mater' in path else 0 for path in paths[row['id']]), default=0)
+            spelling_cost = min((1.25 if spelling_variant(path) else 0 for path in paths[row['id']]), default=0)
             carries = via == 'index' or self._carries_root(row, matched)
             nominal_verb = ((bool(nominal) or (via != 'index' and matched in after_preposition))
                             and row['kind'] == 'entry' and bool(self._entry_stem_units.get(row['id'])))
