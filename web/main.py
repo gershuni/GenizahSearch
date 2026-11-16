@@ -1078,8 +1078,13 @@ ANALYTICS_SCRIPT = '''
 
 # PostHog Analytics (real-user monitoring + session recordings)
 _posthog_key = os.environ.get('POSTHOG_API_KEY', '')
+# Sign-in tokens in a confirmation / reset link's address never reach PostHog: every event
+# passes through window.__ghScrubEvent (`before_send` below; web/static/js/posthog_scrub.js).
+_POSTHOG_SCRUB_JS = open(os.path.join(os.path.dirname(__file__), 'static', 'js', 'posthog_scrub.js'),
+                         encoding='utf-8').read()
 POSTHOG_SCRIPT = f'''
 <!-- PostHog Analytics -->
+<script>{_POSTHOG_SCRUB_JS}</script>
 <script>
     !function(t,e){{var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){{function g(t,e){{var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){{var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}},u.people.toString=function(){{return u.toString(1)+".people (stub)"}},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url lib get_property getSessionProperty sessionRecording startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_config __request_queue".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])}},e.__SV=1)}}(document,window.posthog||[]);
     // Defer PostHog init past first paint (events are queued by the stub loader above)
@@ -1087,6 +1092,7 @@ POSTHOG_SCRIPT = f'''
         posthog.init('{_posthog_key}', {{
             api_host: 'https://eu.i.posthog.com',
             person_profiles: 'identified_only',
+            before_send: window.__ghScrubEvent,
             autocapture: true,
             capture_pageview: true,
             capture_pageleave: true,
