@@ -1,6 +1,6 @@
 # GenizahSearch Search-Helper API
 
-> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-11-09
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-11-15
 
 The **site release** above is the GenizahSearch version this document was last checked
 against — it is NOT a separate API version, and it does not gate what is true. The
@@ -289,6 +289,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | `gap` | integer | `>= 0`; must be `0` when `search_mode in {title, shelfmark}`; at most `10` unless `search_mode == 'responsa'` (2026-10-12) | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
 | `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `invalid_request` (Pydantic `extra='forbid'`); unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion or exclusion filter depending on `library_filter_mode`; intersected with the other filters BEFORE the result cap; SEED-026); `library_filter_mode` (`"include"` default, omitted≡include — restrict to the given set; `"exclude"` — restrict to the complement, i.e. manuscripts whose `library_code` is NOT in the set; invalid value → 400 `invalid_request`; applies to both `POST /api/search` and `POST /api/parallels`; Phase 132 DMF-11); `domains`, `authors`, `works` (string lists); `criteria` — the manuscript features (script style and region, language, vocalization, columns, lines, physical status, material, attributes, period of copy, measured sizes): see [Manuscript features](#manuscript-features-filterscriteria) below, and `GET /api/criteria` for the keys and values; `materials` (catalogue values such as `["Paper","Vellum"]`, read as `criteria.material` with source `catalogue`); `date_from`, `date_to` (int years CE, read as `criteria.period`: a catalogue record whose copy-date span overlaps the range matches — since 2026-11, see Changelog). An older key and the criterion it is read as in one request → 400 `invalid_combination` |
+| `sources` | string \| null | `"all"`, `"editions"` or `"automatic"`; not valid with `title` / `shelfmark` (400 `invalid_combination`) | `null` (`"all"` where the server searches the editions) | Which texts are searched where the server searches the **scholarly editions** (the FGP and PGP transcriptions): `all` -- the automatic transcriptions and the editions, `editions` -- the editions only, `automatic` -- the automatic transcriptions only (the response is then exactly as without editions). With editions, results are **one per page**: see the edition fields below. Where the editions are not searched, `all` is answered from the automatic transcriptions with the warning `editions_unavailable`, and `editions` is refused with 400 `editions_unavailable` (2026-11) |
 
 ### `responsa_options` sub-fields
 
@@ -432,6 +433,10 @@ Notes:
 | `domains` | list of string | possibly empty; top-level, not under `metadata` |
 | `dating` | string \| null | top-level, not under `metadata` |
 | `image_url` | string \| null | best-effort image URL; the server does not probe upstream availability. **Server-relative, same-origin** (e.g. `/api/nli_image_by_sysid/{sys_id}?page={n}`) — it proxies the upstream IIIF service rather than linking it, so resolve it against the API host and do not expect a `cudl.lib.cam.ac.uk` or NLI hostname |
+| `sources` | list of string | **only when the editions were searched** (`request.sources_effective` is `all` or `editions`): what matched on this page -- `automatic`, `fgp_edition`, `pgp_edition` -- in rank order (2026-11) |
+| `page_identified` | bool | with editions only: `false` for an edition hit whose page could not be named (its own result: `uid` is the edition's, `locator.p_num` is `null`, never `0`) |
+| `edition` | object \| null | with editions only: the best member's edition record, `null` when the automatic transcription leads. `{kind, id, version, sys_id, located, cross_page, credit}`: `version` (`fgp:<id>` / `pgp:<id>`) reads that edition with `GET /api/browse?version=`; `credit` is `{en, he}`, whom to credit for the text |
+| `members` | list of object | with editions only: every matching text of this page, best first -- the automatic transcription and each edition -- each `{source, uid, locator, snippet, match_terms, edition}` (`edition` is `null` for the automatic transcription). The item's own `snippet`, `excerpt` and score are its first member's. A page found only in the automatic transcription still has one member |
 
 ### 7-key request echo
 
@@ -486,6 +491,13 @@ request). `extra='forbid'` applies. `sys_id` is required (Phase 79 D-01). At lea
    `volume_ie`/`p_num`/`fl_id` (regex `^(IE\d+)_(P\d+)_(FL\d+)$`).
 2. **sys_id + p_num + volume_ie** — `?sys_id=...&p_num=3&volume_ie=IE12345`.
 3. **sys_id + fl_id** — `?sys_id=...&fl_id=FL999`.
+4. **sys_id + version** (2026-11, where the server searches the scholarly editions) —
+   `?sys_id=...&version=fgp:123`: a search result member's `edition.version`. The text is that
+   edition's own, whole (`text_source` `fgp_edition` / `pgp_edition`), and the envelope adds
+   `edition: {kind, id, version, credit, page_identified}`. Without uid, p_num or fl_id the page
+   is the edition's own when it was identified, else the manuscript's first page with the warning
+   `page_not_identified`. An edition that is not of this manuscript is 404 `edition_not_found`;
+   where the editions are not searched, 400 `editions_unavailable`.
 
 Optional `?text_cap=N` overrides the per-request transcription cap (`[100, 10000]` chars;
 overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
@@ -569,6 +581,8 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
 - `pgp_transcription` — primary path; `text` came from `document_service.fetch_pgp_transcription`. The skill maps this value to "full text available".
 - `snippet` — fallback path; `text` is a synthesized snippet from `browse_service`.
 - `none` — no transcription resolvable; `text` is empty.
+- `fgp_edition` / `pgp_edition` (2026-11) — the request named a scholarly edition (`version`);
+  `text` is that edition, whole, and `edition.credit` names whom to credit.
 
 ### Best-effort image URL contract
 
@@ -1311,6 +1325,8 @@ public API surface — renaming any is a breaking change).
 | `witness_too_long` | 400 | a **pasted** witness exceeds `COMPOSITION_LENGTH_CAP`; a resolved `raw_header` over the cap is skipped-and-reported instead |
 | `sort_requires_multi_witness` | 400 | `sort` sent without `witnesses` |
 | `background_job_required` | 400 | `search_mode=variants_extended` sent to synchronous `/api/search`; submit the same body to `POST /api/search/jobs` (2026-10-11) |
+| `editions_unavailable` | 400 | `sources="editions"`, or `GET /api/browse?version=`, where the server does not search the scholarly editions (2026-11) |
+| `edition_not_found` | 404 | `GET /api/browse?version=` names no edition of that manuscript; take `version` and `sys_id` from the same result (2026-11) |
 | `passage_search_busy` | 503 + `Retry-After` | Phase 145: passage-matching concurrency budget (`SEARCH_API_PASSAGE_CONCURRENCY`, default 4) exhausted; fail-fast; retry shortly |
 
 See [shared/api_errors.py](../shared/api_errors.py) for the authoritative frozenset.
@@ -1325,6 +1341,9 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | ---- | -------- | ------- |
 | `query_downgraded: <message>` | search | Responsa cascade disabled one or more options (`variants`, `ja`, `flex_spacing`, `bidirectional`); also surfaced via `responsa_options_effective` divergence in the request echo. The `tr()` strings are the canonical signal alongside the echo. |
 | `results_cut_off` | search, parallels | the result may be incomplete; more may exist. On search: the engine read its 50,000-candidate limit, so `total` counts the matches among those candidates (a very common word), or a background job reached the 3-minute time limit. On parallels (both `method`s): a background job reached the 3-minute time limit and returned the parallels it had found -- the ones of the chunks, or of the witnesses and candidates, it had searched. A bare string. Narrow the query or add filters for a complete result. Added 2026-10-06; parallels 2026-10-07. |
+| `editions_unavailable` | search | `sources="all"` where the server does not search the scholarly editions: the results are the automatic transcriptions' (2026-11) |
+| `editions_skipped` | search | the editions could not be searched this time (their worker failed or was busy): the results are the automatic transcriptions' alone (2026-11) |
+| `page_not_identified` | browse | `version=` without a page, for an edition whose page was not identified: the locator and image are the manuscript's first page (2026-11) |
 | `volume_ie_defaulted` | browse | `sys_id`-only request resolved against a multi-IE manuscript; server auto-picked the default IE (Phase 79 D-04). Includes `volume_ie` field naming the picked IE. |
 | `enrichment_timeout` | browse | per-source PGP/FJMS/NLI fetch hit `SEARCH_API_BROWSE_TIMEOUT` (default 1.0s); soft failure; partial bundle returned with the corresponding `metadata.<source>` set to `null`. |
 | `enrichment_failed` | browse | per-source PGP/FJMS/NLI fetch raised an exception; soft failure; partial bundle returned (same null-out behavior). |
@@ -1532,6 +1551,25 @@ The following improvements are documented here as future work but are NOT implem
 ---
 
 ## Changelog
+
+### 2026-11 — Scholarly editions: `sources`, one result per page, `version`
+
+Served only where the server searches the scholarly editions (FGP and PGP); elsewhere every
+response is as before.
+
+- `POST /api/search` takes `sources` (`all` by default there, `editions`, `automatic`). With
+  editions each item is one page and adds `sources`, `page_identified`, `edition` and `members`
+  (see the item fields); `request` echoes `sources` and `sources_effective`. An item's existing
+  fields keep their meaning; its snippet is its best member's.
+- `GET /api/browse` takes `version` (`fgp:<id>` / `pgp:<id>`): that edition's text, with its
+  credit; `text_source` adds `fgp_edition` and `pgp_edition`.
+- New codes: errors `editions_unavailable`, `edition_not_found`; warnings `editions_unavailable`,
+  `editions_skipped`, `page_not_identified`.
+- MCP: `search_manuscripts` takes `sources`; `browse_manuscript_page` takes `version` (then
+  `p_num` is optional), and `how_to_cite` credits the edition. Result pages of a long search
+  shorten, then omit, the members' snippets of one oversized page before anything else, so a
+  page's members, credits and locators always fit. The retiring custom GPT's Actions schema is
+  not extended (its results carry the new fields as additional properties).
 
 ### 2026-11 — Manuscript features: `filters.criteria` and `GET /api/criteria`
 

@@ -466,16 +466,29 @@ def how_to_cite(page: dict, retrieved_on: str) -> dict:
     from shared.transcription_credits import page_citation
     source = page.get('text_source')
     pgp = (page.get('metadata') or {}).get('pgp') or {}
+    credit = (page.get('edition') or {}).get('credit') or {}
+    version_info = None
     if source == 'pgp_transcription':
         version_info, shown = {'source': 'pgp', 'attribution': pgp.get('transcription_source'),
                                'pgp_url': pgp.get('pgp_url')}, True
+    elif source in ('fgp_edition', 'pgp_edition'):
+        # A scholarly edition read by its version (editions plan section 3.5): its own
+        # credit, per language (shared/editions_indexer.py stores both).
+        shown = True
     elif source == 'none':
         version_info, shown = None, False
     else:  # 'snippet', and anything unrecognised: the automatic transcription
         version_info, shown = None, True
     locator = page.get('locator') or {}
     shelfmark = page.get('shelfmark') or (f"ID: {locator['sys_id']}" if locator.get('sys_id') else None)
-    citations = {lang: page_citation(version_info, lang=lang,
+    def info(lang):
+        if source == 'fgp_edition':
+            name = credit.get(lang) or credit.get('en')
+            return {'source': 'fgp', 'is_fgp': True, 'source_credit': name, 'attribution': name}
+        if source == 'pgp_edition':
+            return {'source': 'pgp', 'attribution': credit.get(lang) or credit.get('en')}
+        return version_info
+    citations = {lang: page_citation(info(lang), lang=lang,
                                      library=(page.get('library') or {}).get('name') or None,
                                      shelfmark=shelfmark, page_url=_page_url(locator),
                                      retrieved_on=retrieved_on, transcription_shown=shown)
@@ -637,8 +650,11 @@ def build_server(facade_app) -> MCPServer:
             'Read one manuscript page returned by a search: its text, where the text comes from, '
             'catalogue metadata, an image link, and how_to_cite. Read a page before quoting it '
             'or judging a match. Copy sys_id, p_num and volume_ie exactly from a result locator; '
-            'never invent them. text_source says what the text is: pgp_transcription (a Princeton '
-            'Geniza Project edition), snippet (part of the automatic transcription only; say so '
+            'never invent them. To read a scholarly edition that matched (a result member with an '
+            'edition), pass its edition.version as version with the same sys_id; p_num is then '
+            'optional. text_source says what the text is: pgp_transcription (a Princeton '
+            'Geniza Project edition), fgp_edition or pgp_edition (that scholarly edition, whole), '
+            'snippet (part of the automatic transcription only; say so '
             'and infer nothing unseen), or none. An image link is not an inspection of the image. '
             'Cite with how_to_cite (en/he), which credits whoever made the text shown. '
             'Website link: https://genizahsearch.com/browse?sys_id=SID&page=P_NUM&volume_ie=IE.'),
@@ -648,14 +664,22 @@ def build_server(facade_app) -> MCPServer:
     async def browse_manuscript_page(
         ctx: Context,
         sys_id: Annotated[str, Field(description='locator.sys_id from a result, copied exactly.')],
-        p_num: Annotated[int, Field(ge=1, strict=True, description='The one-based locator.p_num from a result.')],
+        p_num: Annotated[int | None, Field(ge=1, strict=True, description='The one-based locator.p_num from a '
+                                                                          'result; required unless version is given.')] = None,
         volume_ie: Annotated[str | None, Field(description='locator.volume_ie when present.')] = None,
         text_cap: Annotated[int, Field(ge=100, le=10000, strict=True, description='Characters of text: start with 4000, '
                                                                       'raise to 10000 only if needed.')] = 4000,
+        version: Annotated[str | None, Field(pattern=r'^(fgp|pgp):\d+$',
+                                             description="A result member's edition.version (fgp:<id> or pgp:<id>), "
+                                                         'copied exactly: read that scholarly edition.')] = None,
     ) -> CallToolResult:
-        params = {'sys_id': sys_id, 'p_num': p_num, 'text_cap': text_cap}
+        params = {'sys_id': sys_id, 'text_cap': text_cap}
+        if p_num is not None:
+            params['p_num'] = p_num
         if volume_ie:
             params['volume_ie'] = volume_ie
+        if version:
+            params['version'] = version
         return await _call_tool(target, ctx, 'browse_manuscript_page', 'GET', '/chatgpt/browse',
                                 params=params, transform=_with_how_to_cite)
 
@@ -669,7 +693,11 @@ def build_server(facade_app) -> MCPServer:
             'job_id to pass to get_research_job. Never resubmit a pending search; a retry after a lost '
             'reply starts a second search. Start with exact; for a composition search two to four '
             'distinctive phrases separately, or find_chunk_parallels for a whole text. ' + SEARCH_MODES +
-            ' limit is how many candidates to save (default 100, fuzzy 500), not the page size.'),
+            ' limit is how many candidates to save (default 100, fuzzy 500), not the page size. '
+            'Where the server searches the scholarly editions (FGP and PGP), each result is one page: '
+            'sources names what matched and members lists each matching text with its own snippet '
+            'and edition (version, credit); sources=automatic searches the automatic transcriptions '
+            'only, editions the editions only.'),
         annotations=STARTS_A_JOB,
         structured_output=False,
     )
@@ -685,6 +713,9 @@ def build_server(facade_app) -> MCPServer:
                                          description=GAP_DESCRIPTION)] = None,
         responsa_options: ResponsaOptions | None = None,
         filters: SearchFilters | None = None,
+        sources: Annotated[Literal['all', 'editions', 'automatic'] | None,
+                           Field(description='Which texts to search where the editions are searched: all (the '
+                                             'default there), editions, or automatic.')] = None,
     ) -> CallToolResult:
         too_wide = _gap_limit_message(search_mode, gap)
         if too_wide:
@@ -706,6 +737,8 @@ def build_server(facade_app) -> MCPServer:
             body['responsa_options'] = responsa_options.model_dump(exclude_none=True)
         if filters is not None:
             body['filters'] = filters.model_dump(exclude_none=True)
+        if sources is not None:
+            body['sources'] = sources
 
         async def operation(client_ip):
             return await _start_and_wait(target, client_ip, '/chatgpt/search/jobs', body)

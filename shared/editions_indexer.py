@@ -71,7 +71,12 @@ REQUIRED_FIELDS = ("unique_id", "content", "content_search", "content_head", "co
 
 
 def default_generation_dir() -> str:
-    """``<INDEX_DIR>/Editions``, beside My Library's ``LocalIndex``."""
+    """``<INDEX_DIR>/Editions``, beside My Library's ``LocalIndex``. ``GENIZAH_EDITIONS_DIR``
+    (dev and gates only: scripts/verify_editions_search.py --web-timing) names another; read at
+    each call, so research workers started with it read the same generation."""
+    override = os.environ.get("GENIZAH_EDITIONS_DIR")
+    if override:
+        return override
     from shared.config import Config
     return os.path.join(Config.INDEX_DIR, EDITIONS_DIRNAME)
 

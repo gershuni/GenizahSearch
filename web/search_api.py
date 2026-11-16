@@ -322,6 +322,29 @@ class SearchRequest(BaseModel):
         default=None,
         description="Optional domain/author/work/material/date filter. Unknown values fail-closed with 400.",
     )
+    sources: Optional[Literal['all', 'editions', 'automatic']] = Field(
+        default=None,
+        description=(
+            "Which texts are searched where the server searches the scholarly editions (FGP and PGP): "
+            "'all' (the automatic transcriptions and the editions; the default there), 'editions' "
+            "(editions only) or 'automatic' (the automatic transcriptions only, as without editions). "
+            "With editions there is one result per page: each item adds `sources` (what matched), "
+            "`edition` and `members` (every matching text of that page, each with its own snippet, "
+            "locator and edition record). Where the editions are not searched, 'all' is answered from "
+            "the automatic transcriptions with the warning editions_unavailable, and 'editions' is "
+            "refused with 400 editions_unavailable. Not valid with 'title' or 'shelfmark'."
+        ),
+    )
+
+    @model_validator(mode='after')
+    def _check_sources_mode(self):
+        if self.sources not in (None, 'automatic') and self.search_mode in ('title', 'shelfmark'):
+            raise APIError(
+                'invalid_combination',
+                f"sources={self.sources!r} applies to the text searches, not search_mode={self.search_mode!r}",
+                http_status=400,
+            )
+        return self
 
     @model_validator(mode='after')
     def _check_responsa_options_coupling(self):
@@ -453,6 +476,31 @@ def _require_background_job(request, mode, endpoint):
             f"POST /api{endpoint}/jobs, then poll its status_url; the result is at its result_url.",
             http_status=400,
         )
+
+
+def _effective_sources(req):
+    """``(the source choice the search runs with, a warning code)`` (editions plan §3.5).
+
+    Where the API is served the scholarly editions (web/editions_assets.py::served_to_api:
+    the switch on for everyone, the index ready) the default is ``'all'``. The choice is None
+    (the automatic transcriptions alone: today's search and response shape) for 'automatic',
+    for title/shelfmark, and where the editions are not served -- 'all' is then answered with
+    the warning ``editions_unavailable``, and 'editions' refused."""
+    if req.search_mode in ('title', 'shelfmark') or req.sources == 'automatic':
+        return None, None
+    from web.editions_assets import served_to_api
+    if served_to_api():
+        return req.sources or 'all', None
+    if req.sources == 'editions':
+        raise APIError(
+            'editions_unavailable',
+            "The scholarly editions are not searched on this server; omit sources or send "
+            "sources='automatic'.",
+            http_status=400,
+        )
+    return None, ('editions_unavailable' if req.sources == 'all' else None)
+
+
 HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
 
 # Phase 145 (passage-matching parallels search): its OWN ceiling, separate
@@ -1142,6 +1190,17 @@ class BrowseRequest(BaseModel):
         default=None,
         description="Override transcription text cap in chars. Bounded [100, 10000]. Default: env SEARCH_API_BROWSE_TEXT_CAP (4000).",
     )
+    version: Optional[str] = Field(
+        default=None,
+        pattern=r'^(fgp|pgp):\d+$',
+        description=(
+            "A scholarly edition of this manuscript: an /api/search result's edition.version "
+            "('fgp:<id>' or 'pgp:<id>'). The text is that edition's own (text_source 'fgp_edition' "
+            "or 'pgp_edition', with `edition` naming whom to credit). Without uid, p_num or fl_id "
+            "the page is the edition's own when it was identified, else the manuscript's first page "
+            "with the warning page_not_identified. Only where the editions are searched."
+        ),
+    )
 
 
 class WitnessInput(BaseModel):
@@ -1357,6 +1416,40 @@ def _parse_uid(uid: str) -> Optional[dict]:
     return {'volume_ie': ie_part, 'p_num': p_num_val, 'fl_id': fl_part}
 
 
+def _browse_edition(req: 'BrowseRequest', loc: 'NormalizedLocator'):
+    """``(edition, warnings)`` for a browse request's edition locator (editions plan §3.5): None
+    without ``version``; 400 editions_unavailable where the editions are not searched; 404
+    edition_not_found when that edition of that manuscript is not known. *edition* is
+    ``{'entry', 'resolved'}`` (web/editions_assets.py::edition_for_page) for the serializer."""
+    if not req.version:
+        return None, []
+    from web.editions_assets import edition_for_page, served_to_api
+    if not served_to_api():
+        raise APIError(
+            'editions_unavailable',
+            "The scholarly editions are not served on this server; omit version.",
+            http_status=400,
+        )
+    found = edition_for_page(loc.sys_id, req.version)
+    if found is None:
+        raise APIError(
+            'edition_not_found',
+            f'no edition {req.version!r} of sys_id={loc.sys_id!r}; take version and sys_id '
+            f'from the same /api/search result',
+            http_status=404,
+        )
+    entry, resolved = found
+    warnings = []
+    page_given = loc.requested_uid or loc.effective_p_num is not None or loc.effective_fl_id
+    if not page_given and not entry.get('page_uid'):
+        warnings.append({
+            'code': 'page_not_identified',
+            'message': "The edition's page was not identified; the locator and image are the "
+                       "manuscript's first page.",
+        })
+    return {'entry': entry, 'resolved': resolved}, warnings
+
+
 def _validate_locator(req: 'BrowseRequest') -> 'NormalizedLocator':
     """D-03 / R-02 / D-03b -- strict locator semantics. R-PR-04 update: returns
     a NormalizedLocator with effective_* fields derived from uid when present.
@@ -1372,7 +1465,7 @@ def _validate_locator(req: 'BrowseRequest') -> 'NormalizedLocator':
       effective_fl_id are derived from parsing the uid.
     - When uid is absent: effective_* fields mirror the request fields.
     """
-    if not (req.uid or req.p_num is not None or req.fl_id):
+    if not (req.uid or req.p_num is not None or req.fl_id or req.version):
         raise APIError(
             'invalid_request',
             'locator missing: provide uid, p_num, or fl_id alongside sys_id',
@@ -1848,6 +1941,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             downgrade_msg = None
             cascade_meta = None
             search_cutoff = {}
+            editions_skipped = False
+            # Which texts are read (editions plan §3.5): None = the automatic transcriptions,
+            # today's search and today's response shape.
+            sources_effective, sources_warning = _effective_sources(req)
             if short_circuit_empty:
                 results = []
                 total = 0
@@ -1875,11 +1972,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     from genizah_core import (
                         _consume_last_responsa_downgrade_meta as _consume_meta_inner,
                     )
+                    from web.research_jobs import consume_editions_skipped
                     # This wait thread also runs website searches, which never read
                     # the downgrade signals: drop any left here, whatever the engine.
                     consume_last_search_cutoff()
                     _consume_last_responsa_downgrade()
                     _consume_meta_inner()
+                    consume_editions_skipped()
+                    extra = {'sources': sources_effective} if sources_effective else {}
                     with search_budget(core_timeout if core_timeout is not None else 0):
                         res = worker_searcher.execute_search(
                             query_str=query,
@@ -1890,10 +1990,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             responsa_options=responsa_options,
                             restrict_sys_ids=restrict_sys_ids,
                             text_position=None,
+                            **extra,
                         ) or []
                     # D8: whether the search reached its candidate limit (same thread).
                     return (res, _consume_last_responsa_downgrade(), _consume_meta_inner(),
-                            consume_last_search_cutoff())
+                            consume_last_search_cutoff(), consume_editions_skipped())
 
                 loop = asyncio.get_event_loop()
 
@@ -1949,7 +2050,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             http_status=504,
                         )
                     try:
-                        results, downgrade_msg, cascade_meta, search_cutoff = _search_fut.result()
+                        (results, downgrade_msg, cascade_meta, search_cutoff,
+                         editions_skipped) = _search_fut.result()
                     except ResearchJobError as exc:
                         raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
                     except ResponsaQueryRefused as exc:
@@ -2002,6 +2104,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 # reached the website's time limit: `total` counts the matches it
                 # checked, and more may exist.
                 warnings_list.append('results_cut_off')
+            if sources_warning:
+                warnings_list.append(sources_warning)
+            if editions_skipped:
+                # The editions leg failed or could not start: these are the automatic
+                # transcriptions' results alone (editions plan §4, PR 3).
+                warnings_list.append('editions_skipped')
             if downgrade_msg:
                 warnings_list.append(f'query_downgraded: {downgrade_msg}')
             elif results:
@@ -2045,6 +2153,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'limit_effective': effective_limit if req.search_mode == 'fuzzy' else min(req.limit, MAX_LIMIT),
                 'filters': filters_dict,
             }
+            if req.sources is not None or sources_effective:
+                # Echoed when asked for or when the editions were read: a request that
+                # neither asks nor gets them keeps today's echo.
+                request_echo['sources'] = req.sources
+                request_echo['sources_effective'] = sources_effective or 'automatic'
 
             # 10. Serialize (D-24).
             from shared.search_serializer import serialize_search_payload
@@ -2211,6 +2324,18 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
         # 3. Locator validation + normalization (D-01 / D-03 / R-02 / R-PR-04).
         loc = _validate_locator(req)
+        # 3a. An edition locator (editions plan §3.5): that edition's text, on its page.
+        edition, edition_warnings = _browse_edition(req, loc)
+        if edition is not None and loc.requested_uid is None and loc.effective_p_num is None \
+                and loc.effective_fl_id is None:
+            page_uid = edition['entry'].get('page_uid')
+            parsed = _parse_uid(page_uid) if page_uid else None
+            loc = NormalizedLocator(
+                sys_id=loc.sys_id, requested_uid=None,
+                effective_p_num=parsed['p_num'] if parsed else 1,
+                effective_volume_ie=parsed['volume_ie'] if parsed else loc.effective_volume_ie,
+                effective_fl_id=parsed['fl_id'] if parsed else None,
+                text_cap=loc.text_cap)
 
         # 4. Resolve effective text_cap (R-08 priority).
         effective_text_cap = _resolve_text_cap(loc.text_cap)
@@ -2276,7 +2401,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             fjms=bundle.fjms,
             nli=bundle.nli,
             text_cap=effective_text_cap,
-            warnings=warnings_list,
+            warnings=warnings_list + edition_warnings,
+            edition=edition,
         )
 
         # 11. Tell the decorator's finally block what to log to PostHog.

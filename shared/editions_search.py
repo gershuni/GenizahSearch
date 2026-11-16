@@ -368,7 +368,8 @@ def edition_position_ok(content: str, match, text_position: Optional[str],
 
 # --- one result per page (plan §3.4) -------------------------------------------------------
 
-def _source_label(row: Dict[str, Any]) -> str:
+def source_label(row: Dict[str, Any]) -> str:
+    """A row's source as results name it: ``automatic``, ``local``, ``fgp_edition``, ``pgp_edition``."""
     edition = row.get("edition")
     if edition:
         return EDITION_SOURCE_LABELS.get(edition.get("kind"), "edition")
@@ -440,7 +441,7 @@ def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Di
         row["uid"] = g["key"]
         row.pop("group_key", None)
         row["members"] = members
-        row["sources"] = list(dict.fromkeys(_source_label(m) for m in members))
+        row["sources"] = list(dict.fromkeys(source_label(m) for m in members))
         row["edition"] = best.get("edition")
         row["edition_match"] = any(m.get("edition") for m in members)
         # A group keyed by an edition's own uid: no page could be named for that hit.

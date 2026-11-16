@@ -3,6 +3,7 @@
 
     python scripts/verify_editions_search.py --gen <generation dir> [--records N] [--no-timing]
     python scripts/verify_editions_search.py --gen <generation dir> --self-test
+    python scripts/verify_editions_search.py --gen <generation dir> --web-timing [--self-test]
 
 The checks run ``SearchEngine.execute_search`` on the main index with the generation attached
 (``attach_editions``), in-process:
@@ -21,8 +22,16 @@ The checks run ``SearchEngine.execute_search`` on the main index with the genera
   percentile of the mode's queries. In this process the legs run one after the other, as on the
   desktop: this is the desktop's cost, which the owner accepted on 2026-11-15, and it is reported,
   not judged. The 20% limit applies to the website's wall-clock time, with the editions leg in a
-  research worker of its own beside the main one (PR 3 checks it). ``--timing-limit 0.2`` makes
+  research worker of its own beside the main one (``--web-timing``). ``--timing-limit 0.2`` makes
   this check fail above a limit all the same.
+* **web timing** (``--web-timing``, editions plan §3.8, PR 3) -- the same queries through the
+  website's route (web/research_jobs.py): real research workers on the real indexes, the
+  automatic transcriptions alone in one worker against a search with editions, its two legs in
+  two workers at once and merged in this process; every run on warm workers (a site at rest),
+  each the fastest of ``--rounds``. The wall-clock time with editions may be at most
+  ``--web-timing-limit`` (20%) above the automatic search's, at the median and at the 90th
+  percentile of each mode's queries. With ``--self-test`` it runs the legs one after the other in
+  one worker (the in-process coordinator) on two modes and must fail.
 
 Every check reports how many cases it ran and fails on zero. It also reports the located share
 of the edition hits it saw. ``--self-test`` reruns findability and line-break on a few records
@@ -209,6 +218,89 @@ def check_timing(engine, located: Located, threshold: Optional[float], rounds: i
     return res
 
 
+def _signature(query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None,
+               restrict_sys_ids=None, text_position=None, corpus_scope="all", phase_callback=None,
+               preview_callback=None, ids_only=False, metadata_sys_ids=None, sources=None):
+    """SearchEngine.execute_search's signature: the web's IsolatedEngine binds arguments to it
+    and sends the search to research workers; nothing runs here."""
+    raise AssertionError("runs in a research worker")
+
+
+def _wait_warm(queue, timeout: float = 300.0) -> None:
+    """Until every slot of *queue* has a worker that has loaded the catalogue (a site at rest:
+    web/research_jobs.py starts each slot's next worker ahead of its search)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        with queue.condition:
+            spares = dict(queue.spares)
+        if any((w.root / "warm.failed").exists() for w in spares.values()):
+            raise RuntimeError("a research worker could not load the catalogue ahead of its search")
+        if len(spares) == queue.capacity and all((w.root / "warm.ready").exists() for w in spares.values()):
+            return
+        if time.monotonic() > deadline:
+            raise RuntimeError("research workers did not finish loading")
+        time.sleep(0.2)
+
+
+def check_web_timing(gen_dir: str, limit: Optional[float], rounds: int = 3,
+                     modes: Optional[List[str]] = None) -> Result:
+    """Per mode, the website's wall-clock time of a search with editions -- its two legs in two
+    research workers at once, merged in this process (web/research_jobs.py, the owner's parallel
+    worker) -- against the same search of the automatic transcriptions alone, one worker: the real
+    worker route on the real indexes, every run on warm workers, each the fastest of *rounds*.
+    Fails above *limit* (the plan's 20%) at the median or the 90th percentile of a mode's queries,
+    and when the editions leg did not run."""
+    os.environ["GENIZAH_EDITIONS_DIR"] = gen_dir
+    os.environ["EDITIONS_SEARCH_ENABLED"] = "1"
+    from types import SimpleNamespace
+    from web import research_jobs
+    from web.research_jobs import IsolatedEngine, consume_editions_skipped, shutdown_research
+    engine = IsolatedEngine(SimpleNamespace(execute_search=_signature), "search")
+    res = Result("web timing")
+    try:
+        main_q, ed_q = research_jobs.get_queue(), research_jobs.get_editions_queue()
+
+        def run(query, mode, opts, sources):
+            _wait_warm(main_q)
+            if sources == "all":
+                _wait_warm(ed_q)
+            consume_editions_skipped()
+            started = time.perf_counter()
+            rows = engine.execute_search(query, mode, 0, corpus_scope="genizah", responsa_options=opts,
+                                         sources=sources)
+            took = time.perf_counter() - started
+            if sources == "all" and consume_editions_skipped():
+                res.fail(f"{query!r} ({mode}): the editions leg did not run")
+            return took, rows
+
+        for name, queries in TIMING.items():
+            if modes and name not in modes:
+                continue
+            mode, opts = ("literal", R) if name == "responsa" else (name, None)
+            alone_t, with_t = [], []
+            for q in queries:
+                alone = min(run(q, mode, opts, "automatic")[0] for _ in range(rounds))
+                runs = [run(q, mode, opts, "all") for _ in range(rounds)]
+                both = min(t for t, _rows in runs)
+                if not any(m.get("edition") for r in runs[0][1] for m in r.get("members") or []):
+                    print(f"         {name:9} {q:16} (no edition hit)")
+                alone_t.append(alone)
+                with_t.append(both)
+                res.cases += 1
+                print(f"         {name:9} {q:16} automatic {alone * 1000:7.0f} ms, with editions "
+                      f"{both * 1000:7.0f} ms ({100 * (both / alone - 1) if alone else 0:+6.1f}%)")
+            for stat, f in (("median", statistics.median), ("p90", _p90)):
+                base, both = f(alone_t), f(with_t)
+                share = both / base - 1 if base > 0 else 0.0
+                print(f"       {name:9} {stat:6} automatic {base * 1000:8.0f} ms, with editions "
+                      f"{both * 1000:8.0f} ms: {100 * share:+6.1f}%")
+                if limit is not None and share > limit:
+                    res.fail(f"{name} {stat}: with editions {100 * share:+.1f}% (> {100 * limit:.0f}%)")
+    finally:
+        shutdown_research()
+    return res
+
+
 @contextmanager
 def planted(fault: str):
     """A fault in the leaf, for the self-test."""
@@ -232,6 +324,12 @@ def planted(fault: str):
             return original(self, doc, content.replace("\n", " "), *a, **k)
         with patch.object(SearchEngine, "_edition_members", flat):
             yield
+    elif fault == "sequential legs":
+        # The search with editions in ONE worker, its legs one after the other (the in-process
+        # coordinator): what the web timing must refuse.
+        from web import research_jobs
+        with patch.object(research_jobs, "_reads_editions_in_parallel", lambda name, arguments: False):
+            yield
     else:
         raise ValueError(fault)
 
@@ -250,7 +348,26 @@ def main(argv=None) -> int:
     p.add_argument("--no-timing", action="store_true")
     p.add_argument("--timing-only", action="store_true")
     p.add_argument("--self-test", action="store_true", help="prove the checks can fail")
+    p.add_argument("--web-timing", action="store_true",
+                   help="only the website's wall-clock timing through research workers (PR 3)")
+    p.add_argument("--web-timing-limit", type=float, default=0.20)
+    p.add_argument("--rounds", type=int, default=3)
+    p.add_argument("--modes", nargs="*", help="web timing: these TIMING modes only")
     args = p.parse_args(argv)
+
+    if args.web_timing:
+        if args.self_test:
+            with planted("sequential legs"):
+                r = check_web_timing(args.gen, args.web_timing_limit, rounds=1,
+                                     modes=args.modes or ["literal", "fuzzy"])
+            caught = r.cases > 0 and not r.ok
+            print(f"[{'CAUGHT' if caught else 'MISSED'}] sequential legs: {r.line()}")
+            print("SELF-TEST PASS" if caught else "SELF-TEST FAIL")
+            return 0 if caught else 1
+        r = check_web_timing(args.gen, args.web_timing_limit, rounds=args.rounds, modes=args.modes)
+        print(r.line())
+        print("GATE PASS" if r.ok else "GATE FAIL")
+        return 0 if r.ok else 1
 
     expected = dict(expected_fgp(args.fgp_db))
     expected.update(expected_pgp(args.pgp_db))

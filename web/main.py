@@ -3727,6 +3727,10 @@ async def initialize_engine():
             # 4. Search Engine & Indexer
             print("[init] 4/6 SearchEngine...", flush=True)
             state.searcher = SearchEngine(state.meta_mgr, state.var_mgr)
+            # The scholarly editions beside it, when EDITIONS_SEARCH_ENABLED is not off and a
+            # coherent generation is installed (web/editions_assets.py).
+            from web.editions_assets import attach_at_startup
+            attach_at_startup(state.searcher)
             print("[init] 5/6 Indexer...", flush=True)
             state.indexer = Indexer(state.meta_mgr)
 

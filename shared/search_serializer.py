@@ -468,7 +468,51 @@ def _serialize_item(
         _printed_set = printed_sys_ids or set()
         out['has_pgp'] = bool(final_sys_id and final_sys_id in _trans_set)
         out['is_printed'] = bool(final_sys_id and final_sys_id in _printed_set)
+    if 'members' in result:
+        # A search that read the scholarly editions (editions plan §3.5): one result per
+        # page. The fields above are the best member's; these say what else matched.
+        out['sources'] = list(result.get('sources') or [])
+        out['page_identified'] = bool(result.get('page_identified', True))
+        out['edition'] = public_edition(result.get('edition'))
+        out['members'] = [_serialize_member(m, meta_mgr) for m in result.get('members') or []]
     return out
+
+
+# The fields of an edition record a reader or a client can use (shared/editions_search.py::
+# edition_record): its version (`fgp:<id>` / `pgp:<id>`, the browse endpoint's `version`), the
+# manuscript, whether its page was identified, and whom to credit.
+_PUBLIC_EDITION_KEYS = ('kind', 'id', 'version', 'sys_id', 'located', 'cross_page', 'credit')
+
+
+def public_edition(edition: Optional[dict]) -> Optional[dict]:
+    """An edition record's public fields, or None for automatic text."""
+    if not edition:
+        return None
+    return {k: edition.get(k) for k in _PUBLIC_EDITION_KEYS}
+
+
+def _serialize_member(member: dict, meta_mgr: Any) -> dict:
+    """One matching text of a result (editions plan §3.5): which source, its own snippet,
+    its locator, and its edition record (None for the automatic transcription)."""
+    from shared_export_utils import remove_highlight_markers
+    from shared.editions_search import source_label
+    raw_header = member.get('raw_header', '') or ''
+    parsed = {}
+    if raw_header and meta_mgr is not None:
+        try:
+            parsed = meta_mgr.parse_full_id_components(raw_header) or {}
+        except Exception:
+            parsed = {}
+    snippet_raw = member.get('snippet', '') or ''
+    sys_id = (member.get('display') or {}).get('id') or parsed.get('sys_id') or None
+    return {
+        'source': source_label(member),
+        'uid': member.get('uid', '') or '',
+        'locator': {'sys_id': sys_id, 'volume_ie': parsed.get('ie_id'), 'p_num': parsed.get('p_num')},
+        'snippet': remove_highlight_markers(snippet_raw),
+        'match_terms': _extract_match_terms(snippet_raw),
+        'edition': public_edition(member.get('edition')),
+    }
 
 
 def _utc_iso_now() -> str:
@@ -752,8 +796,13 @@ def serialize_browse_payload(
     nli: Optional[dict],
     text_cap: int = 4000,
     warnings: Optional[list] = None,
+    edition: Optional[dict] = None,
 ) -> dict:
     """Phase 79 D-26 sibling serializer — same envelope conventions as serialize_search_payload.
+
+    *edition* (editions plan §3.5, the request's ``version``): ``{'entry', 'resolved'}``
+    (web/editions_assets.py::edition_for_page). The text is then that edition's own,
+    ``text_source`` 'fgp_edition' / 'pgp_edition', and the envelope adds ``edition``.
 
     The `page` argument MUST be a `web.services.BrowsePage` dataclass instance
     (Plan 02 returns these from WebDataService.get_browse_page / _by_fl). The
@@ -797,7 +846,18 @@ def serialize_browse_payload(
 
     # Text + text_source (D-10). PGP page-scoped transcription wins; else snippet; else none.
     raw_text = getattr(page, 'text', None) or ''
-    if pgp and pgp.get('page_section_text'):
+    edition_out = None
+    if edition is not None:
+        entry, resolved = edition['entry'], edition['resolved']
+        raw_text = resolved.get('original') or ''
+        text_source = f"{resolved.get('kind')}_edition"
+        edition_out = {
+            'kind': resolved.get('kind'), 'id': str(resolved.get('id')),
+            'version': resolved.get('version'),
+            'credit': entry.get('credit') or resolved.get('credit'),
+            'page_identified': bool(entry.get('page_uid')),
+        }
+    elif pgp and pgp.get('page_section_text'):
         raw_text = pgp['page_section_text']
         text_source = 'pgp_transcription'
     elif raw_text:
@@ -821,7 +881,7 @@ def serialize_browse_payload(
     # Image (D-12, D-13, D-14 REOPENED — best-effort URL, no probe).
     image = _build_browse_image(page)
 
-    return {
+    envelope = {
         'schema_version':  SCHEMA_VERSION,
         'source':          'browse',
         'generated_at':    _utc_iso_now(),
@@ -844,6 +904,9 @@ def serialize_browse_payload(
         'image':           image,
         'warnings':        warnings_list,
     }
+    if edition_out is not None:
+        envelope['edition'] = edition_out
+    return envelope
 
 
 # -----------------------------------------------------------------------------

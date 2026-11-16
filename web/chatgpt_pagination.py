@@ -31,6 +31,32 @@ def page_budget(channel):
     return PAGE_BYTES, len
 
 
+MEMBER_SNIPPET_CHARS = 200
+
+
+def trim_members(row):
+    """Make a one-result-per-page group (a search with editions: ``members``) smaller, one step
+    per call, before the row's own snippet goes (editions plan §3.5): first every member's
+    snippet is shortened to MEMBER_SNIPPET_CHARS, then every member's snippet is omitted. Each
+    member keeps its source, uid, locator and edition (version, credit), so the group's
+    identity, credits and locators always fit. False when there is nothing left to trim."""
+    members = row.get('members') or []
+    if not row.get('member_snippets_shortened') and any(
+            len(m.get('snippet') or '') > MEMBER_SNIPPET_CHARS for m in members):
+        for m in members:
+            text = m.get('snippet') or ''
+            if len(text) > MEMBER_SNIPPET_CHARS:
+                m['snippet'] = text[:MEMBER_SNIPPET_CHARS] + '…'
+        row['member_snippets_shortened'] = True
+        return True
+    if not row.get('member_snippets_omitted') and any('snippet' in m for m in members):
+        for m in members:
+            m.pop('snippet', None)
+        row['member_snippets_omitted'] = True
+        return True
+    return False
+
+
 def _omit_snippet(row):
     """Drop a row's display text (snippet/excerpt) when the row alone cannot fit a
     page; its locator and its match spans (already at most three, each complete;
@@ -85,8 +111,8 @@ def build_pages(payload, job_id, *, page_bytes=PAGE_BYTES, measure=len):
                 raw = JSONResponse(data).body
                 if measure(raw) <= page_bytes:
                     break
-                if len(candidates) == 1 and _omit_snippet(candidates[0]):
-                    continue  # One long row keeps its place, locator and matches.
+                if len(candidates) == 1 and (trim_members(candidates[0]) or _omit_snippet(candidates[0])):
+                    continue  # One long row keeps its place, locator, matches and members.
                 if len(candidates) <= 1:
                     raise ValueError('A result or its fixed metadata exceeds the page allowance. Narrow the query or use the website.')
                 candidates.pop()

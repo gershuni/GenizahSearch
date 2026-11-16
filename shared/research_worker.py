@@ -92,6 +92,13 @@ def preload():
         return None
 
 
+def mark_warm(root, meta):
+    """Say whether this spare worker loaded the catalogue ahead of its search: ``warm.ready``
+    when it did, ``warm.failed`` when preload failed (run_query then loads it again, a cold
+    start a gate measuring warm searches must not take for warm: Codex review of PR #17)."""
+    (root / ('warm.ready' if meta is not None else 'warm.failed')).touch()
+
+
 def restore_settings(snapshot):
     from shared.lab_settings import LabSettings
     settings = LabSettings()
@@ -158,6 +165,11 @@ def main(directory):
         # Started ahead of its search (web/research_jobs.py): load first, then
         # wait. Still one search per process, so killing it frees everything.
         meta = preload()
+        # Loaded: a gate measuring warm searches waits for this (verify_editions_search.py).
+        # Only when the catalogue did load: a failed preload leaves run_query to load it
+        # again after the search arrives, a cold start the gate must not take for warm
+        # (Codex review of PR #17); it says so instead.
+        mark_warm(root, meta)
         payload = wait_for_input(root)
     else:
         payload = pickle.loads((root / 'input.pkl').read_bytes())
@@ -170,7 +182,7 @@ def main(directory):
         last[0] = now
         progress = values if len(values) == 2 and all(isinstance(v, (int, float)) for v in values) else (0, 0)
         status = ('Checking candidate texts'
-                  if payload['kind'] == 'search' and payload['method'] == 'execute_search'
+                  if payload['kind'] == 'search' and payload['method'] in ('execute_search', 'execute_search_leg')
                   else 'Searching')
         write_progress(root, {'status': status, 'progress': progress})
 
@@ -197,10 +209,16 @@ def wants_editions(payload):
     """Does this request read the editions (its source choice ``all`` or ``editions``)? The
     web caller decided it may (the switch, and who is an editor: editions plan §3.6); an
     off switch here still opens nothing."""
-    if payload.get('kind') != 'search' or payload.get('method') != 'execute_search':
+    if payload.get('kind') != 'search':
         return False
     from shared.dictionary_switch import OFF
     from shared.editions_search import SOURCES_AUTOMATIC, editions_switch, normalize_sources
+    if payload.get('method') == 'execute_search_leg':
+        # One leg of a search with editions in a worker of its own (web/editions_jobs.py):
+        # only the editions leg reads them.
+        return (payload.get('arguments') or {}).get('leg') == 'editions' and editions_switch() != OFF
+    if payload.get('method') != 'execute_search':
+        return False
     try:
         # Read as execute_search reads it ("ALL", " editions "): Codex review of PR #16.
         sources = normalize_sources((payload.get('arguments') or {}).get('sources'))
@@ -251,10 +269,20 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         variants = VariantManager(settings=lab.settings)
         lab.var_mgr = variants
         scope = payload['arguments'].get('corpus_scope',
-                                         'all' if payload['method'] == 'execute_search' else 'genizah')
-        searcher = SearchEngine(meta, variants, worker_mode=True, open_local=scope != 'genizah')
-        if wants_editions(payload):
-            searcher.attach_editions()
+                                         'all' if payload['method'] in ('execute_search', 'execute_search_leg')
+                                         else 'genizah')
+        if payload['method'] == 'execute_search_leg' and payload['arguments'].get('leg') == 'editions':
+            scope = 'genizah'      # the editions leg reads no My Library
+        if payload['method'] == 'execute_search_leg' and payload['arguments'].get('leg') == 'editions':
+            # The editions leg in a worker of its own: the editions index alone, no main index.
+            from shared.editions_search import open_editions_engine
+            searcher = open_editions_engine(meta, variants) if wants_editions(payload) else None
+            if searcher is None:
+                raise ValueError('The editions index is unavailable.')
+        else:
+            searcher = SearchEngine(meta, variants, worker_mode=True, open_local=scope != 'genizah')
+            if wants_editions(payload):
+                searcher.attach_editions()
         kind = payload['kind']
         if kind == 'search' and searcher.searcher is None and payload['arguments'].get('mode') not in ('Title', 'Shelfmark'):
             raise ValueError('The transcription search index is unavailable.')
@@ -272,7 +300,7 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
             engine = PassageSearcher(index=index, text_fetcher=searcher,
                                      policy=compose(options['preset'], options['length'], options['depth']),
                                      **({} if options['render_cap'] is None else {'render_cap': options['render_cap']}))
-        allowed = {'search': {'execute_search', 'search_composition_logic'},
+        allowed = {'search': {'execute_search', 'execute_search_leg', 'search_composition_logic'},
                    'lab': {'lab_search', 'lab_composition_search'},
                    'passage': {'search_composition_logic'}}
         if payload['method'] not in allowed[kind]:

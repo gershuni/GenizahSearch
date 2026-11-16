@@ -65,6 +65,8 @@ ERROR_CODES = frozenset({
     'sort_requires_multi_witness',        # 400 — sort='fused'/'witness_count' without witnesses[]
     # 2026-10-11: the website's Extended variant level runs only as a background job:
     'background_job_required',            # 400 — search_mode=variants_extended sent to synchronous /api/search; use /api/search/jobs
+    'editions_unavailable',               # 400 -- sources='editions' where the scholarly editions are not searched (EDITIONS_SEARCH_ENABLED, readiness)
+    'edition_not_found',                  # 404 -- GET /api/browse version= names no edition of that manuscript
     # 2026-10-21 (Responsa Phase 1, shared/responsa_match.py): a star shape the engine does
     # not search yet -- inside a word, a word of stars only, several stars -- is refused
     # with a message, never answered with an empty list.
@@ -82,6 +84,14 @@ WARNING_CODES = frozenset({
     # (D8, 2026-10-06). /api/search and /api/parallels: a background job reached the
     # website's time limit and returned what it had found (2026-10-07).
     'results_cut_off',
+    # Editions search (2026-11): sources='all' asked where the scholarly editions are not
+    # searched (answered from the automatic transcriptions); the editions leg failed or
+    # could not start (the results are the automatic transcriptions' alone).
+    'editions_unavailable',
+    'editions_skipped',
+    # /api/browse version= on an edition whose page was not identified: the locator and
+    # image are the manuscript's first page.
+    'page_not_identified',
     # Phase 80 (/api/parallels) additions:
     'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned
     # Phase 145 (method='passage') additions:

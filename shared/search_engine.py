@@ -165,6 +165,46 @@ def _joined_warnings(*warnings):
     return '; '.join(parts) or None
 
 
+def _all_star_count(row, regex, strip):
+    """An all-star query's matches on a row (decision 2): the count set as the row was built
+    (``_matches``), else a whole-manuscript or seam row counts one, else the matches on its
+    text. Pops ``_matches``."""
+    n = row.pop('_matches', None)
+    if n is not None:
+        return n
+    if row.get('cross_page') or row.get('scope', 'page') != 'page' or regex is None:
+        return 1
+    return _count_matches(regex, row.get('full_text') or '', strip)
+
+
+def _group_legs(main_rows, edition_rows, main_leg, editions_leg, ids_only):
+    """Two legs' rows as one result per page (shared/editions_search.py::group_results),
+    My Library's rows fused in, an all-star query ordered by matches across the groups,
+    and the warning said once on the first row, as on a one-index search. The legs' facts
+    (``_leg``) may come from research workers, without their compiled pattern: an all-star
+    row then carries its ``_matches`` (SearchEngine.execute_search_leg). Returns
+    ``(rows, warning)``."""
+    from shared.editions_search import group_results
+    leg = main_leg if main_leg else editions_leg
+    count = None
+    if leg.get('all_star'):
+        regex, strip = leg.get('regex'), leg.get('strip')
+
+        def count(row):
+            return _all_star_count(row, regex, strip)
+    rows = group_results(main_rows, edition_rows, main_leg.get('local') or [], ids_only=ids_only,
+                         match_count=count, k=RRF_K)
+    if count is not None:
+        rows = SearchEngine._order_all_star(rows, leg.get('regex'), leg.get('strip'))
+    warning = _joined_warnings(main_leg.get('warning'), editions_leg.get('warning'))
+    if warning and rows:
+        rows[0]['responsa_warning'] = warning
+    if leg.get('responsa') and rows:
+        rows[0]['responsa_expanded_count'] = leg.get('expanded')
+        rows[0]['responsa_pattern_count'] = leg.get('pattern_count')
+    return rows, warning
+
+
 def consume_last_search_cutoff() -> dict:
     """Read and clear the cut-off signal of the last search on this thread:
     ``{'capped', 'interrupted'}``, and ``'partial'`` / ``'limited'`` when the search left
@@ -1493,6 +1533,25 @@ class SearchEngine:
         """An editions index is open beside this one."""
         child = getattr(self, '_editions', None)
         return child is not None and child.searcher is not None
+
+    def edition_entry(self, sys_id, version):
+        """The editions index's entry for *version* (``fgp:<id>`` / ``pgp:<id>``, an edition
+        record's ``version``) on manuscript *sys_id*: ``{uid, full_header, source, edition_id,
+        also_ids, page_uid, credit}``, or None when that edition of that manuscript is not in the
+        open generation (or no editions index is open). An id merged into another text's
+        document (``also_ids``) finds that document."""
+        from shared.editions_search import INDEX_SOURCE_KINDS
+        leaf = self if self._edition_leaf else getattr(self, '_editions', None)
+        m = re.match(r'^(fgp|pgp):(\d+)$', str(version or ''))
+        if leaf is None or m is None:
+            return None
+        kind, eid = m.groups()
+        for entry in (getattr(leaf, '_browse_map_cache', None) or {}).get(str(sys_id)) or []:
+            if INDEX_SOURCE_KINDS.get(entry.get('source')) != kind:
+                continue
+            if str(entry.get('edition_id')) == eid or eid in {str(i) for i in entry.get('also_ids') or []}:
+                return dict(entry)
+        return None
 
     def _editions_for_request(self):
         """The child bound to this engine's variant and metadata managers: a request-scoped
@@ -3565,14 +3624,7 @@ class SearchEngine:
         ``_matches``, else counted on its text), then by shelfmark in its natural order
         (T-S 2 before T-S 10, as the other shelfmark sort; Codex round 4 on PR #443).
         Stable: equal rows keep their order."""
-        def matches(row):
-            n = row.pop('_matches', None)
-            if n is None:
-                if row.get('cross_page') or row.get('scope', 'page') != 'page':
-                    return 1
-                n = _count_matches(regex, row.get('full_text') or '', strip)
-            return n
-        keyed = [(-matches(r), natural_sort_key(str((r.get('display') or {}).get('shelfmark') or '')), i, r)
+        keyed = [(-_all_star_count(r, regex, strip), natural_sort_key(str((r.get('display') or {}).get('shelfmark') or '')), i, r)
                  for i, r in enumerate(rows)]
         keyed.sort(key=lambda k: k[:3])
         return [k[3] for k in keyed]
@@ -4216,35 +4268,67 @@ class SearchEngine:
         consume_last_search_cutoff()
 
     def _grouped_rows(self, main_rows, edition_rows, main_leg, editions_leg, ids_only):
-        """The legs' rows as one result per page (shared/editions_search.py::group_results),
-        My Library's rows fused in, an all-star query ordered by matches across the groups,
-        and the warnings said once on the first row, as on a one-index search."""
-        from shared.editions_search import group_results
-        leg = main_leg if main_leg else editions_leg
-        count = None
-        if leg.get('all_star'):
-            regex, strip = leg['regex'], leg['strip']
-
-            def count(row):
-                n = row.pop('_matches', None)
-                if n is None:
-                    if row.get('cross_page') or row.get('scope', 'page') != 'page':
-                        return 1
-                    n = _count_matches(regex, row.get('full_text') or '', strip)
-                return n
-        rows = group_results(main_rows, edition_rows, main_leg.get('local') or [], ids_only=ids_only,
-                             match_count=count, k=RRF_K)
-        if count is not None:
-            rows = self._order_all_star(rows, leg['regex'], leg['strip'])
-        warning = _joined_warnings(main_leg.get('warning'), editions_leg.get('warning'))
+        """The legs' rows as one result per page (_group_legs), the warning also recorded for
+        the request, as on a one-index search."""
+        rows, warning = _group_legs(main_rows, edition_rows, main_leg, editions_leg, ids_only)
         if warning:
             _set_last_responsa_downgrade(warning)
-            if rows:
-                rows[0]['responsa_warning'] = warning
-        if leg.get('responsa') and rows:
-            rows[0]['responsa_expanded_count'] = leg.get('expanded')
-            rows[0]['responsa_pattern_count'] = leg.get('pattern_count')
         return rows
+
+    @bounded_search
+    def execute_search_leg(self, query_str, mode, gap, leg, progress_callback=None, exclude_words=None,
+                           responsa_options=None, restrict_sys_ids: set = None, text_position: str = None,
+                           corpus_scope: str = "all", phase_callback=None, ids_only=False):
+        """One leg of a search with editions, for a research worker of its own beside the other
+        leg's (the website: editions plan §3.10, the owner's parallel worker). *leg*: ``'main'``
+        (the main index and My Library, as ``execute_search(sources='all')`` runs it first) or
+        ``'editions'`` (the editions index, attach_editions).
+
+        Returns ``{'rows', 'leg'}``: the rows as the coordinator's leg returns them (excluded,
+        not in all-star order, no warning on the first row), an all-star query's rows each with
+        its ``_matches`` counted here, where the text is, and the leg's facts without its compiled
+        pattern. ``merge_search_legs`` joins the two as ``execute_search(sources='all')`` would
+        have; the legs are the coordinator's own (_execute_search_leg), so the two routes return
+        the same rows. An editions leg with no editions index open raises ValueError."""
+        if leg not in ('main', 'editions'):
+            raise ValueError(f"Unknown search leg: {leg!r}")
+        if mode in ('Title', 'Shelfmark') or corpus_scope == 'local':
+            raise ValueError("A search with editions reads the text modes in the Genizah corpus only.")
+        args = dict(progress_callback=progress_callback, exclude_words=exclude_words,
+                    responsa_options=responsa_options, restrict_sys_ids=restrict_sys_ids,
+                    text_position=text_position, corpus_scope=corpus_scope, phase_callback=phase_callback,
+                    ids_only=ids_only)
+        engine = self
+        if leg == 'editions':
+            # A worker of its own opens the editions index alone (no main index to load).
+            engine = self if self._edition_leaf else self._editions_for_request()
+            if engine is None:
+                raise ValueError("The editions index is unavailable.")
+            args.update(corpus_scope='genizah')
+        elif self._edition_leaf:
+            raise ValueError("The main leg reads the main index.")
+        self._clear_search_state()
+        _validate_word_gap(mode, gap, responsa_options)
+        facts = {}
+        rows = engine._execute_search_leg(query_str, mode, gap, _leg=facts, **args)
+        regex = facts.pop('regex', None)
+        if facts.get('all_star'):
+            for row in list(rows) + list(facts.get('local') or []):
+                row['_matches'] = _all_star_count(row, regex, facts.get('strip'))
+        return {'rows': rows, 'leg': facts}
+
+    @staticmethod
+    def merge_search_legs(main, editions, ids_only=False):
+        """The two legs of a search with editions (``execute_search_leg``, each run in a research
+        worker of its own) as one result per page, what ``execute_search(sources='all')`` returns
+        for the same legs. *main* / *editions*: a leg's ``{'rows', 'leg'}``, or None when it did
+        not run or failed (the other leg's rows alone, still one result per page).
+
+        Returns ``(rows, warning)``: the warning (the legs' Responsa notes joined) is also on the
+        first row, as a one-index search puts it."""
+        main = main or {'rows': [], 'leg': {}}
+        editions = editions or {'rows': [], 'leg': {}}
+        return _group_legs(main['rows'], editions['rows'], main['leg'], editions['leg'], ids_only)
 
     def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, _leg=None):
         """One index's search (execute_search's docstring, below); today's whole search

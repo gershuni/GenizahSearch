@@ -13,6 +13,8 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
+from web.chatgpt_pagination import trim_members
+
 MAX_RESPONSE_BYTES = 80000  # Conservative: below the 100,000-character Actions cap.
 ACTION_TIMEOUT = 40
 CHUNK_JOB_SCOPE_KEY = 'genizah_chunk_job'
@@ -57,6 +59,8 @@ def compact_payload(payload):
             if original_count and not result['results']:
                 return None  # An oversized first row must not become "no matches".
             return result
+        if not result.get('filtered') and len(result['results']) == 1 and trim_members(result['results'][0]):
+            continue  # One page's many editions: its members shrink before it is dropped.
         if result.get('filtered'):
             result['filtered'].pop()
         elif result['results']:

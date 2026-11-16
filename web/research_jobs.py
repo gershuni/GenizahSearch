@@ -17,7 +17,7 @@ from __future__ import annotations
 import atexit
 from copy import deepcopy
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait as futures_wait
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -221,8 +221,12 @@ def _kill(process):
 
 
 class ResearchQueue:
-    def __init__(self, *, command=None, warm=None):
-        self.capacity = _integer('GENIZAH_RESEARCH_WORKERS', 1, maximum=4)
+    def __init__(self, *, command=None, warm=None, capacity_env='GENIZAH_RESEARCH_WORKERS', slot_offset=0,
+                 name='research'):
+        # *slot_offset*: the editions queue's slots come after the main queue's, so its
+        # workers are pinned to other CPUs (research_worker.main, GENIZAH_RESEARCH_SLOT).
+        self.capacity = _integer(capacity_env, 1, maximum=4)
+        self.slot_offset = slot_offset
         self.queue_limit = _integer('GENIZAH_RESEARCH_QUEUE_SIZE', 16, maximum=64)
         self.memory_mb = _integer('GENIZAH_RESEARCH_MEMORY_MB', 4096, minimum=128, maximum=65536)
         self.reserve_mb = _integer('GENIZAH_WEB_RESERVE_MB', 1024, minimum=128, maximum=65536)
@@ -240,7 +244,7 @@ class ResearchQueue:
         self.closed = False
         self.threads = []
         for number in range(self.capacity):
-            thread = threading.Thread(target=self._consume, args=(number,), name=f'research-{number}', daemon=True)
+            thread = threading.Thread(target=self._consume, args=(number,), name=f'{name}-{number}', daemon=True)
             thread.start()
             self.threads.append(thread)
 
@@ -310,7 +314,7 @@ class ResearchQueue:
             env.update(RAYON_NUM_THREADS='1', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                        MKL_NUM_THREADS='1', GENIZAH_SEARCH_BUDGET_SECONDS='0',
                        GENIZAH_RESEARCH_PARENT=str(os.getpid()),
-                       GENIZAH_RESEARCH_SLOT=str(slot),
+                       GENIZAH_RESEARCH_SLOT=str(slot + self.slot_offset),
                        GENIZAH_RESEARCH_MEMORY_MB=str(allocation_mb),
                        GENIZAH_RESEARCH_WARM='0' if payload is not None else '1')
             # Logs stay in the server log, never in a response containing paths
@@ -461,6 +465,7 @@ class ResearchQueue:
 
 
 _queue = None
+_editions_queue = None
 _queue_lock = threading.Lock()
 _wait_executor = None
 
@@ -469,12 +474,13 @@ def shutdown_research():
     """Stop child processes before the web server exits its lifespan. The globals are reset, so
     a later lifespan in the same process (the tests run several) builds a fresh queue and pool
     instead of scheduling on a closed one ("cannot schedule new futures after shutdown")."""
-    global _queue, _wait_executor
+    global _queue, _editions_queue, _wait_executor
     with _queue_lock:
-        queue, executor = _queue, _wait_executor
-        _queue = _wait_executor = None
-    if queue is not None:
-        queue.close()
+        queue, editions, executor = _queue, _editions_queue, _wait_executor
+        _queue = _editions_queue = _wait_executor = None
+    for q in (queue, editions):
+        if q is not None:
+            q.close()
     if executor is not None:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -511,6 +517,72 @@ def get_queue():
             _queue = ResearchQueue()
             atexit.register(_queue.close)
     return _queue
+
+
+def get_editions_queue():
+    """The editions leg's own worker slots (``GENIZAH_EDITIONS_WORKERS``, default 1, at most 4),
+    beside the main queue's: a search with editions runs its two legs at once (editions plan
+    §3.10, the owner's parallel worker), and the editions leg never waits behind another
+    visitor's search in the main queue, nor takes a slot from one. Its slots are numbered
+    after the main queue's, so their workers run on other CPUs."""
+    global _editions_queue
+    with _queue_lock:
+        if _editions_queue is None:
+            _editions_queue = ResearchQueue(capacity_env='GENIZAH_EDITIONS_WORKERS',
+                                            slot_offset=_integer('GENIZAH_RESEARCH_WORKERS', 1, maximum=4),
+                                            name='editions')
+            atexit.register(_editions_queue.close)
+    return _editions_queue
+
+
+_editions_skipped = threading.local()
+
+
+def consume_editions_skipped() -> bool:
+    """Whether the last search on this thread was asked to read the editions and could not (the
+    editions worker failed, or its queue was full): its rows are the automatic transcriptions'
+    alone, and the results say so once (editions plan §4, PR 3). Then forget it."""
+    skipped = bool(getattr(_editions_skipped, 'value', False))
+    _editions_skipped.value = False
+    return skipped
+
+
+def _leg_arguments(arguments, leg):
+    """``execute_search``'s arguments as ``execute_search_leg`` takes them for *leg*."""
+    out = {k: v for k, v in arguments.items() if k not in ('sources', 'metadata_sys_ids', 'preview_callback')}
+    out['leg'] = leg
+    return out
+
+
+def _reads_editions_in_parallel(name, arguments):
+    """A search whose source choice is "automatic and editions" (``sources='all'``) in a text
+    mode: its legs run in two workers at once. The caller decided the editions are served
+    (the switch, readiness, who is an editor); "editions only" is one leg, one worker, as the
+    coordinator runs it."""
+    if name != 'execute_search' or arguments.get('mode') in METADATA_SEARCH_MODES:
+        return False
+    if arguments.get('corpus_scope', 'all') == 'local':
+        return False
+    from shared.dictionary_switch import OFF
+    from shared.editions_search import SOURCES_ALL, editions_switch, normalize_sources
+    try:
+        wanted = normalize_sources(arguments.get('sources')) == SOURCES_ALL
+    except ValueError:
+        return False          # the worker refuses it with execute_search's own message
+    # Switched off: one worker, which opens no editions (today's search).
+    return wanted and editions_switch() != OFF
+
+
+@dataclass(eq=False)
+class _Waiting:
+    """A submitted job and what its caller waits for: *required* (its failure is the search's)
+    or not (the editions leg: its failure leaves the main rows, with a note)."""
+    queue: ResearchQueue
+    job: Job
+    required: bool = True
+    running_since: float | None = None
+    result: dict | None = None
+    error: BaseException | None = None
 
 
 class IsolatedEngine:
@@ -637,7 +709,6 @@ class IsolatedEngine:
             return original
 
         def call(*args, **kwargs):
-            from shared.search_regex import _deadline, SearchBudgetExceeded
             bound = inspect.signature(original).bind(*args, **kwargs)
             arguments = dict(bound.arguments)
             progress = arguments.pop('progress_callback', None)
@@ -676,68 +747,145 @@ class IsolatedEngine:
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings(),
                        'time_limit': time_limit}
-            if preview is not None:
+            parallel = _reads_editions_in_parallel(name, arguments)
+            if preview is not None and not parallel:
+                # With editions there are no early rows: the grouped order is known only
+                # at the end (editions plan §5).
                 payload['preview'] = True
-            job = queue.submit(payload)
-            cancelled = self._cancel or _cancel_context.get()
-            update = self._status or _status_context.get()
-            previewed = 0
-            running_since = None
-            try:
-                while True:
-                    if cancelled is not None and cancelled.is_set():
-                        raise InterruptedError('Search cancelled')
-                    deadline = _deadline.get()
-                    if self._deadline is not None:
-                        deadline = min(deadline or float('inf'), self._deadline)
-                    if deadline is not None and time.monotonic() >= deadline:
-                        raise SearchBudgetExceeded()
-                    position = queue.position(job)
-                    # The worker stops itself at its time limit; one that cannot
-                    # (stuck outside the engine's checks) is stopped here.
-                    if not position and running_since is None:
-                        running_since = time.monotonic()
-                    if (time_limit and running_since is not None
-                            and time.monotonic() - running_since >= time_limit + TIME_LIMIT_GRACE_SECONDS):
-                        raise SearchBudgetExceeded()
-                    status = f'Queued: {position}' if position else job.status
-                    if update:
-                        update(status, job.progress)
-                    if progress:
-                        # Poll even when the engine is stuck in native code, so
-                        # the UI Stop callback can terminate the subprocess.
-                        progress(*((-position, 0) if position else job.progress))
-                    if preview is not None and job.preview_sequence > previewed:
-                        previewed, rows = job.preview_sequence, job.preview
-                        try:
-                            preview(rows)
-                        except Exception:
-                            # Early rows are a convenience; the result still comes.
-                            log.exception('Search preview callback failed')
-                    try:
-                        result = job.future.result(timeout=0.1)
-                        break
-                    except FutureTimeout:
-                        continue
-            except BaseException:
-                queue.cancel(job)
-                raise
-            finally:
-                if shared is not None and shared['left'] is not None and running_since is not None:
-                    shared['left'] -= time.monotonic() - running_since
+            _editions_skipped.value = False
+            if parallel:
+                # The two legs of a search with editions, each in a worker of its own, at
+                # once (editions plan §3.10): the main index in the main queue, the editions
+                # index in its own. Both share the time limit and a Stop.
+                waiting = [_Waiting(queue, queue.submit(
+                    {**payload, 'method': 'execute_search_leg', 'arguments': _leg_arguments(arguments, 'main')}))]
+                editions_queue = get_editions_queue()
+                try:
+                    waiting.append(_Waiting(editions_queue, editions_queue.submit(
+                        {**payload, 'method': 'execute_search_leg',
+                         'arguments': _leg_arguments(arguments, 'editions')}), required=False))
+                except ResearchJobError as exc:
+                    log.warning('Editions leg not started: %s', exc)
+                    _editions_skipped.value = True
+            else:
+                waiting = [_Waiting(queue, queue.submit(payload))]
+            self._wait_for(waiting, time_limit=time_limit, shared=shared, progress=progress,
+                           preview=None if parallel else preview)
             from shared.search_engine import (_note_search_cutoff, _set_last_responsa_downgrade,
                                               _set_last_responsa_downgrade_meta)
-            cutoff = result.get('cutoff') or {}
-            partial = bool(cutoff.get('partial'))
-            _note_search_cutoff(capped=bool(cutoff.get('limited') if partial else cutoff.get('capped')),
-                                interrupted=bool(cutoff.get('interrupted')), partial=partial)
-            _time_limit_stop.value = bool(result.get('time_limit'))
-            if result.get('downgrade'):
-                _set_last_responsa_downgrade(result['downgrade'])
-            if result.get('cascade'):
-                _set_last_responsa_downgrade_meta(result['cascade'])
-            return result['value']
+            results = [w.result for w in waiting if w.result is not None]
+            for w in waiting:
+                if w.error is not None:
+                    # Failed, refused, or still queued or running when the main leg's answer was
+                    # due (_wait_for): the main rows are complete and stand alone, with the note.
+                    log.warning('Editions leg not used; the main rows stand alone: %r', w.error)
+                    _editions_skipped.value = True
+            for result in results:
+                cutoff = result.get('cutoff') or {}
+                partial = bool(cutoff.get('partial'))
+                _note_search_cutoff(capped=bool(cutoff.get('limited') if partial else cutoff.get('capped')),
+                                    interrupted=bool(cutoff.get('interrupted')), partial=partial)
+            _time_limit_stop.value = any(bool(r.get('time_limit')) for r in results)
+            if parallel:
+                from shared.search_engine import SearchEngine, _joined_warnings
+                legs = [w.result['value'] if w.result is not None else None for w in waiting]
+                value, _ = SearchEngine.merge_search_legs(
+                    legs[0], legs[1] if len(legs) > 1 else None, ids_only=bool(arguments.get('ids_only')))
+                downgrade = _joined_warnings(*(r.get('downgrade') for r in results))
+                cascade = next((r['cascade'] for r in results if r.get('cascade')), None)
+            else:
+                value, downgrade, cascade = results[0]['value'], results[0].get('downgrade'), results[0].get('cascade')
+            if downgrade:
+                _set_last_responsa_downgrade(downgrade)
+            if cascade:
+                _set_last_responsa_downgrade_meta(cascade)
+            return value
         return call
+
+    @staticmethod
+    def _give_up(waiting, error):
+        """Stop the jobs of *waiting* that are not required and have no answer yet: each is
+        cancelled (its worker discarded) and keeps *error* as its failure."""
+        for w in waiting:
+            if not w.required and w.result is None and w.error is None:
+                w.queue.cancel(w.job)
+                w.error = error()
+
+    def _wait_for(self, waiting, *, time_limit, shared, progress, preview):
+        """Wait for the submitted jobs (_Waiting): report the first one's queue position and
+        progress, hand on its early rows, and stop them all on a cancel, a deadline, a worker
+        stuck past its time limit, or a required job's failure (raised). A job that is not
+        required keeps its failure in ``error``; the others' results are in ``result``.
+
+        A job that is not required never costs the required ones their answer (Codex review of
+        PR #17): at the deadline, once every required job has its result, the others still
+        queued or running are stopped and given SearchBudgetExceeded as their ``error``; and a
+        worker stuck past its time limit is stopped the same way when it is not required."""
+        from shared.search_regex import _deadline, SearchBudgetExceeded
+        cancelled = self._cancel or _cancel_context.get()
+        update = self._status or _status_context.get()
+        previewed = 0
+        lead = waiting[0]
+        try:
+            while True:
+                if cancelled is not None and cancelled.is_set():
+                    raise InterruptedError('Search cancelled')
+                deadline = _deadline.get()
+                if self._deadline is not None:
+                    deadline = min(deadline or float('inf'), self._deadline)
+                now = time.monotonic()
+                if deadline is not None and now >= deadline:
+                    if all(w.result is not None for w in waiting if w.required):
+                        self._give_up(waiting, SearchBudgetExceeded)
+                        return
+                    raise SearchBudgetExceeded()
+                for w in waiting:
+                    # The worker stops itself at its time limit; one that cannot
+                    # (stuck outside the engine's checks) is stopped here.
+                    if w.running_since is None and not w.queue.position(w.job):
+                        w.running_since = now
+                    if (time_limit and w.running_since is not None and not w.job.future.done()
+                            and w.result is None and w.error is None
+                            and now - w.running_since >= time_limit + TIME_LIMIT_GRACE_SECONDS):
+                        if w.required:
+                            raise SearchBudgetExceeded()
+                        self._give_up([w], SearchBudgetExceeded)
+                position = lead.queue.position(lead.job)
+                status = f'Queued: {position}' if position else lead.job.status
+                if update:
+                    update(status, lead.job.progress)
+                if progress:
+                    # Poll even when the engine is stuck in native code, so
+                    # the UI Stop callback can terminate the subprocess.
+                    progress(*((-position, 0) if position else lead.job.progress))
+                if preview is not None and lead.job.preview_sequence > previewed:
+                    previewed, rows = lead.job.preview_sequence, lead.job.preview
+                    try:
+                        preview(rows)
+                    except Exception:
+                        # Early rows are a convenience; the result still comes.
+                        log.exception('Search preview callback failed')
+                pending = [w for w in waiting if w.result is None and w.error is None]
+                done, _ = futures_wait([w.job.future for w in pending], timeout=0.1, return_when=FIRST_COMPLETED)
+                for w in pending:
+                    if w.job.future not in done:
+                        continue
+                    try:
+                        w.result = w.job.future.result()
+                    except BaseException as exc:
+                        if w.required:
+                            raise
+                        w.error = exc
+                if all(w.result is not None or w.error is not None for w in waiting):
+                    return
+        except BaseException:
+            for w in waiting:
+                w.queue.cancel(w.job)
+            raise
+        finally:
+            started = [w.running_since for w in waiting if w.running_since is not None]
+            if shared is not None and shared['left'] is not None and started:
+                shared['left'] -= time.monotonic() - min(started)
 
 
 def with_request_settings(engine, **values):

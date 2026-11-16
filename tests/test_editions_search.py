@@ -612,3 +612,79 @@ def test_search_within_replays_the_source_choice():
     assert RefinementStep.from_dict({"query": "x", "mode": "literal"}).sources is None
     replay_chain([step, RefinementStep(query="y", mode="literal")], Searcher(), None)
     assert calls == ["editions", "<none>"]
+
+
+# --- the website's route: each leg in a research worker of its own (PR 3) ------------------------
+
+def _legs(world, query, mode, kw, *, leaf=None):
+    """The two legs as two research workers return them (pickled across the process boundary),
+    merged in the web process."""
+    import pickle
+    kw = dict(kw)
+    kw.setdefault("corpus_scope", "genizah")
+    gap = kw.pop("gap", 0)
+    main = world["eng"].execute_search_leg(query, mode, gap, "main", **kw)
+    editions = (leaf or world["eng"]).execute_search_leg(query, mode, gap, "editions", **kw)
+    main, editions = pickle.loads(pickle.dumps(main)), pickle.loads(pickle.dumps(editions))
+    return SearchEngine.merge_search_legs(main, editions, ids_only=kw.get("ids_only", False))
+
+
+@pytest.mark.parametrize("query, mode, kw", CASES + [
+    ("רבות*", "literal", {"responsa_options": R}),
+    ("שלום עליכם רבותי", "literal", {}),
+])
+def test_the_parallel_legs_return_the_coordinators_rows(world, query, mode, kw):
+    """Each leg in a worker of its own, merged in the web process, gives what the in-process
+    coordinator gives for the same search, row for row (the owner's parallel worker, §3.10)."""
+    expected = _search(world["eng"], query, mode, sources="all", **copy.deepcopy(kw))
+    _consume_last_responsa_downgrade()
+    consume_last_search_cutoff()
+    rows, warning = _legs(world, query, mode, copy.deepcopy(kw))
+    assert rows == expected
+    assert warning == (expected[0].get("responsa_warning") if expected else None)
+
+
+def test_the_editions_worker_opens_the_editions_alone(world):
+    """The editions leg's worker opens the leaf engine only (no main index to load) and returns
+    what the attached child returns."""
+    from shared.editions_search import open_editions_engine
+    eng = world["eng"]
+    leaf = open_editions_engine(eng.meta_mgr, eng.var_mgr, world["gen"])
+    try:
+        for query, mode, kw in [("שלום", "literal", {}), ("של*", "literal", {"responsa_options": R})]:
+            expected = _search(eng, query, mode, sources="all", **copy.deepcopy(kw))
+            rows, _ = _legs(world, query, mode, kw, leaf=leaf)
+            assert rows == expected
+        with pytest.raises(ValueError):
+            leaf.execute_search_leg("שלום", "literal", 0, "main")
+    finally:
+        leaf.close_index()
+
+
+def test_a_failed_editions_leg_leaves_the_main_rows(world):
+    main = world["eng"].execute_search_leg("שלום", "literal", 0, "main", corpus_scope="genizah")
+    rows, _ = SearchEngine.merge_search_legs(main, None)
+    plain = world["plain"].execute_search("שלום", "literal", 0, corpus_scope="genizah")
+    assert [r["uid"] for r in rows] == [r["uid"] for r in plain]
+    assert all(r["sources"] == ["automatic"] for r in rows)
+
+
+def test_a_leg_refuses_what_has_no_editions(world):
+    eng = world["eng"]
+    for mode, scope in (("Title", "genizah"), ("literal", "local")):
+        with pytest.raises(ValueError):
+            eng.execute_search_leg("שלום", mode, 0, "main", corpus_scope=scope)
+    with pytest.raises(ValueError):
+        eng.execute_search_leg("שלום", "literal", 0, "sideways")
+    with pytest.raises(ValueError):
+        world["plain"].execute_search_leg("שלום", "literal", 0, "editions")
+
+
+def test_the_worker_reads_the_editions_only_in_the_editions_leg(monkeypatch):
+    from shared.research_worker import wants_editions
+    monkeypatch.setenv("EDITIONS_SEARCH_ENABLED", "1")
+    leg = {"kind": "search", "method": "execute_search_leg"}
+    assert wants_editions({**leg, "arguments": {"leg": "editions"}}) is True
+    assert wants_editions({**leg, "arguments": {"leg": "main"}}) is False
+    monkeypatch.setenv("EDITIONS_SEARCH_ENABLED", "0")
+    assert wants_editions({**leg, "arguments": {"leg": "editions"}}) is False
