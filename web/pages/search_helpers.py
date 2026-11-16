@@ -9,27 +9,46 @@ from __future__ import annotations
 from typing import Optional, List
 
 
+def selection_key(row) -> str:
+    """A result's identity for the selection: its uid (one per page), else its manuscript.
+
+    Not its position: the cards number the rows the filters leave, so a position in the
+    full list named another result whenever a filter hid an earlier row (Codex on #26).
+    """
+    if isinstance(row, dict):
+        key = row.get('uid') or (row.get('display') or {}).get('id')
+        if key:
+            return str(key)
+    return f'@{id(row)}'
+
+
+def selected_rows(search_state) -> List[dict]:
+    """The selected results among those the page shows (`displayed_results`), in its order.
+
+    A selected result a filter hides is neither counted nor acted on; it shows selected
+    again once the filter is off.
+    """
+    keys = search_state.selected_keys
+    if not keys:
+        return []
+    return [r for r in (search_state.displayed_results or []) if selection_key(r) in keys]
+
+
 def compute_selected_uids(search_state) -> Optional[List[str]]:
     """Map page-scoped checkbox selection to the uid list the export
     handlers consume.
 
-    Returns None when no rows are selected (preserves "export full set"
-    behavior). Returns a list of uids (in sorted-index order) when at
-    least one row is selected. Out-of-bounds indices are silently
-    skipped -- defensive against stale selected_indices after results
-    change underneath us. Empty-uid items (metadata-only hits per D-04
-    locator semantics) are preserved as empty strings in the list and
-    will naturally fail to match anything in the export handler.
+    Returns None when no shown row is selected (preserves "export full set"
+    behavior), else the selected shown rows' uids in the page's order
+    (`selected_rows`). Empty-uid items (metadata-only hits per D-04 locator
+    semantics) are preserved as empty strings in the list and will
+    naturally fail to match anything in the export handler.
 
     Args:
-        search_state: SearchUIState instance with `.results` (list[dict])
-                      and `.selected_indices` (set[int]).
+        search_state: SearchUIState instance with `.displayed_results`
+                      (list[dict]) and `.selected_keys` (set[str]).
     """
-    if not search_state.selected_indices:
+    rows = selected_rows(search_state)
+    if not rows:
         return None
-    uids: List[str] = []
-    for i in sorted(search_state.selected_indices):
-        if 0 <= i < len(search_state.results):
-            r = search_state.results[i]
-            uids.append(r.get('uid', '') if isinstance(r, dict) else '')
-    return uids
+    return [r.get('uid', '') if isinstance(r, dict) else '' for r in rows]

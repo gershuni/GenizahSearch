@@ -13,7 +13,7 @@ A comprehensive search interface with:
 from nicegui import ui, run, app
 from web import io_bound_result
 from web.state import state
-from web.pages.search_helpers import compute_selected_uids
+from web.pages.search_helpers import compute_selected_uids, selected_rows, selection_key
 from web.translations import tr, tr_engine_message, is_rtl, get_language, using_language
 from web.ux_timing import ux_done, ux_ignored
 from web import hebrew_keyboard
@@ -3277,7 +3277,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.responsa_warning = None
         search_state.editions_skipped = False
         search_state.displayed_results = []
-        search_state.selected_indices.clear()
+        search_state.selected_keys.clear()
         search_state.transcription_sys_ids = set()
         search_state.manual_transcription_sys_ids = set()  # SEED-022
         search_state.scholarly_page_uids = set()
@@ -3378,26 +3378,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Toggle selection of all results."""
         if _syncing_select_all['on']:
             return
+        # The box acts on the results the page shows (every page of it), both ways: a
+        # selected result a filter hides keeps its tick for when the filter is off.
+        shown_keys = {selection_key(r) for r in search_state.displayed_results or []}
         if is_checked:
-            # Select all current results
-            for i in range(len(search_state.results)):
-                search_state.selected_indices.add(i)
+            search_state.selected_keys |= shown_keys
         else:
-            # Deselect all
-            search_state.selected_indices.clear()
+            search_state.selected_keys -= shown_keys
 
-        # Re-render to update checkboxes (keeps current page)
-        _display = _apply_measurement_post_filters(search_state.results, search_state)
-        render_results(_display)
-        update_selection_ui()
-        # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
-        _selected_uids = compute_selected_uids(search_state)
-        from web.export_state import update_search_export_selection
-        update_search_export_selection(_selected_uids)
+        # Re-render the rows shown, to tick their boxes (keeps current page). Not the full
+        # list: that put back every row the result filters hid (Codex on #26).
+        render_results(list(search_state.displayed_results or []))
 
     def update_selection_ui():
-        """Update selection counter and bulk actions visibility."""
-        selected_count = len(search_state.selected_indices)
+        """Update selection counter and bulk actions visibility, and mirror the selection
+        to the export payload. Counts the selected results the page shows."""
+        shown = search_state.displayed_results or []
+        selected_count = len(selected_rows(search_state))
 
         # A class, not .style(): NiceGUI's style() only adds, so `.style('')` never took
         # back a `display: none` and the counter and the bulk actions never showed.
@@ -3417,30 +3414,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Update select all checkbox state
         _syncing_select_all['on'] = True
         try:
-            select_all_checkbox.value = selected_count == len(search_state.results) > 0
+            select_all_checkbox.value = selected_count == len(shown) > 0
         finally:
             _syncing_select_all['on'] = False
+        # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
+        from web.export_state import update_search_export_selection
+        update_search_export_selection(compute_selected_uids(search_state))
 
     def _clear_selection():
-        """Forget the selected rows when the result set is replaced: they are indices, so
-        they would name the new set's rows, which then showed as selected and the bulk
-        actions acted on them (Codex on #26)."""
-        search_state.selected_indices.clear()
+        """Forget the selected rows when the result set is replaced: the new set's rows
+        showed as selected and the bulk actions acted on them (Codex on #26)."""
+        search_state.selected_keys.clear()
         update_selection_ui()
-        from web.export_state import update_search_export_selection
-        update_search_export_selection(None)
 
     def bulk_add_to_list():
         """Add all selected results to a list."""
         from web.components.add_to_list_dialog import require_login_for_lists
         if not require_login_for_lists():  # sweep C2: before any lists_mgr read
             return
-        if not search_state.selected_indices:
+        if not search_state.selected_keys:
             ui.notify(tr('No results selected'), type='warning')
             return
 
-        selected_results = [search_state.results[i] for i in sorted(search_state.selected_indices)
-                          if i < len(search_state.results)]
+        selected_results = selected_rows(search_state)
 
         if not selected_results:
             ui.notify(tr('No valid selections'), type='warning')
@@ -3589,12 +3585,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     async def bulk_copy_text():
         """Copy all selected results' text to clipboard (exactly; toast = real outcome)."""
-        if not search_state.selected_indices:
+        if not search_state.selected_keys:
             ui.notify(tr('No results selected'), type='warning')
             return
 
-        selected_results = [search_state.results[i] for i in sorted(search_state.selected_indices)
-                          if i < len(search_state.results)]
+        selected_results = selected_rows(search_state)
 
         if not selected_results:
             ui.notify(tr('No valid selections'), type='warning')
@@ -5407,6 +5402,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
         _update_reset_filters_btn()
         _render_results(search_state, refs, results, page, scroll_to_top, reset_expansion)
+        # The shown rows changed: the count of selected ones and the export's selection follow.
+        update_selection_ui()
 
     def create_result_card(index, result):
         _create_result_card(search_state, refs, index, result)

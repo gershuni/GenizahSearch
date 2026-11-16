@@ -15,7 +15,7 @@ from __future__ import annotations
 from nicegui import background_tasks, ui, run
 from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
-from web.pages.search_helpers import compute_selected_uids
+from web.pages.search_helpers import selection_key
 from web.pages.browse_editions import keep_target
 from web.components.version_selector import decision_for_version
 from web.pages.search_editions import (browse_url as editions_browse_url, edition_text, matched_in,
@@ -750,19 +750,18 @@ def create_result_card(search_state, refs, index, result):
         with ui.row(wrap=False).classes('w-full items-start justify-between'):
             # Checkbox for selection
             with ui.column().classes('justify-center'):
-                def toggle_card_selection(e, idx=index):
+                # By the result's identity, not its card number: the numbers count the
+                # rows the filters leave (Codex on #26). update_selection_ui also mirrors
+                # the selection to the export payload.
+                def toggle_card_selection(e, key=selection_key(result)):
                     if e.value:
-                        search_state.selected_indices.add(idx)
+                        search_state.selected_keys.add(key)
                     else:
-                        search_state.selected_indices.discard(idx)
+                        search_state.selected_keys.discard(key)
                     refs.update_selection_ui()
-                    # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
-                    _selected_uids = compute_selected_uids(search_state)
-                    from web.export_state import update_search_export_selection
-                    update_search_export_selection(_selected_uids)
 
                 result_checkbox = ui.checkbox(
-                    value=index in search_state.selected_indices,
+                    value=selection_key(result) in search_state.selected_keys,
                     on_change=toggle_card_selection
                 ).props('dense')
 

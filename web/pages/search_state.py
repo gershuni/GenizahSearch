@@ -47,7 +47,8 @@ class SearchUIState:
         self.total_count = 0
         self.current_page_idx = 0  # For browse within viewer
         self.current_page = 0  # Zero-indexed page number for result pagination
-        self.selected_indices = set()  # For bulk operations
+        # The selected results, by `search_helpers.selection_key` (bulk actions, exports).
+        self.selected_keys = set()
         self.is_panel_collapsed = False  # For collapsible search panel
         self.last_scroll_top = 0  # For scroll-based auto-collapse
         self.update_timer = None  # Track progress update asyncio Task to prevent duplicates
