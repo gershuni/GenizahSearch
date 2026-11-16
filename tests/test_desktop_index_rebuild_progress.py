@@ -287,6 +287,95 @@ def test_a_cancelled_or_failed_build_returns_the_window_to_normal(window):
     assert not window.index_rebuild_bar.isVisibleTo(window) and window._index_build is None
 
 
+
+# --- the scholarly transcriptions' index around a main-index build ----------------------------
+# A main-index build replaces the browse map the editions are placed by
+# (desktop/editions_index.py): their lifecycle is suspended while it runs and checks again
+# when it has ended, except at exit; the swap waits for a pass of it still ending.
+
+class _Editions:
+    """Stands in for desktop/editions_index.py::EditionsIndex: records what the window asks."""
+
+    def __init__(self, busy=False):
+        self.calls = []
+        self._busy = busy
+
+    def suspend(self, reason):
+        self.calls.append(f'suspend {reason}')
+
+    def resume(self, reason):
+        self.calls.append(f'resume {reason}')
+
+    def busy(self):
+        return self._busy
+
+    def check(self):
+        self.calls.append('check')
+
+
+@pytest.mark.parametrize('mode', ['beside', 'inplace'])
+def test_a_main_index_build_suspends_the_editions_index_and_its_end_checks_it_again(window, mode):
+    window._editions_index = _Editions()
+    th = _started(window, mode)
+    assert window._editions_index.calls == ['suspend main index']
+    th.finished_signal.emit(42)
+    assert window._editions_index.calls == ['suspend main index', 'resume main index']
+
+
+@pytest.mark.parametrize('end', ['cancelled', 'failed'])
+def test_a_cancelled_or_failed_main_build_checks_the_editions_again(window, end):
+    window._editions_index = _Editions()
+    th = _started(window, 'beside')
+    if end == 'cancelled':
+        th.cancelled_signal.emit()
+    else:
+        th.error_signal.emit("boom")
+    assert window._editions_index.calls == ['suspend main index', 'resume main index']
+
+
+def test_a_main_build_at_exit_does_not_check_the_editions_again(window):
+    window._editions_index = _Editions()
+    window._start_index_build('beside', at_exit=True)
+    with patch.object(GenizahGUI, '_finish_exit_rebuild') as finish:
+        _Thread.made[-1].finished_signal.emit(42)
+    assert finish.call_count == 1
+    assert window._editions_index.calls == ['suspend main index']
+
+
+def test_a_sidecar_update_stops_the_editions_build_and_checks_them_when_it_ends(window):
+    """The editions are built from the FGP and PGP sidecars and the NLI crossref, which a
+    running build holds open: a sidecar update suspends them, starts downloading only once
+    the running pass has ended, and checks them again when the downloads have ended (Codex
+    review of PR #25)."""
+    window._editions_index = _Editions(busy=True)
+    retries = []
+    with patch.object(GenizahGUI, '_reset_sidecar_connections'),             patch.object(GenizahGUI, '_download_next_sidecar') as download,             patch.object(genizah_app.QTimer, 'singleShot', side_effect=lambda ms, fn: retries.append(fn)):
+        window._start_sidecar_download([{'name': 'fgp_transcriptions.db', 'subdir': 'fgp_data', 'url': 'u'}])
+        assert window._editions_index.calls == ['suspend sidecars']
+        assert download.call_count == 0 and len(retries) == 1   # the pass still runs: wait
+        retries.pop()()
+        assert download.call_count == 0 and len(retries) == 1
+        window._editions_index._busy = False
+        retries.pop()()
+        assert download.call_count == 1 and retries == []
+    window._sidecar_download_queue = []                        # the last download has ended
+    with patch.object(GenizahGUI, '_reset_sidecar_connections') as reset:
+        window._download_next_sidecar()
+    assert reset.call_count == 1
+    assert window._editions_index.calls == ['suspend sidecars', 'resume sidecars']
+
+
+def test_the_swap_waits_for_a_pass_of_the_editions_index(window):
+    window._editions_index = _Editions(busy=True)
+    th = _started(window, 'beside')
+    assert window._index_readers_busy() == ['scholarly transcriptions']
+    with patch.object(genizah_app, 'swap_in_staged_index') as swap,             patch.object(genizah_app.QTimer, 'singleShot') as later:
+        th.finished_signal.emit(42)
+    assert swap.call_count == 0 and later.call_count == 1
+    window._editions_index._busy = False
+    assert window._index_readers_busy() == []
+
+
 # --- the confirmation, by the free-space plan -----------------------------------------------
 
 def test_the_confirmation_says_how_the_build_will_run():

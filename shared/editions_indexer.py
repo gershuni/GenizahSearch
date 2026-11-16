@@ -70,6 +70,16 @@ REQUIRED_FIELDS = ("unique_id", "content", "content_search", "content_head", "co
                    "boundaries")
 
 
+class BuildCancelled(Exception):
+    """A build stopped by its caller's *should_stop* (the desktop's background build, at exit
+    or when the main index is rebuilt). What it wrote is left for the caller to remove."""
+
+
+def _check_stop(should_stop: Optional[Callable[[], bool]]) -> None:
+    if should_stop is not None and should_stop():
+        raise BuildCancelled("the editions build was stopped")
+
+
 def default_generation_dir() -> str:
     """``<INDEX_DIR>/Editions``, beside My Library's ``LocalIndex``. ``GENIZAH_EDITIONS_DIR``
     (dev and gates only: scripts/verify_editions_search.py --web-timing) names another; read at
@@ -242,8 +252,10 @@ def _connect_ro(path: str) -> sqlite3.Connection:
     return con
 
 
-def fgp_documents(fgp_db: str, locator: PageLocator, rules: Optional[Counter] = None) -> Iterator[EditionDoc]:
-    """Every FGP edition document, by the canonical rule (module docstring)."""
+def fgp_documents(fgp_db: str, locator: PageLocator, rules: Optional[Counter] = None,
+                  should_stop: Optional[Callable[[], bool]] = None) -> Iterator[EditionDoc]:
+    """Every FGP edition document, by the canonical rule (module docstring). *should_stop*:
+    asked before each manuscript; True raises BuildCancelled."""
     from shared.fgp_marks_legend import uses_genuzot_marks
     from shared.fgp_service import (FgpService, _fgp_match_folio, _fgp_match_image_number, pick_fgp_credit,
                                     source_relation_kind)
@@ -260,6 +272,7 @@ def fgp_documents(fgp_db: str, locator: PageLocator, rules: Optional[Counter] = 
         finally:
             con.close()
         for sys_id in sys_ids:
+            _check_stop(should_stop)
             editions = [s for s in service.chooser_sources(sys_id)
                         if source_relation_kind(s) == "edition" and (s.get("content") or "").strip()]
             by_text: Dict[str, EditionDoc] = {}
@@ -323,8 +336,10 @@ def pgp_canonical_pairs(con: sqlite3.Connection) -> List[sqlite3.Row]:
     return out
 
 
-def pgp_documents(pgp_db: str, locator: PageLocator, rules: Optional[Counter] = None) -> Iterator[EditionDoc]:
-    """Every PGP edition document, by the canonical rule (module docstring)."""
+def pgp_documents(pgp_db: str, locator: PageLocator, rules: Optional[Counter] = None,
+                  should_stop: Optional[Callable[[], bool]] = None) -> Iterator[EditionDoc]:
+    """Every PGP edition document, by the canonical rule (module docstring). *should_stop*:
+    asked before each text; True raises BuildCancelled."""
     from shared.document_service import parse_transcription_sections
 
     con = _connect_ro(pgp_db)
@@ -338,6 +353,7 @@ def pgp_documents(pgp_db: str, locator: PageLocator, rules: Optional[Counter] = 
         con.close()
     cache: Dict[Any, SearchText] = {}
     for r in pairs:
+        _check_stop(should_stop)
         sys_id = str(r["sys_id"])
         st = cache.get(r["id"])
         if st is None:
@@ -406,19 +422,38 @@ def _sidecar_meta(path: str, table: str, keys: Sequence[str]) -> Dict[str, Any]:
     return {k: rows.get(k) for k in keys}
 
 
-def input_stamp(fgp_db: str, pgp_db: str, browse_map_path: str, nli_db: Optional[str]) -> Dict[str, Any]:
+def input_stamp(fgp_db: str, pgp_db: str, browse_map_path: str, nli_db: Optional[str],
+                fingerprint: Callable[[Optional[str]], Optional[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """The inputs a generation is built from, as recorded in its meta: a change in any of
-    them is a reason to rebuild (plan §3.7)."""
+    them is a reason to rebuild (plan §3.7). *fingerprint*: file_fingerprint, or one that
+    gives the same answer from a cache (the desktop's check at each start)."""
+    fingerprint = fingerprint or file_fingerprint
     return {
         "fgp": dict(_sidecar_meta(fgp_db, "fgp_meta", ("version", "built_at", "rows", "built_from_gate3_digest")),
-                    file=file_fingerprint(fgp_db)),
+                    file=fingerprint(fgp_db)),
         "pgp": dict(_sidecar_meta(pgp_db, "meta", ("version", "upstream_commit", "imported_at")),
-                    file=file_fingerprint(pgp_db)),
-        "browse_map": file_fingerprint(browse_map_path),
-        "nli_crossref": file_fingerprint(nli_db),
+                    file=fingerprint(pgp_db)),
+        "browse_map": fingerprint(browse_map_path),
+        "nli_crossref": fingerprint(nli_db),
         "cleaner_version": CLEANER_VERSION,
         "builder_version": BUILDER_VERSION,
     }
+
+
+#: The inputs a generation records (input_stamp), in the order a drift report names them.
+INPUT_KEYS = ("fgp", "pgp", "browse_map", "nli_crossref", "cleaner_version", "builder_version")
+
+
+def changed_inputs(recorded: Optional[Dict[str, Any]], installed: Dict[str, Any]) -> List[str]:
+    """The keys of INPUT_KEYS whose installed value is not the one a generation was built
+    from (*recorded*: its meta's ``inputs``): a sidecar by its file (sha256 and size; its
+    version rows describe the file), anything else as it is. Empty: the generation is
+    current (plan section 3.7)."""
+    recorded = recorded or {}
+
+    def fingerprint(value):
+        return value.get("file") if isinstance(value, dict) and "file" in value else value
+    return [key for key in INPUT_KEYS if fingerprint(recorded.get(key)) != fingerprint(installed.get(key))]
 
 
 def search_fold(text: str) -> str:
@@ -482,12 +517,20 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
                      nli_db: Optional[str] = None,
                      folio_images_for: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
                      documents: Optional[Iterable[EditionDoc]] = None,
-                     force: bool = False, progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+                     force: bool = False, progress: Optional[Callable[[str], None]] = None,
+                     should_stop: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
     """Build one generation into *out_dir* and return its meta.
 
     *folio_images_for* defaults to the NLI crossref at *nli_db*. *documents* replaces the
     canonical documents (the gate's fault injections and tests); the meta then still
     records the real inputs, so a build from other documents fails the membership check.
+    *should_stop* (the desktop's background build): asked as the documents are read and
+    written; True raises BuildCancelled, before the meta is written, so what is left in
+    *out_dir* never reads as a generation.
+
+    The meta records the inputs as they were **before** anything was read from them: an
+    input replaced while the build reads (the desktop's sidecar update) then leaves the
+    generation stale against the new file, never stamped with it (Codex review of PR #25).
     """
     import tantivy
 
@@ -501,6 +544,7 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
         if not nli_db:
             raise ValueError("an NLI crossref (nli_db) is required to place FGP texts on their pages")
         check_nli_crossref(nli_db)
+    stamp = input_stamp(fgp_db, pgp_db, browse_map_path, nli_db)
     if os.path.exists(out_dir):
         if not force:
             raise FileExistsError(f"{out_dir} exists; pass force=True to replace it")
@@ -519,9 +563,9 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
     rules = {SOURCE_FGP: Counter(), SOURCE_PGP: Counter()}
     if documents is None:
         say("reading FGP editions")
-        docs = list(fgp_documents(fgp_db, locator, rules[SOURCE_FGP]))
+        docs = list(fgp_documents(fgp_db, locator, rules[SOURCE_FGP], should_stop))
         say("reading PGP editions")
-        docs += list(pgp_documents(pgp_db, locator, rules[SOURCE_PGP]))
+        docs += list(pgp_documents(pgp_db, locator, rules[SOURCE_PGP], should_stop))
     else:
         docs = list(documents)
 
@@ -534,7 +578,9 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
     counts = Counter()
     located = {SOURCE_FGP: Counter(), SOURCE_PGP: Counter()}
     say(f"indexing {len(docs):,} documents")
-    for doc in docs:
+    for n, doc in enumerate(docs):
+        if n % 500 == 0:
+            _check_stop(should_stop)
         text = doc.search.text
         folded = search_fold(text)
         fields = {
@@ -560,6 +606,7 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
         })
     writer.commit()
     writer.wait_merging_threads()
+    _check_stop(should_stop)
 
     marker = write_index_format(db_path, reversed_field=True, seams=None)
     build_id = marker["build_id"]
@@ -568,7 +615,7 @@ def build_generation(out_dir: str, *, fgp_db: str, pgp_db: str, browse_map_path:
     meta = {
         "build_id": build_id,
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        "inputs": input_stamp(fgp_db, pgp_db, browse_map_path, nli_db),
+        "inputs": stamp,
         "counts": {
             "documents": sum(counts.values()),
             "documents_by_source": {k: counts[k] for k in (SOURCE_FGP, SOURCE_PGP)},

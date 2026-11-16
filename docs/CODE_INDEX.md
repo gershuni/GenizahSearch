@@ -3964,3 +3964,36 @@ What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
 - **Function** `render_friedman_expression_empty` (Line 238) — Friedman's tab when the words were not found together: the gap control stays, so the
 - **Function** `render_friedman_expression` (Line 250) — Draw an expression search's answer into the current container. Returns False, drawing
 - **Function** `render_friedman` (Line 273) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
+
+## desktop/editions_index.py
+
+- **Class** `EditionsInputs` (Line 75) — The files a generation is built from.
+    - Method `missing` (Line 82) — The inputs that are not there (an empty file counts as missing: a placeholder).
+- **Function** `installed_inputs` (Line 94) — The sidecars the app reads (each service's own lookup: the user's data folder first,
+- **Function** `staged_dir` (Line 107)
+- **Class** `FingerprintCache` (Line 111) — ``file_fingerprint`` that does not read a file again while its size and modification
+    - Method `__call__` (Line 128)
+    - Method `save` (Line 145)
+- **Function** `inputs_cache_path` (Line 158)
+- **Function** `generation_changes` (Line 162) — What changed since the generation at *gen_dir* was built (``changed_inputs``; empty:
+- **Function** `remove_dir` (Line 174) — Delete *path* if it is there; False when some of it could not be deleted (Windows
+- **Class** `EditionsIndexWorker` (Line 191) — One pass of the lifecycle (module docstring): *task* ``'check'`` or ``'promote'``.
+    - Method `request_stop` (Line 213) — Stop a check's build at its next document (BuildCancelled). A promotion is a few
+    - Method `should_stop` (Line 218)
+    - Method `run` (Line 221)
+    - Method `_check` (Line 232)
+    - Method `_promote` (Line 305)
+    - Method `_opened` (Line 327)
+- **Class** `EditionsIndex` (Line 336) — The desktop's editions index lifecycle (module docstring), on the UI thread.
+    - Method `live_dir` (Line 373)
+    - Method `busy` (Line 376) — A pass is running (the main index's install waits for it).
+    - Method `check` (Line 380) — Start a check pass, or one more after the running pass or the waiting promotion.
+    - Property `_suspended` (Line 394)
+    - Method `suspend` (Line 397) — Something is about to replace an input, *reason*: a main-index rebuild (its new
+    - Method `resume` (Line 419) — What *reason* named has ended: once nothing else is waited for, the generation
+    - Method `_retire_when_idle` (Line 430) — Close the engine's editions child once nothing reads the index (a search reading
+    - Method `close` (Line 451) — At exit: stop the running pass; install nothing more.
+    - Method `_start` (Line 461)
+    - Method `_on_finished` (Line 479)
+    - Method `_promote_later` (Line 533) — Try a promotion that failed again (PROMOTE_LATER_MS on), unless something else
+    - Method `_promote_when_idle` (Line 544) — Promote the built generation once nothing reads the index; a second at a time.

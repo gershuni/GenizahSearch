@@ -82,7 +82,7 @@ def _check_drift(engine) -> None:
     import os
     try:
         from shared.config import Config
-        from shared.editions_indexer import META_FILENAME, default_generation_dir, input_stamp
+        from shared.editions_indexer import META_FILENAME, changed_inputs, default_generation_dir, input_stamp
         child = getattr(engine, '_editions', None)
         gen_dir = getattr(child, '_editions_dir', None) or default_generation_dir()
         with open(os.path.join(gen_dir, META_FILENAME), encoding='utf-8') as f:
@@ -94,10 +94,8 @@ def _check_drift(engine) -> None:
         LOGGER.exception("The editions index's inputs could not be compared with the installed ones")
         return
 
-    def fingerprint(value):
-        return value.get('file') if isinstance(value, dict) and 'file' in value else value
-    changed = [label for key, label in _DRIFT_KEYS
-               if fingerprint(recorded.get(key)) != fingerprint(installed.get(key))]
+    differ = set(changed_inputs(recorded, installed))
+    changed = [label for key, label in _DRIFT_KEYS if key in differ]
     _drift.update(checked=True, changed=changed)
     if changed:
         LOGGER.warning("The editions index was built from other inputs than those installed (%s): rebuild it "

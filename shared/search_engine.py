@@ -1523,15 +1523,36 @@ class SearchEngine:
         if self._edition_leaf:
             return False
         self.close_editions()
+        return self.install_editions(open_editions_engine(self.meta_mgr, self.var_mgr, gen_dir), gen_dir)
+
+    def install_editions(self, child, gen_dir=None):
+        """Put *child* -- a leaf opened elsewhere on the generation at *gen_dir*
+        (``open_editions_engine``, which the desktop runs in a background thread: it opens an
+        index) -- in place as this engine's editions child, closing the one before. Returns
+        whether one is open; None installs nothing (and reload_index still reopens
+        *gen_dir*). Called on the thread that owns the engine's lifecycle (the desktop's UI
+        thread), never while a search reads the child it replaces."""
+        if self._edition_leaf:
+            return False
+        self.close_editions()
         self._editions_dir = gen_dir
         self._editions_wanted = True      # reload_index reopens it (plan §3.3 item 12)
-        self._editions = open_editions_engine(self.meta_mgr, self.var_mgr, gen_dir)
-        return self._editions is not None
+        self._editions = child
+        return child is not None
 
     def detach_editions(self):
         """Close the editions child for good: reload_index no longer reopens it."""
         self._editions_wanted = False
         self.close_editions()
+
+    def set_editions_reopen(self, reopen):
+        """Whether reload_index reopens the editions child after it reopens the main index
+        (plan §3.3 item 12). The child open now is left as it is. The desktop turns it off
+        while a main-index build or a sidecar update runs: the generation it would reopen,
+        on the thread that reloads (the UI thread), was built from the inputs being replaced
+        and is closed again when they are (desktop/editions_index.py; Codex review of PR
+        #25). install_editions turns it on again."""
+        self._editions_wanted = bool(reopen) and not self._edition_leaf
 
     def close_editions(self):
         """Release the editions child (before its generation is promoted: plan §3.7)."""

@@ -54,6 +54,7 @@ class _Host:
     _forget_responsa_notes = APP._forget_responsa_notes
     _on_responsa_downgrade = APP._on_responsa_downgrade
     _downgrade_note = APP._downgrade_note
+    _on_editions_unavailable = APP._on_editions_unavailable
 
     def __init__(self, cutoff, cancelled=False):
         self._search_cutoff = cutoff
@@ -188,3 +189,68 @@ def test_the_search_thread_sends_its_downgrade():
         t.results_signal.connect(lambda rows: got.append(('rows', rows)))
         t.run()                   # same thread: the signals are delivered directly
         assert got == [('downgrade', note), ('rows', [])]
+
+
+# --- The scholarly transcriptions not searched (their index not open yet) --------------------
+
+EDITIONS_NOTE = "The scholarly transcriptions could not be searched this time"
+
+
+def test_a_search_that_could_not_read_the_editions_says_so_once(lang):
+    """desktop/editions_index.py builds the index in the background; a search asked to read
+    the editions before it is open runs without them, and its line says so, once."""
+    tr = genizah_app.tr
+    host = _Host({"capped": False, "interrupted": False})
+    host._on_responsa_downgrade(NOTE)
+    host._on_editions_unavailable(True)
+    host.on_search_finished([])
+    assert host.status_label.text == f"{tr('No results found.')} · {NOTE} · {tr(EDITIONS_NOTE)}"
+    assert host.status_label.text.count(tr(EDITIONS_NOTE)) == 1
+    within = _Host({"capped": True, "interrupted": False})
+    within._refine_mode = True
+    within._on_editions_unavailable(True)
+    within.on_search_finished([])
+    assert within.status_label.text == (f"{tr('0 results within current scope')} ({tr('Partial results')})"
+                                        f" · {tr(EDITIONS_NOTE)}")
+    plain = _Host({"capped": False, "interrupted": False})
+    plain._on_editions_unavailable(False)
+    plain.on_search_finished([])
+    assert plain.status_label.text == tr("No results found.")
+
+
+def test_the_editions_note_is_translated():
+    from shared.genizah_translations import TRANSLATIONS
+    assert TRANSLATIONS.get(EDITIONS_NOTE)
+
+
+class _Table:
+    def rowCount(self):
+        return 2
+
+    def isRowHidden(self, row):
+        return False
+
+
+class _SummaryHost:
+    """The results line's one composer, over two shown rows."""
+    _search_status_summary = APP._search_status_summary
+    _count_text = APP._count_text
+    _shown_results_capped = APP._shown_results_capped
+    _search_excluded_note = APP._search_excluded_note
+    _forget_responsa_notes = APP._forget_responsa_notes
+
+    def __init__(self, skipped):
+        self.results_table = _Table()
+        self.last_results = [{}, {}]
+        self._results_editions_unavailable = skipped
+
+
+def test_the_results_line_says_once_that_the_editions_were_not_read(lang):
+    tr = genizah_app.tr
+    host = _SummaryHost(True)
+    shown = tr("Showing {} of {} results").format(2, "2")
+    assert host._search_status_summary() == f"{shown} · {tr(EDITIONS_NOTE)}"
+    host._forget_responsa_notes()                # the results replaced or cleared
+    assert host._search_status_summary() == shown
+    assert _SummaryHost(False)._search_status_summary() == shown
+

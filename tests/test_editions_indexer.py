@@ -216,6 +216,29 @@ def test_build_refuses_to_overwrite(inputs, generation):
                          browse_map_path=inputs["browse_map"], folio_images_for=lambda s: [])
 
 
+def test_the_meta_records_the_inputs_as_they_were_before_the_build_read_them(tmp_path):
+    """A sidecar replaced while the build reads (the desktop's sidecar update) must leave the
+    generation stale against the new file, never stamped with it (Codex review of PR #25)."""
+    from shared.editions_indexer import file_fingerprint
+    fgp, pgp, bm = str(tmp_path / "fgp.db"), str(tmp_path / "pgp.db"), str(tmp_path / "bm.pkl")
+    make_fgp(fgp)
+    make_pgp(pgp)
+    with open(bm, "wb") as f:
+        pickle.dump({}, f)
+    before = file_fingerprint(fgp)
+
+    def progress(msg):
+        if msg == "reading PGP editions":      # the FGP editions are read: the file changes
+            con = sqlite3.connect(fgp)
+            con.execute("UPDATE fgp_transcriptions SET content = content || ' עוד' WHERE id = 1")
+            con.commit()
+            con.close()
+    meta = build_generation(str(tmp_path / "Editions.new"), fgp_db=fgp, pgp_db=pgp, browse_map_path=bm,
+                            folio_images_for=lambda s: [dict(i) for i in IMAGES.get(s, [])], progress=progress)
+    assert file_fingerprint(fgp) != before
+    assert meta["inputs"]["fgp"]["file"] == before
+
+
 def test_build_script_requires_the_nli_crossref(inputs, tmp_path):
     import build_editions_index
     code = build_editions_index.main([

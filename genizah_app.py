@@ -66,6 +66,7 @@ from desktop.single_instance import (
     acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
 )
 from desktop.qthread_exit import settle_running_threads
+from desktop.editions_index import EditionsIndex
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
@@ -1589,6 +1590,14 @@ def _telemetry_result_bucket(count: int) -> str:
     return '100+'
 
 
+def _editions_not_searched_note(skipped):
+    """' · The scholarly transcriptions could not be searched this time' when a search was
+    asked to read them and their index was not open yet (it is built in the background:
+    desktop/editions_index.py), or ''. A function, not a method: the results line's
+    composers are borrowed by stand-ins in the tests."""
+    return f" · {tr('The scholarly transcriptions could not be searched this time')}" if skipped else ''
+
+
 def _snapshot_has_compound_rows(*lists):
     """True when any saved row, or any page of a saved manuscript row, was
     judged by Composition Search conditions (or is a condition's evidence)."""
@@ -2021,6 +2030,12 @@ class GenizahGUI(QMainWindow):
             self.var_mgr = var_mgr
             self.searcher = searcher
             self.indexer = indexer
+            # The scholarly transcriptions' index (editions plan §3.7, D3; desktop/editions_index.py).
+            # Made here, before the "Index Missing" offer below can start a main-index build,
+            # so that build suspends it and its end checks it (Codex review of PR #25). Nothing
+            # runs at construction: the first check is timed at the end of this method.
+            self._editions_index = EditionsIndex(lambda: self.searcher, readers_busy=self._index_readers_busy,
+                                                 parent=self)
 
             # Phase 97 R-01: wire is_searchable gate from SearchEngine -> MyLibraryTab.
             # attach_my_library_tab stores a weakref so _query_local_index can check
@@ -2166,6 +2181,11 @@ class GenizahGUI(QMainWindow):
             # An index of an earlier format: offer a rebuild once (Responsa plan §6.1),
             # after the startup prompts above; the rebuild itself is the user's click.
             QTimer.singleShot(1500, self._offer_index_rebuild)
+
+            # The scholarly transcriptions' index: checked against the installed sidecars, and
+            # built when it is missing or stale, in a background thread once the startup work
+            # above has settled (a main-index build started above makes this wait for its end).
+            QTimer.singleShot(self._EDITIONS_CHECK_DELAY_MS, self._editions_index.check)
 
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
@@ -23539,7 +23559,7 @@ class GenizahGUI(QMainWindow):
             _corpus_scope = "genizah"
             if hasattr(self, 'corpus_scope_combo'):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=self._search_sources())
             # What this run searched, for the refinement step built from it: a replay
             # (session restore, a removed step, scope change) re-runs exactly this --
             # the widgets may have changed since, and the query lost its mode prefix.
@@ -23551,6 +23571,7 @@ class GenizahGUI(QMainWindow):
                 variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)))
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
         self._run_responsa_downgrade = None    # and so does its downgrade (downgrade_signal)
+        self._run_editions_unavailable = False    # and whether it read the editions (editions_signal)
         # The previous run's enrichment (domains, measurements) arrives again only after
         # this run ends (_launch_enrichment_workers). Until then a preview row must not be
         # judged by it: a manuscript absent from the old domain map was hidden as
@@ -23571,6 +23592,8 @@ class GenizahGUI(QMainWindow):
             self.search_thread.cutoff_signal.connect(_live(self._on_search_cutoff))
         if hasattr(self.search_thread, 'downgrade_signal'):
             self.search_thread.downgrade_signal.connect(_live(self._on_responsa_downgrade))
+        if hasattr(self.search_thread, 'editions_signal'):
+            self.search_thread.editions_signal.connect(_live(self._on_editions_unavailable))
         self.search_thread.results_signal.connect(_live(self.on_search_finished))
         if hasattr(self.search_thread, 'preview_signal'):
             self.search_thread.preview_signal.connect(
@@ -24532,9 +24555,11 @@ class GenizahGUI(QMainWindow):
             # (plan §5.3; Codex review of PR #433).
             if was_cancelled or self._run_left_matches_out():
                 self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})"
-                                          + self._downgrade_note())
+                                          + self._downgrade_note()
+                                          + _editions_not_searched_note(getattr(self, '_run_editions_unavailable', False)))
             else:
-                self.status_label.setText(tr("No results found.") + self._downgrade_note())
+                self.status_label.setText(tr("No results found.") + self._downgrade_note()
+                                          + _editions_not_searched_note(getattr(self, '_run_editions_unavailable', False)))
             self.last_results = []
             self._forget_responsa_notes()
             for b in self.export_buttons: b.setEnabled(False)
@@ -24565,7 +24590,8 @@ class GenizahGUI(QMainWindow):
                 if was_cancelled or self._run_left_matches_out():
                     # Cut off or stopped: nothing found among the pages it read.
                     zero_in_scope = f"{zero_in_scope} ({tr('Partial results')})"
-                self.status_label.setText(zero_in_scope + self._downgrade_note())
+                self.status_label.setText(zero_in_scope + self._downgrade_note()
+                                          + _editions_not_searched_note(getattr(self, '_run_editions_unavailable', False)))
                 if hasattr(self, '_update_refinement_strip'):
                     self._update_refinement_strip()
                 if hasattr(self, '_zero_result_back_btn'):
@@ -24649,6 +24675,9 @@ class GenizahGUI(QMainWindow):
         # line for as long as these results show (plan §5.3; it was a 5-second flash).
         self._responsa_warning = ((results[0].get('responsa_warning') if results else None)
                                   or getattr(self, '_run_responsa_downgrade', None))
+        # And the scholarly transcriptions not searched (their index not open yet), in the
+        # same line for as long as these results show (_search_status_summary).
+        self._results_editions_unavailable = bool(getattr(self, '_run_editions_unavailable', False))
 
         for b in self.export_buttons: b.setEnabled(True)
 
@@ -25719,6 +25748,16 @@ class GenizahGUI(QMainWindow):
         note = getattr(self, '_run_responsa_downgrade', None)
         return f" · {note}" if note else ''
 
+    def _search_sources(self):
+        """The source choice a search runs with (editions plan D1: 'all' / 'editions' /
+        'automatic'). None -- today's search, the automatic transcriptions -- until the
+        choice is offered in the window; the index it reads is kept by
+        desktop/editions_index.py meanwhile."""
+        return None
+
+    def _on_editions_unavailable(self, unavailable):
+        self._run_editions_unavailable = bool(unavailable)
+
     def _shown_results_capped(self):
         """Whether the shown results leave matches out because the search reached its
         50,000-candidate limit (D8; Stop has its own "Partial results" note)."""
@@ -25757,6 +25796,7 @@ class GenizahGUI(QMainWindow):
         self._responsa_warning = None
         self._responsa_expanded_count = 0
         self._responsa_pattern_count = 0
+        self._results_editions_unavailable = False
 
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
@@ -25788,7 +25828,8 @@ class GenizahGUI(QMainWindow):
             text += f" ({tr('Partial results')})"
         if getattr(self, '_responsa_warning', None):
             text += f" · {self._responsa_warning}"
-        return text
+        # The scholarly transcriptions not searched for these results (their index not open).
+        return text + _editions_not_searched_note(getattr(self, '_results_editions_unavailable', False))
 
     def _with_search_summary(self, message):
         """`message`, followed by the results summary when any row is hidden,
@@ -34407,6 +34448,24 @@ class GenizahGUI(QMainWindow):
         self._sidecar_data_dir = data_dir
         # Close DB connections BEFORE downloading so shutil.move can replace files
         self._reset_sidecar_connections()
+        # A build of the scholarly transcriptions' index holds the FGP sidecar and the NLI
+        # crossref open while it reads them (connections of its own): it is stopped, and the
+        # downloads start once its pass has ended; it is checked again when they have ended
+        # (desktop/editions_index.py; Codex review of PR #25).
+        editions = getattr(self, '_editions_index', None)
+        if editions is not None:
+            editions.suspend('sidecars')
+        self._download_sidecars_when_editions_idle()
+
+    _SIDECAR_WAIT_MS = 500
+
+    def _download_sidecars_when_editions_idle(self):
+        """Start the sidecar downloads once no pass of the scholarly transcriptions' index
+        runs (one stopped by _start_sidecar_download ends at its next document)."""
+        editions = getattr(self, '_editions_index', None)
+        if editions is not None and editions.busy():
+            QTimer.singleShot(self._SIDECAR_WAIT_MS, self._download_sidecars_when_editions_idle)
+            return
         self._download_next_sidecar()
 
     def _reset_sidecar_connections(self):
@@ -34427,6 +34486,12 @@ class GenizahGUI(QMainWindow):
         if not self._sidecar_download_queue:
             # All downloads complete -- reset again to pick up new files
             self._reset_sidecar_connections()
+            # The scholarly transcriptions' index is built from the FGP and PGP sidecars and
+            # the NLI crossref: checked against the new files, and rebuilt when they changed
+            # (desktop/editions_index.py; Codex review of PR #25).
+            editions = getattr(self, '_editions_index', None)
+            if editions is not None:
+                editions.resume('sidecars')
             QMessageBox.information(
                 self, tr("Update Complete"),
                 tr("Research data has been updated. New data will be used immediately.")
@@ -34572,6 +34637,11 @@ class GenizahGUI(QMainWindow):
         the build runs from the close path, with the exit window for its progress
         instead of the bar."""
         beside = mode == 'beside'
+        # The new browse map makes any editions build stale: stopped now, checked again when
+        # this build has ended (_end_index_build).
+        editions = getattr(self, '_editions_index', None)
+        if editions is not None:
+            editions.suspend('main index')
         if not beside and self.searcher:
             # Release existing index to unlock files on Windows (memory-mapped .fast files)
             self.searcher.close_index()
@@ -34654,6 +34724,9 @@ class GenizahGUI(QMainWindow):
         QMessageBox.information(self, tr("Done"), tr("Indexing complete. Documents indexed: {}").format(total_docs))
 
     _INSTALL_RETRY_MS = 1000
+    # The first check of the scholarly transcriptions' index, after the startup prompts and
+    # the background loads that on_startup_finished starts.
+    _EDITIONS_CHECK_DELAY_MS = 5000
 
     def _index_readers_busy(self):
         """The workers reading the open index right now, by name: the install waits for
@@ -34662,8 +34735,14 @@ class GenizahGUI(QMainWindow):
         search-within completion (search_thread), Composition, grouping, the saved
         refinement chain's restore replay (_replay_restore_thread), and the Join
         Workbench's candidate and cross-side searches, which share self.searcher
-        (desktop/join_workbench.py; Codex rounds 3-4 on PR #446)."""
+        (desktop/join_workbench.py; Codex rounds 3-4 on PR #446). And a pass of the
+        scholarly transcriptions' index (desktop/editions_index.py): a stopped build still
+        ending, or a promotion renaming and reopening, which the main index's reopen
+        (reload_index reattaches the editions) must not run beside."""
         busy = []
+        editions = getattr(self, '_editions_index', None)    # made once startup has finished
+        if editions is not None and editions.busy():
+            busy.append('scholarly transcriptions')
         if getattr(self, 'is_searching', False):
             busy.append('search')
         for name, attr in (('search', 'search_thread'), ('composition', 'comp_thread'),
@@ -34743,11 +34822,17 @@ class GenizahGUI(QMainWindow):
         QMessageBox.information(self, tr("Done"), tr("Indexing complete. Documents indexed: {}").format(total_docs))
 
     def _end_index_build(self):
-        """After a build ended, however it ended: the bar goes, the Search buttons return."""
+        """After a build ended, however it ended: the bar goes, the Search buttons return,
+        and the scholarly transcriptions' index is checked against the browse map the build
+        left (rebuilt when it changed) -- unless the program is closing."""
+        at_exit = (getattr(self, '_index_build', None) or {}).get('at_exit')
         self._index_build = None
         if hasattr(self, 'index_rebuild_bar'):
             self.index_rebuild_bar.finish()
         self._set_search_available(True)
+        editions = getattr(self, '_editions_index', None)
+        if editions is not None and not at_exit:
+            editions.resume('main index')
 
     def on_index_cancelled(self):
         state = getattr(self, '_index_build', None) or {}
@@ -36897,6 +36982,14 @@ class GenizahGUI(QMainWindow):
                 _keep_until_finished(t)
             except Exception:
                 logger.exception("closeEvent: silencing %s failed", name)
+        # A build of the scholarly transcriptions' index stops at its next document (its
+        # thread is kept until it ends: desktop/editions_index.py); nothing more is opened.
+        try:
+            editions = getattr(self, '_editions_index', None)
+            if editions is not None:
+                editions.close()
+        except Exception:
+            logger.exception("closeEvent: stopping the scholarly transcriptions' index failed")
         # Save session state before closing
         logger.debug(
             "closeEvent: saving session after opt-out flush (scope=%s optouts=%d)",

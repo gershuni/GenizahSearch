@@ -99,6 +99,8 @@ DESKTOP_MODULES = [
     "desktop/qt_translations.py",
     # 2026-10-17: export saves that ask when the file is open in Word or Excel.
     "desktop/export_save.py",
+    # 2026-11-16: the scholarly transcriptions' index, built and promoted in the background.
+    "desktop/editions_index.py",
 ]
 
 # Compound statement types whose bodies run at import time

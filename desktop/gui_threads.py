@@ -289,6 +289,17 @@ def _last_responsa_downgrade():
     return _consume_last_responsa_downgrade()
 
 
+def _last_editions_unavailable():
+    """Whether the search just run on this thread was asked to read the scholarly
+    transcriptions and had no index of them open (``consume_editions_unavailable``: it
+    searched the automatic transcriptions alone, or with "editions only" nothing)."""
+    try:
+        from shared.search_engine import consume_editions_unavailable
+    except ImportError:
+        return False
+    return consume_editions_unavailable()
+
+
 class SearchThread(PausableSearchMixin, QThread):
     """Execute a search query asynchronously."""
 
@@ -314,7 +325,11 @@ class SearchThread(PausableSearchMixin, QThread):
     # The Responsa guard's downgrade of this run (a message, or None), emitted just
     # before results_signal: with no rows there is no first row to carry it.
     downgrade_signal = pyqtSignal(object)
-    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0):
+    # True when this run was asked to read the scholarly transcriptions and their index
+    # was not open yet (desktop/editions_index.py builds it in the background): the
+    # results are the automatic transcriptions' alone. Emitted just before results_signal.
+    editions_signal = pyqtSignal(bool)
+    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0, sources=None):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
         self.exclude_words = exclude_words
@@ -322,6 +337,9 @@ class SearchThread(PausableSearchMixin, QThread):
         self.restrict_sys_ids = restrict_sys_ids
         self.text_position = text_position
         self.corpus_scope = corpus_scope  # Phase 95 smoke-fix: 'all'|'genizah'|'local'
+        # Editions plan D1: 'all' / 'editions' / 'automatic'; None is today's search and
+        # is not passed on (a searcher that is not the real engine takes no `sources`).
+        self.sources = sources
         self._init_pause_support(run_id)
 
     def run(self):
@@ -336,6 +354,7 @@ class SearchThread(PausableSearchMixin, QThread):
 
             def phase_cb(phase):
                 self.phase_signal.emit(str(phase))
+            extra = {} if self.sources is None else {'sources': self.sources}
             # Stop is also honoured between native match calls of engine-generated
             # patterns (stdlib re cannot be interrupted mid-call); their
             # InterruptedError takes the same paths as a progress checkpoint's.
@@ -352,10 +371,12 @@ class SearchThread(PausableSearchMixin, QThread):
                     corpus_scope=self.corpus_scope,
                     phase_callback=phase_cb,
                     preview_callback=self.preview_signal.emit,
+                    **extra,
                 )
 
             self.cutoff_signal.emit(_last_search_cutoff())
             self.downgrade_signal.emit(_last_responsa_downgrade())
+            self.editions_signal.emit(_last_editions_unavailable())
             self.results_signal.emit(results)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
             # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
