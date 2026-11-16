@@ -114,6 +114,29 @@ def test_a_cycle_does_not_hang_or_drop_the_event():
     assert ACCESS not in out.stdout and '[redacted]' in out.stdout
 
 
+@pytest.mark.parametrize('name', ['hebrew_keyboard_opened', 'hebrew_keyboard_used'])
+def test_keyboard_events_carry_no_query_in_any_address(name):
+    search = 'https://genizahsearch.com/search?q=%D7%A9%D7%9C%D7%95%D7%9D&mode=exact#x'
+    event = {
+        'event': name,
+        'properties': {
+            '$current_url': search,
+            '$referrer': search,
+            '$session_entry_url': search,
+            '$pathname': '/search',
+            'field': 'main_search',
+        },
+        '$set_once': {'$initial_current_url': search},
+    }
+    out = _run(event)
+    assert '%D7' not in json.dumps(out)
+    assert out['properties']['$current_url'] == 'https://genizahsearch.com/search'
+    assert out['properties']['$referrer'] == 'https://genizahsearch.com/search'
+    assert out['properties']['$pathname'] == '/search'
+    assert out['properties']['field'] == 'main_search'
+    assert out['$set_once']['$initial_current_url'] == 'https://genizahsearch.com/search'
+
+
 def test_ordinary_events_are_unchanged():
     event = {
         'event': '$pageview',

@@ -16,6 +16,7 @@ from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, tr_engine_message, is_rtl, get_language, using_language
 from web.ux_timing import ux_done, ux_ignored
+from web import hebrew_keyboard
 from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
@@ -167,6 +168,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
     # Capture NiceGUI client for deferred async tasks (slot context)
     _page_client = ui.context.client
+    # The on-screen Hebrew keyboard: open, and used since the last search began.
+    hk_state = {'open': False, 'used': False}
     # ux_timing: the next search was started by this page's URL, not a click.
     _ux_url_start = {'nav': False}
     _page_run = {'run': None}  # the run this page's search is (web/search_runs.py)
@@ -474,6 +477,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Add Advanced View image handler JavaScript at page level (must be outside dialog)
     # Versioned as on /browse (_viewer_js_version): an unversioned copy was kept 4 hours.
     from web.pages.browse import _viewer_js_version
+    ui.add_head_html(hebrew_keyboard.head_html())
     ui.add_head_html(ADVANCED_VIEWER_STYLES.replace(
         '/static/manuscript_viewer.js"', f'/static/manuscript_viewer.js?v={_viewer_js_version()}"', 1))
 
@@ -668,8 +672,54 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # progress bar; the site's top bar would run on 15 s (web/main.py).
                             'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
                             ' data-gs-primary-search'  # "/" jumps here (web/keyboard_shortcuts.py)
+                            f' {hebrew_keyboard.TARGET_ATTR}'  # the on-screen keys type here
                         ).style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
+
+                        # The on-screen Hebrew keyboard (pilot, web/hebrew_keyboard.py): a
+                        # button in the box opens the keys under it. The keys type in the
+                        # browser; the page only opens the panel and notes, for PostHog,
+                        # whether a search's query was typed with them.
+                        with query_input.add_slot('append'):
+                            hk_toggle = ui.button(
+                                icon='keyboard', on_click=lambda: _toggle_hebrew_keyboard()
+                            ).classes(hebrew_keyboard.NO_CAPTURE_CLASS).props(
+                                f'flat round dense size=sm aria-expanded="false"'
+                                f' aria-label="{tr("Hebrew keyboard")}"'
+                            ).tooltip(tr('Hebrew keyboard'))
+                        hk_panel = ui.element('div').classes(
+                            f'w-full {hebrew_keyboard.NO_CAPTURE_CLASS}').props(
+                            f'{hebrew_keyboard.PANEL_ATTR} data-hk-field="{hebrew_keyboard.FIELD}"'
+                            f' data-hk-layout="{hebrew_keyboard.LAYOUT}"')
+                        with hk_panel:
+                            ui.html(hebrew_keyboard.panel_html(tr), sanitize=False)
+                        hk_panel.set_visibility(False)
+
+                        def _toggle_hebrew_keyboard():
+                            hk_state['open'] = not hk_state['open']
+                            hk_panel.set_visibility(hk_state['open'])
+                            hk_toggle.props(f'aria-expanded="{"true" if hk_state["open"] else "false"}"')
+                            if hk_state['open']:
+                                from web.analytics import posthog_capture
+                                posthog_capture(hebrew_keyboard.POSTHOG_OPENED, {
+                                    'field': hebrew_keyboard.FIELD, 'layout': hebrew_keyboard.LAYOUT,
+                                }, client=_page_client)
+
+                        def _note_hebrew_keyboard_used(e):
+                            if hebrew_keyboard.used_payload(getattr(e, 'args', None)).get('used'):
+                                hk_state['used'] = True
+                        hk_panel.on(hebrew_keyboard.USED_EVENT, _note_hebrew_keyboard_used, ['detail'])
+
+                        # A tapped key takes the focus from the box, so the box's blur
+                        # (save_query below) saved the query BEFORE the key, and nothing
+                        # blurs it again. While the keys are open, every change of the
+                        # box's value is saved: on_value_change runs after the value is set
+                        # (a raw 'update:model-value' listener and the panel's event both
+                        # still see the value before the key; Codex, PR #23).
+                        def _save_query_while_keys_open(_e=None):
+                            if hk_state['open']:
+                                _safe_set('search_query', query_input.value or '')
+                        query_input.on_value_change(_save_query_while_keys_open)
 
                         # --- Live shortcut detection: switch mode when user types prefix + space ---
                         _shortcut_prefixes = [
@@ -5351,6 +5401,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             variant_settings = variant_preferences.for_search(mode)
         search_state.last_variant_settings = dict(variant_settings)
+
+        # A search starts the next attempt: the script's next on-screen key sends
+        # hebrew_keyboard_used again. No flag on search_executed, which carries the
+        # query: the keyboard's measurement never sits beside query text (Codex, PR #23).
+        _hebrew_keyboard_used = hk_state['used']
+        hk_state['used'] = False
+        if _hebrew_keyboard_used:
+            try:
+                _page_client.run_javascript(hebrew_keyboard.reset_script())
+            except Exception:
+                pass  # page gone: nothing to reset
 
         # Reset UI
         search_state.is_running = True

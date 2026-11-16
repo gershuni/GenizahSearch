@@ -53,6 +53,29 @@
         return value;
     }
 
+    // Events that promise to carry no query text (the on-screen Hebrew keyboard's,
+    // web/hebrew_keyboard.py). PostHog adds the page address to every event -- `$current_url`,
+    // `$referrer`, the session's entry address -- and on /search that address holds `?q=`, so
+    // for these events every address loses its query and fragment.
+    var QUERY_FREE_EVENTS = { hebrew_keyboard_opened: true, hebrew_keyboard_used: true };
+    var URL_TAIL = /^(https?:\/\/[^?#\s]*)[?#].*$/i;
+
+    function stripAddresses(value, seen) {
+        if (typeof value === 'string') {
+            return value.replace(URL_TAIL, '$1');
+        }
+        if (value === null || typeof value !== 'object' || seen.has(value)) {
+            return value;
+        }
+        seen.add(value);
+        for (var key in value) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+                value[key] = stripAddresses(value[key], seen);
+            }
+        }
+        return value;
+    }
+
     window.__ghScrubEvent = function (event) {
         if (!event) {
             return event;
@@ -62,6 +85,12 @@
             if (event.properties) { scrub(event.properties, seen, true); }
             if (event.$set) { scrub(event.$set, seen, false); }
             if (event.$set_once) { scrub(event.$set_once, seen, false); }
+            if (Object.prototype.hasOwnProperty.call(QUERY_FREE_EVENTS, event.event)) {
+                var seenUrl = new WeakSet();
+                if (event.properties) { stripAddresses(event.properties, seenUrl); }
+                if (event.$set) { stripAddresses(event.$set, seenUrl); }
+                if (event.$set_once) { stripAddresses(event.$set_once, seenUrl); }
+            }
         } catch (e) {
             // A scrub that fails must not send the raw event: drop it.
             return null;

@@ -1380,6 +1380,13 @@ A website restart must not reload every open tab at once (2026-10-21). Browser s
 - **Function** `enabled` / `config` — the switch (independent of `POSTHOG_API_KEY`) and the three numbers the browser reads
 - **Script** `reconnect_backoff.js` — an accessor on `window.io` wraps socket.io's `io(url, opts)`: merges `reconnectionDelay`/`reconnectionDelayMax`/`randomizationFactor` (caller keys win) and delays NiceGUI's `connect_error` handler for "Implicit handshake failed" and "timeout" by `base * 2^n`, jittered x0.5-1.5 (n: consecutive reloads in `sessionStorage['gs_reload_n']`, reset after 60 s connected); a hidden tab waits for `visibilitychange`; other errors pass through; `posthog.capture('reload_scheduled', ...)` before the deferred handler
 
+## web/hebrew_keyboard.py
+
+The on-screen Hebrew keyboard on the /search box (pilot, 2026-11-15): a ⌨ button in the box (`query_input`'s append slot) opens keys in alphabet order, each final form beside its letter, plus space, `*`, `'`, `"` and backspace; no `?` (it switches the mode at the start of the box) and no typing with the physical keys. Browser side: `web/static/js/hebrew_keyboard.js`, which types at the cursor through the box's own `input` event, so the model and the mode-prefix detection see a key as a typed one.
+- **Function** `panel_html(tr)` — the keys as `<button>`s (no script); **Function** `head_html` — the styles and the versioned `<script ... defer>` line
+- **Constant** `TARGET_ATTR` / `PANEL_ATTR` / `USED_EVENT` — the box, the panel, and the event the page counts a search's keyboard use by
+- PostHog, no characters: `hebrew_keyboard_opened` (page), `hebrew_keyboard_used` (script, once per search attempt; `reset_script` starts the next); no flag on `search_executed` (it carries the query), and `posthog_scrub.js` strips the query from these events' page addresses
+
 ## web/keyboard_shortcuts.py
 
 The website's keyboard shortcuts and the card that lists them (owner, 2026-11-05). Browser side: `web/static/js/shortcuts.js` (`?` opens the card, `/` jumps to the page's `data-gs-primary-search` box or the header's go-to box), loaded by `create_layout` in web/main.py together with the trigger (not shared: the layout-less routes have no card); the card opens on the page's hidden `.gs-shortcuts-trigger` (`gs-shortcuts`) and from the sidebar's "Keyboard shortcuts".
