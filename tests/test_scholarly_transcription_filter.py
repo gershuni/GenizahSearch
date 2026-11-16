@@ -281,13 +281,27 @@ def _answer_with_rows(srv, monkeypatch, scholarly_uids, rows=None, check=None):
 def _filter_button(user):
     from nicegui import ui
     return _element(user, ui.button, lambda e: str(e.text) in (
-        'Filter scholarly transcriptions', 'Has scholarly transcription',
+        'Scholarly transcriptions', 'Has scholarly transcription',
         'No scholarly transcription'))
 
 
 def _shown(button):
     """The page hides a filter button with the `tb-hidden` class (and visibility: hidden)."""
     return 'tb-hidden' not in button.classes
+
+
+_MODE_LABELS = {'only': 'Has scholarly transcription', 'hide': 'No scholarly transcription',
+                'all': 'All'}
+
+
+def _choose(user, mode):
+    """Pick *mode* from the scholarly transcription chip's menu, as a reader does."""
+    from nicegui import ui
+    btn = _filter_button(user)
+    with user._client:
+        item = next(e for e in btn.descendants() if isinstance(e, ui.menu_item) and any(
+            getattr(c, 'text', None) == _MODE_LABELS[mode] for c in e.descendants()))
+    _fire(user, item, 'click')
 
 
 async def _until_button_shows(user):
@@ -319,7 +333,7 @@ def test_the_button_filters_the_results_by_their_pages(server, monkeypatch):  # 
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
         for name in ('only', 'hide', 'all'):
-            _fire(a, _filter_button(a), 'click')
+            _choose(a, name)
             await asyncio.sleep(0.2)
             seen[name] = (_count_line(a), _filter_button(a).text, stored(a, 'search_scholarly_filter'))
 
@@ -329,7 +343,7 @@ def test_the_button_filters_the_results_by_their_pages(server, monkeypatch):  # 
                             'Has scholarly transcription', 'only_scholarly'), seen
     assert seen['hide'] == ('2 of 3 Results (No scholarly transcription)',
                             'No scholarly transcription', 'hide_scholarly'), seen
-    assert seen['all'][1:] == ('Filter scholarly transcriptions', 'all'), seen
+    assert seen['all'][1:] == ('Scholarly transcriptions', 'all'), seen
     assert seen['all'][0].startswith('3 Results'), seen
 
 
@@ -349,15 +363,15 @@ def test_a_kept_mode_applies_when_no_page_has_one_and_can_be_turned_off(server, 
         await _until_button_shows(a)
         await asyncio.sleep(0.2)
         seen['kept'] = (_count_line(a), _filter_button(a).text)
-        for _ in range(2):        # only -> hide -> all
-            _fire(a, _filter_button(a), 'click')
+        for name in ('hide', 'all'):
+            _choose(a, name)
             await asyncio.sleep(0.2)
         seen['off'] = (_count_line(a), _filter_button(a).text, stored(a, 'search_scholarly_filter'))
 
     run(driver, count=1)
     assert seen['kept'] == ('0 of 3 Results (Has scholarly transcription)',
                             'Has scholarly transcription'), seen
-    assert seen['off'][1:] == ('Filter scholarly transcriptions', 'all'), seen
+    assert seen['off'][1:] == ('Scholarly transcriptions', 'all'), seen
     assert seen['off'][0].startswith('3 Results'), seen
 
 
@@ -444,7 +458,7 @@ def test_the_filters_panel_keeps_the_scholarly_filter(server, monkeypatch):  # n
         submit(a, WORD)
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
-        _fire(a, _filter_button(a), 'click')                # only those with one
+        _choose(a, 'only')                # only those with one
         await asyncio.sleep(0.2)
         for name in ('Apply Filters', 'Clear Filters'):
             _fire(a, _element(a, ui.button, lambda e, n=name: str(e.text) == n), 'click')
@@ -472,7 +486,7 @@ def test_the_button_keeps_the_rows_excluded_from_the_word_search_out(server, mon
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
         for name in ('only', 'hide'):
-            _fire(a, _filter_button(a), 'click')
+            _choose(a, name)
             await asyncio.sleep(0.2)
             seen[name] = _count_line(a)
 
@@ -499,7 +513,7 @@ def test_a_restored_history_entry_is_checked_before_the_filter_applies(server, m
         submit(a, WORD)
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
-        _fire(a, _filter_button(a), 'click')                # only those with one
+        _choose(a, 'only')                # only those with one
         await asyncio.sleep(0.2)
         seen['shown'] = _count_line(a)
         store(a, search_history=[entry])
@@ -552,7 +566,7 @@ def test_a_session_restore_that_ends_after_a_new_search_changes_nothing(server, 
         release.set()
         await asyncio.sleep(1.0)
         seen['after'] = _count_line(a)
-        _fire(a, _filter_button(a), 'click')       # the next mode reads the stored answers
+        _choose(a, 'hide')       # the next mode reads the stored answers
         await asyncio.sleep(0.3)
         seen['hide'] = _count_line(a)
 
@@ -611,7 +625,7 @@ def test_changing_the_mode_keeps_the_filters_panel_fields(server, monkeypatch): 
         await asyncio.sleep(0.3)
         seen['panel'] = _count_line(a)
         for name in ('only', 'hide'):
-            _fire(a, _filter_button(a), 'click')
+            _choose(a, name)
             await asyncio.sleep(0.3)
             seen[name] = _count_line(a)
 
@@ -650,4 +664,95 @@ def test_reset_filters_shows_while_a_filter_is_on_and_clears_them(server, monkey
     run(driver, count=1)
     assert seen['before'] == ('1 of 3 Results (Hiding PGP, Has scholarly transcription)', True), seen
     assert seen['after'][0].startswith('3 Results'), seen
-    assert seen['after'][1:] == (False, 'Filter scholarly transcriptions', 'all', 'all'), seen
+    assert seen['after'][1:] == (False, 'Scholarly transcriptions', 'all', 'all'), seen
+
+
+def test_the_pgp_chip_menu_filters_and_the_chip_fills(server, monkeypatch):  # noqa: F811
+    """The PGP filter is a chip with a menu, not a cycle: choosing "No PGP" hides the rows with
+    PGP, names itself on the chip and fills it; "All" empties it again (owner's chip design,
+    2026-11-16)."""
+    from nicegui import ui
+
+    import web.pages.search as search_page
+    _answer_with_rows(server, monkeypatch, {'r1'})
+    monkeypatch.setattr(search_page, 'get_sys_ids_with_transcriptions',
+                        lambda ids: {i for i in ids if i == ED})
+    seen = {}
+
+    def chip():
+        return _element(a_user['a'], ui.button, lambda e: str(e.text) in ('PGP', 'Has PGP', 'No PGP'))
+
+    def pick(label):
+        with a_user['a']._client:
+            item = next(e for e in chip().descendants() if isinstance(e, ui.menu_item) and any(
+                getattr(c, 'text', None) == label for c in e.descendants()))
+        _fire(a_user['a'], item, 'click')
+
+    a_user = {}
+
+    async def driver(a):
+        a_user['a'] = a
+        await a.open('/search')
+        await asyncio.sleep(0.5)
+        submit(a, WORD)
+        await wait_for_payloads(server.queue, 1)
+        await _until_button_shows(a)
+        seen['off'] = (chip().text, 'unelevated' in chip().props)
+        pick('No PGP')
+        await asyncio.sleep(0.3)
+        seen['on'] = (_count_line(a), chip().text, 'unelevated' in chip().props,
+                      stored(a, 'search_pgp_filter'))
+        pick('All')
+        await asyncio.sleep(0.3)
+        seen['all'] = (_count_line(a), chip().text, 'unelevated' in chip().props)
+
+    run(driver, count=1)
+    assert seen['off'] == ('PGP', False), seen
+    assert seen['on'] == ('2 of 3 Results (Hiding PGP)', 'No PGP', True, 'hide_pgp'), seen
+    assert seen['all'][0].startswith('3 Results') and seen['all'][1:] == ('PGP', False), seen
+
+
+def test_a_chip_choice_applies_under_the_filters_panel_fields(server, monkeypatch):  # noqa: F811
+    """With the Toggle Filters panel's text field applied, a chip's choice re-renders through
+    the panel's Apply, which must stack the chip's filter on the panel's fields: "No PGP" takes
+    the PGP row out, "All" brings it back, the panel's field stays (Codex review of PR #26)."""
+    from nicegui import ui
+
+    import web.pages.search as search_page
+    rows = [_row('r1', ED, 1, snippet='aaa'), _row('r2', NONE, 1, snippet='aaa'),
+            _row('r3', TRANS, 1, snippet='bbb')]
+    _answer_with_rows(server, monkeypatch, {'r1'}, rows=rows)
+    monkeypatch.setattr(search_page, 'get_sys_ids_with_transcriptions',
+                        lambda ids: {i for i in ids if i == ED})
+    seen = {}
+    a_user = {}
+
+    def pick(label):
+        a = a_user['a']
+        chip = _element(a, ui.button, lambda e: str(e.text) in ('PGP', 'Has PGP', 'No PGP'))
+        with a._client:
+            item = next(e for e in chip.descendants() if isinstance(e, ui.menu_item) and any(
+                getattr(c, 'text', None) == label for c in e.descendants()))
+        _fire(a, item, 'click')
+
+    async def driver(a):
+        a_user['a'] = a
+        await a.open('/search')
+        await asyncio.sleep(0.5)
+        submit(a, WORD)
+        await wait_for_payloads(server.queue, 1)
+        await _until_button_shows(a)
+        text = _element(a, ui.input, lambda e: e.props.get('placeholder') == 'Filter by text')
+        with a._client:
+            text.value = 'aaa'
+        _fire(a, _element(a, ui.button, lambda e: str(e.text) == 'Apply Filters'), 'click')
+        await asyncio.sleep(0.3)
+        seen['panel'] = _count_line(a)
+        for label in ('No PGP', 'All'):
+            pick(label)
+            await asyncio.sleep(0.3)
+            seen[label] = _count_line(a)
+
+    run(driver, count=1)
+    assert seen == {'panel': '2 / 3 Results', 'No PGP': '1 / 3 Results',
+                    'All': '2 / 3 Results'}, seen

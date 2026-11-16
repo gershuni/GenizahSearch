@@ -2,13 +2,14 @@
 Where: `web/pages/search.py::apply_filters`, `clear_filters`
 
 The panel's **Apply Filters** and **Clear Filters** start from every result row
-(`search_state.results`) and apply only their own shelfmark/title/text fields and the measurement
-filters, so the rows hidden by **Filter Printed**, **Filter PGP**, the library filter, the domain
-exclusions, the manuscript exclusions and the word-search exclusions come back while those
-buttons still show as active, and the count line ("N / total Results") does not name them. Found
-2026-11-16 in a review of the scholarly transcription filter, which the panel now keeps (its own
-fix); the others predate it.
+(`search_state.results`). **Apply Filters** now keeps the printed, PGP, scholarly transcription
+and library filters (the result filter chips re-render through it while a panel field is set), but
+it still drops the domain exclusions, the manuscript exclusions and the word-search exclusions,
+and its count line ("N / total Results") does not name the filters it kept. **Clear Filters**
+keeps only the scholarly transcription filter, so the rows hidden by the printed, PGP and library
+filters and by the exclusions come back while those chips still show as active. Found 2026-11-16
+in a review of the scholarly transcription filter; the rest predate it.
 
-Fix sketch: run the panel's rows through the same cascade the buttons use (`_apply_manuscript_exclusions`
+Fix sketch: run the panel's rows through the same cascade the chips use (`_apply_manuscript_exclusions`
 → word-search → domain → printed/PGP/scholarly/library → measurements), with the panel's fields as
-one more step, and give the count line the same parts.
+one more step, in both Apply and Clear, and give the count line the same parts.

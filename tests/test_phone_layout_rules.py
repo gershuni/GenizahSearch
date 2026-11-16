@@ -253,7 +253,8 @@ SHARED_HOOKS = {
                            'lists-item-card', 'lists-item-actions'],
     'web/pages/search.py': ['search-shell', 'search-main-row', 'search-row-btn', 'search-adv-panel',
                             'search-filters-panel', 'results-header', 'results-count-group',
-                            'results-export-group', 'results-more-btn', 'tb-hidden', 'density-toggle'],
+                            'results-export-group', 'results-more-btn', 'tb-hidden', 'density-toggle',
+                            'results-chip-break', 'results-count', 'has-selection'],
     'web/pages/search_results.py': ['pagination-placeholder', 'results-list', 'result-card', 'result-snippet',
                                     'result-shelfmark', 'result-actions', 'result-head', 'result-badges',
                                     'result-title', 'result-index', 'expand-row', 'expand-thumb', 'expand-text',
@@ -538,3 +539,55 @@ def test_the_search_box_fits_the_card_on_a_phone():
     assert "ui.column().classes('flex-grow min-w-80 gap-1') as query_column" in _read('web/pages/search.py')
     rules = _phone_rules(_read('web/static/common.css'))
     assert '.search-main-row > .min-w-80 { min-width: 0 !important; flex-basis: 100%; }' in rules
+
+
+def test_the_result_filters_are_never_off_screen_and_start_their_own_line_on_a_phone():
+    """Owner, 2026-11-16: a reader must see that the list is filtered. Under 1024px the count,
+    Reset filters and the chips wrap rather than scroll sideways; on a phone the chips start a
+    line of their own (the break shows there only); a hidden chip takes no space anywhere."""
+    css = _read('web/static/common.css')
+    narrow = _media_rules(css, '(max-width: 1023px)')
+    group = narrow[narrow.index('.results-count-group {'):]
+    group = group[:group.index('}')]
+    assert 'flex-wrap: wrap' in group and 'overflow-x' not in group, group
+    # The count wraps rather than push the page wider than the screen.
+    assert '.results-count { flex: 1 1 auto; min-width: 0; }' in narrow
+    assert '.results-count-group > * { flex-shrink: 0; }' not in narrow
+    phone = _media_rules(css, '(max-width: 640px)')
+    assert '.results-chip-break { display: block !important; flex-basis: 100%;' in phone
+    top = _top_level(css)
+    assert '.results-chip-break { display: none; }' in top
+    assert '.tb-hidden { display: none !important; }' in top
+    search = _read('web/pages/search.py')
+    # The count has the first line; Reset filters and the chips start the next.
+    assert search.index("classes('results-chip-break')") > search.index("results-count')")
+    assert search.index("classes('results-chip-break')") < search.index('reset_filters_btn = ui.button(')
+
+
+def test_a_selection_does_not_crowd_the_count_on_a_phone():
+    """Selecting results shows "N selected" and the two bulk actions; on a phone the bulk
+    actions join the export icons in the corner, so the count leaves them room, and
+    "N selected" starts the chips' line instead of following the count (Codex on #26)."""
+    css = _read('web/static/common.css')
+    phone = _media_rules(css, '(max-width: 640px)')
+    assert '.results-count { max-width: calc(100% - 150px); }' in phone
+    assert '.results-header.has-selection .results-count { max-width: calc(100% - 214px); }' in phone
+    search = _read('web/pages/search.py')
+    counter = search.index('selection_counter = ui.label(')
+    assert search.index("classes('results-chip-break')") < counter < search.index(
+        'reset_filters_btn = ui.button('), 'the selection counter belongs after the chip break'
+    assert search.index("ui.row().classes('gap-2 results-bulk-actions tb-hidden')") > search.index(
+        "classes('gap-2 results-export-group')")
+
+
+def test_the_filter_chips_are_compact_with_room_before_the_label():
+    """Owner, 2026-11-16: compact chips, the label not crowding the edge it starts from. Logical
+    sides, so the room is on the right in Hebrew and on the left in English; the rule is more
+    specific than the narrow-screen 34px button height."""
+    css = _read('web/static/common.css')
+    top = _top_level(css)
+    rule = top[top.index('.results-header .q-btn.filter-chip {'):]
+    rule = rule[:rule.index('}')]
+    assert 'min-height: 28px !important' in rule and 'padding-inline: 12px 6px !important' in rule, rule
+    assert 'margin-inline-start: 2px !important' in top
+    assert "btn.classes(add='filter-chip')" in _read('web/pages/search.py')

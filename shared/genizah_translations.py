@@ -2990,6 +2990,8 @@ TRANSLATIONS = {
     "Has scholarly transcription": "תעתיק מדעי",
     "No scholarly transcription": "ללא תעתיק מדעי",
     "Reset filters": "נקה סינונים",
+    "Prints": "דפוסים",
+    "Without prints": "ללא דפוסים",
     "Show every result again: clear the result filters": "הצג שוב את כל התוצאות: נקה את סינוני התוצאות",
     "Filter by whether the result's page has a scholarly transcription": "סינון לפי קיומו של תעתיק מדעי לעמוד התוצאה",
     # Catalog browse availability filters (SEED-023)

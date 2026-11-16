@@ -2512,23 +2512,53 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     }
 }
 
-/* Under 1024px the results toolbar is one line: the count and the filter
-   buttons scroll sideways in it, the export icons are a menu
-   (.results-more-btn), and a filter that is not yet available takes no space
-   (.tb-hidden; wider screens reserve its space so nothing shifts). */
+/* Under 1024px the export icons are a menu (.results-more-btn) and the count,
+   Reset filters and the filter chips wrap onto as many lines as they need,
+   never off-screen to the side (owner, 2026-11-16: a reader must see that the
+   list is filtered). On a phone the count has the first line and Reset filters
+   with the chips start the next (.results-chip-break). */
 @media (max-width: 1023px) {
     .results-header { flex-wrap: nowrap !important; padding: 6px 8px !important; gap: 4px !important; }
     .results-header .q-btn { min-height: 34px !important; }
     .results-count-group {
-        flex: 1 1 auto; min-width: 0; flex-wrap: nowrap !important; overflow-x: auto; gap: 8px !important;
-        scrollbar-width: none; -webkit-overflow-scrolling: touch;
+        flex: 1 1 auto; min-width: 0; flex-wrap: wrap !important; gap: 6px 8px !important;
     }
-    .results-count-group::-webkit-scrollbar { display: none; }
-    .results-count-group > * { flex-shrink: 0; }
+    .results-count-group > .q-btn, .results-count-group > .q-checkbox { flex-shrink: 0; }
     .results-count-group .q-btn { white-space: nowrap; }
-    .tb-hidden { display: none !important; }
-    .results-export-group { flex: 0 0 auto; }
+    .results-count { flex: 1 1 auto; min-width: 0; }
+    .results-export-group { flex: 0 0 auto; align-self: flex-start; }
 }
+@media (max-width: 640px) {
+    .results-chip-break { display: block !important; flex-basis: 100%; height: 0; }
+    /* The export icons sit in the top corner; the count and the chips take the
+       full width under them instead of a narrow column beside them. */
+    .results-header { position: relative; }
+    .results-count-group { flex: 1 1 100% !important; }
+    .results-export-group { position: absolute; top: 6px; inset-inline-end: 8px; }
+    .results-count { max-width: calc(100% - 150px); }
+    /* While results are selected the corner group also holds the two bulk
+       actions, so the count leaves room for them too; "N selected" starts the
+       chips' line (it comes after .results-chip-break). */
+    .results-header.has-selection .results-count { max-width: calc(100% - 214px); }
+}
+.results-chip-break { display: none; }
+
+/* The result filter chips (web/pages/search.py::_style_filter_chip): compact
+   pills, more room before the label than around the chevron, the same in
+   Hebrew and English (logical sides). Owner, 2026-11-16. */
+.results-header .q-btn.filter-chip {
+    min-height: 28px !important; padding-block: 0 !important;
+    padding-inline: 12px 6px !important; font-size: 13px; line-height: 1.2;
+}
+.q-btn.filter-chip .q-btn__content { flex-wrap: nowrap; }
+.q-btn.filter-chip .q-icon.on-right {
+    font-size: 18px; margin-inline-start: 2px !important; margin-inline-end: 0 !important;
+}
+
+/* A filter chip that is not available yet (or Reset filters while no filter
+   is on) takes no space at any width: the chips close up rather than leave
+   holes between them (owner's chip design, 2026-11-16). */
+.tb-hidden { display: none !important; }
 
 /* ========================================================================
    Wide screens (the owner's screen-size table, 2026-10-22)

@@ -1864,19 +1864,43 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 with ui.row().classes('items-center gap-3 results-count-group'):
                     # Select all checkbox
                     select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
-                    results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
-                    # Selection counter (initially hidden)
-                    selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
+                    results_count = ui.label(tr('Results')).classes('font-medium results-count').style('color: var(--text-secondary);')
                     # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
                     def _set_btn_visible(btn, visible):
-                        # Wide screens reserve the space (no layout shift when a
-                        # filter appears); a phone cannot afford a blank row, so
-                        # `tb-hidden` removes the button there (common.css).
+                        # `tb-hidden` removes the chip at every width, so the chips close
+                        # up instead of leaving holes (common.css; owner's chip design,
+                        # 2026-11-16).
                         btn.style(f'visibility: {"visible" if visible else "hidden"};')
                         if visible:
                             btn.classes(remove='tb-hidden')
                         else:
                             btn.classes(add='tb-hidden')
+
+                    # The result filters are chips (owner's choice of the filter-row designs,
+                    # 2026-11-16): a pill with a chevron, grey outline while off, filled once
+                    # it hides rows; the three-way ones open a menu instead of cycling blind.
+                    def _style_filter_chip(btn, active):
+                        btn.classes(add='filter-chip')  # size and padding: common.css
+                        btn.props(remove='color outline unelevated flat')
+                        btn.props('rounded dense no-caps icon-right=expand_more '
+                                  + ('unelevated color=primary' if active else 'outline color=grey-8'))
+
+                    def _filter_menu(btn, options, choose):
+                        """A menu under *btn*: one item per (value, label); *choose* gets the value."""
+                        with btn:
+                            with ui.menu().props('auto-close'):
+                                for value, label in options:
+                                    ui.menu_item(label, on_click=lambda v=value: choose(v))
+
+                    # On a phone the count has the first line; Reset filters and the chips start
+                    # the next (owner, 2026-11-16); common.css shows this break there only.
+                    ui.element('div').classes('results-chip-break')
+
+                    # "N selected", hidden while nothing is (update_selection_ui). After the
+                    # break, so on a phone it starts the chips' line instead of crowding the
+                    # count; above 640px the break takes no space and it follows the count.
+                    selection_counter = ui.label('').classes('text-sm results-selection-count tb-hidden').style(
+                        'color: var(--primary-600);')
 
                     # Reset filters (owner, 2026-11-16): the filters stay from one search to the
                     # next, so while one is on the row says so and offers to clear them all.
@@ -1889,109 +1913,65 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Domain filter button (hidden until search with domain data)
                     domain_filter_btn = ui.button(
-                        tr('Filter by domains'), icon='category',
+                        tr('Domains'),
                         on_click=lambda: _open_domain_filter_dialog()
-                    ).classes('text-sm').props('outline dense no-caps')
+                    ).classes('text-sm')
+                    domain_filter_btn.tooltip(tr('Filter by domains'))
+                    _style_filter_chip(domain_filter_btn, False)
                     _set_btn_visible(domain_filter_btn, False)
 
                     # Restore visibility if stored exclusions exist (persistence across navigation)
                     if search_state.domain_exclusions:
                         _set_btn_visible(domain_filter_btn, True)
-                        n_excl = len(search_state.domain_exclusions)
-                        domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
-                        domain_filter_btn.props('outline dense no-caps color=red')
+                        domain_filter_btn.text = f"{len(search_state.domain_exclusions)} {tr('domains excluded')}"
+                        _style_filter_chip(domain_filter_btn, True)
 
-                    # Printed filter toggle (hidden until search has printed data)
-                    def _toggle_printed_filter():
-                        states = ['all', 'hide_printed', 'only_printed']
-                        current_idx = states.index(search_state.printed_filter)
-                        search_state.printed_filter = states[(current_idx + 1) % 3]
+                    # Printed filter (hidden until search has printed data)
+                    async def _set_printed_filter(value):
+                        search_state.printed_filter = value
                         persist_value('search_printed_filter', search_state.printed_filter)
                         save_post_filters_with_run(search_state)
                         _update_printed_filter_btn()
-                        # Re-apply filters and re-render (manuscript exclusions first if active)
-                        if search_state.exclusion_sources:
-                            _apply_manuscript_exclusions()
-                        elif search_state.domain_exclusions and search_state.has_domain_data:
-                            _apply_domain_exclusions()
-                        elif search_state.results:
-                            _apply_printed_filter_and_render(search_state.results)
+                        await _rerender_for_scholarly_filter()
 
                     def _update_printed_filter_btn():
-                        if search_state.printed_filter == 'all':
-                            printed_filter_btn.text = tr('Filter Printed')
-                            # Keep the default primary color when cycled back to 'all' so it
-                            # stays blue like the sibling filter buttons (smoke 2026-06-23).
-                            printed_filter_btn.props('outline dense no-caps color=primary')
-                        elif search_state.printed_filter == 'hide_printed':
-                            printed_filter_btn.text = tr('Hiding printed')
-                            printed_filter_btn.props(remove='color')
-                            printed_filter_btn.props('outline dense no-caps color=red')
-                        elif search_state.printed_filter == 'only_printed':
-                            printed_filter_btn.text = tr('Only printed')
-                            printed_filter_btn.props(remove='color')
-                            printed_filter_btn.props('outline dense no-caps color=deep-orange')
+                        labels = {'hide_printed': tr('Without prints'), 'only_printed': tr('Only printed')}
+                        printed_filter_btn.text = labels.get(search_state.printed_filter, tr('Prints'))
+                        _style_filter_chip(printed_filter_btn, search_state.printed_filter in labels)
 
-                    printed_filter_btn = ui.button(
-                        tr('Filter Printed'), icon='local_printshop',
-                        on_click=lambda: _toggle_printed_filter()
-                    ).classes('text-sm').props('outline dense no-caps')
+                    printed_filter_btn = ui.button(tr('Prints')).classes('text-sm')
+                    printed_filter_btn.tooltip(tr('Filter Printed'))
+                    _style_filter_chip(printed_filter_btn, False)
+                    _filter_menu(printed_filter_btn, [('all', tr('All')), ('only_printed', tr('Only printed')),
+                                                      ('hide_printed', tr('Without prints'))],
+                                 _set_printed_filter)
                     _set_btn_visible(printed_filter_btn, False)
 
                     # Phase 999.2 (PGP-FILTER-01): PGP filter toggle (hidden until search has PGP data).
-                    # Mirrors _toggle_printed_filter end-to-end per CONTEXT D-01..D-11. D-12: web only.
-                    def _toggle_pgp_filter():
-                        states = ['all', 'only_pgp', 'hide_pgp']  # D-02 cycle order
-                        current_idx = states.index(search_state.pgp_filter)
-                        search_state.pgp_filter = states[(current_idx + 1) % 3]
+                    # Mirrors _set_printed_filter end-to-end per CONTEXT D-01..D-11. D-12: web only.
+                    async def _set_pgp_filter(value):
+                        search_state.pgp_filter = value
                         persist_value('search_pgp_filter', search_state.pgp_filter)  # D-10
                         save_post_filters_with_run(search_state)
                         _update_pgp_filter_btn()
-                        _update_pgp_filter_chip()  # D-08 (real impl lands in Task 4; stub below until then)
-                        # Re-apply filters and re-render — same cascade as _toggle_printed_filter.
-                        # PGP filter is applied INSIDE every render branch per D-11 (Task 3); this dispatch
-                        # only chooses the right cascade entry point.
-                        if search_state.exclusion_sources:
-                            _apply_manuscript_exclusions()
-                        elif search_state.domain_exclusions and search_state.has_domain_data:
-                            _apply_domain_exclusions()
-                        elif search_state.results:
-                            _apply_printed_filter_and_render(search_state.results)
+                        await _rerender_for_scholarly_filter()
 
                     def _update_pgp_filter_btn():
-                        # Labels mirror Filter Printed pattern (smoke-feedback 2026-05-19):
-                        # default state shows "Filter PGP" not "All" so the button is self-describing.
-                        if search_state.pgp_filter == 'all':
-                            pgp_filter_btn.text = tr('Filter PGP')
-                            # Match the other filter buttons (Filter by domains / Filter
-                            # Printed) — keep the default primary color in the 'all' state.
-                            # Removing the color prop here made the button render white/grey
-                            # while the siblings stayed blue (smoke 2026-06-23).
-                            pgp_filter_btn.props('outline dense no-caps color=primary')
-                        elif search_state.pgp_filter == 'only_pgp':
-                            pgp_filter_btn.text = tr('Has PGP')
-                            pgp_filter_btn.props(remove='color')
-                            pgp_filter_btn.props('outline dense no-caps color=green')
-                        elif search_state.pgp_filter == 'hide_pgp':
-                            pgp_filter_btn.text = tr('No PGP')
-                            pgp_filter_btn.props(remove='color')
-                            pgp_filter_btn.props('outline dense no-caps color=red')
+                        labels = {'only_pgp': tr('Has PGP'), 'hide_pgp': tr('No PGP')}
+                        pgp_filter_btn.text = labels.get(search_state.pgp_filter, 'PGP')
+                        _style_filter_chip(pgp_filter_btn, search_state.pgp_filter in labels)
 
                     def _update_pgp_filter_chip():
                         # Chip removed per smoke-feedback 2026-05-19: the colored button label
                         # already conveys state, the chip was duplicate. Function preserved as a
-                        # no-op so callers (_toggle_pgp_filter, restore paths) stay stable.
+                        # no-op so callers (restore paths) stay stable.
                         return
 
-                    # Mirrors printed_filter_btn construction exactly (no icon per user, smoke-feedback 2026-05-19).
-                    # min-height matches the icon-bearing sibling buttons: a dense q-btn with an
-                    # icon renders at ~2.286em (icon 1.715em + 0.285em vertical padding ×2),
-                    # taller than the icon-less default 2em min-height (smoke 2026-06-23).
-                    pgp_filter_btn = ui.button(
-                        tr('Filter PGP'),
-                        on_click=lambda: _toggle_pgp_filter()
-                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    pgp_filter_btn = ui.button('PGP').classes('text-sm')
                     pgp_filter_btn.tooltip(tr('Filter by PGP coverage'))
+                    _style_filter_chip(pgp_filter_btn, False)
+                    _filter_menu(pgp_filter_btn, [('all', tr('All')), ('only_pgp', tr('Has PGP')),
+                                                  ('hide_pgp', tr('No PGP'))], _set_pgp_filter)
                     _set_btn_visible(pgp_filter_btn, False)
                     # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
                     if search_state.pgp_filter != 'all':
@@ -1999,11 +1979,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Scholarly transcription filter: does the result's PAGE have a scholarly
                     # transcription the version chooser offers (search_state.scholarly_page_uids)?
-                    # The same cycle and cascade as the PGP filter above.
-                    async def _toggle_scholarly_filter():
-                        states = list(SCHOLARLY_FILTER_STATES)
-                        current_idx = states.index(search_state.scholarly_filter)
-                        search_state.scholarly_filter = states[(current_idx + 1) % len(states)]
+                    # A menu and the same cascade as the PGP filter above.
+                    async def _set_scholarly_filter(value):
+                        search_state.scholarly_filter = value if value in SCHOLARLY_FILTER_STATES else 'all'
                         persist_value('search_scholarly_filter', search_state.scholarly_filter)
                         save_post_filters_with_run(search_state)
                         _update_scholarly_filter_btn()
@@ -2034,21 +2012,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             or search_state.scholarly_filter != 'all')
 
                     def _update_scholarly_filter_btn():
-                        if search_state.scholarly_filter == 'only_scholarly':
-                            text, color = tr('Has scholarly transcription'), 'green'
-                        elif search_state.scholarly_filter == 'hide_scholarly':
-                            text, color = tr('No scholarly transcription'), 'red'
-                        else:
-                            text, color = tr('Filter scholarly transcriptions'), 'primary'
-                        scholarly_filter_btn.text = text
-                        scholarly_filter_btn.props(remove='color')
-                        scholarly_filter_btn.props(f'outline dense no-caps color={color}')
+                        labels = {'only_scholarly': tr('Has scholarly transcription'),
+                                  'hide_scholarly': tr('No scholarly transcription')}
+                        scholarly_filter_btn.text = labels.get(search_state.scholarly_filter,
+                                                               tr('Scholarly transcriptions'))
+                        _style_filter_chip(scholarly_filter_btn, search_state.scholarly_filter in labels)
 
-                    scholarly_filter_btn = ui.button(
-                        tr('Filter scholarly transcriptions'),
-                        on_click=_toggle_scholarly_filter
-                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    scholarly_filter_btn = ui.button(tr('Scholarly transcriptions')).classes('text-sm')
                     scholarly_filter_btn.tooltip(tr("Filter by whether the result's page has a scholarly transcription"))
+                    _style_filter_chip(scholarly_filter_btn, False)
+                    _filter_menu(scholarly_filter_btn,
+                                 [('all', tr('All')), ('only_scholarly', tr('Has scholarly transcription')),
+                                  ('hide_scholarly', tr('No scholarly transcription'))],
+                                 _set_scholarly_filter)
                     _set_btn_visible(scholarly_filter_btn, False)
                     if search_state.scholarly_filter != 'all':
                         _update_scholarly_filter_btn()
@@ -2125,21 +2101,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             _lib_btn_key = ('Showing {shown}/{total} library' if total == 1
                                             else 'Showing {shown}/{total} libraries')
                             library_filter_btn.text = tr(_lib_btn_key).format(shown=shown, total=total)
-                            library_filter_btn.props(remove='color outline')
-                            library_filter_btn.props('dense no-caps color=negative')
+                            _style_filter_chip(library_filter_btn, True)
                         elif hide_active:
                             # Phase 130 UAT: pluralized noun (singular when hiding exactly 1).
                             _n = len(codes)
                             _lib_btn_key = ('Hiding {n} library' if _n == 1
                                             else 'Hiding {n} libraries')
                             library_filter_btn.text = tr(_lib_btn_key).format(n=_n)
-                            library_filter_btn.props(remove='color outline')
-                            library_filter_btn.props('dense no-caps color=deep-orange')
+                            _style_filter_chip(library_filter_btn, True)
                         else:
                             # Neutral: no active filter (empty codes, or show-only with all in-result showing).
                             library_filter_btn.text = tr('Filter by library')
-                            library_filter_btn.props(remove='color')
-                            library_filter_btn.props('outline dense no-caps color=primary')
+                            _style_filter_chip(library_filter_btn, False)
 
                     def _open_library_filter_dialog():
                         """Open dual-mode library filter dialog (Phase 130-02 / DMF redesign).
@@ -2380,7 +2353,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     library_filter_btn = ui.button(
                         tr('Filter by library'),
-                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    ).classes('text-sm')
+                    _style_filter_chip(library_filter_btn, False)
                     library_filter_btn.tooltip(tr('Filter results by library'))
                     # GAP-A: use _set_btn_visible (CSS visibility) to match sibling buttons.
                     # set_visibility(False) uses display:none which conflicts with the
@@ -2396,7 +2370,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_within_btn = ui.button(
                         '', icon='filter_list',
                         on_click=lambda: _enter_refine_mode()
-                    ).classes('text-sm').props('outline dense no-caps')
+                    ).classes('text-sm').props('flat dense no-caps color=primary')
                     search_within_btn.set_visibility(False)
 
                     # Phase 56 entry-point 1 (top-toolbar "Exclude manuscripts"
@@ -2412,8 +2386,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # was visual duplication. The _update_pgp_filter_chip no-op above keeps callers stable.
 
                 with ui.row().classes('gap-2 results-export-group'):
-                    # Bulk actions (initially hidden)
-                    bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
+                    # Bulk actions, hidden while nothing is selected (update_selection_ui)
+                    bulk_actions_row = ui.row().classes('gap-2 results-bulk-actions tb-hidden')
                     with bulk_actions_row:
                         ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
                             f'flat round dense size=sm aria-label="{tr("Add Selected to List")}"'
@@ -3215,9 +3189,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
-        # The scholarly transcription button stays in force under the panel's filters
-        # (Codex review of PR #22).
+        # The result filters' chips stay in force under the panel's filters, stacked as
+        # _apply_printed_filter_and_render stacks them: a chip's choice re-renders through
+        # here while a panel field is set (Codex reviews of PRs #22 and #26). The
+        # exclusions do not yet (docs/open_issues.d/2026-11-16-filters-panel-ignores-result-filters.md).
+        filtered = _apply_printed_filter(filtered)
+        filtered = _apply_pgp_filter(filtered)
         filtered = _apply_scholarly_filter(filtered)
+        filtered = _apply_library_filter(filtered)
 
         render_results(filtered, page=0)
         shown = len(filtered)
@@ -3390,8 +3369,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === Bulk Operations ===
 
+    # True while update_selection_ui moves the select-all box to match the rows: that
+    # change is not the reader's, and taken as one it cleared every row the moment a
+    # single row was unticked from a full selection (Codex on #26).
+    _syncing_select_all = {'on': False}
+
     def toggle_select_all(is_checked):
         """Toggle selection of all results."""
+        if _syncing_select_all['on']:
+            return
         if is_checked:
             # Select all current results
             for i in range(len(search_state.results)):
@@ -3413,20 +3399,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Update selection counter and bulk actions visibility."""
         selected_count = len(search_state.selected_indices)
 
+        # A class, not .style(): NiceGUI's style() only adds, so `.style('')` never took
+        # back a `display: none` and the counter and the bulk actions never showed.
+        # `has-selection` gives the count less room on a phone, where the export
+        # icons, now with the bulk actions, sit in the corner beside it (common.css).
         if selected_count > 0:
             selection_counter.text = f"{selected_count} {tr('selected')}"
-            selection_counter.style('color: var(--primary-600);')
-            bulk_actions_row.style('')  # Show bulk actions
+            for element in (selection_counter, bulk_actions_row):
+                element.classes(remove='tb-hidden')
+            results_header.classes(add='has-selection')
         else:
             selection_counter.text = ''
-            selection_counter.style('display: none;')
-            bulk_actions_row.style('display: none;')  # Hide bulk actions
+            for element in (selection_counter, bulk_actions_row):
+                element.classes(add='tb-hidden')
+            results_header.classes(remove='has-selection')
 
         # Update select all checkbox state
-        if selected_count == len(search_state.results) and len(search_state.results) > 0:
-            select_all_checkbox.value = True
-        else:
-            select_all_checkbox.value = False
+        _syncing_select_all['on'] = True
+        try:
+            select_all_checkbox.value = selected_count == len(search_state.results) > 0
+        finally:
+            _syncing_select_all['on'] = False
+
+    def _clear_selection():
+        """Forget the selected rows when the result set is replaced: they are indices, so
+        they would name the new set's rows, which then showed as selected and the bulk
+        actions acted on them (Codex on #26)."""
+        search_state.selected_indices.clear()
+        update_selection_ui()
+        from web.export_state import update_search_export_selection
+        update_search_export_selection(None)
 
     def bulk_add_to_list():
         """Add all selected results to a list."""
@@ -4182,12 +4184,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _update_domain_filter_btn():
         """Update domain filter button text and styling based on exclusion state."""
         if search_state.domain_exclusions:
-            n = len(search_state.domain_exclusions)
-            domain_filter_btn.text = f"{tr('Filter by domains')} ({n} {tr('excluded')})"
-            domain_filter_btn.props('outline dense no-caps color=red')
+            domain_filter_btn.text = f"{len(search_state.domain_exclusions)} {tr('domains excluded')}"
+            _style_filter_chip(domain_filter_btn, True)
         else:
-            domain_filter_btn.text = tr('Filter by domains')
-            domain_filter_btn.props('outline dense no-caps color=primary')
+            domain_filter_btn.text = tr('Domains')
+            _style_filter_chip(domain_filter_btn, False)
 
     def _open_domain_filter_dialog():
         """Open modal dialog with domain filter checkboxes.
@@ -5290,6 +5291,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
             search_state.results = state_snapshot['results']
+            _clear_selection()
             # The shown search's scholarly answers are not these rows': forget them until
             # these are checked (below; Codex review of PR #22).
             search_state.scholarly_page_uids = set()
@@ -5645,6 +5647,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr("Starting...")
         search_state.search_start_time = time.time()
         search_state.results = []
+        _clear_selection()
         search_state.responsa_warning = None
         search_state.editions_skipped = False
         # SEED-022 (Codex #303 review): clear enrichment presence sets at new-search
@@ -6115,6 +6118,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.is_cancelled = False
             search_state.progress = 1.0
             search_state.results = results
+            _clear_selection()
             search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
             search_state.editions_skipped = bool(_run_cutoff.get('editions_skipped'))
             search_state.domain_excluded_results = []
@@ -6160,6 +6164,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
             results = compact_result_rows(results)
             search_state.results = results
+            _clear_selection()
             search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
             search_state.editions_skipped = bool(_run_cutoff.get('editions_skipped'))
             # A stopped search within results is still the chain's next step: marked
@@ -6294,6 +6299,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.is_cancelled = False
         search_state.progress = 1.0
         search_state.results = results
+        _clear_selection()
 
         # --- Phase 55: Refinement chain update ---
         if search_state._refine_mode:
@@ -7037,7 +7043,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _update_pgp_filter_chip()
                 # Phase 999.2 (HIGH-4): use the unified filtered render cascade so the
                 # restored pgp_filter state actually filters results. Dispatch mirrors
-                # _toggle_pgp_filter — pick the right entry point based on active filters.
+                # _set_pgp_filter — pick the right entry point based on active filters.
                 if search_state.exclusion_sources:
                     _apply_manuscript_exclusions(reset_expansion=False)
                 elif search_state.domain_exclusions and search_state.has_domain_data:

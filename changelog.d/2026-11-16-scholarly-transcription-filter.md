@@ -1,9 +1,9 @@
 ## [Unreleased] -- Filter results by scholarly transcription (web, branch `claude/scholarly-transcription-filter`)
 
-After a search, **Filter scholarly transcriptions** cycles through all results, only the results
-whose page has a scholarly transcription, and only those whose page has none (pages no one has
-edited yet). It sits beside **Filter PGP**, which is unchanged: that one asks whether the manuscript
-has any PGP record, this one whether the result's page has an FGP or PGP edition.
+After a search, the **Scholarly transcriptions** chip offers all results, only the results whose
+page has a scholarly transcription, and only those whose page has none (pages no one has edited
+yet). It sits beside the **PGP** filter, which asks something else: whether the manuscript has
+any PGP record, where this one asks whether the result's page has an FGP or PGP edition.
 
 A page has one when the version chooser offers an edition with text on it: the chooser's own page
 filter decides (`shared/fgp_service.py::filter_sources_for_page`), on the page, page count and text
