@@ -166,6 +166,27 @@ def test_backspace_takes_a_letter_with_its_marks(page):
     assert _box(page) == ''
 
 
+@pytest.mark.parametrize('punct', ['\u05BE', '\u05C0', '\u05C3', '\u05C6'])
+def test_backspace_takes_hebrew_punctuation_alone(page, punct):
+    # Maqaf, paseq, sof pasuq and nun hafukha sit among the Hebrew points but
+    # are not marks: Delete takes them, not the letter before (Codex, PR #3).
+    _reset(page, 'אב' + punct)
+    page.click('[data-hk-action="backspace"]')
+    assert _box(page) == 'אב'
+
+
+def test_backspace_takes_a_letter_with_several_points(page):
+    _reset(page, 'א' + 'ש\u05B8\u05C1')  # shin with qamats and shin dot
+    page.click('[data-hk-action="backspace"]')
+    assert _box(page) == 'א'
+
+
+def test_backspace_takes_a_surrogate_pair_whole(page):
+    _reset(page, 'א\U0001D400')
+    page.click('[data-hk-action="backspace"]')
+    assert _box(page) == 'א'
+
+
 def test_backspace_deletes_a_selection(page):
     _reset(page, 'אבגד')
     page.evaluate("document.getElementById('box').setSelectionRange(0, 2)")

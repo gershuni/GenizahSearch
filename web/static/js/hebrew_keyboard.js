@@ -56,11 +56,12 @@
     if (c[0] !== c[1]) { commit(input, v.slice(0, c[0]) + v.slice(c[1]), c[0]); return; }
     if (c[0] === 0) return;
     var before = v.slice(0, c[0]);
-    // The last letter with every mark on it (a vowel point, the dot of ד̇).
-    var m = before.match(/[^̀-֑ͯ-ׇ]?[̀-֑ͯ-ׇ]*$/);
+    // The last character with every combining mark on it (a vowel point, the
+    // dot of a dotted letter). \p{M} is Unicode's own list: maqaf, paseq and sof
+    // pasuq sit among the Hebrew points but are characters of their own (Codex,
+    // PR #3). With the u flag a surrogate pair is one character.
+    var m = before.match(/\P{M}?\p{M}*$/u);
     var cut = (m && m[0].length) ? m[0].length : 1;
-    // A surrogate pair is one character.
-    if (cut === 1 && /[\uDC00-\uDFFF]/.test(before.slice(-1)) && before.length > 1) cut = 2;
     commit(input, before.slice(0, before.length - cut) + v.slice(c[1]), c[0] - cut);
   }
 
