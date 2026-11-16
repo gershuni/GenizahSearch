@@ -29,7 +29,7 @@ from web.components.filter_panel import (
 from web.components.criteria_panel import CriteriaControl, active_criteria_count
 from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES
 from web.pages.search_state import (
-    SearchUIState, SearchPageRefs,
+    SCHOLARLY_FILTER_STATES, SearchUIState, SearchPageRefs,
     get_search_history, add_to_search_history,
     delete_search_history_entry, clear_search_history,
     domain_display_name,
@@ -117,6 +117,38 @@ def _web_manual_transcription_ids(sys_ids):
     Used by the PGP-tag-browse and session-restore paths, which would otherwise call
     the shared union helper that always includes FGP regardless of the web flag."""
     return union_manual_transcriptions(get_sys_ids_with_pgp_text(sys_ids), _web_fgp_sys_ids(sys_ids))
+
+
+def _read_result_page(row):
+    """``(p_num, text, total_pages)`` of the page Quick View opens *row* on: the same
+    index read (``get_browse_page`` with the row's page and volume), or None."""
+    if state.searcher is None:
+        return None
+    display = row.get('display') or {}
+    try:
+        p_num = int(display.get('img') or 1)
+    except (TypeError, ValueError):
+        p_num = 1
+    volume_ie = None
+    if row.get('raw_header') and state.meta_mgr:
+        try:
+            volume_ie = state.meta_mgr.parse_full_id_components(row['raw_header']).get('ie_id')
+        except Exception:
+            volume_ie = None
+    page = state.searcher.get_browse_page(display.get('id'), p_num=p_num, volume_ie=volume_ie)
+    if not page:
+        return None
+    return page.get('p_num') or p_num, page.get('text') or '', page.get('total_pages') or 0
+
+
+def _web_scholarly_page_uids(rows):
+    """The rows of *rows* whose page has a scholarly transcription, as Quick View's version
+    chooser decides it, with the web's own FGP switch, and whether every row was answered
+    (a ScholarlyCheck). Blocking."""
+    from shared.transcription_service import rows_with_scholarly_transcription
+    from web.feature_flags import web_fgp_enabled
+    return rows_with_scholarly_transcription(
+        rows, read_page=_read_result_page, include_fgp=web_fgp_enabled())
 
 
 async def _bulk_add_items(lists_mgr, sys_ids, list_id):
@@ -291,6 +323,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.domain_exclusions = set(_de) if _de is not None else set()
         search_state.printed_filter = _safe_get('search_printed_filter', 'all')
         search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
+        _scholarly0 = _safe_get('search_scholarly_filter', 'all')
+        search_state.scholarly_filter = _scholarly0 if _scholarly0 in SCHOLARLY_FILTER_STATES else 'all'
         # SEED-026 / DMF (LIBFILTER-01): library dual-mode filter — mode-aware restore with D-06 legacy migration.
         # D-46/D-NEW-7: exclude 'LOCAL' — My Library is desktop-only and must never appear as a web filter.
         # New shape: {'mode':'show_only'|'hide', 'codes':[...]}; legacy shape: plain list (v8.3.0).
@@ -1844,6 +1878,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         else:
                             btn.classes(add='tb-hidden')
 
+                    # Reset filters (owner, 2026-11-16): the filters stay from one search to the
+                    # next, so while one is on the row says so and offers to clear them all.
+                    reset_filters_btn = ui.button(
+                        tr('Reset filters'), icon='filter_alt_off',
+                        on_click=lambda: _reset_result_filters()
+                    ).classes('text-sm').props('flat dense no-caps color=primary')
+                    reset_filters_btn.tooltip(tr('Show every result again: clear the result filters'))
+                    _set_btn_visible(reset_filters_btn, False)
+
                     # Domain filter button (hidden until search with domain data)
                     domain_filter_btn = ui.button(
                         tr('Filter by domains'), icon='category',
@@ -1953,6 +1996,62 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
                     if search_state.pgp_filter != 'all':
                         _update_pgp_filter_btn()
+
+                    # Scholarly transcription filter: does the result's PAGE have a scholarly
+                    # transcription the version chooser offers (search_state.scholarly_page_uids)?
+                    # The same cycle and cascade as the PGP filter above.
+                    async def _toggle_scholarly_filter():
+                        states = list(SCHOLARLY_FILTER_STATES)
+                        current_idx = states.index(search_state.scholarly_filter)
+                        search_state.scholarly_filter = states[(current_idx + 1) % len(states)]
+                        persist_value('search_scholarly_filter', search_state.scholarly_filter)
+                        save_post_filters_with_run(search_state)
+                        _update_scholarly_filter_btn()
+                        await _rerender_for_scholarly_filter()
+
+                    async def _rerender_for_scholarly_filter():
+                        """Render the rows again under the scholarly filter. With the Toggle
+                        Filters panel's shelfmark, title or text set, that is the panel's own
+                        Apply, so its fields stay in force; else the order
+                        _apply_manuscript_exclusions passes on in, so the rows excluded from
+                        the word search stay out (Codex reviews of PR #22)."""
+                        if _panel_text_filters_set():
+                            await apply_filters(notify=False)
+                        elif search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.word_search_excluded_ids:
+                            _apply_word_search_exclusions_and_render()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    def _scholarly_btn_shown():
+                        """Once the check has answered: when some page has one, or when a mode is
+                        on, so a mode kept from an earlier search can be turned off."""
+                        return search_state.scholarly_checked and (
+                            bool(search_state.scholarly_page_uids)
+                            or search_state.scholarly_filter != 'all')
+
+                    def _update_scholarly_filter_btn():
+                        if search_state.scholarly_filter == 'only_scholarly':
+                            text, color = tr('Has scholarly transcription'), 'green'
+                        elif search_state.scholarly_filter == 'hide_scholarly':
+                            text, color = tr('No scholarly transcription'), 'red'
+                        else:
+                            text, color = tr('Filter scholarly transcriptions'), 'primary'
+                        scholarly_filter_btn.text = text
+                        scholarly_filter_btn.props(remove='color')
+                        scholarly_filter_btn.props(f'outline dense no-caps color={color}')
+
+                    scholarly_filter_btn = ui.button(
+                        tr('Filter scholarly transcriptions'),
+                        on_click=_toggle_scholarly_filter
+                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    scholarly_filter_btn.tooltip(tr("Filter by whether the result's page has a scholarly transcription"))
+                    _set_btn_visible(scholarly_filter_btn, False)
+                    if search_state.scholarly_filter != 'all':
+                        _update_scholarly_filter_btn()
 
                     # SEED-026 GAP-A/B/C/D: Library multi-select filter — redesigned as a checkbox
                     # dialog (mirroring _open_domain_filter_dialog) with inclusion semantics.
@@ -3082,8 +3181,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filters_visible['value'] = not filters_visible['value']
         filters_panel.set_visibility(filters_visible['value'])
 
-    async def apply_filters():
-        """Apply filters to results."""
+    def _panel_text_filters_set() -> bool:
+        """The Toggle Filters panel's shelfmark, title or text field holds something."""
+        return any((f.value or '').strip() for f in (filter_shelfmark, filter_title, filter_snippet))
+
+    async def apply_filters(notify: bool = True):
+        """Apply filters to results. *notify*: say how many match (the panel's own button)."""
         if not search_state.results:
             return
         # The measured matches are read off the loop; the filter below then
@@ -3112,11 +3215,54 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
+        # The scholarly transcription button stays in force under the panel's filters
+        # (Codex review of PR #22).
+        filtered = _apply_scholarly_filter(filtered)
 
         render_results(filtered, page=0)
         shown = len(filtered)
-        results_count.text = f"{shown} / {_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
-        ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
+        results_count.text = f"{shown} / {_total_text(len(search_state.results))} {tr('Results')}{_scholarly_count_note()}{_downgrade_suffix()}"
+        if notify:
+            ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
+
+    def _result_filters_active() -> bool:
+        """A filter hides result rows: printed, PGP, scholarly transcription, library,
+        domains, or the Toggle Filters panel's fields and measurements. The manuscript and
+        word-search exclusions are not filters here: they have their own chips."""
+        s = search_state
+        return bool(s.printed_filter != 'all' or s.pgp_filter != 'all'
+                    or s.scholarly_filter != 'all' or s.library_filter or s.domain_exclusions
+                    or s.post_filter_criteria or _panel_text_filters_set())
+
+    def _update_reset_filters_btn():
+        _set_btn_visible(reset_filters_btn, bool(search_state.results) and _result_filters_active())
+
+    def _reset_result_filters():
+        """Clear every result filter and show all the rows (the exclusions stay)."""
+        s = search_state
+        s.printed_filter = s.pgp_filter = s.scholarly_filter = 'all'
+        persist_value('search_printed_filter', 'all')
+        persist_value('search_pgp_filter', 'all')
+        persist_value('search_scholarly_filter', 'all')
+        s.library_mode, s.library_filter = 'hide', []
+        persist_value('search_library_filter', {'mode': 'hide', 'codes': []})
+        s.domain_exclusions = set()
+        persist_search_snapshot(s)
+        filter_shelfmark.value = filter_title.value = filter_snippet.value = ''
+        s.post_filter_criteria = {}
+        save_post_filters_with_run(s)
+        _update_printed_filter_btn()
+        _update_pgp_filter_btn()
+        _update_scholarly_filter_btn()
+        _update_library_btn()
+        _update_domain_filter_btn()
+        if s.exclusion_sources:
+            _apply_manuscript_exclusions()
+        elif s.word_search_excluded_ids:
+            _apply_word_search_exclusions_and_render()
+        elif s.results:
+            _apply_printed_filter_and_render(s.results)
+        ui.notify(tr('Filters cleared'), type='info')
 
     def clear_filters():
         """Clear all filters and show all results."""
@@ -3129,8 +3275,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # not filter state. Clearing it would break reapplying filters later.
 
         if search_state.results:
-            render_results(search_state.results, page=0)
-            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
+            # The panel's filters go; the scholarly transcription button's stays (Codex review
+            # of PR #22).
+            shown = _apply_scholarly_filter(search_state.results)
+            render_results(shown, page=0)
+            if len(shown) != len(search_state.results) or _scholarly_count_note():
+                results_count.text = f"{len(shown)} / {_total_text(len(search_state.results))} {tr('Results')}{_scholarly_count_note()}{_downgrade_suffix()}"
+            else:
+                results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
             ui.notify(tr('Filters cleared'), type='info')
 
     # === Reset Search ===
@@ -3149,6 +3301,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.selected_indices.clear()
         search_state.transcription_sys_ids = set()
         search_state.manual_transcription_sys_ids = set()  # SEED-022
+        search_state.scholarly_page_uids = set()
+        search_state.scholarly_checked = False
+        search_state.scholarly_incomplete = False
         search_state.total_count = 0
         search_state.current_page = 0
         search_state.result_domains = {}
@@ -3185,6 +3340,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Hide domain filter and printed filter buttons
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
+        _set_btn_visible(reset_filters_btn, False)
         # Phase 999.2 (PGP-FILTER-02): hide PGP button + reset in-memory state on New Search.
         # The persisted 'search_pgp_filter' key is reset by clear_search_snapshot() below
         # (Task 1 Edit 2 added it to that helper's defaults dict — MEDIUM-2 fix routes
@@ -3193,6 +3349,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.pgp_filter = 'all'
         _update_pgp_filter_btn()
         _update_pgp_filter_chip()
+        _set_btn_visible(scholarly_filter_btn, False)
+        search_state.scholarly_filter = 'all'
+        _update_scholarly_filter_btn()
         # SEED-026 / DMF (LIBFILTER-01): hide library button + reset in-memory state on New Search.
         # The persisted 'search_library_filter' key is reset by clear_search_snapshot() (added to defaults).
         _set_btn_visible(library_filter_btn, False)
@@ -4376,6 +4535,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             filtered.append(r)
         return filtered
 
+    def _apply_scholarly_filter(results_list):
+        """Keep (only_scholarly) or hide (hide_scholarly) the results whose page has a
+        scholarly transcription (search_state.scholarly_page_uids). Like the PGP filter, a
+        list not checked yet passes unchanged (the button is hidden then); once checked, the
+        mode applies even when no page has one (Codex review of PR #22)."""
+        mode = search_state.scholarly_filter
+        uids = search_state.scholarly_page_uids
+        if mode not in ('only_scholarly', 'hide_scholarly') or not search_state.scholarly_checked:
+            return results_list
+        keep = mode == 'only_scholarly'
+        return [r for r in results_list if (r.get('uid') in uids) == keep]
+
+    async def _recheck_scholarly_pages():
+        """Check the shown rows' pages again, for rows that came without the answers (a
+        restored history entry); the filter applies once they are in (Codex review of
+        PR #22). Rows replaced meanwhile keep nothing of it."""
+        rows = search_state.results
+        if not rows:
+            return
+        check = await io_bound_result.io_bound(_web_scholarly_page_uids, list(rows))
+        if io_bound_result.interrupted(check) or search_state.results is not rows:
+            return
+        search_state.scholarly_page_uids = set(check.found)
+        search_state.scholarly_incomplete = not check.complete
+        search_state.scholarly_checked = check.complete
+        _set_btn_visible(scholarly_filter_btn, _scholarly_btn_shown())
+        _update_scholarly_filter_btn()
+        if search_state.scholarly_filter != 'all':
+            await _rerender_for_scholarly_filter()
+
+    def _scholarly_count_note() -> str:
+        """' (Has scholarly transcription)' or ' (No ...)' where the scholarly filter applies."""
+        if search_state.scholarly_filter == 'all' or not search_state.scholarly_checked:
+            return ''
+        return f" ({tr('Has scholarly transcription') if search_state.scholarly_filter == 'only_scholarly' else tr('No scholarly transcription')})"
+
     def _apply_library_filter(results_list):
         """SEED-026 / DMF (LIBFILTER-01): dual-mode filter results by selected library codes.
 
@@ -4410,6 +4605,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """
         filtered = _apply_printed_filter(results_list)
         filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
+        filtered = _apply_scholarly_filter(filtered)
         filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
@@ -4420,6 +4616,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
         if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
             count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if search_state.scholarly_filter != 'all' and search_state.scholarly_checked:
+            count_parts.append(tr('Has scholarly transcription') if search_state.scholarly_filter == 'only_scholarly' else tr('No scholarly transcription'))
         if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
             count_parts.append(tr('Library filter'))
         if count_parts:
@@ -4440,7 +4638,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or search_state.scholarly_filter != 'all' or bool(search_state.library_filter):
                 # Phase 999.2 (PGP-FILTER-04): route through unified printed+PGP filter when EITHER is active.
                 # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
                 _apply_printed_filter_and_render(search_state.results, reset_expansion=reset_expansion)
@@ -4469,7 +4667,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or search_state.scholarly_filter != 'all' or bool(search_state.library_filter):
                 # Phase 999.2 (PGP-FILTER-04): widened — routes through unified printed+PGP helper.
                 # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
                 _apply_printed_filter_and_render(filtered, reset_expansion=reset_expansion)
@@ -4864,17 +5062,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = filtered
             _apply_domain_exclusions()
             search_state.results = original_results
-        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or search_state.scholarly_filter != 'all' or bool(search_state.library_filter):
             # Phase 999.2 (PGP-FILTER-04): widened — apply printed AND/OR PGP filter post-word-search.
             # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
             filtered = _apply_printed_filter(filtered)
             filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
+            filtered = _apply_scholarly_filter(filtered)
             filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01)
             filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
             n_excl = len(excluded_items)
             count_parts = [f"{n_excl} {tr('excluded')}"]
+            if search_state.scholarly_filter != 'all' and search_state.scholarly_checked:
+                count_parts.append(tr('Has scholarly transcription') if search_state.scholarly_filter == 'only_scholarly' else tr('No scholarly transcription'))
             if search_state.library_filter:  # SEED-026 (WR-04 / Codex): indicator in the library-active branch
                 count_parts.append(tr('Library filter'))
             results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
@@ -4934,6 +5135,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filtered = _apply_printed_filter(filtered)
         # Apply PGP filter on top of printed-filtered results (Phase 999.2, D-11)
         filtered = _apply_pgp_filter(filtered)
+        filtered = _apply_scholarly_filter(filtered)
         # Apply library filter on top of PGP-filtered results (SEED-026, LIBFILTER-01)
         filtered = _apply_library_filter(filtered)
         # Apply measurement post-filters (Phase 54, review concern #1)
@@ -4949,6 +5151,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
         if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
             count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if search_state.scholarly_filter != 'all' and search_state.scholarly_checked:
+            count_parts.append(tr('Has scholarly transcription') if search_state.scholarly_filter == 'only_scholarly' else tr('No scholarly transcription'))
         if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
             count_parts.append(tr('Library filter'))
         if count_parts:
@@ -5086,6 +5290,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
             search_state.results = state_snapshot['results']
+            # The shown search's scholarly answers are not these rows': forget them until
+            # these are checked (below; Codex review of PR #22).
+            search_state.scholarly_page_uids = set()
+            search_state.scholarly_checked = False
+            search_state.scholarly_incomplete = False
+            _set_btn_visible(scholarly_filter_btn, False)
             await _prefetch_post_matches(search_state.results)
             search_state.responsa_warning = responsa_note_of(state_snapshot['results'])
             # An entry from a build that kept the rows: their variant settings are
@@ -5164,6 +5374,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         history_menu.close()
         if state_snapshot.get('results'):
             ui.notify(tr('Search restored from history'), type='info', timeout=2000)
+            await _recheck_scholarly_pages()
             return
 
         ui.notify(tr('Re-running search from history'), type='info', timeout=2000)
@@ -5192,6 +5403,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _toggle_expansion(search_state, refs, index)
 
     def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
+        _update_reset_filters_btn()
         _render_results(search_state, refs, results, page, scroll_to_top, reset_expansion)
 
     def create_result_card(index, result):
@@ -5441,6 +5653,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # transcription / printed icons leak onto partial results of the new one.
         search_state.transcription_sys_ids = set()
         search_state.manual_transcription_sys_ids = set()
+        search_state.scholarly_page_uids = set()
+        search_state.scholarly_checked = False
+        search_state.scholarly_incomplete = False
         search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
 
@@ -5538,6 +5753,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
         _set_btn_visible(pgp_filter_btn, False)
+        _set_btn_visible(scholarly_filter_btn, False)
         # SEED-026 (smoke round 3): hide the library button during the search too; it is
         # re-revealed at RENDER time (not enrichment time) once results exist.
         _set_btn_visible(library_filter_btn, False)
@@ -6002,6 +6218,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # --- Staged enrichment: render fast, enrich progressively ---
         all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+        # The rows behind all_sys_ids, one for one: the scholarly check reads a row's own
+        # page, so each pass checks its own rows, never every row of a manuscript it touches
+        # (a manuscript with many hits would make the first page's pass read them all;
+        # Codex review of PR #22).
+        _id_rows = [r for r in results if r.get('display', {}).get('id')]
+
         this_generation = search_state.search_generation
         _t_stage0 = time.perf_counter()
 
@@ -6083,6 +6305,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Initialize enrichment fields to empty (will be populated progressively)
         search_state.transcription_sys_ids = set()
         search_state.manual_transcription_sys_ids = set()  # SEED-022
+        search_state.scholarly_page_uids = set()
+        search_state.scholarly_checked = False
+        search_state.scholarly_incomplete = False
         search_state.all_result_domains = {}
         search_state.result_domains = {}
         search_state.domain_name_map = {}
@@ -6277,6 +6502,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
             # Phase 999.2 (PGP-FILTER-02, D-07): PGP button visible iff some result has PGP.
             _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+            _set_btn_visible(scholarly_filter_btn, _scholarly_btn_shown())
+            _update_scholarly_filter_btn()
             # BUG-A fix: reveal library button FIRST (before any _update_* calls that might
             # raise). If an exception in _update_pgp_filter_btn/_update_domain_filter_btn/
             # _update_exclude_btn aborts the chain, the button still appears.
@@ -6321,7 +6548,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             if search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or search_state.scholarly_filter != 'all' or bool(search_state.library_filter):
                 # Phase 999.2 (PGP-FILTER-04, HIGH-1): widened — printed OR PGP routes through
                 # the unified _apply_printed_filter_and_render (which applies BOTH per Task 3).
                 # SEED-026 (LIBFILTER-01): widened — library-only also routes through filtering helper.
@@ -6347,8 +6574,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 io_bound_result.io_bound(collect_vs_availability, visible_ids),
                 io_bound_result.io_bound(get_sys_ids_with_pgp_text, visible_ids),
                 io_bound_result.io_bound(_web_fgp_sys_ids, visible_ids),
+                io_bound_result.io_bound(_web_scholarly_page_uids, _id_rows[:PAGE_SIZE]),
             )
-            fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids = _visible_enrichment
+            (fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids,
+             scholarly_uids) = _visible_enrichment
             # Check generation before applying (user may have started a new search).
             # A lookup with no answer (cancelled, or the app is stopping) commits
             # nothing: the cards keep their plain form, the filter buttons stay hidden.
@@ -6359,6 +6588,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _process_domain_data(raw_domains)
                 search_state.transcription_sys_ids = transcription_ids
                 search_state.manual_transcription_sys_ids = union_manual_transcriptions(pgp_text_ids, fgp_ids)
+                search_state.scholarly_page_uids = set(scholarly_uids.found)
+                search_state.scholarly_incomplete = not scholarly_uids.complete
+                # Answered for every row only when the visible batch is all of them and none
+                # failed; else the background pass below says so when its last chunk is in
+                # (Codex review of PR #22).
+                search_state.scholarly_checked = (not all_sys_ids[PAGE_SIZE:]
+                                                  and not search_state.scholarly_incomplete)
                 search_state.catalog_source_counts = catalog_counts
                 search_state.printed_ids = printed_ids
                 search_state.translation_data = trans_data
@@ -6418,17 +6654,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         io_bound_result.io_bound(collect_vs_availability, chunk_ids),
                         io_bound_result.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
                         io_bound_result.io_bound(_web_fgp_sys_ids, chunk_ids),
+                        io_bound_result.io_bound(
+                            _web_scholarly_page_uids,
+                            _id_rows[PAGE_SIZE + chunk_start:PAGE_SIZE + chunk_start + CHUNK_SIZE]),
                     )
                     if search_state.search_generation != this_generation:
                         return
                     if io_bound_result.interrupted(*_chunk_enrichment):
                         return  # no answer (cancelled, or the app is stopping): commit nothing
-                    bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = _chunk_enrichment
+                    (bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids,
+                     bg_scholarly_uids) = _chunk_enrichment
                     bg_domains, bg_counts, bg_printed, bg_meas = bg_fjms_tuple
                     search_state._measurement_cache.update(bg_meas)
                     _process_domain_data(bg_domains)
                     search_state.transcription_sys_ids |= bg_trans_ids
                     search_state.manual_transcription_sys_ids |= union_manual_transcriptions(bg_pgp_text_ids, bg_fgp_ids)
+                    search_state.scholarly_page_uids |= set(bg_scholarly_uids.found)
+                    if not bg_scholarly_uids.complete:
+                        search_state.scholarly_incomplete = True
                     search_state.catalog_source_counts.update(bg_counts)
                     search_state.printed_ids |= bg_printed
                     search_state.translation_data.update(bg_trans_data)
@@ -6436,6 +6679,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 if search_state.search_generation != this_generation:
                     return
+                # Every row's page is checked now, unless a pass could not answer for some.
+                search_state.scholarly_checked = not search_state.scholarly_incomplete
                 _apply_enrichment_to_ui()
                 _render_with_filters(reset_expansion=False)
                 from web.export_state import update_search_export_enrichment
@@ -6722,24 +6967,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if r.get('display', {}).get('id')
             ]
             if sys_ids:
+                # A search started while this runs owns the page: what is read here is the
+                # restored rows', so it is dropped (Codex review of PR #22).
+                _restored_rows = search_state.results
+                _restored_generation = search_state.search_generation
+
+                def _superseded():
+                    return (search_state.results is not _restored_rows
+                            or search_state.search_generation != _restored_generation)
+
                 # SEED-022: restore the PGP link set (PGP badge) AND the manual-
                 # transcription union (new badge) in parallel, so both reappear on a
                 # reloaded session.
                 try:
-                    link_ids, manual_ids = await asyncio.gather(
+                    link_ids, manual_ids, scholarly_uids = await asyncio.gather(
                         io_bound_result.io_bound(get_sys_ids_with_transcriptions, sys_ids),
                         io_bound_result.io_bound(_web_manual_transcription_ids, sys_ids),
+                        io_bound_result.io_bound(_web_scholarly_page_uids, list(search_state.results)),
                     )
-                    if io_bound_result.interrupted(link_ids, manual_ids):
+                    if io_bound_result.interrupted(link_ids, manual_ids, scholarly_uids):
                         return  # no answer (cancelled, or the app is stopping): never store it
+                    if _superseded():
+                        return
                     search_state.transcription_sys_ids = link_ids
                     search_state.manual_transcription_sys_ids = manual_ids
+                    search_state.scholarly_page_uids = set(scholarly_uids.found)
+                    search_state.scholarly_incomplete = not scholarly_uids.complete
+                    search_state.scholarly_checked = scholarly_uids.complete
                 except Exception:
                     link_ids = await run.io_bound(get_sys_ids_with_transcriptions, sys_ids)
-                    if link_ids is None:
+                    if link_ids is None or _superseded():
                         return  # cancelled or app stopping: never store None
                     search_state.transcription_sys_ids = link_ids
                     search_state.manual_transcription_sys_ids = set()
+                    search_state.scholarly_page_uids = set()
+                    search_state.scholarly_checked = False
+                    search_state.scholarly_incomplete = False
                 # SEED-026 (smoke 2026-06-29): re-run the cheap FJMS enrichment on restore
                 # (domains + printed + catalog counts + measurements) so the domain/printed
                 # filter buttons reappear after a UI-language change rebuilds the page from
@@ -6751,6 +7014,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     raw_domains, catalog_counts, printed_ids, meas_batch = await run.io_bound(
                         collect_fjms_enrichment, sys_ids
                     )
+                    if _superseded():
+                        return
                     _process_domain_data(raw_domains)
                     search_state.has_domain_data = bool(search_state.all_result_domains)
                     search_state.result_domains = dict(search_state.all_result_domains)
@@ -6766,6 +7031,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     logger.exception("SEED-026: FJMS re-enrichment on restore failed (non-fatal)")
                 # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
                 _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+                _set_btn_visible(scholarly_filter_btn, _scholarly_btn_shown())
+                _update_scholarly_filter_btn()
                 _update_pgp_filter_btn()
                 _update_pgp_filter_chip()
                 # Phase 999.2 (HIGH-4): use the unified filtered render cascade so the
@@ -6775,7 +7042,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _apply_manuscript_exclusions(reset_expansion=False)
                 elif search_state.domain_exclusions and search_state.has_domain_data:
                     _apply_domain_exclusions(reset_expansion=False)
-                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all' or search_state.scholarly_filter != 'all' or bool(search_state.library_filter):
                     # SEED-026 (LIBFILTER-01): widened — library-only also routes through filtering helper on restore.
                     _apply_printed_filter_and_render(search_state.results, reset_expansion=False)
                 else:

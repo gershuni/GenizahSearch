@@ -172,7 +172,9 @@ class TestSearchScopeDoesNotFollowTheReader:
         src = _read("web/pages/browse.py")
         assert "def _clear_search_scope_for_new_manuscript(" in src
         i = src.index("def _clear_search_scope_for_new_manuscript(")
-        body = src[i:i + 900]
+        # The whole function, up to the next one: a fixed window lost its last line once
+        # the function cleared two more fields (PR #18).
+        body = src[i:src.index("\n    def ", i + 1)]
         assert "state.highlight_terms = None" in body
         assert "_url_state['highlight'] = None" in body
 

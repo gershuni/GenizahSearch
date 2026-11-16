@@ -1339,7 +1339,7 @@ class FgpService:
         """True if the sidecar DB connection is active AND a source table was found."""
         return self._conn is not None and self._table is not None
 
-    def get_fgp_sources_for_fragment(self, sys_id: str) -> List[Dict[str, Any]]:
+    def get_fgp_sources_for_fragment(self, sys_id: str, *, strict: bool = False) -> List[Dict[str, Any]]:
         """
         Get all FGP transcription sources for a fragment, chooser-shaped.
 
@@ -1350,17 +1350,19 @@ class FgpService:
             List of chooser-shaped FGP source dicts (see ``_row_to_fgp_source``),
             ordered by ``sequence_order`` when available. Returns ``[]`` when the
             flag is off, the DB is absent, ``sys_id`` is falsy, or on error.
+            *strict*: raise when a query fails instead of answering empty (a caller that must tell "none" from "could not read"); a sidecar that is not there still answers empty, as the chooser shows nothing from it. The flag being off is no error.
         """
         if not _fgp_enabled():
             return []
-        return self.chooser_sources(sys_id)
+        return self.chooser_sources(sys_id, strict=strict)
 
-    def chooser_sources(self, sys_id: str) -> List[Dict[str, Any]]:
+    def chooser_sources(self, sys_id: str, *, strict: bool = False) -> List[Dict[str, Any]]:
         """The chooser's FGP sources for a manuscript, whatever the feature flag says.
 
         What :meth:`get_fgp_sources_for_fragment` returns when FGP is switched on: the
         editions index (``shared/editions_indexer.py``) is built from exactly this list,
         so search and the chooser never disagree about which FGP texts a manuscript has.
+        *strict*: raise when a query fails instead of answering empty (a caller that must tell "none" from "could not read"); a sidecar that is not there still answers empty, as the chooser shows nothing from it.
         """
         if not sys_id or not self.is_available() or "sys_id" not in self._columns:
             return []
@@ -1384,6 +1386,8 @@ class FgpService:
             sources.sort(key=_fgp_sort_key)
             return sources
         except Exception as e:
+            if strict:
+                raise
             logger.error("Error getting FGP sources for fragment %s: %s", sys_id, e)
             return []
 
@@ -1424,7 +1428,8 @@ class FgpService:
             logger.error("Error batch checking FGP sources: %s", e)
             return set()
 
-    def get_sys_ids_with_fgp_editions(self, sys_ids: Optional[List[str]] = None) -> Set[str]:
+    def get_sys_ids_with_fgp_editions(self, sys_ids: Optional[List[str]] = None, *,
+                                      strict: bool = False) -> Set[str]:
         """Batch-check which sys_ids have an FGP scholarly EDITION (SEED-023).
 
         EDITIONS-ONLY: ``doc_relation = 'Digital Edition'`` -- deliberately NOT
@@ -1441,6 +1446,7 @@ class FgpService:
         Returns:
             Set of sys_ids with an FGP Digital Edition. ``set()`` when the flag is
             off, the DB is absent, or on error.
+            *strict*: raise when a query fails instead of answering empty (a caller that must tell "none" from "could not read"); a sidecar that is not there still answers empty, as the chooser shows nothing from it. The flag being off is no error.
         """
         if not _fgp_enabled():
             return set()
@@ -1470,6 +1476,8 @@ class FgpService:
                 result_set.update(row["sys_id"] for row in cursor if row["sys_id"])
             return result_set
         except Exception as e:
+            if strict:
+                raise
             logger.error("Error batch checking FGP editions: %s", e)
             return set()
 
@@ -1585,9 +1593,9 @@ def reset_fgp_service():
 # ── Module-level Wrapper Functions ─────────────────────────────────
 
 
-def get_fgp_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
+def get_fgp_sources_for_fragment(sys_id: str, *, strict: bool = False) -> List[Dict[str, Any]]:
     """Get all FGP transcription sources for a fragment (chooser-shaped)."""
-    return get_fgp_service().get_fgp_sources_for_fragment(sys_id)
+    return get_fgp_service().get_fgp_sources_for_fragment(sys_id, strict=strict)
 
 
 def get_sys_ids_with_fgp_sources(sys_ids: List[str]) -> Set[str]:
@@ -1595,11 +1603,12 @@ def get_sys_ids_with_fgp_sources(sys_ids: List[str]) -> Set[str]:
     return get_fgp_service().get_sys_ids_with_fgp_sources(sys_ids)
 
 
-def get_sys_ids_with_fgp_editions(sys_ids: Optional[List[str]] = None) -> Set[str]:
+def get_sys_ids_with_fgp_editions(sys_ids: Optional[List[str]] = None, *,
+                                  strict: bool = False) -> Set[str]:
     """sys_ids with an FGP scholarly edition (SEED-023, 'Digital Edition' only).
     ``None`` => full corpus. See
     :meth:`FgpService.get_sys_ids_with_fgp_editions`."""
-    return get_fgp_service().get_sys_ids_with_fgp_editions(sys_ids)
+    return get_fgp_service().get_sys_ids_with_fgp_editions(sys_ids, strict=strict)
 
 
 def get_version() -> Optional[str]:

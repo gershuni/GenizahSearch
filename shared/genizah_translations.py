@@ -2986,6 +2986,12 @@ TRANSLATIONS = {
     "Only PGP": "PGP בלבד",
     "Hiding PGP": "ללא PGP",
     "Filter by PGP coverage": "סנן לפי כיסוי PGP",
+    "Filter scholarly transcriptions": "סנן תעתיקים מדעיים",
+    "Has scholarly transcription": "תעתיק מדעי",
+    "No scholarly transcription": "ללא תעתיק מדעי",
+    "Reset filters": "נקה סינונים",
+    "Show every result again: clear the result filters": "הצג שוב את כל התוצאות: נקה את סינוני התוצאות",
+    "Filter by whether the result's page has a scholarly transcription": "סינון לפי קיומו של תעתיק מדעי לעמוד התוצאה",
     # Catalog browse availability filters (SEED-023)
     "Filter by availability": "סינון לפי זמינות",
     "Filter Scholarly Transcriptions": "סנן לפי תעתיק מדעי",

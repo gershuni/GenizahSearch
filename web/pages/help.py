@@ -1053,6 +1053,10 @@ The site fetches metadata and images from:
 The **Search History** button (clock icon) near the **Search** button lists your recent searches. Clicking one restores its query with all its settings, then runs the search again.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
+        _md('''
+After a search, **Filter scholarly transcriptions** shows only the results whose page has a scholarly transcription -- an FGP or PGP edition in that page's version selector. A second click hides them instead, to find pages no one has edited yet; a third shows every result again. The result filters stay on for your next search: while one is on, **Reset filters** beside the count clears them all.
+        ''').style('color: var(--text-secondary);').classes('mb-4')
+
         if _editions_served():
             h3('Scholarly transcriptions in the search', classes='text-lg font-semibold mb-2 mt-2',
                style='color: var(--text-primary);')
@@ -1868,6 +1872,10 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
         _md('''
 כפתור **היסטוריית חיפוש** (סמל השעון) שליד כפתור **חפש** מציג את החיפושים האחרונים שלכם. לחיצה על אחד מהם משחזרת את השאילתה כולל כל מאפייניה, ואז מריצה את החיפוש מחדש.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        _md('''
+אחרי חיפוש, **סנן תעתיקים מדעיים** מציג רק את התוצאות שלעמוד שלהן יש תעתיק מדעי — מהדורת FGP או PGP בבורר הגרסאות של העמוד. לחיצה שנייה מסתירה אותן במקום זאת, כדי למצוא עמודים שעדיין לא נערכו; לחיצה שלישית מציגה שוב את כל התוצאות. סינוני התוצאות נשארים פעילים גם בחיפוש הבא: כל עוד אחד מהם פעיל, **נקה סינונים** שליד מספר התוצאות מבטל את כולם.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         if _editions_served():

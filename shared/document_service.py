@@ -350,7 +350,7 @@ class PgpService:
             logger.error(f"Error getting sources for document {pgpid}: {e}")
             return []
 
-    def get_all_sources_for_fragment(self, sys_id: str) -> List[Dict[str, Any]]:
+    def get_all_sources_for_fragment(self, sys_id: str, *, strict: bool = False) -> List[Dict[str, Any]]:
         """
         Get all sources (editions and translations) for ALL PGP documents linked to a fragment.
 
@@ -364,6 +364,8 @@ class PgpService:
             List of source dicts from all linked documents, ordered by: doc_relation
             (Edition first), then sequence_order. Each source includes 'page_info'
             from fragment link (recto/verso). Returns empty list if not found.
+
+            *strict*: raise when a query fails instead of answering empty (a caller that must tell "none" from "could not read"); a sidecar that is not there still answers empty, as the chooser shows nothing from it.
         """
         if not sys_id or not self._conn:
             return []
@@ -406,6 +408,8 @@ class PgpService:
             return all_sources
 
         except Exception as e:
+            if strict:
+                raise
             logger.error(f"Error getting all sources for fragment {sys_id}: {e}")
             return []
 
@@ -555,7 +559,8 @@ class PgpService:
             logger.error(f"Error fetching all PGP-link sys_ids: {e}")
             return set()
 
-    def get_sys_ids_with_editions(self, sys_ids: Optional[List[str]] = None) -> Set[str]:
+    def get_sys_ids_with_editions(self, sys_ids: Optional[List[str]] = None, *,
+                                  strict: bool = False) -> Set[str]:
         """Batch check which sys_ids have a PGP scholarly EDITION (SEED-023).
 
         EDITIONS-ONLY: matches ``document_sources.doc_relation LIKE '%Edition%'``
@@ -573,6 +578,7 @@ class PgpService:
 
         Returns:
             Set of sys_ids linked to a PGP document with a scholarly edition.
+            *strict*: raise when a query fails instead of answering empty (a caller that must tell "none" from "could not read"); a sidecar that is not there still answers empty, as the chooser shows nothing from it.
         """
         if not self._conn:
             return set()
@@ -602,6 +608,8 @@ class PgpService:
                 result_set.update(row['sys_id'] for row in cursor if row['sys_id'])
             return result_set
         except Exception as e:
+            if strict:
+                raise
             logger.error(f"Error batch checking PGP editions: {e}")
             return set()
 
@@ -1277,7 +1285,7 @@ def get_sources_for_document(pgpid: int) -> List[Dict[str, Any]]:
     return svc.get_sources_for_document(pgpid)
 
 
-def get_all_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
+def get_all_sources_for_fragment(sys_id: str, *, strict: bool = False) -> List[Dict[str, Any]]:
     """
     Get all sources (editions and translations) for ALL PGP documents linked to a fragment.
 
@@ -1293,7 +1301,7 @@ def get_all_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
         from fragment link (recto/verso). Returns empty list if not found.
     """
     svc = get_pgp_service()
-    return svc.get_all_sources_for_fragment(sys_id)
+    return svc.get_all_sources_for_fragment(sys_id, strict=strict)
 
 
 def get_editions_for_document(pgpid: int) -> List[Dict[str, Any]]:
@@ -1372,11 +1380,12 @@ def get_pgp_urls_for_pgpids(pgpids: List[int]) -> Dict[int, str]:
     return svc.get_pgp_urls_for_pgpids(pgpids)
 
 
-def get_sys_ids_with_editions(sys_ids: Optional[List[str]] = None) -> Set[str]:
+def get_sys_ids_with_editions(sys_ids: Optional[List[str]] = None, *,
+                              strict: bool = False) -> Set[str]:
     """sys_ids with a PGP scholarly edition (SEED-023, EDITIONS-ONLY). ``None``
     => full corpus. See :meth:`PGPDocumentService.get_sys_ids_with_editions`."""
     svc = get_pgp_service()
-    return svc.get_sys_ids_with_editions(sys_ids)
+    return svc.get_sys_ids_with_editions(sys_ids, strict=strict)
 
 
 def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:

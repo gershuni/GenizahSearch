@@ -56,6 +56,15 @@ class SearchUIState:
         # (PGP text ∪ FGP). Source-agnostic; rendered as a SEPARATE additive badge
         # alongside the PGP one. Do NOT conflate with transcription_sys_ids above.
         self.manual_transcription_sys_ids: Set[str] = set()
+        # The uid of every result whose PAGE has a scholarly transcription the version
+        # chooser offers (shared.transcription_service.rows_with_scholarly_transcription):
+        # what the scholarly-transcription filter reads. Filled by the enrichment passes.
+        self.scholarly_page_uids: Set[str] = set()
+        # Whether the check above has answered for this search's shown rows: until it has,
+        # the filter passes the rows through; after, it applies even to an empty set.
+        self.scholarly_checked: bool = False
+        # A pass of this search could not answer for some rows: the check never completes.
+        self.scholarly_incomplete: bool = False
         self.displayed_results = []  # Currently rendered subset (may be filtered)
         self.builder_negated_words: list = []  # Words negated via Query Builder
         self.result_domains: dict = {}  # Domain classification map for result indicators
@@ -69,6 +78,9 @@ class SearchUIState:
         self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
         self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
         self.pgp_filter: str = 'all'  # Phase 999.2: 'all', 'only_pgp', 'hide_pgp' — post-search PGP-presence filter
+        # 'all', 'only_scholarly', 'hide_scholarly': post-search filter on whether the
+        # result's page has a scholarly transcription (scholarly_page_uids).
+        self.scholarly_filter: str = 'all'
         self.library_filter: list = []  # SEED-026 (LIBFILTER-01): active code set for the current mode (hide-set in Hide mode, allowlist in Show-only mode); empty = all
         self.library_mode: str = 'hide'  # 'show_only' | 'hide' (D-05 default: Hide mode with empty set = show all)
         self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
@@ -463,7 +475,8 @@ def preview_shows_final_rows(state: 'SearchUIState') -> bool:
     page keeps its spinner and shows the result as before.
     """
     if (state.exclusion_sources or state.word_search_excluded_ids or state.domain_exclusions
-            or state.printed_filter != 'all' or state.pgp_filter != 'all' or state.library_filter
+            or state.printed_filter != 'all' or state.pgp_filter != 'all'
+            or state.scholarly_filter != 'all' or state.library_filter
             or (state._all_terms_filter and state.refinement_chain)):
         return False
     return not getattr(state, 'post_filter_criteria', None)
@@ -560,6 +573,7 @@ def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] 
 # updated as they change (save_post_filters_with_run), so Back shows this run's rows
 # under its own filters, not those another tab set since (Codex, PR #436).
 _PGP_FILTER_STATES = ('all', 'only_pgp', 'hide_pgp')
+SCHOLARLY_FILTER_STATES = ('all', 'only_scholarly', 'hide_scholarly')
 
 
 def _post_filters(state: 'SearchUIState') -> dict:
@@ -568,6 +582,7 @@ def _post_filters(state: 'SearchUIState') -> dict:
         'domain_exclusions': list(state.domain_exclusions or []),
         'search_exclusion_sources': list(state.exclusion_sources or []),
         'pgp_filter': state.pgp_filter,
+        'scholarly_filter': state.scholarly_filter,
         'library_filter': {'mode': state.library_mode, 'codes': list(state.library_filter or [])},
         'word_search_excluded_ids': list(state.word_search_excluded_ids or []),
     }
@@ -578,6 +593,8 @@ def restore_post_filters(state: 'SearchUIState', raw: dict) -> None:
     load; a snapshot without them leaves the loaded values."""
     if raw.get('pgp_filter') in _PGP_FILTER_STATES:
         state.pgp_filter = raw['pgp_filter']
+    if raw.get('scholarly_filter') in SCHOLARLY_FILTER_STATES:
+        state.scholarly_filter = raw['scholarly_filter']
     library = raw.get('library_filter')
     if isinstance(library, dict):
         from shared.browse_map_utils import sanitize_library_codes
@@ -788,6 +805,7 @@ def clear_search_snapshot() -> None:
         'domain_exclusions': [],
         'search_printed_filter': 'all',
         'search_pgp_filter': 'all',  # Phase 999.2 (PGP-FILTER-05, D-10) — central New-Search reset path
+        'search_scholarly_filter': 'all',
         'search_library_filter': {'mode': 'hide', 'codes': []},  # DMF (LIBFILTER-01/DMF-06) — central New-Search reset path; D-09 dict shape; D-05 fresh default
         'word_search_excluded_ids': [],
         'search_exclusion_sources': [],
