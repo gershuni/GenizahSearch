@@ -1702,11 +1702,9 @@ class PGPSourceWorker(QThread):
             from shared.document_service import (
                 get_all_sources_for_fragment,
                 get_document_for_fragment,
-                get_section_for_page
             )
             from shared.fgp_service import (
-                get_fgp_sources_for_fragment, source_provider,
-                _select_fgp_sources_for_page,
+                get_fgp_sources_for_fragment, filter_sources_for_page,
             )
 
             # Get all sources (editions + translations) for this fragment, then
@@ -1715,52 +1713,16 @@ class PGPSourceWorker(QThread):
             all_sources = get_all_sources_for_fragment(self.sys_id) or []
             all_sources = all_sources + (get_fgp_sources_for_fragment(self.sys_id) or [])
 
-            # Displayed image identity, resolved on the MAIN thread and passed in
-            # (the crossref singleton is not thread-safe on desktop). The FGP
-            # image NUMBER (fgp_image_number_id) is the exact per-image key; the
-            # folio label is the fallback. '' for both -> all FGP kept.
-            fgp_folio = self.folio_label
-            fgp_image_number = self.image_number
-
-            # FGP chosen collectively: editions aligned to the V0.8 page text by
-            # similarity (folio match = safe default; fgp_source_for_folio is used
-            # inside), translations by folio match. PGP loop below is unchanged.
-            fgp_all = [s for s in all_sources if source_provider(s) == 'fgp']
-            fgp_keep_ids = {
-                id(s) for s in _select_fgp_sources_for_page(
-                    fgp_all, fgp_folio, fgp_image_number, self.page_text)
-            }
-
-            # Filter sources by page (recto/verso)
-            current_page_info = 'recto' if self.page_num == 1 else 'verso'
-            page_sources = []
-            for source in all_sources:
-                if source_provider(source) == 'fgp':
-                    if id(source) in fgp_keep_ids:
-                        page_sources.append(source)
-                    continue
-
-                source_page = source.get('page_info')
-                is_translation = 'Translation' in (source.get('doc_relation') or '')
-
-                # Include translations regardless of page_info,
-                # but extract correct section if content has recto/verso markers
-                if is_translation:
-                    if not source_page:
-                        content = source.get('content')
-                        if content:
-                            source['content'] = get_section_for_page(content, self.page_num, source.get('sections'))
-                    page_sources.append(source)
-                    continue
-
-                # For editions: include if page matches or page_info is not set
-                if source_page == current_page_info or not source_page:
-                    # If no page_info, extract the correct recto/verso section
-                    if not source_page:
-                        content = source.get('content')
-                        if content:
-                            source['content'] = get_section_for_page(content, self.page_num, source.get('sections'))
-                    page_sources.append(source)
+            # The website's page filter, so both apps show the same sources.
+            # Displayed image identity is resolved on the MAIN thread and passed
+            # in (the crossref singleton is not thread-safe on desktop): the FGP
+            # image NUMBER is the exact per-image key, the folio label the
+            # fallback, '' for both -> all FGP kept; FGP editions also align to
+            # the V0.8 page text by similarity. The desktop keeps PGP
+            # translations on every page (translations_every_page).
+            page_sources = filter_sources_for_page(
+                all_sources, self.page_num, self.folio_label, self.image_number,
+                page_text=self.page_text, translations_every_page=True)
 
             # Get document metadata
             pgp_doc = get_document_for_fragment(self.sys_id, self.page_num)

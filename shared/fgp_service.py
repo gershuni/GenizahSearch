@@ -929,25 +929,63 @@ def _select_fgp_sources_for_page(
     return [s for s in fgp_sources if id(s) in keep_ids]
 
 
+#: PGP's ``page_info`` for a document that covers both sides of the fragment.
+PGP_BOTH_SIDES = "recto and verso"
+
+
+def _pgp_text_for_page(source: Dict[str, Any], page_num: int) -> Optional[str]:
+    """A PGP source's text narrowed to one page, or ``None`` when it has none there.
+
+    The narrowing is ``get_section_for_page`` with the source's ``sections``. For a
+    'recto and verso' text:
+      * with Recto/Verso headings, the headings decide a page its ``sections`` do
+        not cover (``get_section_for_page`` would return the whole text there
+        without reading them): 45 page texts in the local sidecar, most of them
+        one-sided texts that would otherwise show whole on the other page;
+      * with no heading, a page nothing splits out is shown the whole text: PGP
+        says it covers both sides, so hiding it on the second page would hide
+        the edition there (owner, 2026-11-16: 49 such texts on 42 manuscripts).
+    """
+    from shared.document_service import get_section_for_page, has_side_markers
+
+    content = source.get("content")
+    sections = source.get("sections")
+    text = get_section_for_page(content, page_num, sections)
+    if source.get("page_info") != PGP_BOTH_SIDES:
+        return text
+    if not has_side_markers(content):
+        return content if text is None else text
+    if sections and not any(isinstance(s, dict) and s.get("canvas_num") == page_num
+                            for s in sections):
+        return get_section_for_page(content, page_num)
+    return text
+
+
 def filter_sources_for_page(
     sources: Optional[List[Dict[str, Any]]],
     page_num: int,
     folio_label: Optional[str] = None,
     image_number: Optional[str] = None,
     page_text: Optional[str] = None,
+    *,
+    translations_every_page: bool = False,
 ) -> List[Dict[str, Any]]:
     """Filter a merged PGP+FGP source list to one displayed page.
 
-    Centralizes the per-page filtering that was duplicated across the web
-    enrichment path (``browse_enrichment``), the web Advanced-view path
-    (``search_results``) and the desktop ``PGPSourceWorker`` (FGP-04.4).
+    The one copy of the per-page rule, used by the web enrichment path
+    (``browse_enrichment``), the web Advanced-view path (``search_results``)
+    and the desktop ``PGPSourceWorker`` (FGP-04.4).
 
-    PGP behavior is preserved EXACTLY (FGP-12):
-      * keep a source whose ``page_info`` matches the current side, or that has
-        no ``page_info``;
-      * for a kept PGP NON-translation source with no ``page_info``, narrow its
-        ``content`` to this page via ``get_section_for_page`` (mutated in place,
-        as the original code did).
+    PGP, by the fragment link's ``page_info``:
+      * 'recto' shows on page 1, 'verso' on every other page;
+      * no ``page_info``, or 'recto and verso', shows on every page, its
+        ``content`` narrowed to this page (``_pgp_text_for_page``, mutated in
+        place). A narrowing that leaves nothing keeps the source with no
+        content, which the chooser then leaves out.
+      * Translations follow the same side rule but are not narrowed -- unless
+        ``translations_every_page`` (the desktop's rule): then a translation
+        shows on every page whatever its side, and is narrowed like an edition
+        when it carries no single side.
 
     FGP is one row per manuscript image, aligned to the displayed image by
     folio (see ``fgp_source_for_folio``): a foliated row shows only on the
@@ -957,10 +995,6 @@ def filter_sources_for_page(
 
     Returns a (possibly empty) list; callers may apply ``or None``.
     """
-    # Imported here to avoid any import-order coupling; document_service does not
-    # import this module, so there is no cycle.
-    from shared.document_service import get_section_for_page
-
     # FGP is chosen COLLECTIVELY (so similarity can pick the best edition for this
     # page vs the V0.8 text); PGP is filtered individually (unchanged). When
     # page_text is given, FGP editions align to V0.8 by textual similarity with
@@ -978,16 +1012,16 @@ def filter_sources_for_page(
             if id(source) in fgp_keep_ids:
                 page_sources.append(source)
             continue
-        # PGP path — preserved verbatim from the original sites.
         source_page = source.get("page_info")
-        if source_page == current_page_info or not source_page:
-            is_translation = "Translation" in (source.get("doc_relation") or "")
-            if source.get("content"):
-                if not is_translation and not source_page:
-                    source["content"] = get_section_for_page(
-                        source["content"], page_num, source.get("sections")
-                    )
-            page_sources.append(source)
+        is_translation = "Translation" in (source.get("doc_relation") or "")
+        every_page = not source_page or source_page == PGP_BOTH_SIDES
+        if not (every_page or source_page == current_page_info
+                or (is_translation and translations_every_page)):
+            continue
+        narrow = every_page and (not is_translation or translations_every_page)
+        if narrow and source.get("content"):
+            source["content"] = _pgp_text_for_page(source, page_num)
+        page_sources.append(source)
     return page_sources
 
 

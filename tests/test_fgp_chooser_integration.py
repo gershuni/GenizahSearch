@@ -94,8 +94,10 @@ class TestDesktopChooserWiring:
         assert "get_fgp_sources_for_fragment" in src
         # Merged in BOTH the per-fragment worker and the reading-desk batch worker.
         assert src.count("get_fgp_sources_for_fragment(") >= 2
-        # FGP chosen via the shared selection (folio match + V0.8 similarity).
-        assert "_select_fgp_sources_for_page" in src
+        # Sources chosen by the website's shared page filter (FGP by folio match
+        # + V0.8 similarity, PGP by side), not a desktop copy of the rule.
+        assert "filter_sources_for_page(" in src
+        assert "current_page_info" not in src
         # The folio label, the exact FGP image number, AND the V0.8 page text are
         # resolved on the MAIN thread and passed in — the worker must NOT query
         # the (non-thread-safe) crossref service itself.

@@ -814,6 +814,39 @@ class PgpService:
 # ── Pure Functions (no database dependency) ────────────────────────
 
 
+# A side heading at the start of a line: "Recto", "Verso", and their variants:
+#   bare: Recto\n, Verso\n
+#   period: Verso.\n, Recto.\n
+#   period+qualifier: Verso. Address.\n
+#   parenthetical: Verso (address)\n, Verso (upside down)\n
+#   dash/comma: Recto - right margin\n
+#   space+word: Recto Margin\n
+# Uses explicit [Rr]ecto/[Vv]erso (not IGNORECASE) to avoid matching
+# content lines like "recto text..." which start with the keyword.
+# \b word boundary prevents matching "Rectory" etc.
+_SIDE_MARKER_RE = re.compile(
+    r'^([Rr]ecto|[Vv]erso)\b'
+    r'(?:'
+    r'[.\s]*'                            # optional periods/spaces after keyword
+    r'(?:'
+    r'[-,]\s*[^\n]{0,40}'               # dash/comma modifier
+    r'|'
+    r'\([^\n)]{0,40}\)'                  # parenthetical modifier
+    r'|'
+    r'[A-Z][a-z]*(?:\.[^\n]{0,30})?'    # capitalized qualifier word(s)
+    r')?'
+    r')?'
+    r'\s*\n',
+    re.MULTILINE
+)
+
+
+def has_side_markers(transcription: str) -> bool:
+    """Whether the text carries at least one Recto/Verso heading
+    (the headings ``parse_transcription_sections`` splits on)."""
+    return bool(transcription) and _SIDE_MARKER_RE.search(transcription) is not None
+
+
 def parse_transcription_sections(transcription: str) -> dict:
     """
     Parse PGP transcription text into sections by recto/verso markers.
@@ -829,35 +862,8 @@ def parse_transcription_sections(transcription: str) -> dict:
     if not transcription:
         return {'recto': [], 'verso': []}
 
-    # Pattern matches section headers at start of line
-    # Handles all known marker variants:
-    #   bare: Recto\n, Verso\n
-    #   period: Verso.\n, Recto.\n
-    #   period+qualifier: Verso. Address.\n
-    #   parenthetical: Verso (address)\n, Verso (upside down)\n
-    #   dash/comma: Recto - right margin\n
-    #   space+word: Recto Margin\n
-    # Uses explicit [Rr]ecto/[Vv]erso (not IGNORECASE) to avoid matching
-    # content lines like "recto text..." which start with the keyword.
-    # \b word boundary prevents matching "Rectory" etc.
-    section_pattern = re.compile(
-        r'^([Rr]ecto|[Vv]erso)\b'
-        r'(?:'
-        r'[.\s]*'                            # optional periods/spaces after keyword
-        r'(?:'
-        r'[-,]\s*[^\n]{0,40}'               # dash/comma modifier
-        r'|'
-        r'\([^\n)]{0,40}\)'                  # parenthetical modifier
-        r'|'
-        r'[A-Z][a-z]*(?:\.[^\n]{0,30})?'    # capitalized qualifier word(s)
-        r')?'
-        r')?'
-        r'\s*\n',
-        re.MULTILINE
-    )
-
     # Find all section markers with their positions
-    markers = list(section_pattern.finditer(transcription))
+    markers = list(_SIDE_MARKER_RE.finditer(transcription))
 
     if not markers:
         # No markers found - treat entire text as recto
