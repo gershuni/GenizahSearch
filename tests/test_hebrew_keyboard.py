@@ -92,8 +92,17 @@ def test_used_payload_never_raises():
 
 def test_search_page_wires_it():
     src = SEARCH_PAGE.read_text(encoding='utf-8')
-    assert 'hebrew_keyboard.TARGET_ATTR' in src
-    assert 'hebrew_keyboard.head_html()' in src
+    # The box carries its field, so the header's box (on /search too) keeps its own keys.
+    assert "f' {hebrew_keyboard.TARGET_ATTR}={hebrew_keyboard.FIELD}'" in src
+    assert 'data-hk-field="{hebrew_keyboard.FIELD}"' in src
+    # The script and styles come once per page, from the layout every page with a
+    # header uses (two copies would type each key twice).
+    assert 'hebrew_keyboard.head_html()' not in src
+    main = (ROOT / 'web' / 'main.py').read_text(encoding='utf-8')
+    layout = main[main.index('def create_layout():'):]
+    layout = layout[:layout.index(chr(10) + 'def ')]
+    assert 'ui.add_head_html(hebrew_keyboard.head_html())' in layout
+    assert len({hk.FIELD, hk.HOME_FIELD, hk.HEADER_FIELD}) == 3
     # search_executed carries the query: the keyboard's use never rides on it.
     assert "'hebrew_keyboard':" not in src
     # A key tapped on a phone took the focus from the box (whose blur saved the
@@ -248,3 +257,34 @@ def test_keyboard_activation_types(page):
     page.keyboard.press('Enter')
     page.keyboard.press('Space')
     assert _box(page) == 'אבב'
+
+
+# --- Part 3: several boxes on one page --------------------------------------
+
+_TWO = '''<!doctype html><html><head><meta charset="utf-8"></head><body>
+<div id="header"><input id="hbox" {target}="header_search" value=""></div>
+<div id="hpanel" {panel} data-hk-field="header_search" data-hk-layout="alphabetical">{keys}</div>
+<label id="main" {target}="main_search"><input id="mbox" value=""></label>
+<div id="mpanel" {panel} data-hk-field="main_search" data-hk-layout="alphabetical">{keys}</div>
+<script>window.captured = [];
+window.posthog = {{capture: function (n, p) {{ window.captured.push([n, p]); }}}};</script>
+<script>{js}</script>
+<script>{js}</script>
+</body></html>'''
+
+
+def test_each_panel_types_into_its_own_box_once(page):
+    """The header's box comes first on /search: a key in the main panel still types
+    in the main box (the pair shares a field), the marker on a wrapper reaches its
+    input, and the script loaded twice still types each key once."""
+    page.goto('about:blank')
+    page.set_content(_TWO.format(
+        target=hk.TARGET_ATTR, panel=hk.PANEL_ATTR,
+        keys=hk.panel_html(_ident), js=JS.read_text(encoding='utf-8')))
+    page.click('#mpanel [data-hk-char="ש"]')
+    page.click('#hpanel [data-hk-char="ב"]')
+    page.click('#mpanel [data-hk-char="ת"]')
+    assert page.evaluate("[document.getElementById('hbox').value, document.getElementById('mbox').value]") == ['ב', 'שת']
+    fields = [c[1]['field'] for c in page.evaluate('window.captured')]
+    assert fields == ['main_search'], fields   # once per attempt, from the first key's panel
+

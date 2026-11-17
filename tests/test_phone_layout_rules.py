@@ -591,3 +591,8 @@ def test_the_filter_chips_are_compact_with_room_before_the_label():
     assert 'min-height: 28px !important' in rule and 'padding-inline: 12px 6px !important' in rule, rule
     assert 'margin-inline-start: 2px !important' in top
     assert "btn.classes(add='filter-chip')" in _read('web/pages/search.py')
+    # An off chip follows the theme (Quasar's fixed grey read as disabled on the dark one).
+    assert '.q-btn.filter-chip-off { color: var(--text-secondary); }' in top
+    search = _read('web/pages/search.py')
+    assert "('unelevated color=primary' if active else 'outline')" in search
+    assert "btn.classes(**{'remove' if active else 'add': 'filter-chip-off'})" in search

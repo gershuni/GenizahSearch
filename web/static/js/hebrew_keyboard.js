@@ -2,8 +2,10 @@
  * The on-screen Hebrew keyboard (web/hebrew_keyboard.py).
  *
  * A key inside a panel marked `data-gs-hebrew-keyboard` puts its character into
- * the box marked `data-gs-hebrew-keyboard-target` at the cursor (replacing a
- * selection); the backspace key deletes the selection or the character before
+ * that panel's box at the cursor (replacing a selection): the box marked
+ * `data-gs-hebrew-keyboard-target` with the panel's `data-hk-field` as its value
+ * (the search page, the homepage and the header each have a pair, and the
+ * header's box is on every page), else a box marked without a value; the backspace key deletes the selection or the character before
  * the cursor with its marks. The box hears an ordinary `input` event, so Vue's
  * model, the page's mode-prefix detection and Enter see a key as a typed one.
  *
@@ -17,15 +19,26 @@
  */
 (function () {
   'use strict';
+  // Loaded once per page; a second copy would type every key twice.
+  if (window.gsHebrewKeyboard) return;
   var PANEL = '[data-gs-hebrew-keyboard]';
-  var TARGET = '[data-gs-hebrew-keyboard-target]';
+  var TARGET_NAME = 'data-gs-hebrew-keyboard-target';
+  var TARGET = '[' + TARGET_NAME + ']';
   var USED_EVENT = 'gs-hebrew-keyboard-used';
 
   var usedThisAttempt = false;
   var touchedBox = new WeakSet();  // boxes the reader has put a cursor in
 
-  function targetInput() {
-    var el = document.querySelector(TARGET);
+  // The panel's own box: the one named by its field, else one marked without a name.
+  function targetInput(panel) {
+    var field = panel ? panel.getAttribute('data-hk-field') : null;
+    var boxes = document.querySelectorAll(TARGET), el = null, i;
+    for (i = 0; i < boxes.length && !el; i++) {
+      if (field && boxes[i].getAttribute(TARGET_NAME) === field) el = boxes[i];
+    }
+    for (i = 0; i < boxes.length && !el; i++) {
+      if (!boxes[i].getAttribute(TARGET_NAME)) el = boxes[i];
+    }
     if (!el) return null;
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el;
     return el.querySelector('input, textarea');
@@ -93,15 +106,15 @@
   }, true);
 
   document.addEventListener('focusin', function (ev) {
-    var input = targetInput();
-    if (input && ev.target === input) touchedBox.add(input);
+    var t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.closest(TARGET)) touchedBox.add(t);
   }, true);
 
   document.addEventListener('click', function (ev) {
     var key = ev.target.closest && ev.target.closest(PANEL + ' .gs-hk-key');
     if (!key) return;
     var panel = key.closest(PANEL);
-    var input = targetInput();
+    var input = targetInput(panel);
     if (!input || input.disabled || input.readOnly) return;
     ev.preventDefault();
     if (key.getAttribute('data-hk-action') === 'backspace') {

@@ -24,3 +24,6 @@ taken as the reader's "select none").
 The printed and PGP menus re-render through the same path as the scholarly one, which keeps the
 word-search exclusions and the Toggle Filters panel's fields in force. Help describes the chips in
 both languages.
+
+A chip that is off takes the theme's secondary text colour, its outline with it: Quasar's fixed grey
+read as unavailable on the dark theme (owner, 2026-11-16).

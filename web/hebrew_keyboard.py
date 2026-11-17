@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
-"""An on-screen Hebrew keyboard for the main search box (pilot).
+"""An on-screen Hebrew keyboard for the search boxes (pilot).
 
 For visitors with no Hebrew layout on their computer: students, Arabists reading
-Judeo-Arabic, a borrowed machine. A ⌨ button inside the /search box opens a panel
+Judeo-Arabic, a borrowed machine. A ⌨ button inside a search box opens a panel
 of keys in alphabet order, each final form beside its letter; a key puts its
 character in at the cursor, in the browser (web/static/js/hebrew_keyboard.js), so
 a letter costs no round trip.
 
 The pilot's scope (owner, 2026-11-15, after a Codex design review):
 
-* the main search box only, and only the alphabet layout. The Israeli layout is a
-  second step if the numbers ask for it;
+* the alphabet layout only. The Israeli layout is a second step if the numbers ask
+  for it;
+* the /search box first; the homepage box and the header's go-to box followed
+  (owner, 2026-11-16), each with its own panel (``attach``), named by its field
+  (``FIELD``, ``HOME_FIELD``, ``HEADER_FIELD``), which is also how the script
+  pairs a panel with its box: the header's box is on /search too;
 * no typing with the physical keys: a visitor who opened the panel for one letter
   and then types a shelfmark must get the shelfmark;
 * no ``?`` key: at the start of the box ``?`` and a space switch the mode to
@@ -47,10 +51,14 @@ _JS_PATH = Path(__file__).resolve().parent / 'static' / 'js' / 'hebrew_keyboard.
 
 #: The layout's name in PostHog. The only one in the pilot.
 LAYOUT = 'alphabetical'
-#: The field's name in PostHog.
+#: The fields' names: a panel types into the box carrying the same name, and
+#: PostHog gets it with both events.
 FIELD = 'main_search'
+HOME_FIELD = 'home_search'
+HEADER_FIELD = 'header_search'
 
-#: On the search box (``query_input``): the script types into the box carrying it.
+#: On a search box, with its field as the value: the script types into the box
+#: carrying the panel's field (one marked without a value, else).
 TARGET_ATTR = 'data-gs-hebrew-keyboard-target'
 #: On the panel: the script answers clicks on keys inside it.
 PANEL_ATTR = 'data-gs-hebrew-keyboard'
@@ -148,6 +156,16 @@ STYLES = '''<style>
   .gs-hk-row { gap: 3px; }
   .gs-hk-key { height: 2.5rem; }
 }
+/* The header's panel opens over the page under its box, centred on it and never
+   wider than the screen (the header is one row, 64px high). */
+.gs-hk-floating {
+  position: absolute; top: calc(100% + 12px); left: 50%; transform: translateX(-50%);
+  width: min(30rem, calc(100vw - 16px)); z-index: 3000; padding: 6px 10px 8px;
+  background: var(--bg-card, #fff); color: var(--text-primary, #1f2937);
+  border: 1px solid var(--border-light, #d0d4da); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.gs-hk-floating .gs-hk-panel { max-width: none; }
 </style>
 '''
 
@@ -162,6 +180,43 @@ def head_html() -> str:
         logger.warning('hebrew_keyboard: %s is missing; the keys type nothing', _JS_PATH)
         return STYLES
     return STYLES + f'<script src="/static/js/hebrew_keyboard.js?v={version}" defer></script>\n'
+
+
+def attach(box: Any, field: str, tr: Callable[[str], str], *, floating: bool = False,
+           dark: bool = False, panel_classes: str = 'w-full') -> Tuple[Any, Any, dict]:
+    """Give *box* (a ``ui.input``) the ⌨ button and a panel of keys that type into it.
+
+    *field* names the pair (the script pairs them by it; PostHog gets it). The
+    button goes in the box's ``append`` slot; the panel is made where the caller
+    is, hidden. A *floating* panel opens over the page under its box (the
+    header's); *dark* makes the button white (a dark box). Returns the button,
+    the panel and the state (``{'open': bool}``).
+    """
+    from nicegui import ui
+    from web.analytics import posthog_capture
+
+    client = ui.context.client
+    state = {'open': False}
+    box.props(f'{TARGET_ATTR}={field}')
+    with box.add_slot('append'):
+        toggle = ui.button(icon='keyboard', on_click=lambda: _toggle()).classes(NO_CAPTURE_CLASS).props(
+            'flat round dense size=sm aria-expanded="false"' + (' text-color=white' if dark else '')
+            + f' aria-label="{tr("Hebrew keyboard")}"').tooltip(tr('Hebrew keyboard'))
+    panel = ui.element('div').classes(
+        f'{"gs-hk-floating" if floating else panel_classes} {NO_CAPTURE_CLASS}').props(
+        f'{PANEL_ATTR} data-hk-field="{field}" data-hk-layout="{LAYOUT}"')
+    with panel:
+        ui.html(panel_html(tr), sanitize=False)
+    panel.set_visibility(False)
+
+    def _toggle():
+        state['open'] = not state['open']
+        panel.set_visibility(state['open'])
+        toggle.props(f'aria-expanded="{"true" if state["open"] else "false"}"')
+        if state['open']:
+            posthog_capture(POSTHOG_OPENED, {'field': field, 'layout': LAYOUT}, client=client)
+
+    return toggle, panel, state
 
 
 def reset_script() -> str:

@@ -735,6 +735,7 @@ from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language, visitor_language
 from web.citation_chip import render_citation_chip
 from web.home_query import catalogue_has_shelfmark, home_query_target  # the header's go-to box routes as the homepage box does
+from web import hebrew_keyboard  # the on-screen keys in the header's box (and the script for every page's boxes)
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
     load_atlas_state,
@@ -1919,6 +1920,10 @@ def create_layout():
                 ).classes('header-search-input').on('keydown.enter', _go).on(
                     'keydown.esc', js_handler=_HEADER_SEARCH_CLOSE_JS
                 ).mark('header-search')
+                # The on-screen Hebrew keyboard (web/hebrew_keyboard.py; owner,
+                # 2026-11-16): its keys open over the page under the box.
+                hebrew_keyboard.attach(header_box, hebrew_keyboard.HEADER_FIELD, tr,
+                                       floating=True, dark=True)
                 ui.button(icon='close').props(
                     f'flat round dense text-color=white aria-label="{tr("Close")}"'
                 ).classes('header-search-close').on('click', js_handler=_HEADER_SEARCH_CLOSE_JS)
@@ -2178,6 +2183,9 @@ def create_layout():
     from web.keyboard_shortcuts import dictionaries_served as _shortcut_dictionaries_served
     from web.keyboard_shortcuts import head_html as _shortcuts_head_html
     ui.add_head_html(_shortcuts_head_html())
+    # The on-screen Hebrew keyboard's styles and script, once per page: the header's
+    # box has it on every page, and /search and the homepage boxes use the same script.
+    ui.add_head_html(hebrew_keyboard.head_html())
     shortcuts_trigger = ui.element('div').classes(f'{TRIGGER_CLASS} hidden')
     _shortcuts_card = {'dialog': None}
 

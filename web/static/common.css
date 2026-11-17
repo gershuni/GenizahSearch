@@ -1347,6 +1347,8 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 .header-search-input input { color: #fff !important; text-overflow: ellipsis; }
 .header-search-input input::placeholder { color: rgba(255, 255, 255, 0.75) !important; opacity: 1; }
 .header-search-close { display: none !important; }
+/* The on-screen keyboard's panel (.gs-hk-floating, web/hebrew_keyboard.py) is placed under the field. */
+.header-search-field { position: relative; }
 /* The button: a bar without room for the field. */
 .header-search-field { display: none !important; }
 .app-header > .header-search {
@@ -2551,6 +2553,10 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     padding-inline: 12px 6px !important; font-size: 13px; line-height: 1.2;
 }
 .q-btn.filter-chip .q-btn__content { flex-wrap: nowrap; }
+/* An off chip (outline, no Quasar colour) takes the theme's secondary text colour, its
+   outline with it: Quasar's fixed grey-8 read as disabled on the dark theme (owner, 2026-11-16),
+   and its !important colour class cannot be overridden from here. */
+.q-btn.filter-chip-off { color: var(--text-secondary); }
 .q-btn.filter-chip .q-icon.on-right {
     font-size: 18px; margin-inline-start: 2px !important; margin-inline-end: 0 !important;
 }

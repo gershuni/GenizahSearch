@@ -697,19 +697,21 @@ def test_the_pgp_chip_menu_filters_and_the_chip_fills(server, monkeypatch):  # n
         submit(a, WORD)
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
-        seen['off'] = (chip().text, 'unelevated' in chip().props)
+        seen['off'] = (chip().text, 'unelevated' in chip().props, 'filter-chip-off' in chip().classes)
         pick('No PGP')
         await asyncio.sleep(0.3)
         seen['on'] = (_count_line(a), chip().text, 'unelevated' in chip().props,
-                      stored(a, 'search_pgp_filter'))
+                      stored(a, 'search_pgp_filter'), 'filter-chip-off' in chip().classes)
         pick('All')
         await asyncio.sleep(0.3)
-        seen['all'] = (_count_line(a), chip().text, 'unelevated' in chip().props)
+        seen['all'] = (_count_line(a), chip().text, 'unelevated' in chip().props,
+                       'filter-chip-off' in chip().classes)
 
     run(driver, count=1)
-    assert seen['off'] == ('PGP', False), seen
-    assert seen['on'] == ('2 of 3 Results (Hiding PGP)', 'No PGP', True, 'hide_pgp'), seen
-    assert seen['all'][0].startswith('3 Results') and seen['all'][1:] == ('PGP', False), seen
+    # Off: outline in the theme's colour (filter-chip-off); on: filled.
+    assert seen['off'] == ('PGP', False, True), seen
+    assert seen['on'] == ('2 of 3 Results (Hiding PGP)', 'No PGP', True, 'hide_pgp', False), seen
+    assert seen['all'][0].startswith('3 Results') and seen['all'][1:] == ('PGP', False, True), seen
 
 
 def test_a_chip_choice_applies_under_the_filters_panel_fields(server, monkeypatch):  # noqa: F811

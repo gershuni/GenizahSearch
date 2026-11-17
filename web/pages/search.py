@@ -511,7 +511,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Add Advanced View image handler JavaScript at page level (must be outside dialog)
     # Versioned as on /browse (_viewer_js_version): an unversioned copy was kept 4 hours.
     from web.pages.browse import _viewer_js_version
-    ui.add_head_html(hebrew_keyboard.head_html())
     ui.add_head_html(ADVANCED_VIEWER_STYLES.replace(
         '/static/manuscript_viewer.js"', f'/static/manuscript_viewer.js?v={_viewer_js_version()}"', 1))
 
@@ -719,7 +718,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # progress bar; the site's top bar would run on 15 s (web/main.py).
                             'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
                             ' data-gs-primary-search'  # "/" jumps here (web/keyboard_shortcuts.py)
-                            f' {hebrew_keyboard.TARGET_ATTR}'  # the on-screen keys type here
+                            f' {hebrew_keyboard.TARGET_ATTR}={hebrew_keyboard.FIELD}'  # the on-screen keys type here
                         ).style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
 
@@ -1883,7 +1882,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         btn.classes(add='filter-chip')  # size and padding: common.css
                         btn.props(remove='color outline unelevated flat')
                         btn.props('rounded dense no-caps icon-right=expand_more '
-                                  + ('unelevated color=primary' if active else 'outline color=grey-8'))
+                                  + ('unelevated color=primary' if active else 'outline'))
+                        # Off: the theme's secondary text colour (common.css), not a Quasar
+                        # colour, whose fixed grey read as unavailable on the dark theme.
+                        btn.classes(**{'remove' if active else 'add': 'filter-chip-off'})
 
                     def _filter_menu(btn, options, choose):
                         """A menu under *btn*: one item per (value, label); *choose* gets the value."""

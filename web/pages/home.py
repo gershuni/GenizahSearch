@@ -24,6 +24,7 @@ from web.atlas_assets import atlas_preview_available
 from web.discovery_assets import discovery_available
 from web.analytics import posthog_capture
 from web.home_query import catalogue_has_shelfmark, home_query_target
+from web import hebrew_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,12 @@ def create_page():
                         icon='search',
                         on_click=_navigate_search
                     ).props(f'round color=primary aria-label="{tr("Search")}"').style('width: 44px; height: 44px;')
+
+            # The on-screen Hebrew keyboard (web/hebrew_keyboard.py; owner, 2026-11-16):
+            # the button in the box, the keys under the box's row, as wide as it.
+            with ui.row().classes('w-full justify-center'):
+                _hk_panel = hebrew_keyboard.attach(hero_search, hebrew_keyboard.HOME_FIELD, tr)[1]
+                _hk_panel.style('max-width: 600px;')
 
             # A first-class escape hatch for the many visitors who arrive
             # curious about the Genizah but without a query in mind.  This is
