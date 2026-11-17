@@ -70,6 +70,7 @@ from desktop.editions_index import EditionsIndex
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
+from desktop.widgets.tab_order import chain_layouts
 from desktop.widgets.side_nav import (
     LayoutProofShortcuts, LinkedButton, SideNav, ltr, popup_point, windows_virtual_key,
 )
@@ -6592,6 +6593,8 @@ class GenizahGUI(QMainWindow):
 
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
+        # Enter here searches, as in the query box (owner, v10.0.0: it did nothing).
+        self.gap_input.returnPressed.connect(self.toggle_search)
         # Gap lives on row 1 (2026-08-20). Measured: row 2 needed 1423 px minimum on
         # a 1440 px logical screen, so its fixed-width children were compressed below
         # their minimum and overlapped. Row 1's minimum is 795 px with Gap added and
@@ -6612,6 +6615,7 @@ class GenizahGUI(QMainWindow):
         self.exclude_input.setToolTip(tr("Results containing these words will be filtered out"))
         self.exclude_input.setMaximumWidth(120)
         self.exclude_input.setMinimumWidth(60)   # shrinkable: elide under pressure, never overlap
+        self.exclude_input.returnPressed.connect(self.toggle_search)
 
         # Text Position filter (for join detection)
         self.text_position_combo = QComboBox()
@@ -6818,6 +6822,10 @@ class GenizahGUI(QMainWindow):
         top_layout.addWidget(self.search_row1_container)
         top_layout.addWidget(self.search_row2)
         top_layout.addWidget(self.responsa_sub_row)
+        # Tab in the order the rows show (right to left in Hebrew), not the order the
+        # widgets were parented: Gap and Focus Search are inserted into row 1 late, and
+        # Tab skipped them (desktop/widgets/tab_order.py).
+        chain_layouts(row1, row2, responsa_sub_layout)
 
         # Pre-search filter chip bar (Phase 45-03)
         self.filter_chip_bar = QWidget()
@@ -7187,6 +7195,10 @@ class GenizahGUI(QMainWindow):
         in_l.addWidget(self.comp_filter_chip_bar)
         self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText(tr("Paste source text..."))
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # Tab moves on to the controls below, as in every other field: it typed a tab
+        # character into the box, so nothing after it could be reached with Tab.
+        # Pasted tabs are kept.
+        self.comp_text_area.setTabChangesFocus(True)
         in_l.addWidget(self.comp_text_area)
 
         # Composition Search conditions, under the main text (owner,

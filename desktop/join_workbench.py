@@ -16,6 +16,7 @@ from shared.joins_lab import (
 from shared.responsa_match import ResponsaQueryRefused
 from shared.web_links import web_browse_url
 from desktop.variant_run_settings import basic_changes_searcher
+from desktop.widgets.tab_order import chain_layouts
 
 logger = get_logger(__name__)
 
@@ -1327,6 +1328,7 @@ if _QT_AVAILABLE:
             self.rows.append(entry)
 
             self._sync()
+            self._retab()
             self._update_preview()
             return entry
 
@@ -1364,6 +1366,7 @@ if _QT_AVAILABLE:
             if len(entry["boxes"]) > 1:
                 entry["mods"]["wildcard_prefix"] = False
                 self._update_row_indicator(entry)
+            self._retab()
             self._update_preview()
 
         def _remove_box(self, entry: dict, box: dict, rm_btn):
@@ -1390,6 +1393,12 @@ if _QT_AVAILABLE:
             self.rows.remove(entry)
             self._sync()
             self._update_preview()
+
+        def _retab(self):
+            """Tab through the builder as it shows: each line's word boxes, then its
+            buttons, then the next line. Rows are added after the controls below them,
+            so Qt's default order reached a line's word box last (desktop/widgets/tab_order.py)."""
+            chain_layouts(self.layout())
 
         def _sync(self):
             """Hide the gap spinbox on the LAST row only (it connects to the next row)."""
@@ -5907,6 +5916,8 @@ if _QT_AVAILABLE:
             self.coldstart_input.setPlaceholderText(tr("Enter shelfmark…"))
             btn_open = QPushButton(tr("Open fragment"))
             btn_open.clicked.connect(self._cold_start_open)
+            # Enter opens it too, as in every other shelfmark box (it did nothing).
+            self.coldstart_input.returnPressed.connect(self._cold_start_open)
             coldstart_row.addWidget(self.coldstart_input, 1)
             coldstart_row.addWidget(btn_open)
             # Pick-from-personal-list button (📋) — mirrors the JoinsDialog affordance.
