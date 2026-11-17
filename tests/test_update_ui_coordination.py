@@ -27,6 +27,10 @@ def _make_gui_coordinator():
     gui._sidecar_download_queue = []
     gui._sidecar_data_dir = "/fake/data"
     gui._current_sidecar_download = None
+    # Made once startup has finished (the scholarly transcriptions' index). On a bare
+    # __new__ object a missing attribute raises Qt's RuntimeError, not AttributeError, so
+    # getattr's default never applies: the duck must carry it.
+    gui._editions_index = None
     return gui
 
 
@@ -126,6 +130,22 @@ def test_download_next_sidecar_empty_queue_calls_reset_and_returns():
     mock_reset.assert_called_once()
     # The empty-queue branch shows the "Update Complete" info dialog.
     mock_qmb.information.assert_called_once()
+
+
+def test_download_next_sidecar_empty_queue_checks_the_editions_index_again():
+    """The scholarly transcriptions' index is built from the sidecars just replaced: once the
+    queue is empty, after the services are reset, its build is resumed for 'sidecars'."""
+    gui = _make_gui_coordinator()
+    calls = []
+    gui._editions_index = MagicMock()
+    gui._editions_index.resume.side_effect = lambda why: calls.append(('resume', why))
+
+    with patch("genizah_app.QMessageBox"), \
+         patch.object(gui, "_reset_sidecar_connections",
+                      side_effect=lambda: calls.append(('reset',))):
+        gui._download_next_sidecar()
+
+    assert calls == [('reset',), ('resume', 'sidecars')]
 
 
 # ---------------------------------------------------------------------------

@@ -385,10 +385,14 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     assert any(check.match(ln) for ln in lines[restart + 1:]), (
         "a failed restart must be reported, not swallowed"
     )
-    # One check per external command, and nothing else that looks like one.
+    # Every external command, and nothing else that looks like one. Since the editions search
+    # (PR #18) the script has more than the five above -- the server asked whether it has an
+    # editions index, the editions build and gate, the stop, the swap, the start, the
+    # recoveries -- so each is checked by the loop below rather than counted.
     commands = [i for i, ln in enumerate(lines)
-                if ln.startswith(("python ", "scp ", "ssh ", "git ", "$ContractLines = @("))]
-    assert len(commands) == 5
+                if ln.startswith(("python ", "scp ", "ssh ", "git ", "$ContractLines = @(",
+                                  "$answer = @(ssh "))]
+    assert len(commands) >= 5
     # Select-Object would stop the pipeline early and can kill the native process mid-write,
     # leaving $LASTEXITCODE at -1 on a perfectly healthy repository.
     assert not any("$ContractLines" in ln and "Select-Object" in ln for ln in lines), (
@@ -424,10 +428,64 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
         "comparing against the server's HEAD is exactly the hole this replaced"
     )
     for i in commands:
-        following = next(ln for ln in lines[i + 1:] if ln)
-        assert check.match(following), "the line after %r must be its exit-code check" % lines[i]
-    code = [ln for ln in lines if not ln.startswith("#")]
+        assert _stops_on_its_exit_code(lines, i), (
+            "the line after %r must be its exit-code check, and a failure must stop the script"
+            % lines[i]
+        )
+    # `&&` between PowerShell statements is a parse error in 5.1; inside a string the script
+    # sends to the server's bash (`ssh $RemoteHost "cd ... && ..."`) it is bash's, and right.
+    code = [_PS_STRING.sub('""', ln) for ln in lines if not ln.startswith("#")]
     assert not any("&&" in ln for ln in code), "PowerShell 5.1: `&&` is a parse error"
+
+
+# A PowerShell double-quoted string, its backtick escapes (`" `$) included.
+_PS_STRING = re.compile(r'"(?:`.|[^"`])*"')
+_STOPS = ("Fail ", "Invoke-Recovery ", "Invoke-RollbackBoth ")
+
+
+def _stops_on_its_exit_code(lines, i):
+    """Does the statement right after the external command on line *i* read its exit code, and
+    does a failure end the script? STRICT forms only (gpt-6-astra, round 5, kept the text of a
+    looser pin while disabling the check with `-and $false`):
+
+    - ``if ($LASTEXITCODE -ne 0) { Fail ...`` on one line;
+    - ``if ($LASTEXITCODE -ne 0) {`` opening a block that ends in a stop (Fail, or a recovery
+      or rollback, which always ends in Fail);
+    - ``if ($LASTEXITCODE -eq 0) { Fail ...`` (or such a block) followed by ``Fail`` -- a
+      recovery whose every outcome stops, saying which;
+    - ``$code = $LASTEXITCODE`` followed, after the line that reads the answer, by
+      ``if ($code -ne 0 -or ...) {`` whose block fails (the server's answer to "is this
+      directory there?").
+    """
+    rest = [ln for ln in lines[i + 1:] if ln]
+    first = rest[0]
+
+    def block_stops(start):
+        """Does the block opened on rest[start] stop at its own level -- not only under a
+        condition nested inside it, which may never run -- and how many lines does it take?"""
+        depth, stops = 1, False
+        for n, ln in enumerate(rest[start + 1:]):
+            if depth == 1 and ln.startswith(_STOPS):
+                stops = True
+            code = _PS_STRING.sub('""', ln)       # braces the script sends to bash are not blocks
+            depth += code.count("{") - code.count("}")
+            if depth <= 0:
+                return stops, n + 2
+        return False, 0
+
+    if re.match(r"^if \(\$LASTEXITCODE -ne 0\) \{ Fail ", first):
+        return True
+    if first == "if ($LASTEXITCODE -ne 0) {":
+        return block_stops(0)[0]
+    if re.match(r"^if \(\$LASTEXITCODE -eq 0\) \{ Fail .*\}$", first):
+        return rest[1].startswith("Fail ")
+    if first == "if ($LASTEXITCODE -eq 0) {":
+        stops, used = block_stops(0)
+        return stops and rest[used].startswith("Fail ")
+    if first == "$code = $LASTEXITCODE":
+        at = next((k for k in (1, 2) if re.match(r"^if \(\$code -ne 0 -or .*\) \{$", rest[k])), None)
+        return at is not None and block_stops(at)[0]
+    return False
 
 
 def test_the_deploy_script_really_stops_when_the_guard_refuses(tmp_path):
@@ -597,10 +655,14 @@ def _powershell():
     return exe
 
 
-def _stubs(tmp_path, fail_on=None, **exit_codes):
+def _stubs(tmp_path, fail_on=None, dir_answer="absent", **exit_codes):
     """Each stub logs its invocation and exits with `exit_codes[name]`. With `fail_on=<the
     full argument string of one invocation>` that invocation exits 7 instead -- so a step
     in the MIDDLE of a sequence can be made to fail, not only the first.
+
+    An invocation that asks `test -d` (the deploy asking the server whether it has an editions
+    index) prints `dir_answer`: "absent" by default, a server without one, whose path is the
+    upload, the swap and the restart.
 
     Deliberately no `find`/`type` tricks: on this machine Git's usr/bin precedes System32
     on PATH, so `find /c /v ""` is GNU find walking the C: drive."""
@@ -614,13 +676,18 @@ def _stubs(tmp_path, fail_on=None, **exit_codes):
             # with x so an empty argument list cannot break the substitution.
             "set \"ARGS=x%*\"\r\n"
             "set \"ARGS=%ARGS:\"=%\"\r\n"
+            "set \"HIT=%ARGS:test -d=%\"\r\n"
+            # No answer means no line at all: a bare `echo` would print cmd's echo state.
+            "if not \"%HIT%\"==\"%ARGS%\" if defined STUB_DIR_ANSWER echo %STUB_DIR_ANSWER%\r\n"
             "if \"%ARGS%\"==\"x%STUB_FAIL_ON%\" exit /b 7\r\n"
             "exit /b " + str(code) + "\r\n",
             encoding="ascii",
         )
     log = tmp_path / "stub.log"
     env = dict(os.environ, PATH=str(stubs) + os.pathsep + os.environ.get("PATH", ""),
-               STUB_LOG=str(log), STUB_FAIL_ON=fail_on or "<never>")
+               STUB_LOG=str(log), STUB_FAIL_ON=fail_on or "<never>", STUB_DIR_ANSWER=dir_answer)
+    if not dir_answer:
+        env.pop("STUB_DIR_ANSWER")
     return env, log
 
 
@@ -725,7 +792,19 @@ def test_deploy_really_reports_a_failed_restart(tmp_path):
     assert rc == 1
     assert "DEPLOY ABORTED: restart failed" in err
     assert "Deployed" not in out
-    assert _log_lines(log) == ["ssh", "scp", "ssh"]
+    # ancestor check, upload, "is there an editions index?", swap, restart
+    assert _log_lines(log) == ["ssh", "scp", "ssh", "ssh", "ssh"]
+    assert "mv pgp.db.prev-" in err, "the message must name the rollback to the kept file"
+
+
+def _assert_upload_then_swap(log):
+    """The upload lands under a temporary name and only a later step puts it in place, keeping
+    the served file -- what a server without an editions index runs (PR #18)."""
+    raw = _log_raw(log)
+    assert raw[1].startswith("scp ") and raw[1].rstrip().endswith("/pgp_data/pgp.db.new"), raw[1]
+    assert "test -d %s/Genizah_Index/Editions" % TEST_REPO in raw[2], raw[2]
+    assert "mv pgp.db pgp.db.prev-" in raw[3] and "mv pgp.db.new pgp.db" in raw[3], raw[3]
+    assert raw[3].index("mv pgp.db pgp.db.prev-") < raw[3].index("mv pgp.db.new pgp.db"), raw[3]
 
 
 def test_deploy_succeeds_end_to_end_when_every_step_does(tmp_path):
@@ -735,7 +814,23 @@ def test_deploy_succeeds_end_to_end_when_every_step_does(tmp_path):
     assert rc == 0
     assert "Deployed" in out
     assert FAKE_SHA in out, "the revision the server was checked against must be shown"
-    assert _log_lines(log) == ["ssh", "scp", "ssh"]
+    assert _log_lines(log) == ["ssh", "scp", "ssh", "ssh", "ssh"]
+    _assert_upload_then_swap(log)
+    assert _log_raw(log)[4].replace('"', '').rstrip().endswith(RESTART_ARGS), "the restart comes last"
+
+
+@pytest.mark.parametrize("dir_answer", ["", "Permission denied"], ids=["no-answer", "other-answer"])
+def test_deploy_stops_when_the_server_cannot_say_whether_it_has_an_editions_index(tmp_path, dir_answer):
+    """No answer, or one that is neither "present" nor "absent", is never taken for "no editions
+    index": the sidecar would be swapped in under an index built from the old one. The upload
+    waits under its temporary name."""
+    clean = _sidecar(tmp_path / "clean.db")
+    env, log = _stubs(tmp_path, scp=0, ssh=0, dir_answer=dir_answer)
+    rc, out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
+    assert rc == 1
+    assert "could not ask the server whether" in err and "Genizah_Index/Editions" in err
+    assert "Deployed" not in out
+    assert _log_lines(log) == ["ssh", "scp", "ssh"], "nothing is swapped or restarted"
 
 
 def test_refresh_really_stops_at_the_first_failing_step(tmp_path):
