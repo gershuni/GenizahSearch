@@ -3,8 +3,8 @@
 import html
 import re
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QTextEdit, QCompleter
-from PyQt6.QtCore import Qt, QRect
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QTextEdit, QToolButton, QCompleter
+from PyQt6.QtCore import Qt, QEvent, QRect
 from PyQt6.QtGui import QColor, QTextCursor, QTextCharFormat
 
 from genizah_core import tr
@@ -137,26 +137,175 @@ def markers_to_bold_html(html_text, color='red'):
         f"<b style='color:{color};'>\\1</b>", html_text)
 
 
+#: "Find in text": every match, and the one the arrows are on.
+FIND_MATCH_COLOR = "#fff59d"
+FIND_CURRENT_COLOR = "#ff9632"
+
+
+def _find_cursors(doc, query):
+    """Every match of ``query`` in ``doc``, in order, as selecting cursors."""
+    cursors, cursor = [], QTextCursor(doc)
+    while True:
+        cursor = doc.find(query, cursor)
+        if cursor.isNull():
+            return cursors
+        cursors.append(cursor)
+
+
+def _paint_find_matches(text_browser, cursors, current=-1):
+    selections = []
+    for i, cursor in enumerate(cursors):
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(FIND_CURRENT_COLOR if i == current else FIND_MATCH_COLOR))
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format = fmt
+        selections.append(selection)
+    text_browser.setExtraSelections(selections)
+
+
 def apply_find_highlight(text_browser, query):
+    """Mark every match of ``query`` in ``text_browser``. The render paths call
+    this after putting new text in; when a ``FindNavigator`` is attached to the
+    view it does the marking, so its count and arrows follow the new text."""
     if not text_browser:
+        return
+    navigator = getattr(text_browser, '_find_navigator', None)
+    if navigator is not None:
+        navigator.refresh()
         return
     if not query:
         text_browser.setExtraSelections([])
         return
-    doc = text_browser.document()
-    cursor = QTextCursor(doc)
-    highlight_format = QTextCharFormat()
-    highlight_format.setBackground(QColor("#fff59d"))
-    selections = []
-    while True:
-        cursor = doc.find(query, cursor)
-        if cursor.isNull():
-            break
-        selection = QTextEdit.ExtraSelection()
-        selection.cursor = cursor
-        selection.format = highlight_format
-        selections.append(selection)
-    text_browser.setExtraSelections(selections)
+    _paint_find_matches(text_browser, _find_cursors(text_browser.document(), query))
+
+
+class FindNavigator(QWidget):
+    """The way through the matches of a "Find in text" box (asked for by a
+    reader, 2026-11-17: in a large manuscript the marked matches are pages
+    apart): a count ("3/12"), the match it is on in orange, and the arrows --
+    the buttons, Enter / Shift+Enter and F3 / Shift+F3 in the box.
+
+    Typing goes to the first match from the top of what is on screen, scrolling
+    only when it is not in view. New text in the view (another page, another
+    version, View All) is marked again with no match chosen ("0/12"), so the
+    window stays where the render put it -- at a search hit, say -- until an
+    arrow is used. The text cursor is never moved: the view only scrolls.
+
+    Build it with the box, put it in the box's row, and ``attach`` the view
+    once it exists."""
+
+    def __init__(self, line_edit, parent=None):
+        super().__init__(parent)
+        self.line_edit, self.view = line_edit, None
+        self.matches, self.current = [], -1
+        self._stale = False
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        self.count_label = QLabel()
+        layout.addWidget(self.count_label)
+        self.btn_prev, self.btn_next = QToolButton(), QToolButton()
+        self.btn_prev.setArrowType(Qt.ArrowType.UpArrow)
+        self.btn_next.setArrowType(Qt.ArrowType.DownArrow)
+        for button, name, keys, slot in (
+                (self.btn_prev, tr("Previous match"), "Shift+Enter", self.previous),
+                (self.btn_next, tr("Next match"), "Enter", self.next)):
+            button.setToolTip(f"{name} ({keys})")
+            button.setAccessibleName(name)
+            button.clicked.connect(slot)
+            layout.addWidget(button)
+        line_edit.textChanged.connect(self._on_text_changed)
+        line_edit.installEventFilter(self)
+        self._update_controls()
+
+    def attach(self, view):
+        self.view = view
+        view._find_navigator = self
+        view.document().contentsChanged.connect(self._mark_stale)
+        self.refresh()
+
+    def query(self):
+        return self.line_edit.text().strip()
+
+    def refresh(self):
+        """New text in the view: mark its matches, none of them chosen."""
+        self.current = -1
+        self._mark()
+
+    def next(self):
+        self._step(1)
+
+    def previous(self):
+        self._step(-1)
+
+    # -- inside ---------------------------------------------------------------
+
+    def eventFilter(self, obj, event):
+        if obj is self.line_edit and event.type() == QEvent.Type.KeyPress and event.key() in (
+                Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_F3):
+            # Taken here, so a dialog's default button never gets the Enter.
+            self._step(-1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _mark_stale(self):
+        self._stale = True
+
+    def _mark(self):
+        query = self.query()
+        if self.view is not None:
+            self.matches = _find_cursors(self.view.document(), query) if query else []
+            self._stale = False
+            if self.current >= len(self.matches):
+                self.current = -1
+            _paint_find_matches(self.view, self.matches, self.current)
+        self._update_controls()
+
+    def _on_text_changed(self, _text):
+        self.current = -1
+        self._mark()
+        if self.matches:
+            self._go(self._from_screen(forward=True))
+
+    def _step(self, direction):
+        if self._stale:                     # the text changed under the marks
+            self.refresh()
+        if not self.matches:
+            return
+        if self.current < 0:
+            self._go(self._from_screen(forward=direction > 0))
+        else:
+            self._go((self.current + direction) % len(self.matches))
+
+    def _from_screen(self, forward):
+        """The first match not above what is on screen, or (backwards) the last
+        one not below it; past the end, round to the other end."""
+        height = self.view.viewport().height()
+        rects = [self.view.cursorRect(c) for c in self.matches]
+        if forward:
+            return next((i for i, r in enumerate(rects) if r.bottom() >= 0), 0)
+        return next((i for i in range(len(rects) - 1, -1, -1) if rects[i].top() <= height),
+                    len(rects) - 1)
+
+    def _go(self, index):
+        self.current = index
+        _paint_find_matches(self.view, self.matches, index)
+        self._update_controls()
+        rect = self.view.cursorRect(self.matches[index])
+        height = self.view.viewport().height()
+        if rect.top() < 0 or rect.bottom() > height:
+            bar = self.view.verticalScrollBar()
+            bar.setValue(bar.value() + rect.center().y() - height // 2)
+
+    def _update_controls(self):
+        query, n = self.query(), len(self.matches)
+        # Left-to-right mark: "3/12" reads the same in the Hebrew interface.
+        self.count_label.setText(f"‎{self.current + 1}/{n}" if query else "")
+        self.count_label.setStyleSheet("color: #c62828;" if query and not n else "")
+        self.count_label.setVisible(bool(query))
+        for button in (self.btn_prev, self.btn_next):
+            button.setEnabled(n > 0)
 
 
 def _get_folio_number_from_shelfmark(shelfmark):

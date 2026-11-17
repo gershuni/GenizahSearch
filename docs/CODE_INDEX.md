@@ -1589,6 +1589,7 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
     - Method `set_buttons_visible` (Line 31)
 - **Function** `_format_add_to_list_label` (Line 39)
 - **Function** `apply_find_highlight` (Line 44)
+- **Class** `FindNavigator` — "Find in text": the count ("3/12"), the current match in orange, and the arrows / Enter / Shift+Enter through the matches (Browse by Shelfmark, Manuscript Viewer); `apply_find_highlight` hands an attached view to it.
 - **Function** `_get_folio_number_from_shelfmark` (Line 66) — Extract folio number from Oxford-style shelfmarks only.
 - **Function** `_get_folio_image_index` (Line 94)
 - **Function** `_get_initial_image_index` (Line 122)

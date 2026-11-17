@@ -5707,6 +5707,10 @@ TRANSLATIONS.update({
     "Close the window": "סגירת החלון",
     "Next result": "התוצאה הבאה",
     "Previous result": "התוצאה הקודמת",
+    # Find in text: the arrows through the matches (2026-11-17).
+    "Next match": "ההתאמה הבאה",
+    "Previous match": "ההתאמה הקודמת",
+    "In the Find box: the next / previous match": "בתיבת החיפוש בטקסט: ההתאמה הבאה / הקודמת",
     # Saved searches: the star in the search history menus (2026-10-25).
     "Saved searches": "חיפושים שמורים",
     "Clear history (saved searches stay)": "ניקוי ההיסטוריה (החיפושים השמורים נשארים)",

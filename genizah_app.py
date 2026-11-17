@@ -55,7 +55,7 @@ from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, Sh
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
-    apply_find_highlight, markers_to_bold_html, mark_pattern_hits, text_lines_to_html,
+    FindNavigator, apply_find_highlight, markers_to_bold_html, mark_pattern_hits, text_lines_to_html,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_folio_side_image_index,
     _get_initial_image_index,
@@ -8187,8 +8187,10 @@ class GenizahGUI(QMainWindow):
         browse_find_row.addWidget(QLabel(tr("Find:")))
         self.browse_find_input = QLineEdit()
         self.browse_find_input.setPlaceholderText(tr("Find in text..."))
-        self.browse_find_input.textChanged.connect(lambda text: apply_find_highlight(self.browse_text, text.strip()))
         browse_find_row.addWidget(self.browse_find_input)
+        # The count and the arrows through the matches; the text is attached below.
+        self.browse_find_nav = FindNavigator(self.browse_find_input)
+        browse_find_row.addWidget(self.browse_find_nav)
 
         # Text size, as in the Manuscript Viewer's find row and shared with it
         # (owner, 2026-10-24). Ctrl+= / Ctrl+- / Ctrl+0 too, on this tab.
@@ -8309,6 +8311,7 @@ class GenizahGUI(QMainWindow):
         self.browse_edit_mode = False
         self.browse_original_text = ""
         text_layout.addWidget(self.browse_text)
+        self.browse_find_nav.attach(self.browse_text)
 
         self._browse_apply_text_size(reading_text_size().value())
         reading_text_size().changed.connect(self._browse_apply_text_size)

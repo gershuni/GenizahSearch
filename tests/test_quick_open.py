@@ -591,8 +591,9 @@ def test_the_card_names_the_list_browse_and_viewer_keys_as_bound(hebrew):
     assert _card_keys(sections["In a list of results"]) == {"Space", "Ctrl+A", "Enter", "Ctrl+Enter", "Ctrl+B"}
     assert _card_keys(sections["Composition Search"]) == {"Ctrl+Enter"}
     moves = {"Ctrl+PgDown", "Ctrl+PgUp", f"Ctrl+Shift+{nxt}", f"Ctrl+Shift+{prev}"}
-    assert _card_keys(sections["Browse by Shelfmark"]) == moves
-    assert _card_keys(sections["Manuscript Viewer"]) == moves | {
+    find = {"Enter", "Shift+Enter"}                 # in the Find box: FindNavigator
+    assert _card_keys(sections["Browse by Shelfmark"]) == moves | find
+    assert _card_keys(sections["Manuscript Viewer"]) == moves | find | {
         f"Ctrl+{nxt}", f"Ctrl+{prev}", "Ctrl+B", "Ctrl+F", "Ctrl+=", "Ctrl+-", "Ctrl+0", "Esc"}
     # Browse by Shelfmark: bound on its tab, to its buttons.
     browse = _method_source(_app_source(), "create_browse_tab")

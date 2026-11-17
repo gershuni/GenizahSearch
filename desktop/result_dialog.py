@@ -27,7 +27,7 @@ from desktop.corrections_ui import (
 from desktop.widgets import (
     text_has_pattern_markers,
     _format_add_to_list_label,
-    apply_find_highlight, mark_pattern_hits, markers_to_bold_html, text_lines_to_html,
+    FindNavigator, apply_find_highlight, mark_pattern_hits, markers_to_bold_html, text_lines_to_html,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index,
 )
@@ -929,8 +929,10 @@ class ResultDialog(QDialog):
         ms_find_row.addWidget(QLabel(tr("Find:")))
         self.find_ms_input = QLineEdit()
         self.find_ms_input.setPlaceholderText(tr("Find in text..."))
-        self.find_ms_input.textChanged.connect(lambda text: apply_find_highlight(self.text_ms, text.strip()))
         ms_find_row.addWidget(self.find_ms_input)
+        # The count and the arrows through the matches; the text is attached below.
+        self.find_ms_nav = FindNavigator(self.find_ms_input)
+        ms_find_row.addWidget(self.find_ms_nav)
 
         # Text size, for the manuscript and the source-context panes together
         # (owner, 2026-09-24). Saved, so the next viewer opens at the same size.
@@ -975,6 +977,7 @@ class ResultDialog(QDialog):
         self._text_pt = _saved_text_pt()
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", self._text_pt)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         ms_text_layout.addWidget(self.text_ms)
+        self.find_ms_nav.attach(self.text_ms)
         # Phase 999.4: attach line-number gutter as sibling widget (D-04 selection-safe).
         # First real render at _rd_display_text / browse_render_page will populate.
         apply_line_numbered_text(self.text_ms, "", source_text="", is_html=True)

@@ -92,6 +92,7 @@ def shortcut_sections(hebrew: bool):
         ("Browse by Shelfmark", [
             ("Ctrl+PgDown / Ctrl+PgUp", "Next / previous image"),
             (f"Ctrl+Shift+{nxt} / Ctrl+Shift+{prev}", "Next / previous manuscript"),
+            ("Enter / Shift+Enter", "In the Find box: the next / previous match"),
         ]),
         ("Manuscript Viewer", [
             (f"Ctrl+{nxt} / Ctrl+{prev}", "Next / previous result"),
@@ -99,6 +100,7 @@ def shortcut_sections(hebrew: bool):
             ("Ctrl+PgDown / Ctrl+PgUp", "Next / previous image"),
             ("Ctrl+B", "Open it in Browse by Shelfmark"),
             ("Ctrl+F", "Find in the text"),
+            ("Enter / Shift+Enter", "In the Find box: the next / previous match"),
             ("Ctrl+= / Ctrl+- / Ctrl+0", "Larger, smaller or normal text"),
             ("Esc", "Close the window"),
         ]),
