@@ -2083,6 +2083,7 @@ TRANSLATIONS = {
     "FGP edition": "מהדורת FGP",
     "PGP edition": "מהדורת PGP",
     "Page not identified": "העמוד לא זוהה",
+    "Other parts of this document": "חלקים נוספים של המסמך",
     "in scholarly transcriptions": "בתעתיקים מדעיים",
     "The scholarly transcriptions could not be searched this time": "לא ניתן היה לחפש בתעתיקים המדעיים הפעם",
     "The scholarly transcription has changed since the search; the manuscript is shown": "התעתיק המדעי השתנה מאז החיפוש; מוצג כתב היד",

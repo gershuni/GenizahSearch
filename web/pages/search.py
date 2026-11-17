@@ -12,6 +12,7 @@ A comprehensive search interface with:
 
 from nicegui import ui, run, app
 from web import io_bound_result
+from shared.editions_search import result_sys_ids, row_sys_ids
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids, selected_rows, selection_key
 from web.translations import tr, tr_engine_message, is_rtl, get_language, using_language
@@ -2634,7 +2635,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Append the search that just ran (search_state.last_run) to the refinement
         chain, with the manuscripts and pages of *rows* (its raw results, before the
         display filters). No rows: no step, and the zero-result recovery shows (D-14a)."""
-        raw_ids = {r.get('display', {}).get('id') for r in rows if r.get('display', {}).get('id')}
+        raw_ids = result_sys_ids(rows)
         if not raw_ids:
             search_state._zero_result_refine = True
             return
@@ -2658,7 +2659,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if search_state.is_running:
             return
         # Capture current RAW result sys_ids as the refinement scope BEFORE the user searches
-        raw_ids = {r.get('display', {}).get('id') for r in search_state.results if r.get('display', {}).get('id')}
+        raw_ids = result_sys_ids(search_state.results)
         if not raw_ids:
             return
         search_state.refinement_restrict_sys_ids = raw_ids
@@ -2900,7 +2901,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         is_searching = search_state.is_running
         # Compute unique manuscript count for the button
         if has_results:
-            ms_ids = {r.get('display', {}).get('id') for r in search_state.results if r.get('display', {}).get('id')}
+            ms_ids = result_sys_ids(search_state.results)
             ms_count = len(ms_ids)
         else:
             ms_count = 0
@@ -3545,7 +3546,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.notify(tr('Failed to create list'), type='negative')
                                     return
                                 ui.notify(f"{tr('List created')}: {name}", type='positive')
-                                sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                                sys_ids = list(dict.fromkeys(s for res in selected_results for s in row_sys_ids(res)))
                                 if await _bulk_add_items(state.lists_mgr, sys_ids, new_list_id):
                                     dialog.close()
                             finally:
@@ -3571,7 +3572,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 creating_new_list['active'] = True
                                 return
 
-                            sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                            sys_ids = list(dict.fromkeys(s for res in selected_results for s in row_sys_ids(res)))
                             if await _bulk_add_items(state.lists_mgr, sys_ids, selected_list.value):
                                 dialog.close()
                         finally:

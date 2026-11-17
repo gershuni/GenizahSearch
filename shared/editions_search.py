@@ -480,7 +480,170 @@ def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Di
             for m in members:
                 m.pop("_matches", None)
         out.append(row)
+    return out if ids_only else fold_same_text(out)
+
+
+def _hit_key(member: Dict[str, Any]) -> Optional[Tuple[str, Any]]:
+    """One hit in one edition: its version and the match's span in the edition's text. A PGP
+    text indexed under each of its fragments gives the same key on each; a second match in the
+    same edition (another page) does not."""
+    edition = member.get("edition") or {}
+    version = edition.get("version")
+    if not version:
+        return None
+    span = edition.get("span")
+    return version, tuple(span) if isinstance(span, (list, tuple)) else None
+
+
+def _edition_versions(row: Dict[str, Any]) -> set:
+    return {_hit_key(m) for m in row.get("members") or []} - {None}
+
+
+def _row_sys_id(row: Dict[str, Any]) -> Optional[str]:
+    sid = (row.get("display") or {}).get("id") or (row.get("edition") or {}).get("sys_id")
+    return str(sid) if sid else None
+
+
+def _editions_only(row: Dict[str, Any]) -> bool:
+    members = row.get("members")
+    return bool(members) and all(m.get("edition") for m in members)
+
+
+def fold_same_text(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The grouped rows (``group_results``) with each text shown once.
+
+    A PGP edition of a document on several fragments is indexed once per fragment, and an edition
+    whose page could not be named is a result of its own; a search then shows the same text again
+    and again. A result found in scholarly transcriptions alone is folded into an earlier result
+    that already holds one of its hits (the same edition, the same match: ``_hit_key``; a second
+    match of an edition, on another page, stays a result), or, when its page was not identified, into an earlier
+    result of the same manuscript (and an earlier unidentified one takes a later result of its
+    manuscript) -- unless that result holds the same edition at another span: another match of
+    one text is a find of its own. A result with automatic or My Library text is never folded into another: its
+    own page matched. The result keeps its place and its best row (one whose page was identified
+    before one whose page was not); its ``members`` gain the folded editions it did not have,
+    and ``also_in`` names the other manuscripts (``{'sys_id', 'shelfmark'}``), ``folded`` how
+    many results were folded into it. Other rows pass through unchanged."""
+    clusters: List[List[Dict[str, Any]]] = []
+    hits: List[set] = []                # each cluster's hit keys
+    by_hit: Dict[Tuple[str, Any], set] = {}    # hit key -> the results holding it
+    by_sys: Dict[str, int] = {}
+    unplaced_sys: Dict[str, int] = {}
+
+    def another_match(target: Optional[int], keys: set) -> bool:
+        # The same edition at another span in *target*: a separate find, never folded by
+        # manuscript alone (Codex review of PR #36).
+        if target is None:
+            return False
+        held = hits[target]
+        return any(k not in held and any(h[0] == k[0] for h in held) for k in keys)
+
+    def other_page(target: Optional[int], row: Dict[str, Any], keys: set) -> bool:
+        # A located row joins a result that already has a located row only through a hit one
+        # of those located rows holds: two identified pages that share no hit are two finds,
+        # however an unplaced member links them (Codex review of PR #36).
+        if target is None or row.get("page_identified") is False:
+            return False
+        # A hit in common with EVERY located row: a page holding X and Y must not bridge a page
+        # of X and a page of Y.
+        return any(not (keys & _edition_versions(r)) for r in clusters[target]
+                   if r.get("page_identified") is not False)
+
+    for row in rows:
+        if "members" not in row:
+            clusters.append([row])
+            hits.append(set())
+            continue
+        versions = _edition_versions(row)
+        sid = _row_sys_id(row)
+        target = None
+        if _editions_only(row):
+            # An unplaced hit goes to its own manuscript's result first: naming a manuscript
+            # under another result while that manuscript is a result itself says it twice.
+            if sid and row.get("page_identified") is False:
+                target = by_sys.get(sid)
+                if another_match(target, versions):
+                    target = None
+            if target is None:
+                # Every result that holds one of its hits, in turn: the first may refuse it
+                # (other_page) where a later one takes it.
+                candidates = sorted({t for v in versions for t in by_hit.get(v, ())})
+                target = next((t for t in candidates if not other_page(t, row, versions)), None)
+            if target is None and sid and row.get("page_identified") is not False:
+                target = unplaced_sys.get(sid)
+                # One located page per result by manuscript alone: a result that already has
+                # one (on this manuscript or another it took by hit) leaves a second located
+                # page, which shares no hit with it, a result of its own (Codex review of #36).
+                if another_match(target, versions) or other_page(target, row, versions):
+                    target = None
+        if target is None:
+            target = len(clusters)
+            clusters.append([])
+            hits.append(set())
+        clusters[target].append(row)
+        hits[target] |= versions
+        for v in versions:
+            by_hit.setdefault(v, set()).add(target)
+        if sid:
+            by_sys.setdefault(sid, target)
+            # Every manuscript an unplaced hit stands for, also one that went into another
+            # manuscript's result by hit (Codex review of PR #36): a later located hit of
+            # another edition there joins it. Not a result whose own page matched: a located
+            # hit on another page of the manuscript is a find of its own beside it.
+            if row.get("page_identified") is False and all(_editions_only(r) for r in clusters[target]):
+                unplaced_sys.setdefault(sid, target)
+    return [_folded_row(c) for c in clusters]
+
+
+def _folded_row(cluster: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if len(cluster) == 1:
+        return cluster[0]
+    lead = next((r for r in cluster if r.get("page_identified") is not False), cluster[0])
+    row = dict(lead)
+    members = list(lead.get("members") or [])
+    seen = _edition_versions(lead)
+    lead_sid = _row_sys_id(lead)
+    also: Dict[str, Dict[str, Any]] = {}
+    for other in cluster:
+        if other is lead:
+            continue
+        for m in other.get("members") or []:
+            v = _hit_key(m)
+            if v and v not in seen:
+                seen.add(v)
+                members.append(m)
+        sid = _row_sys_id(other)
+        if sid and sid != lead_sid and sid not in also:
+            also[sid] = {"sys_id": sid, "shelfmark": (other.get("display") or {}).get("shelfmark") or sid}
+    row["members"] = members
+    row["sources"] = list(dict.fromkeys(source_label(m) for m in members))
+    row["edition_match"] = any(m.get("edition") for m in members)
+    if also:
+        row["also_in"] = list(also.values())
+    row["folded"] = len(cluster) - 1
+    if any("_matches" in r for r in cluster):
+        row["_matches"] = max(r.get("_matches") or 0 for r in cluster)
+    return row
+
+
+def result_sys_ids(rows: Iterable[Dict[str, Any]]) -> set:
+    """The manuscripts *rows* found: each row's ``display.id`` and the fragments folded into it
+    (``also_in``: fold_same_text). Search within restricts the next step to these and counts
+    them, so a folded fragment is part of the scope as it was when it was a result of its own."""
+    out = set()
+    for r in rows or ():
+        out.update(row_sys_ids(r))
     return out
+
+
+def row_sys_ids(row: Dict[str, Any]) -> List[str]:
+    """One result's manuscripts, its own first: ``display.id``, then the fragments folded into
+    it (``also_in``). What a bulk "add to list" adds for a selected result."""
+    if not isinstance(row, dict):
+        return []
+    out = [(row.get("display") or {}).get("id")]
+    out += [a.get("sys_id") for a in row.get("also_in") or () if isinstance(a, dict)]
+    return list(dict.fromkeys(s for s in out if s))
 
 
 def results_summary(rows: Iterable[Dict[str, Any]]) -> Dict[str, int]:

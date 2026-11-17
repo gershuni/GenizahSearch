@@ -217,11 +217,10 @@ def replay_chain(
             **_sources_argument(step),
         )
 
-        result_sys_ids = {
-            r.get('display', {}).get('id')
-            for r in results
-            if r.get('display', {}).get('id')
-        }
+        # Each row's manuscript and the fragments folded into it (fold_same_text), as the live
+        # step recorded them.
+        from shared.editions_search import result_sys_ids as _folded_sys_ids
+        result_sys_ids = _folded_sys_ids(results)
 
         # Capture page-level uids for "all terms" filter
         step._result_uids = {

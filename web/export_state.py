@@ -290,6 +290,10 @@ def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
              'snippet': str(m.get('snippet') or '')[:_MEMBER_SNIPPET_CHARS],
              'edition': public_edition(m.get('edition'))}
             for m in row['members'] if isinstance(m, dict)]
+    if isinstance(row.get('also_in'), list):
+        # The same text in other manuscripts, folded into this result (fold_same_text).
+        kept['also_in'] = [{'sys_id': str(a.get('sys_id') or ''), 'shelfmark': str(a.get('shelfmark') or '')}
+                           for a in row['also_in'] if isinstance(a, dict)]
 
     changed = bool(set(row.keys()) - _SEARCH_ROW_ALLOWLIST)
     # Also flag changed when we ADDED sys_id (caller didn't supply it but we

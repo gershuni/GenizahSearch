@@ -459,6 +459,160 @@ def test_group_results_ranks_and_local_rows():
     assert [m["uid"] for m in rows[0]["members"]] == ["ED:fgp:9", "B"]
 
 
+def _ed(kind, eid, sys_id, page=None, shelf=None):
+    """An edition member on *sys_id*: on *page* (its group key) or, without one, unlocated."""
+    uid = f"ED:{kind}:{eid}:{sys_id}" if kind == "pgp" else f"ED:{kind}:{eid}"
+    return {"uid": uid, "group_key": page or uid,
+            "display": {"id": sys_id, "shelfmark": shelf or sys_id, "source": kind.upper()},
+            "edition": {"kind": kind, "uid": uid, "version": f"{kind}:{eid}", "sys_id": sys_id}}
+
+
+def test_the_same_text_is_shown_once():
+    """The duplicates of a joined document's search (v10.0.0): a PGP edition indexed once per
+    fragment, and editions whose page was not identified, each a result of its own."""
+    eds = [_ed("fgp", 1, "990A", shelf="T-S 24.18"),            # unlocated FGP of A
+           _ed("pgp", 7, "990A", shelf="T-S 24.18"),            # one PGP text on A, B, C, unlocated
+           _ed("pgp", 7, "990B", shelf="T-S 16.223"),
+           _ed("pgp", 7, "990C", shelf="T-S 12.634"),
+           _ed("pgp", 8, "990A", page="990A_p1", shelf="T-S 24.18"),   # another PGP text, on a page
+           _ed("pgp", 8, "990C", page="990C_p1", shelf="T-S 12.634"),
+           _ed("pgp", 8, "990B", shelf="T-S 16.223")]
+    rows = group_results([], eds)
+    assert len(rows) == 1
+    row = rows[0]
+    # The result whose page was identified leads, at the first result's place.
+    assert row["uid"] == "990A_p1" and row["page_identified"] is True
+    assert sorted({m["edition"]["version"] for m in row["members"]}) == ["fgp:1", "pgp:7", "pgp:8"]
+    assert len(row["members"]) == 3
+    assert [a["shelfmark"] for a in row["also_in"]] == ["T-S 16.223", "T-S 12.634"]
+    assert row["folded"] == 6
+    # ids_only (completing a step) keeps every match.
+    assert len(group_results([], eds, ids_only=True)) == 7
+
+
+def test_a_page_whose_automatic_text_matched_keeps_its_result():
+    main = [{"uid": "990A_p1", "display": {"id": "990A", "source": "V0.8"}},
+            {"uid": "990B_p1", "display": {"id": "990B", "source": "V0.8"}}]
+    eds = [_ed("pgp", 7, "990A", page="990A_p1"), _ed("pgp", 7, "990B", page="990B_p1"),
+           _ed("pgp", 7, "990C"), _ed("fgp", 3, "990D")]
+    rows = group_results(main, eds)
+    # Both pages matched in their own text: two results; C's copy of the same PGP text folds into
+    # the first; D's FGP edition is another text on another manuscript.
+    assert [r["uid"] for r in rows] == ["990A_p1", "990B_p1", "ED:fgp:3"]
+    assert [a["sys_id"] for a in rows[0]["also_in"]] == ["990C"]
+    assert "also_in" not in rows[1] and "folded" not in rows[2]
+    # B's unplaced copy goes to B's own result, not under A (B would be named twice).
+    rows = group_results(main, eds[:2] + [_ed("pgp", 7, "990B"), _ed("pgp", 7, "990C")])
+    assert [a["sys_id"] for a in rows[0]["also_in"]] == ["990C"]
+    assert rows[1]["folded"] == 1 and "also_in" not in rows[1]
+
+
+def test_an_unplaced_second_match_of_an_edition_is_not_folded_by_manuscript():
+    """Codex review of PR #36: another match of the same edition on one manuscript is a find of
+    its own, page identified or not; another edition there still folds."""
+    first, second = _ed("pgp", 7, "990A"), _ed("pgp", 7, "990A")
+    first["edition"]["span"], second["edition"]["span"] = [0, 9], [40, 49]
+    second["uid"] = second["group_key"] = "ED:pgp:7:990A#2"     # its own group, as the leaf keys it
+    fgp = _ed("fgp", 1, "990A")
+    fgp["edition"]["span"] = [5, 14]
+    rows = group_results([], [first, second, fgp])
+    assert len(rows) == 2 and rows[0]["folded"] == 1 and "folded" not in rows[1]
+    assert {m["edition"]["version"] for m in rows[0]["members"]} == {"pgp:7", "fgp:1"}
+    # A located row of the manuscript with another match of the unplaced row's edition stays.
+    placed = _ed("pgp", 7, "990A", page="990A_p1")
+    placed["edition"]["span"] = [40, 49]
+    assert len(group_results([], [first, placed])) == 2
+
+
+def test_a_located_hit_joins_its_manuscripts_unplaced_hit_folded_elsewhere():
+    """Codex review of PR #36: B's unplaced copy went into A's result by hit; B's located FGP
+    hit joins that result rather than standing apart."""
+    rows = group_results([], [_ed("pgp", 7, "990A"), _ed("pgp", 7, "990B"), _ed("fgp", 1, "990B", page="990B_p1")])
+    assert len(rows) == 1 and rows[0]["uid"] == "990B_p1"
+    assert [a["sys_id"] for a in rows[0]["also_in"]] == ["990A"]
+    # Never into a result whose own page matched: a located hit on another page stays.
+    main = [{"uid": "990A_p1", "display": {"id": "990A", "source": "V0.8"}}]
+    rows = group_results(main, [_ed("pgp", 7, "990A"), _ed("fgp", 1, "990A", page="990A_p5")])
+    assert [r["uid"] for r in rows] == ["990A_p1", "990A_p5"]
+
+
+def test_a_result_takes_one_located_page_by_manuscript_alone():
+    """Codex review of PR #36: A and B share an unplaced hit; B's located FGP joins; A's located
+    page of another edition shares no hit with it and stays a result of its own."""
+    rows = group_results([], [_ed("pgp", 7, "990A"), _ed("pgp", 7, "990B"),
+                              _ed("fgp", 1, "990B", page="990B_p1"), _ed("fgp", 2, "990A", page="990A_p3")])
+    assert [r["uid"] for r in rows] == ["990B_p1", "990A_p3"]
+    # The same on one manuscript: a second located page of another edition stays apart.
+    rows = group_results([], [_ed("pgp", 7, "990A"), _ed("fgp", 1, "990A", page="990A_p1"),
+                              _ed("pgp", 9, "990A", page="990A_p5")])
+    assert [r["uid"] for r in rows] == ["990A_p1", "990A_p5"]
+
+
+def test_a_located_hit_joins_only_through_a_located_rows_hit():
+    """Codex review of PR #36: located A/p1 holds hit X; unplaced B/X and B/Y join it; a located
+    C/p1 with hit Y shares no hit with A's located row and stays a result, while a located D/p1
+    with X (the same text on another fragment's page) still folds."""
+    rows = group_results([], [_ed("pgp", 7, "990A", page="990A_p1"), _ed("pgp", 7, "990B"),
+                              _ed("fgp", 3, "990B"), _ed("fgp", 3, "990C", page="990C_p1"),
+                              _ed("pgp", 7, "990D", page="990D_p1")])
+    assert [r["uid"] for r in rows] == ["990A_p1", "990C_p1"]
+    assert [a["sys_id"] for a in rows[0]["also_in"]] == ["990B", "990D"]
+
+
+def _page(sys_id, page, *eds):
+    """A located row holding several editions on one page (group_results groups them)."""
+    return [_ed(kind, eid, sys_id, page=page) for kind, eid in eds]
+
+
+def test_a_located_page_with_two_hits_never_bridges_two_pages():
+    """Codex review of PR #36: pages of X, of X+Y, of Y. The X+Y page joins the X page; the Y
+    page shares no hit with the X page and stays a result of its own."""
+    eds = _page("990A", "990A_p1", ("pgp", 7)) + _page("990B", "990B_p1", ("pgp", 7), ("fgp", 3)) \
+        + _page("990C", "990C_p1", ("fgp", 3))
+    assert [r["uid"] for r in group_results([], eds)] == ["990A_p1", "990C_p1"]
+
+
+def test_a_located_hit_tries_every_result_holding_one_of_its_hits():
+    """Codex review of PR #36: located X, unplaced X+Y (joins X's result), located Z; a located
+    Y+Z page is refused by X's result (no hit in common with its located row) and joins Z's."""
+    eds = _page("990A", "990A_p1", ("pgp", 7)) + [_ed("pgp", 7, "990B"), _ed("fgp", 3, "990B")] \
+        + _page("990C", "990C_p1", ("pgp", 9)) + _page("990D", "990D_p1", ("fgp", 3), ("pgp", 9))
+    rows = group_results([], eds)
+    assert [r["uid"] for r in rows] == ["990A_p1", "990C_p1"]
+    assert [a["sys_id"] for a in rows[1]["also_in"]] == ["990D"]
+
+
+def test_list_bulk_add_and_replay_take_the_folded_fragments():
+    from shared.editions_search import row_sys_ids
+    row = {"display": {"id": "990A"}, "also_in": [{"sys_id": "990B"}, {"sys_id": "990A"}, {}]}
+    assert row_sys_ids(row) == ["990A", "990B"]
+    assert row_sys_ids({"display": {}}) == [] and row_sys_ids(None) == []
+
+    from shared.refinement import RefinementStep, replay_chain
+
+    class Searcher:
+        def execute_search(self, *a, **kw):
+            return [dict(row)]
+    step = RefinementStep(query="x", mode="literal", result_count=1)
+    replay_chain([step], Searcher(), None)
+    assert step._result_sys_ids == {"990A", "990B"}
+
+
+def test_search_within_counts_the_folded_fragments():
+    from shared.editions_search import result_sys_ids
+    rows = group_results([], [_ed("pgp", 7, "990A", page="990A_p1"), _ed("pgp", 7, "990B"),
+                              _ed("pgp", 7, "990C")])
+    assert len(rows) == 1
+    assert result_sys_ids(rows) == {"990A", "990B", "990C"}
+    assert result_sys_ids([{"display": {"id": "990D"}}, {"display": {}}, "x"]) == {"990D"}
+
+
+def test_a_second_match_of_an_edition_stays_a_result():
+    first, second = _ed("pgp", 7, "990A", page="990A_p1"), _ed("pgp", 7, "990A", page="990A_p2")
+    first["edition"]["span"], second["edition"]["span"] = [0, 9], [40, 49]
+    assert [r["uid"] for r in group_results([], [first, second])] == ["990A_p1", "990A_p2"]
+
+
 # --- the engine's lifecycle and re-reading rows ----------------------------------------------------
 
 def test_variant_settings_bind_the_child(world):

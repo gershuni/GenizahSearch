@@ -475,6 +475,10 @@ def _serialize_item(
         out['page_identified'] = bool(result.get('page_identified', True))
         out['edition'] = public_edition(result.get('edition'))
         out['members'] = [_serialize_member(m, meta_mgr) for m in result.get('members') or []]
+        if result.get('also_in'):
+            # The same text in other manuscripts, folded into this result (fold_same_text).
+            out['also_in'] = [{'sys_id': str(a.get('sys_id') or ''), 'shelfmark': str(a.get('shelfmark') or '')}
+                              for a in result['also_in']]
     return out
 
 

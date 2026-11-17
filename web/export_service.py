@@ -142,7 +142,15 @@ def _sources_cell(result: Dict[str, Any], lang: str = 'en') -> Optional[str]:
         label = f'{name} ({who})' if who else name
         if label not in labels:
             labels.append(label)
-    return ', '.join(labels)
+    cell = ', '.join(labels)
+    also = [str(a.get('shelfmark') or a.get('sys_id') or '') for a in result.get('also_in') or []
+            if isinstance(a, dict)]
+    also = [a for a in also if a]
+    if also:
+        # The same text in other manuscripts, folded into this result (fold_same_text).
+        head = 'חלקים נוספים של המסמך' if lang == 'he' else 'Other parts of this document'
+        cell += f"; {head}: {', '.join(also)}"
+    return cell
 
 
 #: The JSON export's excerpt length (shared/search_serializer.py: ``full_text[:500]``).

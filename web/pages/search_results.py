@@ -707,6 +707,24 @@ def _render_matched_in(result):
     if page_not_identified(result):
         ui.label(tr('Page not identified')).classes('text-xs result-page-unknown').style(
             'color: var(--text-tertiary);')
+    also_in = result.get('also_in') or []
+    if also_in:
+        # The same text found in other manuscripts, folded into this result
+        # (shared/editions_search.py::fold_same_text).
+        with ui.row().classes('items-center gap-1 text-xs flex-wrap result-also-in').style(
+                'color: var(--text-tertiary);'):
+            ui.label(f"{tr('Other parts of this document')}:")
+            for i, other in enumerate(also_in):
+                name = str(other.get('shelfmark') or '')
+                if (not name or name == 'Unknown') and state.meta_mgr is not None:
+                    try:
+                        name = state.meta_mgr.get_meta_for_id(str(other.get('sys_id')))[0]
+                    except Exception:
+                        name = ''
+                if not name or name == 'Unknown':
+                    name = str(other.get('sys_id'))
+                label = name + (',' if i < len(also_in) - 1 else '')
+                ui.link(label, f"/browse?sys_id={quote(str(other.get('sys_id')))}").classes('result-member-link')
     if not matched_in(result):
         return
     with ui.row().classes('items-center gap-1 text-xs flex-wrap result-matched-in').style(

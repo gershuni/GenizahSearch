@@ -125,6 +125,7 @@ from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_s
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import clean_text_single_line, coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
+from shared.editions_search import result_sys_ids, row_sys_ids
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial, saved_cutoff
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
@@ -1654,7 +1655,9 @@ def _export_source_label(res):
     website's exports write it (web/export_service.py::_sources_cell); else the row's source."""
     members = (res or {}).get('members')
     if members:
-        return ', '.join(dict.fromkeys(_match_member_label(m, cut=False) for m in members))
+        cell = ', '.join(dict.fromkeys(_match_member_label(m, cut=False) for m in members))
+        also_in = _also_in_text(res)
+        return f"{cell}; {also_in}" if also_in else cell
     return ((res or {}).get('display') or {}).get('source', '') or ''
 
 
@@ -1686,7 +1689,31 @@ def _result_sources_cell(res):
         label = _match_member_label(member)
         if label not in labels:
             labels.append(label)
-    return ', '.join(codes), f"{tr('Matched in')}: {', '.join(labels)}"
+    tooltip = f"{tr('Matched in')}: {', '.join(labels)}"
+    also_in = _also_in_text(res)
+    return ', '.join(codes), f"{tooltip}\n{also_in}" if also_in else tooltip
+
+
+def _also_in_text(res, meta_mgr=None):
+    """"Other parts of this document: T-S 16.223, T-S 12.634" for a result the same text was folded into
+    from other fragments of its document (shared/editions_search.py::fold_same_text), or ''. *meta_mgr* names
+    a manuscript whose shelfmark the search did not have yet."""
+    names = []
+    for a in (res or {}).get('also_in') or []:
+        if not isinstance(a, dict):
+            continue
+        sid = str(a.get('sys_id') or '')
+        name = str(a.get('shelfmark') or '')
+        if (not name or name == 'Unknown') and sid and meta_mgr is not None:
+            try:
+                name = meta_mgr.get_meta_for_id(sid)[0]
+            except Exception:
+                name = ''
+        if not name or name == 'Unknown':
+            name = sid
+        if name:
+            names.append(name)
+    return f"{tr('Other parts of this document')}: {', '.join(names)}" if names else ''
 
 
 def _editions_match_note(rows):
@@ -24575,6 +24602,11 @@ class GenizahGUI(QMainWindow):
                 if title and title != display_title:
                     item_title.setToolTip(title)
 
+            also_in = _also_in_text(res, self.meta_mgr)
+            if also_in:
+                # The same text in other manuscripts, folded into this result
+                # (shared/editions_search.py::fold_same_text).
+                item_shelf.setToolTip(also_in)
             self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
 
             # Library column: LOCAL hits show parent_folder/folder_name (smoke-fix A).
@@ -24881,7 +24913,7 @@ class GenizahGUI(QMainWindow):
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
-            raw_result_sys_ids = {r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')}
+            raw_result_sys_ids = result_sys_ids(results)
             # Build step from current search bar state
             mode_idx = self.mode_combo.currentIndex()
             if mode_idx == self.MODE_RESPONSA:
@@ -25314,7 +25346,7 @@ class GenizahGUI(QMainWindow):
         if getattr(self, 'is_searching', False):
             return
         # Capture current RAW result sys_ids as the refinement scope BEFORE the user searches
-        raw_ids = {r.get('display', {}).get('id') for r in getattr(self, 'last_results', []) if r.get('display', {}).get('id')}
+        raw_ids = result_sys_ids(getattr(self, 'last_results', []))
         if not raw_ids:
             return
         # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
@@ -25628,7 +25660,7 @@ class GenizahGUI(QMainWindow):
         is_searching = getattr(self, 'is_searching', False)
         results = getattr(self, 'last_results', [])
         if results:
-            ms_ids = {r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')}
+            ms_ids = result_sys_ids(results)
             ms_count = len(ms_ids)
         else:
             ms_count = 0
@@ -27402,15 +27434,26 @@ class GenizahGUI(QMainWindow):
                         QToolTip.showText(event.globalPos(), _pgp_tip)
                         return True
                 # Skip checkbox and actions columns
-                if col not in (self.COL_CHECKBOX, self.COL_ACTIONS, self.COL_IMG):
+                if col not in (self.COL_CHECKBOX, self.COL_ACTIONS):
                     item = self.results_table.item(index.row(), col)
-                    if item and item.text():
+                    parts = []
+                    if item and item.text() and col != self.COL_IMG:
                         rect = self.results_table.visualRect(index)
                         fm = self.results_table.fontMetrics()
                         text_width = fm.horizontalAdvance(item.text())
                         if text_width > rect.width() - 8:
-                            QToolTip.showText(event.globalPos(), item.text())
-                            return True
+                            parts.append(item.text())
+                    # The cell's own tooltip (Src "Matched in", Img "Page not identified",
+                    # Shelfmark "Other parts of this document"): this branch answers every
+                    # request, so it has to serve them too.
+                    # It replaces the cut-off text (a Title's full title, a Src's full names),
+                    # except on the Shelfmark, whose tooltip only adds the other fragments.
+                    own_tip = item.toolTip() if item is not None else ''
+                    if own_tip:
+                        parts = (parts if col == self.COL_SHELF else []) + [own_tip]
+                    if parts:
+                        QToolTip.showText(event.globalPos(), '\n'.join(parts))
+                        return True
             QToolTip.hideText()
             return True
         if hasattr(self, 'results_table') and source == self.results_table and event.type() == QEvent.Type.Leave:
@@ -27768,6 +27811,10 @@ class GenizahGUI(QMainWindow):
                             'img': display.get('img'),
                             'fl_id': self._normalize_fl_id(self._extract_fl_id(res))
                         })
+                    # The other fragments folded into this result (fold_same_text): each
+                    # added as its manuscript, with no page.
+                    for other in row_sys_ids(res)[1:]:
+                        items.append({'sys_id': other, 'img': '', 'fl_id': ''})
 
         if items:
             source = f"Search: {self.last_search_query[:50]}" if self.last_search_query else "Search"

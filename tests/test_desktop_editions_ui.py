@@ -631,6 +631,59 @@ def test_the_src_cell_names_every_text_that_matched():
     assert genizah_app._result_sources_cell({"display": {"source": "V0.8"}}) is None
 
 
+def test_a_folded_result_names_the_other_parts_of_its_document():
+    row = _edition_row()
+    row["also_in"] = [{"sys_id": "990B", "shelfmark": "T-S 16.223"}, {"sys_id": "990C", "shelfmark": "Unknown"}]
+    meta = SimpleNamespace(get_meta_for_id=lambda sid: ("T-S 12.634", "") if sid == "990C" else ("Unknown", ""))
+    assert genizah_app._also_in_text(row, meta) == "Other parts of this document: T-S 16.223, T-S 12.634"
+    assert genizah_app._also_in_text(row) == "Other parts of this document: T-S 16.223, 990C"
+    _text, tip = genizah_app._result_sources_cell(row)
+    assert tip.endswith("\nOther parts of this document: T-S 16.223, 990C")
+    assert genizah_app._export_source_label(row).endswith("; Other parts of this document: T-S 16.223, 990C")
+    assert genizah_app._also_in_text(_edition_row()) == ""
+
+
+def test_the_results_table_shows_a_cells_own_tooltip(monkeypatch):
+    """The results table's event filter answers every tooltip request itself: a cell's own
+    tooltip (Shelfmark, Src, Img) has to be served there, or it is never shown."""
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtGui import QHelpEvent
+    from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem
+    table = QTableWidget(1, 4)
+    table.resize(900, 200)
+    table.setColumnWidth(0, 400)       # the shelfmark is not cut: only its own tooltip shows
+    # Column 0 the shelfmark, 2 the image number; the checkbox, actions and PGP columns elsewhere.
+    gui = SimpleNamespace(results_table=table, COL_CHECKBOX=10, COL_ACTIONS=11, COL_IMG=2, COL_PGP=12,
+                          COL_SHELF=0)
+    shelf = QTableWidgetItem("T-S 24.18")
+    shelf.setToolTip("Other parts of this document: T-S 16.223")
+    table.setItem(0, 0, shelf)
+    img = QTableWidgetItem("")
+    img.setToolTip("Page not identified")
+    table.setItem(0, 2, img)
+    tips = []
+    monkeypatch.setattr(genizah_app.QToolTip, "showText", lambda pos, text, *a: tips.append(text))
+    monkeypatch.setattr(genizah_app.QToolTip, "hideText", lambda *a: tips.append(None))
+    for col in (0, 2):
+        center = table.visualRect(table.model().index(0, col)).center()
+        event = QHelpEvent(QEvent.Type.ToolTip, center, table.viewport().mapToGlobal(center))
+        assert GenizahGUI.eventFilter(gui, table.viewport(), event) is True
+    assert tips == ["Other parts of this document: T-S 16.223", "Page not identified"]
+    # A cut-off cell with a tooltip of its own: the tooltip alone (a compact title's full title
+    # is not said twice); a cut-off shelfmark keeps its text above the other fragments.
+    table.setColumnWidth(0, 30)
+    table.setColumnWidth(1, 30)
+    title = QTableWidgetItem("A compact title cut off")
+    title.setToolTip("A compact title cut off, in full")
+    table.setItem(0, 1, title)
+    tips.clear()
+    for col in (1, 0):
+        center = table.visualRect(table.model().index(0, col)).center()
+        GenizahGUI.eventFilter(gui, table.viewport(), QHelpEvent(QEvent.Type.ToolTip, center,
+                                                                 table.viewport().mapToGlobal(center)))
+    assert tips == ["A compact title cut off, in full", "T-S 24.18\nOther parts of this document: T-S 16.223"]
+
+
 def test_the_count_line_says_how_many_matched_in_a_scholarly_transcription():
     plain = {"uid": "x", "members": [{"edition": None}], "edition_match": False}
     assert genizah_app._editions_match_note([_edition_row(), plain]) == " · 1 in scholarly transcriptions"
