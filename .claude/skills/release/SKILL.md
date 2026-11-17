@@ -147,7 +147,9 @@ Once texts are approved (or Phase 2 was skipped), on the release branch:
    - Edit `README.md` — update "What's New" section
    - Edit `web/main.py` — update the What's New banner text
    - Edit `genizah_app.py` — update WhatsNewBar message + WhatsNewDialog content
-   - Edit `CLAUDE.md` "Recently Changed" section — add entry
+   - Edit `CLAUDE.md` "Recently Changed" section — add entry, and move the oldest of the
+     "Releases" one-liners, verbatim, to the release one-liners archive in the private
+     repository (`docs/archive/CLAUDE_MD_RELEASES_ARCHIVE.md`): the list keeps the last three
    - Add the version's entry to `shared/whats_new_data.py` (newest first: title and items, each
      a feature / improvement / fix, EN + HE, with the apps it is in), from the approved texts. It
      feeds the website's `/whats-new`, `GET /api/whats-new` (the desktop update notice reads it) and

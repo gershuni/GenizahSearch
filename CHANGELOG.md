@@ -8,6 +8,49 @@ which is not public.
 
 ---
 
+## [10.0.1] - 2026-11-17 — Each text shown once, and keyboard fixes
+
+Both apps. With the scholarly transcriptions, a text found on several fragments of one document,
+or in several editions of one manuscript, is one result naming the document's other parts; Search
+Within and the list bulk add include those parts. The desktop shows its results' tooltips (what a
+result matched in, a page not identified, the other parts, full titles), Tab follows the search
+bar's visual order, and Enter searches from Gap and Exclude Words. Deploy: code only, no sidecar
+or `.env` change. No What's New banner or dialog: web stays "10.0.0-scholarly", desktop 10.0.0;
+the version history has the 10.0.1 entry.
+
+### The same text shown once in a search with the scholarly transcriptions (web + desktop)
+
+A search with the scholarly transcriptions showed one text again and again: a PGP edition of a
+document on several fragments is indexed once per fragment, and an edition whose page could not be
+identified was a result of its own beside its manuscript's other results.
+`shared/editions_search.py::fold_same_text` now folds a result found in scholarly transcriptions
+alone into an earlier result holding the same hit (the same edition, the same match), or, when its
+page was not identified, into an earlier result of the same manuscript. A result whose automatic
+text matched is never folded, and a second match of an edition on another page stays a result.
+The result keeps the folded editions among its sources and names the other fragments of the document: web
+"Other parts of this document" under the card (links), desktop the Shelfmark and Src tooltips, both apps' exports in
+the Source cell, the API `also_in`. Completing a step (`ids_only`) still returns every match.
+Desktop: the results table's tooltip handler answered every request itself and served only cut-off
+text and the PGP cell, so a cell's own tooltip never showed (v10.0.0's Src "Matched in" and Img
+"Page not identified" among them); it now serves it, and the Title and Library cells' full names
+show on hover too. Measured on the local editions index: 37 -> 17, 9 -> 2 and 4 -> 1 results for three phrases of
+joined PGP documents.
+
+### Keyboard: Tab in visual order and Enter searches from the search bar (desktop)
+
+- **Search tab:** Tab now goes through the search bar in the order it shows (right to
+  left in Hebrew, left to right in English): query, search type, Gap, Focus Search,
+  Search, corpus, Transcriptions, New, then the second row. It skipped Gap and Focus
+  Search, which are inserted into the row after its other controls (Qt's default Tab
+  order is the order widgets got their parent). `desktop/widgets/tab_order.py`
+  chains a row's controls in layout order.
+- **Enter searches** from the Gap and Exclude Words fields, as from the query box.
+- **Composition Search:** Tab in the source text moves on to the controls below it;
+  it typed a tab character, so nothing after the box could be reached with Tab.
+- **Joins Lab:** Tab goes from a line's ⓘ to its word box, its buttons and then the
+  next line (it reached the word box last); Enter in "Enter shelfmark…" opens it.
+- Tests: `tests/test_desktop_search_bar_keys.py`, real key events in English and Hebrew.
+
 ## [10.0.0] - 2026-11-17 — Scholarly transcriptions and dictionaries
 
 Both apps. The scholarly transcriptions — the Friedberg Genizah Project's and the Princeton Geniza

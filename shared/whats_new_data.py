@@ -8,6 +8,45 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "10.0.1",
+        "date": "2026-11-17",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Each text shown once, and keyboard fixes",
+            "he": "כל טקסט פעם אחת, ותיקוני מקלדת"
+        },
+        "items": [
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "With the scholarly transcriptions, a text found on several fragments of one document, or in several editions of one manuscript, is now one result, and the result names the document's other parts.",
+                "he": "בחיפוש עם התעתיקים המדעיים, טקסט שנמצא בכמה קטעים של אותו מסמך, או בכמה מהדורות של אותו כתב יד, מוצג כעת כתוצאה אחת, והיא מציינת את החלקים הנוספים של המסמך."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "Pointing at a result now shows what it matched in, a page that could not be identified, the document's other parts, and full titles.",
+                "he": "הצבעה על תוצאה מציגה כעת במה נמצאה ההתאמה, עמוד שלא זוהה, החלקים הנוספים של המסמך וכותרות מלאות."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "Tab moves through the search bar in the order it appears (right to left in Hebrew), and Enter in Gap or Exclude Words starts the search. In Composition Search and the Joins Lab, Tab also reaches every control in order.",
+                "he": "Tab עובר בסרגל החיפוש לפי הסדר שבו הוא מוצג (מימין לשמאל בעברית), ו-Enter בשדות \"מרווח\" ו\"מילים להחרגה\" מפעיל את החיפוש. גם בחיפוש חיבורים ובמעבדת צירופים Tab מגיע לכל הפקדים לפי הסדר."
+            }
+        ]
+    },
+    {
         "version": "10.0.0",
         "date": "2026-11-17",
         "apps": [
