@@ -8,6 +8,27 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "10.0.2",
+        "date": "2026-11-17",
+        "apps": [
+            "web"
+        ],
+        "title": {
+            "en": "Each text shown once, in any order",
+            "he": "כל טקסט פעם אחת, בכל סדר"
+        },
+        "items": [
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "With the scholarly transcriptions, a text found on several fragments of one document and in several of its editions is now gathered into one result in every search, whatever order its parts are found in.",
+                "he": "בחיפוש עם התעתיקים המדעיים, טקסט שנמצא בכמה קטעים של אותו מסמך ובכמה ממהדורותיו מאוחד כעת לתוצאה אחת בכל חיפוש, בכל סדר שבו נמצאו חלקיו."
+            }
+        ]
+    },
+    {
         "version": "10.0.1",
         "date": "2026-11-17",
         "apps": [

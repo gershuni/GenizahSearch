@@ -8,6 +8,26 @@ which is not public.
 
 ---
 
+## [10.0.2] - 2026-11-17 — Each text shown once, in any order
+
+Website only. With the scholarly transcriptions, a text found on several fragments of one
+document and in several of its editions is one result however its parts rank. Deploy: code only,
+no sidecar or `.env` change. No What's New banner: the website stays "10.0.0-scholarly"; the
+version history has the 10.0.2 entry. The desktop is not rebuilt; 10.0.1 stays its latest
+release.
+
+### One text, one result, in whatever order its parts rank (web)
+
+A search in the scholarly transcriptions could still show one text twice after 10.0.1: a
+document on several fragments with several editions (PGP 1800, T-S 24.18 + T-S 12.634 +
+T-S 16.223, in Gil's and Udovitch's editions and an FGP edition) was one result or two
+depending on the order its rows ranked in. `shared/editions_search.py::fold_same_text` placed
+each row once, in rank order, and never joined two results it had started; a row linking two
+of them went into one. It now joins, after that pass, any two results that hold one text
+(`_join_linked`: by manuscript first, then by a hit they share) under the same rules: one page
+at most whose own text matched, and it leads; two identified pages only through a hit they
+share; no edition at two places joined by manuscript alone. Code only.
+
 ## [10.0.1] - 2026-11-17 — Each text shown once, and keyboard fixes
 
 Both apps. With the scholarly transcriptions, a text found on several fragments of one document,

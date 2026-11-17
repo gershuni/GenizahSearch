@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 10.0.1
+# Dicta Genizah Search Pro 10.0.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
