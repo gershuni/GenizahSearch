@@ -1330,10 +1330,26 @@ class ResultDialog(QDialog):
 
             parent.send_result_to_composition(
                 self.data,
-                source_text=self.current_page_text,
+                source_text=self._rd_text_for_parallels(),
                 title=short_title,
             )
             self.close()
+
+    def _rd_text_for_parallels(self):
+        """The page as the viewer shows it: the version chosen in its chooser (an FGP or PGP
+        edition, a correction, a reader's version), else the automatic transcription; a
+        translation sends the page's own text (shared/edition_target.py::parallels_text). While
+        editing, the text in the editor, whatever the chooser showed before (Codex review of #33)."""
+        from shared.edition_target import parallels_text
+        if getattr(self, '_rd_edit_mode', False):
+            return parallels_text(self.current_page_text, self.text_ms.toPlainText())
+        combo = getattr(self, 'rd_version_combo', None)
+        data = combo.currentData() if combo is not None else None
+        shown = None
+        if isinstance(data, dict) and data.get('source') not in (None, 'original'):
+            shown = (data.get('content') or data.get('corrected_text')
+                     or self.text_ms.toPlainText())
+        return parallels_text(self.current_page_text, shown, data if isinstance(data, dict) else None)
 
     def add_current_to_list(self):
         """Add the current manuscript to a list."""

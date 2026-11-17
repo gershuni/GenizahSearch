@@ -74,10 +74,11 @@ def test_the_card_names_every_text_that_matched(web):
     assert loose and loose[0]['uid'].startswith('ED:fgp:4')
 
 
-def test_an_unlocated_hit_links_no_folio_and_pins_no_page(web):
+def test_an_unlocated_hit_links_no_folio_and_quick_view_shows_its_edition(web):
     """A hit whose page could not be identified: the spreadsheet's Image URL stays empty (its
-    blank page number linked the first folio), and Quick View does not pin the edition to the
-    page it opens on, saying so in its header instead (Codex review of PR #18)."""
+    blank page number linked the first folio). Quick View shows the edition that matched with
+    the page it opens on, as Browse and the desktop's viewer do, and says in its header that
+    the page is not identified; Next and Previous browse on as usual."""
     from web.export_service import _image_url_cell
     from web.export_state import _compact_search_result_row
     from web.pages.search_results import _hit_scope_version, _quick_view_result_label
@@ -88,7 +89,10 @@ def test_an_unlocated_hit_links_no_folio_and_pins_no_page(web):
         assert _image_url_cell(row, MS2, 'CUL', '') == ''
     assert _image_url_cell(placed, MS1, 'CUL', '2').endswith('?page=1')
     page = SimpleNamespace(sys_id=MS2, p_num=1)
-    assert _hit_scope_version(loose, SimpleNamespace(hit_scope=None, volume_ie=None), page) is None
+    adv = SimpleNamespace(hit_scope=None, volume_ie=None)
+    assert _hit_scope_version(loose, adv, page) == loose['edition']['version'] == 'fgp:4'
+    assert _hit_scope_version(loose, adv, SimpleNamespace(sys_id=MS2, p_num=2)) is None   # Next
+    assert _hit_scope_version(loose, adv, page) == 'fgp:4'                               # back
     assert (_hit_scope_version(placed, SimpleNamespace(hit_scope=None, volume_ie=None), page)
             == placed['edition']['version'])
     assert _quick_view_result_label(2, 50, loose) == 'Result 3 / 50 · Page not identified'
@@ -473,6 +477,45 @@ def test_quick_view_opens_the_edition_on_the_hits_page_only():
     assert _hit_scope_version(result, adv, page2) is None
     assert _hit_scope_version(result, adv, page1) == 'fgp:1'
     assert _hit_scope_version({'edition': None}, SimpleNamespace(hit_scope=None, volume_ie=None), page1) is None
+
+
+def test_quick_view_shows_an_unplaced_hits_edition_on_the_page_it_opens_on():
+    """The chain Quick View runs (_render_advanced_view) for a hit whose page could not be
+    identified -- a short excerpt of a long manuscript, say: the hit claims the page Quick View
+    opens on, the page filter left the excerpt out there and it is kept, and the text shown is
+    the excerpt, not that page's automatic text (often empty on such a page)."""
+    from web.components.version_selector import decision_for_version
+    from web.pages.browse_editions import keep_target
+    from web.pages.search_results import _hit_scope_version
+    excerpt = {'source': 'fgp', 'is_fgp': True, 'id': 4, 'uid': 'fgp:4', 'content': 'x',
+               'doc_relation': 'Digital Edition'}
+    result = {'edition': {'version': 'fgp:4'}, 'page_identified': False}
+    version = _hit_scope_version(result, SimpleNamespace(hit_scope=None, volume_ie=None),
+                                 SimpleNamespace(sys_id=MS2, p_num=1))
+    assert version == 'fgp:4'
+    sources = keep_target([excerpt], [], version)
+    decision = decision_for_version(sources, version)
+    assert decision['source'] is excerpt and decision['eligible']
+
+
+def test_browses_search_for_parallels_sends_the_version_on_screen():
+    """Browse's Search for Parallels reads the page as it is on screen, from the pair
+    handle_version_change writes (the Word export's pair): an edition chosen, else the
+    automatic transcription; a translation sends the page's own text."""
+    from web.pages.browse import _parallels_page_text
+    state = SimpleNamespace(current_page=SimpleNamespace(text='the automatic transcription'))
+    assert _parallels_page_text(state, {}) == 'the automatic transcription'
+    chosen = {'current_version_info': {'source': 'fgp', 'is_fgp': True}, 'current_version_text': 'the edition'}
+    assert _parallels_page_text(state, chosen) == 'the edition'
+    translated = {'current_version_info': {'source': 'translation'}, 'current_version_text': 'English'}
+    assert _parallels_page_text(state, translated) == 'the automatic transcription'
+    # A text with no info beside it was never chosen: not trusted.
+    assert _parallels_page_text(state, {'current_version_text': 'stale'}) == 'the automatic transcription'
+    # Editing: the editor's text, not the version chosen before (Codex review of #33).
+    editing = SimpleNamespace(current_page=state.current_page, edit_mode=True, edit_text='my draft')
+    assert _parallels_page_text(editing, chosen) == 'my draft'
+    assert _parallels_page_text(SimpleNamespace(current_page=state.current_page, edit_mode=True, edit_text=''),
+                                chosen) == 'the automatic transcription'
 
 
 def test_a_restored_search_drops_a_choice_the_reader_is_no_longer_served():

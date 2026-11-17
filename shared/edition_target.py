@@ -23,6 +23,37 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 _VERSION_RE = re.compile(r'^(fgp|pgp):(\d+)$')
 
 
+#: The most text a website link to Find Parallels carries (``/parallels?text=``): a Hebrew letter
+#: is six characters encoded, and a longer address is refused (HTTP 414) before Parallels opens.
+PARALLELS_URL_TEXT_LIMIT = 2000
+
+
+def parallels_url(text: Optional[str]) -> str:
+    """The website's link to Find Parallels with *text*, cut to PARALLELS_URL_TEXT_LIMIT
+    characters before it is encoded (cutting the encoded string would keep a sixth of it and
+    could split an escape)."""
+    from urllib.parse import quote
+    return '/parallels?text=' + quote((text or '')[:PARALLELS_URL_TEXT_LIMIT])
+
+
+def parallels_text(page_text: Optional[str], shown_text: Optional[str] = None,
+                   version: Optional[Dict[str, Any]] = None) -> str:
+    """The text Find Parallels sends from a reading view (the website's Browse and Quick View,
+    the desktop's Browse tab and result viewer): the version on screen, *shown_text* -- an FGP
+    or PGP edition, a correction, a reader's version -- when the chooser shows one, else the
+    page's automatic transcription, *page_text*. A translation is in another language, so the
+    page's own text goes instead. *version*: the chooser's choice, the website's version info
+    (``source`` 'translation', or ``is_translation``) or the desktop's item data (``source``
+    'pgp_translation' / 'fgp_translation'). Until 10.0.0 every one of them sent the automatic
+    transcription, whichever version was on screen."""
+    v = version if isinstance(version, dict) else {}
+    source = str(v.get('source') or '')
+    translation = bool(v.get('is_translation')) or source == 'translation' or source.endswith('_translation')
+    if shown_text and shown_text.strip() and not translation:
+        return shown_text
+    return page_text or ''
+
+
 def source_version(source: Dict[str, Any]) -> Optional[str]:
     """A chooser source's version (``fgp:<id>`` / ``pgp:<id>``), the edition records' key.
     *source* is a source as shared/fgp_service.py and shared/document_service.py give them,

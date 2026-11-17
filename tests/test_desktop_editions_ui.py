@@ -279,6 +279,21 @@ def test_the_viewers_exact_mark_needs_no_search_pattern(resolver):
     assert _red_words(d.text_ms) == ["שלום"] and "*" not in d.text_ms.toPlainText()
 
 
+def test_the_viewer_opens_an_unplaced_hit_on_its_edition_and_says_its_page_is_not_known(resolver, monkeypatch):
+    """A hit whose page could not be identified (a short excerpt of a long manuscript, say):
+    the viewer shows the edition that matched, its match marked, with the page it opens on,
+    never that page's automatic text, and tells the reader why the page may not be its own."""
+    tips = []
+    monkeypatch.setattr("desktop.result_dialog.QToolTip.showText", lambda *a: tips.append(a[1]))
+    parent = _Parent(PGP_ITEM, FGP_ITEM)
+    d = _Dialog(_edition_row(located=False), parent)
+    d._on_rd_pgp_loaded(SID, [{"id": 1}], {})
+    assert parent.auto_selected == []                     # not the default choice
+    assert d.rd_version_combo.currentData()["uid"] == "fgp:5"
+    assert _red_words(d.text_ms) == ["שלום"]
+    assert tips == [UNPLACED_NOTICE]
+
+
 def test_a_stale_hit_in_the_viewer_falls_back_to_the_default_choice_and_says_why(resolver, monkeypatch):
     tips = []
     monkeypatch.setattr("desktop.result_dialog.QToolTip.showText", lambda *a: tips.append(a[1]))
@@ -399,6 +414,84 @@ def test_browse_says_when_an_unplaced_hit_opens_on_the_first_page(resolver):
     b = _Browse(_edition_row(located=False), FGP_ITEM)
     b._on_browse_pgp_loaded(SID, [{"id": 1}], {})
     assert b.status_label.text() == UNPLACED_NOTICE
+
+
+# --- Find Parallels sends the text on screen ------------------------------------------------
+
+def test_parallels_text_is_the_version_on_screen_but_never_a_translation():
+    from shared.edition_target import parallels_text
+    assert parallels_text("automatic", "edition", {"source": "fgp_edition"}) == "edition"
+    assert parallels_text("automatic", "edition", {"source": "pgp"}) == "edition"          # the website's
+    assert parallels_text("automatic", "fixed", {"source": "correction"}) == "fixed"
+    assert parallels_text("automatic", None, None) == "automatic"                          # nothing chosen
+    assert parallels_text("automatic", "  ", {"source": "fgp_edition"}) == "automatic"
+    for translation in ({"source": "pgp_translation"}, {"source": "fgp_translation"},
+                        {"source": "translation"}, {"source": "fgp", "is_translation": True}):
+        assert parallels_text("automatic", "English", translation) == "automatic", translation
+    assert parallels_text(None, None) == ""
+
+
+def test_the_parallels_link_cuts_the_text_before_encoding_it():
+    """A whole edition or manuscript made a link the server refused (Codex review of #33): the
+    website's link carries the first PARALLELS_URL_TEXT_LIMIT characters, cut before encoding."""
+    from urllib.parse import parse_qs, urlparse
+    from shared.edition_target import PARALLELS_URL_TEXT_LIMIT, parallels_url
+    long_text = "שלום עליכם רבותי " * 400                    # 6,800 characters
+    url = parallels_url(long_text)
+    assert url.startswith("/parallels?text=")
+    sent = parse_qs(urlparse(url).query)["text"][0]
+    assert sent == long_text[:PARALLELS_URL_TEXT_LIMIT] and PARALLELS_URL_TEXT_LIMIT == 2000
+    assert len(url) < 16_000                                  # under the usual request-line limits
+    assert parse_qs(urlparse(parallels_url("קצר")).query)["text"] == ["קצר"]
+    assert parallels_url(None) == "/parallels?text="
+
+
+def _sent_to_composition(holder):
+    sent = []
+    holder.send_result_to_composition = lambda res, source_text=None, title=None: sent.append(source_text)
+    return sent
+
+
+def test_the_viewers_find_parallels_sends_the_edition_on_screen(resolver):
+    parent = _Parent(PGP_ITEM, FGP_ITEM)
+    d = _Dialog(_edition_row(), parent)
+    d._on_rd_pgp_loaded(SID, [{"id": 1}], {})
+    assert d.rd_version_combo.currentData()["uid"] == "fgp:5"
+    d.current_page_text = "the automatic transcription"
+    d.lbl_title = QLabel("A title")
+    d.close = lambda: None
+    sent = _sent_to_composition(parent)
+    for name in ("search_for_parallels", "_rd_text_for_parallels"):
+        setattr(d, name, MethodType(getattr(ResultDialog, name), d))
+    d.search_for_parallels()
+    d._rd_edit_mode = True                                # editing the edition shown
+    d.text_ms.setPlainText("my edit")
+    d.search_for_parallels()
+    d._rd_edit_mode = False
+    d.rd_version_combo.setCurrentIndex(0)                 # back to V0.8
+    d.search_for_parallels()
+    assert sent == [ORIGINAL, "my edit", "the automatic transcription"]
+
+
+def test_browses_find_parallels_sends_the_edition_on_screen(resolver):
+    b = _Browse(_edition_row(), PGP_ITEM, FGP_ITEM)
+    b._on_browse_pgp_loaded(SID, [{"id": 1}], {})
+    assert b.browse_version_combo.currentData()["uid"] == "fgp:5"
+    b.meta_mgr = SimpleNamespace(nli_cache={})
+    b.btn_b_all = SimpleNamespace(isChecked=lambda: False)
+    b.current_browse_internal_idx = 0
+    b.searcher.get_browse_page = lambda sid, absolute_index=None, volume_ie=None: {"text": "the automatic transcription"}
+    sent = _sent_to_composition(b)
+    for name in ("browse_search_parallels", "_browse_text_for_parallels"):
+        setattr(b, name, MethodType(getattr(GenizahGUI, name), b))
+    b.browse_search_parallels()
+    b.browse_edit_mode = True                             # editing the edition shown
+    b.browse_text.setPlainText("my edit")
+    b.browse_search_parallels()
+    b.browse_edit_mode = False
+    b.browse_version_combo.setCurrentIndex(0)             # back to V0.8
+    b.browse_search_parallels()
+    assert sent == [ORIGINAL, "my edit", "the automatic transcription"]
 
 
 def test_open_result_in_browse_takes_the_rows_edition():

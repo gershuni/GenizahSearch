@@ -17,6 +17,7 @@ from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
 from web.pages.search_helpers import selection_key
 from web.pages.browse_editions import keep_target
+from shared.edition_target import parallels_text, parallels_url
 from web.components.version_selector import decision_for_version
 from web.pages.search_editions import (browse_url as editions_browse_url, edition_text, matched_in,
                                        member_label, page_not_identified)
@@ -141,11 +142,13 @@ def _hit_scope_phrase(snippet, adv_state, page):
 def _hit_scope_version(result, adv_state, page):
     """The scholarly transcription leading *result* (its edition's version), on the page the
     hit belongs to only -- the same scope as _hit_scope_phrase: Next/Previous browse on as
-    usual (editions plan section 3.4). None for a hit whose page could not be identified:
-    the page Quick View opens on is not its page, so the edition is not pinned there (Codex
-    review of PR #18); the dialog's Browse link opens the edition with its match."""
+    usual (editions plan section 3.4). A hit whose page could not be identified claims the
+    page Quick View opens on, as Browse and the desktop's viewer do: the reader searched that
+    edition and sees it, with the page the manuscript opens on, and the header says the page
+    is not identified (_quick_view_result_label). Until 10.0.0 such a hit showed that page's
+    automatic text, empty on many manuscripts, never the edition that matched."""
     version = (result.get('edition') or {}).get('version')
-    if not version or page is None or page_not_identified(result):
+    if not version or page is None:
         return None
     current = (getattr(page, 'sys_id', None),
                getattr(adv_state, 'volume_ie', None),
@@ -2384,7 +2387,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                     # Define text container and render function at this scope for version switching
                     text_content_container = None
                     dict_pane_on = False   # the reader's dictionary switch, once the pane is marked
-                    current_display_text = {'value': display_text, 'html': text_html}
+                    # 'version': the chooser's choice once the reader (or its loader) makes one,
+                    # for Find Parallels (shared/edition_target.py::parallels_text).
+                    current_display_text = {'value': display_text, 'html': text_html, 'version': None}
 
                     def render_text_section(html_to_render: str):
                         """Render pre-formatted HTML text content + optional line-number gutter (Phase 999.4).
@@ -2546,6 +2551,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 if version_info.get('is_fgp') or version_info.get('source') == 'fgp':
                                     new_text = _fgp_text_for_display(new_text)
                                 current_display_text['value'] = new_text
+                                current_display_text['version'] = version_info
                                 # Re-apply search term highlighting to new version text
                                 new_html = _apply_highlight_marks(new_text or '', adv_state.highlight_terms)
                                 current_display_text['html'] = new_html
@@ -2729,17 +2735,32 @@ def open_advanced_dialog(search_state, refs, index, result):
                             ui.icon('menu_book').classes('mr-2')
                             ui.label(tr('Browse Full Manuscript'))
 
-                    text_for_parallels = current_text or snippet.replace('*', '')
+                    # View mode: the version on screen -- a scholarly transcription the hit
+                    # opened on or the reader chose, not the page's automatic text (Codex review
+                    # of #33); a translation sends the page's text (parallels_text). Edit mode:
+                    # the page text the editor shows.
+                    text_for_parallels = current_text or snippet.replace('*', '') or display_text
+
+                    def _find_parallels(page_text, on_screen):
+                        if on_screen:
+                            text = parallels_text(page_text, current_display_text.get('value'),
+                                                  current_display_text.get('version'))
+                        else:
+                            # Editing: the editor's text as typed (its textarea is bound to
+                            # adv_state.edit_text), not the page it started from (Codex review of #33).
+                            text = parallels_text(page_text, getattr(adv_state, 'edit_text', None))
+                        dialog.close()
+                        # Cut the text, then encode it: a Hebrew letter is six characters encoded.
+                        ui.navigate.to(parallels_url(text))
+
                     if text_for_parallels:
                         ui.button(
                             tr('Find Parallels'), icon='compare_arrows',
-                            on_click=lambda t=text_for_parallels: (
-                                dialog.close(),
-                                ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
-                            )
+                            on_click=lambda t=text_for_parallels, on_screen=not adv_state.edit_mode:
+                                _find_parallels(t, on_screen)
                         ).props('outline')
 
-                    text_to_copy = current_text or snippet.replace('*', '')
+                    text_to_copy = current_text or snippet.replace('*', '') or display_text
                     if text_to_copy:
                         # View mode: copy the version on screen (handle_version_change
                         # updates current_display_text['value']). Edit mode: the editor

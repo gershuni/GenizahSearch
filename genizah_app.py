@@ -11715,10 +11715,11 @@ class GenizahGUI(QMainWindow):
              if pages:
                  text_content = "\n\n".join([p['text'] for p in pages])
         else:
-             # Current Page
+             # Current Page, as it is on screen: the version chosen (an FGP or PGP edition, a
+             # correction), else its automatic transcription (_browse_text_for_parallels).
              if self.current_browse_internal_idx is not None:
                  pd = self.searcher.get_browse_page(self.current_browse_sid, absolute_index=self.current_browse_internal_idx, volume_ie=self.current_browse_volume_ie)
-                 if pd: text_content = pd['text']
+                 text_content = self._browse_text_for_parallels(pd['text'] if pd else '')
 
         if text_content:
             self.send_result_to_composition(
@@ -11726,6 +11727,23 @@ class GenizahGUI(QMainWindow):
                 source_text=text_content,
                 title=short_title
             )
+
+    def _browse_text_for_parallels(self, page_text):
+        """The Browse page as it is on screen: the version chosen in its chooser (an FGP or PGP
+        edition, a correction, a reader's version), else *page_text*, the automatic
+        transcription; a translation sends the page's own text
+        (shared/edition_target.py::parallels_text). While editing, the text in the editor,
+        whatever the chooser showed before (Codex review of #33)."""
+        from shared.edition_target import parallels_text
+        if getattr(self, 'browse_edit_mode', False):
+            return parallels_text(page_text, self.browse_text.toPlainText())
+        combo = getattr(self, 'browse_version_combo', None)
+        data = combo.currentData() if combo is not None else None
+        shown = None
+        if isinstance(data, dict) and data.get('source') not in (None, 'original'):
+            shown = (data.get('content') or data.get('corrected_text')
+                     or self.browse_text.toPlainText())
+        return parallels_text(page_text, shown, data if isinstance(data, dict) else None)
 
     def browse_add_to_list(self):
         """Add current manuscript to a list."""

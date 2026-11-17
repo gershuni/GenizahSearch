@@ -708,6 +708,20 @@ class _JsClick(str):
     """A click handler in JavaScript, run in the browser (``js_handler``), as opposed to a URL."""
 
 
+def _parallels_page_text(state, enrichment_refs) -> str:
+    """The current page's text for Search for Parallels, as it is on screen: the version the
+    chooser shows (``handle_version_change`` writes its text beside its info, the pair the
+    Word export reads), or the automatic transcription when none was chosen. A translation
+    sends the page's own text (shared/edition_target.py::parallels_text). In edit mode the
+    editor's text is on screen, whatever version was chosen before (Codex review of #33)."""
+    from shared.edition_target import parallels_text
+    if getattr(state, 'edit_mode', False):
+        return parallels_text(state.current_page.text, getattr(state, 'edit_text', None))
+    info = enrichment_refs.get('current_version_info')
+    shown = enrichment_refs.get('current_version_text') if info is not None else None
+    return parallels_text(state.current_page.text, shown, info)
+
+
 def _open_in_new_tab(btn, target):
     """Make ``btn`` open a library's viewer in a new tab IN THE BROWSER, with no server
     round trip. ``target``: the URL (the button becomes a link), or a :class:`_JsClick`
@@ -1707,8 +1721,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # Use all pages
             text_content = "\n\n".join([p.text for p in state.full_manuscript if p.text])
         elif state.current_page:
-            # Use current page only
-            text_content = state.current_page.text
+            # The current page as it is on screen: the version handle_version_change wrote
+            # beside its source (the pair the Word export reads), an FGP or PGP edition or a
+            # correction, else the automatic transcription (parallels_text).
+            text_content = _parallels_page_text(state, enrichment_refs)
         else:
             return
 
@@ -1716,11 +1732,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('No text available'), type='warning')
             return
 
-        # Navigate to parallels page with text as URL parameter
+        # Navigate to parallels page with text as URL parameter, cut to the length a link can
+        # carry: a whole edition or manuscript made an address the server refused (Codex
+        # review of #33).
         try:
-            from urllib.parse import quote
-            encoded_text = quote(text_content)
-            ui.navigate.to(f'/parallels?text={encoded_text}')
+            from shared.edition_target import parallels_url
+            ui.navigate.to(parallels_url(text_content))
         except Exception as e:
             logger.error(f"Error navigating to parallels: {e}")
             ui.notify(tr('Error'), type='negative')
