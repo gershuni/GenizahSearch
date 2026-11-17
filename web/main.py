@@ -770,16 +770,21 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.16.0-long-passages"
-# The key before it. 9.16.0's entry is gated on the letter-level index; where that
-# is off, the key stays here, so the unread dot lights only where the new entry is
-# there to read.
-WHATS_NEW_PREVIOUS_VERSION = "9.15.0-friedman"
+WHATS_NEW_VERSION = "10.0.0-scholarly"
+# The keys before it, newest first. 10.0.0's key needs the scholarly transcriptions served to
+# every reader (the switch on and the index installed: they go to the server after the code);
+# 9.16.0's needs the letter-level index. Where a gate is off, the key stays at the one before,
+# so the unread dot lights only where the new entry is there to read.
+WHATS_NEW_PREVIOUS_VERSION = "9.16.0-long-passages"
+WHATS_NEW_EARLIER_VERSION = "9.15.0-friedman"
 
 
 def whats_new_content_key() -> str:
     """The What's New content this deployment shows (before any AI-listing suffix)."""
-    return WHATS_NEW_VERSION if passage_available() else WHATS_NEW_PREVIOUS_VERSION
+    from web.editions_assets import served_to as editions_served_to
+    if editions_served_to(False):
+        return WHATS_NEW_VERSION
+    return WHATS_NEW_PREVIOUS_VERSION if passage_available() else WHATS_NEW_EARLIER_VERSION
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1843,22 +1848,6 @@ def create_layout():
                                 "vocalization, lines, size, material and more — with the Manuscript "
                                 "features button, on Browse by Identification and in Search only in..."),
                              '/catalog-browse'))
-    # v9.14.0 (2026-11-05), the owner-approved line, leading to Browse. Gated on a dictionary
-    # being served: the sidecars are deployed after the code, and the panel is not there before.
-    from web.keyboard_shortcuts import dictionaries_served as _dictionaries_served
-    from web.keyboard_shortcuts import served_dictionaries as _served_dictionaries
-    if _dictionaries_served():
-        _new_surfaces.insert(0, (tr("New: Judeo-Arabic dictionaries! On the manuscript page, press the "
-                                    "dictionaries button (עع) at the bottom of the text pane; clicking a "
-                                    "word then shows its entry in Blau's dictionary and in Lane's Lexicon"),
-                                 '/browse'))
-    # v9.15.0 (2026-11-08), the owner-approved line. Gated on Friedman's dictionary being served:
-    # its sidecar and switch go to the server after the code.
-    if _served_dictionaries().get('friedman'):
-        _new_surfaces.insert(0, (tr("New: Friedman's Judeo-Arabic dictionary, beside Blau's, and expression "
-                                    "search: select several words on the manuscript page to find them "
-                                    "together in both dictionaries"),
-                                 '/browse'))
     # v9.16.0 (2026-11-15), approved with the release texts. Gated like the letter-level
     # entry above: the passage length choice exists only where letter-level parallels are
     # served, and it leads to the same prefilled demo.
@@ -1866,6 +1855,29 @@ def create_layout():
         _new_surfaces.insert(0, (tr('New: "Only long passages" in letter-level parallels search, to keep '
                                     'only manuscripts whose match covers a long passage of your text'),
                                  _parallels_demo_target))
+    # v10.0.0 (2026-11-17), approved with the release texts, newest on top. The keyboard and
+    # theme line is ungated. The dictionaries line replaces 9.14.0's and 9.15.0's (Blau and
+    # Lane, then Friedman). It names all three and the expression search, so it is shown only
+    # while all three are served to every reader: one switched off, or a sidecar that failed
+    # its check, hides it (Codex on #35); Friedman's, served, always has the expression
+    # search. The scholarly transcriptions line is gated like the key: switch and index.
+    from web.keyboard_shortcuts import served_dictionaries as _public_dictionaries
+    from web.editions_assets import served_to as _editions_served_to
+    _new_surfaces.insert(0, (tr("A Hebrew keyboard on screen (⌨) in every search box, and a theme "
+                                "button (light, parchment, dark) in the header"), '/search'))
+    if all(_public_dictionaries().values()):
+        _new_surfaces.insert(0, (tr("New: Judeo-Arabic dictionaries (Blau and Friedman) and an Arabic one "
+                                    "(Lane) in Browse and in Quick View. The dictionary also finds "
+                                    "Judeo-Arabic expressions, and takes the words around into account. "
+                                    "Press Alt and click an Arabic word, or press M/D and then click a "
+                                    "word, and try it! The dictionary works better on scholarly "
+                                    "transcriptions."),
+                                 '/browse'))
+    if _editions_served_to(False):
+        _new_surfaces.insert(0, (tr("New: search the scholarly transcriptions (FGP and PGP) together with "
+                                    "the automatic ones. You can choose to search all the transcriptions, "
+                                    "only the scholarly ones, or only the automatic ones."),
+                                 '/search'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

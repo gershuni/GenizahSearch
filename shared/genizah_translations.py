@@ -6453,6 +6453,29 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v10.0.0 web What's New entries and desktop What's New bar and dialog (2026-11-17),
+# approved with the release texts (the Hebrew is the owner's).
+TRANSLATIONS.update({
+    "New: search the scholarly transcriptions (FGP and PGP) together with the automatic ones. You can choose to search all the transcriptions, only the scholarly ones, or only the automatic ones.":
+        "חדש: חיפוש בתעתיקים המדעיים (FGP ו-PGP) יחד עם התעתיקים האוטומטיים. ניתן לבחור לחפש בכל התעתיקים, רק בתעתיקים המדעיים, או רק בתעתיקים האוטומטיים.",
+    "New: Judeo-Arabic dictionaries (Blau and Friedman) and an Arabic one (Lane) in Browse and in Quick View. The dictionary also finds Judeo-Arabic expressions, and takes the words around into account. Press Alt and click an Arabic word, or press M/D and then click a word, and try it! The dictionary works better on scholarly transcriptions.":
+        "חדש: מילוני ערבית-יהודית (בלאו ופרידמן) וערבית (ליין) בתצוגת עיון ובתצוגת מבט מהיר. המילון מחפש גם ביטויים בערבית-יהודית, ומתחשב במילים בסביבה. לחצו על ALT ועל מילה ערבית, או על M/D ואחר כך על מילה, ותנסו! המילון עובד טוב יותר בתעתיקים מדעיים.",
+    "A Hebrew keyboard on screen (⌨) in every search box, and a theme button (light, parchment, dark) in the header":
+        "מקלדת עברית על המסך (⌨) בכל תיבת חיפוש, וכפתור ערכת נושא (בהירה, קלף, כהה) בסרגל הכותרת",
+    "New: search the scholarly transcriptions (FGP and PGP) together with the automatic ones":
+        "חדש: חיפוש בתעתיקים המדעיים (FGP ו-PGP) יחד עם התעתיקים האוטומטיים",
+    "The app now also searches the scholarly transcriptions (FGP and PGP). Choose which transcriptions to search in the Transcriptions box on the Search tab.":
+        'התוכנה מחפשת כעת גם בתעתיקים המדעיים (FGP ו-PGP). ניתן לבחור בתיבת הבחירה "תעתיקים" בטאב החיפוש באילו תעתיקים יש לחפש.',
+    "A result found in a scholarly transcription opens on that edition, with the match marked, in the Manuscript Viewer and in Browse. Lists keep it, and the exports name every text that matched.":
+        "תוצאה שנמצאה בתעתיק מדעי נפתחת על אותה מהדורה, כשההתאמה מסומנת בה, בחלון צפייה בכתב יד ובלשונית העיון. הרשימות שומרות אותה, והייצוא מציין כל טקסט שנמצאה בו התאמה.",
+    "PGP editions of both sides of a leaf now appear in the version chooser on each page.":
+        "מהדורות PGP של שני צדי הדף מופיעות עכשיו בבורר הגרסאות בכל אחד מהעמודים.",
+    "In Browse and in the Manuscript Viewer, Find in text now goes from match to match: Enter or ▼ to the next, Shift+Enter or ▲ to the previous, with a count of where you are.":
+        "בעיון ובחלון צפייה בכתב יד, החיפוש בטקסט עובר כעת מהתאמה להתאמה: Enter או ▼ להתאמה הבאה, Shift+Enter או ▲ לקודמת, ומונה מראה באיזו התאמה אתם.",
+    "The app keeps you logged in after an upgrade or a restart.":
+        "התוכנה שומרת על החיבור לחשבון גם אחרי עדכון גרסה או הפעלה מחדש.",
+})
+
 # v9.16.0 web What's New entry and desktop What's New bar and dialog (2026-11-15),
 # approved with the release texts.
 TRANSLATIONS.update({

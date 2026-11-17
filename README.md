@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.16.0
+# Dicta Genizah Search Pro 10.0.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,16 +8,19 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.16.0?
+## What's New in Version 10.0.0?
 
-**Dictionary lookup and only long passages**
+**Scholarly transcriptions and dictionaries**
 
-Letter-level Composition Search in the desktop app and letter-level Parallels on the website have
-a third *Passage length* choice, **Only long passages**: it keeps only manuscripts whose match
-covers at least 120 letters of your text (half of it, if your text is shorter), for the wide
-settings, where the list grows long. On the website, moving from page to page starts at once, the
-buttons that open a manuscript in its library's viewer open it every time, Quick View opens on the
-same image as the manuscript page, and the header stays on one row at every window width.
+The search now reads the scholarly transcriptions — the editions of the Friedberg Genizah Project
+(FGP) and the Princeton Geniza Project (PGP) — together with the automatic ones, on the website and
+in the desktop app: a *Transcriptions* choice (All, Scholarly, Automatic), one result per page
+naming every text it matched in, and a result opens on its edition with the match marked. On the
+website, the Judeo-Arabic dictionaries find a word's quotations, verb stem and root and open in
+Quick View too; a Scholarly transcriptions filter keeps the results whose page has an edition, or
+those whose page has none yet; the result filters are tags with a short menu; and a Hebrew
+keyboard on screen is in every search box. In the desktop app, Find in text goes from match to
+match, and the app keeps you logged in after an upgrade.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
@@ -28,7 +31,7 @@ Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 ### Search
 
 - **Keyword, phrase and pattern search** over the MiDRASH automatic transcriptions of the whole
-  corpus, with fuzzy and spelling-variant matching for Hebrew and Judeo-Arabic, a
+  corpus and the FGP and PGP scholarly transcriptions, with fuzzy and spelling-variant matching for Hebrew and Judeo-Arabic, a
   **Responsa mode** and a **tabular query builder**; results span page boundaries
 - **Letter-level parallels**: paste a passage, or several witnesses of one work, and find the
   manuscripts that carry it (desktop; also via the API); **Composition Search** by chunks
@@ -94,7 +97,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.16.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
+1. **Download:** the installer (`GenizahSearchPro_V10.0.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

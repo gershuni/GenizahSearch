@@ -113,7 +113,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.16.0"
+WHATS_NEW_CONTENT_VERSION = "10.0.0"
 
 
 class WhatsNewBar(QFrame):
@@ -197,7 +197,9 @@ class WhatsNewBar(QFrame):
         # with the release texts, 2026-10-30).
         # v9.13.0: the Manuscript features (approved with the release texts, 2026-11-01).
         # v9.16.0: "Only long passages" (approved with the release texts, 2026-11-15).
-        self.lbl_msg.setText(tr('New: "Only long passages" in letter-level Composition Search'))
+        # v10.0.0: the scholarly transcriptions in the search (approved with the release
+        # texts, 2026-11-17).
+        self.lbl_msg.setText(tr("New: search the scholarly transcriptions (FGP and PGP) together with the automatic ones"))
         self.show()
 
     def on_learn_more(self):
@@ -338,8 +340,16 @@ class WhatsNewDialog(QDialog):
         # WHATS_NEW_CONTENT_VERSION stays 9.13.0 (not shown again to its readers).
         # v9.16.0 (2026-11-15, approved with the release texts): one bullet, "Only long
         # passages"; the 9.13.x bullets stay in "All versions".
+        # v10.0.0 (2026-11-17, approved with the release texts): five bullets, the
+        # scholarly transcriptions in the search, a result opening on its edition, Find
+        # going from match to match, PGP editions of both sides, and the sign-in kept;
+        # 9.16.0's stays in "All versions".
         items = [
-            tr('Letter-level Composition Search has a third Passage length choice, "Only long passages": it keeps only manuscripts whose match covers at least 120 letters of your text (half of it, if your text is shorter). It helps at Very wide and Maximal, where the list grows long.'),
+            tr("The app now also searches the scholarly transcriptions (FGP and PGP). Choose which transcriptions to search in the Transcriptions box on the Search tab."),
+            tr("A result found in a scholarly transcription opens on that edition, with the match marked, in the Manuscript Viewer and in Browse. Lists keep it, and the exports name every text that matched."),
+            tr("In Browse and in the Manuscript Viewer, Find in text now goes from match to match: Enter or ▼ to the next, Shift+Enter or ▲ to the previous, with a count of where you are."),
+            tr("PGP editions of both sides of a leaf now appear in the version chooser on each page."),
+            tr("The app keeps you logged in after an upgrade or a restart."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

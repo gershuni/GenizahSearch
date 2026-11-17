@@ -8,6 +8,359 @@ which is not public.
 
 ---
 
+## [10.0.0] - 2026-11-17 — Scholarly transcriptions and dictionaries
+
+Both apps. The scholarly transcriptions — the Friedberg Genizah Project's and the Princeton Geniza
+Project's editions — are searched with the automatic ones: a Transcriptions choice (All, the
+default; Scholarly; Automatic) on the website's search page and the desktop's Search tab, one
+result per page naming every text that matched, and a result opens on its edition with the match
+marked; the public API and MCP take `sources`. The desktop builds the editions index itself, once,
+in the background after its first start, and again after a data or index update. On the website,
+Blau's, Friedman's and Lane's dictionaries are served to every reader, in Quick View too; the
+result filters are tags with menus, with a Scholarly transcriptions filter and Reset filters; the
+on-screen Hebrew keyboard is in every search box; and the header has a theme button. The desktop
+keeps its sign-in across upgrades, and its Find in text goes from match to match. Deploy: the code first, then `scripts/deploy_editions_index.ps1`,
+then in the server's `.env` `EDITIONS_SEARCH_ENABLED=1` and `BLAU_`, `LANE_` and
+`FRIEDMAN_DICTIONARY_ENABLED=1`, and a restart. Web What's New "10.0.0-scholarly"; desktop What's
+New 10.0.0.
+
+### Scholarly transcriptions on the website's search and reading pages (web)
+
+Behind `EDITIONS_SEARCH_ENABLED` (off by default; `editors` shows it to signed-in editors and
+admins only): nothing changes until it is turned on and the editions index is installed.
+
+- **Search:** beside the mode, **Transcriptions** chooses what is searched -- **All** (the
+  automatic and scholarly transcriptions together, the default), **Scholarly** or **Automatic**
+  -- remembered per visitor and kept by Search Within. Each page is one result; its
+  card names every text that matched ("Matched in: Automatic transcription, PGP edition
+  (Ben-Sasson)"), each edition a link to it, and a hit whose page could not be identified says
+  so. The count line adds how many results matched in a scholarly transcription, and says when
+  they could not be searched this time. With the scholarly transcriptions there are no early rows
+  while the search runs.
+- **Reading a hit:** `/browse?version=fgp:<id>&span=a-b` opens that edition on its page, before
+  the page and coverage rules could leave it out or prefer another, and marks the match on the
+  edition's own characters (points and signs included), never a phrase guessed again. An edition
+  changed since the search opens the manuscript as usual and says so. Quick View, the expanded
+  text, Copy and the exports read the edition, not the page's automatic transcription; the
+  exports' Source column names every text that matched.
+- **Deploy:** `scripts/deploy_editions_index.ps1` builds the editions index on the server and puts
+  it in place (first install, or after a main-index rebuild). The FGP and PGP sidecar deploys
+  rebuild it with the sidecar wherever the server has one: built and gated while the site serves,
+  then the service stopped, both swapped, the service started, both put back on any failure. The
+  PGP deploy now uploads under a temporary name and keeps the served file as `.prev-<stamp>`, as
+  the FGP one does. `build_editions_index.py` gains `--promote-only`, `--restore-previous` and
+  `--check-live`; the admin page says when the index was built from other inputs than those
+  installed.
+- Help describes the choice where it is served.
+
+### Scholarly editions in the public API and MCP, two search workers at once (web)
+
+Behind `EDITIONS_SEARCH_ENABLED` (off by default): nothing changes until it is turned on and the
+editions index is installed. The website's pages come in the next change.
+
+- **The public Search API and MCP read the scholarly editions** (FGP and PGP) where the switch is
+  `on`: `POST /api/search` takes `sources` (`all` by default there, `editions`, `automatic`) and
+  answers one result per page, each with `sources`, `edition` and `members` (every matching text of
+  the page, with its own snippet, locator and credit). `GET /api/browse?version=fgp:<id>` reads one
+  edition, with its credit; MCP's `search_manuscripts` and `browse_manuscript_page` take the same,
+  and `how_to_cite` credits the edition. New codes: `editions_unavailable`, `edition_not_found`,
+  `editions_skipped`, `page_not_identified` (`docs/SEARCH_API.md`, Changelog).
+- **On the website a search with editions runs its two legs at once**, the main index in the
+  research queue and the editions in a worker of their own (`GENIZAH_EDITIONS_WORKERS`, default 1),
+  merged in the web process exactly as the in-process coordinator merges them; Stop and the time
+  limit end both, and a failed editions worker leaves the automatic results with a note.
+- **Result pages for ChatGPT and MCP** shorten, then omit, the members' snippets of one oversized
+  page before anything else, so its members, credits and locators always fit.
+- `scripts/verify_editions_search.py --web-timing` measures the website's wall-clock time through
+  real research workers on the real indexes: with editions at most 20% above the automatic search,
+  median and 90th percentile per mode; its `--self-test` runs the legs one after the other and must
+  fail.
+
+### The desktop builds and opens the scholarly transcriptions' index (desktop)
+
+Nothing new is visible yet: the source choice, the grouped results and their `Src` column, the
+viewer, lists, exports and Help come in the next change.
+
+- **The desktop builds the editions index itself** (`desktop/editions_index.py`) from the FGP and
+  PGP sidecars it ships, the NLI crossref and the main index's browse map:
+  built locally, not added to the installer. A few seconds after each start, a
+  background thread compares `<INDEX_DIR>/Editions` with the installed inputs; when it is missing
+  or stale it builds `Editions.new` beside it (88 s and 276 MB on the full data, 2026-11-16),
+  checks it, and the window puts it in place once no search reads the index -- the way a
+  rebuilt main index is swapped in -- then opens it. A finished build that was never put in place
+  is put in place without building again; an unfinished one is replaced. A promotion whose
+  renames fail never reopens the old index: the new build is kept and tried again later.
+- **A main-index rebuild stops a running editions build** (its new browse map makes the build
+  stale), and the editions are checked and rebuilt when it ends. A sidecar update stops it
+  too (a running build holds the files open), its downloads start once the build has ended, and
+  the editions are checked when they have ended. After either, the index built from the old files
+  is closed once no search reads it, until the rebuilt one is installed (the main index's reopen
+  no longer reopens it on the UI thread meanwhile). A build records its inputs as they were
+  before it read them (`build_generation`), and one whose inputs were replaced while it ran is
+  dropped and built again. The exit stops a running build at its next document
+  (`build_generation(should_stop=)`, `BuildCancelled`).
+- **The engine searches the editions with `sources`** (`all` / `editions` / `automatic`) once the
+  index is open, the per-request copies that carry a run's variant settings included
+  (`SearchEngine.install_editions` installs a leaf opened in the background). A search asked to
+  read them before then runs on the automatic transcriptions and its result line says so once
+  ("The scholarly transcriptions could not be searched this time"). No window passes a source
+  choice yet, so every search is today's.
+
+### The scholarly transcriptions in the desktop's search (desktop)
+
+The visible half of the desktop's editions search; the index it reads is built in the background
+since the previous change.
+
+- **A Transcriptions choice** beside the corpus choice on the Search tab: **All** (the automatic
+  and the scholarly transcriptions; the default), **Scholarly**, **Automatic** -- the website's
+  words and Hebrew (תעתיקים: הכל / מדעיים / אוטומטיים). It is shown where the transcriptions are
+  read (the Genizah in a text mode; not My Library alone, Title, Shelfmark or Lab Mode), kept in
+  the session and in each history entry, and replayed by every search-within step.
+- **One result per page.** The `Src` column names every text that matched -- `V0.8`, `FGP`,
+  `PGP` -- with each named in full, with its credit, when you point at it ("Matched in: FGP
+  edition (credit), Automatic transcription"); the count line adds "N in scholarly
+  transcriptions"; a hit whose page could not be identified says so on its page cell.
+- **Opening a hit in a scholarly transcription** -- in the Manuscript Viewer and in Browse --
+  chooses that edition on the folio it arrived for (kept even where the page's filter would
+  leave it out) and marks the match itself on the edition's own characters, mapped from the
+  span the search read (`shared/edition_target.py`, shared with the website's /browse;
+  `desktop/edition_view.py`). A stale hit opens the manuscript as usual and says the edition has
+  changed; an unplaced one says its page is not known. The viewer no longer replaces such a
+  row's identity with the automatic page's.
+- **Lists** add a located hit's page and an unplaced one's manuscript; **exports** name every
+  text that matched in their Source column (Excel, CSV, Word), and their search information
+  says which transcriptions were read. The session keeps the members of each result light.
+- **Help**, in both languages: "Scholarly transcriptions in the search". The Hebrew Help now
+  writes תעתיק / תעתיקים throughout.
+
+### Quick View opens a hit with no identified page on its edition; Find Parallels sends the text on screen (web + desktop)
+
+- **Quick View** opens a scholarly-transcription hit whose page could not be identified (a short
+  excerpt of a long manuscript, a catalogue's text with no image of its own) on the edition that
+  matched, with the page the manuscript opens on, its match marked, as Browse and the desktop's
+  viewer already did; the header still says the page is not identified
+  (`web/pages/search_results.py::_hit_scope_version`). It used to show that page's automatic
+  text, empty on many such manuscripts.
+- **Find Parallels sends the text on screen** from every reading view (the website's Browse and
+  Quick View, the desktop's Browse tab and result viewer): the version shown, an FGP or PGP
+  edition, a correction or a reader's version, else the automatic transcription
+  (`shared/edition_target.py::parallels_text`). A translation sends the page's own text; in edit
+  mode, the editor's text; the whole-manuscript choice still sends every page's automatic text.
+  On the website the link carries the first 2,000 characters (`parallels_url`, as Quick View
+  did): a whole edition or manuscript made an address the server could refuse. Before, every one of them
+  sent the automatic transcription, whichever version was on screen.
+
+### Find in text goes from match to match (desktop)
+
+- **Find in text moves between its matches** in Browse by Shelfmark (View All included) and the
+  Manuscript Viewer: a count beside the box shows which match you are on ("3/12"), marked in
+  orange while the others stay yellow. Enter or the down arrow goes to the next match, Shift+Enter
+  or the up arrow to the previous one (F3 / Shift+F3 too), round from the last to the first; a
+  match off screen is scrolled into view, and the text cursor stays where it was. Typing starts
+  from the first match on screen; a new page or version is marked again with no match chosen, so
+  the viewer stays at the search hit it opened on (`desktop/widgets/__init__.py::FindNavigator`).
+  The keyboard shortcuts card and Help name the keys.
+
+### Filter results by scholarly transcription (web)
+
+After a search, the **Scholarly transcriptions** chip offers all results, only the results whose
+page has a scholarly transcription, and only those whose page has none (pages no one has edited
+yet). It sits beside the **PGP** filter, which asks something else: whether the manuscript has
+any PGP record, where this one asks whether the result's page has an FGP or PGP edition.
+
+A page has one when the version chooser offers an edition with text on it: the chooser's own page
+filter decides (`shared/fgp_service.py::filter_sources_for_page`), on the page, page count and text
+Quick View opens the result with, so the filter, Quick View and /browse agree. Translations do not
+count; a result found in a scholarly transcription has one by definition. The check
+(`shared/transcription_service.py::rows_with_scholarly_transcription`) reads only manuscripts with
+an edition at all and runs with the rest of the results' enrichment, visible page first. It reads
+the FGP and PGP sidecars, so it works whether or not the editions search is switched on.
+
+Kept with the run and across reloads like the PGP filter (`search_scholarly_filter`), reset by New
+Search. Since the result filters stay on for the next search, a **Reset filters** button beside the
+count shows while any of them is on (printed, PGP, scholarly transcription, library, domains, the
+Toggle Filters panel) and clears them all; the manuscript and word-search exclusions keep their own
+chips. Help describes both in both languages. Web only; no sidecar or API change.
+
+### The result filters as chips (web)
+
+The result filters beside the count are chips now: **Domains**, **Prints**, **PGP**, **Scholarly transcriptions** and the library filter,
+each a pill with a chevron, grey while off and filled once it hides rows. Printed, PGP and scholarly
+transcription open a short menu (all / only / without) instead of cycling through their states on
+each click, so the next state is never a guess; domains and library open their dialogs as before.
+**Search within** is a plain action, not a chip. A chip that is not available yet takes no space
+at any width, so the row closes up instead of leaving holes (`.tb-hidden` in `common.css`).
+
+Under 1024px the count, **Reset filters** and the chips wrap instead of scrolling sideways, so
+none is off-screen; on a phone the count has the first line beside the export icons (pinned to
+the corner) and Reset filters with the chips start the next (`.results-chip-break`).
+
+Selecting results shows "N selected" and the two bulk actions (add the selected results to a list,
+copy their text) again: they had stayed hidden, because the page showed them with `.style('')`,
+which in NiceGUI only adds styles. They show and hide by a class now (`tb-hidden`); on a phone the
+count leaves room for the bulk actions in the corner (`.has-selection`) and "N selected" starts the
+chips' line. A new search or a restored history entry starts with nothing selected (the selection
+is row positions, so the new rows showed as selected and the bulk actions acted on them), and
+unticking one row of a full selection keeps the others (the select-all box moving to match was
+taken as the reader's "select none").
+
+The printed and PGP menus re-render through the same path as the scholarly one, which keeps the
+word-search exclusions and the Toggle Filters panel's fields in force. Help describes the chips in
+both languages.
+
+A chip that is off takes the theme's secondary text colour, its outline with it: Quasar's fixed grey
+read as unavailable on the dark theme.
+
+### Selected results stay the ones ticked when a filter is on (web)
+
+With a result filter on, a ticked row could stand for another result: a row's checkbox stored its
+number among the rows shown, and **Add Selected to List**, **Copy Selected Text** and the exports
+of the selected rows read that number in the full, unfiltered list. Once a filter hid an earlier
+row they acted on a different manuscript. A result is now selected by its identity (its uid, else
+its manuscript: `web/pages/search_helpers.py::selection_key`), and the selection is read against
+the rows the page shows (`selected_rows`), in their order.
+
+- **Select all** ticks the rows shown, every page of them, none a filter hides, and keeps them on
+  screen: it used to re-render the full list, which put back every row the result filters hid.
+  Unticking it unticks the rows shown only.
+- "N selected" counts the selected rows shown. A selected row a filter hides is not acted on, and
+  shows ticked again once the filter is off.
+- The export's selection follows every render, not only a click.
+
+### PGP editions of both sides shown in the version chooser (web + desktop)
+
+A PGP edition linked to a manuscript as "recto and verso" never appeared in the version chooser:
+the page filter kept a PGP source only when its side was the shown page's ('recto' on page 1,
+'verso' on any other) or was empty. It now shows on every page, its text narrowed to the page by
+its Recto/Verso headings or per-image sections, as an edition with no side already was; where
+its sections skip a page, its headings decide that page. A text that cannot be split for a page
+-- no heading and no section for it -- is shown whole on both pages. Measured on the local `pgp.db`: 982 edition texts carry the label;
+688 manuscripts had no PGP edition in the chooser because all of theirs do; 49 texts on 42
+manuscripts are the whole-text case. With PGP first, these editions become the default text on
+those pages.
+
+The desktop PGP source worker (`desktop/gui_threads.py`) kept its own copy of the rule; it now
+calls `shared/fgp_service.py::filter_sources_for_page`, with `translations_every_page=True` so a
+PGP translation still shows on every page in the desktop as before. Pinned by
+`tests/test_pgp_recto_and_verso.py` and `tests/test_pgp_recto_and_verso_desktop.py`.
+
+### Dictionaries in Quick View (web)
+
+The dictionary lookup (Blau, Friedman, Lane) works in the search page's Quick View as on /browse:
+click a word of the transcription, select words, press D or M, or on a phone tap "Look up" under
+selected words; the same switch beside the version chooser, and the same panel. Fullscreen Quick
+View takes the lookup too. Moving to another result or page, changing the text version, or closing
+Quick View closes the panel. Esc closes the panel first, and Quick View on the next press.
+
+The page side moved out of `web/pages/browse.py` into `web/components/dictionary_lookup.py`, which
+both pages use; /browse is unchanged. `web/static/js/blau_lookup.js` now stands down only for a menu
+or a dialog that does not hold the panel, and inside Quick View keeps the phone chip beside the panel
+and uses up the Esc that closes it. No sidecar or setting changes: Quick View offers the lookup
+wherever /browse does.
+
+### Dictionaries name their source at the top, and show no internal names (web)
+
+Each dictionary tab (Blau, Friedman, Lane) now opens on its author and title, linked to the
+dictionary's site, always in view at the top (`blau_panel.SOURCES`, `_render_source`); the full
+credit line stays at the foot. Under tabs, Friedman's and Lane's separate section titles are gone,
+since the source line names them.
+
+No internal name or lookup key reaches the reader any more: "Possible spelling", Friedman's "found by
+its base form" line and Blau's "Looked for" list show the word with its final letters (ממלך, not the
+key ממלכ; `shared/ja_roots.with_final_letters`), and the match-details tooltip (ⓘ), which printed the
+internal step names (`mater → source_suffix`), is gone: the lookup does not explain how it reached
+a match.
+
+Both lookups drop a match that needs both a spelling the word does not have (a yod or waw added or
+dropped, צ/ט) and a form the entry does not print (`shared/blau_normalize.stacked_variant`): ממלוך no
+longer reaches ממלכה̈ ("fiancée") as ממלך with the feminine ending. Of 4,000 corpus words, 30 had such
+matches in Friedman, almost all wrong (יהודה -> באליהודיה, לעולם -> לעלמה); Blau had none.
+No sidecar or setting changes.
+
+### Dictionaries: צ and ט read for one another (web + desktop)
+
+Judeo-Arabic writes ض (צ̇) and ظ (ט̇) for one another, so a word looked up in Blau's or Friedman's
+dictionary now also reaches an entry spelled with the other letter: עצ̇ים reaches עט̇ם, אלקאט̇י
+reaches קאצ̇י. One or two letters of a word are exchanged (`shared/blau_normalize.py::interchange_variants`),
+in the same later pass as a spelling with a yod or waw added or dropped: an entry spelled as the
+word is written comes first, and an exchanged one shows as "Possible spelling" (step `interchange`,
+`spelling_variant`). Several words (the expression search) the same way: a second pass with each
+word's exchanged spellings (`shared/ja_expression.py::interchange_candidates`), whose hits come
+after the words' own and carry `possible_spelling`. The reader's side only: the stored keys,
+`NORMALIZER_VERSION` and `KEYING_VERSION` are unchanged, so no sidecar is rebuilt.
+
+Only the ض/ظ pair itself is exchanged: an exchanged spelling is shown only where the dictionary
+prints the letter reached with the dot (ט̇ for a word's צ, צ̇ for its ט; `shared/ja_roots.py::
+interchange_dotted`). The word's own dot is not needed. Without the rule, 73% of the exchanged
+cards in Blau had a ط/ص root (טוב reached צוב, חוץ reached חוט), and Blau printed the dot on every
+ض/ظ root reached, so the rule drops no real pair there.
+
+`scripts/measure_dictionary_interchange.py` measures what the exchange gains and adds on the
+automatic text, for every exchanged spelling and for the dotted letter (ض/ظ) only.
+
+A ת at the end of a word was already read as the feminine ה (סלאמת, ובסלאמת reach סלאמה), not only
+before a pronoun suffix; a test now pins it.
+
+### On-screen Hebrew keyboard on the search box (pilot) (web)
+
+- A keyboard button inside the /search box opens Hebrew keys under it, for visitors with no Hebrew layout: the letters in alphabet order, each final form beside its letter, space, `*` (any letters), `'` (geresh, as the dictionary box reads it), `"` (abbreviation) and delete. A key types at the cursor; a mouse click leaves the cursor in the box, and a tap moves it to the keys so a phone's own keyboard closes (`web/hebrew_keyboard.py`, `web/static/js/hebrew_keyboard.js`).
+- Pilot scope, after a design review: the main search box only, one layout, no `?` key (`?` and a space switch the mode), no typing with the physical keys.
+- PostHog, with no characters and no query text: `hebrew_keyboard_opened` and `hebrew_keyboard_used` (once per search attempt); the page address PostHog adds to these two loses its query in `before_send` (`web/static/js/posthog_scrub.js`).
+
+### The on-screen Hebrew keyboard in every search box (web)
+
+The keyboard button that opens the Hebrew keys is now in the homepage's search box and in the
+header's go-to box too, not only on the search page. The homepage's keys open
+under its box; the header's open over the page under its box (`.gs-hk-floating`). One helper adds
+the button and the panel to a box (`web/hebrew_keyboard.py::attach`).
+
+- Each box carries its own field (`main_search`, `home_search`, `header_search`) as the script's
+  target, and its panel the same field: the script types a key into its panel's box, so on the
+  search page, where the header's box comes first, the main box's keys still type in the main box.
+  PostHog gets the field with both events.
+- The script and styles come once per page, from the layout every page with a header uses, and the
+  script refuses to run twice (a second copy would type each key twice).
+
+### A theme button in the header (web)
+
+The header has a theme button beside the language button: it cycles light -> parchment -> dark,
+and its icon shows the theme the page is in. It advances from the theme the tab shows (another
+tab may have changed the stored one), and the sidebar's and the Settings page's theme choices set
+both the page and the header icon the same way (`web/main.py::create_layout`,
+`web/pages/settings.py`).
+
+### The desktop app keeps you signed in after an upgrade (desktop)
+
+The desktop app no longer asks for the password again after an upgrade or any other restart.
+Each refresh of the sign-in (when the app starts, every hour while it runs, and when a request
+finds it expired) replaces the saved tokens. The server accepts a replaced refresh token only
+within ten seconds or when it is the one just before the current one; an older one is refused
+and ends the session. The saved file used to keep the pair from the sign-in, so after an hour
+of use it was two refreshes old, and the next start was refused and showed the user as signed
+out; most users met it when an upgrade restarted the app.
+
+Every new pair is now written to `~/.genizah_corrections/supabase_credentials.json` from the
+auth client's own events, from whichever thread refreshed, under a lock and replaced whole
+(`shared/atomic_io.write_bytes_atomic`); the newest pair is kept in memory, so a save that
+failed is made good by the next one. "Remember me" is kept beside it rather than
+overwritten, and a file another program holds is retried and, if still unreadable, left as it
+was rather than taken for an empty one. A sign-out drops the client before it asks the server
+to end the session, so a refresh that lands after it never writes the file back.
+
+Users whose saved sign-in is already stale sign in once more after installing this version.
+Gate: `tests/test_desktop_sign_in_survives_restart.py`, which runs the real `supabase_auth`
+client against a fake auth server with GoTrue's refresh-token rules (reuse window, parent
+token, session revoked on older reuse, revoked on sign-out).
+
+### Sign-in tokens no longer reach the analytics (web)
+
+A confirmation, magic-link or password-reset link opens the site with the visitor's session in
+the address (`#access_token=...&refresh_token=...`), and PostHog recorded that address with the
+page's events. Every event now passes through `before_send` (`web/static/js/posthog_scrub.js`),
+which replaces the value of each token parameter with `[redacted]` in the event, the person
+properties and the session recording. Events recorded before the deploy still hold them.
+Pinned by `tests/test_posthog_scrub.py`.
+
 ## [9.16.0] - 2026-11-15 — Dictionary lookup and only long passages
 
 Both apps. Letter-level Composition Search (desktop) and Parallels (web) gain a third *Passage

@@ -371,10 +371,11 @@ def test_an_unread_announcement_carries_a_dot():
 
 
 def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
-    """9.16.0's entry is gated on the letter-level index, and so is its key: a reader who
-    dismissed the 9.15.0 content gets the dot where the new entry is there to read, and
-    no dot on a box without the index, where nothing new is shown."""
-    from web.main import WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION
+    """10.0.0's entry is gated on the scholarly transcriptions being served to every reader,
+    9.16.0's on the letter-level index, and so is each key: a reader who dismissed the
+    content before gets the dot where the new entry is there to read, and no dot where
+    nothing new is shown."""
+    from web.main import WHATS_NEW_EARLIER_VERSION, WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION
 
     def dot_after_dismissing(key):
         async def driver(user):
@@ -390,10 +391,55 @@ def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
     with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
           patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''})):
         found = []
-        _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
-        _run(dot_after_dismissing(WHATS_NEW_VERSION), passage_on=True)
-        _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=False)
+        with patch('web.editions_assets.served_to', side_effect=lambda editor: not editor):
+            _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_VERSION), passage_on=True)
+        assert found == [True, False], found
+        found = []
+        with patch('web.editions_assets.served_to', return_value=False):
+            _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=False)
         assert found == [True, False, False], found
+
+
+def test_the_scholarly_transcriptions_line_is_shown_only_where_they_are_served():
+    """The 10.0.0 editions line leads to a choice that exists only where the editions are
+    served to every reader; the keyboard and theme line is there either way."""
+    editions_line = "New: search the scholarly transcriptions (FGP and PGP)"
+    keyboard_line = "A Hebrew keyboard on screen"
+
+    async def driver(user):
+        await user.open('/')
+        text = _texts(_elements(user))
+        seen.append((editions_line in text, keyboard_line in text))
+
+    seen = []
+    with patch('web.editions_assets.served_to', side_effect=lambda editor: not editor):
+        _run(driver)
+    with patch('web.editions_assets.served_to', return_value=False):
+        _run(driver)
+    assert seen == [(True, True), (False, True)], seen
+
+
+def test_the_dictionaries_line_is_shown_only_while_all_three_are_served():
+    """The 10.0.0 dictionaries line names Blau's, Friedman's and Lane's dictionaries and the
+    expression search, so one dictionary switched off, or a sidecar that failed its check,
+    hides it (Codex on #35); an editors-only preview never counts."""
+    dictionaries_line = "New: Judeo-Arabic dictionaries (Blau and Friedman)"
+    every = {'blau': True, 'friedman': True, 'lane': True}
+
+    async def driver(user):
+        await user.open('/')
+        seen.append(dictionaries_line in _texts(_elements(user)))
+
+    seen = []
+    for served in (every, {**every, 'friedman': False}, {**every, 'blau': False, 'friedman': False},
+                   dict.fromkeys(every, False)):
+        with patch('web.keyboard_shortcuts.served_dictionaries',
+                   side_effect=lambda editor=False, s=served: s if not editor else every):
+            _run(driver)
+    assert seen == [True, False, False, False], seen
 
 
 def test_the_button_is_drawn_because_there_IS_something_to_announce():

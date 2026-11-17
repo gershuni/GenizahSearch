@@ -8,6 +8,110 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "10.0.0",
+        "date": "2026-11-17",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Scholarly transcriptions and dictionaries",
+            "he": "תעתיקים מדעיים ומילונים"
+        },
+        "items": [
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Search the scholarly transcriptions, the editions of the Friedberg Genizah Project (FGP) and the Princeton Geniza Project (PGP), together with the automatic ones: choose All, Scholarly or Automatic under Transcriptions. Each page is one result, naming every text it matched in, and a result opens on its edition with the match marked.",
+                "he": "חיפוש בתעתיקים המדעיים, המהדורות של פרויקט הגניזה של פרידברג (FGP) ושל פרויקט הגניזה של פרינסטון (PGP), יחד עם התעתיקים האוטומטיים: בוחרים ב\"תעתיקים\" הכל, מדעיים או אוטומטיים. כל עמוד הוא תוצאה אחת, שמציינת כל טקסט שנמצאה בו התאמה, ותוצאה נפתחת על המהדורה כשההתאמה מסומנת בה."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web"
+                ],
+                "en": "After a search, the Scholarly transcriptions filter keeps only the results whose page has a scholarly transcription, or only those whose page has none yet.",
+                "he": "אחרי חיפוש, הסינון \"תעתיקים מדעיים\" משאיר רק את התוצאות שלעמוד שלהן יש תעתיק מדעי, או רק את אלה שלעמוד שלהן עדיין אין."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web"
+                ],
+                "en": "The Judeo-Arabic dictionaries (Blau's and Friedman's, and Lane's Arabic-English Lexicon) are now open to everyone, and they find more: a word's quotations, its verb stem and root, and the expression it makes with the words beside it. They open in Quick View too.",
+                "he": "המילונים לערבית-יהודית (של בלאו ושל פרידמן והלקסיקון הערבי-אנגלי של ליין) פתוחים כעת לכלל הציבור והם מוצאים יותר: מובאות של המילה, הבניין והשורש שלה, והצירוף שהיא יוצרת עם המילים הסמוכות לה. הם נפתחים גם במבט מהיר."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web"
+                ],
+                "en": "A Hebrew keyboard on screen in every search box: press ⌨ in the box and type with the mouse or a finger.",
+                "he": "מקלדת עברית על המסך בכל תיבת חיפוש: לוחצים על ⌨ בתיבה ומקלידים בעכבר או באצבע."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web"
+                ],
+                "en": "A theme button in the header switches between light, parchment and dark.",
+                "he": "כפתור בסרגל הכותרת מחליף בין ערכות הנושא: בהירה, קלף וכהה."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The result filters are tags beside the count; Prints, PGP and Scholarly transcriptions open a short menu, and Reset filters clears them all.",
+                "he": "סינוני התוצאות מופיעים כתגיות ליד מספר התוצאות; דפוסים, PGP ותעתיקים מדעיים פותחים תפריט קצר, ו\"נקה סינונים\" מבטל את כולם."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The public API and the MCP server search and read the scholarly transcriptions too.",
+                "he": "גם ה-API הציבורי ושרת ה-MCP מחפשים וקוראים בתעתיקים המדעיים."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "In Browse and in the Manuscript Viewer, Find in text now goes from match to match: Enter or ▼ to the next, Shift+Enter or ▲ to the previous, with a count of where you are.",
+                "he": "בעיון ובחלון צפייה בכתב יד, החיפוש בטקסט עובר כעת מהתאמה להתאמה: Enter או ▼ להתאמה הבאה, Shift+Enter או ▲ לקודמת, ומונה מראה באיזו התאמה אתם."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "With a result filter on, the selected results are the ones you ticked, and Select all ticks the results shown.",
+                "he": "כשסינון תוצאות פעיל, התוצאות הנבחרות הן אלה שסימנתם, ו\"בחר הכל\" מסמן את התוצאות המוצגות."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "PGP editions of both sides of a leaf appear in the version chooser on each page.",
+                "he": "מהדורות PGP של שני צדי הדף מופיעות בבורר הגרסאות בכל אחד מהעמודים."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "The desktop app keeps you logged in after an upgrade or a restart.",
+                "he": "התוכנה שומרת על החיבור לחשבון גם אחרי עדכון גרסה או הפעלה מחדש."
+            }
+        ]
+    },
+    {
         "version": "9.16.0",
         "date": "2026-11-15",
         "apps": [

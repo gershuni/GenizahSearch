@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-15 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-11-cambridge-route-nli-bytes-keep-cambridge-credit.md). 175 open: P1 0, P2 42, P3 133.
+> **Last Updated:** 2026-11-17 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-16-filters-panel-ignores-result-filters.md). 176 open: P1 0, P2 42, P3 134.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -25,7 +25,7 @@ the private repository; grep only).
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 5 | 9 |
 | Desktop app | 0 | 9 | 28 | 37 |
-| Website | 0 | 5 | 24 | 29 |
+| Website | 0 | 5 | 25 | 30 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 4 | 4 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **42** | **133** | **175** |
+| **Total** | **0** | **42** | **134** | **176** |
 
 ## P1 - Critical
 
@@ -203,6 +203,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-293](ISSUE_DETAILS.md#gs-293) | The Toggle Filters panel drops the other result filters | `web/pages/search.py::apply_filters`, `clear_filters` | 2026-11-16 | ❌ Open |
 | [GS-292](ISSUE_DETAILS.md#gs-292) | An NLI image served by the Cambridge route keeps the Cambridge credit | `web/api.py::_cambridge_image`, `web/pages/browse.py` (image credit footer), `web/pages/search_results.py::open_advanced_dialog` | 2026-11-11 | ❌ Open |
 | [GS-278](ISSUE_DETAILS.md#gs-278) | Search-hit highlighting in the reading view does not match through vowel points | `web/pages/browse.py::highlight_text` | 2026-10-27 | ❌ Open |
 | [GS-273](ISSUE_DETAILS.md#gs-273) | The reading desk saves a source choice it never applies, keyed by list position | `web/pages/browse.py` (reading-desk version `ui.select`, `state.reading_desk_selected_sources`), `web/pages/browse_state.py` | 2026-10-26 | ❌ Open |

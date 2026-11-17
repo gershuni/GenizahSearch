@@ -73,7 +73,10 @@ def test_the_card_and_help_ask_for_this_reader():
     assert "dictionaries=_shortcut_dictionaries_served(GlobalAuthState.is_editor())" in main
     assert "served_dictionaries(editor), expression_dictionaries(editor)" in help_src
     assert "dict_editor = GlobalAuthState.is_editor()" in browse
-    assert "if _dictionaries_served():" in main and "if _served_dictionaries().get('friedman'):" in main
+    # What's New: the 10.0.0 dictionaries line, which replaced 9.14.0's and 9.15.0's (Friedman's,
+    # gated on served_dictionaries()), names all three, so it asks whether every reader has
+    # all three (tests/render_smoke/test_whats_new_banner.py shows it hidden with one).
+    assert "if all(_public_dictionaries().values()):" in main and "_served_dictionaries()" not in main
 
 
 @pytest.mark.parametrize("switch, env, default", [
