@@ -523,7 +523,12 @@ def fold_same_text(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     own page matched. The result keeps its place and its best row (one whose page was identified
     before one whose page was not); its ``members`` gain the folded editions it did not have,
     and ``also_in`` names the other manuscripts (``{'sys_id', 'shelfmark'}``), ``folded`` how
-    many results were folded into it. Other rows pass through unchanged."""
+    many results were folded into it. Other rows pass through unchanged.
+
+    The rows' order decides where a row goes first; two results the first pass left apart are
+    joined afterwards when they hold one text and the rules above allow it (``_join_linked``),
+    so a text the rules allow as one result is one in whatever order its rows rank."""
+    position = {id(row): i for i, row in enumerate(rows)}
     clusters: List[List[Dict[str, Any]]] = []
     hits: List[set] = []                # each cluster's hit keys
     by_hit: Dict[Tuple[str, Any], set] = {}    # hit key -> the results holding it
@@ -592,13 +597,128 @@ def fold_same_text(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # hit on another page of the manuscript is a find of its own beside it.
             if row.get("page_identified") is False and all(_editions_only(r) for r in clusters[target]):
                 unplaced_sys.setdefault(sid, target)
-    return [_folded_row(c) for c in clusters]
+    return [_folded_row(c) for c in _join_linked(clusters, position)]
+
+
+class _Result:
+    """A result while ``_join_linked`` runs: its rows and what a join is decided by, kept up to
+    date as it grows, so deciding a join never reads its rows again."""
+    __slots__ = ("rows", "fixed", "hits", "editions", "placed", "own", "sids", "unplaced_sids")
+
+    def __init__(self, rows: List[Dict[str, Any]]):
+        self.rows = list(rows)
+        # A row without members (My Library's, today's rows) is never joined.
+        self.fixed = not all("members" in r for r in rows)
+        self.hits: set = set()          # hit keys (_hit_key)
+        self.editions: set = set()      # their editions (versions)
+        self.placed: List[set] = []     # each identified page's hit keys
+        self.own = 0                    # rows whose own page matched (automatic / My Library text)
+        self.sids: set = set()
+        self.unplaced_sids: set = set()
+        for row in rows:
+            hits = _edition_versions(row)
+            self.hits |= hits
+            unplaced = row.get("page_identified") is False
+            if not unplaced:
+                self.placed.append(hits)
+            self.own += not _editions_only(row)
+            sid = _row_sys_id(row)
+            if sid:
+                self.sids.add(sid)
+                if unplaced:
+                    self.unplaced_sids.add(sid)
+        self.editions = {k[0] for k in self.hits}
+
+    def absorb(self, other: "_Result") -> None:
+        self.rows += other.rows
+        self.hits |= other.hits
+        self.editions |= other.editions
+        self.placed += other.placed
+        self.own += other.own
+        self.sids |= other.sids
+        self.unplaced_sids |= other.unplaced_sids
+
+    def keys(self, kind: str, seek: bool) -> set:
+        """What links this result to another. ``hit``: its hits, either way. ``manuscript``: an
+        unplaced row's manuscript links to any row of that manuscript; *seek* gives the keys to
+        look up, else the keys the result is found under."""
+        if kind == "hit":
+            return set(self.hits)
+        mine, wanted = ("unplaced", "any") if seek else ("any", "unplaced")
+        return {(mine, s) for s in self.sids} | {(wanted, s) for s in self.unplaced_sids}
+
+
+def _can_join(a: _Result, b: _Result) -> bool:
+    """May two results be one (``_join_linked``)? The first pass's rules for the joined result:
+    one row at most whose own page matched (automatic or My Library text: never folded into
+    another); every two identified pages share a hit (two pages that share none are two finds,
+    ``other_page``); and joined without a hit in common (by manuscript alone), no edition in
+    both, which would be another match of one text (``another_match``)."""
+    if a.own + b.own > 1:
+        return False
+    if any(not (x & y) for x in a.placed for y in b.placed):
+        return False
+    return bool(a.hits & b.hits) or not (a.editions & b.editions)
+
+
+def _join_linked(clusters: List[List[Dict[str, Any]]],
+                 position: Dict[int, int]) -> List[List[Dict[str, Any]]]:
+    """*clusters* (``fold_same_text``'s first pass) with every two that hold one text joined.
+
+    The first pass places each row once, in rank order, and never joins two results it has
+    started: a row linking two of them (one by its hit, the other by its manuscript) went into
+    one, and the text stayed two results, so how many results a document gave depended on the
+    order its rows ranked in (T-S 24.18 shown twice, 2026-11-17). Here two results are joined
+    while any two are linked and ``_can_join`` allows it: by manuscript first (an unplaced hit
+    goes to its manuscript's result first, as in the first pass), then by a hit they share. A
+    joined result is placed at the earlier one's place, its rows in rank order. Rows without
+    ``members`` are never joined.
+
+    Where the rules allow all of a text's rows to be one result, they are one in every order.
+    Where they do not (a page holding X and Y between a page of X and a page of Y), the order
+    still decides which pages go together, and so how many results there are; and a manuscript
+    may be named under one result and lead another when the two are different finds (pages
+    that share no hit)."""
+    live: List[Optional[_Result]] = [_Result(c) for c in clusters]
+
+    def one_pass(kind: str) -> bool:
+        # Two results whose own pages both matched are never one: such a result looks only
+        # among the others (``free``), so a page of every result sharing one hit costs nothing.
+        found: Dict[Any, List[int]] = {}
+        free: Dict[Any, List[int]] = {}
+        for ci, c in enumerate(live):
+            if c is not None and not c.fixed:
+                for key in c.keys(kind, seek=False):
+                    found.setdefault(key, []).append(ci)
+                    if not c.own:
+                        free.setdefault(key, []).append(ci)
+        joined = False
+        for ci in range(len(live)):
+            c = live[ci]
+            if c is None or c.fixed:
+                continue
+            look = free if c.own else found
+            partners = sorted({cj for key in c.keys(kind, seek=True) for cj in look.get(key, ()) if cj > ci})
+            for cj in partners:
+                other = live[cj]
+                if other is not None and _can_join(c, other):
+                    c.absorb(other)
+                    live[cj] = None
+                    joined = True
+        return joined
+
+    while one_pass("manuscript") or one_pass("hit"):
+        pass
+    return [sorted(c.rows, key=lambda r: position[id(r)]) for c in live if c is not None]
 
 
 def _folded_row(cluster: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(cluster) == 1:
         return cluster[0]
-    lead = next((r for r in cluster if r.get("page_identified") is not False), cluster[0])
+    # A row whose own page matched leads (it is never folded into another), then the first
+    # whose page was identified.
+    lead = next((r for r in cluster if not _editions_only(r)), None) \
+        or next((r for r in cluster if r.get("page_identified") is not False), cluster[0])
     row = dict(lead)
     members = list(lead.get("members") or [])
     seen = _edition_versions(lead)

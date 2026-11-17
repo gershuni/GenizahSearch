@@ -490,6 +490,49 @@ def test_the_same_text_is_shown_once():
     assert len(group_results([], eds, ids_only=True)) == 7
 
 
+def test_the_same_text_is_one_result_in_every_order():
+    """T-S 24.18 shown twice (2026-11-17): the same seven rows, ranked in another order, were
+    two results -- the unplaced FGP and PGP-7 copies in one, PGP-8's located pages in another --
+    because an unplaced PGP-8 copy on B ranked before any result held PGP 8 and started its
+    own, and B's PGP-7 copy then went there by manuscript. Before the fix 3,296 of the 5,040
+    orders gave two or three results."""
+    import itertools
+    eds = [_ed("fgp", 1, "990A"), _ed("pgp", 7, "990A"), _ed("pgp", 7, "990B"),
+           _ed("pgp", 7, "990C"), _ed("pgp", 8, "990A", page="990A_p1"),
+           _ed("pgp", 8, "990C", page="990C_p1"), _ed("pgp", 8, "990B")]
+    seen = set()
+    for order in itertools.permutations(eds):
+        rows = group_results([], copy.deepcopy(list(order)))
+        assert len(rows) == 1, [r["uid"] for r in rows]
+        row = rows[0]
+        assert row["page_identified"] is True and row["uid"] in ("990A_p1", "990C_p1")
+        assert sorted(m["edition"]["version"] for m in row["members"]) == ["fgp:1", "pgp:7", "pgp:8"]
+        assert row["folded"] == 6
+        assert {row["display"]["id"]} | {a["sys_id"] for a in row["also_in"]} == {"990A", "990B", "990C"}
+        seen.add(row["uid"])
+    # Which identified page leads follows the ranking.
+    assert seen == {"990A_p1", "990C_p1"}
+
+
+def test_a_page_whose_own_text_matched_leads_the_joined_result():
+    """A located edition page and a page whose automatic text matched, the two holding one hit:
+    one result in either order, led by the page whose own text matched (it is never folded into
+    another), at the place of the better-ranked of the two."""
+    from shared.editions_search import fold_same_text
+    main = [{"uid": "990B_p1", "display": {"id": "990B", "source": "V0.8"}}]
+    edition_page = group_results([], [_ed("pgp", 7, "990A", page="990A_p1")])[0]
+    matched_page = group_results(main, [_ed("pgp", 7, "990B", page="990B_p1")])[0]
+    other = group_results([], [_ed("fgp", 3, "990D")])[0]
+    for order in ([edition_page, other, matched_page], [matched_page, other, edition_page]):
+        rows = fold_same_text(copy.deepcopy(order))
+        assert [r["uid"] for r in rows] == ["990B_p1", "ED:fgp:3"]
+        assert [a["sys_id"] for a in rows[0]["also_in"]] == ["990A"]
+    # Two pages whose own text matched stay two results, however they are linked.
+    second = group_results([{"uid": "990A_p1", "display": {"id": "990A", "source": "V0.8"}}],
+                           [_ed("pgp", 7, "990A", page="990A_p1")])[0]
+    assert [r["uid"] for r in fold_same_text([second, matched_page])] == ["990A_p1", "990B_p1"]
+
+
 def test_a_page_whose_automatic_text_matched_keeps_its_result():
     main = [{"uid": "990A_p1", "display": {"id": "990A", "source": "V0.8"}},
             {"uid": "990B_p1", "display": {"id": "990B", "source": "V0.8"}}]
@@ -570,6 +613,41 @@ def test_a_located_page_with_two_hits_never_bridges_two_pages():
     eds = _page("990A", "990A_p1", ("pgp", 7)) + _page("990B", "990B_p1", ("pgp", 7), ("fgp", 3)) \
         + _page("990C", "990C_p1", ("fgp", 3))
     assert [r["uid"] for r in group_results([], eds)] == ["990A_p1", "990C_p1"]
+
+
+def test_joining_never_bridges_two_pages_in_any_order():
+    """Codex review of the order-independent fold: pages of X, X+Y, Y+Z, Z. The order decides
+    which pages go together (two results or three), but in no order are two pages that share no
+    hit one result."""
+    import itertools
+    pages = [_page("990A", "990A_p1", ("pgp", 7)), _page("990B", "990B_p1", ("pgp", 7), ("fgp", 3)),
+             _page("990C", "990C_p1", ("fgp", 3), ("pgp", 9)), _page("990D", "990D_p1", ("pgp", 9))]
+    apart = [{"990A", "990C"}, {"990A", "990D"}, {"990B", "990D"}]
+    counts = set()
+    for order in itertools.permutations(pages):
+        rows = group_results([], copy.deepcopy([e for page in order for e in page]))
+        counts.add(len(rows))
+        for row in rows:
+            held = {row["display"]["id"]} | {a["sys_id"] for a in row.get("also_in") or ()}
+            assert not any(pair <= held for pair in apart), (row["uid"], held)
+    assert counts <= {2, 3}
+
+
+def test_two_pages_whose_own_text_matched_are_never_compared(monkeypatch):
+    """Codex review of the order-independent fold: many pages whose own text matched, all
+    holding one hit, cost no comparison at all (they can never be one result)."""
+    import shared.editions_search as es
+    calls = []
+    real = es._can_join
+    monkeypatch.setattr(es, "_can_join", lambda a, b: calls.append(1) or real(a, b))
+    main = [{"uid": f"990{i}_p1", "display": {"id": f"990{i}", "source": "V0.8"}} for i in range(300)]
+    eds = []
+    for i in range(300):
+        ed = _ed("pgp", 7, f"990{i}", page=f"990{i}_p1")
+        ed["edition"]["span"] = [0, 9]
+        eds.append(ed)
+    rows = group_results(main, eds)
+    assert len(rows) == 300 and not calls
 
 
 def test_a_located_hit_tries_every_result_holding_one_of_its_hits():
