@@ -320,6 +320,19 @@ def _count_line_now(user):
         return None
 
 
+async def _count_line_after(user, before, what):
+    """The count line once it is no longer *before*, waiting up to 15 s. The scholarly chip's
+    choice and Toggle Filters' Apply are async handlers: a click only schedules them, so a
+    fixed wait can read the line they replace (public CI, 2026-11-17: Apply read after 0.3 s
+    on a Windows runner still showed the chip's line)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 15
+    while (line := _count_line_now(user)) in (before, None):
+        assert loop.time() < deadline, f'{what}: the count line stayed {line!r}'
+        await asyncio.sleep(0.05)
+    return line
+
+
 def test_the_button_filters_the_results_by_their_pages(server, monkeypatch):  # noqa: F811
     """A search's rows, the pages with a scholarly transcription known from the enrichment:
     the button cycles all -> only those -> only the others -> all, the count line says
@@ -333,9 +346,10 @@ def test_the_button_filters_the_results_by_their_pages(server, monkeypatch):  # 
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
         for name in ('only', 'hide', 'all'):
+            before = _count_line_now(a)
             _choose(a, name)
-            await asyncio.sleep(0.2)
-            seen[name] = (_count_line(a), _filter_button(a).text, stored(a, 'search_scholarly_filter'))
+            line = await _count_line_after(a, before, name)
+            seen[name] = (line, _filter_button(a).text, stored(a, 'search_scholarly_filter'))
 
     run(driver, count=1)
     assert sorted(set(checked)) == ['r1', 'r2', 'r3']
@@ -364,9 +378,10 @@ def test_a_kept_mode_applies_when_no_page_has_one_and_can_be_turned_off(server, 
         await asyncio.sleep(0.2)
         seen['kept'] = (_count_line(a), _filter_button(a).text)
         for name in ('hide', 'all'):
+            before = _count_line_now(a)
             _choose(a, name)
-            await asyncio.sleep(0.2)
-        seen['off'] = (_count_line(a), _filter_button(a).text, stored(a, 'search_scholarly_filter'))
+            line = await _count_line_after(a, before, name)
+        seen['off'] = (line, _filter_button(a).text, stored(a, 'search_scholarly_filter'))
 
     run(driver, count=1)
     assert seen['kept'] == ('0 of 3 Results (Has scholarly transcription)',
@@ -458,12 +473,14 @@ def test_the_filters_panel_keeps_the_scholarly_filter(server, monkeypatch):  # n
         submit(a, WORD)
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
+        before = _count_line_now(a)
         _choose(a, 'only')                # only those with one
-        await asyncio.sleep(0.2)
-        for name in ('Apply Filters', 'Clear Filters'):
-            _fire(a, _element(a, ui.button, lambda e, n=name: str(e.text) == n), 'click')
-            await asyncio.sleep(0.3)
-            seen[name] = _count_line(a)
+        before = await _count_line_after(a, before, 'only')
+        _fire(a, _element(a, ui.button, lambda e: str(e.text) == 'Apply Filters'), 'click')
+        seen['Apply Filters'] = await _count_line_after(a, before, 'Apply Filters')
+        # Clear Filters is a plain handler: its line is written as the click returns.
+        _fire(a, _element(a, ui.button, lambda e: str(e.text) == 'Clear Filters'), 'click')
+        seen['Clear Filters'] = _count_line(a)
 
     run(driver, count=1)
     assert seen == {'Apply Filters': '1 / 3 Results (Has scholarly transcription)',
@@ -486,9 +503,9 @@ def test_the_button_keeps_the_rows_excluded_from_the_word_search_out(server, mon
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
         for name in ('only', 'hide'):
+            before = _count_line_now(a)
             _choose(a, name)
-            await asyncio.sleep(0.2)
-            seen[name] = _count_line(a)
+            seen[name] = await _count_line_after(a, before, name)
 
     run(driver, count=1)
     assert seen == {'only': '1 of 3 Results (1 excluded, Has scholarly transcription)',
@@ -513,9 +530,9 @@ def test_a_restored_history_entry_is_checked_before_the_filter_applies(server, m
         submit(a, WORD)
         await wait_for_payloads(server.queue, 1)
         await _until_button_shows(a)
+        before = _count_line_now(a)
         _choose(a, 'only')                # only those with one
-        await asyncio.sleep(0.2)
-        seen['shown'] = _count_line(a)
+        seen['shown'] = await _count_line_after(a, before, 'only')
         store(a, search_history=[entry])
         _restore_history(a, earlier)
         loop = asyncio.get_running_loop()
@@ -567,8 +584,7 @@ def test_a_session_restore_that_ends_after_a_new_search_changes_nothing(server, 
         await asyncio.sleep(1.0)
         seen['after'] = _count_line(a)
         _choose(a, 'hide')       # the next mode reads the stored answers
-        await asyncio.sleep(0.3)
-        seen['hide'] = _count_line(a)
+        seen['hide'] = await _count_line_after(a, seen['after'], 'hide')
 
     run(driver, count=1)
     assert seen['after'] == '1 of 3 Results (Has scholarly transcription)', seen
@@ -621,13 +637,12 @@ def test_changing_the_mode_keeps_the_filters_panel_fields(server, monkeypatch): 
         text = _element(a, ui.input, lambda e: e.props.get('placeholder') == 'Filter by text')
         with a._client:
             text.value = 'aaa'
+        before = _count_line_now(a)
         _fire(a, _element(a, ui.button, lambda e: str(e.text) == 'Apply Filters'), 'click')
-        await asyncio.sleep(0.3)
-        seen['panel'] = _count_line(a)
+        seen['panel'] = before = await _count_line_after(a, before, 'Apply Filters')
         for name in ('only', 'hide'):
             _choose(a, name)
-            await asyncio.sleep(0.3)
-            seen[name] = _count_line(a)
+            seen[name] = before = await _count_line_after(a, before, name)
 
     run(driver, count=1)
     assert seen == {'panel': '2 / 3 Results',
