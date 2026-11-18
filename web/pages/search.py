@@ -44,8 +44,9 @@ from web.pages.search_state import (
 )
 from web import search_runs
 from shared.search_box_input import TEXT_MODES, is_latin_script_query, search_box_input_kind, split_placeholder
-from web.catalog_assets import (CATALOG_NEAR_FORMS_SHOWN, CATALOG_NEAR_TOOLTIP,
-                                 CATALOG_TRANSLATIONS_TOOLTIP, catalog_available)
+from web.catalog_assets import (CATALOG_NEAR_FORMS_SHOWN, CATALOG_TRANSLATIONS_TOOLTIP,
+                                 NEAR_SPELLINGS_MODES, catalog_available)
+from shared.near_spellings import near_spellings_tooltip
 from web.home_query import home_query_target
 from shared.keyboard_layout import layout_suggestion
 from web.pages.search_results import (
@@ -92,6 +93,11 @@ import asyncio
 import time
 
 logger = logging.getLogger(__name__)
+
+
+def _near_tooltip(mode):
+    """The Fuzzy search (near spellings) switch's tooltip in *mode* (catalogue plan §4.7)."""
+    return near_spellings_tooltip(mode, tr)
 
 
 def _get_fjms_for_criteria():
@@ -1123,12 +1129,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Initially hide if mode is not responsa
                 responsa_sub_row.set_visibility(saved_mode == 'responsa')
 
-                # === Catalogue switches (visible only in Catalogue mode; catalogue plan §4.7, D2) ===
+                # === Catalogue switches (catalogue plan §4.7, D2): both in Catalogue mode; Fuzzy
+                # search alone in Title mode, where it also looks for the words in any order ===
                 catalog_sub_row = ui.row().classes('w-full items-center gap-4 px-2 flex-wrap')
                 with catalog_sub_row:
                     # The text search's own word for it (Fuzzy / מקורב), with the catalogue's rule (§4.7).
                     catalog_near_cb = ui.checkbox(tr('Fuzzy search'), value=saved_catalog['near_spellings'])
-                    catalog_near_cb.tooltip(tr(CATALOG_NEAR_TOOLTIP))
+                    with catalog_near_cb:
+                        catalog_near_tip = ui.tooltip(_near_tooltip(saved_mode))
                     catalog_translations_cb = ui.checkbox(tr('Automatic translations'),
                                                           value=saved_catalog['include_translations'])
                     catalog_translations_cb.tooltip(tr(CATALOG_TRANSLATIONS_TOOLTIP))
@@ -1136,7 +1144,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     lambda e: _safe_set('catalog_near_spellings', bool(e.value)))
                 catalog_translations_cb.on_value_change(
                     lambda e: _safe_set('catalog_translations', bool(e.value)))
-                catalog_sub_row.set_visibility(saved_mode == 'Catalog')
+                catalog_sub_row.set_visibility(saved_mode in NEAR_SPELLINGS_MODES)
+                catalog_translations_cb.set_visibility(saved_mode == 'Catalog')
 
                 # Advanced Options panel (inside expanded_panel, collapses with search bar);
                 # opened from the row's button, its own header hidden.
@@ -1258,7 +1267,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Responsa sub-options: visible only in Responsa mode
                 responsa_sub_row.set_visibility(is_responsa)
-                catalog_sub_row.set_visibility(mode == 'Catalog')
+                catalog_sub_row.set_visibility(mode in NEAR_SPELLINGS_MODES)
+                catalog_translations_cb.set_visibility(mode == 'Catalog')
+                catalog_near_tip.set_text(_near_tooltip(mode))
                 _sync_sources_visibility()
 
                 # Save mode to storage (don't persist pgp_tags)
@@ -5602,9 +5613,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             params += f'&tag={quote(str(tag_value))}'
         if mode in VALID_SEARCH_MODES and mode != 'pgp_tags':
             params += f'&mode={quote(mode)}'
-        if mode == 'Catalog':
-            if catalog_near_cb.value: params += '&near=1'
-            if not catalog_translations_cb.value: params += '&translations=0'
+        if mode in NEAR_SPELLINGS_MODES and catalog_near_cb.value:
+            params += '&near=1'
+        if mode == 'Catalog' and not catalog_translations_cb.value:
+            params += '&translations=0'
         if mode == 'responsa':
             if responsa_variants_cb.value: params += '&variants=1'
             if responsa_ja_cb.value: params += '&ja=1'
@@ -5909,9 +5921,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                           and mode not in NO_SOURCES_MODES
                                                           and not lab_mode.value
                                                           and _editions_still_served()) else None
-        # The catalogue search's switches, recorded with its run (Back, search-within replay).
+        # The catalogue search's switches, recorded with its run (Back, search-within replay);
+        # a Title search's near spellings travel the same way (catalogue plan §4.7).
         run_catalog = ({'include_translations': bool(catalog_translations_cb.value),
-                        'near_spellings': bool(catalog_near_cb.value)} if mode == 'Catalog' else None)
+                        'near_spellings': bool(catalog_near_cb.value)} if mode == 'Catalog'
+                       else {'near_spellings': bool(catalog_near_cb.value)} if mode == 'Title'
+                       else None)
         search_state.last_run = {
             'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
             # Lab Mode is not in the address either: a page back on this run shows it.

@@ -16,6 +16,9 @@ from shared.catalog_text_rows import CATALOG_NEAR_TOOLTIP, CATALOG_TRANSLATIONS_
 
 #: How many of the near spellings a search added the line under the count names.
 CATALOG_NEAR_FORMS_SHOWN = 8
+#: The search page's modes that show the Fuzzy search (near spellings) switch (plan §4.7). Title
+#: mode has it whether or not the catalogue text search is served: it reads the titles only.
+NEAR_SPELLINGS_MODES = frozenset({'Catalog', 'Title'})
 
 
 def catalog_available() -> bool:

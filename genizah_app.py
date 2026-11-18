@@ -18530,6 +18530,16 @@ class GenizahGUI(QMainWindow):
             self.search_params_container.setVisible(not is_pgp_tags)
         # The transcriptions choice: no text is read in Title / Shelfmark.
         self._update_sources_visibility()
+        # Title mode ($, index 5) has the catalogue's Fuzzy search switch too (catalogue plan 4.7),
+        # without the translations switch; its tooltip adds that each word is then found anywhere
+        # in the title, in any order (shared/near_spellings.py, as the website says it).
+        if hasattr(self, 'chk_catalog_near'):
+            from shared.near_spellings import near_spellings_tooltip
+            in_title = index == 5
+            if in_title:
+                self.catalog_sub_row.setVisible(True)
+            self.chk_catalog_translations.setVisible(not in_title)
+            self.chk_catalog_near.setToolTip(near_spellings_tooltip('Title' if in_title else 'Catalog', tr))
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
@@ -23907,6 +23917,13 @@ class GenizahGUI(QMainWindow):
         self._post_criteria_ids = None
         self._post_criteria_gen = getattr(self, '_post_criteria_gen', 0) + 1  # drops a late answer
         self._measurement_fetch_complete = False
+        # Title mode's Fuzzy search (catalogue plan 4.7) is the catalogue's switch, read above for
+        # Catalog mode only: the thread searches with it, and the run's step and history entry keep
+        # it as they keep a catalogue search's switches (_apply_run_params, _history_catalog_options).
+        if (mode == 'Title' and getattr(self, '_last_search_params', None) is not None
+                and getattr(self, 'chk_catalog_near', None) is not None and self.chk_catalog_near.isChecked()):
+            self.search_thread.catalog_options = {'near_spellings': True}
+            self._last_search_params['catalog_options'] = {'near_spellings': True}
 
         # Every signal that writes the table or the status line is dropped
         # once New discards this run (_deliver_unless_discarded).

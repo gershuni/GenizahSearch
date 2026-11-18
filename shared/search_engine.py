@@ -4118,7 +4118,7 @@ class SearchEngine:
         return deduped
 
 
-    def metadata_search_ids(self, query_str, mode, restrict_sys_ids=None):
+    def metadata_search_ids(self, query_str, mode, restrict_sys_ids=None, near_spellings=False):
         """The manuscripts a Title/Shelfmark search is for: the sys_ids
         ``_execute_metadata_search`` builds its rows from, before it reads any text.
 
@@ -4126,6 +4126,10 @@ class SearchEngine:
         and indexed, and hands them to ``execute_search`` as *metadata_sys_ids*: a
         lookup then skips the research worker (web/research_jobs.py), and a broad
         search's worker skips the catalogue.
+
+        *near_spellings* (Title only; catalogue plan §4.7): each word of the query is
+        found as typed or as one of its near spellings, in any order
+        (metadata_manager._title_matcher). Shelfmark mode has none.
         """
         # A title keeps its quote marks: the catalogue decides what they mean
         # (metadata_manager._title_matcher), and folding them out here lost them.
@@ -4139,7 +4143,10 @@ class SearchEngine:
         stripped = query_str.strip()
         if (stripped == '*' or stripped == '') and restrict_sys_ids:
             return sorted(restrict_sys_ids)
-        sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
+        if near_spellings and mode == 'Title':
+            sys_ids = self.meta_mgr.search_by_meta(query_str, target_field, near_spellings=True)
+        else:
+            sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
         if restrict_sys_ids is not None:
             sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
         return sys_ids
@@ -4177,14 +4184,15 @@ class SearchEngine:
             return False
 
     def _execute_metadata_search(self, query_str, mode, progress_callback=None, restrict_sys_ids=None,
-                                 sys_ids=None):
+                                 sys_ids=None, near_spellings=False):
         """Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
 
         *sys_ids*: the manuscripts, when the caller resolved them already
-        (``metadata_search_ids``); otherwise resolved here.
+        (``metadata_search_ids``); otherwise resolved here, with *near_spellings*.
         """
         if sys_ids is None:
-            sys_ids = self.metadata_search_ids(query_str, mode, restrict_sys_ids)
+            sys_ids = self.metadata_search_ids(query_str, mode, restrict_sys_ids,
+                                               near_spellings=near_spellings)
         results = []
         total_ids = len(sys_ids)
 
@@ -4286,7 +4294,9 @@ class SearchEngine:
         Mode ``'Catalog'`` searches the catalogue text instead (plan
         CATALOGUE_TEXT_SEARCH_PLAN §4.3; ``_execute_catalog_search``): *catalog_options*
         carries its switches (``include_translations``, ``near_spellings``), and the
-        transcription options (gap, NOT-words, position, sources) do not apply.
+        transcription options (gap, NOT-words, position, sources) do not apply. In
+        Title mode, *catalog_options*' ``near_spellings`` searches the titles with near
+        spellings (plan §4.7; ``metadata_search_ids``); its other switch does not apply.
 
         *sources* (editions plan §3.4, D1): which texts are read -- ``'automatic'`` (or
         None: today's search, row for row), ``'all'`` (the automatic transcriptions and the
@@ -4321,8 +4331,9 @@ class SearchEngine:
             unavailable = (sources != SOURCES_AUTOMATIC and mode not in ('Title', 'Shelfmark')
                            and corpus_scope != 'local')
             if sources in (SOURCES_AUTOMATIC, SOURCES_ALL) or mode in ('Title', 'Shelfmark') or corpus_scope == 'local':
+                near = mode == 'Title' and bool((catalog_options or {}).get('near_spellings'))
                 rows = self._execute_search_leg(query_str, mode, gap, preview_callback=preview_callback,
-                                                metadata_sys_ids=metadata_sys_ids, **args)
+                                                metadata_sys_ids=metadata_sys_ids, near_spellings=near, **args)
                 _EDITIONS_UNAVAILABLE.value = unavailable
                 return rows
             # Editions only, and no editions index open: nothing is searched.
@@ -4415,7 +4426,7 @@ class SearchEngine:
         editions = editions or {'rows': [], 'leg': {}}
         return _group_legs(main['rows'], editions['rows'], main['leg'], editions['leg'], ids_only)
 
-    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, _leg=None):
+    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, near_spellings=False, _leg=None):
         """One index's search (execute_search's docstring, below); today's whole search
         when *_leg* is None. *_leg* (a dict): one leg of a search with editions -- the state
         is not cleared (the coordinator did), no previews, My Library's rows go to
@@ -4427,6 +4438,8 @@ class SearchEngine:
         *metadata_sys_ids* (Title/Shelfmark only): the manuscripts the search is
         for, resolved by the caller with ``metadata_search_ids`` (the web app, in the
         server process); the catalogue is then not searched again here.
+        *near_spellings* (Title only): the titles are searched with near spellings
+        (``metadata_search_ids``).
 
         *preview_callback(rows)*, when given, is called from this thread while the
         search is still running: with the rows found so far, at most every
@@ -4462,7 +4475,7 @@ class SearchEngine:
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids,
-                                                 sys_ids=metadata_sys_ids)
+                                                 sys_ids=metadata_sys_ids, near_spellings=near_spellings)
 
         # The common entry for every corpus scope and mode: before the LOCAL
         # branch (its broad handler would swallow the ValueError) and the Fuzzy

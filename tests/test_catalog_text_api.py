@@ -140,7 +140,10 @@ def test_other_modes_keep_their_response_shape(client, stub):
 
 
 @pytest.mark.parametrize('body', [
-    {'query': 'x', 'search_mode': 'title', 'near_spellings': True},
+    # near_spellings is valid with 'title' too (tests/test_title_near_spellings.py)
+    {'query': 'x', 'search_mode': 'shelfmark', 'near_spellings': True},
+    {'query': 'x', 'search_mode': 'exact', 'near_spellings': False},
+    {'query': 'x', 'search_mode': 'title', 'include_translations': True},
     {'query': 'x', 'search_mode': 'exact', 'include_translations': False},
     {'query': 'x', 'search_mode': 'catalog', 'gap': 2},
     {'query': 'x', 'search_mode': 'catalog', 'sources': 'editions'},
@@ -149,3 +152,41 @@ def test_invalid_combinations(client, stub, served, body):
     r = client.post('/api/search', json=body)
     assert r.status_code == 400 and _code(r) == 'invalid_combination', r.text
     assert stub.calls == []
+
+
+# --- near_spellings with search_mode='title' (catalogue plan §4.7, PR 2b) ---------------------
+
+def test_title_takes_near_spellings_where_the_catalogue_search_is_not_served(client, stub):
+    """The title search reads the catalogue's titles, served everywhere: no catalog_unavailable."""
+    stub.results[0].pop('catalogue')
+    r = client.post('/api/search', json={'query': 'tefillin', 'search_mode': 'title',
+                                         'near_spellings': True})
+    assert r.status_code == 200, r.text
+    call = stub.calls[-1]
+    assert call['mode'] == 'Title' and call['catalog_options'] == {'near_spellings': True}
+    echo = r.json()['request']
+    assert echo['near_spellings'] is True and 'include_translations' not in echo
+
+
+def test_title_near_spellings_false_is_echoed(client, stub):
+    stub.results[0].pop('catalogue')
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'title', 'near_spellings': False})
+    assert r.status_code == 200, r.text
+    assert stub.calls[-1]['catalog_options'] == {'near_spellings': False}
+    assert r.json()['request']['near_spellings'] is False
+
+
+def test_a_title_search_without_it_is_today_s(client, stub):
+    stub.results[0].pop('catalogue')
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'title'})
+    assert r.status_code == 200, r.text
+    assert 'catalog_options' not in stub.calls[-1]
+    assert 'near_spellings' not in r.json()['request']
+
+
+def test_a_title_search_never_reads_a_catalogue_count(client, stub):
+    stub.results[0].pop('catalogue')
+    stub.results[0]['catalogue_search'] = {'near_forms': [], 'total': 12345}
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'title', 'near_spellings': True})
+    assert r.status_code == 200, r.text
+    assert r.json()['total'] == 1

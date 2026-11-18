@@ -634,14 +634,18 @@ class IsolatedEngine:
         process's engine (``SearchEngine.metadata_search_ids``); None when it cannot:
         an engine without the method (a test fake), or a catalogue still loading
         (the web app reads libraries.csv in the background; a worker loads its own,
-        whole, so until then the worker resolves them as before)."""
+        whole, so until then the worker resolves them as before). A Title search with near
+        spellings (``catalog_options``, catalogue plan §4.7) is resolved with them."""
         resolve = getattr(self._engine, 'metadata_search_ids', None)
         if resolve is None:
             return None
         if not getattr(getattr(self._engine, 'meta_mgr', None), '_csv_bank_loaded', False):
             return None
+        near = (arguments['mode'] == 'Title'
+                and bool((arguments.get('catalog_options') or {}).get('near_spellings')))
         return list(resolve(arguments.get('query_str', ''), arguments['mode'],
-                            arguments.get('restrict_sys_ids')))
+                            arguments.get('restrict_sys_ids'),
+                            **({'near_spellings': True} if near else {})))
 
     def _metadata_search(self, original, arguments, progress, time_limit, shared):
         """A Title/Shelfmark search's manuscripts, resolved in this process, and a

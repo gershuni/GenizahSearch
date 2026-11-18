@@ -34,6 +34,10 @@ from rapidfuzz.distance import OSA
 
 from shared.responsa import expand_plene_defective
 
+#: Added after the Fuzzy search switch's tooltip (shared/catalog_text_rows.py::CATALOG_NEAR_TOOLTIP) in
+#: Title mode, where the switch also stops reading the query as one phrase (``near_spellings_tooltip``).
+TITLE_NEAR_SPELLINGS_TOOLTIP = "Each word anywhere in the title, in any order"
+
 LATIN_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 #: Latin words shorter than this have no near spellings.
 LATIN_MIN_LETTERS = 5
@@ -84,6 +88,16 @@ def near_spellings(word: str) -> frozenset[str]:
         d = latin_distance(word)
         return _edits(word, d, LATIN_LETTERS) if d else frozenset({word})
     return frozenset({word})
+
+
+def near_spellings_tooltip(mode: str, tr) -> str:
+    """The Fuzzy search switch's tooltip in search *mode*, through the app's *tr*: in Title
+    mode it adds that each word is then looked for on its own, in any order."""
+    from shared.catalog_text_rows import CATALOG_NEAR_TOOLTIP
+    text = tr(CATALOG_NEAR_TOOLTIP)
+    if mode == 'Title':
+        text += '. ' + tr(TITLE_NEAR_SPELLINGS_TOOLTIP)
+    return text
 
 
 def distance(word: str, other: str) -> int:

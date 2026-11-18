@@ -55,7 +55,8 @@ class RefinementStep:
     # None for a step saved before the source choice existed, replayed as today's search.
     sources: Optional[str] = None
     # A catalogue search's switches (catalogue plan §4.7: include_translations,
-    # near_spellings); None for every other mode, and for a step that predates them.
+    # near_spellings), or a Title search's near_spellings; None for every other mode, and
+    # for a step that predates them.
     catalog_options: Optional[dict] = None
 
     # Runtime-only fields (not serialized, rebuilt on replay)
@@ -159,7 +160,7 @@ def step_partial(cutoff, parent=None) -> bool:
 
 
 def _sources_argument(step: RefinementStep) -> dict:
-    """The step's source choice and, for a catalogue search, its switches, for
+    """The step's source choice and, for a catalogue or Title search, its switches, for
     execute_search, when it recorded them (a searcher that predates them is never handed
     the argument)."""
     out = {'sources': step.sources} if step.sources else {}

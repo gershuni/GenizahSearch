@@ -50,7 +50,7 @@ _TITLE_MARKS_RE = re.compile(
     + chr(0x0300) + '-' + chr(0x036F) + ']')
 
 
-def _title_matcher(query):
+def _title_matcher(query, near_spellings=False, latin_near=None):
     """The test a Title search applies to a catalogue title, or None for a query
     with nothing to look for.
 
@@ -61,6 +61,12 @@ def _title_matcher(query):
     holding the abbreviation was never found, and a query for it returned every
     title holding its letters in a longer word instead.) A pair of double quotes
     around the whole query is not a mark.
+
+    *near_spellings* (catalogue plan §4.7): each word of the query is looked for on
+    its own, as typed or as one of its near spellings, every word somewhere in the
+    title and in any order (``_title_near_matcher``). *latin_near*: a callable that
+    returns a Latin query word's near spellings the titles hold as words
+    (``MetadataManager._title_latin_near``), asked only for a Latin word that has some.
     """
     q = (query or '').lower().strip().translate(_QUOTE_MARKS)
     # Only a closed pair is a pair around the query, and it goes even when the text
@@ -70,6 +76,8 @@ def _title_matcher(query):
     # is what people type, and the reading still finds that abbreviation.
     if len(q) > 2 and q[0] == '"' and q[-1] == '"':
         q = q[1:-1].strip()
+    if near_spellings:
+        return _title_near_matcher(q, latin_near)
     folded = strip_search_diacritics(q).strip()
     if not folded:
         return None
@@ -79,6 +87,78 @@ def _title_matcher(query):
         piece = max(re.split('["\']', q), key=len)
         return lambda title: piece in (low := title.lower()) and q in low.translate(_QUOTE_MARKS)
     return lambda title: folded in _TITLE_MARKS_RE.sub('', title.lower())
+
+
+_LATIN_WORD_RE = re.compile('[a-z]+')
+# The titles' Latin words and the near spellings kept among them (MetadataManager._title_latin_near):
+# one lock, a bounded cache.
+_TITLE_WORDS_LOCK = threading.Lock()
+_TITLE_NEAR_CACHE_SIZE = 256
+
+
+def _title_word_spellings(word, latin_near=None):
+    """The spellings a Title search with near spellings looks for in place of one query
+    word (no quote mark in it): the word as typed first, then its near spellings
+    (shared/near_spellings.py: one ו or י added or dropped inside a Hebrew word; one
+    letter different in a Latin word of five letters or more, two from nine).
+
+    A Latin word keeps only the near spellings that the titles hold as words
+    (*latin_near*, a callable returning them for the word): two edits make tens of
+    thousands of strings, too many to look for in every title. It is asked only for a word
+    that has near spellings (``latin_distance``). A Hebrew word has a handful, looked for
+    as they are; one that no title holds finds nothing.
+
+    No final letters are folded on either side: a near spelling changes only the inside
+    of the word, so each one ends with the word's own last letter, final or not, and is
+    looked for as the titles write it.
+    """
+    from shared.near_spellings import latin_distance, near_spellings
+    if _LATIN_WORD_RE.fullmatch(word):
+        held = latin_near(word) if latin_near is not None and latin_distance(word) else ()
+        return [word] + sorted(s for s in held if s != word)
+    return [word] + sorted(s for s in near_spellings(word) if s != word)
+
+
+def _title_near_matcher(q, latin_near=None):
+    """``_title_matcher`` with near spellings, for *q* read as that function reads a query:
+    one test per word, all of which a title must pass, in any order; None when no word has
+    anything to look for.
+
+    A word with a quote mark is an abbreviation, found with its mark in any spelling of
+    the mark, as without near spellings (it has none: an abbreviation is not spelled
+    plene or defective). Every other word is found with the marks folded out of the
+    title, as typed or as one of its near spellings (``_title_word_spellings``).
+    """
+    marked, plain = [], []
+    for word in q.split():
+        if not strip_search_diacritics(word).strip():
+            continue                      # quote marks alone: nothing to look for
+        if '"' in word or "'" in word:
+            # The longest run of letters first: translate() only for a title holding it.
+            marked.append((max(re.split('["\']', word), key=len), word))
+            continue
+        spellings = _title_word_spellings(strip_search_diacritics(word), latin_near)
+        if len(spellings) == 1:
+            plain.append((True, spellings[0]))
+        else:
+            plain.append((False, re.compile('|'.join(map(re.escape, spellings)))))
+    if not marked and not plain:
+        return None
+
+    def matches(title):
+        low = title.lower()
+        if marked:
+            if not all(piece in low for piece, _ in marked):
+                return False
+            with_marks = low.translate(_QUOTE_MARKS)
+            if not all(word in with_marks for _, word in marked):
+                return False
+        if plain:
+            bare = _TITLE_MARKS_RE.sub('', low)
+            return all((test in bare) if literal else test.search(bare) is not None
+                       for literal, test in plain)
+        return True
+    return matches
 # Credit line for images served from the Bodleian's Genizah Fragments site, in the
 # form its licence requires ("Image provided by [owner]"). Both apps and the web
 # attribution table import this so the wording cannot drift; it is NOT a Creative
@@ -427,12 +507,15 @@ class _BoundedLRUCache:
     (unbounded — restores legacy behavior for an escape hatch).
     """
 
-    __slots__ = ('_data', '_maxsize', '_lock')
+    __slots__ = ('_data', '_maxsize', '_lock', '_revision')
 
     def __init__(self, maxsize=_NLI_CACHE_MAX_ENTRIES, data=None):
         self._data = OrderedDict()
         self._maxsize = int(maxsize)
         self._lock = threading.RLock()
+        # Counts the writes (``revision``): what is derived from the entries, such as the
+        # Title search's Latin words, knows when to read them again.
+        self._revision = 0
         if data:
             with self._lock:
                 for key, value in data.items():
@@ -460,6 +543,7 @@ class _BoundedLRUCache:
             self._data[key] = value
             self._data.move_to_end(key)
             self._evict_locked()
+            self._revision += 1
 
     def get(self, key, default=None):
         with self._lock:
@@ -484,6 +568,7 @@ class _BoundedLRUCache:
             self._data[key] = entry
             self._data.move_to_end(key)
             self._evict_locked()
+            self._revision += 1
             return entry
 
     def items(self):
@@ -515,6 +600,11 @@ class _BoundedLRUCache:
     @property
     def maxsize(self):
         return self._maxsize
+
+    @property
+    def revision(self):
+        """How many writes the cache has taken: it changes whenever an entry does."""
+        return self._revision
 
 
 # ==============================================================================
@@ -564,6 +654,9 @@ class MetadataManager:
     # The desktop and the scripts leave it False and fetch as before.
     checked_library_fetches = False
     _csv_bank_loaded = False
+    # The titles' Latin-letter words, the catalogue's and the NLI cache's, each with what it was
+    # read from, and {query word: its near spellings among them} -- _title_latin_words.
+    _title_latin_words_cache = None
     # Entries carry a Cambridge decision (shared/cudl_identity.py::entry_decision_stale).
     supports_cambridge_decision = True
 
@@ -2191,7 +2284,65 @@ class MetadataManager:
 
         self.save_caches()
 
-    def search_by_meta(self, query, field):
+    def _title_latin_words(self):
+        """``(words, near cache)``: the Latin-letter words of the catalogue titles and the
+        NLI cache titles (lower case), which the near spellings of a Latin Title query word
+        are kept against, and the cache of what was kept (``_title_latin_near``).
+
+        The catalogue's words are read on first use (~0.4 s for ~11,000 words) and again once
+        it has grown (it loads in the background); the NLI cache's whenever it has changed
+        since (its ``revision``), so a spelling a newly fetched NLI title holds is found, as
+        ``search_by_meta`` scans that title. A cache that counts no writes (a plain dict) is
+        read every time: its size would miss a title replaced in place. Either change clears
+        the near cache. Title searches run in parallel threads: built under the lock."""
+        def latin_words(titles):
+            words = set()
+            for title in titles:
+                if title:
+                    words.update(_LATIN_WORD_RE.findall(title.lower()))
+            return frozenset(words)
+
+        nli = self.nli_cache
+        with _TITLE_WORDS_LOCK:
+            csv_key = len(self.csv_bank)
+            revision = getattr(nli, 'revision', None)
+            # object(): never equal to the last key, so a cache without a revision is read again.
+            # The cache itself, not its id: a cache loaded in its place may reuse the id.
+            nli_key = (nli, revision) if revision is not None else object()
+            cached = self._title_latin_words_cache
+            if cached is not None and cached[0] == csv_key and cached[2] == nli_key:
+                return cached[4], cached[5]
+            if cached is not None and cached[0] == csv_key:
+                csv_words = cached[1]
+            else:
+                csv_words = latin_words(data.get('title') for data in list(self.csv_bank.values()))
+            if cached is not None and cached[2] == nli_key:
+                nli_words = cached[3]
+            else:
+                nli_words = latin_words(data.get('title') for _sid, data in list(nli.items())
+                                        if isinstance(data, dict))
+            cached = (csv_key, csv_words, nli_key, nli_words, csv_words | nli_words, {})
+            self._title_latin_words_cache = cached
+            return cached[4], cached[5]
+
+    def _title_latin_near(self, word):
+        """The near spellings of the Latin query word *word* that the titles hold as words,
+        remembered for the last ``_TITLE_NEAR_CACHE_SIZE`` words: ``near_spellings`` keeps
+        nothing, and two edits are ~100,000 strings (0.14 s at nine letters)."""
+        words, kept = self._title_latin_words()
+        with _TITLE_WORDS_LOCK:
+            hit = kept.get(word)
+        if hit is not None:
+            return hit
+        from shared.near_spellings import near_spellings
+        hit = frozenset(near_spellings(word) & words)
+        with _TITLE_WORDS_LOCK:
+            while len(kept) >= _TITLE_NEAR_CACHE_SIZE:
+                kept.pop(next(iter(kept)))
+            kept[word] = hit
+        return hit
+
+    def search_by_meta(self, query, field, near_spellings=False):
         """Search for system IDs where the specified field matches the query.
 
         Uses precise matching to avoid false positives like 120.2 matching 120.25.
@@ -2199,6 +2350,9 @@ class MetadataManager:
         - "ts12.123" or "T-S 12 123" matching "T-S 12.123"
         - Missing/extra spaces, dashes, dots
         - Case insensitivity
+
+        *near_spellings* (title only; catalogue plan §4.7): each query word is found as
+        typed or as a near spelling, in any order (``_title_matcher``).
         """
         results = set()
         q_norm = query.lower().strip()
@@ -2214,7 +2368,7 @@ class MetadataManager:
                     results.add(sys_id)
         else:
             # Other fields (title): substring match; quote marks per _title_matcher
-            matches = _title_matcher(query)
+            matches = _title_matcher(query, near_spellings, self._title_latin_near)
             if matches is None:
                 return []
             # 1. Search in CSV Bank (Fastest) — snapshot to avoid concurrent modification

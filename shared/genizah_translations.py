@@ -6766,3 +6766,9 @@ TRANSLATIONS.update({
     "Full catalogue entry": "רשומת הקטלוג המלאה",
     "automatic translation": "תרגום אוטומטי",
 })
+
+# Fuzzy search (near spellings) in Title mode (catalogue plan §4.7, PR 2b; to be approved with the
+# PR): added after the switch's tooltip above, in Title mode only.
+TRANSLATIONS.update({
+    "Each word anywhere in the title, in any order": "כל מילה בכל מקום בכותרת, בכל סדר",
+})

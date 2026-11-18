@@ -325,11 +325,13 @@ class SearchRequest(BaseModel):
     near_spellings: Optional[bool] = Field(
         default=None,
         description=(
-            "search_mode='catalog' only: also find near spellings of each word that the catalogue "
-            "holds -- in Hebrew a vav or yod added or dropped (plene/defective spelling), in Latin "
-            "letters one letter different in words of five letters or more, two from nine letters "
-            "(Saadya for Saadia). Manuscripts found only through one come after the rest, with "
-            "near_spelling true. Default false."
+            "search_mode='catalog' or 'title' only: also find near spellings of each word -- in "
+            "Hebrew a vav or yod added or dropped (plene/defective spelling), in Latin letters one "
+            "letter different in words of five letters or more, two from nine letters (Saadya for "
+            "Saadia). 'catalog': only spellings the catalogue holds; manuscripts found only through "
+            "one come after the rest, with near_spelling true. 'title': each word of the query is "
+            "found as typed or as a near spelling, anywhere in the title and in any order (without "
+            "it the query is found as one phrase); the results stay in shelfmark order. Default false."
         ),
     )
     include_translations: Optional[bool] = Field(
@@ -365,11 +367,17 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode='after')
     def _check_catalog_options_coupling(self):
-        if self.search_mode != 'catalog' and (self.near_spellings is not None
-                                              or self.include_translations is not None):
+        if self.search_mode not in ('catalog', 'title') and self.near_spellings is not None:
             raise APIError(
                 'invalid_combination',
-                f"near_spellings and include_translations are only valid when search_mode='catalog' "
+                f"near_spellings is only valid when search_mode='catalog' or 'title' "
+                f"(got search_mode={self.search_mode!r})",
+                http_status=400,
+            )
+        if self.search_mode != 'catalog' and self.include_translations is not None:
+            raise APIError(
+                'invalid_combination',
+                f"include_translations is only valid when search_mode='catalog' "
                 f"(got search_mode={self.search_mode!r})",
                 http_status=400,
             )
@@ -535,7 +543,11 @@ def _effective_sources(req):
 
 def _check_catalog_served(req) -> Optional[dict]:
     """The catalogue search's switches for execute_search, or None for any other mode; a
-    catalogue search where the server does not serve it is refused (catalog_unavailable)."""
+    catalogue search where the server does not serve it is refused (catalog_unavailable).
+    A title search that asked for near spellings, either way, gets that switch alone: it
+    reads the catalogue's titles, served everywhere (catalogue plan §4.7)."""
+    if req.search_mode == 'title':
+        return None if req.near_spellings is None else {'near_spellings': bool(req.near_spellings)}
     if req.search_mode != 'catalog':
         return None
     from web.catalog_assets import catalog_available
@@ -2123,7 +2135,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     if _slot_release is not None:
                         _slot_release()
                 total = len(results)
-                if catalog_effective is not None and results:
+                if req.search_mode == 'catalog' and results:
                     # The catalogue search counts every match exactly; its rows stop at
                     # CATALOG_MAX_ROWS (shared/catalog_text_rows.py), so the count comes
                     # from the first row, not from the rows.
@@ -2213,7 +2225,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             }
             if catalog_effective is not None:
                 request_echo['near_spellings'] = catalog_effective['near_spellings']
-                request_echo['include_translations'] = catalog_effective['include_translations']
+                if 'include_translations' in catalog_effective:
+                    request_echo['include_translations'] = catalog_effective['include_translations']
             if req.sources is not None or sources_effective:
                 # Echoed when asked for or when the editions were read: a request that
                 # neither asks nor gets them keeps today's echo.

@@ -104,7 +104,9 @@ SEARCH_MODES = (
     'variants, Judeo-Arabic transliteration, flexible spacing and either word order. It is a query '
     'syntax, NOT a filter for responsa literature. '
     'title = words in the catalogue titles of the manuscripts (the library catalogue records and the NLI '
-    'catalogue cache), not manuscript text; filtering by work is filters.works. '
+    'catalogue cache), not manuscript text, found as one phrase; with near_spellings=true each word is '
+    'found anywhere in the title, in any order, as typed or plene/defective (Latin: near spellings the '
+    'titles hold); filtering by work is filters.works. '
     'shelfmark = a call number such as T-S 12.123 or ENA 1628.38. '
     'catalog = the catalogue records, not the manuscript text: what catalogues SAY a manuscript is '
     '(FJMS titles, descriptions and full entries, PGP descriptions, library titles; Hebrew and English, '
@@ -724,8 +726,8 @@ def build_server(facade_app) -> MCPServer:
                            Field(description='Which texts to search where the editions are searched: all (the '
                                              'default there), editions, or automatic.')] = None,
         near_spellings: Annotated[bool | None,
-                                  Field(description="search_mode='catalog' only: also near spellings "
-                                                    '(default false).')] = None,
+                                  Field(description="search_mode='catalog' or 'title' only: also near "
+                                                    'spellings (default false).')] = None,
         include_translations: Annotated[bool | None,
                                         Field(description="search_mode='catalog' only: false searches the "
                                                           'original catalogue records only, without their '
