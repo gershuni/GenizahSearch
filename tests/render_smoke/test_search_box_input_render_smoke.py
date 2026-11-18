@@ -88,7 +88,7 @@ def _texts(user, kind):
 async def _search_typed(user, engine, query):
     """Type *query* into the box and click Search; the engine's call for it."""
     before = len(engine.calls)
-    box = next(e for e in _elements(user, ui.input) if e.props.get('placeholder') == 'Enter Hebrew text to search')
+    box = next(e for e in _elements(user, ui.input) if 'data-gs-primary-search' in e.props)
     with user.client:
         box.value = query
     button = next(b for b in _elements(user, ui.button) if b.props.get('label') == 'Search' and 'px-8' in b.classes)
@@ -137,7 +137,7 @@ def test_a_shelfmark_typed_into_the_box_runs_in_shelfmark_mode_and_a_hebrew_quer
             calls_before = len(engine.calls)
             with patch('nicegui.ui.navigate.to') as nav_mock:
                 box = next(e for e in _elements(user, ui.input)
-                           if e.props.get('placeholder') == 'Enter Hebrew text to search')
+                           if 'data-gs-primary-search' in e.props)
                 with user.client:
                     box.value = '990053835020205171'
                 button = next(b for b in _elements(user, ui.button)
@@ -231,7 +231,7 @@ def test_the_header_box_is_on_the_search_page_too():
             await _connect(user)
             seen['boxes'] = [e for e in _elements(user, ui.input) if 'header-search' in e._markers]
             seen['page_box'] = [e for e in _elements(user, ui.input)
-                                if e.props.get('placeholder') == 'Enter Hebrew text to search']
+                                if 'data-gs-primary-search' in e.props]
 
     _run(go)
     assert len(seen['boxes']) == 1, seen

@@ -924,7 +924,7 @@ def test_a_restored_history_entry_does_not_inherit_the_shown_searchs_partial_sta
     history entry that kept its rows (and says they were cut) is its own search, which
     Search within completes."""
     from tests.test_web_variant_settings_per_visitor import (
-        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history)
+        SEARCH_BOX, WORD3, _element, _legacy_history_entry, _restore_history)
     from nicegui import ui
     star = f'{WORD2}* טיכ*'
     partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
@@ -940,7 +940,7 @@ def test_a_restored_history_entry_does_not_inherit_the_shown_searchs_partial_sta
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
         store(a, search_history=[entry])
         _restore_history(a, WORD3)
-        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        box = _element(a, ui.input, lambda e: SEARCH_BOX in e.props)
         await _wait_for(lambda: box.value == WORD3, user=a)
         await _click_search_within(a)
         await wait_for_payloads(queue, 2)          # the restored search's completion
@@ -1021,7 +1021,7 @@ def test_a_restored_history_entry_is_not_the_shown_search(page):
     does not say it was cut), and Search within runs on their manuscripts."""
     from nicegui import ui
     from tests.test_web_variant_settings_per_visitor import (
-        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history, stored)
+        SEARCH_BOX, WORD3, _element, _legacy_history_entry, _restore_history, stored)
     queue = page({
         (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
         (WORD, True): ([_row('M1'), _row('M2')], None),
@@ -1036,7 +1036,7 @@ def test_a_restored_history_entry_is_not_the_shown_search(page):
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
         store(a, search_history=[_legacy_history_entry(WORD3, '990000000000099')])
         _restore_history(a, WORD3)
-        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        box = _element(a, ui.input, lambda e: SEARCH_BOX in e.props)
         await _wait_for(lambda: box.value == WORD3, user=a)
         await _wait_for(lambda: any(t.startswith('1 Results') for t in _label_texts(a)), user=a)
         await _click_search_within(a)

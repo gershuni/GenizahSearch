@@ -46,6 +46,7 @@ from web.pages.search_state import (
 )
 from web import search_runs
 from shared.search_box_input import TEXT_MODES, is_latin_script_query, search_box_input_kind, split_placeholder
+from shared.search_mode_examples import mode_lead, mode_placeholder
 from web.catalog_assets import (CATALOG_NEAR_FORMS_SHOWN, CATALOG_TRANSLATIONS_TOOLTIP,
                                  NEAR_SPELLINGS_MODES, catalog_available)
 from shared.near_spellings import near_spellings_tooltip
@@ -755,9 +756,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # Changed to H2 semantic label
                         query_label = h2(tr('Search Query'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
                         query_input = ui.input(
-                            placeholder=tr('Enter Hebrew text to search'),
+                            # What to type in the mode, on the box's top border as the Mode
+                            # field's label is (stack-label: always there), and an example
+                            # inside; both follow the mode (_show_mode_example below).
+                            label=mode_lead(saved_mode, tr),
+                            placeholder=mode_placeholder(saved_mode, tr),
                             value=saved_query
                         ).classes('w-full text-lg').props(
+                            'stack-label '
                             # data-no-loading-bar: the search runs in the page with its own
                             # progress bar; the site's top bar would run on 15 s (web/main.py).
                             'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
@@ -1339,6 +1345,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _safe_set('search_mode', mode)
 
             mode_select.on('update:model-value', on_mode_change)
+
+            # The box says what to type in the mode chosen, with an example drawn afresh (owner,
+            # 2026-11-18; shared/search_mode_examples.py). On every change of mode, a mode set in
+            # code (a sign typed in the box, a history item, a link) too.
+            def _show_mode_example(*_):
+                query_input.props['label'] = mode_lead(mode_select.value, tr)
+                query_input.props['placeholder'] = mode_placeholder(mode_select.value, tr)
+
+            mode_select.on_value_change(_show_mode_example)
 
             def _sync_sources_visibility(*_):
                 """The Transcriptions selector shows only where the search reads it: a mode

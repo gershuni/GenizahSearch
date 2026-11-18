@@ -1507,6 +1507,14 @@ TRANSLATIONS = {
     "Navigate through manuscript pages": "נווט בין דפי כתב היד",
     "Enter search terms": "הזן מילות חיפוש",
     "Enter Hebrew text to search": "הזן טקסט עברי לחיפוש",
+    # The search box's lead in each mode, and its example (owner's wording, 2026-11-18;
+    # shared/search_mode_examples.py).
+    "Type a term to search": "הקלידו מונח לחיפוש",
+    "Type words with operators for an advanced search": "הקלידו מילים עם אופרטורים לחיפוש מתקדם",
+    "Type a term to search the titles": "הקלידו מונח לחיפוש בכותרות",
+    "Type a term to search the catalog data": "הקלידו מונח לחיפוש במידע הקטלוגי",
+    "Type a string to search the shelfmarks": "הקלידו מחרוזת לחיפוש במספרי המדף",
+    "For example: {query}": "לדוגמה: {query}",
     "Search manuscripts...": "חיפוש בכתבי יד...",
     # Replaces "Search manuscripts..." on the homepage hero box (owner,
     # 2026-09-04). Both the English and the Hebrew read as "search FOR a

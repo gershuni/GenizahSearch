@@ -71,8 +71,8 @@ from desktop.catalog_search import (MODE_INDEX_CATALOG, MODE_INDEX_TITLE, CATALO
                                     CATALOG_TRANSLATIONS_TOOLTIP, ModeCombo,
                                     CatalogCountWorker, catalog_offered, catalog_options as _catalog_options,
                                     combo_index as _mode_combo_index, engine_mode as _combo_engine_mode,
-                                    source_text as _catalog_source_text, step_mode as _combo_step_mode,
-                                    telemetry_mode as _combo_telemetry_mode)
+                                    show_mode_examples, source_text as _catalog_source_text,
+                                    step_mode as _combo_step_mode, telemetry_mode as _combo_telemetry_mode)
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
@@ -6316,7 +6316,7 @@ class GenizahGUI(QMainWindow):
         self.search_row1_container = QWidget()
         row1 = QHBoxLayout(self.search_row1_container)
         row1.setContentsMargins(0, 0, 0, 0)
-        self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
+        self.query_input = QLineEdit()   # its lead text: the mode's example (show_mode_examples below)
         self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\nR = Responsa mode\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._on_query_text_changed)
@@ -6484,6 +6484,10 @@ class GenizahGUI(QMainWindow):
         # (owner screenshots, 2026-09-24). Each block keeps its natural width.
         self.search_row2 = FlowWidget(margin=0)
         row2 = self.search_row2.flow
+
+        # The query box says what to type in the mode chosen and shows an example of it (owner,
+        # 2026-11-18): after the combo has all its rows and the box its shortcuts tooltip.
+        show_mode_examples(self.mode_combo, self.query_input, tr)
 
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))

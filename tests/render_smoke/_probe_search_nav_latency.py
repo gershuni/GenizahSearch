@@ -300,7 +300,7 @@ def test_probe():
         await _open(user, '/search', 0.0)
         await asyncio.sleep(1.5)   # the page's deferred loaders settle, as on a reader's open page
         query = next(e for e in _elements(user, ui.input)
-                     if e.props.get('placeholder') == 'Enter Hebrew text to search')
+                     if 'data-gs-primary-search' in e.props)
         with user.client:
             query.value = QUERY
         btn = next(b for b in _elements(user, ui.button)

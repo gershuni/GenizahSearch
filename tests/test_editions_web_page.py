@@ -11,7 +11,7 @@ import pytest
 os.environ.setdefault('GENIZAH_STORAGE_SECRET', 'editions-web-page-test-secret-0123456789abcdef')
 
 from tests.test_web_variant_settings_per_visitor import (  # noqa: E402,F401  (server is a fixture)
-    PLACEHOLDER, _element, run, server, store, submit, wait_for_payloads,
+    SEARCH_BOX, _element, run, server, store, submit, wait_for_payloads,
 )
 
 
@@ -176,7 +176,7 @@ def test_a_search_of_one_kind_says_so_and_offers_all(server, monkeypatch):  # no
         seen['button'] = button.text
         # The box edited since: the button still runs the search the notice describes (Codex
         # on #50), in every transcription.
-        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        box = _element(a, ui.input, lambda e: SEARCH_BOX in e.props)
         with a._client:
             box.value = 'משהו אחר'
         from tests.test_web_variant_settings_per_visitor import _fire

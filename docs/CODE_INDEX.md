@@ -1553,6 +1553,10 @@ a hand-rolled pattern lacking a `sys-id-pattern-exempt: <reason>` annotation, pi
 migrated site to the shared object, and pins the never-match-LOCAL property.
 `scripts/check_sys_id_prefixes.py` re-measures which prefixes the corpus actually contains.
 
+## shared/search_mode_examples.py
+
+What the search box says in each search mode (owner's design and wording, 2026-11-18): `MODE_EXAMPLES`: mode -> (lead, its examples). `mode_lead(mode, tr)` what to type in the mode; `mode_placeholder(mode, tr, choose=random.choice)` "For example:" and one of the mode's examples, the example isolated right to left and an English line left to right (the website's box is always right to left). Unknown modes and PGP Tags get Exact's. Used by `web/pages/search.py` (`_show_mode_example`, on every value of the Mode list: the lead is the box's stacked label, the example its placeholder) and `desktop/catalog_search.py::show_mode_examples` (on every row of the desktop's mode combo, from `GenizahGUI.create_search_tab`: the example is the placeholder, the lead heads the tooltip above the shortcuts). Tests: `tests/test_search_mode_examples.py`, `tests/test_desktop_mode_examples.py`, `tests/render_smoke/test_search_mode_placeholder_render_smoke.py`.
+
 ## shared/search_serializer.py
 
 Phase 77 single-source-of-truth serializer for the "Claude-friendly JSON" payload shape. One module powers both download handlers (`/api/export/json`, `/api/export/parallels/json`) and Phase 78+ API responses (`/api/search`, `/api/parallels`); modifying `_serialize_item()` updates download AND API in lockstep per EXPORT-03.

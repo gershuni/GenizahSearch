@@ -176,7 +176,7 @@ def test_search_submit_with_unappliable_filters_runs_nothing_and_says_why(reques
         async with _user(engine, {'search_filter_material_exclude': ['Printed']}) as user:
             await user.open('/search')
             query = next(e for e in _elements(user, ui.input)
-                         if e.props.get('placeholder') == 'Enter Hebrew text to search')
+                         if 'data-gs-primary-search' in e.props)
             with user.client:
                 query.value = 'word'
             engine.calls.clear()
@@ -357,7 +357,7 @@ def test_search_history_records_a_copy_of_the_live_filters(monkeypatch, tmp_path
                                   'search_filter_text_all': ['term']}) as user:
             await user.open('/search')
             query = next(e for e in _elements(user, ui.input)
-                         if e.props.get('placeholder') == 'Enter Hebrew text to search')
+                         if 'data-gs-primary-search' in e.props)
             with user.client:
                 query.value = 'word'
             UserInteraction(user, {_button(user, 'Search', 'px-8')}, None).click()

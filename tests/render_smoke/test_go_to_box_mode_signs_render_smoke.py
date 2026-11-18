@@ -105,7 +105,7 @@ def test_the_homepage_box_opens_search_in_the_signs_mode(monkeypatch):
 # --- /search: the box's live switch, and the address a go-to box opens ------------------
 
 def _search_box(user):
-    return next(e for e in _elements(user, ui.input) if e.props.get('placeholder') == 'Enter Hebrew text to search')
+    return next(e for e in _elements(user, ui.input) if 'data-gs-primary-search' in e.props)
 
 
 def _mode_select(user):

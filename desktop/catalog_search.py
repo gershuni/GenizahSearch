@@ -146,6 +146,28 @@ def catalog_offered() -> bool:
     return bool(path) and os.path.isfile(path) and catalog_text_enabled(default=True)
 
 
+def show_mode_examples(combo, query_box, translate) -> None:
+    """The query box follows the mode combo (shared/search_mode_examples.py, as the website's
+    /search box does): its placeholder is one of the row's examples, drawn afresh on every change
+    of row, and its tooltip opens with what to type in the mode, above the shortcuts it held
+    when this was called (owner, 2026-11-18). PGP Tags hides the box, so its row keeps the text
+    modes'."""
+    from shared.search_mode_examples import mode_lead, mode_placeholder
+
+    shortcuts = query_box.toolTip()
+
+    def show(_row=None):
+        # The mode is currentIndex(), not the signal's argument: a combo that shows its rows in
+        # another order than its indices carries the row shown.
+        mode = step_mode(combo.currentIndex())
+        query_box.setPlaceholderText(mode_placeholder(mode, translate))
+        lead = mode_lead(mode, translate)
+        query_box.setToolTip(lead + "\n\n" + shortcuts if shortcuts else lead)
+
+    combo.currentIndexChanged.connect(show)
+    show()
+
+
 def catalog_options(near_spellings: bool, include_translations: bool) -> dict:
     """The switches a catalogue search runs with, as the engine takes them."""
     return {"near_spellings": bool(near_spellings), "include_translations": bool(include_translations)}

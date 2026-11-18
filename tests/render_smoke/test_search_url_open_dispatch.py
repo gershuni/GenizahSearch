@@ -160,7 +160,7 @@ def test_a_typed_search_reaches_the_engine_without_a_browser_round_trip():
             await _connect(user)
             await asyncio.sleep(0.3)   # the page's deferred loaders
             query = next(e for e in _elements(user, ui.input)
-                         if e.props.get('placeholder') == 'Enter Hebrew text to search')
+                         if 'data-gs-primary-search' in e.props)
             with user.client:
                 query.value = QUERY
             button = next(b for b in _elements(user, ui.button)

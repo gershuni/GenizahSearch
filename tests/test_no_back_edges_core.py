@@ -155,6 +155,7 @@ EXTRACTED_MODULES = [
     "shared/retrieval_adapters.py",
     "shared/retrieval_eval.py",
     "shared/search_regex.py",
+    "shared/search_mode_examples.py",    # the search box's lead text and example query per mode, 2026-11-18
     "shared/search_serializer.py",
     "shared/search_tokenizer.py",
     "shared/session_persistence.py",

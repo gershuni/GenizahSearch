@@ -28,7 +28,7 @@ os.environ.setdefault('GENIZAH_STORAGE_SECRET', 'variant-settings-test-secret-01
 WORD = 'אבגד'
 WORD2 = 'הוזח'
 WORD3 = 'טיכל'
-PLACEHOLDER = 'Enter Hebrew text to search'
+SEARCH_BOX = 'data-gs-primary-search'   # the /search box's marker (its placeholder follows the mode)
 
 # Server values chosen to differ from every website default.
 SERVER = {
@@ -216,7 +216,7 @@ def _fire(user, element, event_type, value=None):
 def submit(user, text):
     """Type into the search box and press Enter, exactly as the page wires it."""
     from nicegui import ui
-    box = _element(user, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+    box = _element(user, ui.input, lambda e: SEARCH_BOX in e.props)
     _fire(user, box, 'keydown.enter', text)
 
 
@@ -527,7 +527,7 @@ def test_a_restored_history_entry_does_not_take_the_shown_searchs_settings(serve
             await asyncio.sleep(0.05)
         store(a, search_history=[_legacy_history_entry(WORD2, '990000000000099')])
         _restore_history(a, WORD2)
-        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        box = _element(a, ui.input, lambda e: SEARCH_BOX in e.props)
         while box.value != WORD2:                 # the restore runs as a task
             assert loop.time() < deadline, box.value
             await asyncio.sleep(0.05)
