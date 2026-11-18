@@ -1142,3 +1142,41 @@ def test_a_stopped_search_saves_its_query_with_its_rows():
     assert len(stopped) == 1
     body = ast.unparse(stopped[0])
     assert body.index('persist_search_snapshot(search_state)') < body.index("_safe_set('search_query', clean_query)")
+
+
+# --- the level a go-to box's ?? or ??? names (PR #52) ---------------------------------
+
+from web.search_bootstrap import address_variant_level  # noqa: E402
+
+_PAIRS = {'variants': 30, 'variants_extended': 70, 'variants_maximum': 150}
+_FRESH = {'restore_saved_results': False, 'rejoin_run': False}
+
+
+@pytest.mark.parametrize('mode, level', [('variants_extended', 70), ('variants_maximum', 150)])
+def test_a_fresh_address_with_the_slider_shows_the_signs_level(mode, level):
+    assert address_variant_level(mode, use_slider=True, state=_FRESH, preset_pairs=_PAIRS) == level
+
+
+@pytest.mark.parametrize('state', [
+    {'restore_saved_results': True, 'rejoin_run': False},   # Back to a stamped address
+    {'restore_saved_results': False, 'rejoin_run': True},   # a run still running, rejoined
+])
+def test_back_and_a_rejoined_run_keep_their_own_settings(state):
+    """Codex review of PR #52: a restored address must not set the level."""
+    assert address_variant_level('variants_extended', use_slider=True, state=state, preset_pairs=_PAIRS) is None
+
+
+@pytest.mark.parametrize('mode, use_slider', [
+    ('variants_extended', False),   # without the slider the mode itself is the level
+    ('variants', True), ('Title', True), (None, True),
+])
+def test_no_level_otherwise(mode, use_slider):
+    assert address_variant_level(mode, use_slider=use_slider, state=_FRESH, preset_pairs=_PAIRS) is None
+
+
+def test_the_bootstrap_of_a_fresh_level_address_is_fresh():
+    """The state the page passes: a box's address is neither Back nor a rejoin."""
+    state = resolve_search_bootstrap(
+        initial_query='שלום', initial_tag=None, initial_mode='variants_extended', initial_domain=None,
+        from_browse=None, saved_mode='exact', saved_query='שלום', saved_results_count=5, use_slider=True)
+    assert address_variant_level('variants_extended', use_slider=True, state=state, preset_pairs=_PAIRS) == 70

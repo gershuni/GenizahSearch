@@ -178,3 +178,110 @@ def test_the_page_lookup_searches_when_the_catalogue_fails(monkeypatch):
 
     monkeypatch.setattr(state, 'meta_mgr', _Broken())
     assert catalogue_has_shelfmark('Mingana 9') is False
+
+
+# --- the search-mode signs (2026-11-18) ----------------------------------------
+# A sign and a space open /search in its mode, the sign removed: the /search box's own
+# signs (shared/search_mode_signs.py, tests/test_search_mode_signs.py).
+
+def _search(text, has_shelfmark=None, catalog_served=False):
+    """(path, {name: value}) for where ``text`` is sent."""
+    target = home_query_target(text, has_shelfmark, catalog_served=catalog_served)
+    parts = urlsplit(target)
+    return parts.path, {k: v[0] for k, v in parse_qs(parts.query).items()}
+
+
+@pytest.mark.parametrize('sign, mode', [
+    ('$', 'Title'), ('#', 'Shelfmark'), ('?', 'variants'), ('??', 'variants_extended'),
+    ('???', 'variants_maximum'), ('~', 'fuzzy'), ('=', 'exact'), ('/', 'Regex'),
+    ('R', 'responsa'), ('%', 'Catalog'),
+])
+def test_a_sign_opens_search_in_its_mode_without_the_sign(sign, mode):
+    assert _search(f'{sign} שלום', catalog_served=True) == ('/search', {'q': 'שלום', 'mode': mode})
+
+
+def test_the_signed_url_carries_the_query_intact():
+    target = home_query_target('$ משה + אהרן & #')
+    assert target == '/search?q=' + quote('משה + אהרן & #', safe='') + '&mode=Title'
+
+
+@pytest.mark.parametrize('text, expected', [
+    ('# T-S 12.123', ('/search', {'q': 'T-S 12.123', 'mode': 'Shelfmark'})),   # a sign wins over Browse
+    ('= T-S 12.123', ('/search', {'q': 'T-S 12.123', 'mode': 'exact'})),       # the rules call this a shelfmark
+    ('$ Psalm 23', ('/search', {'q': 'Psalm 23', 'mode': 'Title'})),
+    ('~ 990053835020205171', ('/search', {'q': '990053835020205171', 'mode': 'fuzzy'})),
+    ('  $  שלום  ', ('/search', {'q': 'שלום', 'mode': 'Title'})),
+])
+def test_a_sign_decides_before_the_input_kind(text, expected):
+    assert _search(text) == expected
+
+
+@pytest.mark.parametrize('text, mode', [('$ ', 'Title'), ('R ', 'responsa')])
+def test_the_sign_alone_opens_search_in_its_mode(text, mode):
+    assert home_query_target(text) == f'/search?mode={mode}'
+
+
+def test_percent_is_a_sign_only_where_the_catalogue_search_is_served():
+    assert _search('% שלום', catalog_served=True) == ('/search', {'q': 'שלום', 'mode': 'Catalog'})
+    # Not served: the box does what it did before the signs (the whole input, searched).
+    assert _route('% שלום') == ('/search', 'q', '% שלום')
+    assert home_query_target('% שלום', catalog_served=False) == home_query_target('% שלום')
+
+
+@pytest.mark.parametrize('text', ['$שלום', 'Rashi', 'r שלום'])
+def test_a_sign_without_a_space_is_no_sign_here(text):
+    """As in the /search box; /search's own parsing still reads ``$שלום`` there."""
+    assert _route(text) == ('/search', 'q', text)
+
+
+def test_r_gives_way_to_text_of_an_r_shelfmarks_shape():
+    """``R 15`` is a Mosseri shelfmark (libraries.csv, 33 shelfmarks begin with ``R ``): text of
+    that shape is routed as if it had no sign; anything else after ``R`` is a Responsa query."""
+    catalogue = _Catalogue({'R 15', 'R II 5'})
+    assert home_query_target('R 15', catalogue) == '/browse?shelfmark=R%2015'
+    assert home_query_target('  R II 5 ', catalogue) == '/browse?shelfmark=R%20II%205'
+    assert _route('R 99') == ('/search', 'q', 'R 99')    # the shape, though no such shelfmark
+    assert catalogue.asked == ['R 15', 'R II 5']   # the go-to routing's own lookup, not the sign's
+
+
+@pytest.mark.parametrize('text, query', [
+    ('R שלום', 'שלום'),
+    ('R قال', 'قال'),
+    ('R 99 [3] 100', '99 [3] 100'),   # digits and a gap: a Responsa query (Codex review of PR #52)
+    ('R 15 שבת', '15 שבת'),
+    ('R abc', 'abc'),
+])
+def test_any_other_text_after_r_is_a_responsa_query(text, query):
+    assert _search(text, _Catalogue()) == ('/search', {'q': query, 'mode': 'responsa'})
+
+
+def test_the_r_shape_covers_every_r_shelfmark_in_the_catalogue():
+    """Every libraries.csv call number that begins with the Responsa sign and a space has the
+    shape ``R_SHELFMARK_RE`` knows; a new form there fails here, not on a reader's search."""
+    import csv
+    from pathlib import Path
+
+    from web.home_query import R_SHELFMARK_RE
+
+    path = Path(__file__).resolve().parents[1] / 'libraries.csv'
+    with path.open(encoding='utf-8', newline='') as f:
+        r_marks = {cn.strip() for row in csv.reader(f) if len(row) > 2
+                   for cn in row[2].split('|') if cn.strip().startswith('R ')}
+    assert len(r_marks) >= 33, len(r_marks)
+    assert sorted(m for m in r_marks if not R_SHELFMARK_RE.fullmatch(m)) == []
+
+
+def test_r_15_does_not_depend_on_the_shelfmark_index_being_ready():
+    """Until its index is built the catalogue lookup says False (MetadataManager.has_shelfmark);
+    ``R 15`` must not become a Responsa search for ``15`` meanwhile (Codex review of PR #52)."""
+    not_ready = _Catalogue()
+    assert _route('R 15') == ('/search', 'q', 'R 15')
+    assert home_query_target('R 15', not_ready) == '/search?q=R%2015'
+    assert home_query_target('R 15', _Catalogue({'R 15'})) == '/browse?shelfmark=R%2015'
+
+
+def test_no_sign_asks_the_catalogue():
+    catalogue = _Catalogue({'# 15', 'R שלום'})
+    assert _search('# 15', catalogue) == ('/search', {'q': '15', 'mode': 'Shelfmark'})
+    assert _search('R שלום', catalogue) == ('/search', {'q': 'שלום', 'mode': 'responsa'})
+    assert catalogue.asked == []

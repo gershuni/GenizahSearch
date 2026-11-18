@@ -735,6 +735,7 @@ from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language, visitor_language
 from web.citation_chip import render_citation_chip
 from web.home_query import catalogue_has_shelfmark, home_query_target  # the header's go-to box routes as the homepage box does
+from web.catalog_assets import catalog_available  # and offers % where the catalogue search is served
 from web import hebrew_keyboard  # the on-screen keys in the header's box (and the script for every page's boxes)
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
@@ -1920,7 +1921,10 @@ def create_layout():
             async def _go():
                 # Off the loop: a Latin string with a digit is looked up in the
                 # catalogue (MetadataManager.has_shelfmark) before it is searched.
-                target = await run.io_bound(home_query_target, header_box.value, catalogue_has_shelfmark)
+                # A search-mode sign ($ ...) opens /search in its mode; % where the
+                # catalogue text search is served (web/catalog_assets.py).
+                target = await run.io_bound(home_query_target, header_box.value, catalogue_has_shelfmark,
+                                            catalog_served=catalog_available())
                 if target:
                     ui.navigate.to(target)
 

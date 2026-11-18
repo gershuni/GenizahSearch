@@ -108,6 +108,7 @@ EXTRACTED_MODULES = [
     "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24
     "shared/keyboard_layout.py",         # the /search box's wrong-layout suggestion, 2026-11-03
     "shared/search_box_input.py",        # what a search or go-to box holds (moved from web/), 2026-11-04
+    "shared/search_mode_signs.py",       # the search-mode signs ($, #, %...), one table for every box, 2026-11-18
     "shared/whats_new_history.py",       # What's New in every version, 2026-11-05
     "shared/whats_new_data.py",          # its entries, 2026-11-05
     "shared/exclusion_service.py",

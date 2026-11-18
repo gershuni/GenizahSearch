@@ -64,6 +64,8 @@ from shared.refinement import (RefinementStep, chain_needs_completion, complete_
                                needs_mode_labels, truncate_chain, replay_chain, scope_signature,
                                steps_that_cannot_complete)
 from shared.search_engine import _consume_last_responsa_downgrade, consume_last_search_cutoff
+from shared.search_mode_signs import split_mode_sign
+from web.search_bootstrap import address_variant_level
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids, catalog_fallback,
@@ -329,6 +331,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     restore_saved_results = bootstrap_state['restore_saved_results']
     restore_saved_filters = bootstrap_state['restore_saved_filters']
     restore_saved_exclusions = bootstrap_state['restore_saved_exclusions']
+    # ?? or ??? typed into a go-to box opens Spelling Variants at that level: with the
+    # slider, this page's slider shows it (a fresh address only; never saved).
+    _address_level = address_variant_level(initial_mode, use_slider=use_slider, state=bootstrap_state,
+                                           preset_pairs=variant_preferences.PRESET_PAIRS)
+    if _address_level:
+        saved_preset = _address_level
+        saved_max_changes = variant_preferences.max_changes(variant_preferences.level_of(saved_preset))
 
     # A page that rejoins a run, or restores the rows of one, shows the texts that run
     # searched, not the visitor's current choice; with the run's snapshot gone (a restart, an
@@ -799,39 +808,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         query_input.on_value_change(_save_query_while_keys_open)
 
                         # --- Live shortcut detection: switch mode when user types prefix + space ---
-                        _shortcut_prefixes = [
-                            ('???', 'variants_maximum'),
-                            ('??', 'variants_extended'),
-                            ('R', 'responsa'),
-                            ('?', 'variants'),
-                            ('=', 'exact'),
-                            ('~', 'fuzzy'),
-                            ('/', 'Regex'),
-                            ('$', 'Title'),
-                            ('#', 'Shelfmark'),
-                        ]
-                        if _catalog_served:
-                            _shortcut_prefixes.append(('%', 'Catalog'))
-
+                        # The signs are shared/search_mode_signs.py's (% only where the
+                        # catalogue is served); the go-to boxes read the same table.
                         def on_query_input_change():
                             val = query_input.value or ''
-                            # Check if text starts with a shortcut followed by a space
-                            for prefix, target_mode in _shortcut_prefixes:
-                                if val.startswith(prefix + ' ') or val == prefix + ' ':
-                                    # Strip the prefix and leading space
-                                    clean = val[len(prefix):].lstrip()
-                                    query_input.value = clean
-                                    # Switch mode (map variant subtypes for slider)
-                                    if use_slider and target_mode in ('variants_extended', 'variants_maximum'):
-                                        # ?? and ??? name a level: the slider shows it.
-                                        _show_level_on_slider(target_mode)
-                                        mode_select.value = 'variants'
-                                    else:
-                                        mode_select.value = target_mode
-                                    # Explicitly trigger mode change handler — programmatic
-                                    # value assignment doesn't fire Vue 'update:model-value'
-                                    on_mode_change()
-                                    break
+                            target_mode, clean = split_mode_sign(val, catalog_served=_catalog_served)
+                            if target_mode is not None:
+                                query_input.value = clean
+                                # Switch mode (map variant subtypes for slider)
+                                if use_slider and target_mode in ('variants_extended', 'variants_maximum'):
+                                    # ?? and ??? name a level: the slider shows it.
+                                    _show_level_on_slider(target_mode)
+                                    mode_select.value = 'variants'
+                                else:
+                                    mode_select.value = target_mode
+                                # Explicitly trigger mode change handler — programmatic
+                                # value assignment doesn't fire Vue 'update:model-value'
+                                on_mode_change()
                         query_input.on('update:model-value', on_query_input_change)
                         # Fire shortcut detection immediately on space press (avoids
                         # one-keystroke delay from NiceGUI's batched model-value updates)

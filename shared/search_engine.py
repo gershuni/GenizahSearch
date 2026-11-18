@@ -57,6 +57,7 @@ from shared.responsa_match import (
     component_query_string, expand_stems as expand_responsa_stems, plans_from_dicts,
     refuse_unsupported_stars, ResponsaQueryRefused, StarExclusion, GUARD_REFUSAL_TEXT,
 )
+from shared.search_mode_signs import MODE_SIGNS
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -3756,21 +3757,9 @@ class SearchEngine:
             return None, query
         if not query: return None, ""
 
-        # Check multi-character prefixes first (order matters: longer prefixes first)
-        prefix_map = [
-            ('???', 'variants_maximum'),
-            ('??', 'variants_extended'),
-            ('?', 'variants'),
-            ('=', 'exact'),
-            ('~', 'fuzzy'),
-            ('/', 'Regex'),
-            ('$', 'Title'),
-            ('#', 'Shelfmark'),
-            ('%', 'Catalog'),
-            ('R', 'responsa'),
-        ]
-
-        for prefix, mode in prefix_map:
+        # The one table of signs (shared/search_mode_signs.py), longer prefixes first.
+        # Here a symbol sign needs no space after it.
+        for prefix, mode in MODE_SIGNS:
             if query.startswith(prefix):
                 clean = query[len(prefix):].lstrip()
                 if clean:

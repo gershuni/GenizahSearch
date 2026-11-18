@@ -24,6 +24,7 @@ from web.atlas_assets import atlas_preview_available
 from web.discovery_assets import discovery_available
 from web.analytics import posthog_capture
 from web.home_query import catalogue_has_shelfmark, home_query_target
+from web.catalog_assets import catalog_available
 from web import hebrew_keyboard
 
 logger = logging.getLogger(__name__)
@@ -146,8 +147,11 @@ def create_page():
                     async def _navigate_search():
                         # Off the loop: a Latin string with a digit is looked up
                         # in the catalogue (MetadataManager.has_shelfmark) before it is searched.
+                        # A search-mode sign ($ ...) opens /search in its mode; % where
+                        # the catalogue text search is served (web/catalog_assets.py).
                         target = await run.io_bound(
-                            home_query_target, hero_search.value, catalogue_has_shelfmark)
+                            home_query_target, hero_search.value, catalogue_has_shelfmark,
+                            catalog_served=catalog_available())
                         if target:
                             ui.navigate.to(target)
 

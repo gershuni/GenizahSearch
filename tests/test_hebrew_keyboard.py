@@ -46,8 +46,8 @@ def test_rows_fit_a_phone():
 
 
 def test_no_mode_prefix_keys():
-    # '?' and a space switch the mode at the start of the box (search.py
-    # _shortcut_prefixes); a newcomer would take '?' for a wildcard.
+    # '?' and a space switch the mode at the start of the box
+    # (shared/search_mode_signs.py); a newcomer would take '?' for a wildcard.
     for prefix in ('?', '=', '~', '/', '$', '#', 'R'):
         assert prefix not in hk.all_characters()
 

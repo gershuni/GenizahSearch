@@ -1295,7 +1295,7 @@ on `/catalog-browse` (sidebar card, chips under the button), in "Search only in.
 - **Function** `page_meta` (Line 128) — per-route SEO metadata (title, description, canonical, OG/Twitter)
 - **Function** `_resolve_ui_language` (Line 222) — detect UI language from storage/cookie
 - **Function** `create_layout` (Line 240) — shared page layout (header, sidebar, footer)
-- `create_layout`'s `render_header_center` — the header's go-to box on every page, `/` and `/search` included (owner, 2026-11-04): `home_query_target` with `catalogue_has_shelfmark` via `run.io_bound`; placeholder "Search text or go to a shelfmark..."; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css. Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
+- `create_layout`'s `render_header_center` — the header's go-to box on every page, `/` and `/search` included (owner, 2026-11-04): `home_query_target` with `catalogue_has_shelfmark` and `catalog_served=catalog_available()` via `run.io_bound` (a sign and a space open /search in its mode, 2026-11-18); placeholder "Search text or go to a shelfmark..."; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css. Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
 - **Function** `_show_citation_reminder` (Line 635) — periodic citation reminder popup
 - **Function** `apply_theme_immediately` (Line 689) — inject dark/light theme CSS
 - **Function** `_safe_user_storage_get` (Line 821) — safe app.storage.user accessor
@@ -2101,7 +2101,8 @@ The Reading Desk's third image view (2026-11-18): the assembled picture of a sav
 
 ## web/home_query.py
 
-- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Optional `has_shelfmark` predicate: Latin text with a digit the rules call text is looked up in the catalogue first (`Mingana 9`). Tests: `tests/test_home_query_routing.py`.
+- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Optional `has_shelfmark` predicate: Latin text with a digit the rules call text is looked up in the catalogue first (`Mingana 9`). A search-mode sign and a space come first (`mode_sign_target`, 2026-11-18); keyword `catalog_served` (the pages pass `catalog_available()`) makes `%` one. Tests: `tests/test_home_query_routing.py`.
+- **Function** `mode_sign_target` — `/search?q=<query>&mode=<mode>` for a sign and a space (`$ שלום` -> Title, the sign removed; the sign alone opens /search in its mode), else None; `shared/search_mode_signs.py::split_mode_sign`. `R` (the one letter sign) gives way to text of an `R` shelfmark's shape (`R_SHELFMARK_RE`: `R 15` Mosseri, `R II 5` Turin), decided from the text, never the catalogue lookup (False until its index is built); any other text after `R` is a Responsa query, digits only too. Wiring: `tests/render_smoke/test_go_to_box_mode_signs_render_smoke.py`.
 - **Function** `catalogue_has_shelfmark` — the pages' `has_shelfmark`: `state.meta_mgr.has_shelfmark`, False when the catalogue is not loaded or the lookup fails; the pages call `home_query_target` with it via `run.io_bound`.
 
 ## shared/search_box_input.py
@@ -2113,6 +2114,14 @@ What a search or go-to box holds (moved from `web/` on 2026-11-04, so the deskto
 - **Function** `typed_as_shelfmark` — True when the search box holds a shelfmark (not a system number, not words).
 - **Function** `go_to_kind` — where a go-to box sends the text: ``'sys_id'`` / ``'shelfmark'`` / ``'text'`` (None if blank); `search_box_input_kind`, plus the optional catalogue check `has_shelfmark` for text with a digit and no Hebrew/Arabic letter (`Mingana 9`). One rule for `web/home_query.py::home_query_target` and `shared/quick_open.py::quick_open_target`.
 - **Function** `split_placeholder` — ``(before, after)`` the placeholder in a translated sentence, so the query can be rendered as a link between the two halves.
+
+## shared/search_mode_signs.py
+
+The search-mode signs, one table for every box (2026-11-18): the engine's `parse_query_syntax`, the /search box's live switch (`web/pages/search.py`, `on_query_input_change`) and the go-to boxes (`web/home_query.py::mode_sign_target`). Tests: `tests/test_search_mode_signs.py`.
+
+- **Constant** `MODE_SIGNS` — (sign, mode): `???` `??` `?` `=` `~` `/` `$` `#` `%` `R`, a sign that begins another after it.
+- **Constant** `CATALOG_MODE` — `'Catalog'`, the mode of `%`, a sign only where the catalogue text search is served.
+- **Function** `split_mode_sign` — ``(mode, query)`` when the text begins with a sign and a space (``'$ שלום'`` -> ``('Title', 'שלום')``), else ``(None, text)``; keyword `catalog_served` for `%`.
 
 ## web/public_name.py
 
@@ -2126,6 +2135,7 @@ What a search or go-to box holds (moved from `web/` on 2026-11-04, so the deskto
 
 - **Function** `matches_saved_run` — True when a stamped URL (`run=` code, query, mode, Responsa options) is the address of a saved run.
 - **Function** `resolve_search_bootstrap` — Resolve whether persisted search UI state should be reused for this request (Back by run code; rejoin a running search).
+- **Function** `address_variant_level` — the level `??`/`???` from a go-to box names (`/search?mode=variants_extended`), for the slider on that page: a fresh address only (not Back, not a rejoined run), never saved (2026-11-18, PR #52).
 
 ## web/search_runs.py
 
@@ -2860,7 +2870,7 @@ The parsed NLI MARC / IIIF-manifest answers kept on disk (2026-11-03), one SQLit
     - Method `_map_span_to_pages` (Line 1652) — Return page overlaps and primary page for a match span.
     - Method `_get_field` (Line 1684)
     - Method `_get_best_text_for_id` (Line 1690) — Find the first page with meaningful text for a given System ID.
-    - Method `parse_query_syntax` (Line 1739) — Parses search syntax prefix from query string.
+    - Method `parse_query_syntax` (Line 1739) — Parses search syntax prefix from query string (the signs: `shared/search_mode_signs.py::MODE_SIGNS`; no space needed after one).
     - Method `_expand_responsa_component` (Line 1784) — Expand a single ResponsaComponent through the full Responsa expansion pipeline.
     - Method `_build_line_break_regex` (Line 1831) — Build a regex pattern for line-break search.
     - Method `_execute_line_break_search` (Line 1928) — Execute a line-break search using | syntax.

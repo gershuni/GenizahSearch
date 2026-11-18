@@ -183,3 +183,26 @@ def resolve_search_bootstrap(
         'restore_saved_exclusions': restore_saved_state,
         'rejoin_run': rejoin,
     }
+
+
+# The modes whose sign names a Spelling Variants level (?? and ???).
+LEVEL_MODES = ('variants_extended', 'variants_maximum')
+
+
+def address_variant_level(initial_mode: str | None, *, use_slider: bool, state: Dict[str, Any],
+                          preset_pairs: Dict[str, int]) -> int | None:
+    """The variant level an address names, for the slider to show on this page.
+
+    ``??`` or ``???`` typed into a go-to box (web/home_query.py) opens
+    ``/search?mode=variants_extended`` (or ``variants_maximum``); with the slider the
+    page has one variants mode, and the slider shows the sign's level, as typing the sign
+    into the /search box does. Only for a fresh address: Back (*state*'s
+    ``restore_saved_results``) and a rejoined run (``rejoin_run``) show their own run's
+    settings. The caller keeps it to the page; the visitor's saved level is not changed
+    (Codex review of PR #52). None when there is nothing to show.
+    """
+    if not use_slider or initial_mode not in LEVEL_MODES:
+        return None
+    if state.get('restore_saved_results') or state.get('rejoin_run'):
+        return None
+    return preset_pairs.get(initial_mode)
