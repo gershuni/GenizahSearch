@@ -35,6 +35,50 @@ from shared import nli_metadata_store as _nli_store
 from shared.codicological import CodicologicalManager
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
 from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
+from shared.text_normalize import strip_search_diacritics
+
+# One spelling for the quote marks of a Hebrew abbreviation: gershayim and the curly
+# double quotes read as the ASCII double quote, geresh and the curly single quotes as
+# the apostrophe.
+_QUOTE_MARKS = str.maketrans({
+    chr(0x05F4): '"', chr(0x201C): '"', chr(0x201D): '"',
+    chr(0x05F3): "'", chr(0x2018): "'", chr(0x2019): "'",
+})
+# Every mark above and what strip_search_diacritics folds, to read a title without them.
+_TITLE_MARKS_RE = re.compile(
+    '["\'' + ''.join(chr(c) for c in (0x05F3, 0x05F4, 0x2018, 0x2019, 0x201C, 0x201D))
+    + chr(0x0300) + '-' + chr(0x036F) + ']')
+
+
+def _title_matcher(query):
+    """The test a Title search applies to a catalogue title, or None for a query
+    with nothing to look for.
+
+    A substring match, case-insensitive. A query typed WITH a quote mark is an
+    abbreviation and must be found with its mark, in any spelling of the mark; a
+    query typed without one also finds the abbreviation, the marks being folded out
+    of the title. (The marks used to be folded out of the query alone, so a title
+    holding the abbreviation was never found, and a query for it returned every
+    title holding its letters in a longer word instead.) A pair of double quotes
+    around the whole query is not a mark.
+    """
+    q = (query or '').lower().strip().translate(_QUOTE_MARKS)
+    # Only a closed pair is a pair around the query, and it goes even when the text
+    # inside holds a mark of its own. A double quote at the start alone is the title's
+    # (some titles open with one) and is looked for as typed. `"word"` is read as the
+    # pair, not as an open quote before an abbreviation ending in its mark: the pair
+    # is what people type, and the reading still finds that abbreviation.
+    if len(q) > 2 and q[0] == '"' and q[-1] == '"':
+        q = q[1:-1].strip()
+    folded = strip_search_diacritics(q).strip()
+    if not folded:
+        return None
+    if '"' in q or "'" in q:
+        # translate() is the slow step over ~190K titles: only for a title that holds
+        # the query's longest run of letters between marks.
+        piece = max(re.split('["\']', q), key=len)
+        return lambda title: piece in (low := title.lower()) and q in low.translate(_QUOTE_MARKS)
+    return lambda title: folded in _TITLE_MARKS_RE.sub('', title.lower())
 # Credit line for images served from the Bodleian's Genizah Fragments site, in the
 # form its licence requires ("Image provided by [owner]"). Both apps and the web
 # attribution table import this so the wording cannot drift; it is NOT a Creative
@@ -2169,17 +2213,20 @@ class MetadataManager:
                 if val and _shelfmark_matches(self._nli_shelfmark_forms_for(sys_id, val), shelfmark_query):
                     results.add(sys_id)
         else:
-            # Other fields (title): substring match
+            # Other fields (title): substring match; quote marks per _title_matcher
+            matches = _title_matcher(query)
+            if matches is None:
+                return []
             # 1. Search in CSV Bank (Fastest) — snapshot to avoid concurrent modification
             for sys_id, data in list(self.csv_bank.items()):
                 val = data.get(field, '')
-                if val and q_norm in val.lower().strip():
+                if val and matches(val):
                     results.add(sys_id)
 
             # 2. Search in NLI Cache (for items not in CSV or updated)
             for sys_id, data in self.nli_cache.items():
                 val = data.get(field, '')
-                if val and q_norm in val.lower().strip():
+                if val and matches(val):
                     results.add(sys_id)
 
         # Phase 84: CUDL classmark fallback (NORM-01/02). Zero-regression by construction:

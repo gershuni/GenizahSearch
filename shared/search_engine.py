@@ -4124,7 +4124,9 @@ class SearchEngine:
         lookup then skips the research worker (web/research_jobs.py), and a broad
         search's worker skips the catalogue.
         """
-        if mode != 'Regex':
+        # A title keeps its quote marks: the catalogue decides what they mean
+        # (metadata_manager._title_matcher), and folding them out here lost them.
+        if mode == 'Shelfmark':
             query_str = strip_search_diacritics(query_str)
 
         field_map = {'Title': 'title', 'Shelfmark': 'shelfmark'}

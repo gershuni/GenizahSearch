@@ -247,6 +247,53 @@ def test_title_search_is_a_substring_match_as_before(bank):
     assert mm.search_by_meta('mitzvot of', 'title') == ['T2']
 
 
+RID = 'רי"ד'
+
+
+BARE = RID.replace('"', '')
+
+
+def _abbreviation_catalogue(bank):
+    bank = dict(bank)
+    bank['T1'] = {'shelfmark': 'X 1', 'title': 'פסקי ה' + RID}
+    bank['T3'] = {'shelfmark': 'X 3', 'title': 'ש' + BARE + 'ים'}      # the letters, inside a longer word
+    return _manager(bank, nli_cache={'T2': {'shelfmark': '', 'title': 'תוספות ' + RID.replace('"', '״')}})
+
+
+@pytest.mark.parametrize('typed, found', [
+    (RID, ['T1', 'T2']),                         # typed with its mark: the abbreviation only
+    (RID.replace('"', '״'), ['T1', 'T2']),       # either spelling of the mark
+    ('ה' + RID, ['T1']),
+    (BARE, ['T1', 'T2', 'T3']),                  # typed without: the abbreviation too
+    ('"פסקי ה' + BARE + '"', ['T1']),            # quotes around the whole query are not a mark
+    ('"' + RID + '"', ['T1', 'T2']),             # nor around an abbreviation, which keeps its own
+    ('״' + RID.replace('"', '״') + '״', ['T1', 'T2']),
+    ('"ה' + RID, []),                            # a quote at the start alone is looked for as typed
+    ('"' + BARE + '"', ['T1', 'T2', 'T3']),      # a closed pair around plain letters: as without it
+])
+def test_title_search_finds_an_abbreviation_by_its_quote_mark(bank, typed, found):
+    """Through the engine as well: it used to fold the mark out of the query alone, so
+    the title holding the abbreviation was never found and T3 came back in its place."""
+    mm = _abbreviation_catalogue(bank)
+    assert sorted(_engine(mm).metadata_search_ids(typed, 'Title')) == found
+    assert sorted(mm.search_by_meta(typed, 'title')) == found
+
+
+def test_a_title_opening_with_a_double_quote_is_found_by_it(bank):
+    bank = dict(bank)
+    bank['Q1'] = {'shelfmark': 'X 1', 'title': '"אדון חסדך" פיוט'}
+    bank['Q2'] = {'shelfmark': 'X 2', 'title': 'אדון חסדך'}
+    mm = _manager(bank)
+    assert mm.search_by_meta('"אדון חסדך', 'title') == ['Q1']
+    assert sorted(mm.search_by_meta('אדון חסדך', 'title')) == ['Q1', 'Q2']
+    assert sorted(mm.search_by_meta('"אדון חסדך"', 'title')) == ['Q1', 'Q2']
+
+
+@pytest.mark.parametrize('typed', ['"', '""', "'", ' '])
+def test_a_title_query_of_quote_marks_only_finds_nothing(bank, typed):
+    assert _abbreviation_catalogue(bank).search_by_meta(typed, 'title') == []
+
+
 # ---------------------------------------------------------------- the engine takes resolved manuscripts
 
 def _engine(meta_mgr):
