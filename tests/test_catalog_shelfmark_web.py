@@ -151,7 +151,10 @@ def _puzzle_meta(monkeypatch, answer):
         csv_bank={}, nli_cache={}))
     added = []
 
-    async def fake_add(sys_id, shelfmark, *_a):
+    async def fake_add(sys_id, shelfmark, *_a, still_wanted=None):
+        # Same keyword as the real function: a fragment no longer wanted is not added.
+        if still_wanted is not None and not still_wanted():
+            return
         added.append((sys_id, shelfmark))
     monkeypatch.setattr(puzzle, '_add_fragment_by_sys_id', fake_add)
     return added
