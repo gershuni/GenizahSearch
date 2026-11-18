@@ -5871,8 +5871,22 @@ TRANSLATIONS.update({
         "יש לכם כמה עדי נוסח של החיבור שאתם מחפשים? הוסיפו כל אחד מהם בחלון **עדים**: החיפוש נעשה בכל עותק בנפרד והתוצאות ממוזגות, וכך מוצאים יותר מאשר בכל עותק לבדו.",
     "In **Responsa** style, * stands for any letters inside a word: כהנ* גדו* finds both כהן גדול and כהנים גדולים.":
         "בחיפוש בסגנון **פרויקט השו\"ת**, הסימן * מייצג אותיות כלשהן בתוך מילה: כהנ* גדו* מוצא גם כהן גדול וגם כהנים גדולים.",
-    "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for catalog titles, # for shelfmarks, and R and a space for **Responsa** style.":
-        "הקלידו סימן ואחריו רווח כדי לבחור את סוג החיפוש: ? שלום לחיפוש **וריאנטים**, ~ לחיפוש **מקורב**, $ לכותרות בקטלוג, # למספרי מדף, ו-R ורווח לחיפוש בסגנון **פרויקט השו\"ת**.",
+    # Their one-time "New" on the mode list's Catalog item and on the Fuzzy search switch, in the
+    # form of "New! Letter-level search" (desktop GenizahGUI._update_new_feature_marks,
+    # web/components/new_mark.py).
+    "New! Catalog": "חדש! קטלוג",
+    "New! Fuzzy search": "חדש! חיפוש מקורב",
+    # The Catalog item's tooltip, and the list's while it is new (the owner's wording, 2026-11-18).
+    "Search the catalogue information": "חיפוש במידע קטלוגי",
+    # The catalogue search and Title's Fuzzy search (approved 2026-11-18).
+    "**Catalog** mode searches what the catalogues say about each manuscript: the FJMS catalogue, PGP's descriptions and the library titles, in Hebrew and English. Type % and a space to switch to it.":
+        "סוג החיפוש **קטלוג** מחפש במה שכתוב על כל כתב יד בקטלוגים: קטלוג FJMS, התיאורים של PGP וכותרות הספריות, בעברית ובאנגלית. הקלידו % ורווח כדי לעבור אליו.",
+    "Opened a manuscript from a **Catalog** search? **Found in the catalogue records** shows each record your words were found in, whole, with the words marked.":
+        "פתחתם כתב יד מתוצאות חיפוש **קטלוג**? **נמצא ברשומות הקטלוג** מציג כל רשומה שבה נמצאו המילים, במלואה, והמילים מסומנות בה.",
+    "In **Title** search, **Fuzzy search** finds each word anywhere in the title, in any order, and in plene or defective spelling.":
+        "בחיפוש **כותרת**, **חיפוש מקורב** מוצא כל מילה בכל מקום בכותרת, בכל סדר, ובכתיב מלא או חסר.",
+    "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for titles, % for the catalogues, # for shelfmarks, and R and a space for **Responsa** style.":
+        "הקלידו סימן ואחריו רווח כדי לבחור את סוג החיפוש: ? שלום לחיפוש **וריאנטים**, ~ לחיפוש **מקורב**, $ לכותרות, % לקטלוגים, # למספרי מדף, ו-R ורווח לחיפוש בסגנון **פרויקט השו\"ת**.",
     "#שלום# finds the word with every prefix and suffix (600 forms), and %שלום finds it with and without ו and י.":
         "#שלום# מוצא את המילה עם כל התחיליות והסיומות (600 צורות), ו-%שלום מוצא אותה בכתיב מלא ובכתיב חסר (עם ו' ו-י' ובלעדיהן).",
     "Not sure of the **Responsa** syntax? **Tabular Search** builds the query from boxes, with a live preview.":

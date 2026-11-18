@@ -550,3 +550,60 @@ def test_the_viewer_and_browse_call_the_catalogue_pane():
     assert "_update_browse_found" in calls(gui.open_result_in_browse)
     assert "_update_browse_found" in calls(gui.browse_render_page)
     assert "self._browse_catalogue_row = " in inspect.getsource(gui.open_result_in_browse)
+
+
+# -- Catalog right under Title (owner, 2026-11-18), every index as it was ---------------------------
+
+_MODE_LABELS = ["Exact", "Variants", "Responsa", "Fuzzy", "Regex", "Title", "Shelfmark", "PGP Tags"]
+
+
+def _mode_combo():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    combo = cs.ModeCombo()
+    combo.addItems(_MODE_LABELS)
+    combo.addItem("Catalog")
+    combo.show_after(cs.MODE_INDEX_CATALOG, cs.MODE_INDEX_TITLE)
+    return combo
+
+
+@pytest.mark.gui
+def test_catalog_is_shown_under_title_and_every_index_stays():
+    from PyQt6.QtWidgets import QComboBox
+    combo = _mode_combo()
+    shown = [QComboBox.itemText(combo, row) for row in range(combo.count())]
+    assert shown == ["Exact", "Variants", "Responsa", "Fuzzy", "Regex", "Title", "Catalog", "Shelfmark", "PGP Tags"]
+    # the window and the saved history still name the modes by their old indices
+    assert [combo.itemText(i) for i in range(combo.count())] == _MODE_LABELS + ["Catalog"]
+    assert combo.currentIndex() == 0
+    for index in (cs.MODE_INDEX_CATALOG, 6, cs.MODE_INDEX_PGP_TAGS, cs.MODE_INDEX_TITLE):
+        combo.setCurrentIndex(index)
+        assert combo.currentIndex() == index and combo.currentText() == combo.itemText(index)
+    combo.setItemText(cs.MODE_INDEX_CATALOG, "New! Catalog")
+    combo.setItemData(cs.MODE_INDEX_PGP_TAGS, "tags tip")
+    assert QComboBox.itemText(combo, 6) == "New! Catalog"
+    assert combo.itemData(cs.MODE_INDEX_PGP_TAGS) == "tags tip" == QComboBox.itemData(combo, 8)
+
+
+@pytest.mark.gui
+def test_the_mode_slot_gets_the_index_not_the_row():
+    """The window connects currentIndexChanged (which carries the row shown) to a slot that reads
+    currentIndex(); choosing the row under Title is Catalog, the next one still Shelfmark."""
+    combo = _mode_combo()
+    seen = []
+    combo.currentIndexChanged.connect(lambda _row: seen.append(combo.currentIndex()))
+    from PyQt6.QtWidgets import QComboBox
+    QComboBox.setCurrentIndex(combo, 6)          # what a click on the row under Title does
+    QComboBox.setCurrentIndex(combo, 7)
+    assert seen == [cs.MODE_INDEX_CATALOG, 6]
+
+
+def test_the_window_shows_catalog_under_title_and_reads_the_index():
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "genizah_app.py"),
+               encoding="utf-8").read()
+    assert "self.mode_combo = ModeCombo()" in src
+    assert "self.mode_combo.show_after(MODE_INDEX_CATALOG, MODE_INDEX_TITLE)" in src
+    assert ("self.mode_combo.currentIndexChanged.connect(\n"
+            "            lambda _row: self._on_search_mode_changed(self.mode_combo.currentIndex()))") in src
+    assert "self.mode_combo.currentIndexChanged.connect(self._on_search_mode_changed)" not in src

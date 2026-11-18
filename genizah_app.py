@@ -67,7 +67,8 @@ from desktop.single_instance import (
 )
 from desktop.qthread_exit import settle_running_threads
 from desktop.editions_index import EditionsIndex
-from desktop.catalog_search import (MODE_INDEX_CATALOG, CATALOG_NEAR_TOOLTIP, CATALOG_TRANSLATIONS_TOOLTIP,
+from desktop.catalog_search import (MODE_INDEX_CATALOG, MODE_INDEX_TITLE, CATALOG_NEAR_TOOLTIP,
+                                    CATALOG_TRANSLATIONS_TOOLTIP, ModeCombo,
                                     CatalogCountWorker, catalog_offered, catalog_options as _catalog_options,
                                     combo_index as _mode_combo_index, engine_mode as _combo_engine_mode,
                                     source_text as _catalog_source_text, step_mode as _combo_step_mode,
@@ -2750,6 +2751,7 @@ class GenizahGUI(QMainWindow):
             QApplication.instance().installEventFilter(self._layout_shortcuts)
 
         self._wire_tip_signals()
+        self._update_new_feature_marks()
 
         # Two menu layouts, chosen in Settings and kept in config.pkl as
         # nav_layout (owner, 2026-10-24: the tabs stay, and the side menu is an
@@ -3150,6 +3152,9 @@ class GenizahGUI(QMainWindow):
                 # than during a construction the user never watched.
                 self._update_comp_method_affordance()
                 self._update_witness_affordance()
+            if hasattr(self, 'search_tab') and current_widget is self.search_tab:
+                # And the search section's one-time "New" (_update_new_feature_marks).
+                self._update_new_feature_marks()
             if hasattr(self, 'community_tab') and current_widget == self.community_tab:
                 logger.debug("Matched community_tab, _community_data_loaded=%s", getattr(self, '_community_data_loaded', False))
                 # Load community data when tab is first shown or refresh if needed
@@ -6347,15 +6352,20 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.query_input)
 
         # Mode combo moved to row1 (next to search button)
-        self.mode_combo = QComboBox()
+        # ModeCombo: indices fixed (a history entry keeps one), rows in the order shown.
+        self.mode_combo = ModeCombo()
         self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Responsa (R)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
         self.MODE_RESPONSA = 2
         self.MODE_PGP_TAGS = 7
-        # The catalogue text search (desktop/catalog_search.py): appended at index 8, where the
-        # installer put its file; no other row moves.
+        # The catalogue text search (desktop/catalog_search.py): index 8, where the installer put
+        # its file, so no other index moves; shown right under Title, as on the website (owner,
+        # 2026-11-18).
         self._catalog_offered = catalog_offered()
         if self._catalog_offered:
             self.mode_combo.addItem(tr("Catalog") + " (%)")
+            self.mode_combo.show_after(MODE_INDEX_CATALOG, MODE_INDEX_TITLE)
+            self.mode_combo.setItemData(MODE_INDEX_CATALOG, tr(self.CATALOG_MODE_TIP),
+                                        Qt.ItemDataRole.ToolTipRole)
         row1.addWidget(self.mode_combo)
 
         # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
@@ -6484,7 +6494,9 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.setItemData(5, tr("Search in Title metadata"))
         self.mode_combo.setItemData(6, tr("Search in Shelfmark metadata"))
         self.mode_combo.setItemData(7, tr("Search by topic tags from the Princeton Geniza Project"))
-        self.mode_combo.currentIndexChanged.connect(self._on_search_mode_changed)
+        # The signal carries the row shown; the mode is currentIndex() (ModeCombo).
+        self.mode_combo.currentIndexChanged.connect(
+            lambda _row: self._on_search_mode_changed(self.mode_combo.currentIndex()))
 
         # Variant controls container (visible only in Variants mode)
         self.variant_controls_container = QWidget()
@@ -6616,8 +6628,8 @@ class GenizahGUI(QMainWindow):
         # goes into row 1 bare.
         # Inserted before refine_badge to keep Gap next to the mode selector, using the
         # same indexOf() idiom as the btn_pre_search_filters insertion further down.
-        # No extra visibility wiring: PGP Tags mode hides search_row1_container whole,
-        # which is exactly the hiding search_params_container used to give it.
+        # No extra visibility wiring: PGP Tags mode hides row 1's controls but the mode list
+        # (_show_row1_for_tags), which is the hiding search_params_container used to give it.
         row1.insertWidget(row1.indexOf(self.refine_badge), self.gap_input)
 
         # Exclude Words Filter (New)
@@ -17308,7 +17320,133 @@ class GenizahGUI(QMainWindow):
     # One tip at each start, in the strip under the notice bars: not on the
     # first start, not while another notice bar is up, and not once turned off.
     _MODE_INDEX_RESPONSA = 2
+    _MODE_INDEX_TITLE = 5
     _MODE_INDEX_PGP_TAGS = 7
+    # The one-time "New", in the orange of letter-level search's (_METHOD_COMBO_ACCENT,
+    # lbl_comp_method_new): the mode list's frame, its Catalog item, the Fuzzy search switch.
+    _NEW_COMBO_STYLE = "QComboBox { border: 2px solid #e67e22; border-radius: 3px; }"
+    _NEW_SWITCH_STYLE = "QCheckBox { color: #e67e22; font-weight: bold; }"
+    _NEW_COLOR = "#e67e22"
+    # Each "New" is shown one time (owner, 2026-11-18): on the launch the reader first sees it
+    # (_announcement_allowed / _mark_announcement_seen keep it spent in config.pkl), and gone at
+    # once when the reader chooses a mode, works the switch, or uses the feature.
+    _ANNOUNCE_CATALOG_MODE = 'catalog_mode_new_seen'
+    _ANNOUNCE_TITLE_FUZZY = 'title_fuzzy_new_seen'
+    _FEATURE_ANNOUNCEMENT = {'catalog_search': _ANNOUNCE_CATALOG_MODE, 'title_fuzzy': _ANNOUNCE_TITLE_FUZZY}
+    #: The Catalog item's tooltip (owner's wording, 2026-11-18); the list's own while it is new.
+    CATALOG_MODE_TIP = "Search the catalogue information"
+
+    def _tips_offered(self):
+        """The tips this window can show: the catalogue search's only where it is offered."""
+        offered = bool(getattr(self, '_catalog_offered', False))
+        return tuple(t for t in startup_tips.TIPS if t.requires != 'catalog' or offered)
+
+    @staticmethod
+    def _catalog_features_in(history):
+        """The catalogue search and Title's Fuzzy search, in use by the search history: a Catalog
+        search, or a Title search run with Fuzzy search (its catalog_options)."""
+        found = set()
+        for entry in history.get('regular', []):
+            params = entry.get('search_params') or {}
+            if params.get('mode_index') == MODE_INDEX_CATALOG:
+                found.add('catalog_search')
+            elif (params.get('mode_index') == GenizahGUI._MODE_INDEX_TITLE
+                  and (params.get('catalog_options') or {}).get('near_spellings')):
+                found.add('title_fuzzy')
+        return found
+
+    def _new_mark_features_used(self):
+        """What retires the one-time "New" marks: a feature the tips record as used
+        (startup_tips.mark_used), or one the search history shows, read once a launch (a
+        search run before the marks came)."""
+        from_history = self.__dict__.get('_new_mark_history')
+        if from_history is None:
+            from_history = set()
+            try:
+                from shared.session_persistence import get_history
+                from_history = self._catalog_features_in(get_history())
+            except Exception:                                    # noqa: BLE001
+                logger.debug("New marks: reading the search history failed", exc_info=True)
+            self._new_mark_history = from_history
+        return startup_tips.features_used() | from_history
+
+    def _search_tab_is_current(self):
+        """Whether the search section is in front: a "New" is spent on first SIGHT, not when
+        computed during a construction or behind another section (_composition_tab_is_current)."""
+        tabs = getattr(self, 'tabs', None)
+        tab = getattr(self, 'search_tab', None)
+        if tabs is None or tab is None:
+            return False
+        try:
+            return tabs.currentWidget() is tab
+        except Exception:                                    # noqa: BLE001
+            return False
+
+    def _update_new_feature_marks(self):
+        """The release's one-time "New" (owner, 2026-11-18), as letter-level search was
+        announced: the control highlighted and its label saying it is new, no badge. The mode
+        list's frame and its Catalog item ("New! Catalog (%)", the list's tooltip saying what it
+        searches) while the catalogue search is offered; the Fuzzy search switch ("New! Fuzzy
+        search") in Title mode. Each is shown one time: on the launch the reader first sees it,
+        until the reader chooses a mode or works the switch (_mode_chosen, _title_switch_clicked)
+        or uses the feature (_feature_used), and never where the feature is already in use."""
+        combo = getattr(self, 'mode_combo', None)
+        if combo is None:
+            return
+        used = self._new_mark_features_used()
+        catalog_new = (bool(getattr(self, '_catalog_offered', False)) and combo.count() > MODE_INDEX_CATALOG
+                       and 'catalog_search' not in used
+                       and self._announcement_allowed(self._ANNOUNCE_CATALOG_MODE))
+        if catalog_new != self.__dict__.get('_catalog_new_shown', False):
+            self._catalog_new_shown = catalog_new
+            combo.setStyleSheet(self._NEW_COMBO_STYLE if catalog_new else "")
+            combo.setToolTip(tr(self.CATALOG_MODE_TIP) if catalog_new else "")
+            combo.setItemText(MODE_INDEX_CATALOG, tr("New! Catalog" if catalog_new else "Catalog") + " (%)")
+            bold = QFont(combo.font())
+            bold.setBold(True)
+            combo.setItemData(MODE_INDEX_CATALOG, QColor(self._NEW_COLOR) if catalog_new else None,
+                              Qt.ItemDataRole.ForegroundRole)
+            combo.setItemData(MODE_INDEX_CATALOG, bold if catalog_new else None, Qt.ItemDataRole.FontRole)
+        if catalog_new and self._search_tab_is_current():
+            self._mark_announcement_seen(self._ANNOUNCE_CATALOG_MODE)
+        near = getattr(self, 'chk_catalog_near', None)
+        if near is not None:
+            near_new = (combo.currentIndex() == self._MODE_INDEX_TITLE and 'title_fuzzy' not in used
+                        and self._announcement_allowed(self._ANNOUNCE_TITLE_FUZZY))
+            near.setText(tr("New! Fuzzy search" if near_new else "Fuzzy search"))
+            near.setStyleSheet(self._NEW_SWITCH_STYLE if near_new else "")
+            if near_new and self._search_tab_is_current():
+                self._title_new_shown = True
+                self._mark_announcement_seen(self._ANNOUNCE_TITLE_FUZZY)
+
+    def _mode_chosen(self):
+        """The reader chose a mode in the list (activated: a mode set in code, a session restored,
+        never fires it). The list's "New" has been seen; the switch's too once the reader leaves
+        Title mode after it showed."""
+        self._retire_announcement(self._ANNOUNCE_CATALOG_MODE)
+        if (self.__dict__.get('_title_new_shown')
+                and self.mode_combo.currentIndex() != self._MODE_INDEX_TITLE):
+            self._retire_announcement(self._ANNOUNCE_TITLE_FUZZY)
+        self._update_new_feature_marks()
+
+    def _title_switch_clicked(self, checked):
+        """The reader worked the Fuzzy search switch in Title mode: its "New" has been seen, and
+        turned on it is Title's Fuzzy search used."""
+        if self.mode_combo.currentIndex() != self._MODE_INDEX_TITLE:
+            return
+        if checked:
+            self._feature_used('title_fuzzy')
+        else:
+            self._retire_announcement(self._ANNOUNCE_TITLE_FUZZY)
+            self._update_new_feature_marks()
+
+    def _feature_used(self, feature):
+        """A feature was used: its startup tip and its "New" are no longer needed."""
+        startup_tips.mark_used(feature)
+        key = self._FEATURE_ANNOUNCEMENT.get(feature)
+        if key:
+            self._retire_announcement(key)
+        self._update_new_feature_marks()
 
     def _maybe_show_startup_tip(self):
         try:
@@ -17334,17 +17472,18 @@ class GenizahGUI(QMainWindow):
         every_tip = startup_tips.all_round()
         used = set() if every_tip else self._tip_features_in_use()
         current = getattr(self.tip_strip.tip, 'key', None)
-        tip, new_round = startup_tips.pick_tip(seen, used, current)
+        tips = self._tips_offered()
+        tip, new_round = startup_tips.pick_tip(seen, used, current, tips=tips)
         if new_round and every_tip:
             used = self._tip_features_in_use()
-            tip, _ = startup_tips.pick_tip([t.key for t in startup_tips.TIPS], used, current)
+            tip, _ = startup_tips.pick_tip([t.key for t in tips], used, current, tips=tips)
         if tip is None:
             self.tip_strip.hide()
             return None
         if new_round:
             startup_tips.start_round()
         startup_tips.mark_seen(tip)
-        has_next = startup_tips.has_other_tip(tip, used)
+        has_next = startup_tips.has_other_tip(tip, used, tips=tips)
         self.tip_strip.set_tip(tip, self._tip_action_label(tip), has_next=has_next)
         return tip
 
@@ -17429,6 +17568,15 @@ class GenizahGUI(QMainWindow):
         elif kind == 'pgp_tags':
             self._set_active_tab(self.search_tab)
             self.mode_combo.setCurrentIndex(self._MODE_INDEX_PGP_TAGS)
+        elif kind == 'catalog_mode':
+            self._set_active_tab(self.search_tab)
+            if getattr(self, '_catalog_offered', False):
+                self.mode_combo.setCurrentIndex(MODE_INDEX_CATALOG)
+            QTimer.singleShot(80, lambda: self._flash_widget(self.mode_combo))
+        elif kind == 'title_fuzzy':
+            self._set_active_tab(self.search_tab)
+            self.mode_combo.setCurrentIndex(self._MODE_INDEX_TITLE)
+            QTimer.singleShot(80, lambda: self._flash_widget(self.chk_catalog_near))
         elif kind == 'witness_dialog':
             self._set_active_tab(self.composition_tab)
             if self._comp_method() == 'passage':
@@ -17530,6 +17678,12 @@ class GenizahGUI(QMainWindow):
             if self.tabs.currentWidget() is getattr(self, 'catalog_browse_tab', None) else None)
         for shortcut in self._section_shortcuts[:self.tabs.count()]:
             shortcut.activated.connect(lambda: startup_tips.mark_used('section_key'))
+        # The reader's own acts spend the one-time "New" (_update_new_feature_marks): choosing a
+        # mode in the list, working the Fuzzy search switch in Title mode.
+        self.mode_combo.activated.connect(lambda _row: self._mode_chosen())
+        near = getattr(self, 'chk_catalog_near', None)
+        if near is not None:
+            near.clicked.connect(self._title_switch_clicked)
 
     def _tip_features_in_use(self):
         return startup_tips.features_used() | self._tip_derived_features()
@@ -17565,6 +17719,7 @@ class GenizahGUI(QMainWindow):
                         found.add('pgp_tags')
                     if params.get('text_position'):
                         found.add('position')
+            found |= self._catalog_features_in(history)
         except Exception:
             logger.debug("Startup tips: reading the search history failed", exc_info=True)
         cfg = load_app_config()
@@ -18533,7 +18688,7 @@ class GenizahGUI(QMainWindow):
 
         # PGP Tags mode: hide row1, show tag combo, hide search params
         if hasattr(self, 'tag_search_combo'):
-            self.search_row1_container.setVisible(not is_pgp_tags)
+            self._show_row1_for_tags(is_pgp_tags)
             self.tag_search_combo.setVisible(is_pgp_tags)
             self.search_params_container.setVisible(not is_pgp_tags)
         # The transcriptions choice: no text is read in Title / Shelfmark.
@@ -18548,6 +18703,31 @@ class GenizahGUI(QMainWindow):
                 self.catalog_sub_row.setVisible(True)
             self.chk_catalog_translations.setVisible(not in_title)
             self.chk_catalog_near.setToolTip(near_spellings_tooltip('Title' if in_title else 'Catalog', tr))
+        update_marks = getattr(self, '_update_new_feature_marks', None)
+        if update_marks is not None:
+            update_marks()
+
+    def _show_row1_for_tags(self, tags):
+        """PGP Tags searches by the tag list: row 1's text controls hide, and its mode list
+        stays, the way back to a text search. (The whole row used to hide, the list with it,
+        so PGP Tags could not be left.) Leaving shows again exactly what it hid: the rest keep
+        the visibility their own rules gave them (the refine badge, the sources list)."""
+        row = self.search_row1_container.layout()
+        hidden = self.__dict__.get('_row1_hidden_for_tags')
+        if tags:
+            if hidden:
+                return                                   # already hidden: keep what to show again
+            hidden = []
+            for i in range(row.count()):
+                widget = row.itemAt(i).widget()
+                if widget is not None and widget is not self.mode_combo and not widget.isHidden():
+                    widget.setVisible(False)
+                    hidden.append(widget)
+            self._row1_hidden_for_tags = hidden
+        elif hidden:
+            for widget in hidden:
+                widget.setVisible(True)
+            self._row1_hidden_for_tags = []
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
@@ -23932,6 +24112,10 @@ class GenizahGUI(QMainWindow):
                 and getattr(self, 'chk_catalog_near', None) is not None and self.chk_catalog_near.isChecked()):
             self.search_thread.catalog_options = {'near_spellings': True}
             self._last_search_params['catalog_options'] = {'near_spellings': True}
+            self._feature_used('title_fuzzy')
+        elif mode == 'Catalog':
+            # The first Catalog search retires its "New" and its startup tip.
+            self._feature_used('catalog_search')
 
         # Every signal that writes the table or the status line is dropped
         # once New discards this run (_deliver_unless_discarded).
@@ -34353,6 +34537,8 @@ class GenizahGUI(QMainWindow):
             logger.warning("Browse: catalogue pane failed: %s", exc)
         self.browse_found_view.setHtml(body)
         self.browse_found_view.setVisible(bool(body))
+        if body:
+            startup_tips.mark_used('catalog_found')  # its startup tip is no longer needed
 
     def browse_render_page(self, pd):
         if pd.get('sys_id') and pd.get('sys_id') != self.current_browse_sid:

@@ -17,7 +17,8 @@ import os
 from collections import OrderedDict
 from typing import Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import QComboBox
 
 from shared.catalog_text_rows import CATALOG_NEAR_TOOLTIP, CATALOG_TRANSLATIONS_TOOLTIP  # noqa: F401 (re-exported)
 
@@ -37,6 +38,72 @@ COMBO_ROWS = (
 MODE_INDEX_RESPONSA = 2
 MODE_INDEX_PGP_TAGS = 7
 MODE_INDEX_CATALOG = 8
+MODE_INDEX_TITLE = 5
+
+
+class ModeCombo(QComboBox):
+    """The search-mode combo, Catalog shown right under Title (owner, 2026-11-18), as on the
+    website. The window and the saved search history name a mode by its index in COMBO_ROWS,
+    fixed since before the catalogue came (Catalog 8, after PGP Tags 7; a history entry keeps
+    it): this combo shows its rows in another order (show_after) and still answers in those
+    indices -- currentIndex, setCurrentIndex, itemText, setItemText, itemData, setItemData.
+
+    currentIndexChanged carries the row shown, a Qt signal this class does not translate: its
+    slot reads currentIndex() (genizah_app.py connects it so)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._shown: list[int] = []          # _shown[row] = the mode index shown in that row
+
+    def addItem(self, *args):
+        super().addItem(*args)
+        self._shown.append(len(self._shown))
+
+    def addItems(self, texts):
+        for text in texts:
+            self.addItem(text)
+
+    def show_after(self, index: int, after: int) -> None:
+        """Show mode *index* in the row right under mode *after*; every index stays as it was,
+        the current mode too. No change signal."""
+        if index not in self._shown or after not in self._shown or index == after:
+            return
+        current = self.currentIndex()
+        blocked = self.blockSignals(True)
+        try:
+            row = self._shown.index(index)
+            items = self.model().takeRow(row)
+            del self._shown[row]
+            target = self._shown.index(after) + 1
+            self.model().insertRow(target, items)
+            self._shown.insert(target, index)
+            QComboBox.setCurrentIndex(self, self._row(current))
+        finally:
+            self.blockSignals(blocked)
+
+    def _row(self, index: int) -> int:
+        return self._shown.index(index) if 0 <= index < len(self._shown) else index
+
+    def currentIndex(self) -> int:
+        row = super().currentIndex()
+        return self._shown[row] if 0 <= row < len(self._shown) else row
+
+    def setCurrentIndex(self, index: int) -> None:
+        super().setCurrentIndex(self._row(index))
+
+    def itemText(self, index: int) -> str:
+        return super().itemText(self._row(index))
+
+    def setItemText(self, index: int, text: str) -> None:
+        super().setItemText(self._row(index), text)
+
+    def itemData(self, index: int, role=Qt.ItemDataRole.UserRole):
+        return super().itemData(self._row(index), role)
+
+    def setItemData(self, index: int, value, role=Qt.ItemDataRole.UserRole) -> None:
+        super().setItemData(self._row(index), value, role)
+
+
 #: The combo index a mode a prefix names selects (parse_query_syntax / the live shortcut).
 _INDEX_OF_PREFIX_MODE = {"literal": 0, "exact": 0, "variants": 1, "responsa": 2, "fuzzy": 3,
                          "Regex": 4, "Title": 5, "Shelfmark": 6, "Catalog": MODE_INDEX_CATALOG}

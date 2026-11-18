@@ -29,6 +29,8 @@ from web.components.filter_panel import (
 )
 from web.components.criteria_panel import CriteriaControl, active_criteria_count
 from web.components.toggle_button import set_btn_on
+from web.components import new_mark
+from web.components.new_mark import CATALOG_SEARCH_USED_KEY, TITLE_FUZZY_USED_KEY
 from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES, withhold_unserved_catalog
 from web.pages.search_state import (
     SCHOLARLY_FILTER_STATES, SearchUIState, SearchPageRefs,
@@ -350,6 +352,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _restored_run = _saved_run
     else:
         _restored_run = None
+    # The run shown again was this reader's search: its feature's one-time "New" is spent.
+    new_mark.mark_used_by_run(_restored_run)
     _restored_sources = _restored_run.get('sources') if isinstance(_restored_run, dict) else None
     _restored_catalog = _restored_run.get('catalog_options') if isinstance(_restored_run, dict) else None
     if isinstance(_restored_catalog, dict):
@@ -908,16 +912,35 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'pgp_tags': tr('PGP Tags'),
                             }
 
+                        # The release's one-time "New" (web/components/new_mark.py): the list is
+                        # highlighted and so is its Catalog item, which says it is new. Shown one
+                        # time: spent for later visits now, and gone from this page when the
+                        # reader chooses a mode or runs a Catalog search (_retire_catalog_new).
+                        catalog_is_new = {'value': bool(_catalog_served)
+                                          and new_mark.is_new(CATALOG_SEARCH_USED_KEY)}
+                        if catalog_is_new['value']:
+                            new_mark.mark_used(CATALOG_SEARCH_USED_KEY)
                         if _catalog_served:
                             # After Title, before PGP Tags: the catalogue modes together.
                             _tags_label = mode_options.pop('pgp_tags')
-                            mode_options['Catalog'] = tr('Catalog') + ' (%)'
+                            mode_options['Catalog'] = (tr(new_mark.NEW_CATALOG_LABEL) if catalog_is_new['value']
+                                                       else tr('Catalog')) + ' (%)'
                             mode_options['pgp_tags'] = _tags_label
 
                         mode_select = ui.select(
                             mode_options,
                             value=saved_mode
                         ).classes('w-48').props(f'outlined dense label="{tr("Mode")}"')
+                        if _catalog_served:
+                            # The Catalog item's tooltip says what it searches (owner, 2026-11-18).
+                            mode_select.add_slot('option', new_mark.option_slot(
+                                tr(new_mark.NEW_CATALOG_LABEL) + ' (%)', tr('Catalog') + ' (%)',
+                                tr(new_mark.CATALOG_MODE_TIP)))
+                        catalog_new_tip = None
+                        if catalog_is_new['value']:
+                            mode_select.classes(new_mark.NEW_CLASS)
+                            with mode_select:
+                                catalog_new_tip = ui.tooltip(tr(new_mark.CATALOG_MODE_TIP))
 
                     # Which texts are searched, beside the mode (editions plan section 3.4):
                     # only where the scholarly transcriptions are served to this reader.
@@ -1128,6 +1151,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 with catalog_sub_row:
                     # The text search's own word for it (Fuzzy / מקורב), with the catalogue's rule (§4.7).
                     catalog_near_cb = ui.checkbox(tr('Fuzzy search'), value=saved_catalog['near_spellings'])
+                    catalog_near_cb.mark('catalog-near-switch')
                     with catalog_near_cb:
                         catalog_near_tip = ui.tooltip(_near_tooltip(saved_mode))
                     catalog_translations_cb = ui.checkbox(tr('Automatic translations'),
@@ -1135,6 +1159,50 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     catalog_translations_cb.tooltip(tr(CATALOG_TRANSLATIONS_TOOLTIP))
                 catalog_near_cb.on_value_change(
                     lambda e: _safe_set('catalog_near_spellings', bool(e.value)))
+
+                # The switch's one-time "New", in Title mode: spent for later visits when it first
+                # shows, gone from this page when the reader leaves Title mode after it showed,
+                # works the switch, or runs a Title search with it (web/components/new_mark.py).
+                near_new = {'value': new_mark.is_new(TITLE_FUZZY_USED_KEY), 'shown': False}
+
+                def _show_near_switch_new(mode):
+                    new = mode == 'Title' and near_new['value']
+                    if new and not near_new['shown']:
+                        near_new['shown'] = True
+                        new_mark.mark_used(TITLE_FUZZY_USED_KEY)
+                    catalog_near_cb.text = tr(new_mark.NEW_FUZZY_LABEL if new else 'Fuzzy search')
+                    catalog_near_cb.classes(**{'add' if new else 'remove': new_mark.NEW_CLASS})
+
+                def _retire_title_fuzzy_new():
+                    near_new['value'] = False
+                    new_mark.mark_used(TITLE_FUZZY_USED_KEY)
+                    _show_near_switch_new(mode_select.value)
+
+                def _retire_catalog_new():
+                    """The list and its Catalog item plain again (its tooltip stays)."""
+                    new_mark.mark_used(CATALOG_SEARCH_USED_KEY)
+                    if catalog_is_new['value']:
+                        catalog_is_new['value'] = False
+                        mode_select.classes(remove=new_mark.NEW_CLASS)
+                        if catalog_new_tip is not None:
+                            catalog_new_tip.delete()
+                        options = dict(mode_select.options)
+                        options['Catalog'] = tr('Catalog') + ' (%)'
+                        mode_select.set_options(options, value=mode_select.value)
+
+                def _mode_chosen():
+                    """The reader chose a mode in the list (update:model-value: never a mode set
+                    in code): the list's "New" has been seen, and the switch's once the reader
+                    leaves Title mode after it showed."""
+                    _retire_catalog_new()
+                    if near_new['shown'] and mode_select.value != 'Title':
+                        _retire_title_fuzzy_new()
+
+                _show_near_switch_new(saved_mode)
+                mode_select.on('update:model-value', _mode_chosen)
+                # The reader working the switch in Title mode has seen its "New".
+                catalog_near_cb.on('update:model-value',
+                                   lambda: _retire_title_fuzzy_new() if mode_select.value == 'Title' else None)
                 catalog_translations_cb.on_value_change(
                     lambda e: _safe_set('catalog_translations', bool(e.value)))
                 catalog_sub_row.set_visibility(saved_mode in NEAR_SPELLINGS_MODES)
@@ -1263,6 +1331,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 catalog_sub_row.set_visibility(mode in NEAR_SPELLINGS_MODES)
                 catalog_translations_cb.set_visibility(mode == 'Catalog')
                 catalog_near_tip.set_text(_near_tooltip(mode))
+                _show_near_switch_new(mode)
                 _sync_sources_visibility()
 
                 # Save mode to storage (don't persist pgp_tags)
@@ -5920,6 +5989,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'near_spellings': bool(catalog_near_cb.value)} if mode == 'Catalog'
                        else {'near_spellings': bool(catalog_near_cb.value)} if mode == 'Title'
                        else None)
+        # The first Catalog search, or the first Title search with Fuzzy search, retires the
+        # feature's one-time "New" (web/components/new_mark.py).
+        if mode == 'Catalog':
+            _retire_catalog_new()
+        elif mode == 'Title' and catalog_near_cb.value:
+            _retire_title_fuzzy_new()
         search_state.last_run = {
             'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
             # Lab Mode is not in the address either: a page back on this run shows it.

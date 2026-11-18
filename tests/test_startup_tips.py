@@ -1,7 +1,7 @@
 """Startup tips (desktop/startup_tips.py; owner, 2026-10-25).
 
-Pinned here: the 58 tips the owner approved, each with its Hebrew, in the chosen
-order (the strongest five first); a tip is shown once a round, and not when its
+Pinned here: the 61 tips the owner approved, each with its Hebrew, in the chosen
+order (the strongest five first, then the newest features); a tip is shown once a round, and not when its
 feature is already in use, and a new round starts when all have been; no tip on the first start, beside another notice bar, or once
 turned off; five closes in a row turn the tips off; a tip that needs the
 letter-level index or an account invites to it; every Show me names a control
@@ -41,18 +41,22 @@ def cfg(monkeypatch):
 
 
 def test_the_owners_tips_in_the_owners_order():
-    assert len(TIPS) == 58
-    assert len(TIPS_BY_KEY) == 58                     # keys are unique
+    assert len(TIPS) == 61
+    assert len(TIPS_BY_KEY) == 61                     # keys are unique
     assert [t.key for t in TIPS[:5]] == [
         "go_to", "saved_searches", "letter_level", "witnesses", "responsa_star"]
-    # the Manuscript features (2026-11-02) come next, so tip readers meet them soon
-    assert [t.key for t in TIPS[5:8]] == ["features_search", "features_browse", "features_joins"]
-    assert {t.used for t in TIPS[5:8]} == {"features"}
+    # the catalogue search and Title's Fuzzy search (2026-11-18) come next, then the
+    # Manuscript features (2026-11-02), so tip readers meet the newest soon
+    assert [t.key for t in TIPS[5:8]] == ["catalog_search", "catalog_found", "title_fuzzy"]
+    assert [t.requires for t in TIPS[5:8]] == ["catalog", "catalog", None]
+    assert [t.key for t in TIPS[8:11]] == ["features_search", "features_browse", "features_joins"]
+    assert {t.used for t in TIPS[8:11]} == {"features"}
     for tip in TIPS:
         assert TRANSLATIONS.get(tip.text), tip.key     # every tip has its Hebrew
         assert tip.text.count("**") % 2 == 0, tip.key
         assert TRANSLATIONS[tip.text].count("**") % 2 == 0, tip.key
         assert tip.needs in (None, "letter_index", "account"), tip.key
+        assert tip.requires in (None, "catalog"), tip.key
 
 
 def test_bold_escaping_and_direction():
@@ -115,7 +119,11 @@ class _Host:
     _tip_next = GenizahGUI._tip_next
     _tip_features_in_use = GenizahGUI._tip_features_in_use
     _tip_derived_features = GenizahGUI._tip_derived_features
+    _tips_offered = GenizahGUI._tips_offered
+    _catalog_features_in = staticmethod(GenizahGUI._catalog_features_in)
+    _catalog_offered = True
     _MODE_INDEX_RESPONSA = GenizahGUI._MODE_INDEX_RESPONSA
+    _MODE_INDEX_TITLE = GenizahGUI._MODE_INDEX_TITLE
     _MODE_INDEX_PGP_TAGS = GenizahGUI._MODE_INDEX_PGP_TAGS
     RESULTS_TEXT_KEY = GenizahGUI.RESULTS_TEXT_KEY
 
@@ -254,7 +262,7 @@ def test_features_in_use_are_read_from_what_is_kept(cfg, monkeypatch):
 def test_every_show_me_and_wire_names_what_the_window_has():
     kinds = {"query", "responsa", "help", "history", "go_to", "pgp_tags", "witness_dialog", "joins_lab",
              "settings", "search_settings", "menu", "recent_list", "tab", "search", "composition", "browse",
-             "catalog"}
+             "catalog", "catalog_mode", "title_fuzzy"}
     for tip in TIPS:
         if not tip.show:
             continue
@@ -273,3 +281,30 @@ def test_main_window_wiring():
     assert "self._wire_tip_signals()" in _SRC
     settings = (Path(__file__).resolve().parent.parent / "desktop" / "settings_dialogs.py").read_text(encoding="utf-8")
     assert 'tr("Show a tip when the program starts")' in settings
+
+
+def test_the_catalogue_tips_only_where_the_catalogue_is_offered(cfg, monkeypatch):
+    """The catalogue search's two tips need its file (desktop/catalog_search.py::catalog_offered);
+    Title's Fuzzy search has none to need."""
+    monkeypatch.setattr("shared.session_persistence.get_history", lambda *a: {"regular": [], "composition": []})
+    cfg[startup_tips.TIPS_STARTS_KEY] = 1
+    cfg[startup_tips.TIPS_SEEN_KEY] = [t.key for t in TIPS[:5]]
+    host = _Host()
+    assert host._maybe_show_startup_tip().key == "catalog_search"
+    host._catalog_offered = False
+    assert [t.key for t in host._tips_offered()] == [
+        t.key for t in TIPS if t.key not in ("catalog_search", "catalog_found")]
+    cfg[startup_tips.TIPS_SEEN_KEY] = [t.key for t in TIPS[:5]]
+    assert host._maybe_show_startup_tip().key == "title_fuzzy"
+
+
+def test_a_catalogue_or_title_fuzzy_search_in_the_history_retires_its_tip(cfg, monkeypatch):
+    from desktop.catalog_search import MODE_INDEX_CATALOG
+    history = {"regular": [
+        {"query": "x", "search_params": {"mode_index": MODE_INDEX_CATALOG}},
+        {"query": "y", "search_params": {"mode_index": 5, "catalog_options": {"near_spellings": True}}},
+        {"query": "z", "search_params": {"mode_index": 5, "catalog_options": None}}],
+        "composition": []}
+    monkeypatch.setattr("shared.session_persistence.get_history", lambda *a: history)
+    assert {"catalog_search", "title_fuzzy"} <= _Host()._tip_derived_features()
+    assert GenizahGUI._catalog_features_in({"regular": history["regular"][2:]}) == set()

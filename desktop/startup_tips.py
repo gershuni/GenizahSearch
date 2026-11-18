@@ -3,8 +3,9 @@
 thin strip under the top bars, for the features people miss.
 
 The owner wrote and approved the 55 tips (English and Hebrew; the Hebrew is
-each English text's TRANSLATIONS entry), and three more for the Manuscript
-features with v9.13.0 (2026-11-02), and chose: the strongest first, a tip
+each English text's TRANSLATIONS entry), three more for the Manuscript
+features with v9.13.0 (2026-11-02), and three for the catalogue search and
+Title's Fuzzy search (2026-11-18), and chose: the strongest first, a tip
 at every start, the strip rather than a window, and tips that need the
 letter-level index or an account shown to everyone as invitations (their
 button then builds the index or opens the login).
@@ -47,6 +48,7 @@ class Tip:
     show: str | None = None   # what Show me does (GenizahGUI._tip_show_me)
     used: str | None = None   # the feature whose use makes the tip unnecessary
     needs: str | None = None  # 'letter_index' / 'account': unmet, the button invites
+    requires: str | None = None  # 'catalog': shown only where the catalogue search is offered
 
 
 # The strongest five first (owner), then the rest in the review sheet's order.
@@ -66,6 +68,18 @@ TIPS = (
     Tip('responsa_star',
         "In **Responsa** style, * stands for any letters inside a word: כהנ* גדו* finds both כהן גדול and כהנים גדולים.",
         show='responsa', used='responsa_search'),
+    # The catalogue search and Title's Fuzzy search (owner, 2026-11-18): right after the
+    # strongest five, as the Manuscript features were, so people who have seen the earlier
+    # tips get them next. The catalogue's two only where the catalogue search is offered.
+    Tip('catalog_search',
+        "**Catalog** mode searches what the catalogues say about each manuscript: the FJMS catalogue, PGP's descriptions and the library titles, in Hebrew and English. Type % and a space to switch to it.",
+        show='catalog_mode', used='catalog_search', requires='catalog'),
+    Tip('catalog_found',
+        "Opened a manuscript from a **Catalog** search? **Found in the catalogue records** shows each record your words were found in, whole, with the words marked.",
+        show='catalog_mode', used='catalog_found', requires='catalog'),
+    Tip('title_fuzzy',
+        "In **Title** search, **Fuzzy search** finds each word anywhere in the title, in any order, and in plene or defective spelling.",
+        show='title_fuzzy', used='title_fuzzy'),
     # The Manuscript features (owner, 2026-11-02, v9.13.0): right after the
     # strongest five, so people who have seen the earlier tips get them next.
     # Applying a feature in either place retires all three.
@@ -79,7 +93,7 @@ TIPS = (
         'Hunting joins? **Focus Search** > **Manuscript features** can keep only manuscripts in the same script, with about the same number of lines and line height as your fragment.',
         show='search:btn_pre_search_filters', used='features'),
     Tip('mode_signs',
-        "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for catalog titles, # for shelfmarks, and R and a space for **Responsa** style.",
+        "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for titles, % for the catalogues, # for shelfmarks, and R and a space for **Responsa** style.",
         show='query', used='mode_sign'),
     Tip('responsa_affixes',
         "#שלום# finds the word with every prefix and suffix (600 forms), and %שלום finds it with and without ו and י.",

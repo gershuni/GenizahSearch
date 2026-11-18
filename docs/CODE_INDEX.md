@@ -4080,3 +4080,8 @@ What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
 - **Function** `render_found_panel` — the "Found in the catalogue records" panel; Quick View draws it first, Browse under its header
 - **Function** `found_for_result` / `found_for_browse` — the panel's records for a result row (the search it carries) or for Browse's `cq` / `cnear` / `ctr` address, where `catalog_available()`
 - **Function** `browse_params` — the Browse address part that carries a catalogue result's search (search_results.py `_browse_match_params`)
+
+## web/components/new_mark.py
+
+- **Function** `is_new` / `mark_used` — whether this reader has not used a feature yet, kept per reader (`ui.catalog_search_used`, `ui.title_fuzzy_used`; `/reset-hints` forgets them) (2026-11-18)
+- **Function** `option_slot` — the mode list's option slot that highlights the Catalog item while it reads "New! Catalog (%)". The one-time "New" on /search: the mode list and its Catalog item until the first Catalog search, the Fuzzy search switch ("New! Fuzzy search") in Title mode until it is first used (search.py `_retire_catalog_new`, `_show_near_switch_new`); the desktop's is `GenizahGUI._update_new_feature_marks`

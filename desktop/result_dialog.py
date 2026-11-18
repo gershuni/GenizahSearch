@@ -2825,6 +2825,7 @@ class ResultDialog(QDialog):
         self.src_widget.setVisible(True)
         self.text_src.setHtml(found)
         self._give_found_pane_room()
+        startup_tips.mark_used('catalog_found')  # its startup tip is no longer needed
 
     def _give_found_pane_room(self):
         """At least a third of the text column for the catalogue pane: its records are what the

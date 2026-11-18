@@ -3360,7 +3360,9 @@ def reset_hints_route():
     ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
     # The dictionaries switch is new again only while the lookup is off (blau_panel.switch_is_new).
     from web.components.blau_panel import SEEN_KEY as dictionaries_seen
-    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen', dictionaries_seen):
+    from web.components.new_mark import KEYS as new_mark_keys
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen', dictionaries_seen,
+                *new_mark_keys):
         safe_user_pop(key, None)
     ui.navigate.to('/')
 
