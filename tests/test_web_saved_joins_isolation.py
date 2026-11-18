@@ -976,6 +976,9 @@ def _canvas_rules(user, state):
     user.javascript_rules[re.compile(
         r'\s*window\.puzzleCanvas(\.getCropState\(\)|\.clearAll\(\)| && window\.puzzleCanvas\.fitAll\(\))\s*$')] = \
         lambda m: None
+    # An auto-save asks, before and after reading the canvas, whether pictures
+    # are being replaced: here they never are (the same token both times).
+    user.javascript_rules[re.compile(r'.*puzzleCanvas\.saveToken\(\) : 0$')] = lambda m: 0
 
 
 def _saved_x(path):

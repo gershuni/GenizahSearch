@@ -3655,11 +3655,26 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'border: 1px solid white; color: white !important; background: transparent;'
                             )
 
-                        ui.button(
-                            tr('Back to Page View'),
-                            icon='arrow_forward' if is_rtl() else 'arrow_back',
-                            on_click=exit_joined_view
-                        ).props('flat dense text-color=white')
+                        with ui.row().classes('items-center gap-2'):
+                            if WEB_PUZZLE_ENABLED and len(state.reading_desk_entries) > 1:
+                                def open_desk_in_puzzle():
+                                    from web.joins_lab_storage import stage_fragments_for_puzzle
+                                    sys_ids = [e.get('sys_id') for e in state.reading_desk_entries]
+                                    if stage_fragments_for_puzzle(sys_ids):
+                                        ui.navigate.to('/puzzle')
+                                    else:
+                                        ui.notify(
+                                            tr('The change could not be saved. Check your connection and try again.'),
+                                            type='warning')
+                                ui.button(
+                                    tr('Open in Puzzle'), icon='extension',
+                                    on_click=open_desk_in_puzzle
+                                ).props('flat dense text-color=white')
+                            ui.button(
+                                tr('Back to Page View'),
+                                icon='arrow_forward' if is_rtl() else 'arrow_back',
+                                on_click=exit_joined_view
+                            ).props('flat dense text-color=white')
 
                 # === Reading Desk Toolbar ===
                 with ui.card().classes('w-full mb-2 p-2').style(

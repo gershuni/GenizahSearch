@@ -349,6 +349,39 @@ def read_anchor() -> Optional[dict]:
     return read_joins_lab_state()
 
 
+PUZZLE_STAGING_MAX = 21  # what the puzzle page takes from one handoff (web/pages/puzzle.py)
+PUZZLE_STAGING_SOURCE_JOIN = 'join'  # a whole join or document, opened as a puzzle of its own
+
+
+def stage_fragments_for_puzzle(sys_ids, source: str = PUZZLE_STAGING_SOURCE_JOIN) -> int:
+    """Leave ``sys_ids`` for the puzzle page to add when it next opens; the number left.
+
+    The one-time handoff the Joins Lab already uses (``puzzle_staging``): the
+    caller then navigates to ``/puzzle``, which takes the key and adds each
+    fragment in order. Ids are kept once each, in order, up to
+    :data:`PUZZLE_STAGING_MAX`. Nothing is written for an empty list. 0 also
+    when the storage refused the write: the caller must then stay where it is
+    (at ``/puzzle`` there would be nothing to take).
+    """
+    from datetime import datetime, timezone
+
+    kept = []
+    for sys_id in sys_ids or []:
+        sys_id = str(sys_id or '').strip()
+        if sys_id and sys_id not in kept:
+            kept.append(sys_id)
+    kept = kept[:PUZZLE_STAGING_MAX]
+    if not kept:
+        return 0
+    written = safe_user_set(_PUZZLE_STAGING_KEY, {
+        'schema_version': 1,
+        'fragments': kept,
+        'source': source,
+        'created_at': datetime.now(tz=timezone.utc).isoformat(),
+    })
+    return len(kept) if written else 0
+
+
 def clear_joins_lab_state() -> None:
     """Remove the ``joins_lab`` key AND the ``puzzle_staging`` key from per-user storage.
 

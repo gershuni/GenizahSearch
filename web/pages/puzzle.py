@@ -43,6 +43,22 @@ EXT_IMAGE_VERSION = f"&cv={CUDL_RESOLVER_REVISION}"
 # How often the canvas positions are kept in the tab, for a reload or a return to /puzzle.
 STATE_SAVE_INTERVAL_S = 30
 
+
+def _drop_query_param_js(name: str) -> str:
+    """JavaScript that takes ``?name=`` out of the address bar (no reload).
+
+    ``?add=`` and ``?doc=`` are one-time instructions. Left in the address,
+    every reload of the page (a language switch, a lost connection) carried
+    them out again on top of the canvas the tab restores: the fragment was
+    added a second time, at its default place, beside the saved one.
+    """
+    return (
+        '(function(){try{var u=new URL(window.location.href);'
+        f'if(u.searchParams.has({json.dumps(name)})){{u.searchParams.delete({json.dumps(name)});'
+        "history.replaceState(history.state,'',u.pathname+u.search+u.hash);}}catch(e){}})()"
+    )
+
+
 # ── JavaScript: window.puzzleCanvas global object ─────────────────
 
 PUZZLE_CANVAS_JS = '''
@@ -76,6 +92,64 @@ window.puzzleCanvas = {
     _extensionRequestCounter: 0,
     _extensionListenerAttached: false,
     _extensionBannerDismissed: false,
+    // Image loads can take seconds (the extension, a slow library) and answer
+    // out of order. Each load takes a number for its fragment; only the newest
+    // one for that fragment, on the canvas it was asked for, may draw.
+    _loadSeq: {},
+    _generation: 0,
+    _folioRequests: {},
+    // Pictures being replaced right now (another side, another threshold).
+    // Until they have all answered the canvas is between two states, and is
+    // not saved: see isBusy and _swapEnded.
+    _swapsInFlight: 0,
+    _exportRun: 0,
+
+    _swapEpoch: 0,
+
+    isBusy: function() {
+        return this._swapsInFlight > 0;
+    },
+
+    /**
+     * For a save that reads the canvas in several calls: null while busy,
+     * else a number that changes whenever a replacement starts. A save reads
+     * it before and after, and writes only if it got the same number twice
+     * (no replacement began while it was reading).
+     */
+    saveToken: function() {
+        return this.isBusy() ? null : this._swapEpoch;
+    },
+
+    _swapEnded: function() {
+        this._swapsInFlight = Math.max(0, this._swapsInFlight - 1);
+        if (this._swapsInFlight === 0) {
+            // Settled: now it may be saved.
+            this._emitEvent('puzzle-object-modified', { key: null });
+        }
+    },
+
+    /** The picture at result.url as a loaded element, or null. */
+    _loadHtmlImage: function(result) {
+        return new Promise(function(resolve) {
+            if (!result || !result.url) { resolve(null); return; }
+            var htmlImg = new Image();
+            htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
+            if (result.direct) htmlImg.removeAttribute('crossOrigin');
+            htmlImg.decoding = 'async';
+            htmlImg.onload = function() { resolve(htmlImg); };
+            htmlImg.onerror = function() { resolve(null); };
+            htmlImg.src = result.url;
+        });
+    },
+
+    _nextLoadSeq: function(key) {
+        this._loadSeq[key] = (this._loadSeq[key] || 0) + 1;
+        return this._loadSeq[key];
+    },
+
+    _isStaleLoad: function(key, seq, generation) {
+        return this._loadSeq[key] !== seq || this._generation !== generation;
+    },
 
     /**
      * Tear down the puzzle canvas, removing all event listeners, fragments,
@@ -106,7 +180,14 @@ window.puzzleCanvas = {
         this._contextMenuTarget = null;
         this._contextMenuSuppressHandler = null;
         this._listenersAttached = false;
+        if (this._fullscreenChangeHandler) {
+            document.removeEventListener('fullscreenchange', this._fullscreenChangeHandler);
+            this._fullscreenChangeHandler = null;
+        }
+        document.body.classList.remove('puzzle-fullscreen');
         this._pendingAdds = [];
+        this._generation += 1;
+        this._loadSeq = {};
         this.fragments = {};
         this.folioData = {};
         if (this.canvas) {
@@ -576,11 +657,15 @@ window.puzzleCanvas = {
         var self = this;
         this._resizeHandler = function() {
             if (!self.canvas) return;
-            var c = document.getElementById(canvasId);
-            if (!c) return;
-            var p = c.parentElement;
-            self.canvas.setWidth(p.clientWidth);
-            self.canvas.setHeight(Math.max(p.clientHeight, 400));
+            // Fabric wraps the canvas in its own fixed-size element: the room
+            // available is that wrapper's parent, not the canvas's.
+            var wrapper = self.canvas.wrapperEl || document.getElementById(canvasId);
+            var p = wrapper && wrapper.parentElement;
+            if (!p) return;
+            self.canvas.setDimensions({
+                width: p.clientWidth,
+                height: Math.max(p.clientHeight, 400)
+            });
             self.canvas.requestRenderAll();
         };
         window.addEventListener('resize', this._resizeHandler);
@@ -649,12 +734,18 @@ window.puzzleCanvas = {
         console.log('Loading fragment image:', key, imageUrl);
         var m = meta || {};
         var flId = m.fl_id || '';
+        var seq = this._nextLoadSeq(key);
+        var generation = this._generation;
         self._loadImageWithFallbacks(flId, m, key).then(function(result) {
+            // Asked again since, or the canvas was cleared for another
+            // document: this answer belongs to nothing on the canvas.
+            if (self._isStaleLoad(key, seq, generation)) return;
             var htmlImg = new Image();
             htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
             if (result.direct) htmlImg.removeAttribute('crossOrigin');
             htmlImg.decoding = 'async';
             htmlImg.onload = function() {
+                if (self._isStaleLoad(key, seq, generation)) return;
                 console.log('Image loaded:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
                 try {
                     self._removePlaceholder(key);
@@ -734,6 +825,7 @@ window.puzzleCanvas = {
                 }
             };
             htmlImg.onerror = function() {
+                if (self._isStaleLoad(key, seq, generation)) return;
                 console.error('All image sources failed for', key);
                 self._removePlaceholder(key);
                 self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'all-failed' });
@@ -760,8 +852,16 @@ window.puzzleCanvas = {
                 if (self.fragments[key] === obj) {
                     removedKeys.push(key);
                     delete self.fragments[key];
+                    // Nothing asked for it may come back, and a fragment
+                    // added again under this key starts from its own state.
+                    delete self.folioData[key];
+                    self._nextLoadSeq(key);
+                    self._folioRequests[key] = (self._folioRequests[key] || 0) + 1;
                     break;
                 }
+            }
+            if (self._cropMode && self._cropTarget === obj) {
+                self.toggleCropMode(false);
             }
             self.canvas.remove(obj);
         });
@@ -899,6 +999,13 @@ window.puzzleCanvas = {
                         edited = true;
                     }
                     break;
+                case 'Escape':
+                    // In the browser's own full screen Escape is the browser's
+                    // (see toggleFullscreen); this is the window-filling one.
+                    if (document.body.classList.contains('puzzle-fullscreen') && !document.fullscreenElement) {
+                        self.toggleFullscreen(false);
+                    }
+                    break;
             }
             if (edited) {
                 // Fabric fires object:modified only for mouse edits; a saved
@@ -1018,31 +1125,58 @@ window.puzzleCanvas = {
      * @param {string} sys_id - Manuscript system identifier for the API call.
      */
     loadFolios: async function(key, sys_id) {
+        var known = this.folioData[key];
+        if (known && known.sys_id === sys_id) {
+            // The list is the manuscript's, not the picture's: keep it (and
+            // whatever folio is wanted) and only note what is shown now.
+            this._syncFolioIndex(key, false);
+            return;
+        }
+        var generation = this._generation;
+        var request = (this._folioRequests[key] || 0) + 1;
+        this._folioRequests[key] = request;
         try {
             var resp = await fetch('/api/puzzle_folios/' + sys_id);
             if (!resp.ok) return;
             var folios = await resp.json();
+            // An answer for a fragment since removed, re-added or cleared
+            // must not reset the folio of the one on the canvas now.
+            if (generation !== this._generation || this._folioRequests[key] !== request
+                    || !this.fragments[key]) return;
             this.folioData[key] = { sys_id: sys_id, folios: folios, currentIndex: 0 };
-            // Find current folio index based on fragment meta
-            var frag = this.fragments[key];
-            if (frag && frag._fragmentMeta) {
-                var currentFlId = frag._fragmentMeta.fl_id;
-                var idx = -1;
-                if (currentFlId) {
-                    idx = folios.findIndex(function(f) { return f.fl_id === currentFlId; });
-                }
-                if (idx < 0) {
-                    // Match by label for non-NLI fragments
-                    var currentLabel = frag._fragmentMeta.folio_label || key.split(',')[1] || '';
-                    if (currentLabel) {
-                        idx = folios.findIndex(function(f) { return f.label === currentLabel; });
-                    }
-                }
-                if (idx >= 0) this.folioData[key].currentIndex = idx;
-            }
+            this._syncFolioIndex(key, true);
         } catch(e) {
             console.error('Failed to load folios for', key, e);
         }
+    },
+
+    /**
+     * Note which folio the fragment's picture shows (_folioIndex), found by
+     * its fl_id, else its label. setWanted also makes it the folio wanted
+     * (currentIndex, which runs ahead while another side is loading).
+     */
+    _syncFolioIndex: function(key, setWanted) {
+        var data = this.folioData[key];
+        var frag = this.fragments[key];
+        if (!data || !frag) return;
+        var idx = -1;
+        var meta = frag._fragmentMeta || {};
+        if (meta.fl_id) {
+            idx = data.folios.findIndex(function(f) { return f.fl_id === meta.fl_id; });
+        }
+        if (idx < 0 && meta.external_provider && meta.page_index != null) {
+            idx = data.folios.findIndex(function(f) { return f.page_index === meta.page_index; });
+        }
+        if (idx < 0) {
+            // Match by label for non-NLI fragments
+            var label = meta.folio_label || key.split(',')[1] || '';
+            if (label) {
+                idx = data.folios.findIndex(function(f) { return f.label === label; });
+            }
+        }
+        if (idx < 0) idx = 0;
+        frag._folioIndex = idx;
+        if (setWanted || !this.isBusy()) data.currentIndex = idx;
     },
 
     /**
@@ -1053,7 +1187,7 @@ window.puzzleCanvas = {
      * @param {number} direction - Folio offset: +1 for next, -1 for previous.
      * @returns {Promise<string>} The label of the new folio (e.g. "1v", "2r").
      */
-    navigateFolio: async function(key, direction) {
+    navigateFolio: async function(key, direction, options) {
         var data = this.folioData[key];
         if (!data || !data.folios.length) return '';
         var newIndex = Math.max(0, Math.min(data.folios.length - 1, data.currentIndex + direction));
@@ -1063,24 +1197,15 @@ window.puzzleCanvas = {
         var obj = this.fragments[key];
         if (!obj) return folio.label;
 
-        // Use stashed target center from flipAllPuzzle if available (avoids
-        // reading stale Fabric.js geometry after bulk position changes)
-        var center = obj._flipTargetCenter
-            || (typeof obj.getCenterPoint === 'function' ? obj.getCenterPoint() : {
-                x: (obj.left || 0) + ((obj.width || 0) * (obj.scaleX || 1) / 2),
-                y: (obj.top || 0) + ((obj.height || 0) * (obj.scaleY || 1) / 2)
-            });
-        // Consume the stashed center so subsequent navigations use live geometry
-        delete obj._flipTargetCenter;
-        var pos = {
-            centerX: center.x,
-            centerY: center.y,
-            angle: obj.angle,
-            scaleX: obj.scaleX,
-            scaleY: obj.scaleY,
-            flipX: obj.flipX,
-            flipY: obj.flipY
-        };
+        // Newest request for this fragment: an image still on its way for an
+        // earlier one is dropped when it arrives.
+        var seq = this._nextLoadSeq(key);
+        var generation = this._generation;
+        if (obj._folioIndex === newIndex) {
+            // Asked back to the picture already shown (a second flip before
+            // the first one's image arrived): nothing to load.
+            return folio.label || '';
+        }
         var self = this;
         var meta = obj._fragmentMeta || {};
         var threshold = meta.threshold || 30;
@@ -1101,54 +1226,145 @@ window.puzzleCanvas = {
             folioMeta.image_url = folio.image_url || '';
         }
 
-        var result = await self._loadImageWithFallbacks(folio.fl_id || '', folioMeta, key);
-        return new Promise(function(resolve) {
-            var htmlImg = new Image();
-            htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
-            if (result.direct) htmlImg.removeAttribute('crossOrigin');
-            htmlImg.decoding = 'async';
-            htmlImg.onload = function() {
+        // The folio the canvas still shows if this load does not draw.
+        function shownLabel() {
+            var shown = self.fragments[key];
+            var idx = shown ? shown._folioIndex : undefined;
+            if (typeof idx === 'number' && data.folios[idx]) return data.folios[idx].label || '';
+            return folio.label || '';
+        }
+        function stale() {
+            return self._isStaleLoad(key, seq, generation) || !self.fragments[key];
+        }
+
+        this._swapsInFlight += 1;
+        this._swapEpoch += 1;
+        try {
+            var result = await self._loadImageWithFallbacks(folio.fl_id || '', folioMeta, key);
+            if (stale()) return shownLabel();
+            var htmlImg = await self._loadHtmlImage(result);
+            if (stale()) return shownLabel();
+            var img = null;
+            if (htmlImg) {
                 try {
-                    if (self.canvas && typeof self.canvas.discardActiveObject === 'function') {
-                        self.canvas.discardActiveObject();
-                    }
-                    self._removeFragmentsByKey(key);
-                    var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
-                        hasControls: true, hasBorders: true,
-                        cornerSize: 12, transparentCorners: false,
-                        perPixelTargetFind: true, _fragmentKey: key,
-                        _imageUrl: result.url,
-                        _fragmentMeta: folioMeta
-                    }));
-                    if (typeof img.setPositionByOrigin === 'function') {
-                        var pt = (typeof fabric.Point === 'function')
-                            ? new fabric.Point(pos.centerX, pos.centerY)
-                            : { x: pos.centerX, y: pos.centerY };
-                        img.setPositionByOrigin(pt, 'center', 'center');
-                        img.setCoords();
-                    }
-                    self.canvas.add(img);
-                    self.fragments[key] = img;
-                    self.canvas.setActiveObject(img);
-                    self.canvas.requestRenderAll();
-                    self._syncSelection();
-                    self._emitEvent('puzzle-fragment-meta', {
-                        key: key,
-                        meta: Object.assign({}, img._fragmentMeta || {}, {
-                            folio_label: folio.label || ''
-                        })
-                    });
+                    // The other side of the same leaf keeps the crop, mirrored;
+                    // another leaf is another picture and starts uncropped.
+                    var shownIndex = self.fragments[key]._folioIndex;
+                    var otherSide = (typeof shownIndex === 'number' && shownIndex !== newIndex
+                        && Math.floor(shownIndex / 2) === Math.floor(newIndex / 2));
+                    img = self._swapFragmentImage(key, htmlImg, result, folioMeta,
+                                                  otherSide ? 'mirror' : 'drop');
                 } catch (err) {
                     console.error('Failed to render folio image:', key, err);
                 }
-                resolve(folio.label);
-            };
-            htmlImg.onerror = function() {
+            } else {
                 console.error('Folio nav failed:', key);
-                resolve(folio.label);
+            }
+            if (!img) {
+                // Nothing was drawn: the wanted folio goes back to the one shown.
+                var shown = self.fragments[key];
+                if (shown && typeof shown._folioIndex === 'number') {
+                    data.currentIndex = shown._folioIndex;
+                }
+                if (shown && options && options.standInOnFailure) {
+                    // Part of a puzzle flip: its place is already mirrored,
+                    // so the picture is too (see flipAllPuzzle).
+                    shown.set({ flipX: !shown.flipX });
+                    shown._standIn = true;
+                    shown.setCoords();
+                    self.canvas.requestRenderAll();
+                }
+                return shownLabel();
+            }
+            img._folioIndex = newIndex;
+            self._emitEvent('puzzle-fragment-meta', {
+                key: key,
+                meta: Object.assign({}, img._fragmentMeta || {}, {
+                    folio_label: folio.label || ''
+                })
+            });
+            return folio.label;
+        } finally {
+            self._swapEnded();
+        }
+    },
+
+    /**
+     * Replace a fragment's picture in place and return the new object.
+     * Its place (centre, angle, scale, flips, crop, stacking order) is read
+     * from the object on the canvas NOW, not from when the picture was asked
+     * for: the fragment may have been moved, or the whole puzzle flipped
+     * again, while a slow image was on its way.
+     * @param {string} cropMode - 'keep' (the same picture, e.g. another
+     *     threshold), 'mirror' (the other side of the leaf) or 'drop'.
+     */
+    _swapFragmentImage: function(key, htmlImg, result, meta, cropMode) {
+        var old = this.fragments[key];
+        if (!old || !this.canvas) return null;
+        if (this._cropMode && this._cropTarget === old) {
+            this.toggleCropMode(false);
+        }
+        var center = old.getCenterPoint();
+        var oldEl = (typeof old.getElement === 'function') ? old.getElement() : null;
+        var oldW = (oldEl && (oldEl.naturalWidth || oldEl.width)) || old.width;
+        var oldH = (oldEl && (oldEl.naturalHeight || oldEl.height)) || old.height;
+        var newW = htmlImg.naturalWidth || htmlImg.width;
+        var newH = htmlImg.naturalHeight || htmlImg.height;
+        var crop = null;
+        var cropped = (old.cropX || 0) > 0 || (old.cropY || 0) > 0
+            || old.width < oldW || old.height < oldH;
+        if (cropped && cropMode !== 'drop' && oldW && oldH && newW && newH) {
+            // Not rounded: the two sides' pictures can differ in size, and a
+            // rounded crop would drift a little with every flip.
+            var rx = newW / oldW;
+            var ry = newH / oldH;
+            var left = old.cropX || 0;
+            if (cropMode === 'mirror') left = oldW - left - old.width;
+            var cropX = Math.min(Math.max(0, left * rx), newW - 1);
+            var cropY = Math.min(Math.max(0, (old.cropY || 0) * ry), newH - 1);
+            crop = {
+                cropX: cropX,
+                cropY: cropY,
+                width: Math.max(1, Math.min(old.width * rx, newW - cropX)),
+                height: Math.max(1, Math.min(old.height * ry, newH - cropY))
             };
-            htmlImg.src = result.url;
-        });
+        }
+        var options = {
+            angle: old.angle, scaleX: old.scaleX, scaleY: old.scaleY,
+            flipX: old.flipX, flipY: old.flipY,
+            hasControls: true, hasBorders: true,
+            cornerSize: 12, transparentCorners: false,
+            perPixelTargetFind: true, _fragmentKey: key,
+            _imageUrl: result.url, _fragmentMeta: meta
+        };
+        // Built in full before the old one is touched: if this throws, the
+        // fragment stays on the canvas as it was.
+        var img = this._buildFragmentImage(htmlImg, options);
+        if (crop) img.set(crop);
+        var pt = (typeof fabric.Point === 'function')
+            ? new fabric.Point(center.x, center.y)
+            : { x: center.x, y: center.y };
+        img.setPositionByOrigin(pt, 'center', 'center');
+        img.setCoords();
+        if (cropMode === 'keep') img._standIn = !!old._standIn;
+
+        var selected = this.canvas.getActiveObjects().indexOf(old) >= 0;
+        var onlySelected = this.canvas.getActiveObject() === old;
+        if (selected) this.canvas.discardActiveObject();
+        var stackIndex = this.canvas.getObjects().indexOf(old);
+        this._removeFragmentsByKey(key);
+        if (stackIndex >= 0 && typeof this.canvas.insertAt === 'function') {
+            this.canvas.insertAt(stackIndex, img);
+        } else {
+            this.canvas.add(img);
+        }
+        this.fragments[key] = img;
+        if (onlySelected) {
+            this.canvas.setActiveObject(img);
+            this._syncSelection();
+        }
+        this.canvas.requestRenderAll();
+        return img;
     },
 
     getCurrentFolioLabel: function(key) {
@@ -1276,13 +1492,25 @@ window.puzzleCanvas = {
             if (!active || !active._fragmentKey) return false;
             this._cropMode = true;
             this._cropTarget = active;
-            this._cropOffsets = { top: 0, bottom: 0, left: 0, right: 0 };
-            if (!active._originalWidth) {
-                active._originalWidth = active.width;
-                active._originalHeight = active.height;
-                active._originalCropX = active.cropX || 0;
-                active._originalCropY = active.cropY || 0;
-            }
+            // Edges are measured against the FULL picture, so a fragment
+            // cropped before can be opened up again; Revert goes back to the
+            // crop this session started from.
+            var cropEl = (typeof active.getElement === 'function') ? active.getElement() : null;
+            var fullW = (cropEl && (cropEl.naturalWidth || cropEl.width)) || active.width;
+            var fullH = (cropEl && (cropEl.naturalHeight || cropEl.height)) || active.height;
+            active._originalWidth = fullW;
+            active._originalHeight = fullH;
+            this._cropSessionStart = {
+                cropX: active.cropX || 0, cropY: active.cropY || 0,
+                width: active.width, height: active.height,
+                left: active.left, top: active.top
+            };
+            this._cropOffsets = {
+                top: active.cropY || 0,
+                left: active.cropX || 0,
+                right: Math.max(0, fullW - (active.cropX || 0) - active.width),
+                bottom: Math.max(0, fullH - (active.cropY || 0) - active.height)
+            };
             // Show only edge handles for crop (not corners for resize)
             // Do NOT lock scaling — we intercept scaling events as crop operations
             active.set({
@@ -1358,6 +1586,7 @@ window.puzzleCanvas = {
             this._cropMode = false;
             this._cropTarget = null;
             this._cropOffsets = null;
+            this._cropSessionStart = null;
             this.canvas.requestRenderAll();
             return false;
         }
@@ -1439,12 +1668,12 @@ window.puzzleCanvas = {
     cropRevert: function() {
         if (!this._cropTarget) return;
         var obj = this._cropTarget;
-        if (obj._originalWidth) {
+        var start = this._cropSessionStart;
+        if (start) {
+            // With its corner too: dragging the left or top handle moves it.
             obj.set({
-                width: obj._originalWidth,
-                height: obj._originalHeight,
-                cropX: obj._originalCropX || 0,
-                cropY: obj._originalCropY || 0
+                width: start.width, height: start.height, cropX: start.cropX, cropY: start.cropY,
+                left: start.left, top: start.top
             });
             obj._originalWidth = null;
             obj._originalHeight = null;
@@ -1512,16 +1741,38 @@ window.puzzleCanvas = {
             s.newAngle = (360 - s.origAngle) % 360;
         });
 
-        // 4. Apply mirror + angle to current objects, then navigate to verso.
-        //    Store the target center on the object so _reloadFragment / navigateFolio
-        //    uses it instead of re-reading the (stale) geometry.
+        // 4. Apply mirror + angle to the objects on the canvas now. A picture
+        //    of the other side that arrives later takes its place from the
+        //    object it replaces (_swapFragmentImage), so flipping again before
+        //    it arrives stays consistent.
         keys.forEach(function(key) {
             var obj = self.fragments[key];
             var s = snapshots[key];
             if (!obj || !s) return;
 
-            // Apply angle + position
-            obj.set({ angle: s.newAngle });
+            var change = { angle: s.newAngle };
+            s.direction = 0;
+            if (obj._standIn) {
+                // Shown mirrored in place of a side there was no picture
+                // of: flipping back shows it as it is again.
+                change.flipX = !obj.flipX;
+                obj._standIn = false;
+            } else {
+                var data = self.folioData[key];
+                var ci = data ? data.currentIndex : 0;
+                var otherIdx = (ci % 2 === 0) ? ci + 1 : ci - 1;
+                var hasOtherSide = !!(data && data.folios && otherIdx >= 0 && otherIdx < data.folios.length);
+                if (hasOtherSide) {
+                    s.direction = otherIdx - ci;
+                } else {
+                    // No picture of the other side (or its list of sides has
+                    // not arrived): show this one mirrored, so its outline
+                    // still fits its neighbours in the flipped puzzle.
+                    change.flipX = !obj.flipX;
+                    obj._standIn = true;
+                }
+            }
+            obj.set(change);
             if (typeof obj.setPositionByOrigin === 'function') {
                 var pt = (typeof fabric.Point === 'function')
                     ? new fabric.Point(s.mirroredCx, s.cy)
@@ -1529,22 +1780,22 @@ window.puzzleCanvas = {
                 obj.setPositionByOrigin(pt, 'center', 'center');
             }
             obj.setCoords();
-
-            // Stash target center for the async reload to use
-            obj._flipTargetCenter = { x: s.mirroredCx, y: s.cy };
         });
         this.canvas.requestRenderAll();
 
         // 5. Navigate each fragment to recto/verso counterpart
         keys.forEach(function(key) {
-            var data = self.folioData[key];
-            if (!data || data.folios.length < 2) return;
-            var ci = data.currentIndex;
-            var newIdx = (ci % 2 === 0) ? Math.min(ci + 1, data.folios.length - 1) : Math.max(ci - 1, 0);
-            if (newIdx !== ci) {
-                self.navigateFolio(key, newIdx - ci);
+            var s = snapshots[key];
+            if (s && s.direction) {
+                self.navigateFolio(key, s.direction, { standInOnFailure: true });
             }
         });
+        // The new places are an edit. While other sides are still on their
+        // way the canvas is half flipped and must not be saved: the last
+        // picture to answer reports the edit (_swapEnded).
+        if (!this.isBusy()) {
+            this._emitEvent('puzzle-object-modified', { key: null });
+        }
     },
 
     setSelectedScale: function(scale) {
@@ -1675,7 +1926,7 @@ window.puzzleCanvas = {
                         scaleX: s.scaleX || 1,
                         scaleY: s.scaleY || 1,
                         flipX: !!s.flipH,
-                        flipV: !!s.flipV,
+                        flipY: !!s.flipV,
                     });
                     if (typeof obj.setPositionByOrigin === 'function' &&
                         s.centerX !== undefined && s.centerY !== undefined) {
@@ -1726,62 +1977,49 @@ window.puzzleCanvas = {
         var obj = this.fragments[key];
         if (!obj) return;
         var self = this;
-        var center = (typeof obj.getCenterPoint === 'function')
-            ? obj.getCenterPoint()
-            : {
-                x: (obj.left || 0) + ((obj.width || 0) * (obj.scaleX || 1) / 2),
-                y: (obj.top || 0) + ((obj.height || 0) * (obj.scaleY || 1) / 2)
-            };
-        var pos = {
-            centerX: center.x,
-            centerY: center.y,
-            angle: obj.angle,
-            scaleX: obj.scaleX, scaleY: obj.scaleY,
-            flipX: obj.flipX, flipY: obj.flipY
-        };
-        var m = newMeta || obj._fragmentMeta || {};
-        self._loadImageWithFallbacks(m.fl_id, m, key).then(function(result) {
-            var htmlImg = new Image();
-            htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
-            if (result.direct) htmlImg.removeAttribute('crossOrigin');
-            htmlImg.decoding = 'async';
-            htmlImg.onload = function() {
-                try {
-                    if (self.canvas && typeof self.canvas.discardActiveObject === 'function') {
-                        self.canvas.discardActiveObject();
-                    }
-                    self._removeFragmentsByKey(key);
-                    var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
-                        hasControls: true, hasBorders: true,
-                        cornerSize: 12, transparentCorners: false,
-                        perPixelTargetFind: true, _fragmentKey: key,
-                        _imageUrl: result.url, _fragmentMeta: m
-                    }));
-                    if (typeof img.setPositionByOrigin === 'function') {
-                        var pt = (typeof fabric.Point === 'function')
-                            ? new fabric.Point(pos.centerX, pos.centerY)
-                            : { x: pos.centerX, y: pos.centerY };
-                        img.setPositionByOrigin(pt, 'center', 'center');
-                        img.setCoords();
-                    }
-                    self.canvas.add(img);
-                    self.fragments[key] = img;
-                    self.canvas.setActiveObject(img);
-                    self.canvas.requestRenderAll();
-                    self._syncSelection();
+        // WHICH picture this is stays what the canvas shows now; the caller
+        // only says how it is to be processed. (A caller that waited before
+        // calling may name a folio the fragment has since left.)
+        var m = Object.assign({}, obj._fragmentMeta || {});
+        if (newMeta) {
+            ['threshold', 'processed', 'size'].forEach(function(field) {
+                if (newMeta[field] !== undefined) m[field] = newMeta[field];
+            });
+        }
+        var seq = this._nextLoadSeq(key);
+        var generation = this._generation;
+        // This takes the place of a folio change still on its way, so the
+        // folio wanted is again the one shown.
+        var data = this.folioData[key];
+        if (data && typeof obj._folioIndex === 'number') data.currentIndex = obj._folioIndex;
+
+        this._swapsInFlight += 1;
+        this._swapEpoch += 1;
+        (async function() {
+            try {
+                var result = await self._loadImageWithFallbacks(m.fl_id, m, key);
+                if (self._isStaleLoad(key, seq, generation)) return;
+                var htmlImg = await self._loadHtmlImage(result);
+                if (self._isStaleLoad(key, seq, generation) || !self.fragments[key]) return;
+                if (!htmlImg) {
+                    console.error('Reload failed:', key);
+                    return;
+                }
+                var folioIndex = self.fragments[key]._folioIndex;
+                var img = self._swapFragmentImage(key, htmlImg, result, m, 'keep');
+                if (img) {
+                    img._folioIndex = folioIndex;
                     self._emitEvent('puzzle-fragment-meta', {
                         key: key,
                         meta: img._fragmentMeta || null
                     });
-                } catch (err) {
-                    console.error('Failed to rebuild fragment:', key, err);
                 }
-            };
-            htmlImg.onerror = function() {
-                console.error('Reload failed:', key);
-            };
-            htmlImg.src = result.url;
-        });
+            } catch (err) {
+                console.error('Failed to rebuild fragment:', key, err);
+            } finally {
+                self._swapEnded();
+            }
+        })();
     },
 
     /**
@@ -1792,12 +2030,18 @@ window.puzzleCanvas = {
      * @param {fabric.Image} target - The Fabric image object to toggle.
      */
     clearAll: function() {
+        // Also the fragments queued before the canvas existed (Fabric still
+        // loading): they belong to the canvas being cleared.
+        this._pendingAdds = [];
         if (!this.canvas) return;
-        var keys = Object.keys(this.fragments);
-        for (var i = 0; i < keys.length; i++) {
-            var obj = this.fragments[keys[i]];
-            if (obj) this.canvas.remove(obj);
-        }
+        if (this._cropMode) this.toggleCropMode(false);
+        // Everything goes: the fragments, and the "Loading..." texts of
+        // pictures still on their way, which are dropped when they arrive.
+        var canvas = this.canvas;
+        canvas.getObjects().slice().forEach(function(obj) { canvas.remove(obj); });
+        this._generation += 1;
+        this._loadSeq = {};
+        this._folioRequests = {};
         this.fragments = {};
         this.folioData = {};
         if (typeof this.canvas.discardActiveObject === 'function') {
@@ -1808,6 +2052,195 @@ window.puzzleCanvas = {
         this._emitEvent('puzzle-clear', {});
     },
 
+    /**
+     * Save the puzzle as a PNG, drawn from the canvas itself: every fragment
+     * as it is shown (place, crop, flip, stacking order), on white, with the
+     * shelfmark banner below. Nothing is fetched again, so a picture that
+     * reached the canvas through the extension is in the file too.
+     * @returns {Promise<string>} 'ok', 'empty', or 'tainted' when a picture
+     *     shown straight from a library (no background removal) stops the
+     *     browser from reading the canvas.
+     */
+    exportPng: async function(title, filename) {
+        if (!this.canvas) return 'empty';
+        var canvas = this.canvas;
+        var isFragment = function(o) { return !!o._fragmentKey; };
+        var objects = canvas.getObjects().filter(isFragment);
+        if (objects.length === 0) return 'empty';
+        // Nothing of the editing state is touched (a crop in progress, the
+        // selection): Fabric draws no borders or handles into the file.
+        var run = ++this._exportRun;
+
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        var minScale = Infinity;
+        objects.forEach(function(obj) {
+            obj.setCoords();
+            var b = obj.getBoundingRect();
+            minX = Math.min(minX, b.left);
+            minY = Math.min(minY, b.top);
+            maxX = Math.max(maxX, b.left + b.width);
+            maxY = Math.max(maxY, b.top + b.height);
+            minScale = Math.min(minScale, Math.abs(obj.scaleX || 1), Math.abs(obj.scaleY || 1));
+        });
+        var margin = 20;
+        var left = Math.floor(minX) - margin;
+        var top = Math.floor(minY) - margin;
+        var width = Math.ceil(maxX - minX) + margin * 2;
+        var height = Math.ceil(maxY - minY) + margin * 2;
+        // One canvas unit per picture pixel of the most reduced fragment
+        // (none loses detail), within what a browser canvas can hold.
+        var multiplier = Math.min(4, Math.max(1, 1 / (minScale || 1)));
+        var MAX_SIDE = 8000;
+        if (Math.max(width, height) * multiplier > MAX_SIDE) {
+            multiplier = MAX_SIDE / Math.max(width, height);
+        }
+
+        // toCanvasElement changes these on the live canvas and puts them back
+        // itself only when drawing does not throw.
+        var saved = {
+            viewport: canvas.viewportTransform.slice(),
+            background: canvas.backgroundColor,
+            width: canvas.width,
+            height: canvas.height,
+            retina: canvas.enableRetinaScaling,
+            skipControls: canvas.skipControlsDrawing
+        };
+        var drawn;
+        try {
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+            canvas.backgroundColor = '';
+            drawn = canvas.toCanvasElement(multiplier, {
+                left: left, top: top, width: width, height: height, filter: isFragment
+            });
+        } catch (e) {
+            console.error('Puzzle export: drawing failed:', e);
+            drawn = null;
+        } finally {
+            canvas.backgroundColor = saved.background;
+            canvas.enableRetinaScaling = saved.retina;
+            canvas.skipControlsDrawing = saved.skipControls;
+            if (canvas.width !== saved.width || canvas.height !== saved.height) {
+                canvas.setDimensions({ width: saved.width, height: saved.height });
+            }
+            canvas.setViewportTransform(saved.viewport);
+            canvas.requestRenderAll();
+        }
+        if (!drawn) return 'failed';
+
+        // Banner (the same three rows as the desktop export).
+        var W = drawn.width;
+        var s = Math.max(0.6, W / 800);
+        var pad = Math.round(14 * s);
+        var gap = Math.round(5 * s);
+        var fontShelf = Math.round(18 * s) + 'px Arial, sans-serif';
+        var fontAttr = Math.round(14 * s) + 'px Arial, sans-serif';
+        var fontUrl = Math.round(12 * s) + 'px Arial, sans-serif';
+        var measure = document.createElement('canvas').getContext('2d');
+        measure.font = fontShelf;
+        var lines = [];
+        var current = '';
+        String(title || '').split(' + ').forEach(function(part) {
+            var candidate = current ? current + ' + ' + part : part;
+            if (current && measure.measureText(candidate).width > W - pad * 2) {
+                lines.push(current);
+                current = part;
+            } else {
+                current = candidate;
+            }
+        });
+        if (current) lines.push(current);
+        var rows = lines.map(function(t) { return { text: t, font: fontShelf, px: Math.round(18 * s), color: '#505050' }; });
+        rows.push({ text: 'Created by Dicta Genizah Search', font: fontAttr, px: Math.round(14 * s), color: '#505050' });
+        rows.push({ text: 'www.GenizahSearch.com', font: fontUrl, px: Math.round(12 * s), color: '#787878' });
+        var bannerH = pad * 2 - gap;
+        rows.forEach(function(r) { bannerH += r.px + gap; });
+
+        var out = document.createElement('canvas');
+        out.width = W;
+        out.height = drawn.height + bannerH;
+        var ctx = out.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, out.width, out.height);
+        ctx.drawImage(drawn, 0, 0);
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, drawn.height, W, bannerH);
+        ctx.fillStyle = '#d2d2d2';
+        ctx.fillRect(0, drawn.height, W, 1);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.direction = 'ltr';
+        var y = drawn.height + pad;
+        rows.forEach(function(r) {
+            ctx.font = r.font;
+            ctx.fillStyle = r.color;
+            ctx.fillText(r.text, W / 2, y);
+            y += r.px + gap;
+        });
+
+        var blob;
+        try {
+            blob = await new Promise(function(resolve, reject) {
+                try { out.toBlob(resolve, 'image/png'); } catch (e) { reject(e); }
+            });
+        } catch (e) {
+            console.warn('Puzzle export: the canvas cannot be read:', e);
+            return 'tainted';
+        }
+        if (!blob) return 'tainted';
+        // The page gave up waiting and made the file another way meanwhile.
+        if (run !== this._exportRun) return 'cancelled';
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = filename || 'puzzle.png';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+        return 'ok';
+    },
+
+    /**
+     * Full screen: the puzzle (toolbars and canvas) covers the whole window,
+     * and the browser's own full screen is asked for where it is allowed.
+     * Dialogs, menus and notices still show above it. Escape leaves both.
+     * @returns {boolean} Whether full screen is now on.
+     */
+    toggleFullscreen: function(enable) {
+        var body = document.body;
+        var on = (typeof enable === 'boolean') ? enable : !body.classList.contains('puzzle-fullscreen');
+        var self = this;
+        if (!this._fullscreenChangeHandler) {
+            this._fullscreenChangeHandler = function() {
+                // Left the browser's full screen (Escape): leave ours too.
+                if (!document.fullscreenElement && self._fullscreenAsked) {
+                    self._fullscreenAsked = false;
+                    self.toggleFullscreen(false);
+                }
+            };
+            document.addEventListener('fullscreenchange', this._fullscreenChangeHandler);
+        }
+        body.classList.toggle('puzzle-fullscreen', on);
+        try {
+            if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().then(function() {
+                    self._fullscreenAsked = true;
+                }).catch(function() {});
+            } else if (!on && document.fullscreenElement && self._fullscreenAsked) {
+                self._fullscreenAsked = false;
+                document.exitFullscreen().catch(function() {});
+            }
+        } catch (e) { /* the window-filling layout works without it */ }
+        var refit = function() {
+            if (self._resizeHandler) self._resizeHandler();
+            self.fitAll();
+        };
+        setTimeout(refit, 60);
+        setTimeout(refit, 400);
+        this._emitEvent('puzzle-fullscreen', { on: on });
+        return on;
+    },
+
     getCropState: function() {
         var cropState = {};
         for (var key in this.fragments) {
@@ -1815,8 +2248,8 @@ window.puzzleCanvas = {
             // cropConfirm clears _originalWidth, so a confirmed crop is
             // measured against the full image (the element Fabric draws from).
             var el = (typeof obj.getElement === 'function') ? obj.getElement() : null;
-            var fullW = obj._originalWidth || (el && (el.naturalWidth || el.width)) || 0;
-            var fullH = obj._originalHeight || (el && (el.naturalHeight || el.height)) || 0;
+            var fullW = (el && (el.naturalWidth || el.width)) || obj._originalWidth || 0;
+            var fullH = (el && (el.naturalHeight || el.height)) || obj._originalHeight || 0;
             if (fullW && fullH && (
                 (obj.cropX || 0) > 0 || (obj.cropY || 0) > 0 ||
                 obj.width < fullW || obj.height < fullH
@@ -1884,9 +2317,18 @@ PUZZLE_STYLES = '''
     height: calc(100vh - 80px);
     background: #1a1a1a;
 }
+/* Full screen (puzzleCanvas.toggleFullscreen): over the page header and
+   drawer, under dialogs, menus and notices (Quasar: 6000 and up). */
+body.puzzle-fullscreen .puzzle-container {
+    position: fixed;
+    inset: 0;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 5000;
+}
 .puzzle-toolbar {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 4px;
     padding: 4px 8px;
     background: #2d2d2d;
@@ -1927,6 +2369,10 @@ PUZZLE_STYLES = '''
 }
 .puzzle-canvas-wrap {
     flex: 1;
+    /* The column does not stretch its children: without this the area stays
+       as wide as the canvas inside it, and never grows with the window. */
+    width: 100%;
+    align-self: stretch;
     position: relative;
     overflow: hidden;
     min-height: 400px;
@@ -2148,7 +2594,8 @@ def _parse_puzzle_event_args(args):
     return payload
 
 
-async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider):
+async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider,
+                                  still_wanted=None):
     """Resolve a manuscript's folios and add the first folio image to the canvas.
 
     Fetches the NLI IIIF manifest to get FL IDs, determines the appropriate
@@ -2162,8 +2609,13 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         puzzle_meta: Dict of confirmed fragment metadata keyed by fragment key.
         pending_fragment_meta: Dict of fragments awaiting JS confirmation.
         threshold_slider: NiceGUI slider widget (unused here, passed for API compat).
+        still_wanted: Optional callable asked after the folio lookup (which
+            can take seconds): False means the canvas this fragment was meant
+            for has been replaced meanwhile, and nothing is added.
     """
     folios = await run.io_bound(_resolve_folios, sys_id)
+    if still_wanted is not None and not still_wanted():
+        return
     if not folios:
         ui.notify(tr('No images found'), type='warning')
         return
@@ -2304,7 +2756,42 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         'details': ('', ''),          # (title, notes) as last loaded or saved
         'pending_crops': {},          # Crop state to apply after each fragment loads {key: {cropX, cropY, width, height}}
         'is_published': False,        # Whether current doc is published to community
+        'canvas_epoch': 0,            # +1 each time the canvas is replaced (a document opened, New Puzzle)
+        'load_failed': False,         # a picture of the load in progress (or just ended) failed
+        # ?add= / ?doc= are still in the address and still say what this tab should hold.
+        'url_add_live': bool(initial_add),
+        'url_doc_live': bool(initial_doc),
     }
+
+    def _canvas_guard():
+        """A check for an add that has to wait (a folio lookup can take seconds):
+        is the canvas still the one the fragment was asked for? Without it, a
+        fragment asked for on one canvas landed on the draft opened meanwhile,
+        and was auto-saved there."""
+        epoch = doc_state['canvas_epoch']
+        return lambda: doc_state['canvas_epoch'] == epoch
+
+    # The canvas this page starts with (the tab's own, restored): what ``?add=``
+    # and a join handed over from another page were asked for. Restoring the
+    # tab's canvas is not a replacement; anything the visitor opens after is.
+    startup_canvas = _canvas_guard()
+
+    def _drop_url_param(name):
+        """Take ``?add=`` or ``?doc=`` out of the address, once."""
+        if doc_state.get(f'url_{name}_live'):
+            doc_state[f'url_{name}_live'] = False
+            try:
+                ui.run_javascript(_drop_query_param_js(name))
+            except Exception:
+                pass  # no page to tell (already closed)
+
+    def _forget_url_instructions():
+        """The visitor replaced the canvas: the address no longer says what
+        this tab holds, and a reload must restore the tab, not the address."""
+        doc_state['url_doc_loaded'] = False
+        doc_state['url_add_key'] = None
+        _drop_url_param('add')
+        _drop_url_param('doc')
 
     from shared.puzzle_export import auto_suggest_title
     from shared.puzzle_model import PuzzleDocument, PuzzleFragment
@@ -2486,6 +2973,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         canvas. An edit made while a draft is still loading is saved once the
         load ends, so a half-drawn canvas is never written.
         """
+        if not doc_state.get('loading'):
+            # Edited: from here a reload must bring back the tab's canvas, not
+            # open the address's document over it. (While still loading, the
+            # address is the only thing that can bring the document back.)
+            _drop_url_param('doc')
         if doc_state['current_doc_id'] is None:
             doc_state['has_unsaved_changes'] = True
             return
@@ -2508,6 +3000,19 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         loop = asyncio.get_event_loop()
         doc_state['auto_save_handle'] = loop.create_task(do_auto_save())
 
+    async def _canvas_save_token():
+        """The canvas's save token: None while pictures are being replaced.
+
+        0 when the browser does not answer (the save then goes by what
+        build_fragments_list could read, as before).
+        """
+        try:
+            return await ui.run_javascript(
+                'window.puzzleCanvas && window.puzzleCanvas.saveToken ? window.puzzleCanvas.saveToken() : 0',
+                timeout=5.0)
+        except Exception:
+            return 0
+
     async def _auto_save_now():
         """Write the canvas into the open draft (the auto-save itself)."""
         doc_id = doc_state['current_doc_id']
@@ -2523,11 +3028,24 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         doc = await run.io_bound(joins.load_document, doc_id)
         if not doc or doc_state['current_doc_id'] != doc_id:
             return
+        # A canvas with pictures being replaced (a flip whose other sides are
+        # still on their way) is between two states: the fragments already
+        # stand at their new places and show their old sides. It is not
+        # saved; it reports an edit itself once the last picture has answered.
+        # The canvas is read in several calls, so the token is read before and
+        # after them: a flip that began in between changes it.
+        token = await _canvas_save_token()
+        if token is None:
+            return
         try:
             fragments = await build_fragments_list(stored=_fragments_by_key(doc.fragments))
         except Exception as e:
             logger.warning("puzzle auto-save: the canvas could not be read: %s", e)
             return
+        if await _canvas_save_token() != token:
+            return
+        if doc_state['current_doc_id'] != doc_id:
+            return  # another document was opened while the canvas was being read
         if not fragments and doc.fragments:
             # An empty canvas never empties a saved draft by itself (a canvas
             # that failed to come back looks the same as one cleared by hand).
@@ -2544,6 +3062,21 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             doc_state['details'] = (doc.title, doc.notes)
         else:
             logger.warning("puzzle auto-save: draft %s was not saved", doc_id)
+
+    def _drop_doc_param_if_done():
+        """Take ``?doc=`` out of the address once its document is fully on the canvas.
+
+        Not before: until every picture has answered and the positions are
+        kept in the tab, a reload can only bring the document back through
+        the address (a published join opens as an unsaved copy, which the tab
+        alone would restore at default places). And not at all if a picture
+        failed: the tab has no place for that fragment, the address still does.
+        """
+        if doc_state.get('load_failed'):
+            return
+        if doc_state.get('url_doc_loaded') and not doc_state.get('loading'):
+            doc_state['url_doc_loaded'] = False
+            _drop_url_param('doc')
 
     def _load_finished():
         """A draft or tab canvas has finished loading (every image answered)."""
@@ -2724,7 +3257,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             return None
         return document_from_published_detail(detail)
 
-    async def load_document(doc_id, *, restoring=False):
+    async def load_document(doc_id, *, restoring=False, from_url=False):
         """Load a document onto the canvas. True when it was loaded.
 
         The visitor's own saved document opens as itself (edits auto-save).
@@ -2755,6 +3288,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             ui.notify(tr('Could not load document'), type='warning')
             return False
 
+        if not restoring:
+            doc_state['canvas_epoch'] += 1
+        doc_state['load_failed'] = False
+        if not restoring and not from_url:
+            _forget_url_instructions()   # the visitor opened it from Saved Joins
         await ui.run_javascript('window.puzzleCanvas.clearAll()')
         puzzle_meta.clear()
         pending_fragment_meta.clear()
@@ -2870,6 +3408,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     async def new_puzzle():
         """Clear canvas and reset to scratch pad state."""
+        doc_state['canvas_epoch'] += 1
+        doc_state['load_failed'] = False
+        _forget_url_instructions()
         await ui.run_javascript('window.puzzleCanvas.clearAll()')
         puzzle_meta.clear()
         pending_fragment_meta.clear()
@@ -3039,8 +3580,41 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         if not puzzle_meta:
             ui.notify(tr('Add fragments before exporting'), type='warning')
             return
-        fragments = await build_fragments_list()
         ui.notify(tr('Generating export...'), type='info')
+
+        # The browser draws the file from the canvas itself, so it holds
+        # exactly what is on screen. Composing it here instead means finding
+        # every picture again in the server's cache, and one that reached the
+        # canvas another way (the extension, a library fallback) was left out
+        # of the file without a word.
+        seen = []
+        for meta in puzzle_meta.values():
+            shelfmark = meta.get('shelfmark', '')
+            if shelfmark and shelfmark not in seen:
+                seen.append(shelfmark)
+        title = ' + '.join(seen) if seen else 'Untitled Join'
+        filename = title.replace(' ', '_').replace('+', '_') + '.png'
+        try:
+            outcome = await ui.run_javascript(
+                f'window.puzzleCanvas.exportPng({json.dumps(title)}, {json.dumps(filename)})',
+                timeout=60.0,
+            )
+        except Exception as e:
+            logger.warning("puzzle export: the browser did not answer: %s", e)
+            outcome = None
+            # The browser may still be at it (the wait ended, not its work):
+            # it must not hand over a second file after the one made below.
+            ui.run_javascript('if (window.puzzleCanvas) { window.puzzleCanvas._exportRun += 1; }')
+        if outcome == 'ok':
+            ui.notify(tr('Export ready'), type='positive')
+            return
+        if outcome == 'empty':
+            ui.notify(tr('Add fragments before exporting'), type='warning')
+            return
+
+        # The browser could not read its canvas (a picture shown straight from
+        # a library, without background removal): compose it here.
+        fragments = await build_fragments_list()
 
         def _do_export():
             from shared.puzzle_export import compose_puzzle_export, add_metadata_banner
@@ -3190,11 +3764,16 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     ui.notify(tr('Shelfmark not found'), type='warning')
                     return
 
+                # Bound to the canvas as it is when Enter is pressed: the
+                # shelfmark lookup below is the first wait, not the folio one.
+                same_canvas = _canvas_guard()
                 result = await io_bound_result.io_bound(
                     state.meta_mgr.resolve_system_by_shelfmark, text
                 )
                 if result is io_bound_result.INTERRUPTED:
                     return  # no answer (cancelled, or the app is stopping): not "not found"
+                if not same_canvas():
+                    return  # another document was opened meanwhile: not added to it
                 result = result or {}
                 sys_id = result.get('sys_id')
                 options = result.get('options') or []
@@ -3206,7 +3785,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         shelfmark_input.value = ''
                         await _add_fragment_by_sys_id(
                             item['sys_id'], item['shelfmark'] or text, puzzle_meta,
-                            pending_fragment_meta, threshold_slider
+                            pending_fragment_meta, threshold_slider, still_wanted=same_canvas
                         )
                     open_shelfmark_picker(puzzle_main, items_from_options(options, state.meta_mgr),
                                           _add_picked, text)
@@ -3218,7 +3797,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 shelfmark = result.get('selected_shelfmark') or text
                 shelfmark_input.value = ''
                 await _add_fragment_by_sys_id(
-                    sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider
+                    sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider,
+                    still_wanted=same_canvas
                 )
 
             shelfmark_input.on('keydown.enter', lambda: on_add_shelfmark())
@@ -3229,6 +3809,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             async def on_add_from_list():
                 """Show dialog to pick a manuscript from personal lists."""
+                # For the canvas as it is when the dialog is asked for: what is
+                # picked in it is not added to a document opened meanwhile.
+                same_canvas = _canvas_guard()
                 from web.supabase_client import get_user_client, get_user_lists, get_list_items
                 from web.auth_state import GlobalAuthState
                 logged_in = GlobalAuthState.is_logged_in()
@@ -3303,16 +3886,22 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             to_add = [(s['sys_id'], s['shelfmark']) for s in selected_items if s['cb'].value]
                             dlg.close()
                             for sid, shelf in to_add:
+                                if not same_canvas():
+                                    break
                                 await _add_fragment_by_sys_id(
-                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider
+                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider,
+                                    still_wanted=same_canvas
                                 )
 
                         async def add_all():
                             to_add = [(s['sys_id'], s['shelfmark']) for s in selected_items]
                             dlg.close()
                             for sid, shelf in to_add:
+                                if not same_canvas():
+                                    break
                                 await _add_fragment_by_sys_id(
-                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider
+                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider,
+                                    still_wanted=same_canvas
                                 )
 
                         ui.button(tr('Add Selected'), on_click=add_selected).props('flat dark color=primary')
@@ -3326,6 +3915,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             async def on_add_from_joins():
                 """Show joined fragments for selected fragment and add them."""
+                same_canvas = _canvas_guard()   # as in on_add_from_list
                 from web.components.joins_panel import fetch_connected_fragments
                 from shared.fjms_service import get_fjms_service
 
@@ -3448,8 +4038,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             to_add = [(s['sys_id'], s['shelfmark']) for s in items_list if s['cb'].value]
                             dlg.close()
                             for sid, shelf in to_add:
+                                if not same_canvas():
+                                    break
                                 await _add_fragment_by_sys_id(
-                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider
+                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider,
+                                    still_wanted=same_canvas
                                 )
 
                         ui.button(tr('Add Selected'), on_click=add_joins).props('flat dark color=primary')
@@ -3544,6 +4137,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             ui.button(icon='fit_screen', on_click=lambda: ui.run_javascript(
                 'window.puzzleCanvas.fitAll()'
             )).props('dense flat dark round size=sm').tooltip(tr('Fit All'))
+            fullscreen_btn = ui.button(icon='fullscreen', on_click=lambda: ui.run_javascript(
+                'window.puzzleCanvas.toggleFullscreen()'
+            )).props('dense flat dark round size=sm').tooltip(tr('Full screen'))
 
             ui.separator().props('vertical').style('height: 20px')
 
@@ -3878,6 +4474,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 # A failed image still answers for its part of the load. It
                 # stays in puzzle_meta, so a save keeps its stored position.
                 if part_of_load:
+                    doc_state['load_failed'] = True
                     loading_keys.discard(key)
                     doc_state['load_pending'] = len(loading_keys)
                     if not loading_keys:
@@ -3896,6 +4493,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     pending['size'] = js_meta.get('size', pending.get('size', 800))
                 puzzle_meta[key] = pending
                 app.storage.tab['puzzle_fragments'] = puzzle_meta
+                if doc_state.get('url_add_key') == key:
+                    # The tab now holds the fragment ?add= asked for, so a
+                    # reload restores it and must not add it again.
+                    doc_state['url_add_key'] = None
+                    _drop_url_param('add')
                 ui.notify(f'{pending.get("shelfmark", key)} ({pending.get("folio_label", "")})', type='positive')
 
             # Apply pending crop state for this fragment (from load_document).
@@ -3965,6 +4567,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             # Keep the loaded canvas's positions in the tab now, not at the
             # next periodic save, so a reload restores what is on screen.
             await save_state()
+            _drop_doc_param_if_done()
 
         def on_puzzle_fragment_meta(e):
             """Handle 'puzzle-fragment-meta' event: update stored metadata after folio nav or bg toggle."""
@@ -3979,6 +4582,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             puzzle_meta[key]['threshold'] = meta.get('threshold', puzzle_meta[key].get('threshold', 30))
             puzzle_meta[key]['processed'] = meta.get('processed', puzzle_meta[key].get('processed', True))
             puzzle_meta[key]['size'] = meta.get('size', puzzle_meta[key].get('size', 800))
+            # Another page of an external library's manuscript is another
+            # address: without these a save kept the page left behind.
+            for field in ('external_provider', 'page_index', 'image_url'):
+                if meta.get(field) not in (None, ''):
+                    puzzle_meta[key][field] = meta[field]
             if meta.get('folio_label'):
                 puzzle_meta[key]['folio_label'] = meta.get('folio_label')
             app.storage.tab['puzzle_fragments'] = puzzle_meta
@@ -4014,6 +4622,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 except (NameError, Exception):
                     pass
         canvas_wrap.on('puzzle-selection', on_puzzle_selection)
+
+        def on_puzzle_fullscreen(e):
+            """Handle 'puzzle-fullscreen' event: the button shows what a click will do."""
+            payload = _parse_puzzle_event_args(e.args)
+            on = isinstance(payload, dict) and bool(payload.get('on'))
+            fullscreen_btn.props(f"icon={'fullscreen_exit' if on else 'fullscreen'}")
+        canvas_wrap.on('puzzle-fullscreen', on_puzzle_fullscreen)
 
     # ── Initialize canvas after DOM is ready ──
     async def init_canvas():
@@ -4306,7 +4921,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             # Always resolve folios to detect external providers (Oxford, Manchester, etc.)
             # even when FL ID is provided — NLI stub FL IDs for external libraries return 503,
             # so using them directly causes a ~20s fallback chain before the image loads.
+            same_canvas = startup_canvas
+            if not same_canvas():
+                return  # the visitor opened something else while the page was starting
             folios = await run.io_bound(_resolve_folios, add_sys_id)
+            if not same_canvas():
+                return  # another document was opened meanwhile: not added to it
             if folios:
                 # If _resolve_folios found an external provider, use that path
                 # (much faster than waiting for NLI timeouts)
@@ -4396,6 +5016,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
                 shelfmark = sm or ''
 
+            # ?add= leaves the address when this fragment is on the canvas
+            # (on_puzzle_add_result): dropped earlier, a reload while its
+            # picture was loading lost it; never dropped, every reload added it again.
+            doc_state['url_add_key'] = key
+
             # Use effective values (ext_threshold/ext_processed set for external path)
             eff_threshold = ext_threshold if external_provider else threshold
             eff_processed = ext_processed if external_provider else True
@@ -4439,7 +5064,61 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             """
             if not await _wait_for_canvas():
                 return
+            if not startup_canvas():
+                return  # the visitor opened something else while the page was starting
+            _same_canvas = startup_canvas
+            clear_first = False
+            if bulk.get('source') == 'join':
+                if doc_state['current_doc_id']:
+                    # A whole join or document opens as a puzzle of its own,
+                    # not inside the saved draft this tab had open (which
+                    # would then auto-save with these fragments added). The
+                    # draft stays saved.
+                    clear_first = True
+                elif puzzle_meta or pending_fragment_meta:
+                    # An unsaved canvas exists only in this tab: the join
+                    # neither mixes into it nor replaces it without a word.
+                    with ui.dialog() as ask, ui.card().classes('w-96 p-4').style(
+                        'background: var(--bg-card); color: var(--text-primary);'
+                    ):
+                        ui.label(tr('There is an unsaved puzzle on screen.')).classes(
+                            'text-lg font-bold').style('color: var(--text-primary);')
+                        ui.label(tr("Replace it with this join, or add the join's fragments to it?")
+                                 ).classes('text-sm').style('color: var(--text-secondary);')
+                        with ui.row().classes('w-full justify-end gap-2'):
+                            ui.button(tr('Replace'), on_click=lambda: ask.submit('replace')
+                                      ).props('flat color=primary')
+                            ui.button(tr('Add to it'), on_click=lambda: ask.submit('add')).props('flat')
+                            ui.button(tr('Cancel'), on_click=lambda: ask.submit(None)).props('flat')
+                    # None: cancelled or dismissed. If the page is closed with
+                    # the question still open no answer ever comes, so the
+                    # wait also ends when the page has gone.
+                    async def _answer():
+                        return await ask
+                    waiting = asyncio.ensure_future(_answer())
+                    while not waiting.done():
+                        if getattr(page_client, '_deleted', False):
+                            waiting.cancel()
+                            return
+                        await asyncio.wait([waiting], timeout=2.0)
+                    choice = waiting.result()
+                    if choice is None or not startup_canvas():
+                        return
+                    clear_first = choice == 'replace'
+            if clear_first:
+                own_canvas = doc_state['canvas_epoch'] + 1   # what new_puzzle makes it
+                await new_puzzle()
+                if doc_state['canvas_epoch'] != own_canvas:
+                    return  # replaced again while it was being cleared
+                _same_canvas = _canvas_guard()
+            # The join is for this canvas. If another document is opened (or
+            # a new puzzle started) while its fragments are still being looked
+            # up, the rest are not added there: they would be auto-saved into
+            # a draft that has nothing to do with this join.
+
             for sys_id in bulk_fragments:
+                if not _same_canvas():
+                    return
                 if not sys_id:
                     continue
                 shelfmark = ''
@@ -4452,6 +5131,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 await _add_fragment_by_sys_id(
                     sys_id, shelfmark, puzzle_meta,
                     pending_fragment_meta, threshold_slider,
+                    still_wanted=_same_canvas,
                 )
 
         # Schedule via the SAME _after_delay wrapper the single-add uses —
@@ -4467,7 +5147,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             if not await _wait_for_canvas():
                 return
             await asyncio.sleep(1.0)
-            if not await load_document(initial_doc):
+            if await load_document(initial_doc, from_url=True):
+                # Once it is fully drawn the tab itself restores it, and the
+                # address must not open it again over what the tab holds
+                # later. A document that did not open keeps its address: it
+                # may open after signing in.
+                doc_state['url_doc_loaded'] = True
+                _drop_doc_param_if_done()   # at once for a document with no fragments
+            else:
                 await _restore_tab_canvas()
 
         asyncio.ensure_future(_after_delay(1.5, auto_load_doc))
@@ -4480,8 +5167,16 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         visitor); no saved join is written here.
         """
         try:
+            # Not while pictures are being replaced, and not if a replacement
+            # began between the two reads below (as in _auto_save_now): the
+            # tab would keep the places from before a flip beside the sides
+            # from after it.
+            token = await _canvas_save_token()
+            if token is None:
+                return
             state_json = await ui.run_javascript(
-                'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getState() : null',
+                'window.puzzleCanvas && window.puzzleCanvas.canvas && !window.puzzleCanvas.isBusy()'
+                ' ? window.puzzleCanvas.getState() : null',
                 timeout=5.0
             )
             if not state_json:
@@ -4491,6 +5186,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getCropState() : null',
                 timeout=5.0
             )
+            if await _canvas_save_token() != token:
+                return
             crops = json.loads(crop_json) if isinstance(crop_json, str) and crop_json else {}
             for key, crop in (crops if isinstance(crops, dict) else {}).items():
                 if key in state:

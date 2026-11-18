@@ -1021,6 +1021,30 @@ def create_joins_dialog(
                         on_click=handle_view_all
                     ).props('outline color=green').classes('w-full')
 
+                # The whole join on one canvas: the fragments side by side, to
+                # be moved into place, where the view above shows one after another.
+                if WEB_PUZZLE_ENABLED and total > 1:
+                    def handle_open_in_puzzle():
+                        from web.joins_lab_storage import stage_fragments_for_puzzle
+                        members = [d.get('document_id') for d in (fragment_details or [])]
+                        if not any(members):
+                            members = [shelfmark_to_docid.get(f.upper()) for f in fragments]
+                        # The fragment being viewed first: the details of some
+                        # joins list only its partners (kept once if listed too).
+                        sys_ids = [document_id] + members
+                        if not stage_fragments_for_puzzle(sys_ids):
+                            ui.notify(
+                                tr('The change could not be saved. Check your connection and try again.')
+                                if any(sys_ids) else tr('No images found'), type='warning')
+                            return
+                        dialog.close()
+                        ui.navigate.to('/puzzle')
+
+                    ui.button(
+                        tr('Open in Puzzle'), icon='extension',
+                        on_click=handle_open_in_puzzle
+                    ).props('outline color=green').classes('w-full')
+
                 # Find more joins button (D-19, FND-04/05) — only when Lab URL provided and joins exist
                 if find_joins_url and total > 1:
                     # A link, as "Find Joins in the Joins Lab" above.
