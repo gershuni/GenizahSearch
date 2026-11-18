@@ -87,6 +87,13 @@ from web.pages.browse_editions import (link_target as _edition_link_target, mark
                                       note_stale_edition as _note_stale_edition,
                                       on_target_folio, target_mark_for,
                                       target_version_for)
+from web.pages.browse_desk_document import (
+    DESK_CSS as _RD_DOCUMENT_CSS, VIEW_FRAGMENTS, document_desk, document_view,
+    is_other_desk, render_document_text_panel,
+)
+from web.pages.browse_desk_images import (
+    IMAGES_CSS as _RD_IMAGES_CSS, page_label as desk_page_label, render_image_pane, shown_text_image,
+)
 from web.pages.browse_enrichment import (
     BrowsePageRefs,
     discovery_panel_enabled,
@@ -1554,8 +1561,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.is_loading = False
                 update_content()
 
-    def enter_joined_view(fragments_info: list, pgpid: int = None):
-        """Switch to reading desk mode showing all fragments in dual-pane layout."""
+    def enter_joined_view(fragments_info: list, pgpid: int = None, selected_sources: dict = None,
+                          draw: bool = True):
+        """Switch to reading desk mode showing all fragments in dual-pane layout.
+
+        ``selected_sources``: the reader's choices on a desk being restored, in place
+        before the desk is first drawn (the document panel reads them).
+        ``draw``: False fills the desk without drawing it -- the desk is drawn around the
+        current page, and a desk restored as the page opens has none yet; the caller loads
+        one, and the desk is drawn when it arrives."""
         state.view_joined = True
         state.view_all = False
         state.joined_fragments_info = fragments_info
@@ -1586,9 +1600,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 'pgp_doc': pgp_doc or {}
             })
         state.reading_desk_entries = entries
-        state.reading_desk_selected_sources = {}
+        state.reading_desk_selected_sources = dict(selected_sources or {})
         _persist_reading_desk_state()
-        update_content()
+        if draw:
+            update_content()
 
     refs.enter_joined_view = enter_joined_view
 
@@ -1699,11 +1714,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 selected_sources = saved.get('selected_sources', {})
                 enter_joined_view(
                     [{'shelfmark': e['shelfmark'], 'document_id': e['sys_id']} for e in frag_info],
-                    pgpid=pgpid
+                    pgpid=pgpid,
+                    selected_sources=selected_sources if isinstance(selected_sources, dict) else None,
+                    # No page yet (the desk is being restored as the page opens): fill the
+                    # desk and let the caller load a page. Drawing it here raised, and the
+                    # restore "failed" its way into the page load that then drew the desk.
+                    draw=state.current_page is not None,
                 )
-                # Restore selected source preferences after enter_joined_view resets them
-                if selected_sources:
-                    state.reading_desk_selected_sources = selected_sources
                 logger.info(f"[ReadingDesk] Restored {len(frag_info)} entries")
                 return True
         except Exception as e:
@@ -3434,6 +3451,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # IntersectionObserver synchronizes scrolling between panes
                 current_shelfmark_upper = (page.shelfmark or '').upper()
 
+                # Document mode (web/pages/browse_desk_document.py): while every fragment
+                # on the desk belongs to the PGP document it was opened for, the text side
+                # is that document's edition, once -- not one text per fragment.
+                try:
+                    rd_document = document_desk(
+                        state.joined_pgpid, [e.get('sys_id') for e in state.reading_desk_entries])
+                except Exception:
+                    logger.exception('[ReadingDesk] document sources for %s', state.joined_pgpid)
+                    rd_document = document_desk(None, [])
+                rd_view = document_view(rd_document, state.reading_desk_selected_sources)
+
                 async def rd_navigate_to_fragment(target_sm):
                     """Exit reading desk and navigate to a specific fragment."""
                     exit_joined_view()
@@ -3663,7 +3691,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     with ui.row().classes('w-full items-center justify-between p-3'):
                         with ui.row().classes('items-center gap-3'):
                             ui.icon('auto_stories').classes('text-xl').style('color: white !important;')
-                            if state.joined_pgpid:
+                            # A desk that now holds a fragment from outside the document
+                            # is a hand-built one: it no longer carries the document's name.
+                            if state.joined_pgpid and not is_other_desk(rd_document):
                                 header_txt = f'{tr("Document")} #{state.joined_pgpid}'
                             else:
                                 header_txt = tr('Reading Desk')
@@ -3674,17 +3704,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'border: 1px solid white; color: white !important; background: transparent;'
                             )
 
+                        def open_desk_in_puzzle():
+                            from web.joins_lab_storage import stage_fragments_for_puzzle
+                            sys_ids = [e.get('sys_id') for e in state.reading_desk_entries]
+                            if stage_fragments_for_puzzle(sys_ids):
+                                ui.navigate.to('/puzzle')
+                            else:
+                                ui.notify(
+                                    tr('The change could not be saved. Check your connection and try again.'),
+                                    type='warning')
+
                         with ui.row().classes('items-center gap-2'):
                             if WEB_PUZZLE_ENABLED and len(state.reading_desk_entries) > 1:
-                                def open_desk_in_puzzle():
-                                    from web.joins_lab_storage import stage_fragments_for_puzzle
-                                    sys_ids = [e.get('sys_id') for e in state.reading_desk_entries]
-                                    if stage_fragments_for_puzzle(sys_ids):
-                                        ui.navigate.to('/puzzle')
-                                    else:
-                                        ui.notify(
-                                            tr('The change could not be saved. Check your connection and try again.'),
-                                            type='warning')
                                 ui.button(
                                     tr('Open in Puzzle'), icon='extension',
                                     on_click=open_desk_in_puzzle
@@ -3739,412 +3770,320 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ).classes('text-sm').style('color: var(--text-secondary);')
 
                 # Two-panel flex row (same pattern as single-page view)
-                with ui.element('div').classes('reading-desk-panels').style(
+                ui.html(f'<style>{_RD_DOCUMENT_CSS}{_RD_IMAGES_CSS}</style>', sanitize=False)
+                # The catalogue (app_state), not the page's BrowseState: that has no meta_mgr,
+                # so the desk never learned a fragment's library and a Bodleian fragment
+                # named as PGP names it ("Bodl. MS heb. ...") was asked of NLI, which has
+                # no image of it.
+                rd_library_for = app_state.meta_mgr.get_library_for_id if getattr(app_state, 'meta_mgr', None) else None
+                rd_text = {}  # 'draw': redraws the text side alone (set below)
+                with ui.element('div').classes(
+                    'reading-desk-panels' + (' rd-document-mode' if rd_view is not None else '')
+                ).style(
                     'display: flex; flex-direction: row; gap: 16px; min-height: 70vh; width: 100%;'
                 ):
 
-                    # === LEFT PANE: Image Stack ===
-                    with ui.card().style('flex: 0 0 50%; min-height: 70vh; display: flex; flex-direction: column;'):
-                        ui.label(tr('Manuscript Images')).classes('text-sm font-semibold p-2 border-b').style(
-                            'color: var(--text-secondary); background: #1a1a1a; color: white; border-radius: 8px 8px 0 0;'
+                    # === Image side (web/pages/browse_desk_images.py): one image at a time
+                    # beside a filmstrip, or all images in one stack ===
+                    with ui.card().classes('rd-image-card').style('flex: 0 0 50%; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;'):
+                        render_image_pane(
+                            state.reading_desk_entries, state, document_text=rd_view is not None,
+                            text_per_fragment=rd_view in (None, VIEW_FRAGMENTS),
+                            current_shelfmark=page.shelfmark or '',
+                            library_for=rd_library_for,
+                            on_navigate=rd_navigate_to_fragment, on_remove=remove_from_desk,
+                            on_layout_change=update_content,
+                            # Another image: the text side alone is redrawn, not the desk
+                            # (a full redraw emptied the page and threw the reader to its top).
+                            on_image_change=lambda: rd_text['draw'](),
+                            on_arrange=open_desk_in_puzzle if WEB_PUZZLE_ENABLED else None,
+                            on_choice=_persist_reading_desk_state,
                         )
-                        with ui.scroll_area().classes('rd-image-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
-                            for frag_idx, entry in enumerate(state.reading_desk_entries):
-                                frag_sm = entry.get('shelfmark', '')
-                                frag_sid = entry.get('sys_id', '')
-                                frag_pages = entry.get('pages', [])
-                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
-
-                                # Fragment separator
-                                if frag_idx > 0:
-                                    ui.separator().classes('my-4')
-
-                                # Fragment header (clickable link to navigate)
-                                with ui.element('div').props(f'id="rd-img-frag-{frag_idx}"').classes('reading-desk-fragment'):
-                                    with ui.row().classes('items-center gap-2 p-2 w-full').style(
-                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
-                                    ):
-                                        ui.icon('description').classes('text-green-600')
-
-                                        def make_nav_handler(sm=frag_sm):
-                                            return lambda: rd_navigate_to_fragment(sm)
-
-                                        ui.label(frag_sm).classes(
-                                            'font-bold text-base cursor-pointer hover:underline'
-                                        ).style('color: var(--text-primary);').on('click', make_nav_handler())
-                                        if is_current_frag:
-                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
-                                        ui.element('div').classes('flex-grow')
-
-                                        def make_remove_img(sid=frag_sid):
-                                            return lambda: remove_from_desk(sid)
-
-                                        ui.button(
-                                            icon='close', on_click=make_remove_img()
-                                        ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
-
-                                # Oxford detection
-                                frag_library_code = ''
-                                if getattr(state, 'meta_mgr', None) and frag_sid:
-                                    try:
-                                        frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
-                                    except Exception:
-                                        frag_library_code = ''  # Library code lookup failed; use empty string
-                                frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
-
-                                if not frag_pages:
-                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
-                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
-
-                                # Render each page image with its own controls
-                                for pg_i, pg in enumerate(frag_pages):
-                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
-                                    pg_idx = max(0, pg_num - 1)
-                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
-                                    viewer_id = f'rd-viewer-{frag_idx}-{pg_i}'
-
-                                    # Image URL
-                                    if frag_is_oxford:
-                                        frag_img_url = get_oxford_direct_image_url(frag_sm, pg_idx)
-                                        if not frag_img_url:
-                                            frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
-                                    elif is_synthetic_sys_id(frag_sid):
-                                        # Phase 85 D-06: synthetic sys_ids have no NLI image source
-                                        frag_img_url = ''
-                                    else:
-                                        frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
-
-                                    # Page label
-                                    ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
-
-                                    # Per-image controls bar
-                                    with ui.row().classes('items-center gap-1 px-2 py-1').style(
-                                        'background: #1a1a1a; border-radius: 4px; margin: 0 4px;'
-                                    ):
-                                        ui.button(
-                                            icon='remove',
-                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdZoom('{vid}', -0.25)")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Zoom out'))
-                                        ui.html(f'<span id="{viewer_id}-zoom-label" style="color: white; font-size: 0.75rem; min-width: 36px; text-align: center;">100%</span>', sanitize=False)
-                                        ui.button(
-                                            icon='add',
-                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdZoom('{vid}', 0.25)")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Zoom in'))
-                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                        ui.button(
-                                            icon='rotate_left',
-                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdRotate('{vid}', -90)")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Rotate Left'))
-                                        ui.button(
-                                            icon='rotate_right',
-                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdRotate('{vid}', 90)")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Rotate Right'))
-                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                        ui.button(
-                                            icon='restart_alt',
-                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdResetView('{vid}')")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Reset View'))
-
-                                    # Per-image adjustment controls
-                                    with ui.row().classes('items-center gap-1 px-2 py-1').style(
-                                        'background: #1a1a1a; margin: 0 4px; border-top: 1px solid #333;'
-                                    ):
-                                        ui.icon('brightness_6').style('color: white; font-size: 0.85rem;').tooltip(tr('Brightness'))
-                                        _rd_b_sl = ui.slider(
-                                            min=-100, max=100, step=1, value=0,
-                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetBrightness('{vid}', {e.value})")
-                                        ).props('dark dense').classes('w-16')
-                                        ui.icon('contrast').style('color: white; font-size: 0.85rem;').tooltip(tr('Contrast'))
-                                        _rd_c_sl = ui.slider(
-                                            min=-100, max=100, step=1, value=0,
-                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetContrast('{vid}', {e.value})")
-                                        ).props('dark dense').classes('w-16')
-                                        ui.icon('timeline').style('color: white; font-size: 0.85rem;').tooltip(tr('Gamma'))
-                                        _rd_g_sl = ui.slider(
-                                            min=20, max=300, step=1, value=100,
-                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetGamma('{vid}', {e.value / 100})")
-                                        ).props('dark dense').classes('w-16')
-                                        ui.button(
-                                            icon='exposure',
-                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdToggleInvert('{vid}')")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Invert Colors'))
-                                        # Store refs for reset
-                                        _rd_b_ref, _rd_c_ref, _rd_g_ref = _rd_b_sl, _rd_c_sl, _rd_g_sl
-                                        def _rd_reset(vid=viewer_id, b_sl=_rd_b_ref, c_sl=_rd_c_ref, g_sl=_rd_g_ref):
-                                            b_sl.value = 0; c_sl.value = 0; g_sl.value = 100
-                                            ui.run_javascript(f"window.rdResetAdjustments('{vid}')")
-                                        ui.button(
-                                            icon='restart_alt',
-                                            on_click=_rd_reset
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Reset Image'))
-
-                                    # Image display area with zoom/drag support
-                                    safe_sid = frag_sid.replace("'", "\\'")
-                                    is_ox_js = 'true' if frag_is_oxford else 'false'
-                                    with ui.element('div').style(
-                                        'background: #1a1a1a; border-radius: 0 0 4px 4px; overflow: hidden; '
-                                        'display: flex; align-items: center; justify-content: center; '
-                                        'min-height: 350px; margin: 0 4px 8px 4px; position: relative;'
-                                    ):
-                                        ui.html(f'''
-                                            <img id="{viewer_id}"
-                                                 class="rd-zoomable"
-                                                 src="{frag_img_url}"
-                                                 style="max-height: 500px; max-width: 100%; object-fit: contain; cursor: grab; transition: none;"
-                                                 loading="lazy"
-                                                 draggable="false"
-                                                 onerror="
-                                                     if ({is_ox_js}) {{
-                                                         this.style.display='none';
-                                                     }} else {{
-                                                         var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
-                                                         if (this.src.indexOf('oxford_image')===-1) {{
-                                                             this.onerror=function(){{ this.style.display='none'; }};
-                                                             this.src=ox;
-                                                         }} else {{
-                                                             this.style.display='none';
-                                                         }}
-                                                     }}
-                                                 "
-                                            />
-                                        ''', sanitize=False)
 
                     # === RIGHT PANE: Text Stack ===
-                    with ui.card().style('flex: 1 1 auto; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;'):
-                        ui.label(tr('Transcriptions')).classes('text-sm font-semibold p-2 border-b').style(
-                            'color: var(--text-secondary);'
-                        )
-                        with ui.scroll_area().classes('rd-text-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
-                            for frag_idx, entry in enumerate(state.reading_desk_entries):
-                                frag_sm = entry.get('shelfmark', '')
-                                frag_sid = entry.get('sys_id', '')
-                                frag_pages = entry.get('pages', [])
-                                frag_sources = entry.get('sources', [])
-                                frag_pgp_doc = entry.get('pgp_doc', {})
-                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
+                    rd_text_card = ui.card().style('flex: 1 1 auto; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;')
 
-                                # Fragment separator
-                                if frag_idx > 0:
-                                    ui.separator().classes('my-4')
+                    def rd_draw_text():
+                        # With one image on show and one text per fragment, the text side is
+                        # that image's alone: its fragment, and its side of the fragment
+                        # (None: every fragment's whole text, as in the all-images view).
+                        rd_shown = shown_text_image(
+                            state.reading_desk_entries, state.reading_desk_selected_sources,
+                            document_text=rd_view is not None, current_shelfmark=page.shelfmark or '',
+                            can_arrange=WEB_PUZZLE_ENABLED, library_for=rd_library_for)
+                        rd_shown_frag = rd_shown['frag_idx'] if rd_shown else None
+                        rd_shown_page = rd_shown['page_index'] if rd_shown else None
+                        rd_text_card.clear()
+                        with rd_text_card:
+                            if rd_view is None:
+                                ui.label(tr('Transcriptions')).classes('text-sm font-semibold px-2').style(
+                                    'color: var(--text-secondary);'
+                                )
+                            else:
+                                # The document's own text, once; "By fragment" in its
+                                # controls brings back the stack below.
+                                render_document_text_panel(
+                                    rd_document, state, rd_view, update_content,
+                                    on_choice=_persist_reading_desk_state)
+                            if rd_view in (None, VIEW_FRAGMENTS):
+                                with ui.scroll_area().classes('rd-text-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
+                                    for frag_idx, entry in enumerate(state.reading_desk_entries):
+                                        if rd_shown_frag is not None and frag_idx != rd_shown_frag:
+                                            continue
+                                        frag_sm = entry.get('shelfmark', '')
+                                        frag_sid = entry.get('sys_id', '')
+                                        frag_pages = entry.get('pages', [])
+                                        frag_sources = entry.get('sources', [])
+                                        frag_pgp_doc = entry.get('pgp_doc', {})
+                                        is_current_frag = frag_sm.upper() == current_shelfmark_upper
 
-                                # Fragment header (clickable link)
-                                with ui.element('div').props(f'id="rd-text-frag-{frag_idx}"').classes('reading-desk-fragment'):
-                                    with ui.row().classes('items-center gap-2 p-2 w-full').style(
-                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
-                                    ):
-                                        ui.icon('description').classes('text-green-600')
+                                        # Fragment separator
+                                        if frag_idx > 0 and rd_shown_frag is None:
+                                            ui.separator().classes('my-4')
 
-                                        def make_nav_handler_text(sm=frag_sm):
-                                            return lambda: rd_navigate_to_fragment(sm)
+                                        # Fragment header (clickable link)
+                                        with ui.element('div').props(f'id="rd-text-frag-{frag_idx}"').classes('reading-desk-fragment'):
+                                            with ui.row().classes('items-center gap-2 p-2 w-full').style(
+                                                'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
+                                            ):
+                                                ui.icon('description').classes('text-green-600')
 
-                                        ui.label(frag_sm).classes(
-                                            'font-bold text-base cursor-pointer hover:underline'
-                                        ).style('color: var(--text-primary);').on('click', make_nav_handler_text())
-                                        if is_current_frag:
-                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
-                                        ui.element('div').classes('flex-grow')
+                                                def make_nav_handler_text(sm=frag_sm):
+                                                    return lambda: rd_navigate_to_fragment(sm)
 
-                                        def make_remove_text(sid=frag_sid):
-                                            return lambda: remove_from_desk(sid)
+                                                ui.label(frag_sm).classes(
+                                                    'font-bold text-base cursor-pointer hover:underline'
+                                                ).style('color: var(--text-primary);').on('click', make_nav_handler_text())
+                                                if is_current_frag:
+                                                    ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+                                                ui.element('div').classes('flex-grow')
 
-                                        ui.button(
-                                            icon='close', on_click=make_remove_text()
-                                        ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
+                                                def make_remove_text(sid=frag_sid):
+                                                    return lambda: remove_from_desk(sid)
 
-                                # Per-fragment version selector
-                                # Build source options for dropdown
-                                source_options = {}
-                                source_map = {}  # option_key -> source dict
-                                if frag_sources:
-                                    for src_i, src in enumerate(frag_sources):
-                                        doc_rel = src.get('doc_relation', '')
-                                        scholar = src.get('source_scholar', 'Unknown')
-                                        lang = src.get('language', '')
-                                        # FGP is a distinct provider — label it as such
-                                        # so it never reads as a PGP edition (FGP-07).
-                                        if source_provider(src) == 'fgp':
-                                            if source_relation_kind(src) == 'translation':
-                                                label = f"FGP {lang} {tr('Translation')}".replace('  ', ' ').strip()
-                                            else:
-                                                label = tr('FGP Transcription')
-                                            # Disambiguate the per-image navigable
-                                            # list (1r, 1v, 2r…) — one FGP row/image.
-                                            folio = src.get('folio_label')
-                                            if folio:
-                                                label = f"{label} · {folio}"
-                                        elif 'Edition' in doc_rel:
-                                            label = f"PGP Edition: {scholar}"
-                                        elif 'Translation' in doc_rel:
-                                            label = f"{lang} Translation: {scholar}"
-                                        else:
-                                            label = f"{doc_rel}: {scholar}"
-                                        key = f"src_{src_i}"
-                                        source_options[key] = label
-                                        source_map[key] = src
-                                    # FGP entries that read alike are numbered, as in
-                                    # the version menu (owner, 2026-10-27).
-                                    _fgp_keys = [k for k, s in source_map.items() if source_provider(s) == 'fgp']
-                                    for k, numbered in zip(_fgp_keys, number_repeated_labels(
-                                            [source_options[k] for k in _fgp_keys])):
-                                        source_options[k] = numbered
+                                                ui.button(
+                                                    icon='close', on_click=make_remove_text()
+                                                ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
-                                # Always add V0.8 as fallback
-                                source_options['v08'] = 'V0.8 (HTR)'
-
-                                # Default selection: first PGP edition if available, else first translation, else V0.8
-                                default_key = 'v08'
-                                for k, src in source_map.items():
-                                    if 'Edition' in (src.get('doc_relation') or ''):
-                                        default_key = k
-                                        break
-                                if default_key == 'v08':
-                                    for k, src in source_map.items():
-                                        if 'Translation' in (src.get('doc_relation') or ''):
-                                            default_key = k
-                                            break
-
-                                # Text containers for each page (for version switching)
-                                text_containers = {}
-
-                                if len(source_options) > 1:
-                                    with ui.row().classes('items-center gap-2 px-2 py-1'):
-                                        ui.icon('history', size='xs').classes('text-green-600')
-
-                                        def make_version_handler(f_sid=frag_sid, f_pages=frag_pages, s_map=source_map, t_containers=text_containers):
-                                            def on_change(e):
-                                                selected = e.value
-                                                state.reading_desk_selected_sources[f_sid] = selected
-                                                # Update text display for this fragment
-                                                src = s_map.get(selected)
-                                                if src and src.get('content'):
-                                                    content = src['content']
-                                                    is_translation = 'Translation' in (src.get('doc_relation') or '')
-                                                    is_english = src.get('language') == 'English'
-                                                    text_dir = 'ltr' if (is_translation and is_english) else 'rtl'
-                                                    text_align = 'left' if text_dir == 'ltr' else 'right'
-                                                    is_fgp = source_provider(src) == 'fgp'
-                                                    from shared.document_service import parse_transcription_sections
-                                                    sections = parse_transcription_sections(content)
-                                                    for pg_key, container in t_containers.items():
-                                                        container.clear()
-                                                        with container:
-                                                            pg_section = 'recto' if pg_key == 0 else 'verso'
-                                                            section_texts = sections.get(pg_section, [])
-                                                            if is_fgp:
-                                                                # FGP is a navigable per-image list; its image
-                                                                # numbering does not map to the fragment's
-                                                                # recto/verso, so show the full content once
-                                                                # (under the first page) — never side-split or
-                                                                # hidden on a later page (round-2 contract).
-                                                                section_text = content if pg_key == 0 else ''
-                                                            else:
-                                                                section_text = '\n\n'.join(section_texts) if section_texts else content
-                                                            if section_text:
-                                                                ui.label(section_text).style(
-                                                                    f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
-                                                                    f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
-                                                                    f'overflow-wrap: break-word; word-break: break-word; '
-                                                                    f'color: var(--text-primary);'
-                                                                )
-                                                            else:
-                                                                ui.label(tr('No text for this page')).classes('italic text-gray-400')
+                                        # Per-fragment version selector
+                                        # Build source options for dropdown
+                                        source_options = {}
+                                        source_map = {}  # option_key -> source dict
+                                        if frag_sources:
+                                            for src_i, src in enumerate(frag_sources):
+                                                doc_rel = src.get('doc_relation', '')
+                                                scholar = src.get('source_scholar', 'Unknown')
+                                                lang = src.get('language', '')
+                                                # FGP is a distinct provider — label it as such
+                                                # so it never reads as a PGP edition (FGP-07).
+                                                if source_provider(src) == 'fgp':
+                                                    if source_relation_kind(src) == 'translation':
+                                                        label = f"FGP {lang} {tr('Translation')}".replace('  ', ' ').strip()
+                                                    else:
+                                                        label = tr('FGP Transcription')
+                                                    # Disambiguate the per-image navigable
+                                                    # list (1r, 1v, 2r…) — one FGP row/image.
+                                                    folio = src.get('folio_label')
+                                                    if folio:
+                                                        label = f"{label} · {folio}"
+                                                elif 'Edition' in doc_rel:
+                                                    label = f"PGP Edition: {scholar}"
+                                                elif 'Translation' in doc_rel:
+                                                    label = f"{lang} Translation: {scholar}"
                                                 else:
-                                                    # V0.8 - use original page text
-                                                    for pg_key, container in t_containers.items():
-                                                        container.clear()
-                                                        with container:
-                                                            pg_text = ''
-                                                            for p in f_pages:
-                                                                p_num = p.p_num if hasattr(p, 'p_num') else 0
-                                                                if max(0, p_num - 1) == pg_key:
-                                                                    pg_text = p.text if hasattr(p, 'text') else ''
-                                                                    break
-                                                            if pg_text:
-                                                                ui.label(pg_text).style(
-                                                                    'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
-                                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
-                                                                    'overflow-wrap: break-word; word-break: break-word; '
-                                                                    'color: var(--text-primary);'
-                                                                )
-                                                            else:
-                                                                ui.label(tr('No text available')).classes('italic text-gray-400')
-                                            return on_change
+                                                    label = f"{doc_rel}: {scholar}"
+                                                key = f"src_{src_i}"
+                                                source_options[key] = label
+                                                source_map[key] = src
+                                            # FGP entries that read alike are numbered, as in
+                                            # the version menu (owner, 2026-10-27).
+                                            _fgp_keys = [k for k, s in source_map.items() if source_provider(s) == 'fgp']
+                                            for k, numbered in zip(_fgp_keys, number_repeated_labels(
+                                                    [source_options[k] for k in _fgp_keys])):
+                                                source_options[k] = numbered
 
-                                        ui.select(
-                                            options=source_options,
-                                            value=default_key,
-                                            on_change=make_version_handler()
-                                        ).props('dense outlined').classes('text-sm').style('min-width: 200px;')
+                                        # Always add V0.8 as fallback
+                                        source_options['v08'] = 'V0.8 (HTR)'
 
-                                if not frag_pages:
-                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
-                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
+                                        # Default selection: first PGP edition if available, else first translation, else V0.8
+                                        # "By fragment" beside a document's edition opens on what the
+                                        # fragment has of its own -- its FGP transcription, else the
+                                        # automatic one: the PGP sources are the document's, and as
+                                        # the default they were the same text under every fragment.
+                                        # They stay in the chooser.
+                                        default_key = 'v08'
+                                        _default_from = {
+                                            k: s for k, s in source_map.items()
+                                            if rd_view != VIEW_FRAGMENTS or source_provider(s) == 'fgp'}
+                                        for k, src in _default_from.items():
+                                            if 'Edition' in (src.get('doc_relation') or ''):
+                                                default_key = k
+                                                break
+                                        if default_key == 'v08':
+                                            for k, src in _default_from.items():
+                                                if 'Translation' in (src.get('doc_relation') or ''):
+                                                    default_key = k
+                                                    break
 
-                                # Determine initial text content based on default source selection
-                                initial_source = source_map.get(default_key)
-                                initial_sections = None
-                                initial_is_ltr = False
-                                initial_is_fgp = False
-                                if initial_source and initial_source.get('content'):
-                                    from shared.document_service import parse_transcription_sections
-                                    initial_sections = parse_transcription_sections(initial_source['content'])
-                                    is_translation = 'Translation' in (initial_source.get('doc_relation') or '')
-                                    is_english = initial_source.get('language') == 'English'
-                                    initial_is_ltr = is_translation and is_english
-                                    initial_is_fgp = source_provider(initial_source) == 'fgp'
+                                        # The reader's own choice for this fragment, while it is still on
+                                        # offer: the text side is redrawn for every image chosen, and the
+                                        # selector must not fall back to its default each time.
+                                        _stored_choice = state.reading_desk_selected_sources.get(frag_sid)
+                                        if _stored_choice in source_options:
+                                            default_key = _stored_choice
 
-                                # Render each page's text
-                                for pg_i, pg in enumerate(frag_pages):
-                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
-                                    pg_idx = max(0, pg_num - 1)
-                                    pg_text = pg.text if hasattr(pg, 'text') else ''
-                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+                                        # Text containers for each page (for version switching)
+                                        text_containers = {}
 
-                                    ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
+                                        if len(source_options) > 1:
+                                            with ui.row().classes('items-center gap-2 px-2 py-1'):
+                                                ui.icon('history', size='xs').classes('text-green-600')
 
-                                    # Text content container (replaceable by version selector)
-                                    tc = ui.column().classes('w-full px-3 py-2').style('min-width: 0;')
-                                    text_containers[pg_idx] = tc
+                                                def make_version_handler(f_sid=frag_sid, f_pages=frag_pages, s_map=source_map, t_containers=text_containers):
+                                                    def on_change(e):
+                                                        selected = e.value
+                                                        state.reading_desk_selected_sources[f_sid] = selected
+                                                        _persist_reading_desk_state()
+                                                        # Update text display for this fragment
+                                                        src = s_map.get(selected)
+                                                        if src and src.get('content'):
+                                                            content = src['content']
+                                                            is_translation = 'Translation' in (src.get('doc_relation') or '')
+                                                            is_english = src.get('language') == 'English'
+                                                            text_dir = 'ltr' if (is_translation and is_english) else 'rtl'
+                                                            text_align = 'left' if text_dir == 'ltr' else 'right'
+                                                            is_fgp = source_provider(src) == 'fgp'
+                                                            from shared.document_service import parse_transcription_sections
+                                                            sections = parse_transcription_sections(content)
+                                                            for pg_key, container in t_containers.items():
+                                                                container.clear()
+                                                                with container:
+                                                                    pg_section = 'recto' if pg_key == 0 else 'verso'
+                                                                    section_texts = sections.get(pg_section, [])
+                                                                    if is_fgp:
+                                                                        # FGP is a navigable per-image list; its image
+                                                                        # numbering does not map to the fragment's
+                                                                        # recto/verso, so show the full content once
+                                                                        # (under the first page) — never side-split or
+                                                                        # hidden on a later page (round-2 contract).
+                                                                        section_text = content if pg_key == min(t_containers) else ''
+                                                                    else:
+                                                                        section_text = '\n\n'.join(section_texts) if section_texts else content
+                                                                    if section_text:
+                                                                        ui.label(section_text).style(
+                                                                            f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                                            f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                            f'overflow-wrap: break-word; word-break: break-word; '
+                                                                            f'color: var(--text-primary);'
+                                                                        )
+                                                                    else:
+                                                                        ui.label(tr('No text for this page')).classes('italic text-gray-400')
+                                                        else:
+                                                            # V0.8 - use original page text
+                                                            for pg_key, container in t_containers.items():
+                                                                container.clear()
+                                                                with container:
+                                                                    pg_text = ''
+                                                                    for p in f_pages:
+                                                                        p_num = p.p_num if hasattr(p, 'p_num') else 0
+                                                                        if max(0, p_num - 1) == pg_key:
+                                                                            pg_text = p.text if hasattr(p, 'text') else ''
+                                                                            break
+                                                                    if pg_text:
+                                                                        ui.label(pg_text).style(
+                                                                            'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
+                                                                            'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                            'overflow-wrap: break-word; word-break: break-word; '
+                                                                            'color: var(--text-primary);'
+                                                                        )
+                                                                    else:
+                                                                        ui.label(tr('No text available')).classes('italic text-gray-400')
+                                                    return on_change
 
-                                    with tc:
-                                        # Show PGP source text if available and selected by default
-                                        display_text = pg_text
-                                        text_dir = 'rtl'
-                                        text_align = 'right'
+                                                ui.select(
+                                                    options=source_options,
+                                                    value=default_key,
+                                                    on_change=make_version_handler()
+                                                ).props('dense outlined').classes('text-sm').style('min-width: 200px;')
 
-                                        if initial_is_fgp:
-                                            # FGP: full content shown once (navigable per-image
-                                            # list; its image numbering does not map to the
-                                            # fragment's recto/verso, so no side split — round-2).
-                                            display_text = initial_source.get('content', '') if pg_idx == 0 else ''
-                                            if initial_is_ltr:
-                                                text_dir = 'ltr'
-                                                text_align = 'left'
-                                        elif initial_sections is not None:
-                                            pg_section = 'recto' if pg_idx == 0 else 'verso'
-                                            section_texts = initial_sections.get(pg_section, [])
-                                            if section_texts:
-                                                display_text = '\n\n'.join(section_texts)
-                                            elif pg_idx == 0 and not initial_sections.get('verso'):
-                                                # No markers, use full content for recto
-                                                display_text = initial_source.get('content', pg_text)
-                                            if initial_is_ltr:
-                                                text_dir = 'ltr'
-                                                text_align = 'left'
+                                        if not frag_pages:
+                                            frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
+                                                          type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
 
-                                        if display_text:
-                                            ui.label(display_text).style(
-                                                f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
-                                                f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
-                                                f'overflow-wrap: break-word; word-break: break-word; '
-                                                f'color: var(--text-primary);'
-                                            )
-                                        else:
-                                            ui.label(tr('No text available')).classes('italic text-gray-400')
+                                        # Determine initial text content based on default source selection
+                                        initial_source = source_map.get(default_key)
+                                        initial_sections = None
+                                        initial_is_ltr = False
+                                        initial_is_fgp = False
+                                        if initial_source and initial_source.get('content'):
+                                            from shared.document_service import parse_transcription_sections
+                                            initial_sections = parse_transcription_sections(initial_source['content'])
+                                            is_translation = 'Translation' in (initial_source.get('doc_relation') or '')
+                                            is_english = initial_source.get('language') == 'English'
+                                            initial_is_ltr = is_translation and is_english
+                                            initial_is_fgp = source_provider(initial_source) == 'fgp'
+
+                                        # Render each page's text
+                                        for pg_i, pg in enumerate(frag_pages):
+                                            pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
+                                            pg_idx = max(0, pg_num - 1)
+                                            pg_text = pg.text if hasattr(pg, 'text') else ''
+                                            if rd_shown_page is not None and pg_idx != rd_shown_page:
+                                                continue
+                                            pg_label = desk_page_label(pg_idx, len(frag_pages))
+
+                                            ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
+
+                                            # Text content container (replaceable by version selector)
+                                            tc = ui.column().classes('w-full px-3 py-2').style('min-width: 0;')
+                                            text_containers[pg_idx] = tc
+
+                                            with tc:
+                                                # Show PGP source text if available and selected by default
+                                                display_text = pg_text
+                                                text_dir = 'rtl'
+                                                text_align = 'right'
+
+                                                if initial_is_fgp:
+                                                    # FGP: full content shown once (navigable per-image
+                                                    # list; its image numbering does not map to the
+                                                    # fragment's recto/verso, so no side split — round-2).
+                                                    display_text = initial_source.get('content', '') if pg_idx == (rd_shown_page or 0) else ''
+                                                    if initial_is_ltr:
+                                                        text_dir = 'ltr'
+                                                        text_align = 'left'
+                                                elif initial_sections is not None:
+                                                    pg_section = 'recto' if pg_idx == 0 else 'verso'
+                                                    section_texts = initial_sections.get(pg_section, [])
+                                                    if section_texts:
+                                                        display_text = '\n\n'.join(section_texts)
+                                                    elif pg_idx == 0 and not initial_sections.get('verso'):
+                                                        # No markers, use full content for recto
+                                                        display_text = initial_source.get('content', pg_text)
+                                                    if initial_is_ltr:
+                                                        text_dir = 'ltr'
+                                                        text_align = 'left'
+
+                                                if display_text:
+                                                    ui.label(display_text).style(
+                                                        f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                        f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                        f'overflow-wrap: break-word; word-break: break-word; '
+                                                        f'color: var(--text-primary);'
+                                                    )
+                                                else:
+                                                    ui.label(tr('No text available')).classes('italic text-gray-400')
+
+                    rd_text['draw'] = rd_draw_text
+                    rd_draw_text()
 
                 # Inject per-image viewer JS (zoom/rotate/drag)
                 ui.run_javascript('''
-                    window.rdViewers = window.rdViewers || {};
+                    // This script runs with every redraw of the desk, which makes every image
+                    // anew, unzoomed, under ids that are used again (rd-viewer-<fragment>-<page>):
+                    // the views kept for the old ones go, or the first zoom or drag on a new
+                    // image would jump to where an old one had been left.
+                    window.rdViewers = {};
 
                     function rdInitState(viewerId) {
                         if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, brightness: 0, contrast: 0, gamma: 1.0, invert: false};
@@ -4227,36 +4166,52 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     };
 
                     // Initialize drag support for all rd-zoomable images
+                    // One pair of window listeners for every image, installed once per page:
+                    // the image being dragged is found by its id. (A pair per image, added at
+                    // each init and never removed, piled up as the filmstrip view redraws its
+                    // image on every thumbnail -- with the replaced <img> kept alive by them.)
+                    if (!window.rdDragBound) {
+                        window.rdDragBound = true;
+                        window.rdDragging = null;
+                        window.addEventListener('mousemove', function(e) {
+                            const id = window.rdDragging;
+                            if (!id) return;
+                            const state = window.rdViewers[id];
+                            const img = document.getElementById(id);
+                            if (!state || !img) { window.rdDragging = null; return; }
+                            state.x = e.clientX - state.startX;
+                            state.y = e.clientY - state.startY;
+                            img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                        });
+                        window.addEventListener('mouseup', function() {
+                            const id = window.rdDragging;
+                            if (!id) return;
+                            window.rdDragging = null;
+                            const state = window.rdViewers[id];
+                            if (state) state.isDragging = false;
+                            const img = document.getElementById(id);
+                            if (img) img.style.cursor = 'grab';
+                        });
+                    }
+
                     window.rdInitDrag = function(viewerId) {
                         const img = document.getElementById(viewerId);
                         if (!img || img.dataset.rdDragInit) return;
                         img.dataset.rdDragInit = 'true';
-                        const state = rdInitState(viewerId);
+                        rdInitState(viewerId);
                         img.style.cursor = 'grab';
                         img.ondragstart = (e) => e.preventDefault();
 
                         img.onmousedown = function(e) {
                             if (e.button !== 0) return;
                             e.preventDefault();
+                            const state = rdInitState(viewerId);
                             state.isDragging = true;
                             state.startX = e.clientX - state.x;
                             state.startY = e.clientY - state.y;
+                            window.rdDragging = viewerId;
                             img.style.cursor = 'grabbing';
                         };
-                        const moveHandler = function(e) {
-                            if (!state.isDragging) return;
-                            state.x = e.clientX - state.startX;
-                            state.y = e.clientY - state.startY;
-                            img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
-                        };
-                        const upHandler = function() {
-                            if (state.isDragging) {
-                                state.isDragging = false;
-                                img.style.cursor = 'grab';
-                            }
-                        };
-                        window.addEventListener('mousemove', moveHandler);
-                        window.addEventListener('mouseup', upHandler);
 
                         img.onwheel = function(e) {
                             e.preventDefault();
@@ -5827,14 +5782,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # NOTE (Codex MEDIUM #5): _restore_reading_desk_state is responsible for
             # fully-populated page/source hydration - restore_browse_snapshot only
             # returned the minimal dict for precedence resolution.
-            if not _restore_reading_desk_state():
-                # Safety net: fall through to normal page load when desk restore fails.
-                if initial_sys_id:
+            _restore_reading_desk_state()
+            if state.current_page is None:
+                # The desk is drawn around a current page and there is none yet, restored
+                # or not: load the page the address names, else the desk's first fragment
+                # (a blank /browse with a saved desk), and the desk comes up with it. With
+                # neither -- the restore failed and left nothing -- the welcome screen.
+                _desk_first = next((e.get('sys_id') for e in state.reading_desk_entries
+                                    if e.get('sys_id')), None)
+                if not initial_sys_id and _desk_first:
+                    state.sys_id = _desk_first
+                if initial_sys_id or _desk_first:
                     state.is_loading = True
                     update_content()
-                    # Cat-2: deferred init safety-net fallback - container must mount before async load.
+                    # Cat-2: deferred init - container must mount before async load.
                     asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
                 else:
+                    state.view_joined = False
                     update_content()
         elif action == 'shelfmark':
             # Shelfmark passed via URL param - auto-search on load.

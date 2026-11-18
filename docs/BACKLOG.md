@@ -1,6 +1,6 @@
 # GenizahSearch - Backlog
 
-> **Last Updated:** 2026-10-27 (GS-277 added: the owner's open question on editing an edition). 112 items.
+> **Last Updated:** 2026-11-18 (GS-294 added: the desktop Reading Desk's parity with the web's). 113 items.
 
 What is not an open defect: deferred defects, code debt, test gaps, ideas and extensions,
 and server or owner tasks. Same row form and the same ID space as
@@ -15,14 +15,14 @@ move one to the tracker by moving its row and changing its section to a priority
 |------|------|------|------|------|------|------|
 | Search | 0 | 5 | 0 | 7 | 0 | 12 |
 | Browse and viewer | 0 | 0 | 0 | 2 | 1 | 3 |
-| Desktop app | 2 | 12 | 1 | 8 | 0 | 23 |
+| Desktop app | 2 | 12 | 1 | 9 | 0 | 24 |
 | Website | 0 | 7 | 0 | 3 | 2 | 12 |
 | Discovery | 0 | 3 | 0 | 2 | 2 | 7 |
 | Accounts and community | 0 | 7 | 3 | 5 | 3 | 18 |
 | Data and sidecars | 2 | 0 | 0 | 0 | 2 | 4 |
 | Build, CI and tests | 0 | 6 | 24 | 0 | 0 | 30 |
 | Server and operations | 0 | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **4** | **40** | **28** | **27** | **13** | **112** |
+| **Total** | **4** | **40** | **28** | **28** | **13** | **113** |
 
 ## Deferred defects
 
@@ -182,6 +182,7 @@ move one to the tracker by moving its row and changing its section to a priority
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-294](ISSUE_DETAILS.md#gs-294) | Desktop Reading Desk: parity with the web's (a document's edition once, the image views, a join's assembled picture) | `genizah_app.py` (reading desk / joined view), `desktop/puzzle.py`; web: `web/pages/browse_desk_document.py`, `browse_desk_images.py`, `browse_desk_puzzle.py` | 2026-11-18 | ❌ Open |
 | [GS-237](ISSUE_DETAILS.md#gs-237) | Starting offline with a saved log-in shows you logged out | `desktop/supabase_corrections_client.py::_load_credentials` | 2026-09-27 | ❌ Open |
 | [GS-238](ISSUE_DETAILS.md#gs-238) | Right-click exclusions have no list and no undo short of New | `genizah_app.py::_exclude_word_search_result` | 2026-09-25 | ❌ Open |
 | [GS-239](ISSUE_DETAILS.md#gs-239) | Re-running a composition search from History uses the current Exclude Manuscripts list, not the one it ran with | `genizah_app.py::_add_comp_search_to_history`, `_restore_comp_search_from_state` | 2026-09-25 | ❌ Open |

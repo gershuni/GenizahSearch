@@ -4339,3 +4339,19 @@ in a review of the scholarly transcription filter; the rest predate it.
 Fix sketch: run the panel's rows through the same cascade the chips use (`_apply_manuscript_exclusions`
 → word-search → domain → printed/PGP/scholarly/library → measurements), with the panel's fields as
 one more step, in both Apply and Clear, and give the count line the same parts.
+
+## GS-294
+
+**Desktop Reading Desk: parity with the web's (a document's edition once, the image views, a join's assembled picture)** · idea · Desktop app · ❌ Open · opened 2026-11-18
+
+Where: `genizah_app.py` (reading desk / joined view), `desktop/puzzle.py`; web: `web/pages/browse_desk_document.py`, `browse_desk_images.py`, `browse_desk_puzzle.py`
+
+Owner, 2026-11-18, after the web Reading Desk was reworked: the desktop app should get the same.
+On the web a desk opened for a PGP document now shows that document's edition once (one selector
+over its own editions, translations apart) instead of once per fragment; the image side has three
+views (one image beside a strip of thumbnails, all images, the assembled picture of a saved join);
+and with one image on show the per-fragment text is that image's side alone and follows the
+thumbnail chosen. None of this exists on the desktop. The rule and the data are in shared-free web
+modules today (`document_desk`, `desk_images`, `find_joins`): the parts that are not NiceGUI would
+have to move to `shared/` first. The desktop's saved joins are not kept per visitor, so its lookup
+is simpler than the web's.

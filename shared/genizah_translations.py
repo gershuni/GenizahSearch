@@ -3714,6 +3714,24 @@ TRANSLATIONS.update({
     "Open in Reading Desk": "פתח בשולחן העיון",
     "Reading Desk": "שולחן עיון",
     "added to Reading Desk": "נוסף לשולחן העיון",
+    # Reading Desk, document mode: the document's text once (web/pages/browse_desk_document.py)
+    "By fragment": "לפי קטע",
+    # Reading Desk, image side (web/pages/browse_desk_images.py)
+    "One at a time": "תמונה אחת",
+    "All images": "כל התמונות",
+    "images": "תמונות",
+    "Image Adjustments": "התאמות תמונה",
+    # Reading Desk, the assembled picture of a join (web/pages/browse_desk_puzzle.py)
+    "Assembled": "צירוף",
+    "Looking for a saved join of these fragments…": "מחפש צירוף שמור של הקטעים…",
+    "No saved join of these fragments yet.": "עדיין אין צירוף שמור של הקטעים האלה.",
+    "Arrange in Puzzle": "סידור בפאזל",
+    "Assembling the picture…": "מרכיב את התמונה…",
+    "The picture could not be assembled.": "לא ניתן היה להרכיב את התמונה.",
+    "This join has too many fragments to show here. Open it in the Puzzle.": "בצירוף הזה יותר מדי קטעים להצגה כאן. פתחו אותו בפאזל.",
+    "Your saved join": "צירוף שמור שלך",
+    "Published by {}": "פורסם על ידי {}",
+    "{on} of this document's {total} fragments are on the desk": "בשולחן העיון {on} מתוך {total} קטעי המסמך",
 
     # --- Browse / image controls ---
     "Add Notes": "הוסף הערות",

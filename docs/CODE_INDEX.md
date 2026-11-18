@@ -2055,6 +2055,34 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `persist_browse_snapshot` (Line 154) — Serialize browse position and reading desk state to app.storage.user.
 - **Function** `clear_browse_snapshot` (Line 196) — Wipe browse snapshot keys.
 
+## web/pages/browse_desk_document.py
+
+The Reading Desk's document mode (2026-11-18): a PGP document's text shown once for the whole document, not per fragment. Tests: `tests/test_reading_desk_document.py`, `tests/render_smoke/test_reading_desk_document_render_smoke.py`.
+
+- **Function** `document_desk` — for the document a desk was opened for and the fragments now on it: whether the sidecar knows the document, whether every fragment on the desk is one of its own (`whole`), and the document's own editions and translations (never another document's)
+- **Function** `document_view` — the text view: edition, translation, one text per fragment, or None when the per-fragment desk stays (no document, an outside fragment, no text)
+- **Function** `chosen_source` — the reader's edition or translation if it is still one of the document's, else the first
+- **Function** `is_other_desk` — a desk opened for a document that now holds a fragment from outside it (titled "Reading Desk" again)
+- **Function** `render_document_text_panel` — the view toggle, one selector, the attribution and the whole text; choices live in `state.reading_desk_selected_sources` under the `__document_*__` keys
+
+## web/pages/browse_desk_images.py
+
+The Reading Desk's image side (2026-11-18): one image at a time beside a filmstrip, or all images in one stack. Tests: `tests/render_smoke/test_reading_desk_document_render_smoke.py`.
+
+- **Function** `desk_images` — every page image of every fragment on the desk, in desk order (url, Oxford fallback, viewer id, label)
+- **Function** `image_view` — the reader's view, else one at a time beside a document's edition and all images on any other desk
+- **Function** `shown_image` — the image on show in the one-at-a-time view (the reader's, else the fragment they came from, else the first)
+- **Function** `page_label` — Recto/Verso for a fragment of one leaf, a number beyond that
+- **Function** `render_image_pane` — the view switcher, then the filmstrip view or the stack; one compact toolbar per image, the adjustments behind one button
+
+## web/pages/browse_desk_puzzle.py
+
+The Reading Desk's third image view (2026-11-18): the assembled picture of a saved join of the fragments on the desk. Read-only; arranging stays in the Fragment Puzzle.
+
+- **Function** `find_joins` — BLOCKING; the visitor's own saved joins (through `web/saved_joins.py`) and the published joins holding at least two of the desk's fragments, best first; either half may fail alone
+- **Function** `own_picture_js` — the browser asks `POST /api/puzzle_export` for the picture of the visitor's own join and keeps it for the page's life
+- **Function** `render_join_view` — the lookup off the event loop, then the picture with the image toolbar and "Open in Puzzle", a chooser when there are several, or "Arrange in Puzzle" when there is none
+
 ## web/pages/browse_enrichment.py
 
 - **Class** `BrowsePageRefs` (Line 33) — UI element references and callbacks needed by extracted browse_enrichment functions.
