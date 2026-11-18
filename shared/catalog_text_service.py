@@ -82,11 +82,13 @@ DRIFT_KEYS = (
 )
 
 
-def catalog_text_enabled() -> bool:
-    """The ``CATALOG_TEXT_SEARCH_ENABLED`` flag, read on every call (default OFF)."""
+def catalog_text_enabled(default: bool = False) -> bool:
+    """The ``CATALOG_TEXT_SEARCH_ENABLED`` flag, read on every call. Unset, it is *default*:
+    OFF for the website (decision 0004: the file goes up before the flag), ON for the desktop
+    app, whose installer carries the file (plan D5; desktop/catalog_search.py)."""
     value = os.environ.get("CATALOG_TEXT_SEARCH_ENABLED")
     if value is None:
-        return False
+        return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 

@@ -20,13 +20,27 @@ if os.environ.get("GENIZAH_SKIP_SIDECAR_CHECK") != "1":
             "GenizahSearchPro.spec: refusing to build -- see the sidecar check above. "
             "Set GENIZAH_SKIP_SIDECAR_CHECK=1 only if you know what will ship."
         )
+    # The catalogue text search's file, checked here for the same reason: a copy the reader
+    # refuses would ship a Catalog mode whose every search finds nothing. The gate reads the
+    # whole file (a quick_check and a sample re-keyed): a few minutes.
+    _catalog = subprocess.run(
+        [sys.executable, os.path.join("scripts", "verify_catalog_text_sidecar.py"),
+         "--db", os.path.join("catalog_data", "catalog_text.db"), "--rows-from-meta"],
+        cwd=os.path.abspath(os.getcwd()),
+    )
+    if _catalog.returncode != 0:
+        raise SystemExit(
+            "GenizahSearchPro.spec: refusing to build -- see the catalogue file check above "
+            "(build it with python scripts/build_catalog_text_sidecar.py). "
+            "Set GENIZAH_SKIP_SIDECAR_CHECK=1 only if you know what will ship."
+        )
 
 # WR-05: hebrew_sample.pdf (6.3 MB) was shipped in every production installer
 # even though it is only used by tests/test_local_pyinstaller_smoke.py
 # (@pytest.mark.packaging — release CI only).  Removed from production datas;
 # the packaging smoke test is responsible for adding the fixture to its own
 # on-the-fly build when needed.
-datas = [('icon.ico', '.'), ('Help.html', '.'), ('oxford_full_db.json', '.'), ('libraries.csv', '.'), ('ie_volume_map.json', '.'), ('bodleian_master_index.csv', '.'), ('shared_export_utils.py', '.'), ('shared\\export_utils.py', 'shared'), ('shared', 'shared'), ('libraries_translations.db', '.'), ('fist_data\\fjms_enrichment.db', 'fist_data'), ('fist_data\\visual_similarity.db', 'fist_data'), ('fist_data\\vs_manifest.txt', 'fist_data'), ('nli_data\\nli_crossref.db', 'nli_data'), ('pgp_data\\pgp.db', 'pgp_data'), ('fgp_data\\fgp_transcriptions.db', 'fgp_data')]
+datas = [('icon.ico', '.'), ('Help.html', '.'), ('oxford_full_db.json', '.'), ('libraries.csv', '.'), ('ie_volume_map.json', '.'), ('bodleian_master_index.csv', '.'), ('shared_export_utils.py', '.'), ('shared\\export_utils.py', 'shared'), ('shared', 'shared'), ('libraries_translations.db', '.'), ('fist_data\\fjms_enrichment.db', 'fist_data'), ('fist_data\\visual_similarity.db', 'fist_data'), ('fist_data\\vs_manifest.txt', 'fist_data'), ('nli_data\\nli_crossref.db', 'nli_data'), ('pgp_data\\pgp.db', 'pgp_data'), ('fgp_data\\fgp_transcriptions.db', 'fgp_data'), ('catalog_data\\catalog_text.db', 'catalog_data')]
 binaries = []
 hiddenimports = ['tantivy', 'numpy', 'PIL', 'fitz', 'pymupdf', 'openpyxl', 'defusedxml']
 tmp_ret = collect_all('tantivy')

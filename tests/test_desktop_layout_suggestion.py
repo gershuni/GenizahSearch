@@ -56,6 +56,11 @@ class _Window(QWidget):
         self._run_seq = 0
         self.is_searching = False
         self.searches = []
+        self.catalog_offers = []
+
+    def _offer_catalog_count(self, run_id, query):
+        """The catalogue's count, which follows when no "Did you mean" is shown (PR #48): recorded."""
+        self.catalog_offers.append((run_id, query))
 
     def finished_zero(self, query, text_search=True):
         """What start_search and on_search_finished do for a run that found nothing."""
@@ -152,6 +157,7 @@ def test_nothing_asked_when_the_query_spells_no_hebrew(query):
     w.finished_zero(query)
     assert w.searcher.asked == []
     assert w.layout_suggestion_label.isHidden()
+    assert w.catalog_offers == [(1, query)]       # the catalogue's count is offered instead
 
 
 def test_nothing_offered_after_a_search_that_was_not_a_text_search():
@@ -180,6 +186,7 @@ def test_no_check_without_the_engines_words_occur():
     w.searcher = object()                                    # an engine without the check
     w.finished_zero("dcuk")
     assert w.layout_suggestion_label.isHidden()
+    assert w.catalog_offers == [(1, "dcuk")]
 
 
 class _ZeroResultHost:

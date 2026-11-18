@@ -329,7 +329,7 @@ class SearchThread(PausableSearchMixin, QThread):
     # was not open yet (desktop/editions_index.py builds it in the background): the
     # results are the automatic transcriptions' alone. Emitted just before results_signal.
     editions_signal = pyqtSignal(bool)
-    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0, sources=None):
+    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0, sources=None, catalog_options=None):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
         self.exclude_words = exclude_words
@@ -340,6 +340,9 @@ class SearchThread(PausableSearchMixin, QThread):
         # Editions plan D1: 'all' / 'editions' / 'automatic'; None is today's search and
         # is not passed on (a searcher that is not the real engine takes no `sources`).
         self.sources = sources
+        # A catalogue search's switches (mode 'Catalog'); None for every other mode, and
+        # then not passed on (a searcher that is not the real engine takes no catalog_options).
+        self.catalog_options = catalog_options
         self._init_pause_support(run_id)
 
     def run(self):
@@ -355,6 +358,8 @@ class SearchThread(PausableSearchMixin, QThread):
             def phase_cb(phase):
                 self.phase_signal.emit(str(phase))
             extra = {} if self.sources is None else {'sources': self.sources}
+            if self.catalog_options is not None:
+                extra['catalog_options'] = self.catalog_options
             # Stop is also honoured between native match calls of engine-generated
             # patterns (stdlib re cannot be interrupted mid-call); their
             # InterruptedError takes the same paths as a progress checkpoint's.

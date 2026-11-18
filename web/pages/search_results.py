@@ -708,16 +708,9 @@ def catalogue_source_text(result) -> str:
     """Where a catalogue search's row found its words, in the reader's language: "FJMS Catalog ·
     Free Description · automatic translation", "PGP description", "Library catalogue title",
     and "Fuzzy" when it was found only through a near spelling (catalogue plan §4.3, §4.7). '' for
-    any other row."""
-    info = result.get('catalogue') if isinstance(result, dict) else None
-    if not info:
-        return ''
-    from shared.catalog_text_rows import source_label_parts
-    parts = [tr(p) for p in source_label_parts(info.get('source', ''), info.get('field', ''),
-                                                bool(info.get('automatic')))]
-    if info.get('near'):
-        parts.append(tr('Fuzzy'))
-    return ' · '.join(parts)
+    any other row. The desktop's Source column says the same (shared/catalog_text_rows.py)."""
+    from shared.catalog_text_rows import source_label
+    return source_label(result, tr)
 
 
 def _render_catalogue_source(result):

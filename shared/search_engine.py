@@ -4263,12 +4263,13 @@ class SearchEngine:
         """A catalogue text search's rows (shared/catalog_text_rows.py), in the catalogue's rank
         order. The first row carries ``catalogue_search``: the near spellings searched and the
         exact count. Rows past ``CATALOG_MAX_ROWS`` are cut, and said to be (the cut-off signal),
-        except for *ids_only* (a search-within completing), which gets every row."""
+        except for *ids_only* (a search-within completing), which gets every match as a light id
+        row, with no card or snippet."""
         from shared.catalog_text_rows import CATALOG_MAX_ROWS, catalog_search_rows
         self._clear_search_state()
         rows, info = catalog_search_rows(query_str, catalog_options, self.meta_mgr, restrict_sys_ids,
                                          progress_callback=progress_callback,
-                                         max_rows=10 ** 9 if ids_only else CATALOG_MAX_ROWS)
+                                         max_rows=CATALOG_MAX_ROWS, ids_only=ids_only)
         if info['capped']:
             _note_search_cutoff(capped=True)
         if rows:
@@ -4300,6 +4301,8 @@ class SearchEngine:
         My Library only), the search is today's. Previews are off when editions are read.
         """
         if mode == 'Catalog':
+            if corpus_scope == 'local':
+                return []   # My Library has no catalogue records
             return self._execute_catalog_search(query_str, catalog_options, restrict_sys_ids,
                                                 progress_callback, ids_only=ids_only)
         from shared.editions_search import SOURCES_ALL, SOURCES_AUTOMATIC, normalize_sources

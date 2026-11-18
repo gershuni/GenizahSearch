@@ -11,12 +11,9 @@ refuses ``search_mode='catalog'``.
 """
 from __future__ import annotations
 
-#: The search page's catalogue switches, explained (English keys; shared/genizah_translations.py).
-CATALOG_NEAR_TOOLTIP = ("Fuzzy search: in Hebrew, a ו or י added or dropped (כתבה for כתובה); "
-                        "in Latin letters, one letter different in words of five letters or more, two in "
-                        "words of nine or more (Saadya for Saadia)")
-CATALOG_TRANSLATIONS_TOOLTIP = ("Also search the automatic translations of the catalogue records "
-                                "(English to Hebrew and Hebrew to English)")
+# The switches' tooltips are shared with the desktop (shared/catalog_text_rows.py).
+from shared.catalog_text_rows import CATALOG_NEAR_TOOLTIP, CATALOG_TRANSLATIONS_TOOLTIP  # noqa: E402,F401
+
 #: How many of the near spellings a search added the line under the count names.
 CATALOG_NEAR_FORMS_SHOWN = 8
 

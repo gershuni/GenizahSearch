@@ -601,7 +601,8 @@ def test_the_choice_is_laid_out_saved_and_restored():
     assert "self.sources_label = QLabel(tr('Transcriptions') + ':')" in tab
     start = _function_source("start_search")
     assert "_run_sources = self._search_sources()" in start
-    assert start.count("sources=_run_sources)") == 2          # the thread, and the step's params
+    # The thread, and the step's params (each also carries the catalogue switches since PR 3).
+    assert start.count("sources=_run_sources, catalog_options=_run_catalog") == 2
     assert "'search_sources': getattr(self, '_search_sources_choice', 'all')" in _function_source("_save_session")
     assert "_restore_sources_choice(self, reg.get('search_sources', 'all'))" in \
         _function_source("_apply_persistent_session_preferences")

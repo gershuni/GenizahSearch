@@ -14,6 +14,7 @@ SIDECARS = [
     "pgp_data/pgp.db",
     "nli_data/nli_crossref.db",
     "fgp_data/fgp_transcriptions.db",
+    "catalog_data/catalog_text.db",
 ]
 
 

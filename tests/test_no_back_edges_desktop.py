@@ -104,6 +104,8 @@ DESKTOP_MODULES = [
     "desktop/editions_index.py",
     # 2026-11-16: a search hit opens on its scholarly transcription, its match marked.
     "desktop/edition_view.py",
+    # 2026-11-18: the search mode combo's rows and the catalogue text search.
+    "desktop/catalog_search.py",
 ]
 
 # Compound statement types whose bodies run at import time

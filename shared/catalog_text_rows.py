@@ -70,6 +70,30 @@ def source_label_parts(source: str, field: str, automatic: bool) -> list[str]:
     return parts
 
 
+#: The catalogue switches, explained (English keys; shared/genizah_translations.py), on both apps.
+CATALOG_NEAR_TOOLTIP = ("Fuzzy search: in Hebrew, a ו or י added or dropped (כתבה for כתובה); "
+                        "in Latin letters, one letter different in words of five letters or more, two in "
+                        "words of nine or more (Saadya for Saadia)")
+CATALOG_TRANSLATIONS_TOOLTIP = ("Also search the automatic translations of the catalogue records "
+                                "(English to Hebrew and Hebrew to English)")
+#: The tag of a result found only through a near spelling: the text search's own word for it.
+NEAR_LABEL = "Fuzzy"
+
+
+def source_label(row: Any, translate=lambda s: s) -> str:
+    """A catalogue row's source line in the reader's language, its pieces joined by " · ":
+    "FJMS Catalog · Free Description · automatic translation", and "Fuzzy" when it was found
+    only through a near spelling. '' for a row of any other search. *translate* is the app's tr."""
+    info = row.get("catalogue") if isinstance(row, dict) else None
+    if not info:
+        return ""
+    parts = [translate(p) for p in source_label_parts(info.get("source", ""), info.get("field", ""),
+                                                      bool(info.get("automatic")))]
+    if info.get("near"):
+        parts.append(translate(NEAR_LABEL))
+    return " · ".join(parts)
+
+
 def near_forms_for_display(forms: Iterable[str]) -> list[str]:
     """Near spellings as a reader writes them (Hebrew final letters restored)."""
     return [display_form(f) for f in forms]
@@ -97,16 +121,23 @@ def _display(meta_mgr: Any, sys_id: str) -> dict:
 
 def catalog_search_rows(query: str, options: Optional[dict], meta_mgr: Any,
                         restrict_sys_ids: Optional[set] = None, service: Any = None,
-                        progress_callback=None, max_rows: int = CATALOG_MAX_ROWS) -> tuple[list[dict], dict]:
+                        progress_callback=None, max_rows: int = CATALOG_MAX_ROWS,
+                        ids_only: bool = False) -> tuple[list[dict], dict]:
     """The rows of a catalogue search, and what the search says about them:
     ``{'total': every matching manuscript (after the restriction), 'capped': rows were cut at
-    max_rows, 'near_forms': the near spellings searched (as written), 'available': the service is
-    served}``. Never raises for a bad query; an unavailable service answers no rows."""
+    max_rows, 'near_forms': the near spellings searched (as written), 'available': the file is open
+    and checked}``. Never raises for a bad query; a service that is not ready answers no rows. Whether
+    the search is offered at all (the flag) is the surfaces' question: web/catalog_assets.py, the
+    API's catalog_unavailable, desktop/catalog_search.py.
+
+    *ids_only* (a search-within completing its step): every match, uncut, as a light row -- the
+    manuscript's id, as the text modes' id rows carry it -- with no card, record text or snippet,
+    so a broad word costs one row per manuscript and no more (Codex review of PR #47)."""
     from shared.catalog_text_service import get_catalog_text_service
 
     opts = catalog_options(options)
     service = service or get_catalog_text_service()
-    info = {"total": 0, "capped": False, "near_forms": [], "available": bool(service.is_available())}
+    info = {"total": 0, "capped": False, "near_forms": [], "available": bool(service.is_ready())}
     if not info["available"]:
         return [], info
     result = service.search(query, include_translations=opts["include_translations"], limit=None,
@@ -117,6 +148,10 @@ def catalog_search_rows(query: str, options: Optional[dict], meta_mgr: Any,
     hits = [h for h in result.hits
             if (restrict_sys_ids is None or h.sys_id in restrict_sys_ids) and _known(meta_mgr, h.sys_id)]
     total = len(hits)
+    info["total"] = total
+    if ids_only:
+        return [{"uid": "", "display": {"id": hit.sys_id, "source": ""}, "metadata_only": True}
+                for hit in hits], info
     info["capped"] = total > max_rows
     kept: list[tuple[Any, dict]] = []
     for i, hit in enumerate(hits[:max_rows]):
@@ -140,5 +175,4 @@ def catalog_search_rows(query: str, options: Optional[dict], meta_mgr: Any,
                 "automatic": hit.automatic, "near": hit.near, "exact": hit.exact,
             },
         })
-    info["total"] = total
     return rows, info

@@ -176,12 +176,36 @@ def verify(db: str, expect_rows: int, sample: int = 2000, seed: int = 20261105,
     return problems
 
 
+def _meta_rows(db: str):
+    """``meta.rows_total`` of *db* as an int, or None when it cannot be read."""
+    try:
+        con = sqlite3.connect(f"file:{Path(db).resolve().as_posix()}?mode=ro", uri=True)
+        try:
+            row = con.execute("SELECT value FROM meta WHERE key = 'rows_total'").fetchone()
+        finally:
+            con.close()
+        return int(row[0]) if row and str(row[0]).isdigit() else None
+    except (sqlite3.Error, OSError, ValueError):
+        return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--db", required=True)
-    ap.add_argument("--expect-rows", type=int, required=True)
+    rows = ap.add_mutually_exclusive_group(required=True)
+    rows.add_argument("--expect-rows", type=int)
+    # The desktop build (build_app.bat): the number the file's own meta records stands in for one
+    # given by hand; every other check still runs. A deploy names the number it expects.
+    rows.add_argument("--rows-from-meta", action="store_true",
+                      help="expect the row count the file's meta records (the installer build)")
     ap.add_argument("--sample", type=int, default=2000, help="records whose keys are re-checked (0 = all)")
     args = ap.parse_args(argv)
+    if args.rows_from_meta:
+        args.expect_rows = _meta_rows(args.db)
+        if args.expect_rows is None:
+            print(f"FAIL: {args.db} has no readable meta.rows_total")
+            print("RESULT: FAIL (1 problem(s))")
+            return 1
     problems = verify(args.db, args.expect_rows, sample=args.sample, canaries=CANARIES)
     if problems:
         for problem in problems:

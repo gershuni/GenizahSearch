@@ -21,6 +21,15 @@ echo Checking the sidecar is fit to ship...
 python scripts\check_shipping_sidecar.py
 if errorlevel 1 exit /b 1
 
+REM The catalogue text search's file (catalogue plan D5: the installer carries it, about 190 MB
+REM compressed). Built by scripts\build_catalog_text_sidecar.py from the same FJMS, PGP and
+REM libraries files this installer ships. Its gate runs inside GenizahSearchPro.spec, so a direct
+REM PyInstaller run checks it too; this only says early that the file is missing.
+if not exist catalog_data\catalog_text.db (
+    echo catalog_data\catalog_text.db is missing: run python scripts\build_catalog_text_sidecar.py first.
+    exit /b 1
+)
+
 REM Build from the CHECKED-IN spec, never from command-line flags.
 REM Command-line PyInstaller regenerates GenizahSearchPro.spec on every run and
 REM strips the maintained collect_all() calls for pymupdf / zstandard / lxml plus

@@ -52,6 +52,17 @@ def test_main_passes_and_fails_by_exit_code(sidecar, monkeypatch):
     assert gate.main(["--db", str(sidecar), "--expect-rows", str(_rows(sidecar) + 1)]) == 1
 
 
+def test_the_installer_build_takes_the_count_from_the_files_meta(sidecar, tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, "CANARIES", FIXTURE_CANARIES)
+    assert gate.main(["--db", str(sidecar), "--rows-from-meta"]) == 0
+    # The other checks still run: meta and records disagreeing fails.
+    lying = _damaged(sidecar, tmp_path, "UPDATE meta SET value = '1' WHERE key = 'rows_total'")
+    assert gate.main(["--db", str(lying), "--rows-from-meta"]) == 1
+    assert gate.main(["--db", str(tmp_path / "absent.db"), "--rows-from-meta"]) == 1
+    with pytest.raises(SystemExit):
+        gate.main(["--db", str(sidecar)])     # one of the two is required
+
+
 def test_a_missing_or_empty_file_fails(tmp_path):
     assert gate.verify(str(tmp_path / "absent.db"), 1)
     empty = tmp_path / "empty.db"

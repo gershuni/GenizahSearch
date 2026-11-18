@@ -113,9 +113,8 @@ def test_rows_past_the_cap_are_cut_and_said_to_be(service):
     assert _ids(rows) == [A, C] and info["capped"]
 
 
-def test_an_unavailable_service_answers_nothing(sidecar, monkeypatch):
-    monkeypatch.delenv("CATALOG_TEXT_SEARCH_ENABLED", raising=False)
-    service = CatalogTextService(db_path=str(sidecar))
+def test_a_service_that_is_not_ready_answers_nothing(tmp_path):
+    service = CatalogTextService(db_path=str(tmp_path / "absent.db"))
     try:
         assert catalog_search_rows("כתובה", None, _Meta(), service=service) == (
             [], {"total": 0, "capped": False, "near_forms": [], "available": False})
@@ -205,6 +204,28 @@ def test_the_catalog_mode_says_when_it_cut_rows(service, monkeypatch):
     # A search-within completing gets every row.
     rows = _engine(_Meta()).execute_search("כתובה", "Catalog", 0, ids_only=True)
     assert len(rows) == 3 and not consume_last_search_cutoff().get("capped")
+
+
+def test_a_search_within_completing_gets_light_id_rows_only(service, monkeypatch):
+    """Codex review of PR #47: completing a step past the cap read every match's card, record
+    text and snippet. Its rows are now the manuscript ids only, every one, in rank order."""
+    from shared.editions_search import result_sys_ids
+
+    class _NoCards(_Meta):
+        def get_meta_for_id(self, sys_id):
+            raise AssertionError("an id row reads no card")
+
+    def _no_snippets(*_args, **_kwargs):
+        raise AssertionError("an id row builds no snippet")
+
+    monkeypatch.setattr(service, "snippets", _no_snippets)
+    rows, info = catalog_search_rows("כתובה", None, _NoCards(), service=service, max_rows=1, ids_only=True)
+    assert _ids(rows) == [A, C, B] and info["total"] == 3 and not info["capped"]
+    assert all(set(r) == {"uid", "display", "metadata_only"} for r in rows)
+    assert result_sys_ids(rows) == {A, B, C}
+    rows, info = catalog_search_rows("כתובה", None, _NoCards(), service=service, restrict_sys_ids={B},
+                                     ids_only=True)
+    assert _ids(rows) == [B] and info["total"] == 1
 
 
 def test_a_catalog_search_where_it_is_not_served_answers_nothing(monkeypatch, tmp_path):

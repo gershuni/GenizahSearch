@@ -67,6 +67,11 @@ from desktop.single_instance import (
 )
 from desktop.qthread_exit import settle_running_threads
 from desktop.editions_index import EditionsIndex
+from desktop.catalog_search import (MODE_INDEX_CATALOG, CATALOG_NEAR_TOOLTIP, CATALOG_TRANSLATIONS_TOOLTIP,
+                                    CatalogCountWorker, catalog_offered, catalog_options as _catalog_options,
+                                    combo_index as _mode_combo_index, engine_mode as _combo_engine_mode,
+                                    source_text as _catalog_source_text, step_mode as _combo_step_mode,
+                                    telemetry_mode as _combo_telemetry_mode)
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
@@ -6346,6 +6351,11 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Responsa (R)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
         self.MODE_RESPONSA = 2
         self.MODE_PGP_TAGS = 7
+        # The catalogue text search (desktop/catalog_search.py): appended at index 8, where the
+        # installer put its file; no other row moves.
+        self._catalog_offered = catalog_offered()
+        if self._catalog_offered:
+            self.mode_combo.addItem(tr("Catalog") + " (%)")
         row1.addWidget(self.mode_combo)
 
         # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
@@ -6814,6 +6824,21 @@ class GenizahGUI(QMainWindow):
         # Initially hidden (shown when Responsa mode selected)
         self.responsa_sub_row.setVisible(False)
 
+        # --- Catalogue switches (visible only in Catalog mode; catalogue plan §4.7, D2) ---
+        self.catalog_sub_row = QWidget()
+        catalog_sub_layout = QHBoxLayout(self.catalog_sub_row)
+        catalog_sub_layout.setContentsMargins(0, 2, 0, 2)
+        catalog_sub_layout.setSpacing(12)
+        self.chk_catalog_near = QCheckBox(tr("Fuzzy search"))
+        self.chk_catalog_near.setToolTip(tr(CATALOG_NEAR_TOOLTIP))
+        catalog_sub_layout.addWidget(self.chk_catalog_near)
+        self.chk_catalog_translations = QCheckBox(tr("Automatic translations"))
+        self.chk_catalog_translations.setChecked(True)
+        self.chk_catalog_translations.setToolTip(tr(CATALOG_TRANSLATIONS_TOOLTIP))
+        catalog_sub_layout.addWidget(self.chk_catalog_translations)
+        catalog_sub_layout.addStretch()
+        self.catalog_sub_row.setVisible(False)
+
         # Lazily load PGP tags in background
         self._pgp_tags_worker = PGPTagsWorker()
         self._pgp_tags_worker.finished.connect(self._on_pgp_tags_loaded)
@@ -6822,10 +6847,11 @@ class GenizahGUI(QMainWindow):
         top_layout.addWidget(self.search_row1_container)
         top_layout.addWidget(self.search_row2)
         top_layout.addWidget(self.responsa_sub_row)
+        top_layout.addWidget(self.catalog_sub_row)
         # Tab in the order the rows show (right to left in Hebrew), not the order the
         # widgets were parented: Gap and Focus Search are inserted into row 1 late, and
         # Tab skipped them (desktop/widgets/tab_order.py).
-        chain_layouts(row1, row2, responsa_sub_layout)
+        chain_layouts(row1, row2, responsa_sub_layout, catalog_sub_layout)
 
         # Pre-search filter chip bar (Phase 45-03)
         self.filter_chip_bar = QWidget()
@@ -18493,6 +18519,8 @@ class GenizahGUI(QMainWindow):
         # Show/hide Responsa sub-options based on mode
         if hasattr(self, 'responsa_sub_row'):
             self.responsa_sub_row.setVisible(is_responsa)
+        if hasattr(self, 'catalog_sub_row'):
+            self.catalog_sub_row.setVisible(index == MODE_INDEX_CATALOG)
 
 
         # PGP Tags mode: hide row1, show tag combo, hide search params
@@ -18764,6 +18792,7 @@ class GenizahGUI(QMainWindow):
         ('/', 'Regex'),
         ('$', 'Title'),
         ('#', 'Shelfmark'),
+        ('%', 'Catalog'),     # only where the catalogue is offered (desktop/catalog_search.py)
     ]
 
     def _on_query_text_changed(self):
@@ -18771,6 +18800,8 @@ class GenizahGUI(QMainWindow):
         text = self.query_input.text()
         # Check for shortcut prefix followed by space
         for prefix, target_mode in self._SHORTCUT_PREFIXES:
+            if target_mode == 'Catalog' and not getattr(self, '_catalog_offered', False):
+                continue    # % is no shortcut where the catalogue is not installed
             if text.startswith(prefix + ' ') or text == prefix + ' ':
                 startup_tips.mark_used('mode_sign')  # its startup tip is no longer needed
                 clean = text[len(prefix):].lstrip()
@@ -18778,14 +18809,11 @@ class GenizahGUI(QMainWindow):
                 self.query_input.blockSignals(True)
                 self.query_input.setText(clean)
                 self.query_input.blockSignals(False)
-                # Switch mode combo
-                modes = ['literal', 'variants', 'responsa', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+                # Switch mode combo (desktop/catalog_search.py has its rows)
                 target_mode = self._apply_prefix_variant_preset(target_mode)
-                try:
-                    combo_idx = modes.index(target_mode)
+                combo_idx = _mode_combo_index(target_mode, getattr(self, '_catalog_offered', False))
+                if combo_idx is not None:
                     self.mode_combo.setCurrentIndex(combo_idx)
-                except ValueError:
-                    pass
                 break
         self._update_variant_count_preview()
 
@@ -23449,7 +23477,7 @@ class GenizahGUI(QMainWindow):
     #: The choice's values and their labels (module level: _SOURCE_CHOICES).
     _SOURCE_CHOICES = _SOURCE_CHOICES
     #: mode_combo rows whose searches read no transcription text: Title, Shelfmark, PGP Tags.
-    _NO_SOURCES_MODE_INDEXES = (5, 6, 7)
+    _NO_SOURCES_MODE_INDEXES = (5, 6, 7, MODE_INDEX_CATALOG)
 
     def _set_sources_choice(self, choice):
         """Put a saved choice in place (_restore_sources_choice)."""
@@ -23668,39 +23696,31 @@ class GenizahGUI(QMainWindow):
         mode_override, clean_query = self.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
 
         if mode_override:
-            # Map mode string back to combo index
-            # modes list must match the order in init_ui (Responsa at index 2)
-            modes = ['literal', 'variants', 'responsa', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+            # Map mode string back to combo index (desktop/catalog_search.py has the rows)
             # Handle 'exact' vs 'literal' naming difference if present
             core_mode = mode_override
             if core_mode == 'exact': core_mode = 'literal'
             # ?, ?? and ??? select their level (shown on the buttons or slider)
             core_mode = self._apply_prefix_variant_preset(core_mode)
-
-            try:
-                combo_idx = modes.index(core_mode)
+            combo_idx = _mode_combo_index(core_mode, getattr(self, '_catalog_offered', False))
+            if combo_idx is not None:   # a mode with no row here keeps the query as typed
                 self.mode_combo.setCurrentIndex(combo_idx)
                 query = clean_query
-            except ValueError:
-                pass # Mode not found in UI list
 
         mode_idx = self.mode_combo.currentIndex()
         # Map combo index to mode string (Responsa uses 'exact' as base mode)
-        if mode_idx == self.MODE_RESPONSA:
-            mode = 'exact'  # Base mode; Responsa pipeline takes over via responsa_options
-        else:
-            modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
-            mode = modes[mode_idx] if mode_idx < len(modes) else 'literal'
+        # Responsa runs in the engine's 'exact' (its pipeline takes over via responsa_options)
+        mode = _combo_engine_mode(mode_idx)
 
         # Phase 114 D-05: hardcoded search mode enum map — NEVER mode_combo.currentText()
-        _SEARCH_MODE_ENUM = {
-            0: 'keyword', 1: 'variants', 2: 'responsa', 3: 'fuzzy',
-            4: 'regex', 5: 'title', 6: 'shelfmark', 7: 'pgp_tags',
-        }
-        _mode_key = _SEARCH_MODE_ENUM.get(mode_idx, 'keyword')
+        # (desktop/catalog_search.py::COMBO_ROWS: keyword .. pgp_tags, catalog)
+        _mode_key = _combo_telemetry_mode(mode_idx)
+        # A catalogue search never runs in Lab Mode (it reads no transcription), so it is never
+        # counted as a Lab search either, whatever the toggle shows.
         _is_lab = bool(
             getattr(self, 'btn_lab_mode_toggle', None)
             and self.btn_lab_mode_toggle.isChecked()
+            and mode != 'Catalog'
         )
         _search_mode_enum = f'lab_{_mode_key}' if _is_lab else _mode_key
 
@@ -23826,7 +23846,8 @@ class GenizahGUI(QMainWindow):
                 'variant_mode': 'variants' if self.chk_responsa_variants.isChecked() else 'exact',
             }
 
-        if self.btn_lab_mode_toggle.isChecked():
+        # The catalogue search reads no transcription: Lab Mode has nothing to add to it (_is_lab).
+        if _is_lab:
             if not self.lab_engine:
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
@@ -23852,7 +23873,12 @@ class GenizahGUI(QMainWindow):
             # Which transcriptions this run reads (editions plan D1): the thread searches them
             # and the step built from the run replays them.
             _run_sources = self._search_sources()
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=_run_sources)
+            # The catalogue search's switches (catalogue plan §4.7, D2): the thread searches with
+            # them and the step built from the run replays them.
+            _run_catalog = (_catalog_options(self.chk_catalog_near.isChecked(),
+                                             self.chk_catalog_translations.isChecked())
+                            if mode == 'Catalog' else None)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=_run_sources, catalog_options=_run_catalog)
             # What this run searched, for the refinement step built from it: a replay
             # (session restore, a removed step, scope change) re-runs exactly this --
             # the widgets may have changed since, and the query lost its mode prefix.
@@ -23863,7 +23889,9 @@ class GenizahGUI(QMainWindow):
                 # its step searches with them, not with what a later search left.
                 variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)),
                 # And the transcriptions it read (editions plan §3.3 item 8): a step replays them.
-                sources=_run_sources)
+                sources=_run_sources, catalog_options=_run_catalog,
+                # The mode it ran in (a history entry saves it with the switches above).
+                mode_index=mode_idx)
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
         self._run_responsa_downgrade = None    # and so does its downgrade (downgrade_signal)
         self._run_editions_unavailable = False    # and whether it read the editions (editions_signal)
@@ -24659,7 +24687,13 @@ class GenizahGUI(QMainWindow):
             # Src — Phase 95 D-11: LOCAL source rendered in blue #3498db (symmetric with PGP green).
             source_val = str(meta.get('source', ''))
             grouped = _result_sources_cell(res)
-            if grouped is not None:
+            _cat_src = _catalog_source_text(res) if res.get('catalogue') else ''
+            if _cat_src:
+                # A catalogue search's row: where its words were found (catalogue plan §4.3).
+                src_item = QTableWidgetItem(_cat_src)
+                src_item.setToolTip(_cat_src)
+                self.results_table.setItem(row_idx, self.COL_SRC, src_item)
+            elif grouped is not None:
                 # Every text of this page that matched: the automatic one, the editions.
                 src_item = QTableWidgetItem(grouped[0])
                 src_item.setToolTip(grouped[1])
@@ -24785,9 +24819,12 @@ class GenizahGUI(QMainWindow):
         if not offer:
             return
         run_id, query = offer
+        # The catalogue's count follows when there is no "Did you mean" to show.
+        self._catalog_offer_pending = (run_id, query)
         hebrew = layout_suggestion(query)
         occurs = getattr(self.searcher, 'words_occur', None) if self.searcher else None
         if not hebrew or occurs is None:
+            self._offer_catalog_count(run_id, query)
             return
         worker = _LayoutSuggestionWorker(occurs, hebrew, run_id, self)
         worker.checked.connect(self._on_layout_suggestion_checked)
@@ -24808,10 +24845,50 @@ class GenizahGUI(QMainWindow):
     def _on_layout_suggestion_checked(self, run_id, hebrew, found):
         """Show the line if the corpus has the words and no other search has
         started since (a newer run, or one running now)."""
-        if (not found or run_id != self._run_seq or self.is_searching
+        if (run_id != self._run_seq or self.is_searching
                 or run_id <= getattr(self, '_layout_cleared_run', 0)):
             return
+        if not found:
+            pending = getattr(self, '_catalog_offer_pending', None)
+            if pending and pending[0] == run_id:
+                self._offer_catalog_count(*pending)
+            return
         self._show_layout_suggestion(hebrew)
+
+    def _offer_catalog_count(self, run_id, query):
+        """Under a text search that found nothing, when no "Did you mean" is shown: how many
+        manuscripts' catalogue records hold the words (counted off the UI thread,
+        desktop/catalog_search.py), as a link that searches the catalogue (catalogue plan §4.4)."""
+        self._catalog_offer_pending = None
+        if not getattr(self, '_catalog_offered', False) or not query:
+            return
+        options = _catalog_options(self.chk_catalog_near.isChecked(), self.chk_catalog_translations.isChecked())
+        worker = CatalogCountWorker(query, options, run_id, self)
+        worker.counted.connect(self._on_catalog_counted)
+        if not hasattr(self, '_catalog_count_workers'):
+            self._catalog_count_workers = set()
+        self._catalog_count_workers.add(worker)
+        worker.finished.connect(lambda w=worker: self._catalog_count_worker_done(w))
+        worker.start()
+
+    def _catalog_count_worker_done(self, worker):
+        getattr(self, '_catalog_count_workers', set()).discard(worker)
+        worker.deleteLater()
+
+    def _on_catalog_counted(self, run_id, query, total):
+        """Show the offer if the catalogue holds the words and no other search has started."""
+        if (not total or run_id != self._run_seq or self.is_searching
+                or run_id <= getattr(self, '_layout_cleared_run', 0)):
+            return
+        import html as _html
+        offer = tr("{count} manuscripts whose catalogue records mention {query}").format(
+            count=f"{total:,}", query=query)
+        self.layout_suggestion_label.setText(
+            _html.escape(tr("No matches in the transcriptions.")) + ' <a href="catalog">'
+            + _html.escape(offer) + '</a>')
+        self._layout_suggestion = None
+        self._catalog_offer_query = query
+        self.layout_suggestion_label.setVisible(True)
 
     def _show_layout_suggestion(self, hebrew):
         import html as _html
@@ -24829,7 +24906,17 @@ class GenizahGUI(QMainWindow):
         self._layout_suggestion = None
 
     def _take_layout_suggestion(self, _href=None):
-        """The Hebrew, clicked: run it in the same mode, as if typed."""
+        """The Hebrew, clicked: run it in the same mode, as if typed. The catalogue's count,
+        clicked: the same words in Catalog mode."""
+        if _href == 'catalog':
+            query = getattr(self, '_catalog_offer_query', None)
+            if not query or self.is_searching or not getattr(self, '_catalog_offered', False):
+                return
+            self._hide_layout_suggestion()
+            self.mode_combo.setCurrentIndex(MODE_INDEX_CATALOG)
+            self.query_input.setText(query)
+            self.toggle_search()
+            return
         hebrew = self._layout_suggestion
         if not hebrew or self.is_searching:
             return
@@ -24927,12 +25014,7 @@ class GenizahGUI(QMainWindow):
         if self._refine_mode:
             raw_result_sys_ids = result_sys_ids(results)
             # Build step from current search bar state
-            mode_idx = self.mode_combo.currentIndex()
-            if mode_idx == self.MODE_RESPONSA:
-                mode_val = 'responsa'
-            else:
-                _modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
-                mode_val = _modes[mode_idx] if mode_idx < len(_modes) else 'literal'
+            mode_val = _combo_step_mode(self.mode_combo.currentIndex())
             text_position = (
                 self._text_position_from_index(self.text_position_combo.currentIndex())
                 if hasattr(self, 'text_position_combo') else None
@@ -25337,6 +25419,8 @@ class GenizahGUI(QMainWindow):
         # The transcriptions the run read (None: today's search); replay_chain and
         # complete_chain pass it on (shared/refinement.py::_sources_argument).
         step.sources = params.get('sources')
+        # A catalogue search's switches (shared/refinement.py::_sources_argument passes them on).
+        step.catalog_options = params.get('catalog_options')
 
     def _refinement_step_searcher(self):
         """searcher_for_step for replay_chain / complete_chain: each step searches with
@@ -25363,12 +25447,7 @@ class GenizahGUI(QMainWindow):
             return
         # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
         if not self.refinement_chain and self.query_input.text().strip():
-            mode_idx = self.mode_combo.currentIndex()
-            if mode_idx == self.MODE_RESPONSA:
-                mode_val = 'responsa'
-            else:
-                _modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
-                mode_val = _modes[mode_idx] if mode_idx < len(_modes) else 'literal'
+            mode_val = _combo_step_mode(self.mode_combo.currentIndex())
             step0 = RefinementStep(
                 query=self.query_input.text().strip(),
                 mode=mode_val or 'exact',
@@ -35873,8 +35952,11 @@ class GenizahGUI(QMainWindow):
         if entry:
             self.query_input.setText(entry.get('query', ''))
             params = entry.get('search_params', {})
-            if 'mode_index' in params:
+            if 'mode_index' in params and (params['mode_index'] != MODE_INDEX_CATALOG
+                                           or getattr(self, '_catalog_offered', False)):
+                # (a Catalog entry where the catalogue is not installed keeps the shown mode)
                 self.mode_combo.setCurrentIndex(params['mode_index'])
+            self._restore_catalog_switches(params.get('catalog_options'))
             if 'gap' in params:
                 self.gap_input.setText(str(params['gap']))
             if 'text_position' in params:
@@ -36044,6 +36126,35 @@ class GenizahGUI(QMainWindow):
             self.run_composition()
         self._schedule_session_save()
 
+    def _history_mode_index(self):
+        """The mode a history entry saves: the one the shown run searched in (_last_search_params;
+        the combo stays editable while it runs), else the combo's (results restored from a stored
+        snapshot, a Lab run)."""
+        params = getattr(self, '_last_search_params', None)
+        if params is not None and isinstance(params.get('mode_index'), int):
+            return params['mode_index']
+        return self.mode_combo.currentIndex()
+
+    def _history_catalog_options(self):
+        """The catalogue switches a history entry keeps: those the shown run searched with
+        (_last_search_params, recorded when it started: the switches and the mode stay editable
+        while it runs), None for any other search. Without a recorded run (results restored from
+        a stored snapshot), the switches shown, for a Catalog search only."""
+        params = getattr(self, '_last_search_params', None)
+        if params is not None and 'catalog_options' in params:
+            recorded = params.get('catalog_options')
+            return dict(recorded) if recorded else None
+        if self.mode_combo.currentIndex() != MODE_INDEX_CATALOG or not hasattr(self, 'chk_catalog_near'):
+            return None
+        return _catalog_options(self.chk_catalog_near.isChecked(), self.chk_catalog_translations.isChecked())
+
+    def _restore_catalog_switches(self, options):
+        """Put a history entry's catalogue switches back (an entry without them: as they are)."""
+        if not isinstance(options, dict) or not hasattr(self, 'chk_catalog_near'):
+            return
+        self.chk_catalog_near.setChecked(bool(options.get('near_spellings', False)))
+        self.chk_catalog_translations.setChecked(bool(options.get('include_translations', True)))
+
     def _add_regular_search_to_history(self):
         """Save the current regular search to history."""
         from shared.session_persistence import add_history_entry
@@ -36060,7 +36171,7 @@ class GenizahGUI(QMainWindow):
             'result_count_capped': self._shown_results_capped(),
             'timestamp': datetime.now().isoformat(),
             'search_params': {
-                'mode_index': self.mode_combo.currentIndex(),
+                'mode_index': self._history_mode_index(),
                 'gap': int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0,
                 'text_position': self.text_position_combo.currentIndex(),
                 'variant_preset': getattr(self, '_current_variant_preset', 70),
@@ -36070,6 +36181,8 @@ class GenizahGUI(QMainWindow):
                 'corpus_scope': getattr(self, '_search_corpus_scope', 'genizah'),
                 # And the transcriptions choice (editions plan D1), restored with it.
                 'sources': getattr(self, '_search_sources_choice', 'all'),
+                # A catalogue search's switches, restored with it (None for any other mode).
+                'catalog_options': self._history_catalog_options(),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots are intentionally NOT stored here. Storing
