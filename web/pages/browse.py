@@ -80,7 +80,7 @@ from web.components.shelfmark_picker import items_from_manuscripts, open_shelfma
 from web import io_bound_result
 from web.pages.browse_state import (
     BrowseState, page_has_reading_view, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
-    clamp_zoom, zoom_percent,
+    clamp_zoom, zoom_percent, normalize_rotation, clamp_rotation, ROTATION_MIN, ROTATION_MAX,
 )
 from web.browse_bootstrap import resolve_browse_bootstrap
 from web.pages.browse_editions import (link_target as _edition_link_target, mark_html,
@@ -448,9 +448,6 @@ VIEWER_STYLES = '''
     .browse-image-title { display: none; }
     .browse-image-adjust { display: none !important; padding: 4px 8px !important; }
     .browse-image-adjust.is-open { display: flex !important; }
-    /* The rotation slider needs a wide panel; below 1440px the two rotate
-       buttons do the job and the toolbar stays one row. */
-    @media (max-width: 1439px) { .browse-rotate-slider { display: none !important; } }
     /* Laptop and up: the lookup is a short row, the green card is one line
        WHEN IT FITS, with the title cut to the width, and the two panels get
        the height. Nothing forces the line: beside the 280px drawer a 1024px
@@ -479,11 +476,13 @@ VIEWER_STYLES = '''
         .browse-controls-card .q-btn { min-height: 36px; }
         .shortcuts-hint { display: none !important; }
 
-        /* Image panel: one row of 34px icon buttons. The rotation slider, the
-           zoom figure and the separators go. */
+        /* Image panel: one row of 34px icon buttons. The zoom figure and the
+           separators go. Behind `tune`, the rotation slider has the first line
+           to itself (its icon and angle beside it), for a finger. */
         .browse-image-head { padding: 4px 6px !important; }
         .browse-image-tools { gap: 2px !important; flex-wrap: nowrap !important; }
-        .browse-image-tools .q-separator, .browse-rotate-slider, .zoom-level-label { display: none !important; }
+        .browse-image-tools .q-separator, .zoom-level-label { display: none !important; }
+        .browse-image-adjust .browse-rotate-slider { flex: 1 1 calc(100% - 80px); }
         .browse-image-head .q-btn, .browse-image-adjust .q-btn {
             min-width: 34px !important; min-height: 34px !important; width: 34px; height: 34px; padding: 0 !important;
         }
@@ -1896,6 +1895,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # server for the sliders and the page's own state.
     ZOOM_RESET_JS = ('(e) => { [window.manuscriptViewer, window.fsEditViewer].forEach('
                      'function(v) { if (v && v.reset) v.reset(); }); emit(e); }')
+    ROTATE_LIVE_JS = ('(angle) => { [window.manuscriptViewer, window.fsEditViewer].forEach('
+                      'function(v) { if (v && v.setRotation) v.setRotation(angle); }); }')
 
     def _zoom_changed(e):
         """The browser's zoom level, from the viewer's `browse_zoom` event.
@@ -1919,8 +1920,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """Reset zoom to 100%."""
         state.zoom_level = 1.0
         state.rotation = 0  # Also reset rotation
-        if slider_refs.get('rotate'):
-            slider_refs['rotate'].value = 0
+        _sync_rotation_sliders()
         # Reset image adjustments
         for key in ('brightness', 'contrast'):
             if slider_refs.get(key): slider_refs[key].value = 0
@@ -1933,32 +1933,51 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             [window.manuscriptViewer, window.fsEditViewer].forEach(function(v) { if (v && v.reset) v.reset(); });
         ''')
 
+    def _sync_rotation_sliders():
+        """Both rotation sliders (the panel's and the full-screen editor's) show
+        `state.rotation`. A slider set here calls `handle_rotation_slider`,
+        which finds the angle already the page's and pushes nothing."""
+        for key in ('rotate', 'fs_rotate'):
+            slider = slider_refs.get(key)
+            if slider is not None and not slider.is_deleted and slider.value != state.rotation:
+                slider.value = state.rotation
+
+    def _set_rotation(angle: int):
+        state.rotation = angle
+        _sync_rotation_sliders()
+        update_image_transform()
+
     def rotate_left():
         """Rotate image 90 degrees counter-clockwise."""
-        state.rotation = (state.rotation - 90) % 360
-        if slider_refs.get('rotate'):
-            slider_refs['rotate'].value = state.rotation
-        update_image_transform()
+        _set_rotation(normalize_rotation(state.rotation - 90))
 
     def rotate_right():
         """Rotate image 90 degrees clockwise."""
-        state.rotation = (state.rotation + 90) % 360
-        if slider_refs.get('rotate'):
-            slider_refs['rotate'].value = state.rotation
-        update_image_transform()
-
-    def rotate_reset():
-        """Reset rotation to 0."""
-        state.rotation = 0
-        if slider_refs.get('rotate'):
-            slider_refs['rotate'].value = 0
-        update_image_transform()
+        _set_rotation(normalize_rotation(state.rotation + 90))
 
     def handle_rotation_slider(e):
-        """Handle rotation slider change."""
-        if e.value is not None:
-             state.rotation = int(e.value)
-             update_image_transform()
+        """Free rotation: a slider moved by the reader, by whole degrees."""
+        if e.value is None:
+            return
+        angle = clamp_rotation(e.value)
+        if angle != state.rotation:
+            _set_rotation(angle)
+
+    def _rotation_slider(key: str, width_class: str):
+        """The free-rotation slider and its angle, for one image-adjustment row
+        (2026-11-18: it was a toolbar slider shown only from 1440px, so a laptop
+        or phone had the 90° buttons alone)."""
+        ui.icon('crop_rotate').classes('text-white text-sm').tooltip(tr('Rotation'))
+        slider = ui.slider(
+            min=ROTATION_MIN, max=ROTATION_MAX, step=1, value=state.rotation,
+            on_change=handle_rotation_slider,
+        ).props(f'dark dense aria-label="{tr("Rotation")}"').classes(f'{width_class} browse-rotate-slider').style('transition: none;')
+        # The image turns in the browser while the slider moves; the server
+        # hears the angle (throttled) for the other slider and the next folio.
+        slider.on('update:model-value', js_handler=ROTATE_LIVE_JS)
+        slider_refs[key] = slider
+        ui.label().bind_text_from(slider, 'value', backward=lambda v: f'{clamp_rotation(v)}°').classes(
+            'text-white text-xs browse-rotate-angle').style('min-width: 2.8em; direction: ltr; unicode-bidi: isolate;')
 
     def toggle_fullscreen():
         """Toggle fullscreen mode."""
@@ -4965,13 +4984,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='add').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').on('click', js_handler=ZOOM_IN_JS).tooltip(f'{tr("Zoom in")} (+)')
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='rotate_left', on_click=rotate_left).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
-                                    
-                                    # Rotation Slider
-                                    slider_refs['rotate'] = ui.slider(
-                                        min=0, max=360, step=1, value=state.rotation,
-                                        on_change=handle_rotation_slider
-                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2 browse-rotate-slider').style('transition: none;')
-                                    
                                     ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='restart_alt').props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}" data-action="zoom-reset"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(f'{tr("Reset View")} (0)')
@@ -4979,24 +4991,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(f'{tr("Fullscreen Image")} (F)')
 
                             # Image adjustment controls row
-                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 print-hide browse-image-adjust').style(
+                            with ui.row().classes('w-full items-center gap-1.5 px-3 py-1 print-hide browse-image-adjust').style(
                                 'background: #1a1a1a; border-top: 1px solid #333;'
                             ) as _image_adjust_row:
+                                _rotation_slider('rotate', 'w-24')
                                 ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
                                 slider_refs['brightness'] = ui.slider(
                                     min=-100, max=100, step=1, value=0,
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setBrightness({e.value})')
-                                ).props('dark dense').classes('w-24')
+                                ).props('dark dense').classes('w-20')
                                 ui.icon('contrast').classes('text-white text-sm').tooltip(tr('Contrast'))
                                 slider_refs['contrast'] = ui.slider(
                                     min=-100, max=100, step=1, value=0,
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setContrast({e.value})')
-                                ).props('dark dense').classes('w-24')
+                                ).props('dark dense').classes('w-20')
                                 ui.icon('timeline').classes('text-white text-sm').tooltip(tr('Gamma'))
                                 slider_refs['gamma'] = ui.slider(
                                     min=20, max=300, step=1, value=100,
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setGamma({e.value / 100})')
-                                ).props('dark dense').classes('w-24')
+                                ).props('dark dense').classes('w-20')
                                 ui.button(
                                     icon='exposure',
                                     on_click=lambda: ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.toggleInvert()')
@@ -5006,6 +5019,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if slider_refs.get('contrast'): slider_refs['contrast'].value = 0
                                     if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
                                     ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
+                                    if state.rotation:  # the row's rotation too, the zoom kept
+                                        _set_rotation(0)
                                 ui.button(
                                     icon='restart_alt',
                                     on_click=_reset_image_adj
@@ -5518,6 +5533,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 with ui.element('div').classes('fullscreen-image-toolbar').style(
                                     'border-top: 1px solid #444; padding: 2px 8px;'
                                 ):
+                                    _rotation_slider('fs_rotate', 'w-24')
                                     ui.icon('brightness_6').style('color: #ccc; font-size: 1rem;').tooltip(tr('Brightness'))
                                     slider_refs['fs_brightness'] = ui.slider(
                                         min=-100, max=100, step=1, value=0,
@@ -5542,6 +5558,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if slider_refs.get('fs_contrast'): slider_refs['fs_contrast'].value = 0
                                         if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
                                         ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.resetAdjustments()')
+                                        if state.rotation:
+                                            _set_rotation(0)
                                     ui.button(
                                         icon='restart_alt',
                                         on_click=_fs_reset_adj
@@ -5866,6 +5884,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 // Ignore if focused on any text input element
                 const tag = document.activeElement.tagName;
                 if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;
+                // A focused slider (rotation, brightness...) owns the arrow keys:
+                // one degree must never also turn the folio (Codex on #45). Its
+                // other keys are not its own, so + - 0 F still work there.
+                if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+                    && e.target.closest && e.target.closest('.q-slider, [role="slider"]')) return;
                 const rtl = __BROWSE_RTL__;
                 let action = null;
                 if (e.key === 'ArrowLeft') action = rtl ? 'next' : 'prev';

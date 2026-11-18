@@ -131,10 +131,10 @@ def test_reset_view_and_rotation_never_push_a_scale():
         with patch.object(ui, 'run_javascript') as run_js:
             _click(user, _button_with_tooltip(user, 'Rotate Left'))
         sent = ' '.join(str(c.args[0]) for c in run_js.call_args_list)
-        assert 'setRotation(270)' in sent
+        assert 'setRotation(-90)' in sent  # 90° left of upright, in the slider's -180..180
         assert 'scale' not in sent and 'update(' not in sent, sent
         _rebuild(user)
-        await _wait_until(lambda: 'rotate(270deg)' in _image_markup(user))
+        await _wait_until(lambda: 'rotate(-90deg)' in _image_markup(user))
         assert 'scale(2.25)' in _image_markup(user), 'the rotation left the level alone'
 
         # Reset View: both viewers reset in the browser, and the page's own state with them.

@@ -204,6 +204,12 @@ class AdvancedViewState:
         self.header_container = None
         self.info_bar_container = None
         self.brightness_sl = None
+        # The free-rotation slider in the image's adjustment row; the 90° buttons
+        # and Reset View go through it, so it always shows the image's angle.
+        self.rotation_sl = None
+        # The image's angle, kept across the dialog's redraws (full screen, edit
+        # mode, a folio, a late page count); 0 again for another result.
+        self.rotation = 0
 
 
 # ---------------------------------------------------------------------------

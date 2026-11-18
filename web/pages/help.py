@@ -1606,7 +1606,7 @@ This page enables convenient continuous reading of a full manuscript, synchroniz
 **Loading a Manuscript:** Enter a **Shelfmark** in the search box. The search is flexible and ignores spaces/punctuation (e.g., `TS NS 13 15` finds `T-S NS 13.15`).
 
 **Features:**
-- **Images:** An image viewer displays the manuscript page. You can zoom, rotate, and view in full screen
+- **Images:** An image viewer displays the manuscript page. You can zoom, rotate, and view in full screen. To straighten a tilted fragment, open **Image adjustments** and drag the rotation slider (or use the arrow keys, one degree at a time)
 - **Page Navigation:** Use the arrows or page dropdown to navigate between pages
 - **View All:** Click to display all manuscript pages in one long scrollable view
 - **Search for Parallels:** Send the current page text to **Find Parallels**
@@ -2383,7 +2383,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 **טעינת כתב יד:** הזינו **מספר מדף** בתיבת החיפוש. החיפוש גמיש ומתעלם מרווחים/סימני פיסוק (למשל: `TS NS 13 15` מוצא `T-S NS 13.15`).
 
 **תכונות:**
-- **תמונות:** מציג התמונות מראה את עמוד כתב היד. ניתן לעשות זום, לסובב, ולצפות במסך מלא
+- **תמונות:** מציג התמונות מראה את עמוד כתב היד. ניתן לעשות זום, לסובב, ולצפות במסך מלא. כדי ליישר קטע עקום, פתחו את **כוונון תמונה** וגררו את פס הסיבוב (או השתמשו במקשי החצים, מעלה אחת בכל לחיצה)
 - **ניווט בעמודים:** השתמשו בחצים או בתפריט העמודים לניווט בין עמודים
 - **הצג הכל:** לחצו להצגת כל עמודי כתב היד ברצף אחד לגלילה
 - **חפש מקבילות:** שליחת טקסט העמוד הנוכחי ל**מציאת מקבילות**

@@ -57,6 +57,34 @@ def zoom_percent(level: float) -> int:
     return int(round(clamp_zoom(level) * 100))
 
 
+# Free rotation (2026-11-18). The slider runs from -180 to 180 so a small
+# tilt either way sits beside the middle, where the page is upright; the 90°
+# buttons land in the same range (`normalize_rotation`).
+ROTATION_MIN = -180
+ROTATION_MAX = 180
+
+
+def normalize_rotation(degrees) -> int:
+    """``degrees`` as a whole angle in (-180, 180]: 270 -> -90, -180 -> 180, 450 -> 90.
+    A value that is not a finite number is 0."""
+    try:
+        angle = int(round(float(degrees)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    angle %= 360
+    return angle - 360 if angle > 180 else angle
+
+
+def clamp_rotation(degrees) -> int:
+    """A slider's angle held to ROTATION_MIN..ROTATION_MAX as a whole number; not a finite number -> 0.
+    Unlike `normalize_rotation` it keeps -180 as -180, so a slider dragged to its end stays there."""
+    try:
+        angle = int(round(float(degrees)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(ROTATION_MIN, min(ROTATION_MAX, angle))
+
+
 def page_has_reading_view(page) -> bool:
     """Whether the reading view offers its versions, Edit, Comment, Notes and Joins for ``page``.
 

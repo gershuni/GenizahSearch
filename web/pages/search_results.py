@@ -25,7 +25,8 @@ from web.translations import tr, is_rtl, get_language, in_visitor_language
 from web.ux_timing import ux_done
 from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
-from web.pages.browse_state import page_has_reading_view
+from web.pages.browse_state import (page_has_reading_view, normalize_rotation, clamp_rotation,
+                                    ROTATION_MIN, ROTATION_MAX)
 from web.pages.search_state import (
     AdvancedViewState, domain_display_name, save_post_filters_with_run,
 )
@@ -241,12 +242,15 @@ def quick_view_image(sys_id, page_idx, *, page=None, is_oxford=False, shelfmark=
 
 
 def quick_view_img_html(img_url: str, sys_id: str, page_idx: int, *, is_oxford: bool,
-                        credit_falls_back_to_nli: bool = False) -> str:
+                        credit_falls_back_to_nli: bool = False, rotation: int = 0) -> str:
     """Quick View's ``<img>``: a 400-px image first, the full one from ``data-full-src``
     (initProgressiveImages), and handleImageError's NLI fallback on error.
 
     ``credit_falls_back_to_nli``: a library's image (Cambridge, ...) whose credit must turn
     to NLI's when the viewer falls back to NLI (manuscript_viewer.js ``data-credit-fallback``).
+
+    ``rotation``: the angle the image is drawn at (the viewer adopts it on init), so an image
+    swapped in under a turned rotation slider stays turned.
     """
     safe_img_url = html.escape(img_url, quote=True)
     safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
@@ -256,7 +260,7 @@ def quick_view_img_html(img_url: str, sys_id: str, page_idx: int, *, is_oxford: 
     fallback = ' data-credit-fallback="nli"' if credit_falls_back_to_nli else ''
     return (
         f'<img src="{thumb}" data-full-src="{safe_img_url}" class="adv-zoomable-image"{fallback}'
-        ' style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"'
+        f' style="transform: translate(0px, 0px) rotate({clamp_rotation(rotation)}deg) scale(1); cursor: grab; max-height: 100%;"'
         ' draggable="false" onload="if(window.advViewer) window.advViewer.init()"'
         f''' onerror="handleImageError(this, '{safe_sys_id}', {int(page_idx)}, {'true' if is_oxford else 'false'}, 'advViewer')"/>'''
     )
@@ -1531,7 +1535,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             return
         credit = ext.get('attribution', '') if chosen.get('active_source') not in ('nli', 'oxford') else ''
         image_el.content = quick_view_img_html(new_url, sys_id, page_idx, is_oxford=img_args['is_oxford'],
-                                               credit_falls_back_to_nli=bool(credit))
+                                               credit_falls_back_to_nli=bool(credit), rotation=adv_state.rotation)
         adv_state.image_choice = (sys_id, page_idx, img_args, new_url)
         credit_el = adv_state.image_credit_el
         if credit and credit_el is not None and not credit_el.is_deleted:
@@ -1546,6 +1550,41 @@ def open_advanced_dialog(search_state, refs, index, result):
         except Exception:
             pass  # the dialog is gone
 
+    def _adv_live_rotation_slider():
+        slider = adv_state.rotation_sl
+        return slider if slider is not None and not slider.is_deleted else None
+
+    def _adv_slider_rotation(e):
+        """The slider moved: the dialog keeps the angle (`adv_state.rotation`, which
+        its redraws draw the image with) and the image turns."""
+        if e.value is None:
+            return
+        adv_state.rotation = clamp_rotation(e.value)
+        ui.run_javascript(f'if(window.advViewer) window.advViewer.setRotation({adv_state.rotation})')
+
+    def _adv_set_rotation(angle: int):
+        """Quick View's angle. Through the slider where there is one: its on_change
+        keeps the angle and turns the image, so it never shows another angle than
+        the image's. The full-screen Quick View has none."""
+        slider = _adv_live_rotation_slider()
+        if slider is not None and slider.value != angle:
+            slider.value = angle
+            return
+        adv_state.rotation = angle
+        ui.run_javascript(f'if(window.advViewer) window.advViewer.setRotation({int(angle)})')
+
+    def _adv_rotate_by(delta: int):
+        _adv_set_rotation(normalize_rotation(adv_state.rotation + delta))
+
+    def _adv_reset_view():
+        """Reset View: zoom, pan, rotation and the image adjustments, the sliders with them."""
+        adv_state.rotation = 0
+        for name, neutral in (('rotation_sl', 0), ('brightness_sl', 0), ('contrast_sl', 0), ('gamma_sl', 100)):
+            slider = getattr(adv_state, name, None)
+            if slider is not None and not slider.is_deleted:
+                slider.value = neutral
+        ui.run_javascript('if(window.advViewer) window.advViewer.reset()')
+
     def load_result(idx: int):
         """Load a result into the dialog, updating UI in-place."""
         _dict_hide()
@@ -1556,6 +1595,7 @@ def open_advanced_dialog(search_state, refs, index, result):
         # Reset enrichment data for new result
         adv_state.fjms_data = None
         adv_state.crossref_data = None
+        adv_state.rotation = 0  # another manuscript starts upright
 
         # Update header label
         adv_state.result_label.set_text(_quick_view_result_label(idx, len(adv_state.results), result))
@@ -2136,14 +2176,15 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props(f'flat round size=xs text-color=white aria-label="{tr("Zoom out")}"').tooltip(tr('Zoom out'))
                                     ui.label('100%').classes('adv-zoom-label text-white text-xs px-1')
                                     ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=xs text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
-                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props(f'flat round size=xs text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
-                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=xs text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
+                                    ui.button(icon='rotate_right', on_click=lambda: _adv_rotate_by(90)).props(f'flat round size=xs text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
+                                    ui.button(icon='restart_alt', on_click=_adv_reset_view).props(f'flat round size=xs text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
                             # Image
                             with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: calc(100% - 48px);'):
                                 adv_state.image_el = ui.html(quick_view_img_html(
                                     img_url, sys_id, page_idx, is_oxford=is_oxford,
-                                    credit_falls_back_to_nli=bool(library_image_credit)), sanitize=False)
+                                    credit_falls_back_to_nli=bool(library_image_credit),
+                                    rotation=adv_state.rotation), sanitize=False)
                                 ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
                 return  # Exit early for fullscreen mode
@@ -2645,30 +2686,42 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     ui.label('100%').classes('adv-zoom-label text-white text-sm px-2')
                                     ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='rotate_left', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateLeft()')).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
-                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
+                                    ui.button(icon='rotate_left', on_click=lambda: _adv_rotate_by(-90)).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
+                                    ui.button(icon='rotate_right', on_click=lambda: _adv_rotate_by(90)).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
+                                    ui.button(icon='restart_alt', on_click=_adv_reset_view).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
                             # Image adjustment controls (hidden until `tune`)
-                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 adv-image-adjust').style(
+                            with ui.row().classes('w-full items-center gap-1.5 px-3 py-1 adv-image-adjust').style(
                                 'background: #1a1a1a; border-top: 1px solid #333;'
                             ) as _adv_adjust_row:
+                                # Free rotation (2026-11-18), whole degrees either way.
+                                ui.icon('crop_rotate').classes('text-white text-sm').tooltip(tr('Rotation'))
+                                adv_state.rotation_sl = ui.slider(
+                                    min=ROTATION_MIN, max=ROTATION_MAX, step=1, value=adv_state.rotation,
+                                    on_change=_adv_slider_rotation,
+                                ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-24 adv-rotate-slider').style('transition: none;')
+                                # The image turns in the browser while the slider moves.
+                                adv_state.rotation_sl.on('update:model-value', js_handler=(
+                                    '(angle) => { if (window.advViewer) window.advViewer.setRotation(angle); }'))
+                                ui.label().bind_text_from(
+                                    adv_state.rotation_sl, 'value', backward=lambda v: f'{clamp_rotation(v)}°'
+                                ).classes('text-white text-xs').style('min-width: 2.8em; direction: ltr; unicode-bidi: isolate;')
                                 ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
                                 adv_state.brightness_sl = ui.slider(
                                     min=-100, max=100, step=1, value=0,
                                     on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setBrightness({e.value})')
-                                ).props('dark dense').classes('w-24')
+                                ).props('dark dense').classes('w-20')
                                 ui.icon('contrast').classes('text-white text-sm').tooltip(tr('Contrast'))
                                 adv_state.contrast_sl = ui.slider(
                                     min=-100, max=100, step=1, value=0,
                                     on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setContrast({e.value})')
-                                ).props('dark dense').classes('w-24')
+                                ).props('dark dense').classes('w-20')
                                 ui.icon('timeline').classes('text-white text-sm').tooltip(tr('Gamma'))
                                 adv_state.gamma_sl = ui.slider(
                                     min=20, max=300, step=1, value=100,
                                     on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setGamma({e.value / 100})')
-                                ).props('dark dense').classes('w-24')
+                                ).props('dark dense').classes('w-20')
                                 ui.button(
                                     icon='exposure',
                                     on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
@@ -2678,6 +2731,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     if hasattr(adv_state, 'contrast_sl'): adv_state.contrast_sl.value = 0
                                     if hasattr(adv_state, 'gamma_sl'): adv_state.gamma_sl.value = 100
                                     ui.run_javascript('if(window.advViewer) window.advViewer.resetAdjustments()')
+                                    _adv_set_rotation(0)  # the row's rotation too, the zoom kept
                                 ui.button(
                                     icon='restart_alt',
                                     on_click=_adv_reset_adj
@@ -2691,7 +2745,8 @@ def open_advanced_dialog(search_state, refs, index, result):
                             with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: 70vh;'):
                                 adv_state.image_el = ui.html(quick_view_img_html(
                                     img_url, sys_id, page_idx, is_oxford=is_oxford,
-                                    credit_falls_back_to_nli=bool(library_image_credit)), sanitize=False)
+                                    credit_falls_back_to_nli=bool(library_image_credit),
+                                    rotation=adv_state.rotation), sanitize=False)
                                 ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
                             # Attribution footer. The image above can fall back to NLI
