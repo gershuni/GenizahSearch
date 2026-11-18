@@ -96,6 +96,18 @@ def has_hebrew_or_arabic_letter(text: str) -> bool:
     return False
 
 
+_LATIN_LETTER_RE = re.compile('[A-Za-z]')
+
+
+def is_latin_script_query(text: Optional[str]) -> bool:
+    """True when ``text`` holds a Latin letter and no Hebrew or Arabic letter: a query the
+    transcriptions cannot answer, which the search page searches in the catalogue (catalogue
+    text search plan, D6). An accented Latin letter (Fusṭāṭ) counts through its base letter."""
+    if not text or has_hebrew_or_arabic_letter(text):
+        return False
+    return bool(_LATIN_LETTER_RE.search(_without_accents(text)))
+
+
 def _words_are_shelfmark_words(text: str) -> bool:
     """No run of four or more letters that is neither a shelfmark word nor a Roman numeral."""
     for run in _LETTER_RUN_RE.findall(text):

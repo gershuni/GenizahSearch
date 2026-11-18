@@ -88,6 +88,8 @@ EXTRACTED_MODULES = [
     "shared/catalog_criteria.py",        # catalogue criteria plan, PR 1a, 2026-11-01
     "shared/catalog_text_normalize.py",  # catalogue text search keys, PR 1, 2026-11-05
     "shared/catalog_text_service.py",    # catalogue text search sidecar reader, PR 1, 2026-11-05
+    "shared/catalog_text_rows.py",       # catalogue text search result rows, PR 2, 2026-11-18
+    "shared/near_spellings.py",          # catalogue near spellings, PR 2, 2026-11-18
     "shared/edition_search_text.py",     # editions search: an edition's search text, PR 1, 2026-11-15
     "shared/editions_indexer.py",        # editions search: the editions index builder, PR 1, 2026-11-15
     "shared/editions_search.py",         # editions search: switch, source choice, grouping, PR 2, 2026-11-15

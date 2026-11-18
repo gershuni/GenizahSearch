@@ -28,7 +28,7 @@ from web.components.filter_panel import (
     apply_criteria, retire_old_saved_filters, restore_saved_criteria,
 )
 from web.components.criteria_panel import CriteriaControl, active_criteria_count
-from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES
+from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES, withhold_unserved_catalog
 from web.pages.search_state import (
     SCHOLARLY_FILTER_STATES, SearchUIState, SearchPageRefs,
     get_search_history, add_to_search_history,
@@ -42,7 +42,9 @@ from web.pages.search_state import (
     discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
 )
 from web import search_runs
-from shared.search_box_input import TEXT_MODES, search_box_input_kind, split_placeholder
+from shared.search_box_input import TEXT_MODES, is_latin_script_query, search_box_input_kind, split_placeholder
+from web.catalog_assets import (CATALOG_NEAR_FORMS_SHOWN, CATALOG_NEAR_TOOLTIP,
+                                 CATALOG_TRANSLATIONS_TOOLTIP, catalog_available)
 from web.home_query import home_query_target
 from shared.keyboard_layout import layout_suggestion
 from web.pages.search_results import (
@@ -183,7 +185,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_bidirectional: int = None, initial_domain: str = None,
                        from_browse: int = None,
                        vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
-                       initial_run: str = None):
+                       initial_run: str = None, initial_near: int = None,
+                       initial_translations: int = None):
     """Create the advanced search page."""
 
 
@@ -238,6 +241,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         saved_sources = 'all'
     # Set when a search finds them no longer served to this reader (_editions_still_served).
     _editions_access = {'lost': False}
+    # The catalogue text search (catalogue plan §4.4), where the website serves it
+    # (web/catalog_assets.py): its mode, the % shortcut, the offer under an empty text
+    # search and the Latin-script routing exist only then. Its two switches are remembered
+    # per visitor; an address's near=/translations= wins.
+    _catalog_served = catalog_available()
+    saved_catalog = {'near_spellings': bool(_safe_get('catalog_near_spellings', False)),
+                     'include_translations': bool(_safe_get('catalog_translations', True))}
+    if initial_near is not None:
+        saved_catalog['near_spellings'] = bool(initial_near)
+    if initial_translations is not None:
+        saved_catalog['include_translations'] = bool(initial_translations)
 
     use_slider = bool(variant_preferences.get('variant_use_slider'))
     # Num Changes shows the x1-x3 of the level the page opens on.
@@ -295,6 +309,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         saved_run=_saved_run,
         live_run=_live_run.snapshot.get('last_run') if _live_run is not None else None,
     )
+    # An address, a session or a run from when the catalogue was served: where it is not, its
+    # mode is Exact and its rows are neither restored nor rejoined (Codex review of PR #47).
+    bootstrap_state = withhold_unserved_catalog(
+        bootstrap_state, catalog_served=_catalog_served, saved_run=_saved_run,
+        live_run=_live_run.snapshot.get('last_run') if _live_run is not None else None)
     if not bootstrap_state['rejoin_run']:
         _live_run = None
     saved_mode = bootstrap_state['mode']
@@ -315,6 +334,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     else:
         _restored_run = None
     _restored_sources = _restored_run.get('sources') if isinstance(_restored_run, dict) else None
+    _restored_catalog = _restored_run.get('catalog_options') if isinstance(_restored_run, dict) else None
+    if isinstance(_restored_catalog, dict):
+        saved_catalog.update({k: bool(v) for k, v in _restored_catalog.items() if k in saved_catalog})
     if _editions_served and _restored_sources in SOURCE_CHOICES:
         saved_sources = _restored_sources
 
@@ -672,7 +694,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         mode_val = mode_select.value
                         mode_names = {'exact': '=', 'variants': '?', 'variants_extended': '??',
                                      'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
-                                     'Shelfmark': '#', 'Title': '$', 'pgp_tags': 'PGP'}
+                                     'Shelfmark': '#', 'Title': '$', 'Catalog': '%', 'pgp_tags': 'PGP'}
                         collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
 
                     def collapse_panel():
@@ -780,6 +802,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ('$', 'Title'),
                             ('#', 'Shelfmark'),
                         ]
+                        if _catalog_served:
+                            _shortcut_prefixes.append(('%', 'Catalog'))
 
                         def on_query_input_change():
                             val = query_input.value or ''
@@ -882,6 +906,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'Title': tr('Title') + ' ($)',
                                 'pgp_tags': tr('PGP Tags'),
                             }
+
+                        if _catalog_served:
+                            # After Title, before PGP Tags: the catalogue modes together.
+                            _tags_label = mode_options.pop('pgp_tags')
+                            mode_options['Catalog'] = tr('Catalog') + ' (%)'
+                            mode_options['pgp_tags'] = _tags_label
 
                         mode_select = ui.select(
                             mode_options,
@@ -1079,6 +1109,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Initially hide if mode is not responsa
                 responsa_sub_row.set_visibility(saved_mode == 'responsa')
 
+                # === Catalogue switches (visible only in Catalogue mode; catalogue plan §4.7, D2) ===
+                catalog_sub_row = ui.row().classes('w-full items-center gap-4 px-2 flex-wrap')
+                with catalog_sub_row:
+                    # The text search's own word for it (Fuzzy / מקורב), with the catalogue's rule (§4.7).
+                    catalog_near_cb = ui.checkbox(tr('Fuzzy search'), value=saved_catalog['near_spellings'])
+                    catalog_near_cb.tooltip(tr(CATALOG_NEAR_TOOLTIP))
+                    catalog_translations_cb = ui.checkbox(tr('Automatic translations'),
+                                                          value=saved_catalog['include_translations'])
+                    catalog_translations_cb.tooltip(tr(CATALOG_TRANSLATIONS_TOOLTIP))
+                catalog_near_cb.on_value_change(
+                    lambda e: _safe_set('catalog_near_spellings', bool(e.value)))
+                catalog_translations_cb.on_value_change(
+                    lambda e: _safe_set('catalog_translations', bool(e.value)))
+                catalog_sub_row.set_visibility(saved_mode == 'Catalog')
+
                 # Advanced Options panel (inside expanded_panel, collapses with search bar);
                 # opened from the row's button, its own header hidden.
                 with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-2 search-adv-panel').style(
@@ -1199,6 +1244,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Responsa sub-options: visible only in Responsa mode
                 responsa_sub_row.set_visibility(is_responsa)
+                catalog_sub_row.set_visibility(mode == 'Catalog')
                 _sync_sources_visibility()
 
                 # Save mode to storage (don't persist pgp_tags)
@@ -2920,7 +2966,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Restore the last chain step's query and re-execute it
             last_step = search_state.refinement_chain[-1]
             query_input.value = last_step.query
-            mode_select.value = 'exact' if last_step.mode == 'literal' else last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
+            mode_select.value = 'exact' if last_step.mode == 'literal' else last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark', 'Catalog') else 'exact'
             # Remove the last step so re-search in refine mode re-adds it
             search_state.refinement_chain = search_state.refinement_chain[:-1]
             if search_state.refinement_chain:
@@ -5465,6 +5511,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             params += f'&tag={quote(str(tag_value))}'
         if mode in VALID_SEARCH_MODES and mode != 'pgp_tags':
             params += f'&mode={quote(mode)}'
+        if mode == 'Catalog':
+            if catalog_near_cb.value: params += '&near=1'
+            if not catalog_translations_cb.value: params += '&translations=0'
         if mode == 'responsa':
             if responsa_variants_cb.value: params += '&variants=1'
             if responsa_ja_cb.value: params += '&ja=1'
@@ -5505,6 +5554,80 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             await execute_search(as_text=True)
         as_text.on('click', _run_as_text)
         as_text.on('keydown.enter', _run_as_text)
+
+    def _show_catalog_routed_notice():
+        """A Latin-script query searched in the catalogue (catalogue plan D6): said, with the
+        same query as a transcription search one click away."""
+        _clear_input_notice()
+        input_notice_row.set_visibility(True)
+        with input_notice_row:
+            ui.label(tr('Searched the catalogue records.'))
+            as_text = _link_like(tr('Search the transcriptions instead'))
+
+        async def _run_as_text():
+            await execute_search(as_text=True)
+        as_text.on('click', _run_as_text)
+        as_text.on('keydown.enter', _run_as_text)
+
+    def _show_near_forms(forms):
+        """The near spellings a catalogue search added (catalogue plan §4.7), the commonest
+        first: the reader sees what was searched besides the words as typed."""
+        if not forms:
+            return
+        shown = forms[:CATALOG_NEAR_FORMS_SHOWN]
+        text = ', '.join(shown) + (' …' if len(forms) > len(shown) else '')
+        input_notice_row.set_visibility(True)
+        with input_notice_row:
+            ui.label(tr('Also searched: {forms}').format(forms=text)).props('dir="auto"')
+
+    def _show_catalog_offer(clean_query, count):
+        """Under a text search that found nothing: how many manuscripts' catalogue records
+        hold the words, as a link to that search here (catalogue plan §4.4; PostHog
+        search_suggestion, kind=catalogue, shown and taken)."""
+        from web.analytics import posthog_capture
+        _clear_input_notice()
+        input_notice_row.set_visibility(True)
+        with input_notice_row:
+            ui.label(tr('No matches in the transcriptions.'))
+            link = _link_like(tr('{count} manuscripts whose catalogue records mention {query}').format(
+                count=f'{count:,}', query=clean_query))
+
+        async def _take():
+            posthog_capture('search_suggestion', {'kind': 'catalogue', 'taken': True}, client=_page_client)
+            query_input.value = clean_query
+            mode_select.value = 'Catalog'
+            on_mode_change()
+            await execute_search()
+        link.on('click', _take)
+        link.on('keydown.enter', _take)
+        posthog_capture('search_suggestion', {'kind': 'catalogue', 'taken': False}, client=_page_client)
+
+    async def _offer_catalog_search(clean_query, generation):
+        """The catalogue offer under an empty text search: one count, off the loop, with
+        the visitor's switches; nothing when the catalogue finds nothing either, or the
+        reader started another search meanwhile."""
+        if not catalog_available():
+            return
+        from shared.catalog_text_service import get_catalog_text_service
+        opts = {'include_translations': bool(catalog_translations_cb.value), 'limit': 0,
+                'near_spellings': bool(catalog_near_cb.value)}
+        try:
+            result = await run.io_bound(lambda: get_catalog_text_service().search(clean_query, **opts))
+        except Exception:
+            logger.debug('Catalogue offer failed for %r', clean_query, exc_info=True)
+            return
+        if (result is None or not result.total or search_state.search_generation != generation
+                or search_state.is_running):
+            return
+        _show_catalog_offer(clean_query, result.total)
+
+    async def _offer_after_empty_text_search(clean_query, mode, generation):
+        """What follows a text search that found nothing: "Did you mean <Hebrew>?" first,
+        and only when that is not shown, the catalogue offer."""
+        await _offer_layout_suggestion(clean_query, mode, generation)
+        if input_notice_row.visible or not _catalog_served:
+            return
+        await _offer_catalog_search(clean_query, generation)
 
     def _show_layout_suggestion(hebrew, mode):
         """"Did you mean <Hebrew>?": the Hebrew as a link to the same search in the
@@ -5594,6 +5717,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # (*as_text*). The mode selector is left as it was: the next query is text
         # again. A Hebrew query, or a prefixed one, is untouched.
         _typed_shelfmark = False
+        _typed_latin = False   # a Latin-script query searched in the catalogue (D6)
+        if mode_override == 'Catalog' and not _catalog_served:
+            mode_override, parsed_query = None, query   # % is no shortcut where it is not served
         if mode_override:
             mode = mode_override
             clean_query = parsed_query
@@ -5603,6 +5729,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _show_level_on_slider(mode)
                 mode = 'variants'
             mode_select.value = mode
+            # A value set in code fires no 'update:model-value': show the mode's own options
+            # (the catalogue's switches, the variant slider) as choosing it from the list does.
+            on_mode_change()
         else:
             mode = mode_select.value
             kind = search_box_input_kind(query) if (not as_text and mode in TEXT_MODES) else 'text'
@@ -5612,6 +5741,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if kind == 'shelfmark':
                 mode = 'Shelfmark'
                 _typed_shelfmark = True
+            elif (kind == 'text' and mode in TEXT_MODES and not as_text and _catalog_served
+                  and is_latin_script_query(query)):
+                # Latin script finds nothing in the transcriptions (catalogue plan D6): the
+                # catalogue is searched, said under the count, with the text search one
+                # click away. The mode selector stays as it was.
+                mode = 'Catalog'
+                _typed_latin = True
 
         # This visitor's variant level and Num Changes, read now: they travel with
         # this search only. The engine's settings object is shared by every visitor
@@ -5677,6 +5813,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                           and mode not in NO_SOURCES_MODES
                                                           and not lab_mode.value
                                                           and _editions_still_served()) else None
+        # The catalogue search's switches, recorded with its run (Back, search-within replay).
+        run_catalog = ({'include_translations': bool(catalog_translations_cb.value),
+                        'near_spellings': bool(catalog_near_cb.value)} if mode == 'Catalog' else None)
         search_state.last_run = {
             'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
             # Lab Mode is not in the address either: a page back on this run shows it.
@@ -5690,6 +5829,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if run_sources is not None:
             # Recorded with the step, so search-within replays the same choice.
             search_state.last_run['sources'] = run_sources
+        if run_catalog is not None:
+            search_state.last_run['catalog_options'] = run_catalog
         if attach is not None:
             # The run as it started (its gap, NOT-words, position and code are not in
             # the address), and its clock.
@@ -5702,6 +5843,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.last_run.pop('sources', None)
             if sources_select is not None and run_sources in SOURCE_CHOICES:
                 sources_select.value = run_sources
+            run_catalog = search_state.last_run.get('catalog_options')
             search_state.search_start_time = attach.started
 
         # This search's run (web/search_runs.py), registered before the first await:
@@ -6004,6 +6146,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         corpus_scope='genizah',
                         preview_callback=preview_cb if _preview_wanted else None,
                         **({'sources': run_sources} if run_sources else {}),
+                        **({'catalog_options': run_catalog} if run_catalog else {}),
                     )
             except InterruptedError:
                 return []
@@ -6451,11 +6594,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _ux_first_rows('ok' if results else 'zero')
         if _typed_shelfmark:
             _show_shelfmark_notice()
+        elif _typed_latin:
+            _show_catalog_routed_notice()
+            if not results:
+                # Wrong-layout Hebrew (akuo = שלום) is Latin script too: the Hebrew is
+                # offered as before, in the page's own (text) mode.
+                asyncio.ensure_future(_after_delay(0, _offer_layout_suggestion, clean_query,
+                                                   mode_select.value, this_generation))
         elif not results and mode in TEXT_MODES:
-            # "Did you mean <Hebrew>?" for a query typed on the English layout:
-            # beside the rest of the page's work, not before it (its corpus check
-            # is one index query, off the loop).
-            asyncio.ensure_future(_after_delay(0, _offer_layout_suggestion, clean_query, mode, this_generation))
+            # "Did you mean <Hebrew>?" for a query typed on the English layout, else the
+            # catalogue's count: beside the rest of the page's work, not before it (each
+            # check is one query, off the loop).
+            asyncio.ensure_future(_after_delay(0, _offer_after_empty_text_search, clean_query, mode,
+                                               this_generation))
+        if mode == 'Catalog' and results:
+            _show_near_forms((results[0].get('catalogue_search') or {}).get('near_forms') or [])
         # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
         # HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library filter
         # needs no enrichment data (only bool(search_state.results)); enrichment runs later

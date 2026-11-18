@@ -140,6 +140,17 @@ def key(text: str) -> str:
     return " ".join(key_words(text))
 
 
+_FINAL_OF = {"כ": "ך", "מ": "ם", "נ": "ן", "פ": "ף", "צ": "ץ"}
+
+
+def display_form(word_key: str) -> str:
+    """A key as a reader writes it: a Hebrew key's last letter back in its final form (the keys
+    fold the finals away), so a near spelling is shown as תפלין, not תפלינ. Other keys as they are."""
+    if len(word_key) > 1 and _HEBREW_WORD_RE.match(word_key) and word_key[-1] in _FINAL_OF:
+        return word_key[:-1] + _FINAL_OF[word_key[-1]]
+    return word_key
+
+
 def is_hebrew_text(text: str) -> bool:
     """True when ``text`` holds a Hebrew letter (the record's language label: he or en)."""
     return bool(_HEBREW_LETTER.search(text or ""))
@@ -157,9 +168,23 @@ def hebrew_forms(word_key: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Term:
     """One condition of a query: a single word (``phrase`` False, one key) or a quoted phrase
-    (``phrase`` True, its keys in order, matched next to each other without prefixes)."""
+    (``phrase`` True, its keys in order, matched next to each other without prefixes).
+
+    ``near`` is the word's near spellings that the sidecar holds (plan §4.7), filled in by the
+    service when the reader asks for them; never for a phrase."""
     keys: tuple[str, ...]
     phrase: bool
+    near: tuple[str, ...] = ()
+
+
+def _word_forms(term: Term, expand_prefixes: bool, near: bool, near_only: bool = False) -> tuple[str, ...]:
+    """The keys a single-word term matches: the word, with ``near`` its near spellings (with
+    ``near_only`` those alone), and with ``expand_prefixes`` each of those after the Hebrew
+    prefixes."""
+    bases = (() if near and near_only and term.near else (term.keys[0],)) + (term.near if near else ())
+    if not expand_prefixes:
+        return bases
+    return tuple(dict.fromkeys(f for base in bases for f in hebrew_forms(base)))
 
 
 def parse_query(query: str) -> list[Term]:
@@ -185,18 +210,21 @@ def parse_query(query: str) -> list[Term]:
     return terms
 
 
-def fts_match(terms: list[Term], expand_prefixes: bool) -> str:
+def fts_match(terms: list[Term], expand_prefixes: bool, near: bool = False, near_only: bool = False) -> str:
     """The FTS5 MATCH expression for ``terms``: every term required.
 
     Each key is wrapped in double quotes; keys hold only letters and digits (``tokens``), so the
     reader cannot reach FTS5 operators (OR, NOT, NEAR, ``*``, ``^``, column filters) through them.
-    ``expand_prefixes`` adds ``hebrew_forms`` for each single Hebrew word (never inside a phrase)."""
+    ``expand_prefixes`` adds ``hebrew_forms`` for each single Hebrew word (never inside a phrase);
+    ``near`` adds each single word's near spellings (``Term.near``), with their prefixes too, and
+    ``near_only`` leaves the word itself out of a term that has near spellings (for a one-word
+    query whose manuscripts with the word itself are already found)."""
     clauses: list[str] = []
     for term in terms:
         if term.phrase:
             clauses.append('"' + " ".join(term.keys) + '"')
             continue
-        forms = hebrew_forms(term.keys[0]) if expand_prefixes else (term.keys[0],)
+        forms = _word_forms(term, expand_prefixes, near, near_only)
         if len(forms) == 1:
             clauses.append(f'"{forms[0]}"')
         else:
@@ -209,12 +237,13 @@ def can_expand(terms: list[Term]) -> bool:
     return any(not t.phrase and len(hebrew_forms(t.keys[0])) > 1 for t in terms)
 
 
-def match_spans(text: str, terms: list[Term], expand_prefixes: bool) -> tuple[list[tuple[int, int]], int | None]:
+def match_spans(text: str, terms: list[Term], expand_prefixes: bool,
+                near: bool = False) -> tuple[list[tuple[int, int]], int | None]:
     """Where ``terms`` match in ``text``: the (start, end) of every matched word, in order, and the
     offset a snippet should centre on.
 
     A single word matches wherever its key (or, with ``expand_prefixes``, any of its
-    ``hebrew_forms``) stands. A phrase matches only where all its keys stand next to each other,
+    ``hebrew_forms``; with ``near``, any of its near spellings too) stands. A phrase matches only where all its keys stand next to each other,
     in order, as FTS5 matched it; its words elsewhere are not marked. The snippet centres on the
     first phrase match when the query has a phrase (the part the reader asked for exactly), else on
     the first matched word; ``None`` when nothing matches."""
@@ -225,7 +254,7 @@ def match_spans(text: str, terms: list[Term], expand_prefixes: bool) -> tuple[li
     singles: set[str] = set()
     for term in terms:
         if not term.phrase:
-            singles.update(hebrew_forms(term.keys[0]) if expand_prefixes else term.keys)
+            singles.update(_word_forms(term, expand_prefixes, near))
             continue
         width = len(term.keys)
         for j in range(len(flat) - width + 1):

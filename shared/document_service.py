@@ -806,16 +806,20 @@ class PgpService:
         Returns:
             Version string (e.g., '1.0.0') or None if unavailable.
         """
+        return self.get_meta_value('version')
+
+    def get_meta_value(self, key: str) -> Optional[str]:
+        """One value of the sidecar's ``meta`` (e.g. ``upstream_commit``), or None."""
         if self._conn is None:
             return None
         try:
             cursor = self._conn.execute(
-                "SELECT value FROM meta WHERE key = 'version'"
+                "SELECT value FROM meta WHERE key = ?", (key,)
             )
             row = cursor.fetchone()
             return row["value"] if row else None
         except Exception as e:
-            logger.error(f"PgpService.get_version error: {e}")
+            logger.error(f"PgpService.get_meta_value({key!r}) error: {e}")
             return None
 
 

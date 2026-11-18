@@ -54,6 +54,9 @@ class RefinementStep:
     # The texts the step read (editions plan §3.4, D1): 'all', 'editions' or 'automatic';
     # None for a step saved before the source choice existed, replayed as today's search.
     sources: Optional[str] = None
+    # A catalogue search's switches (catalogue plan §4.7: include_translations,
+    # near_spellings); None for every other mode, and for a step that predates them.
+    catalog_options: Optional[dict] = None
 
     # Runtime-only fields (not serialized, rebuilt on replay)
     _result_uids: set = field(default_factory=set, repr=False, compare=False)
@@ -156,9 +159,13 @@ def step_partial(cutoff, parent=None) -> bool:
 
 
 def _sources_argument(step: RefinementStep) -> dict:
-    """The step's source choice for execute_search, when it recorded one (a searcher that
-    predates the choice is never handed the argument)."""
-    return {'sources': step.sources} if step.sources else {}
+    """The step's source choice and, for a catalogue search, its switches, for
+    execute_search, when it recorded them (a searcher that predates them is never handed
+    the argument)."""
+    out = {'sources': step.sources} if step.sources else {}
+    if getattr(step, 'catalog_options', None):
+        out['catalog_options'] = dict(step.catalog_options)
+    return out
 
 
 def _last_search_cutoff() -> dict:

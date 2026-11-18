@@ -6741,3 +6741,24 @@ TRANSLATIONS.update({
     "click": "לחיצה",
     "Select words": "סימון מילים",
 })
+
+# The catalogue text search, web (catalogue plan §4.4, §4.7; to be approved with the PR):
+# the mode's switches, the lines under the count, the source line on a catalogue result.
+TRANSLATIONS.update({
+    'Fuzzy search: in Hebrew, a ו or י added or dropped (כתבה for כתובה); in Latin letters, one letter different in words of five letters or more, two in words of nine or more (Saadya for Saadia)':
+        "חיפוש מקורב: בעברית ו' או י' שנוספה או נשמטה (כתבה במקום כתובה); באותיות לטיניות אות אחת שונה במילים של חמש אותיות ומעלה, ושתיים במילים של תשע ומעלה (Saadya במקום Saadia)",
+    "Automatic translations": "תרגומים אוטומטיים",
+    'Also search the automatic translations of the catalogue records (English to Hebrew and Hebrew to English)':
+        "חיפוש גם בתרגומים האוטומטיים של רשומות הקטלוג (מאנגלית לעברית ומעברית לאנגלית)",
+    "Searched the catalogue records.": "החיפוש נערך ברשומות הקטלוג.",
+    "Search the transcriptions instead": "חפשו בתעתיקים במקום זאת",
+    "Also searched: {forms}": "החיפוש כלל גם: {forms}",
+    "No matches in the transcriptions.": "אין התאמות בתעתיקים.",
+    "{count} manuscripts whose catalogue records mention {query}": "{count} כתבי יד שרשומות הקטלוג שלהם מזכירות את {query}",
+    "PGP description": "תיאור PGP",
+    "Library catalogue title": "כותרת בקטלוג הספרייה",
+    "Textual frame": "מסגרת טקסטואלית",
+    "Colophon": "קולופון",
+    "Full catalogue entry": "רשומת הקטלוג המלאה",
+    "automatic translation": "תרגום אוטומטי",
+})

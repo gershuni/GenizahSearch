@@ -998,7 +998,7 @@ def _tree_cost_ns(forms):
 # Literal, Variants, Fuzzy -- the ones that can match natively); Responsa [N]
 # tokens and Regex mode keep any gap and stay on the interruptible route.
 MAX_WORD_GAP = 10
-_GAP_FREE_MODES = frozenset({'Regex', 'Title', 'Shelfmark'})
+_GAP_FREE_MODES = frozenset({'Regex', 'Title', 'Shelfmark', 'Catalog'})
 
 
 def _validate_word_gap(mode, gap, responsa_options=None):
@@ -3748,6 +3748,8 @@ class SearchEngine:
         - / = Regex
         - $ = Title
         - # = Shelfmark
+        - % = Catalog (the catalogue text search, shared/catalog_text_rows.py; the
+          caller drops it where that search is not served)
         - R = responsa
         """
         if responsa_mode:
@@ -3764,6 +3766,7 @@ class SearchEngine:
             ('/', 'Regex'),
             ('$', 'Title'),
             ('#', 'Shelfmark'),
+            ('%', 'Catalog'),
             ('R', 'responsa'),
         ]
 
@@ -4255,12 +4258,34 @@ class SearchEngine:
         results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
         return results
 
+    def _execute_catalog_search(self, query_str, catalog_options=None, restrict_sys_ids=None,
+                                progress_callback=None, ids_only=False):
+        """A catalogue text search's rows (shared/catalog_text_rows.py), in the catalogue's rank
+        order. The first row carries ``catalogue_search``: the near spellings searched and the
+        exact count. Rows past ``CATALOG_MAX_ROWS`` are cut, and said to be (the cut-off signal),
+        except for *ids_only* (a search-within completing), which gets every row."""
+        from shared.catalog_text_rows import CATALOG_MAX_ROWS, catalog_search_rows
+        self._clear_search_state()
+        rows, info = catalog_search_rows(query_str, catalog_options, self.meta_mgr, restrict_sys_ids,
+                                         progress_callback=progress_callback,
+                                         max_rows=10 ** 9 if ids_only else CATALOG_MAX_ROWS)
+        if info['capped']:
+            _note_search_cutoff(capped=True)
+        if rows:
+            rows[0]['catalogue_search'] = {'near_forms': info['near_forms'], 'total': info['total']}
+        return rows
+
     @bounded_search
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None,
                        responsa_options=None, restrict_sys_ids: set = None, text_position: str = None,
                        corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False,
-                       metadata_sys_ids=None, sources=None):
+                       metadata_sys_ids=None, sources=None, catalog_options=None):
         """Search the Genizah (and/or LOCAL) index; return the verified result rows.
+
+        Mode ``'Catalog'`` searches the catalogue text instead (plan
+        CATALOGUE_TEXT_SEARCH_PLAN §4.3; ``_execute_catalog_search``): *catalog_options*
+        carries its switches (``include_translations``, ``near_spellings``), and the
+        transcription options (gap, NOT-words, position, sources) do not apply.
 
         *sources* (editions plan §3.4, D1): which texts are read -- ``'automatic'`` (or
         None: today's search, row for row), ``'all'`` (the automatic transcriptions and the
@@ -4274,6 +4299,9 @@ class SearchEngine:
         Genizah / all scope; whenever it does not run (no editions index, Title/Shelfmark,
         My Library only), the search is today's. Previews are off when editions are read.
         """
+        if mode == 'Catalog':
+            return self._execute_catalog_search(query_str, catalog_options, restrict_sys_ids,
+                                                progress_callback, ids_only=ids_only)
         from shared.editions_search import SOURCES_ALL, SOURCES_AUTOMATIC, normalize_sources
         sources = normalize_sources(sources)
         _EDITIONS_UNAVAILABLE.value = False

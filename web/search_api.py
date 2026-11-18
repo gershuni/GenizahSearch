@@ -288,9 +288,9 @@ class SearchRequest(BaseModel):
         description="Search query string. Max 1000 chars after stripping. Empty after strip -> 400 query_required.",
     )
     search_mode: Literal['exact', 'variants', 'variants_extended',
-                         'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
+                         'responsa', 'title', 'shelfmark', 'fuzzy', 'catalog'] = Field(
         ...,
-        description="Search mode: 'exact' (the words as typed, as whole words, with no spelling variation: the website's Exact; a word inside a longer one, such as a prefixed form, is not matched (until 2026-10-21 some were); for prefixed forms use 'responsa' with #word), 'variants' (letter-confusion spellings: the 30 most frequent pairs, one change per word; the website's Basic level), 'variants_extended' (the website's Extended level: 70 pairs, up to two changes per word; background jobs only, POST /api/search/jobs), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
+        description="Search mode: 'exact' (the words as typed, as whole words, with no spelling variation: the website's Exact; a word inside a longer one, such as a prefixed form, is not matched (until 2026-10-21 some were); for prefixed forms use 'responsa' with #word), 'variants' (letter-confusion spellings: the 30 most frequent pairs, one change per word; the website's Basic level), 'variants_extended' (the website's Extended level: 70 pairs, up to two changes per word; background jobs only, POST /api/search/jobs), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode), 'catalog' (the catalogue records' text, not the manuscripts': FJMS catalogue titles, descriptions and full entries, PGP descriptions and library titles, in Hebrew and English, with their automatic translations; every word in one record; Hebrew words also after the common prefixes; one result per manuscript, each with catalogue_source, catalogue_field, automatic_translation and near_spelling; where the server does not serve it, 400 catalog_unavailable).",
     )
     responsa_options: Optional[ResponsaOptions] = Field(
         default=None,
@@ -322,6 +322,23 @@ class SearchRequest(BaseModel):
         default=None,
         description="Optional domain/author/work/material/date filter. Unknown values fail-closed with 400.",
     )
+    near_spellings: Optional[bool] = Field(
+        default=None,
+        description=(
+            "search_mode='catalog' only: also find near spellings of each word that the catalogue "
+            "holds -- in Hebrew a vav or yod added or dropped (plene/defective spelling), in Latin "
+            "letters one letter different in words of five letters or more, two from nine letters "
+            "(Saadya for Saadia). Manuscripts found only through one come after the rest, with "
+            "near_spelling true. Default false."
+        ),
+    )
+    include_translations: Optional[bool] = Field(
+        default=None,
+        description=(
+            "search_mode='catalog' only: also search the automatic translations of the catalogue "
+            "records (default true); a hit in one has automatic_translation true."
+        ),
+    )
     sources: Optional[Literal['all', 'editions', 'automatic']] = Field(
         default=None,
         description=(
@@ -338,10 +355,22 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode='after')
     def _check_sources_mode(self):
-        if self.sources not in (None, 'automatic') and self.search_mode in ('title', 'shelfmark'):
+        if self.sources not in (None, 'automatic') and self.search_mode in ('title', 'shelfmark', 'catalog'):
             raise APIError(
                 'invalid_combination',
                 f"sources={self.sources!r} applies to the text searches, not search_mode={self.search_mode!r}",
+                http_status=400,
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _check_catalog_options_coupling(self):
+        if self.search_mode != 'catalog' and (self.near_spellings is not None
+                                              or self.include_translations is not None):
+            raise APIError(
+                'invalid_combination',
+                f"near_spellings and include_translations are only valid when search_mode='catalog' "
+                f"(got search_mode={self.search_mode!r})",
                 http_status=400,
             )
         return self
@@ -359,7 +388,7 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode='after')
     def _check_gap_metadata_coupling(self):
-        if self.search_mode in ('title', 'shelfmark') and self.gap and self.gap != 0:
+        if self.search_mode in ('title', 'shelfmark', 'catalog') and self.gap and self.gap != 0:
             raise APIError(
                 'invalid_combination',
                 f"gap has no effect with metadata-only search modes "
@@ -417,6 +446,9 @@ _SEARCH_MODE_TO_INTERNAL = {
     'title':     'Title',
     'shelfmark': 'Shelfmark',
     'fuzzy':     'fuzzy',
+    # The catalogue text search (catalogue plan §4.4): listed in capabilities only where the
+    # server serves it (web/catalog_assets.py), refused with catalog_unavailable elsewhere.
+    'catalog':   'Catalog',
 }
 
 # Core-search wall-clock timeout (2026-06): execute_search runs in a thread-pool
@@ -486,7 +518,7 @@ def _effective_sources(req):
     (the automatic transcriptions alone: today's search and response shape) for 'automatic',
     for title/shelfmark, and where the editions are not served -- 'all' is then answered with
     the warning ``editions_unavailable``, and 'editions' refused."""
-    if req.search_mode in ('title', 'shelfmark') or req.sources == 'automatic':
+    if req.search_mode in ('title', 'shelfmark', 'catalog') or req.sources == 'automatic':
         return None, None
     from web.editions_assets import served_to_api
     if served_to_api():
@@ -499,6 +531,22 @@ def _effective_sources(req):
             http_status=400,
         )
     return None, ('editions_unavailable' if req.sources == 'all' else None)
+
+
+def _check_catalog_served(req) -> Optional[dict]:
+    """The catalogue search's switches for execute_search, or None for any other mode; a
+    catalogue search where the server does not serve it is refused (catalog_unavailable)."""
+    if req.search_mode != 'catalog':
+        return None
+    from web.catalog_assets import catalog_available
+    if not catalog_available():
+        raise APIError(
+            'catalog_unavailable',
+            "The catalogue text search is not served on this server.",
+            http_status=400,
+        )
+    return {'include_translations': req.include_translations is not False,
+            'near_spellings': bool(req.near_spellings)}
 
 
 HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
@@ -1945,6 +1993,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # Which texts are read (editions plan §3.5): None = the automatic transcriptions,
             # today's search and today's response shape.
             sources_effective, sources_warning = _effective_sources(req)
+            catalog_effective = _check_catalog_served(req)
             if short_circuit_empty:
                 results = []
                 total = 0
@@ -1980,6 +2029,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     _consume_meta_inner()
                     consume_editions_skipped()
                     extra = {'sources': sources_effective} if sources_effective else {}
+                    if catalog_effective is not None:
+                        extra['catalog_options'] = catalog_effective
                     with search_budget(core_timeout if core_timeout is not None else 0):
                         res = worker_searcher.execute_search(
                             query_str=query,
@@ -2072,6 +2123,13 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     if _slot_release is not None:
                         _slot_release()
                 total = len(results)
+                if catalog_effective is not None and results:
+                    # The catalogue search counts every match exactly; its rows stop at
+                    # CATALOG_MAX_ROWS (shared/catalog_text_rows.py), so the count comes
+                    # from the first row, not from the rows.
+                    exact_total = (results[0].get('catalogue_search') or {}).get('total')
+                    if isinstance(exact_total, int) and exact_total > total:
+                        total = exact_total
 
             # 8. Cap results.
             # P9X: for fuzzy, if the client did NOT supply `limit` (Pydantic
@@ -2153,6 +2211,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'limit_effective': effective_limit if req.search_mode == 'fuzzy' else min(req.limit, MAX_LIMIT),
                 'filters': filters_dict,
             }
+            if catalog_effective is not None:
+                request_echo['near_spellings'] = catalog_effective['near_spellings']
+                request_echo['include_translations'] = catalog_effective['include_translations']
             if req.sources is not None or sources_effective:
                 # Echoed when asked for or when the editions were read: a request that
                 # neither asks nor gets them keeps today's echo.
@@ -3172,6 +3233,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # passage_available() internally (web/passage_assets.py) -- no need
         # to AND it again here.
         _multi_witness_on = _passage_multi_witness_available()
+        from web.catalog_assets import catalog_available as _catalog_available
+        _catalog_on = _catalog_available()
 
         return {
             'schema_version': 1,
@@ -3184,7 +3247,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # Derived from the real mode enum (not a literal list) -- dict
             # insertion order is preserved, and _SEARCH_MODE_TO_INTERNAL's
             # own definition order already matches the documented contract.
-            'search_modes': list(_SEARCH_MODE_TO_INTERNAL.keys()),
+            'search_modes': [m for m in _SEARCH_MODE_TO_INTERNAL
+                             if m != 'catalog' or _catalog_on],
             # search_mode values only POST /api/search/jobs accepts (2026-10-11).
             'background_job_modes': sorted(BACKGROUND_JOB_MODES),
             'features': {

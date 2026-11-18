@@ -17,16 +17,22 @@ empty result. ``is_available()`` is readiness AND the ``CATALOG_TEXT_SEARCH_ENAB
 A search answers one hit per manuscript, ranked (plan §4.3, owner D3):
 
 1. manuscripts found by the words as typed come before those found only through a Hebrew prefix
-   (כתובה before הכתובה);
+   (כתובה before הכתובה), and, with ``near_spellings``, those before the ones found only through a
+   near spelling (כתבה, saadya; plan §4.7, ``shared/near_spellings.py``);
 2. within each group, by the manuscript's best record: FTS5 bm25, with a title worth more than a
    description and a description more than a full catalogue entry (``COLUMN_WEIGHTS``), and an
    automatic translation worth less than an original (``AUTOMATIC_FACTOR``).
 
 ``include_translations=False`` leaves the automatic translations out (D2's switch). The count is
 exact: every matching manuscript is ranked, and ``limit`` only bounds what is returned.
+
+A near spelling counts only when the file holds it: each candidate is looked up in the FTS5
+vocabulary (``fts5vocab``, made in the connection's own temp schema, so the read-only file is
+unchanged and every thread's connection has its own).
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -43,6 +49,7 @@ from shared.catalog_text_normalize import (
     match_spans,
     parse_query,
 )
+from shared.near_spellings import near_spellings as _near_spellings_of
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -62,6 +69,17 @@ AUTOMATIC_FACTOR = 0.8
 SNIPPET_CHARS = 200
 #: The default bound on returned hits (the count is always exact).
 DEFAULT_LIMIT = 5000
+#: At most this many words of a query get near spellings (the first ones); the rest are searched
+#: as typed. Each costs up to a few tenths of a second (shared/near_spellings.py).
+MAX_NEAR_WORDS = 4
+#: Words whose near spellings in the file are remembered (small tuples, not the candidates).
+NEAR_CACHE_SIZE = 2048
+#: The inputs whose drift is reported at startup (plan §4.6): this file's ``meta`` key and a label.
+#: PGP's schema version rarely changes with a refresh, its upstream commit always does.
+DRIFT_KEYS = (
+    ("input_fjms_version", "FJMS sidecar version"),
+    ("input_pgp_upstream_commit", "PGP sidecar upstream commit"),
+)
 
 
 def catalog_text_enabled() -> bool:
@@ -93,24 +111,32 @@ class CatalogHit:
     lang: str            # he | en
     automatic: bool      # True when the record is an automatic translation
     score: float         # lower is better
-    exact: bool          # found by the words as typed (False: only through a Hebrew prefix)
+    exact: bool          # found by the words as typed (False: only through a prefix or a near spelling)
+    near: bool = False   # found only through a near spelling
 
 
 @dataclass(frozen=True)
 class CatalogResult:
     query: str
-    terms: tuple[Term, ...]
+    terms: tuple[Term, ...]      # with ``near_spellings``, each word's near spellings the file holds
     hits: tuple[CatalogHit, ...]
     total: int                   # every matching manuscript, whatever ``limit`` returned
     include_translations: bool
+    near_spellings: bool = False
 
     @property
     def truncated(self) -> bool:
         return self.total > len(self.hits)
 
+    @property
+    def near_forms(self) -> tuple[str, ...]:
+        """Every near spelling searched, commonest in the file first per word, each once."""
+        return tuple(dict.fromkeys(f for t in self.terms for f in t.near))
 
-def _empty(query: str, include_translations: bool, terms: tuple[Term, ...] = ()) -> CatalogResult:
-    return CatalogResult(query, terms, (), 0, include_translations)
+
+def _empty(query: str, include_translations: bool, terms: tuple[Term, ...] = (),
+           near_spellings: bool = False) -> CatalogResult:
+    return CatalogResult(query, terms, (), 0, include_translations, near_spellings)
 
 
 class CatalogTextService:
@@ -119,6 +145,10 @@ class CatalogTextService:
     def __init__(self, db_path: Optional[str] = None, thread_safe: bool = False):
         self._conn: Any = None
         self._meta: dict[str, str] = {}
+        # Words -> their near spellings in this file (``_near_in_file``); searches run in several
+        # threads at once (run.io_bound), so the cache is read and written under its lock.
+        self._near_cache: dict[str, tuple[str, ...]] = {}
+        self._near_lock = threading.Lock()
         self.unavailable_reason = "not opened"
         self._db_path = db_path or default_sidecar_path()
         if not self._db_path:
@@ -170,6 +200,18 @@ class CatalogTextService:
     def meta(self, key: str) -> str:
         return self._meta.get(key, "")
 
+    def input_drift(self, installed: dict[str, Optional[str]]) -> list[str]:
+        """How the inputs this file was built from differ from the sidecars installed now (plan
+        §4.6): one line per ``DRIFT_KEYS`` entry whose installed value is known and differs. The
+        file is still served (a slightly old catalogue is still useful); the caller logs it."""
+        out = []
+        for meta_key, label in DRIFT_KEYS:
+            now = installed.get(meta_key)
+            built = self.meta(meta_key)
+            if now and built and str(now) != built:
+                out.append(f"{label}: the catalogue file was built from {built}, the installed one is {now}")
+        return out
+
     def close(self) -> None:
         if self._conn is not None:
             try:
@@ -181,24 +223,79 @@ class CatalogTextService:
 
     # -- search --------------------------------------------------------------
 
-    def search(self, query: str, include_translations: bool = True, limit: int = DEFAULT_LIMIT) -> CatalogResult:
-        """The manuscripts whose catalogue records hold every word of ``query``. Never raises."""
+    def search(self, query: str, include_translations: bool = True, limit: int = DEFAULT_LIMIT,
+               near_spellings: bool = False) -> CatalogResult:
+        """The manuscripts whose catalogue records hold every word of ``query`` (with
+        ``near_spellings``, or a near spelling of it). Never raises."""
         terms = tuple(parse_query(query or ""))
         if not terms or self._conn is None:
-            return _empty(query, include_translations, terms)
+            return _empty(query, include_translations, terms, near_spellings)
         try:
+            if near_spellings:
+                terms = tuple(self._with_near_spellings(terms))
+            expand = can_expand(list(terms))
             exact = self._ranked(fts_match(list(terms), expand_prefixes=False), include_translations)
             ranked = list(exact)
-            if can_expand(list(terms)):
-                found = {hit.sys_id for hit in exact}
+            found = {hit.sys_id for hit in exact}
+            if expand:
                 for hit in self._ranked(fts_match(list(terms), expand_prefixes=True), include_translations):
                     if hit.sys_id not in found:
+                        found.add(hit.sys_id)
                         ranked.append(replace(hit, exact=False))
+            if any(t.near for t in terms):
+                # One word: its own manuscripts are found already, so only its near spellings are
+                # searched (a common word's own records are not ranked a second time). Several:
+                # each word as typed or near, since a manuscript may hold one as typed and another
+                # only near.
+                match = fts_match(list(terms), expand_prefixes=expand, near=True, near_only=len(terms) == 1)
+                for hit in self._ranked(match, include_translations):
+                    if hit.sys_id not in found:
+                        found.add(hit.sys_id)
+                        ranked.append(replace(hit, exact=False, near=True))
         except sqlite3.Error as exc:
             logger.warning("CatalogTextService: search %r failed: %s", query, exc)
-            return _empty(query, include_translations, terms)
+            return _empty(query, include_translations, terms, near_spellings)
         bound = max(0, int(limit)) if limit is not None else len(ranked)
-        return CatalogResult(query, terms, tuple(ranked[:bound]), len(ranked), include_translations)
+        return CatalogResult(query, terms, tuple(ranked[:bound]), len(ranked), include_translations,
+                             near_spellings)
+
+    def _with_near_spellings(self, terms: tuple[Term, ...]) -> list[Term]:
+        """``terms`` with each single word's near spellings that the file holds, commonest first
+        (a phrase gets none: it asked for the words as typed). Only the first ``MAX_NEAR_WORDS``
+        single words get them."""
+        out = []
+        budget = MAX_NEAR_WORDS
+        for term in terms:
+            if term.phrase or budget <= 0:
+                out.append(term)
+                continue
+            budget -= 1
+            near = self._near_in_file(term.keys[0])
+            out.append(replace(term, near=near) if near else term)
+        return out
+
+    def _near_in_file(self, word: str) -> tuple[str, ...]:
+        """*word*'s near spellings that the file holds, remembered (``NEAR_CACHE_SIZE``)."""
+        with self._near_lock:
+            hit = self._near_cache.get(word)
+        if hit is not None:
+            return hit
+        candidates = _near_spellings_of(word) - {word}
+        near = tuple(self._in_vocabulary(candidates)) if candidates else ()
+        with self._near_lock:
+            while len(self._near_cache) >= NEAR_CACHE_SIZE:
+                self._near_cache.pop(next(iter(self._near_cache)))
+            self._near_cache[word] = near
+        return near
+
+    def _in_vocabulary(self, candidates) -> list[str]:
+        """Those of ``candidates`` the FTS index holds, the commonest (most records) first."""
+        self._conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS temp.catalog_vocab USING fts5vocab(main, 'catalog_fts', 'row')")
+        rows = self._conn.execute(
+            "SELECT term FROM temp.catalog_vocab WHERE term IN (SELECT value FROM json_each(?)) "
+            "ORDER BY doc DESC, term", (json.dumps(sorted(candidates), ensure_ascii=False),))
+        return [row[0] for row in rows]
 
     def _ranked(self, match: str, include_translations: bool) -> list[CatalogHit]:
         weights = ", ".join(str(w) for w in COLUMN_WEIGHTS)
@@ -234,21 +331,43 @@ class CatalogTextService:
             return ""
         return row[0] if row else ""
 
+    def record_texts(self, record_ids) -> dict[int, str]:
+        """The original texts of many records at once, by id (one query, ids in file order)."""
+        if self._conn is None:
+            return {}
+        ids = sorted({int(i) for i in record_ids})
+        if not ids:
+            return {}
+        try:
+            rows = self._conn.execute(
+                "SELECT id, text FROM records WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))
+            return {int(r[0]): r[1] for r in rows}
+        except sqlite3.Error:
+            return {}
+
+    def snippets(self, hits, result: CatalogResult) -> list[str]:
+        """``snippet`` for each of ``hits``, their texts read in one query."""
+        texts = self.record_texts(h.record_id for h in hits)
+        return [make_snippet(texts.get(h.record_id, ""), result.terms, expand_prefixes=not h.exact, near=h.near)
+                for h in hits]
+
     def snippet(self, hit: CatalogHit, result: CatalogResult) -> str:
         """About ``SNIPPET_CHARS`` of the hit's original text around its match (the first phrase
         match when the query has a phrase, else the first matched word), every matched word inside
-        ``*...*`` (the result cards' marker, ``SearchEngine.format_snippet``)."""
-        return make_snippet(self.record_text(hit.record_id), result.terms, expand_prefixes=not hit.exact)
+        ``*...*`` (the result cards' marker, ``SearchEngine.format_snippet``). A hit found through a
+        near spelling marks the near spelling."""
+        return make_snippet(self.record_text(hit.record_id), result.terms, expand_prefixes=not hit.exact,
+                            near=hit.near)
 
 
 def make_snippet(text: str, terms: tuple[Term, ...] | list[Term], expand_prefixes: bool,
-                 width: int = SNIPPET_CHARS) -> str:
+                 width: int = SNIPPET_CHARS, near: bool = False) -> str:
     """See ``CatalogTextService.snippet``. A phrase's words are marked only where the phrase
     stands (``match_spans``). A literal ``*`` in the text becomes ``∗`` (U+2217), so it can never
     open or close a marker."""
     if not text:
         return ""
-    marked, anchor = match_spans(text, list(terms), expand_prefixes)
+    marked, anchor = match_spans(text, list(terms), expand_prefixes, near)
     start, end = 0, len(text)
     if len(text) > width:
         centre = anchor if anchor is not None else 0
@@ -308,6 +427,41 @@ def get_catalog_text_service(thread_safe: bool = True) -> CatalogTextService:
         if _default_service is None:
             _default_service = CatalogTextService(thread_safe=thread_safe)
         return _default_service
+
+
+def peek_catalog_text_service() -> Optional[CatalogTextService]:
+    """The default service if it was opened already, else None (never opens the file: a page
+    asks this on the event loop, and opening checks a 700 MB file)."""
+    return _default_service
+
+
+def installed_inputs() -> dict[str, Optional[str]]:
+    """The installed FJMS and PGP sidecars' values for ``DRIFT_KEYS`` (None where a sidecar is
+    absent or unreadable). Never raises."""
+    out: dict[str, Optional[str]] = {key: None for key, _ in DRIFT_KEYS}
+    try:
+        from shared.fjms_service import get_fjms_service
+        out["input_fjms_version"] = get_fjms_service(thread_safe=True).get_version()
+    except Exception as exc:
+        logger.debug("CatalogTextService: FJMS version unreadable: %s", exc)
+    try:
+        from shared.document_service import get_pgp_service
+        out["input_pgp_upstream_commit"] = get_pgp_service().get_meta_value("upstream_commit")
+    except Exception as exc:
+        logger.debug("CatalogTextService: PGP upstream commit unreadable: %s", exc)
+    return out
+
+
+def open_and_check() -> CatalogTextService:
+    """Open the process-wide service and log why it is not served, or how its inputs drifted from
+    the installed sidecars (plan §4.6). For a startup hook, off the event loop. Never raises."""
+    service = get_catalog_text_service()
+    if not service.is_ready():
+        logger.warning("Catalogue text search not served: %s", service.unavailable_reason)
+        return service
+    for line in service.input_drift(installed_inputs()):
+        logger.warning("Catalogue text file out of date (rebuild it; plan §4.6): %s", line)
+    return service
 
 
 def reset_catalog_text_service() -> None:

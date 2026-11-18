@@ -28,6 +28,8 @@ I = "990000000000000009"  # a word with nikud
 J = "990000000000000010"  # a literal * in the text
 K = "990000000000000011"  # a long text with cheese in the middle; an unknown author
 M = "990000000000000012"  # shares a work title (id 3000) with H: one translation, two manuscripts
+N = "990000000000000013"  # כתבה, the defective spelling of כתובה (a near spelling, plan §4.7)
+P = "990000000000000014"  # Saadya, a near spelling of Saadia; and a prefixed defective spelling
 
 LONG_TEXT = ("Letter about trade in the Mediterranean. " * 6
              + "The writer mentions a shipment of cheese from Sicily. "
@@ -66,6 +68,8 @@ def write_fjms(path: Path, extra_translations=()) -> Path:
         (B, "שטר הכתובה של פלונית"),
         (D, "כתובת סת אלדאר"),
         (J, "Note * with a star, about cheese"),
+        (N, "כתבה ישנה"),
+        (P, "Commentary by Saadya; נזכרת בו הכתבה"),
         ("12345", "a row whose sys_id is not a corpus sys_id"),
     ])
     conn.executemany("INSERT INTO catalog_full_texts VALUES (?, ?)", [

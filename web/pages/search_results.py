@@ -704,6 +704,29 @@ def render_preview_results(search_state, refs, rows):
                 create_result_card(search_state, refs, i, res)
 
 
+def catalogue_source_text(result) -> str:
+    """Where a catalogue search's row found its words, in the reader's language: "FJMS Catalog ·
+    Free Description · automatic translation", "PGP description", "Library catalogue title",
+    and "Fuzzy" when it was found only through a near spelling (catalogue plan §4.3, §4.7). '' for
+    any other row."""
+    info = result.get('catalogue') if isinstance(result, dict) else None
+    if not info:
+        return ''
+    from shared.catalog_text_rows import source_label_parts
+    parts = [tr(p) for p in source_label_parts(info.get('source', ''), info.get('field', ''),
+                                                bool(info.get('automatic')))]
+    if info.get('near'):
+        parts.append(tr('Fuzzy'))
+    return ' · '.join(parts)
+
+
+def _render_catalogue_source(result):
+    """The source line under a catalogue search's snippet; nothing for any other row."""
+    text = catalogue_source_text(result)
+    if text:
+        ui.label(text).classes('text-xs result-catalogue-source').style('color: var(--text-tertiary);')
+
+
 def _render_matched_in(result):
     """A result found with the scholarly transcriptions (editions plan section 3.4): every text
     of its page that matched, each edition a link to it; and a hit whose page could not be named
@@ -1166,10 +1189,18 @@ def create_result_card(search_state, refs, index, result):
             if search_state.refinement_chain:
                 snippet = enrich_snippet_with_chain_terms(snippet, search_state.refinement_chain, refs.query_input.value)
             snippet_html = SearchEngine.format_snippet(snippet)
-            with ui.element('div').classes('mt-3 p-3 rounded-lg text-sm result-snippet').style(
-                'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
-            ):
+            # A catalogue record may be English: its own direction (dir=auto), not the
+            # transcriptions' right-to-left.
+            _snippet_dir = ('text-align: start;' if result.get('catalogue')
+                            else 'direction: rtl; text-align: right;')
+            _snippet_box = ui.element('div').classes('mt-3 p-3 rounded-lg text-sm result-snippet').style(
+                f'background: var(--bg-tertiary); {_snippet_dir} line-height: 1.8;'
+            )
+            if result.get('catalogue'):
+                _snippet_box.props('dir="auto"')
+            with _snippet_box:
                 ui.html(snippet_html, sanitize=False)
+        _render_catalogue_source(result)
         _render_matched_in(result)
 
         # === Inline accordion expansion (image + full text only) ===

@@ -135,11 +135,21 @@ def test_capabilities_search_modes_derived_from_real_enum(client, clean_env):
     from web.search_api import _SEARCH_MODE_TO_INTERNAL
     r = _get(client)
     body = r.json()
-    assert body['search_modes'] == list(_SEARCH_MODE_TO_INTERNAL.keys())
+    # The catalogue text search is listed only where it is served (web/catalog_assets.py).
+    assert body['search_modes'] == [m for m in _SEARCH_MODE_TO_INTERNAL if m != 'catalog']
     assert body['search_modes'] == [
         'exact', 'variants', 'variants_extended',
         'responsa', 'title', 'shelfmark', 'fuzzy',
     ]
+
+
+def test_capabilities_lists_the_catalogue_search_where_it_is_served(client, clean_env, monkeypatch):
+    from web.search_api import _SEARCH_MODE_TO_INTERNAL
+    import web.catalog_assets as catalog_assets
+    monkeypatch.setattr(catalog_assets, 'catalog_available', lambda: True)
+    body = _get(client).json()
+    assert body['search_modes'] == list(_SEARCH_MODE_TO_INTERNAL.keys())
+    assert body['search_modes'][-1] == 'catalog'
 
 
 def test_capabilities_lists_the_chunk_modes_validation_accepts(client, clean_env):

@@ -67,6 +67,7 @@ ERROR_CODES = frozenset({
     'background_job_required',            # 400 — search_mode=variants_extended sent to synchronous /api/search; use /api/search/jobs
     'editions_unavailable',               # 400 -- sources='editions' where the scholarly editions are not searched (EDITIONS_SEARCH_ENABLED, readiness)
     'edition_not_found',                  # 404 -- GET /api/browse version= names no edition of that manuscript
+    'catalog_unavailable',                # 400 -- search_mode='catalog' where the catalogue text search is not served (CATALOG_TEXT_SEARCH_ENABLED, readiness)
     # 2026-10-21 (Responsa Phase 1, shared/responsa_match.py): a star shape the engine does
     # not search yet -- inside a word, a word of stars only, several stars -- is refused
     # with a message, never answered with an empty list.

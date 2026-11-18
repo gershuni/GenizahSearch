@@ -20,7 +20,7 @@ SOURCE_CHOICES = {
 }
 
 #: Modes that read no transcription text: no choice is shown or sent.
-NO_SOURCES_MODES = frozenset({'Shelfmark', 'Title', 'pgp_tags'})
+NO_SOURCES_MODES = frozenset({'Shelfmark', 'Title', 'Catalog', 'pgp_tags'})
 
 _SOURCE_NAMES = {
     'automatic': 'Automatic transcription',

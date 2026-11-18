@@ -105,7 +105,14 @@ SEARCH_MODES = (
     'syntax, NOT a filter for responsa literature. '
     'title = words in the catalogue titles of the manuscripts (the library catalogue records and the NLI '
     'catalogue cache), not manuscript text; filtering by work is filters.works. '
-    'shelfmark = a call number such as T-S 12.123 or ENA 1628.38.'
+    'shelfmark = a call number such as T-S 12.123 or ENA 1628.38. '
+    'catalog = the catalogue records, not the manuscript text: what catalogues SAY a manuscript is '
+    '(FJMS titles, descriptions and full entries, PGP descriptions, library titles; Hebrew and English, '
+    'with automatic translations), for topics, names and English words (cheese, Maimonides, marriage '
+    'contract); every word in one record; each result names its catalogue_source and catalogue_field; '
+    'near_spellings=true adds plene/defective Hebrew and near Latin spellings (Saadya for Saadia). Only '
+    'where get_capabilities lists it in search_modes; a catalogue hit is never evidence of what a '
+    'fragment reads.'
 )
 
 CHUNK_MODES = (
@@ -705,7 +712,7 @@ def build_server(facade_app) -> MCPServer:
         ctx: Context,
         query: Annotated[str, Field(min_length=1, max_length=1000, description='The words to search for, or a shelfmark.')],
         search_mode: Annotated[Literal['exact', 'variants', 'variants_extended', 'fuzzy',
-                                       'responsa', 'title', 'shelfmark'],
+                                       'responsa', 'title', 'shelfmark', 'catalog'],
                                Field(description='See the search modes in the tool description.')],
         limit: Annotated[int | None, Field(ge=1, le=500, strict=True, description='Candidates to save: at most 100, '
                                                                     'or 500 for fuzzy.')] = None,
@@ -716,6 +723,13 @@ def build_server(facade_app) -> MCPServer:
         sources: Annotated[Literal['all', 'editions', 'automatic'] | None,
                            Field(description='Which texts to search where the editions are searched: all (the '
                                              'default there), editions, or automatic.')] = None,
+        near_spellings: Annotated[bool | None,
+                                  Field(description="search_mode='catalog' only: also near spellings "
+                                                    '(default false).')] = None,
+        include_translations: Annotated[bool | None,
+                                        Field(description="search_mode='catalog' only: false searches the "
+                                                          'original catalogue records only, without their '
+                                                          'automatic translations (default true).')] = None,
     ) -> CallToolResult:
         too_wide = _gap_limit_message(search_mode, gap)
         if too_wide:
@@ -739,6 +753,10 @@ def build_server(facade_app) -> MCPServer:
             body['filters'] = filters.model_dump(exclude_none=True)
         if sources is not None:
             body['sources'] = sources
+        if near_spellings is not None:
+            body['near_spellings'] = near_spellings
+        if include_translations is not None:
+            body['include_translations'] = include_translations
 
         async def operation(client_ip):
             return await _start_and_wait(target, client_ip, '/chatgpt/search/jobs', body)

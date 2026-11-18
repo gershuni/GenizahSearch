@@ -12,10 +12,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_text_fixture import A, B, C, D, E, F, H, I, J, K, M, build_sidecar  # noqa: E402
+from catalog_text_fixture import A, B, C, D, E, F, H, I, J, K, M, N, P, build_sidecar  # noqa: E402
 from scripts.build_catalog_text_sidecar import SCHEMA_VERSION as BUILDER_SCHEMA_VERSION  # noqa: E402
 from shared import catalog_text_service as svc  # noqa: E402
 from shared.catalog_text_service import CatalogTextService, make_snippet  # noqa: E402
+from shared.near_spellings import near_spellings  # noqa: E402
 from shared.catalog_text_normalize import parse_query  # noqa: E402
 
 
@@ -198,6 +199,138 @@ def test_a_phrase_snippet_shows_the_phrase_not_an_earlier_lone_word():
 def test_make_snippet_on_text_without_a_match():
     assert make_snippet("short text", parse_query("other"), expand_prefixes=False) == "short text"
     assert make_snippet("", parse_query("x"), expand_prefixes=False) == ""
+
+
+# --- near spellings (plan §4.7) ---------------------------------------------------------
+
+def test_near_spellings_are_off_unless_asked(service):
+    result = service.search("כתובה")
+    assert N not in _ids(result) and not result.near_spellings and result.near_forms == ()
+
+
+def test_near_spellings_come_after_the_words_as_typed_and_their_prefixes(service):
+    result = service.search("כתובה", near_spellings=True)
+    assert _ids(result) == [A, C, B, N, P]
+    assert [(h.exact, h.near) for h in result.hits] == [
+        (True, False), (True, False), (False, False), (False, True), (False, True)]
+    assert result.near_forms == ("כתבה",) and result.near_spellings
+
+
+def test_a_hebrew_near_spelling_takes_the_prefixes_too(service):
+    # P holds only הכתבה: the defective spelling after the article.
+    result = service.search("כתובה", near_spellings=True)
+    hit = next(h for h in result.hits if h.sys_id == P)
+    assert "*הכתבה*" in service.snippet(hit, result)
+
+
+def test_a_latin_near_spelling(service):
+    assert _ids(service.search("Saadia")) == []
+    result = service.search("Saadia", near_spellings=True)
+    assert _ids(result) == [P] and result.near_forms == ("saadya",)
+    assert "*Saadya*" in service.snippet(result.hits[0], result)
+
+
+def test_only_near_spellings_the_file_holds_are_searched(service):
+    result = service.search("cheese", near_spellings=True)
+    assert result.near_forms == () and _ids(result) == _ids(service.search("cheese"))
+    assert len(near_spellings("cheese")) > 100       # the candidates, none of them in the file
+
+
+def test_a_phrase_gets_no_near_spellings(service):
+    result = service.search('"כתובה"', near_spellings=True)
+    assert _ids(result) == [A, C] and result.near_forms == ()
+
+
+def test_near_spellings_need_every_word_in_one_record(service):
+    assert _ids(service.search("Saadia commentary", near_spellings=True)) == [P]
+    assert _ids(service.search("Saadia cheese", near_spellings=True)) == []
+
+
+def test_only_the_first_words_get_near_spellings(service, monkeypatch):
+    monkeypatch.setattr(svc, "MAX_NEAR_WORDS", 1)
+    service._near_cache.clear()
+    result = service.search("כתובה Saadia", near_spellings=True)
+    assert result.terms[0].near == ("כתבה",) and result.terms[1].near == ()
+
+
+def test_near_spellings_are_remembered_per_word(service, monkeypatch):
+    service._near_cache.clear()
+    calls = []
+    real = svc._near_spellings_of
+    monkeypatch.setattr(svc, "_near_spellings_of", lambda w: calls.append(w) or real(w))
+    service.search("Saadia", near_spellings=True)
+    service.search("Saadia", near_spellings=True)
+    assert calls == ["saadia"]
+
+
+def test_the_near_spelling_cache_is_bounded_and_safe_across_threads(service, monkeypatch):
+    import threading
+    monkeypatch.setattr(svc, "NEAR_CACHE_SIZE", 3)
+    service._near_cache.clear()
+    errors = []
+
+    def search(word):
+        try:
+            for _ in range(5):
+                service.search(word, near_spellings=True)
+        except Exception as exc:     # noqa: BLE001
+            errors.append(exc)
+    words = ["Saadia", "ketuba", "Fustat", "cheese", "כתובה", "תפילין", "letters", "contract"]
+    threads = [threading.Thread(target=search, args=(w,)) for w in words]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert not errors and len(service._near_cache) <= 3
+
+
+def test_near_spellings_respect_the_translations_switch(service):
+    result = service.search("ketuba", near_spellings=True, include_translations=False)
+    assert set(_ids(result)) == {E, F} and "ketubba" in result.near_forms
+
+
+def test_near_forms_are_shown_with_their_final_letters():
+    from shared.catalog_text_normalize import display_form
+    assert display_form("תפלינ") == "תפלין"
+    assert display_form("saadya") == "saadya" and display_form("מ") == "מ"
+
+
+# --- the inputs drifting (plan §4.6) ---------------------------------------------------
+
+def test_input_drift_names_what_changed(service):
+    assert service.input_drift({"input_fjms_version": "5.1.0", "input_pgp_upstream_commit": "abc123"}) == []
+    lines = service.input_drift({"input_fjms_version": "5.2.0", "input_pgp_upstream_commit": "def456"})
+    assert len(lines) == 2
+    assert "5.1.0" in lines[0] and "5.2.0" in lines[0]
+    assert "abc123" in lines[1] and "def456" in lines[1]
+
+
+def test_an_unknown_installed_input_is_not_drift(service):
+    assert service.input_drift({"input_fjms_version": None}) == []
+    assert service.input_drift({}) == []
+
+
+def test_open_and_check_logs_drift_and_never_raises(monkeypatch, sidecar, caplog):
+    monkeypatch.setattr(svc, "default_sidecar_path", lambda: str(sidecar))
+    monkeypatch.setattr(svc, "installed_inputs", lambda: {"input_fjms_version": "9.9.9"})
+    svc.reset_catalog_text_service()
+    try:
+        with caplog.at_level("WARNING"):
+            assert svc.open_and_check().is_ready()
+        assert "9.9.9" in caplog.text and "5.1.0" in caplog.text
+    finally:
+        svc.reset_catalog_text_service()
+
+
+def test_open_and_check_logs_a_file_it_cannot_serve(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(svc, "default_sidecar_path", lambda: str(tmp_path / "absent.db"))
+    svc.reset_catalog_text_service()
+    try:
+        with caplog.at_level("WARNING"):
+            assert not svc.open_and_check().is_ready()
+        assert "not served" in caplog.text
+    finally:
+        svc.reset_catalog_text_service()
 
 
 def test_not_ready_service_answers_empty_and_never_raises(tmp_path):

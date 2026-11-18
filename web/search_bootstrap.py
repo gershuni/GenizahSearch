@@ -15,6 +15,7 @@ VALID_SEARCH_MODES = {
     'Regex',
     'Shelfmark',
     'Title',
+    'Catalog',     # the catalogue text search (web/catalog_assets.py decides if it is offered)
     'pgp_tags',
 }
 
@@ -51,6 +52,33 @@ def matches_saved_run(initial_query: str | None, explicit_mode: str | None,
         return False
     url_options = initial_responsa or {}
     return all(bool(options.get(name)) == bool(url_options.get(name)) for name in RESPONSA_URL_OPTIONS)
+
+
+def is_catalog_run(run: Dict[str, Any] | None) -> bool:
+    """True when *run* (a run's last_run) was a catalogue text search."""
+    return isinstance(run, dict) and 'Catalog' in (run.get('mode'), run.get('page_mode'))
+
+
+def withhold_unserved_catalog(state: Dict[str, Any], *, catalog_served: bool,
+                              saved_run: Dict[str, Any] | None = None,
+                              live_run: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """*state* (``resolve_search_bootstrap``'s answer) where the catalogue text search is not
+    served: the Catalog mode becomes Exact, and a Catalog run's rows are neither restored nor
+    rejoined, with its filters and exclusions, so a reload or Back shows nothing of a surface
+    that is off (its switch turned off after the visitor searched; Codex review of PR #47).
+    Unchanged where the catalogue is served."""
+    if catalog_served:
+        return state
+    out = dict(state)
+    if out.get('mode') == 'Catalog':
+        out['mode'] = 'exact'
+    if is_catalog_run(live_run):
+        out['rejoin_run'] = False
+        out['restore_run_filters'] = False
+    if is_catalog_run(saved_run):
+        out.update(restore_saved_results=False, restore_run_filters=False,
+                   restore_saved_exclusions=False)
+    return out
 
 
 def resolve_search_bootstrap(

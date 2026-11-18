@@ -53,6 +53,9 @@ from shared.search_engine import MAX_WORD_GAP  # noqa: E402
 SEARCH_MODES = ['exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy']
 # The website's Extended and Maximum levels: accepted only by POST /api/search/jobs.
 BACKGROUND_MODES = ['variants_extended']
+# Accepted only where the server serves it (web/catalog_assets.py); the tests that run every
+# mode run without it, and tests/test_catalog_text_api.py covers it.
+SERVED_WHERE_AVAILABLE_MODES = ['catalog']
 
 # Concrete fixture queries per AC2 — picked so a real Tantivy index would
 # return ≥1 result. Layer-2 tests are skipped in environments without an
@@ -77,6 +80,7 @@ EXPECTED_INTERNAL_MODE = {
     'shelfmark': 'Shelfmark',
     'fuzzy': 'fuzzy',
     'variants_extended': 'variants_extended',
+    'catalog': 'Catalog',
 }
 
 # What the engine runs. 2026-10-21 (owner decision): API 'exact' is the website's
@@ -950,10 +954,11 @@ def test_posthog_search_mode_value_null_on_unknown_enum_value(
 
 def test_search_mode_to_internal_mapping_complete():
     """Every UI search_mode maps to a non-None internal mode."""
-    for m in SEARCH_MODES + BACKGROUND_MODES:
+    every = SEARCH_MODES + BACKGROUND_MODES + SERVED_WHERE_AVAILABLE_MODES
+    for m in every:
         assert m in _SEARCH_MODE_TO_INTERNAL
         assert _SEARCH_MODE_TO_INTERNAL[m] == EXPECTED_INTERNAL_MODE[m]
-    assert set(_SEARCH_MODE_TO_INTERNAL) == set(SEARCH_MODES + BACKGROUND_MODES)
+    assert set(_SEARCH_MODE_TO_INTERNAL) == set(every)
 
 
 def test_invalid_combination_code_registered():

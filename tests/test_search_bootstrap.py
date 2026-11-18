@@ -423,6 +423,62 @@ def test_a_finished_run_wins_over_rejoining():
     assert state['restore_saved_results'] is True and state['rejoin_run'] is False
 
 
+def test_where_the_catalogue_is_not_served_its_runs_rows_stay_away():
+    """Codex review of PR #47: the switch turned off after a Catalog search. Back to it,
+    or a plain reload, restores none of its rows, filters or exclusions; a Catalog run still
+    running is not rejoined; the mode is Exact."""
+    from web.search_bootstrap import withhold_unserved_catalog
+
+    catalog_run = _run(query='Saadia', page_mode='Catalog')
+    back = _back(initial_query='Saadia', initial_mode='Catalog', saved_run=catalog_run)
+    assert back['restore_saved_results'] is True   # what the gate takes away
+    off = withhold_unserved_catalog(back, catalog_served=False, saved_run=catalog_run)
+    assert off['mode'] == 'exact'
+    assert off['restore_saved_results'] is False
+    assert off['restore_run_filters'] is False
+    assert off['restore_saved_exclusions'] is False
+
+    reload = resolve_search_bootstrap(
+        initial_query=None, initial_tag=None, initial_mode=None, initial_domain=None,
+        from_browse=None, saved_mode='Catalog', saved_query='Saadia', saved_results_count=12,
+        use_slider=False, saved_run=catalog_run)
+    assert reload['restore_saved_results'] is True
+    off = withhold_unserved_catalog(reload, catalog_served=False, saved_run=catalog_run)
+    assert off['restore_saved_results'] is False and off['mode'] == 'exact'
+
+    running = _back(initial_query='Saadia', initial_mode='Catalog', saved_run=None,
+                    live_run=catalog_run, saved_results_count=0)
+    assert running['rejoin_run'] is True
+    off = withhold_unserved_catalog(running, catalog_served=False, live_run=catalog_run)
+    assert off['rejoin_run'] is False and off['restore_run_filters'] is False
+
+
+def test_the_catalogue_gate_leaves_other_runs_and_a_served_catalogue_alone():
+    from web.search_bootstrap import withhold_unserved_catalog
+
+    exact = _back(initial_query='שלום', initial_mode='exact', saved_run=_run(query='שלום', page_mode='exact'))
+    assert withhold_unserved_catalog(exact, catalog_served=False,
+                                     saved_run=_run(query='שלום', page_mode='exact')) == exact
+    catalog_run = _run(query='Saadia', page_mode='Catalog')
+    back = _back(initial_query='Saadia', initial_mode='Catalog', saved_run=catalog_run)
+    assert withhold_unserved_catalog(back, catalog_served=True, saved_run=catalog_run) == back
+
+
+def test_the_search_page_gates_the_catalogue_before_it_rejoins_or_restores():
+    """The page passes the bootstrap through the catalogue gate, with both runs, before it
+    reads ``rejoin_run`` or any restore flag."""
+    import ast
+
+    page = _function(_search_page_tree(), 'create_search_page')
+    gate = [node for node in ast.walk(page)
+            if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'withhold_unserved_catalog']
+    assert len(gate) == 1, 'expected one catalogue gate in create_search_page; update this test'
+    assert {kw.arg for kw in gate[0].keywords} >= {'catalog_served', 'saved_run', 'live_run'}
+    reads = [node.lineno for node in ast.walk(page)
+             if isinstance(node, ast.Subscript) and getattr(node.value, 'id', None) == 'bootstrap_state']
+    assert reads and gate[0].lineno < min(reads)
+
+
 def test_an_address_without_a_mode_keeps_the_query_only_back():
     """Addresses stamped before runs had codes: Back by query, no filters (829cd7cf)."""
     state = _back(initial_mode=None, initial_query='שלום', saved_query='שלום', initial_run=None,

@@ -468,6 +468,13 @@ def _serialize_item(
         _printed_set = printed_sys_ids or set()
         out['has_pgp'] = bool(final_sys_id and final_sys_id in _trans_set)
         out['is_printed'] = bool(final_sys_id and final_sys_id in _printed_set)
+    catalogue = result.get('catalogue')
+    if catalogue:
+        # A catalogue text search's row (catalogue plan §4.4): where its words were found.
+        out['catalogue_source'] = catalogue.get('source', '')
+        out['catalogue_field'] = catalogue.get('field', '')
+        out['automatic_translation'] = bool(catalogue.get('automatic'))
+        out['near_spelling'] = bool(catalogue.get('near'))
     if 'members' in result:
         # A search that read the scholarly editions (editions plan §3.5): one result per
         # page. The fields above are the best member's; these say what else matched.

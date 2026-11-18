@@ -50,7 +50,9 @@ TIME_LIMIT_GRACE_SECONDS = 60
 # in this thread, with no worker to start or queue to wait in -- a shelfmark lookup used
 # to take 10 s or more on the API, behind the worker's catalogue load and whoever was
 # searching -- and a broader search still goes to a worker, which skips its catalogue.
-METADATA_SEARCH_MODES = frozenset({'Title', 'Shelfmark'})
+# The catalogue TEXT search ('Catalog', shared/catalog_text_rows.py) always runs here: it
+# reads its own read-only SQLite file, no index and no catalogue a worker would load.
+METADATA_SEARCH_MODES = frozenset({'Title', 'Shelfmark', 'Catalog'})
 INLINE_METADATA_ROWS = 100
 _TO_WORKER = object()   # IsolatedEngine._metadata_search: the search goes to a worker
 _time_limit_stop = threading.local()
@@ -687,13 +689,17 @@ class IsolatedEngine:
 
         try:
             check()
-            sys_ids = self._resolve_metadata_search(arguments)
-            if sys_ids is None:
-                return _TO_WORKER
-            arguments['metadata_sys_ids'] = sys_ids
-            if len(sys_ids) > INLINE_METADATA_ROWS:
-                return _TO_WORKER
-            result = original(**arguments, progress_callback=inline_progress)
+            if arguments.get('mode') == 'Catalog':
+                # Never a worker: the catalogue text file is read in this thread.
+                result = original(**arguments, progress_callback=inline_progress)
+            else:
+                sys_ids = self._resolve_metadata_search(arguments)
+                if sys_ids is None:
+                    return _TO_WORKER
+                arguments['metadata_sys_ids'] = sys_ids
+                if len(sys_ids) > INLINE_METADATA_ROWS:
+                    return _TO_WORKER
+                result = original(**arguments, progress_callback=inline_progress)
         finally:
             if shared is not None and shared['left'] is not None:
                 shared['left'] -= time.monotonic() - started

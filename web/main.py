@@ -2870,7 +2870,7 @@ def search_page_route(
     bidirectional: int = None, domain: str = None,
     from_browse: int = None,
     vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
-    run: str = None,
+    run: str = None, near: int = None, translations: int = None,
 ):
     safe_user_set('current_page', '/search')
     ui.add_head_html(page_meta(
@@ -2895,7 +2895,7 @@ def search_page_route(
             initial_bidirectional=bidirectional, initial_domain=domain,
             from_browse=from_browse,
             vs_src=vs_src, vs_mode=vs_mode, vs_browse=vs_browse,
-            initial_run=run,
+            initial_run=run, initial_near=near, initial_translations=translations,
         )
 
 @ui.page('/parallels', title='Textual Parallels | Dicta Genizah Search')
@@ -3924,6 +3924,15 @@ app.on_startup(start_malloc_trim_on_startup)
 app.on_startup(start_perf_watch_on_startup)
 app.on_startup(open_blau_sidecar_on_startup)
 app.on_startup(initialize_engine)
+
+
+async def open_catalog_text_sidecar_on_startup():
+    """The catalogue text search's sidecar, opened and checked off the loop (web/catalog_assets.py)."""
+    from web.catalog_assets import open_catalog_text_on_startup
+    await open_catalog_text_on_startup()
+
+
+app.on_startup(open_catalog_text_sidecar_on_startup)
 
 
 async def stop_research_workers():

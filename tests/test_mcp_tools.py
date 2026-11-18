@@ -221,6 +221,20 @@ def test_a_quick_search_returns_its_first_page(stack):
     assert path == '/chatgpt/search/jobs' and sent == {'query': 'שלום', 'search_mode': 'exact', 'limit': 100}
 
 
+def test_a_catalogue_search_forwards_both_switches(stack):
+    host, _, engine = stack
+
+    async def script(client):
+        return await client.call_tool('search_manuscripts', {'query': 'cheese', 'search_mode': 'catalog',
+                                                             'near_spellings': True,
+                                                             'include_translations': False})
+    run(host, script)
+    [(path, sent)] = engine.calls
+    assert path == '/chatgpt/search/jobs' and sent['search_mode'] == 'catalog'
+    assert sent['near_spellings'] is True and sent['include_translations'] is False
+    assert 'catalog = the catalogue records' in mcp_server.SEARCH_MODES
+
+
 def test_a_slow_search_hands_over_its_job_and_pages_without_rerunning(stack):
     host, _, engine = stack
     engine.gate.clear()
