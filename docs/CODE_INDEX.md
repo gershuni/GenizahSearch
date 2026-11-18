@@ -1182,6 +1182,15 @@ The rest of a dictionary card behind one button that draws it in place (2026-11-
 - **Function** `render_lane_empty` (Line 116) — Lane's tab when Lane has no reading for ``word`` (or no word was typed yet): its title,
 - **Function** `render_lane` (Line 126) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
 
+## web/components/toggle_button.py
+
+A button that is on or off (2026-11-18): on is Quasar's primary colour, off carries no Quasar colour and takes
+`.q-btn.btn-off` (the theme's secondary text), because Quasar's fixed grey read as disabled on the dark theme.
+
+- **Function** `set_btn_on(btn, on)` — Advanced Options, Search only in..., Filter Results and the Export button,
+  the row-density toggle (`web/pages/search.py`) and the criteria panel's sections
+- **Constant** `OFF_CLASS` — `btn-off`
+
 ## web/components/criteria_panel.py
 
 The "Manuscript features" control (catalogue criteria, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.3, PR 1b):

@@ -2514,7 +2514,8 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     }
 }
 
-/* Under 1024px the export icons are a menu (.results-more-btn) and the count,
+/* The corner group holds the density toggle, Filter Results (.results-filter-btn) and the
+   Export menu (.results-export-btn) at every width (owner, 2026-11-18). Under 1024px the count,
    Reset filters and the filter chips wrap onto as many lines as they need,
    never off-screen to the side (owner, 2026-11-16: a reader must see that the
    list is filtered). On a phone the count has the first line and Reset filters
@@ -2537,11 +2538,11 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     .results-header { position: relative; }
     .results-count-group { flex: 1 1 100% !important; }
     .results-export-group { position: absolute; top: 6px; inset-inline-end: 8px; }
-    .results-count { max-width: calc(100% - 150px); }
+    .results-count { max-width: calc(100% - 182px); }
     /* While results are selected the corner group also holds the two bulk
        actions, so the count leaves room for them too; "N selected" starts the
        chips' line (it comes after .results-chip-break). */
-    .results-header.has-selection .results-count { max-width: calc(100% - 214px); }
+    .results-header.has-selection .results-count { max-width: calc(100% - 246px); }
 }
 .results-chip-break { display: none; }
 
@@ -2557,6 +2558,30 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
    outline with it: Quasar's fixed grey-8 read as disabled on the dark theme (owner, 2026-11-16),
    and its !important colour class cannot be overridden from here. */
 .q-btn.filter-chip-off { color: var(--text-secondary); }
+/* The same for every other on/off button (web/components/toggle_button.py): Advanced Options,
+   Search only in..., the row-density toggle, the criteria sections (owner, 2026-11-18). */
+.q-btn.btn-off { color: var(--text-secondary); }
+
+/* A search of one kind of transcription only (owner, 2026-11-18; web/pages/search_editions.py):
+   the Transcriptions selector, while not on All, is framed and tinted in the primary colour,
+   and the results carry a notice saying so. The tint is an image over the theme's own field
+   colour (whose rules are !important); the text keeps the theme's colour, bold. */
+.q-field.sources-narrowed.q-field--outlined .q-field__control:before,
+.q-field.sources-narrowed.q-field--outlined:hover .q-field__control:before {
+    border: 2px solid var(--q-primary);
+}
+.q-field.sources-narrowed.q-field--outlined .q-field__control {
+    background-image: linear-gradient(color-mix(in srgb, var(--q-primary) 22%, transparent),
+                                      color-mix(in srgb, var(--q-primary) 22%, transparent)) !important;
+}
+.q-field.sources-narrowed .q-field__native { font-weight: 700; }
+.sources-notice {
+    background: color-mix(in srgb, var(--q-primary) 12%, var(--bg-secondary));
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text-primary);
+    min-height: 0;
+}
+.sources-notice-icon { color: var(--q-primary); }
 .q-btn.filter-chip .q-icon.on-right {
     font-size: 18px; margin-inline-start: 2px !important; margin-inline-end: 0 !important;
 }
@@ -2643,7 +2668,8 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 .search-panel-expanded { padding: 12px 16px !important; }
 .search-adv-panel > .q-expansion-item__container > .q-item,
 .search-filters-panel > .q-expansion-item__container > .q-item { display: none; }
-.search-row-btn { height: 36px; }
+/* Advanced Options and Search only in...: square icon buttons, named by their tooltips. */
+.search-row-btn { height: 36px; min-width: 36px; }
 .results-header { padding: 6px 12px !important; }
 .density-toggle { gap: 0 !important; }
 .density-toggle .q-btn { min-width: 30px; }

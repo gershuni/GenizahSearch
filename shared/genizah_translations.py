@@ -2090,6 +2090,10 @@ TRANSLATIONS = {
     "Other parts of this document": "חלקים נוספים של המסמך",
     "in scholarly transcriptions": "בתעתיקים מדעיים",
     "The scholarly transcriptions could not be searched this time": "לא ניתן היה לחפש בתעתיקים המדעיים הפעם",
+    # Over the results of a search of one kind only (web/pages/search_editions.py::SOURCES_NOTICES).
+    "Search restricted to the scholarly transcriptions (FGP and PGP)": "החיפוש מוגבל לתעתיקים המדעיים (FGP ו-PGP)",
+    "Search restricted to the automatic transcriptions": "החיפוש מוגבל לתעתיקים האוטומטיים",
+    "Search all transcriptions": "חפש בכל התעתיקים",
     "The scholarly transcription has changed since the search; the manuscript is shown": "התעתיק המדעי השתנה מאז החיפוש; מוצג כתב היד",
     "The page of this match could not be identified; the edition is shown with the page the manuscript opens on": "לא ניתן היה לזהות את העמוד של התאמה זו; המהדורה מוצגת לצד העמוד שבו נפתח כתב היד",
     "PGP Transcription": "תעתיק PGP",

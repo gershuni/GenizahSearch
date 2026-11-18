@@ -25,6 +25,7 @@ from shared.catalog_criteria import (
     BY_KEY, CRITERIA, NEW_TABLE_KEYS, SECTIONS, clean_criteria,
     criterion_label, section_label, value_label,
 )
+from web.components.toggle_button import set_btn_on
 from web.translations import get_language, is_rtl, tr
 
 logger = logging.getLogger(__name__)
@@ -346,11 +347,11 @@ class CriteriaControl:
                 n = sum(1 for c in CRITERIA if c.section == section.key and c.key in clean)
                 text = section_label(section.key, self._lang) + (f" ({n})" if n else '')
                 selected = section.key == self._section
-                ui.button(text, on_click=lambda _=None, s=section.key: self._pick_section(s)).props(
-                    f"flat dense no-caps align={'right' if self._rtl else 'left'} "
-                    f"{'color=primary' if selected else 'color=grey-8'}"
+                btn = ui.button(text, on_click=lambda _=None, s=section.key: self._pick_section(s)).props(
+                    f"flat dense no-caps align={'right' if self._rtl else 'left'}"
                 ).classes('w-full text-sm' + (' font-bold' if selected or n else '')).mark(
                     f'{self._mark}-section-{section.key}')
+                set_btn_on(btn, selected)
 
     def _pick_section(self, key: str):
         self._section = key

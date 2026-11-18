@@ -253,7 +253,8 @@ SHARED_HOOKS = {
                            'lists-item-card', 'lists-item-actions'],
     'web/pages/search.py': ['search-shell', 'search-main-row', 'search-row-btn', 'search-adv-panel',
                             'search-filters-panel', 'results-header', 'results-count-group',
-                            'results-export-group', 'results-more-btn', 'tb-hidden', 'density-toggle',
+                            'results-export-group', 'results-filter-btn', 'results-export-btn', 'tb-hidden',
+                            'density-toggle',
                             'results-chip-break', 'results-count', 'has-selection'],
     'web/pages/search_results.py': ['pagination-placeholder', 'results-list', 'result-card', 'result-snippet',
                                     'result-shelfmark', 'result-actions', 'result-head', 'result-badges',
@@ -570,8 +571,10 @@ def test_a_selection_does_not_crowd_the_count_on_a_phone():
     "N selected" starts the chips' line instead of following the count (Codex on #26)."""
     css = _read('web/static/common.css')
     phone = _media_rules(css, '(max-width: 640px)')
-    assert '.results-count { max-width: calc(100% - 150px); }' in phone
-    assert '.results-header.has-selection .results-count { max-width: calc(100% - 214px); }' in phone
+    # The corner holds the density toggle, Filter Results and Export (one button wider since
+    # 2026-11-18, when Filter Results left the menu), and the two bulk actions while selected.
+    assert '.results-count { max-width: calc(100% - 182px); }' in phone
+    assert '.results-header.has-selection .results-count { max-width: calc(100% - 246px); }' in phone
     search = _read('web/pages/search.py')
     counter = search.index('selection_counter = ui.label(')
     assert search.index("classes('results-chip-break')") < counter < search.index(
@@ -596,3 +599,29 @@ def test_the_filter_chips_are_compact_with_room_before_the_label():
     search = _read('web/pages/search.py')
     assert "('unelevated color=primary' if active else 'outline')" in search
     assert "btn.classes(**{'remove' if active else 'add': 'filter-chip-off'})" in search
+
+
+def test_on_off_buttons_follow_the_theme_when_off():
+    """Owner, 2026-11-18: Advanced Options, Search only in..., the row-density toggle and the
+    criteria sections were Quasar's fixed grey while off, which reads as disabled on the dark
+    theme (the filter chips had the same fix). Off carries no Quasar colour and takes the theme's
+    secondary text colour; on is the primary colour."""
+    import re
+    from types import SimpleNamespace
+
+    from web.components.toggle_button import OFF_CLASS, set_btn_on
+
+    top = _top_level(_read('web/static/common.css'))
+    assert f'.q-btn.{OFF_CLASS} {{ color: var(--text-secondary); }}' in top
+    for path in ('web/pages/search.py', 'web/components/criteria_panel.py'):
+        assert not re.search(r'grey-[78]\b', _read(path).replace('blue-grey', '')), path
+
+    calls = []
+    btn = SimpleNamespace(props=lambda *a, **k: calls.append(('props', a, k)),
+                          classes=lambda *a, **k: calls.append(('classes', a, k)))
+    set_btn_on(btn, True)
+    assert calls == [('props', (), {'remove': 'color'}), ('props', ('color=primary',), {}),
+                     ('classes', (), {'remove': OFF_CLASS})], calls
+    calls.clear()
+    set_btn_on(btn, False)
+    assert calls == [('props', (), {'remove': 'color'}), ('classes', (), {'add': OFF_CLASS})], calls

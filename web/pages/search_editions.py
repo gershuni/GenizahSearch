@@ -22,6 +22,28 @@ SOURCE_CHOICES = {
 #: Modes that read no transcription text: no choice is shown or sent.
 NO_SOURCES_MODES = frozenset({'Shelfmark', 'Title', 'Catalog', 'pgp_tags'})
 
+#: What the results say above them when the search read one kind of transcription only (owner,
+#: 2026-11-18: a search limited to one kind was easy to mistake for a search of all).
+SOURCES_NOTICES = {
+    'editions': 'Search restricted to the scholarly transcriptions (FGP and PGP)',
+    'automatic': 'Search restricted to the automatic transcriptions',
+}
+#: The notice's button: the same search again, in every transcription.
+SEARCH_ALL_SOURCES = 'Search all transcriptions'
+#: The class of the Transcriptions selector while it is not on All (web/static/common.css).
+NARROWED_CLASS = 'sources-narrowed'
+
+
+def sources_notice(last_run: Any) -> Optional[str]:
+    """The notice over the results of *last_run* (``search_state.last_run``), translated, when
+    it read the scholarly or the automatic transcriptions only; None for a search of all of
+    them, one that took no choice (a mode reading no text, Lab Mode, a reader they are not
+    served to) or no search."""
+    if not isinstance(last_run, dict):
+        return None
+    notice = SOURCES_NOTICES.get(last_run.get('sources'))
+    return tr(notice) if notice else None
+
 _SOURCE_NAMES = {
     'automatic': 'Automatic transcription',
     'fgp_edition': 'FGP edition',

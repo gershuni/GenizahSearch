@@ -66,7 +66,10 @@ class TestFinding14AriaLabels:
             "Search History",
             "Add Selected to List",
             "Copy Selected Text",
-            "More actions",
+            "Filter Results",
+            "Export",
+            "Advanced Options",
+            "Search only in...",
             "Compact rows",
             "Comfortable rows",
         ]
@@ -74,12 +77,12 @@ class TestFinding14AriaLabels:
             assert f'aria-label="{{tr("{label}")}}"' in src or f'aria-label="{label}"' in src, (
                 f"Missing aria-label for control '{label}' in search.py (#14)"
             )
-        # Since 2026-10-22 the post-filter toggle and the three exports are
-        # text items of the "More actions" menu (owner's mockup), named by
-        # their visible text rather than an aria-label.
-        for label in ("Toggle Filters", "Export Word", "Export Excel", "Export JSON"):
+        # Since 2026-11-18 the post-filter toggle is an icon button of its own
+        # (Filter Results, above) and the three exports are the text items of
+        # the Export button's menu, named by their visible text.
+        for label in ("Export Word", "Export Excel", "Export JSON"):
             assert f"ui.menu_item(tr('{label}')" in src, (
-                f"'{label}' must stay a named item of the results menu"
+                f"'{label}' must stay a named item of the Export menu"
             )
 
     def test_no_icon_only_button_without_aria_label_in_toolbar_region(self):
@@ -89,10 +92,11 @@ class TestFinding14AriaLabels:
         icons / badges that may reuse the same Material icon name elsewhere).
         """
         src = _read(SEARCH_PY)
-        # filter_list / description / table_view / data_object left this row on
-        # 2026-10-22: they are text items of the "More actions" menu now.
+        # description / table_view / data_object left this row on 2026-10-22:
+        # they are text items of the Export menu (its button: download).
         for icon in ("restart_alt", "history", "playlist_add", "content_copy",
-                     "more_vert", "view_headline", "view_agenda"):
+                     "filter_list", "download", "tune", "filter_alt",
+                     "view_headline", "view_agenda"):
             needle = f"ui.button(icon='{icon}'"
             idx = src.find(needle)
             assert idx != -1, f"expected ui.button(icon='{icon}') in search.py"

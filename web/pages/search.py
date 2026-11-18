@@ -28,6 +28,7 @@ from web.components.filter_panel import (
     apply_criteria, retire_old_saved_filters, restore_saved_criteria,
 )
 from web.components.criteria_panel import CriteriaControl, active_criteria_count
+from web.components.toggle_button import set_btn_on
 from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES, withhold_unserved_catalog
 from web.pages.search_state import (
     SCHOLARLY_FILTER_STATES, SearchUIState, SearchPageRefs,
@@ -74,8 +75,9 @@ from web.document_service import (
 from web.search_load_control import enrichment_batch_slot
 from web.research_jobs import (ResearchJobError, consume_editions_skipped, consume_time_limit_stop,
                                 run_research_call, shared_time_limit, with_request_settings)
-from web.pages.search_editions import (NO_SOURCES_MODES, SOURCE_CHOICES, drop_source_choice, edition_text,
-                                       editions_count_suffix)
+from web.pages.search_editions import (NARROWED_CLASS, NO_SOURCES_MODES, SEARCH_ALL_SOURCES, SOURCE_CHOICES,
+                                       drop_source_choice, edition_text, editions_count_suffix,
+                                       sources_notice)
 from shared.config import Config
 from web import variant_preferences
 from shared.fgp_service import get_sys_ids_with_fgp_sources
@@ -934,6 +936,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         sources_select.on('update:model-value',
                                           lambda: _safe_set('search_sources', sources_select.value))
 
+                        # Scholarly or Automatic only stands out from All (owner, 2026-11-18):
+                        # framed and tinted in the primary colour (common.css). On every change,
+                        # a history item or a followed run's choice set in code too.
+                        def _mark_sources_narrowed(*_):
+                            narrowed = sources_select.value not in (None, 'all')
+                            sources_select.classes(**{'add' if narrowed else 'remove': NARROWED_CLASS})
+
+                        _mark_sources_narrowed()
+                        sources_select.on_value_change(_mark_sources_narrowed)
+
 
                     # Track current preset level based on mode
                     def get_level_from_mode(mode):
@@ -1023,7 +1035,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if panel is None:
                             return
                         panel.value = not panel.value
-                        adv_toggle_btn.props(f'color={"primary" if panel.value else "grey-8"}')
+                        set_btn_on(adv_toggle_btn, panel.value)
 
                     def _toggle_filters_panel():
                         panel = _panel_toggles.get('filters')
@@ -1036,7 +1048,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         panel = _panel_toggles.get('filters')
                         is_open = bool(panel.value) if panel is not None else False
                         n = _active_filter_count()
-                        filters_toggle_btn.props(f'color={"primary" if (is_open or n) else "grey-8"}')
+                        set_btn_on(filters_toggle_btn, bool(is_open or n))
                         filters_badge.text = str(n)
                         filters_badge.set_visibility(n > 0)
 
@@ -1056,14 +1068,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             panel.value = False
                             _update_filters_toggle_btn()
 
+                    # Icons only, named by their tooltips (owner, 2026-11-18).
                     with ui.column().classes('items-center gap-0'):
-                        adv_toggle_btn = ui.button(
-                            tr('Advanced Options'), icon='tune', on_click=lambda: _toggle_adv_panel(),
-                        ).props('outline dense no-caps color=grey-8').classes('search-row-btn')
+                        adv_toggle_btn = ui.button(icon='tune', on_click=lambda: _toggle_adv_panel(),
+                        ).props(f'outline dense aria-label="{tr("Advanced Options")}"').classes(
+                            'search-row-btn').tooltip(tr('Advanced Options'))
+                        set_btn_on(adv_toggle_btn, False)
                     with ui.column().classes('items-center gap-0'):
-                        with ui.button(
-                            tr('Search only in...'), icon='filter_alt', on_click=lambda: _toggle_filters_panel(),
-                        ).props('outline dense no-caps color=grey-8').classes('search-row-btn') as filters_toggle_btn:
+                        with ui.button(icon='filter_alt', on_click=lambda: _toggle_filters_panel(),
+                        ).props(f'outline dense aria-label="{tr("Search only in...")}"').classes(
+                            'search-row-btn btn-off').tooltip(tr('Search only in...')) as filters_toggle_btn:
                             filters_badge = ui.badge('0').props('floating rounded color=primary')
                             filters_badge.set_visibility(False)
                     with ui.column().classes('items-center gap-0'):
@@ -2453,8 +2467,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     def _update_density_buttons():
                         compact = _density['value'] == 'compact'
-                        density_compact_btn.props(f'color={"primary" if compact else "grey-7"}')
-                        density_comfortable_btn.props(f'color={"grey-7" if compact else "primary"}')
+                        set_btn_on(density_compact_btn, compact)
+                        set_btn_on(density_comfortable_btn, not compact)
 
                     def _set_density(value):
                         _density['value'] = value
@@ -2473,12 +2487,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).tooltip(tr('Comfortable rows'))
                     _update_density_buttons()
 
-                    # One menu for the post-filters and the three exports, at every width.
-                    with ui.button(icon='more_vert').props(
-                        f'flat round dense size=sm aria-label="{tr("More actions")}"'
-                    ).classes('results-more-btn').tooltip(tr('More actions')):
+                    # The Filter Results panel and the exports, each a button of its own at
+                    # every width (owner, 2026-11-18: inside one "More actions" menu they were
+                    # too hidden). The filter button is on while its panel is open.
+                    filter_results_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
+                        f'flat round dense size=sm aria-label="{tr("Filter Results")}"'
+                    ).classes('results-filter-btn').tooltip(tr('Filter Results'))
+                    set_btn_on(filter_results_btn, False)
+                    with ui.button(icon='download').props(
+                        f'flat round dense size=sm aria-label="{tr("Export")}"'
+                    ).classes('results-export-btn').tooltip(tr('Export')) as export_btn:
+                        # Never on: the same colour as Filter Results while that is off.
+                        set_btn_on(export_btn, False)
                         with ui.menu().props('auto-close'):
-                            ui.menu_item(tr('Toggle Filters'), lambda: toggle_filters())
                             ui.menu_item(tr('Export Word'), lambda: ui.download('/api/export/word'))
                             ui.menu_item(tr('Export Excel'), lambda: ui.download('/api/export/excel'))
                             ui.menu_item(tr('Export JSON'), lambda: ui.download('/api/export/json'))
@@ -2496,6 +2517,73 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'border-bottom: 1px solid rgba(128,128,128,0.3); '
                 'overflow-x: auto; white-space: nowrap; min-height: 0; display: none;'
             )
+
+            # The transcriptions the shown search read, when it read one kind only (owner,
+            # 2026-11-18): said over the results, with the same search in all of them a click
+            # away -- a search limited to the scholarly or the automatic transcriptions was
+            # easy to take for a search of all. Follows search_state.last_run.
+            sources_notice_strip = ui.row().classes(
+                'w-full px-4 py-1 gap-2 items-center sources-notice').style('display: none;')
+
+            def _update_sources_notice():
+                sources_notice_strip.clear()
+                text = sources_notice(search_state.last_run)
+                if not text:
+                    sources_notice_strip.style('display: none;')
+                    return
+                sources_notice_strip.style('display: flex;')
+                with sources_notice_strip:
+                    ui.icon('info', size='18px').classes('sources-notice-icon')
+                    ui.label(text).classes('text-sm')
+                    if sources_select is not None:
+                        ui.button(tr(SEARCH_ALL_SOURCES), icon='search',
+                                  on_click=_search_all_sources).props(
+                            'flat dense no-caps color=primary').classes('text-sm')
+
+            async def _search_all_sources():
+                """The notice's button: the search the notice describes, in every transcription.
+
+                Its query and mode, its Responsa options, and every control a Back to it
+                restores (_show_run_controls: gap, NOT words, text position, variant level, Num
+                Changes, Lab Mode) go back first, whatever they hold now: edited controls would
+                otherwise run another search (Codex on #50). Its "Search only in..." filters do
+                not yet (docs/open_issues.d/2026-11-18-search-all-transcriptions-filters.md).
+                Its NOT words leave out the Tabular Search's, which the search adds again, so
+                each is excluded once; its variant settings are passed as recorded, since the
+                search reads the visitor's stored ones, not the controls. The run read text, so
+                it runs as text again: a query that looks like a shelfmark was run as text."""
+                shown = search_state.last_run
+                if search_state.is_running or sources_select is None or not isinstance(shown, dict):
+                    return
+                if shown.get('query'):
+                    query_input.value = shown['query']
+                page_mode = shown.get('page_mode')
+                if page_mode in mode_select.options and page_mode != mode_select.value:
+                    mode_select.value = page_mode
+                    on_mode_change()  # a value set in code fires no change event
+                _show_run_controls(shown)
+                # A Responsa run's options, not the boxes as ticked since (Codex on #50).
+                options = shown.get('responsa_options')
+                if isinstance(options, dict):
+                    responsa_variants_cb.value = bool(options.get('variants'))
+                    responsa_ja_cb.value = bool(options.get('ja'))
+                    responsa_flex_cb.value = bool(options.get('flex_spacing'))
+                    bidirectional_cb.value = bool(options.get('bidirectional'))
+                builder_words = list(search_state.builder_negated_words or [])
+                own_words = []
+                for word in (str(w) for w in (shown.get('exclude_words') or [])):
+                    if word in builder_words:
+                        builder_words.remove(word)  # the search adds it again
+                    else:
+                        own_words.append(word)
+                not_filter.value = ' '.join(own_words)
+                sources_select.value = 'all'
+                _safe_set('search_sources', 'all')
+                recorded = shown.get('variant_settings')
+                await execute_search(as_text=True,
+                                     variant_settings=recorded if isinstance(recorded, dict) else None)
+
+            _update_sources_notice()
 
             # Phase 57: Visual Similarity restriction strip (orange-themed)
             vs_restrict_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
@@ -3203,6 +3291,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Toggle visibility of filters panel."""
         filters_visible['value'] = not filters_visible['value']
         filters_panel.set_visibility(filters_visible['value'])
+        set_btn_on(filter_results_btn, filters_visible['value'])
 
     def _panel_text_filters_set() -> bool:
         """The Toggle Filters panel's shelfmark, title or text field holds something."""
@@ -3396,6 +3485,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # or a Back cannot bring the cleared results back (Codex, PR #436).
         discard_search_run(search_state)
         search_state.last_run = None
+        _update_sources_notice()
         try:
             ui.run_javascript("history.replaceState(null, '', '/search')")
         except Exception:
@@ -5351,6 +5441,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Nor are they the shown search's rows: their search is the restored one,
             # as the controls now describe it, and cut off only if the entry says so.
             search_state.last_run = None
+            _update_sources_notice()
             # No search runs here: the address keeps the code of the search shown
             # before, and Back to it would bring that run back over these rows.
             ui.run_javascript("(function(){var u=new URL(location.href);"
@@ -5677,7 +5768,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Run the search the controls describe; with *attach* (a run still running, found
     # by Back), follow that run's search instead of starting it again. (No docstring:
     # the double-submit guard stays the first statement -- tests/test_ux_timing.py.)
-    async def execute_search(attach=None, as_text=False):
+    async def execute_search(attach=None, as_text=False, variant_settings=None):
         # Guard against double-submit (rage-clicking while search is running)
         if search_state.is_running:
             ux_ignored(_page_client, 'search_results')
@@ -5751,8 +5842,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # This visitor's variant level and Num Changes, read now: they travel with
         # this search only. The engine's settings object is shared by every visitor
-        # and is never written here.
-        if mode in ('variants', 'variants_extended', 'variants_maximum', 'fuzzy'):
+        # and is never written here. *variant_settings*: a shown run's, as recorded
+        # ("Search all transcriptions" reruns it), checked and over the mode's own.
+        if variant_settings is not None:
+            known = {k: v for k, v in variant_settings.items() if k in variant_preferences.REQUEST_SETTINGS}
+            variant_settings = {**variant_preferences.for_search(mode),
+                                **variant_preferences.request_settings(**known)}
+        elif mode in ('variants', 'variants_extended', 'variants_maximum', 'fuzzy'):
             if variant_slider:
                 pairs_count = int(variant_slider.value)
             elif mode == 'fuzzy':
@@ -5865,6 +5961,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # The page that started the run, or the page a Back brought to it later, saves
         # it (its snapshot, the history entry); another page following it only shows it.
         search_run.owner = search_state
+        # Its transcriptions, over the results from the start (the run's own, followed too).
+        _update_sources_notice()
 
         # The phone fold asks the browser for its width BESIDE the search, never
         # before it: awaited here, it first waited for the page to connect, so a
