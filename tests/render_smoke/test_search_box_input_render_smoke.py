@@ -28,8 +28,11 @@ import time
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
 from nicegui import ui
 from nicegui.testing.user_interaction import UserInteraction
+
+from shared.search_engine import SearchEngine
 
 from tests.render_smoke.test_search_url_open_dispatch import (
     _app, _connect, _elements, _get_page, _run,
@@ -57,6 +60,13 @@ class _Engine:
     def words_occur(self, query):
         self.asked.append(query)
         return query in self.occurring
+
+
+class _SignParsingEngine(_Engine):
+    """The stub, with the engine's own sign parsing (``SearchEngine.parse_query_syntax``)."""
+
+    def parse_query_syntax(self, query, responsa_mode=False):
+        return SearchEngine.parse_query_syntax(self, query, responsa_mode=responsa_mode)
 
 
 async def _wait_for_calls(engine, n, timeout=10.0):
@@ -226,3 +236,34 @@ def test_the_header_box_is_on_the_search_page_too():
     _run(go)
     assert len(seen['boxes']) == 1, seen
     assert len(seen['page_box']) == 1, seen
+
+
+@pytest.mark.parametrize('catalog_served', [False, True], ids=['catalogue-not-served', 'catalogue-served'])
+def test_a_latin_word_beginning_with_r_is_searched_as_typed_not_as_responsa(catalog_served):
+    """``Rashi`` is a search for Rashi, not the Responsa sign before ``ashi`` (2026-11-18):
+    ``R`` is the one letter among the signs and counts only with a space after it. Pinned
+    from the address the homepage and header boxes open and typed into the box, through
+    the engine's own sign parsing. Where the catalogue text search is served a Latin query
+    goes to the catalogue; ``R`` and a space still chooses Responsa."""
+    engine = _SignParsingEngine()
+    seen = {}
+
+    async def go():
+        with patch('web.pages.search.catalog_available', lambda: catalog_served):
+            async with _app(engine) as user:
+                await _get_page(user, '/search?q=Rashi')
+                await _wait_for_calls(engine, 1)
+                seen['url_open'] = dict(engine.calls[0])
+                await _connect(user)
+                await asyncio.sleep(0.3)   # the page's deferred loaders
+                await _settle()
+                # The Responsa sign last: it switches the page's mode selector.
+                seen['typed'] = {q: await _search_typed(user, engine, q)
+                                 for q in ('Rabbi', 'Responsa Maimonides', 'R. Isaac', 'R שלום')}
+
+    _run(go)
+    latin_mode = 'Catalog' if catalog_served else 'literal'
+    assert seen['url_open'] == {'query': 'Rashi', 'mode': latin_mode}, seen
+    for query in ('Rabbi', 'Responsa Maimonides', 'R. Isaac'):
+        assert seen['typed'][query] == {'query': query, 'mode': latin_mode}, (query, seen)
+    assert seen['typed']['R שלום'] == {'query': 'שלום', 'mode': 'responsa'}, seen

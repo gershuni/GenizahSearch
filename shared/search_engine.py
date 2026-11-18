@@ -3751,7 +3751,8 @@ class SearchEngine:
         - # = Shelfmark
         - % = Catalog (the catalogue text search, shared/catalog_text_rows.py; the
           caller drops it where that search is not served)
-        - R = responsa
+        - R = responsa, only with a space after it (``R שלום``): the one letter
+          among the signs, so ``Rashi`` stays a word. The others need no space.
         """
         if responsa_mode:
             return None, query
@@ -3761,7 +3762,12 @@ class SearchEngine:
         # Here a symbol sign needs no space after it.
         for prefix, mode in MODE_SIGNS:
             if query.startswith(prefix):
-                clean = query[len(prefix):].lstrip()
+                rest = query[len(prefix):]
+                # A letter sign (R) counts only with a space after it, as Help says:
+                # without one it begins a word, and 'Rashi' is no Responsa search for 'ashi'.
+                if prefix.isalpha() and not rest[:1].isspace():
+                    continue
+                clean = rest.lstrip()
                 if clean:
                     return mode, clean
 

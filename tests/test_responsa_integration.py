@@ -464,6 +464,39 @@ class TestParseQuerySyntaxResponsaBypass:
         assert mode == 'Shelfmark'
 
 
+class TestResponsaSignNeedsASpace:
+    """``R`` is the one letter among the signs, so it chooses Responsa only with a space
+    after it, as Help says ("type R followed by a space"). Without the space it is the
+    first letter of a word: ``Rashi`` is a search for Rashi (a Latin-script query, which
+    the website sends to the catalogue), not a Responsa search for ``ashi``. The symbol
+    signs still need no space (2026-11-18)."""
+
+    @pytest.mark.parametrize('query', [
+        'Rashi', 'Rabbi', 'Responsa Maimonides', 'RAMBAM', 'R. Isaac', 'Rשלום',
+    ])
+    def test_a_word_beginning_with_r_is_not_the_responsa_sign(self, query):
+        assert _make_search_engine().parse_query_syntax(query) == (None, query)
+
+    @pytest.mark.parametrize('query, expected', [
+        ('R שלום', ('responsa', 'שלום')),
+        ('R  Rashi', ('responsa', 'Rashi')),
+        ('R\tשלום', ('responsa', 'שלום')),
+    ])
+    def test_r_and_a_space_is_still_the_responsa_sign(self, query, expected):
+        assert _make_search_engine().parse_query_syntax(query) == expected
+
+    @pytest.mark.parametrize('query', ['R', 'R ', 'R  '])
+    def test_r_alone_is_no_search(self, query):
+        assert _make_search_engine().parse_query_syntax(query) == (None, query)
+
+    @pytest.mark.parametrize('query, expected', [
+        ('$שלום', ('Title', 'שלום')), ('#T-S 12.1', ('Shelfmark', 'T-S 12.1')),
+        ('??שלום', ('variants_extended', 'שלום')), ('=Rashi', ('exact', 'Rashi')),
+    ])
+    def test_a_symbol_sign_still_needs_no_space(self, query, expected):
+        assert _make_search_engine().parse_query_syntax(query) == expected
+
+
 # ============================================================================
 # execute_search — Responsa pipeline
 # ============================================================================
