@@ -55,7 +55,9 @@ def write_fjms(path: Path, extra_translations=()) -> Path:
     conn.executemany("INSERT INTO catalog VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
         (A, "כתובה", None, None, None, "תפילין", None, None, None, None, None, 1000),
         (A, "כתובה", None, None, None, None, None, None, None, None, None, 1000),   # second record, same title
-        (C, "שטר", None, None, None, None, None, None, None, "נתן בן נהוראי", None, 2000),
+        # A note (FJMS Comment) no manuscript view shows: where a catalogue search finds it says so.
+        (C, "שטר", None, None, None, None, None, "רשומה זו מוטעית (טעות בסיגנטורה)", None, "נתן בן נהוראי",
+         None, 2000),
         (G, "לא ידוע", None, None, None, None, None, None, None, None, None, -1),    # FJMS's unknown work
         (H, "שאלות ותשובות", None, None, None, None, None, None, None, None, None, 3000),
         (M, "שאלות ותשובות", None, None, None, None, None, None, None, None, None, 3000),

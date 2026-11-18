@@ -6772,3 +6772,9 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     "Each word anywhere in the title, in any order": "כל מילה בכל מקום בכותרת, בכל סדר",
 })
+# Where a catalogue search found a manuscript, in the views opened from its results
+# (approved 2026-11-18).
+TRANSLATIONS.update({
+    "Found in the catalogue records": "נמצא ברשומות הקטלוג",
+    "{shown} of {count} matching records": "{shown} מתוך {count} רשומות תואמות",
+})

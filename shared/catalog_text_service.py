@@ -69,6 +69,9 @@ AUTOMATIC_FACTOR = 0.8
 SNIPPET_CHARS = 200
 #: The default bound on returned hits (the count is always exact).
 DEFAULT_LIMIT = 5000
+#: The records of one manuscript ``matches`` returns at most (the count is always exact). A
+#: manuscript has a few dozen records; a common word may match many of them.
+MATCHES_LIMIT = 30
 #: At most this many words of a query get near spellings (the first ones); the rest are searched
 #: as typed. Each costs up to a few tenths of a second (shared/near_spellings.py).
 MAX_NEAR_WORDS = 4
@@ -134,6 +137,21 @@ class CatalogResult:
     def near_forms(self) -> tuple[str, ...]:
         """Every near spelling searched, commonest in the file first per word, each once."""
         return tuple(dict.fromkeys(f for t in self.terms for f in t.near))
+
+
+@dataclass(frozen=True)
+class CatalogMatch:
+    """One catalogue record of a manuscript that a query matches: where a catalogue search found
+    it (``CatalogTextService.matches``)."""
+    record_id: int
+    source: str          # fjms | pgp | libraries
+    field: str
+    lang: str
+    automatic: bool
+    text: str            # the record's original text, whole
+    spans: tuple[tuple[int, int], ...]   # the matched words in ``text`` (match_spans)
+    exact: bool          # matched by the words as typed
+    near: bool = False   # matched only through a near spelling
 
 
 def _empty(query: str, include_translations: bool, terms: tuple[Term, ...] = (),
@@ -320,6 +338,56 @@ class CatalogTextService:
                        automatic=bool(row[5]), score=float(row[6]), exact=True)
             for row in self._conn.execute(sql, (match,))
         ]
+
+    def matches(self, sys_id: str, query: str, include_translations: bool = True,
+                near_spellings: bool = False, limit: int = MATCHES_LIMIT) -> tuple[list[CatalogMatch], int]:
+        """Every catalogue record of ``sys_id`` that ``query`` matches, as ``search`` matches it,
+        and how many there are: the records found by the words as typed first, then through a
+        Hebrew prefix, then through a near spelling, the best first in each, at most ``limit``.
+        Each comes whole, with its matched words. What a manuscript opened from a catalogue search
+        shows as the place it was found, whatever field holds it. Never raises."""
+        terms = tuple(parse_query(query or ""))
+        if not terms or self._conn is None or not sys_id:
+            return [], 0
+        try:
+            where = "" if include_translations else " AND automatic = 0"
+            ids = [r[0] for r in self._conn.execute(f"SELECT id FROM records WHERE sys_id = ?{where}",
+                                                   (str(sys_id),))]
+            if not ids:
+                return [], 0
+            if near_spellings:
+                terms = tuple(self._with_near_spellings(terms))
+            expand = can_expand(list(terms))
+            tiers = [(False, False)] + ([(True, False)] if expand else [])
+            if any(t.near for t in terms):
+                tiers.append((expand, True))
+            weights = ", ".join(str(w) for w in COLUMN_WEIGHTS)
+            sql = (
+                "WITH h AS MATERIALIZED ("
+                f"  SELECT rowid AS id, bm25(catalog_fts, {weights}) AS score FROM catalog_fts "
+                "  WHERE catalog_fts MATCH ? AND rowid IN (SELECT value FROM json_each(?))) "
+                "SELECT r.id, r.source, r.field, r.lang, r.automatic, r.text "
+                "FROM h JOIN records r ON r.id = h.id "
+                f"ORDER BY h.score * CASE r.automatic WHEN 1 THEN {AUTOMATIC_FACTOR} ELSE 1.0 END, r.id"
+            )
+            found: list[CatalogMatch] = []
+            seen: set[int] = set()
+            for tier, (expand_prefixes, near) in enumerate(tiers):
+                match = fts_match(list(terms), expand_prefixes=expand_prefixes, near=near)
+                for row in self._conn.execute(sql, (match, json.dumps(ids))):
+                    if row[0] in seen:
+                        continue
+                    seen.add(row[0])
+                    spans, _ = match_spans(row[5], list(terms), expand_prefixes, near)
+                    found.append(CatalogMatch(
+                        record_id=int(row[0]), source=row[1], field=row[2], lang=row[3],
+                        automatic=bool(row[4]), text=row[5], spans=tuple(spans), exact=tier == 0,
+                        near=near))
+        except sqlite3.Error as exc:
+            logger.warning("CatalogTextService: matches %r in %s failed: %s", query, sys_id, exc)
+            return [], 0
+        bound = max(0, int(limit)) if limit is not None else len(found)
+        return found[:bound], len(found)
 
     # -- display -------------------------------------------------------------
 

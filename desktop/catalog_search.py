@@ -14,6 +14,7 @@ refuses (a bad copy) answers no rows.
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -88,6 +89,156 @@ def source_text(row) -> str:
     from genizah_core import tr
     from shared.catalog_text_rows import source_label
     return source_label(row, tr)
+
+
+def found_html(found: Optional[dict], translate=lambda s: s) -> str:
+    """The viewer's "Found in the catalogue records" pane for ``found_in_catalogue``'s answer:
+    each matching record under its source line, whole, its matched words marked as the viewer
+    marks a search's words; '' when nothing was found. Every text is escaped."""
+    import html
+
+    from shared.catalog_text_rows import FOUND_MORE
+
+    if not found or not found.get("records"):
+        return ""
+
+    def piece(text):
+        # Escaped first, then its line breaks (tests/test_desktop_angle_marks.py's guard).
+        return html.escape(text).replace("\n", "<br>")
+
+    blocks = []
+    for record in found["records"]:
+        body = "".join(f"<b style='color:red;'>{piece(text)}</b>" if matched else piece(text)
+                       for text, matched in record["segments"])
+        direction = "rtl" if record.get("rtl") else "ltr"
+        blocks.append(f"<p><span style='color:gray;'>{html.escape(record['label'])}</span><br>"
+                      f"<span dir='{direction}'>{body}</span></p>")
+    shown, count = len(found["records"]), int(found.get("count") or 0)
+    if count > shown:
+        more = translate(FOUND_MORE).format(shown=shown, count=count)
+        blocks.append(f"<p style='color:gray;'>{html.escape(more)}</p>")
+    return "".join(blocks)
+
+
+#: Lookups whose answers the viewer and Browse keep (written on the GUI thread only, in the
+#: worker's signal handler): a manuscript reopened draws its pane at once.
+FOUND_CACHE_SIZE = 128
+_FOUND_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+
+
+def found_lookup(row) -> Optional[tuple]:
+    """The pane's lookup for a catalogue search's row -- (sys_id, query, near_spellings,
+    include_translations), from the search the row carries -- or None for any other row."""
+    info = row.get("catalogue") if isinstance(row, dict) else None
+    searched = info.get("searched") if isinstance(info, dict) else None
+    sys_id = (row.get("display") or {}).get("id") if isinstance(row, dict) else None
+    if not isinstance(searched, dict) or not sys_id or not (searched.get("query") or "").strip():
+        return None
+    return (str(sys_id), searched["query"], bool(searched.get("near_spellings")),
+            bool(searched.get("include_translations", True)))
+
+
+def cached_found(lookup) -> Optional[tuple]:
+    """A lookup's kept answer, (matches, count), or None."""
+    answer = _FOUND_CACHE.get(lookup)
+    if answer is not None:
+        _FOUND_CACHE.move_to_end(lookup)
+    return answer
+
+
+def keep_found(lookup, answer) -> None:
+    _FOUND_CACHE[lookup] = answer
+    _FOUND_CACHE.move_to_end(lookup)
+    while len(_FOUND_CACHE) > FOUND_CACHE_SIZE:
+        _FOUND_CACHE.popitem(last=False)
+
+
+def found_html_for(answer, translate=lambda s: s) -> str:
+    """``found_html`` of a lookup's answer, its labels in the reader's language."""
+    from shared.catalog_text_rows import found_records
+    return found_html(found_records(*answer, translate=translate), translate)
+
+
+class CatalogFoundWorker(QThread):
+    """A pane's lookup off the GUI thread: with near spellings it builds and looks up each word's
+    candidates, up to a few tenths of a second a word (Codex review of PR #51). Emits
+    ``answered(lookup, (matches, count))``; ``([], 0)`` when the catalogue cannot answer."""
+
+    answered = pyqtSignal(object, object)
+
+    def __init__(self, lookup: tuple, parent=None):
+        super().__init__(parent)
+        self.lookup = lookup
+
+    def run(self):
+        answer = ([], 0)
+        try:
+            from shared.catalog_text_rows import catalogue_matches
+            sys_id, query, near, translations = self.lookup
+            answer = catalogue_matches(sys_id, query, {"near_spellings": near, "include_translations": translations})
+        except Exception:  # noqa: BLE001 -- a pane that cannot be filled is not shown
+            answer = ([], 0)
+        if not self.isInterruptionRequested():
+            self.answered.emit(self.lookup, answer)
+
+
+class FoundLookupQueue:
+    """One owner's pane lookups (the viewer's, Browse's): at most one ``CatalogFoundWorker``
+    running at a time. A request while one runs waits, and only the latest waiting one runs next
+    (unless its answer is kept by then): paging through results opens no thread per result, and
+    the first run fills the near spellings' cache for the next (Codex review of PR #51). Every
+    answer is kept and handed to *on_answer(lookup, answer)* on the GUI thread."""
+
+    def __init__(self, on_answer, parent=None):
+        self._on_answer = on_answer
+        self._parent = parent
+        self._running = None
+        self._waiting = None
+        self._stopped = False
+
+    def request(self, lookup) -> None:
+        if self._stopped:
+            return
+        if self._running is not None:
+            self._waiting = None if self._running.lookup == lookup else lookup
+            return
+        self._start(lookup)
+
+    def _start(self, lookup) -> None:
+        worker = CatalogFoundWorker(lookup, self._parent)
+        worker.answered.connect(self._answered)
+        worker.finished.connect(lambda w=worker: self._finished(w))
+        self._running = worker
+        worker.start()
+
+    def _answered(self, lookup, answer) -> None:
+        keep_found(lookup, answer)
+        if not self._stopped:
+            self._on_answer(lookup, answer)
+
+    def _finished(self, worker) -> None:
+        worker.deleteLater()
+        if self._running is worker:
+            self._running = None
+        lookup, self._waiting = self._waiting, None
+        if lookup is None or self._stopped:
+            return
+        kept = cached_found(lookup)
+        if kept is not None:
+            self._on_answer(lookup, kept)
+        else:
+            self._start(lookup)
+
+    def stop(self, timeout_ms: int = 2000) -> None:
+        """No more answers; the running lookup is interrupted and waited for (the owner closes)."""
+        self._stopped = True
+        self._waiting = None
+        worker = self._running
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            if not worker.wait(timeout_ms):
+                worker.terminate()
+                worker.wait()
 
 
 class CatalogCountWorker(QThread):

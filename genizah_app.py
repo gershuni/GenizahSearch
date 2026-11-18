@@ -7908,6 +7908,14 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
 
+        # Where a catalogue search found the manuscript, when Browse was opened from one of its
+        # results (_update_browse_found): its matching catalogue records, a few lines, scrolling.
+        self.browse_found_view = QTextBrowser()
+        self.browse_found_view.setFont(QFont("SBL Hebrew", 11))
+        self.browse_found_view.setMaximumHeight(self.browse_found_view.fontMetrics().lineSpacing() * 5 + 16)
+        self.browse_found_view.setVisible(False)
+        top_layout.addWidget(self.browse_found_view)
+
         # Extended Info button + Bibliography buttons (shared row).
         # An overflow row like the Manuscript Viewer's actions (2026-09-24,
         # Codex on #362): as metadata arrives Info, the bibliographies, Catalog,
@@ -28022,6 +28030,10 @@ class GenizahGUI(QMainWindow):
         # Persist highlight data for browse pane
         self.browse_highlight_data = res.get('page_highlights', []) if isinstance(res, dict) else []
         self.browse_highlight_pattern = res.get('highlight_pattern') if isinstance(res, dict) else None
+        # A catalogue search's result: Browse shows where the search found the manuscript, for as
+        # long as it shows that manuscript (_update_browse_found).
+        self._browse_catalogue_row = res if isinstance(res, dict) and res.get('catalogue') else None
+        self._update_browse_found(sid)
 
         derived_fl_id = fl_id or self._extract_fl_id(res)
         if shelfmark:
@@ -34298,10 +34310,55 @@ class GenizahGUI(QMainWindow):
             # Re-fetch PGP for same-manuscript page navigation (new manuscript handled by enriched_loaded)
             self._browse_refresh_pgp_for_page()
     
+    def _update_browse_found(self, sid):
+        """Show above the Browse page where the catalogue search Browse was opened from found
+        *sid*: at once from a kept answer, or once the lookup, run off the GUI thread
+        (desktop/catalog_search.py::CatalogFoundWorker), answers; hidden for any other manuscript."""
+        view = getattr(self, 'browse_found_view', None)
+        if view is None:
+            return
+        from desktop.catalog_search import FoundLookupQueue, cached_found, found_lookup
+        row = getattr(self, '_browse_catalogue_row', None)
+        lookup = found_lookup(row) if (row and sid and (row.get('display') or {}).get('id') == sid) else None
+        if lookup is not None and getattr(self, '_browse_found_lookup', None) == lookup:
+            return      # this manuscript's box is shown, or its lookup is running
+        self._browse_found_lookup = lookup
+        view.setHtml('')
+        view.setVisible(False)
+        if lookup is None:
+            return
+        answer = cached_found(lookup)
+        if answer is not None:
+            self._fill_browse_found(answer)
+            return
+        if getattr(self, '_browse_found_queue', None) is None:
+            self._browse_found_queue = FoundLookupQueue(self._on_browse_found_answered, self)
+        self._browse_found_queue.request(lookup)
+
+    def _on_browse_found_answered(self, lookup, answer):
+        """A Browse lookup answered (and kept): drawn if Browse still shows its manuscript."""
+        if lookup == getattr(self, '_browse_found_lookup', None):
+            self._fill_browse_found(answer)
+
+    def _fill_browse_found(self, answer):
+        body = ''
+        try:
+            import html as _html
+            from desktop.catalog_search import found_html_for
+            from shared.catalog_text_rows import FOUND_HEADING
+            found = found_html_for(answer, tr)
+            if found:
+                body = f"<b>{_html.escape(tr(FOUND_HEADING))}</b>{found}"
+        except Exception as exc:  # noqa: BLE001 -- Browse shows the manuscript without it
+            logger.warning("Browse: catalogue pane failed: %s", exc)
+        self.browse_found_view.setHtml(body)
+        self.browse_found_view.setVisible(bool(body))
+
     def browse_render_page(self, pd):
         if pd.get('sys_id') and pd.get('sys_id') != self.current_browse_sid:
             self.current_browse_sid = pd['sys_id']
             self._sync_browse_cite_button()  # Cite + website buttons follow the document
+        self._update_browse_found(self.current_browse_sid)
 
         self.current_browse_p = pd['p_num']
 

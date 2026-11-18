@@ -94,6 +94,89 @@ def source_label(row: Any, translate=lambda s: s) -> str:
     return " · ".join(parts)
 
 
+#: The panel a manuscript opened from a catalogue search shows: where the search found it.
+FOUND_HEADING = "Found in the catalogue records"
+#: Said under the panel when the manuscript has more matching records than it shows.
+FOUND_MORE = "{shown} of {count} matching records"
+
+
+def marked_segments(text: str, spans: Iterable[tuple[int, int]]) -> list[tuple[str, bool]]:
+    """``text`` in pieces, each with whether it is a matched word: the order the apps render it."""
+    pieces: list[tuple[str, bool]] = []
+    cursor = 0
+    for start, end in sorted(spans):
+        if start < cursor or end > len(text):
+            continue
+        if start > cursor:
+            pieces.append((text[cursor:start], False))
+        pieces.append((text[start:end], True))
+        cursor = end
+    if cursor < len(text):
+        pieces.append((text[cursor:], False))
+    return pieces
+
+
+def found_for_row(row: Any, service: Any = None, translate=lambda s: s) -> Optional[dict]:
+    """``found_in_catalogue`` for a catalogue search's result row, by the search the row carries
+    (``catalogue.searched``); None for a row of any other search, or one saved before rows carried
+    their search."""
+    info = row.get("catalogue") if isinstance(row, dict) else None
+    searched = info.get("searched") if isinstance(info, dict) else None
+    sys_id = (row.get("display") or {}).get("id") if isinstance(row, dict) else None
+    if not isinstance(searched, dict) or not sys_id:
+        return None
+    return found_in_catalogue(sys_id, searched.get("query", ""), searched, service=service,
+                              translate=translate)
+
+
+def found_in_catalogue(sys_id: str, query: str, options: Optional[dict] = None, service: Any = None,
+                       translate=lambda s: s) -> dict:
+    """Where a catalogue search for *query*, with its switches (*options*), found *sys_id*, as a
+    manuscript view opened from that search shows it: ``{'records': [...], 'count': n}``, each
+    record ``{'label': its source line (source_label's), 'segments': marked_segments of its whole
+    text, 'rtl': a Hebrew record}``, at most ``MATCHES_LIMIT`` of the *count* that match.
+
+    The records come from the catalogue file itself, so every field the search reads is shown,
+    those no catalogue panel lists too (FJMS notes and colophons, mention descriptions, records
+    from general sources). No records when the file is not ready, or nothing matches; never
+    raises. *translate* is the app's tr."""
+    return found_records(*catalogue_matches(sys_id, query, options, service=service), translate=translate)
+
+
+def catalogue_matches(sys_id: str, query: str, options: Optional[dict] = None,
+                      service: Any = None) -> tuple[list, int]:
+    """``CatalogTextService.matches`` for the panel, with the search's switches: the data only, no
+    labels, so a web page can run it off its event loop (with near spellings it builds and looks
+    up each word's candidates, up to a few tenths of a second a word). ``([], 0)`` without a
+    query or a ready file."""
+    from shared.catalog_text_service import get_catalog_text_service
+
+    if not sys_id or not (query or "").strip():
+        return [], 0
+    opts = catalog_options(options)
+    service = service or get_catalog_text_service()
+    if not service.is_ready():
+        return [], 0
+    return service.matches(sys_id, query, include_translations=opts["include_translations"],
+                           near_spellings=opts["near_spellings"])
+
+
+def found_records(found: Iterable[Any], count: int, translate=lambda s: s) -> dict:
+    """``found_in_catalogue``'s answer from ``catalogue_matches``' (the labels in the reader's
+    language: *translate* is the app's tr)."""
+    records = []
+    for match in found:
+        parts = [translate(p) for p in source_label_parts(match.source, match.field, match.automatic)]
+        if match.near:
+            parts.append(translate(NEAR_LABEL))
+        records.append({
+            "label": " · ".join(parts),
+            "segments": marked_segments(match.text, match.spans),
+            "rtl": match.lang == "he",
+        })
+    return {"records": records, "count": count}
+
+
 def near_forms_for_display(forms: Iterable[str]) -> list[str]:
     """Near spellings as a reader writes them (Hebrew final letters restored)."""
     return [display_form(f) for f in forms]
@@ -159,6 +242,9 @@ def catalog_search_rows(query: str, options: Optional[dict], meta_mgr: Any,
             progress_callback(i, total)
         kept.append((hit, _display(meta_mgr, hit.sys_id)))
     snippets = service.snippets([hit for hit, _ in kept], result)
+    # The search itself, one object every row shares: a view opened from a row shows where the
+    # search found its manuscript (found_in_catalogue), restored sessions and history included.
+    searched = {"query": query, **opts}
     rows: list[dict] = []
     for (hit, display), snippet in zip(kept, snippets):
         rows.append({
@@ -173,6 +259,7 @@ def catalog_search_rows(query: str, options: Optional[dict], meta_mgr: Any,
             "catalogue": {
                 "source": hit.source, "field": hit.field, "lang": hit.lang,
                 "automatic": hit.automatic, "near": hit.near, "exact": hit.exact,
+                "searched": searched,
             },
         })
     return rows, info

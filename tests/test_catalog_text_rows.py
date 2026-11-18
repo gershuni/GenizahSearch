@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_text_fixture import A, B, C, N, P, build_sidecar  # noqa: E402
+from catalog_text_fixture import A, B, C, D, N, P, build_sidecar  # noqa: E402
 from shared import catalog_text_rows as rows_module  # noqa: E402
 from shared.catalog_text_rows import (CATALOG_MODE, catalog_options, catalog_search_rows,  # noqa: E402
                                       source_label_parts)
@@ -72,7 +72,10 @@ def test_rows_come_in_the_catalogues_order_with_their_source(service):
     first = rows[0]
     assert first["snippet"] == "*כתובה*" and first["full_text"] == "" and first["metadata_only"]
     assert first["catalogue"] == {"source": "fjms", "field": "GenizahTitle", "lang": "he",
-                                  "automatic": False, "near": False, "exact": True}
+                                  "automatic": False, "near": False, "exact": True,
+                                  "searched": {"query": "כתובה", "include_translations": True,
+                                               "near_spellings": False}}
+    assert all(r["catalogue"]["searched"] is first["catalogue"]["searched"] for r in rows)
     assert first["display"]["shelfmark"] == "T-S 01" and first["display"]["library_code"] == "CUL"
 
 
@@ -141,8 +144,61 @@ def test_the_source_line(source, field, automatic, parts):
 def test_every_label_is_translated():
     from shared.genizah_translations import TRANSLATIONS
     labels = set(rows_module.SOURCE_LABELS.values()) | set(rows_module.FIELD_LABELS.values())
-    labels.add(rows_module.AUTOMATIC_LABEL)
+    labels |= {rows_module.AUTOMATIC_LABEL, rows_module.NEAR_LABEL, rows_module.FOUND_HEADING,
+               rows_module.FOUND_MORE}
     assert not [label for label in labels if label not in TRANSLATIONS]
+
+
+# --- where a manuscript was found (the views' panel) ----------------------------------------
+
+def test_marked_segments_cut_the_text_at_its_matched_words():
+    from shared.catalog_text_rows import marked_segments
+    assert marked_segments("a bc d", [(2, 4)]) == [("a ", False), ("bc", True), (" d", False)]
+    assert marked_segments("bc", [(0, 2)]) == [("bc", True)]
+    assert marked_segments("abc", []) == [("abc", False)]
+    assert marked_segments("abcdef", [(3, 4), (0, 1), (0, 1), (5, 99)]) == [
+        ("a", True), ("bc", False), ("d", True), ("ef", False)]
+
+
+def test_the_panel_shows_a_note_whole_with_its_source_line(service):
+    from shared.catalog_text_rows import found_in_catalogue
+    tr = {"FJMS Catalog": "קטלוג FJMS", "Note": "הערה"}.get
+    found = found_in_catalogue(C, "טעות", None, service=service, translate=lambda s: tr(s, s))
+    assert found["count"] == 1
+    record = found["records"][0]
+    assert record["label"] == "קטלוג FJMS · הערה" and record["rtl"]
+    assert "".join(text for text, _ in record["segments"]) == "רשומה זו מוטעית (טעות בסיגנטורה)"
+    assert [text for text, matched in record["segments"] if matched] == ["טעות"]
+
+
+def test_the_panel_follows_the_searchs_switches(service):
+    from shared.catalog_text_rows import found_in_catalogue
+    assert found_in_catalogue(P, "כתובה", None, service=service)["records"] == []
+    near = found_in_catalogue(P, "כתובה", {"near_spellings": True}, service=service)["records"]
+    assert near[0]["label"].endswith(" · Fuzzy")
+    assert found_in_catalogue(D, "marriage contract", None, service=service)["records"][0]["label"] == (
+        "FJMS Catalog · Free Description · automatic translation")
+    assert found_in_catalogue(D, "marriage contract", {"include_translations": False},
+                              service=service) == {"records": [], "count": 0}
+
+
+def test_a_row_carries_its_search_to_the_panel(service):
+    from shared.catalog_text_rows import found_for_row
+    rows, _ = catalog_search_rows("כתובה", {"near_spellings": True}, _Meta(), service=service)
+    by_id = {r["display"]["id"]: r for r in rows}
+    found = found_for_row(by_id[P], service=service)
+    assert found["count"] == 1 and found["records"][0]["label"].endswith(" · Fuzzy")
+    assert [t for t, m in found["records"][0]["segments"] if m] == ["הכתבה"]
+    # A row of another search, or one saved before rows carried their search: no panel.
+    assert found_for_row({"display": {"id": P}, "snippet": "x"}, service=service) is None
+    assert found_for_row({"display": {"id": P}, "catalogue": {"source": "fjms"}}, service=service) is None
+
+
+def test_the_panel_is_empty_without_a_query_or_a_file(service, tmp_path):
+    from shared.catalog_text_rows import found_in_catalogue
+    assert found_in_catalogue(C, "  ", None, service=service) == {"records": [], "count": 0}
+    absent = CatalogTextService(db_path=str(tmp_path / "absent.db"))
+    assert found_in_catalogue(C, "טעות", None, service=absent) == {"records": [], "count": 0}
 
 
 # --- the engine ------------------------------------------------------------------------

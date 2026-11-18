@@ -831,8 +831,12 @@ def _recents_lock_for(user_id: str) -> asyncio.Lock:
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False,
                        initial_version: Optional[str] = None, initial_span: Optional[str] = None,
-                       initial_fp: Optional[str] = None):
+                       initial_fp: Optional[str] = None, catalogue_search: Optional[dict] = None):
     """Create the professional manuscript viewer page UI.
+
+    catalogue_search ({'query', 'near_spellings', 'include_translations'}): Browse opened from a
+    catalogue search's result (web/components/catalog_found.py); the manuscript it opened shows
+    where that search found it, under the header.
 
     initial_version / initial_span (editions plan section 3.4): a scholarly transcription's
     search hit -- that edition, chosen on the folio the link arrived for, its match marked
@@ -873,6 +877,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     dict_on = dictionaries.on
     dictionaries.head()
     service = get_service()
+
+    # Where the catalogue search this page was opened from found its manuscript: shown under the
+    # header while that manuscript is on screen (catalogue_search above); the lookup runs off the
+    # event loop and its answer is kept (web/components/catalog_found.py).
+    catalogue_found = {'sys_id': None, 'lookup': None}
+    if catalogue_search and initial_sys_id:
+        from web.components.catalog_found import lookup_for_browse
+        catalogue_found['sys_id'] = initial_sys_id
+        catalogue_found['lookup'] = lookup_for_browse(
+            initial_sys_id, catalogue_search.get('query'), bool(catalogue_search.get('near_spellings')),
+            bool(catalogue_search.get('include_translations', True)))
 
     # Track metadata panel visibility
     show_metadata = {'value': False}
@@ -1060,6 +1075,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 params['span'] = f'{span[0]}-{span[1]}'
                 if state.edition_target.get('fp'):
                     params['fp'] = state.edition_target['fp']
+        if catalogue_search and catalogue_found['sys_id'] == state.sys_id:
+            # Opened from a catalogue search's result: the search stays in the address while its
+            # manuscript is shown, so a reload or a copied link shows the panel again; another
+            # manuscript's address leaves it out (Codex review of PR #51).
+            from web.components.catalog_found import address_params
+            params.update(address_params(catalogue_search))
         qs = urlencode(params)
         new_url = f'/browse?{qs}'
         shelfmark = page.shelfmark or state.sys_id
@@ -2581,6 +2602,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         icon='skip_previous' if is_rtl() else 'skip_next',
                         on_click=lambda: navigate_shelfmark(1)
                     ).props('flat round aria-label="Next manuscript" data-action="next-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Next manuscript'))
+
+            # Opened from a catalogue search's result: where the search found this manuscript.
+            if catalogue_found['lookup'] and page.sys_id == catalogue_found['sys_id']:
+                from web.components.catalog_found import place_found_panel
+                with ui.element('div').classes('w-full print-hide'):
+                    place_found_panel(catalogue_found['lookup'])
 
             # === Action Buttons Row ===
             # Removed - buttons moved to appropriate headers

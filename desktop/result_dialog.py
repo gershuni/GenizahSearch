@@ -50,6 +50,7 @@ from desktop.widgets.overflow_row import (
 )
 from desktop.widgets.side_nav import LayoutProofShortcuts
 from desktop.shortcuts_dialog import arrow_keys, key_label
+from shared.catalog_text_rows import FOUND_HEADING
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
@@ -985,7 +986,10 @@ class ResultDialog(QDialog):
         # 2. Source Context (Below Manuscript Text)
         self.src_widget = QWidget() # Container to hide/show easily
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
-        src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
+        # Its heading says which it shows: a composition's match, or where a catalogue search
+        # found the manuscript (load_result_by_index).
+        self.lbl_src_heading = QLabel("<b>" + tr("Match Context (Source)") + "</b>")
+        src_layout.addWidget(self.lbl_src_heading)
         self.text_src = QTextBrowser()
         self.text_src.setFont(QFont("SBL Hebrew", self._text_pt))
         # A viewer reopened at a saved limit shows which way is left (Codex, #362).
@@ -2779,6 +2783,57 @@ class ResultDialog(QDialog):
             text_browser.ensureCursorVisible()
         QTimer.singleShot(0, _do_scroll)
 
+    def _show_catalogue_found(self, data):
+        """The lower pane for a catalogue search's row: where the search found the manuscript.
+        True for such a row: the pane is drawn now from a kept answer, or hidden until the lookup,
+        run off the GUI thread, one at a time (desktop/catalog_search.py::FoundLookupQueue),
+        answers. False for any other row, which keeps the pane's other use."""
+        from desktop.catalog_search import FoundLookupQueue, cached_found, found_lookup
+        lookup = found_lookup(data)
+        self._rd_found_lookup = lookup
+        if lookup is None:
+            return False
+        answer = cached_found(lookup)
+        if answer is not None:
+            self._fill_found_pane(answer)
+            return True
+        self.src_widget.setVisible(False)
+        self.text_src.clear()
+        if getattr(self, '_rd_found_queue', None) is None:
+            self._rd_found_queue = FoundLookupQueue(self._on_found_answered)
+        self._rd_found_queue.request(lookup)
+        return True
+
+    def _on_found_answered(self, lookup, answer):
+        """A lookup answered (and kept): drawn if its result is still the one shown."""
+        if getattr(self, '_workers_torn_down', False) or lookup != getattr(self, '_rd_found_lookup', None):
+            return
+        self._fill_found_pane(answer)
+
+    def _fill_found_pane(self, answer):
+        from desktop.catalog_search import found_html_for
+        try:
+            found = found_html_for(answer, tr)
+        except Exception as exc:  # noqa: BLE001 -- the viewer shows the result without the pane
+            logger.warning("result_dialog: catalogue pane failed: %s", exc)
+            found = ""
+        if not found:
+            self.src_widget.setVisible(False)
+            self.text_src.clear()
+            return
+        self.lbl_src_heading.setText("<b>" + tr(FOUND_HEADING) + "</b>")
+        self.src_widget.setVisible(True)
+        self.text_src.setHtml(found)
+        self._give_found_pane_room()
+
+    def _give_found_pane_room(self):
+        """At least a third of the text column for the catalogue pane: its records are what the
+        reader opened the result to see (the composition pane keeps three lines)."""
+        sizes = self.ms_text_splitter.sizes()
+        total = sum(sizes)
+        if total > 0 and len(sizes) == 2 and sizes[1] < total // 3:
+            self.ms_text_splitter.setSizes([total - total // 3, total // 3])
+
     def _source_pane(self, data, pattern_str):
         """(text, pattern) for the composition pane beside the manuscript.
 
@@ -3150,9 +3205,14 @@ class ResultDialog(QDialog):
         sync_marks_legend_button(self.btn_rd_marks_legend, None)  # V0.8 on screen
         self._refresh_find_highlights()
         
-        # 2. Source Context
+        # 2. Source Context -- or, for a catalogue search's result, where the search found the
+        # manuscript: its matching catalogue records, whole, whatever field holds them (a note,
+        # say, that no catalogue panel shows).
         source_text, src_pattern_str = self._source_pane(data, pattern_str)
-        if source_text:
+        if self._show_catalogue_found(data):
+            pass    # filled now from a kept answer, or once its worker answers
+        elif source_text:
+            self.lbl_src_heading.setText("<b>" + tr("Match Context (Source)") + "</b>")
             self.src_widget.setVisible(True)
             self.text_src.setHtml(self._htmlify(source_text))
             self._scroll_to_first_highlight(self.text_src, src_pattern_str)
@@ -4450,6 +4510,15 @@ class ResultDialog(QDialog):
                         worker.wait()
             except Exception:  # noqa: BLE001
                 logger.exception("ResultDialog: could not stop %s", attr)
+
+        # The catalogue pane's lookups (_show_catalogue_found): a late answer must not reach a
+        # deleted viewer.
+        try:
+            queue = getattr(self, '_rd_found_queue', None)
+            if queue is not None:
+                queue.stop()
+        except Exception:  # noqa: BLE001
+            logger.exception("ResultDialog: could not stop the catalogue lookups")
 
         # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
         try:

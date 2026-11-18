@@ -337,6 +337,60 @@ def test_not_ready_service_answers_empty_and_never_raises(tmp_path):
     service = CatalogTextService(db_path=str(tmp_path / "absent.db"))
     assert service.search("כתובה").hits == ()
     assert service.record_text(1) == ""
+    assert service.matches(A, "כתובה") == ([], 0)
+
+
+# --- where a manuscript's records match (the "found in the catalogue" panel) ---------------
+
+def _marked(match):
+    return [match.text[s:e] for s, e in match.spans]
+
+
+def test_matches_finds_a_field_no_view_shows(service):
+    """The FJMS note (Comment) of C: the search finds it, and so must the place it is shown."""
+    assert C in _ids(service.search("טעות"))
+    found, count = service.matches(C, "טעות")
+    assert count == 1 and len(found) == 1
+    match = found[0]
+    assert (match.source, match.field, match.automatic) == ("fjms", "Comment", False)
+    assert match.text == "רשומה זו מוטעית (טעות בסיגנטורה)" and _marked(match) == ["טעות"]
+    assert match.exact and not match.near
+
+
+def test_matches_returns_every_matching_record_best_first_and_counts_past_the_limit(service):
+    found, count = service.matches(C, "שטר")
+    assert count == 2 and [m.field for m in found] == ["GenizahTitle", "FullText"]
+    assert all("שטר" in _marked(m) for m in found)
+    found, count = service.matches(C, "שטר", limit=1)
+    assert count == 2 and [m.field for m in found] == ["GenizahTitle"]
+
+
+def test_matches_keeps_to_the_manuscript_asked_for(service):
+    assert service.matches(B, "טעות") == ([], 0)
+    assert service.matches("990000000000000999", "כתובה") == ([], 0)
+    assert service.matches(C, "") == ([], 0) and service.matches("", "כתובה") == ([], 0)
+
+
+def test_matches_marks_prefixed_and_near_spellings_as_the_search_found_them(service):
+    found, _ = service.matches(B, "כתובה")
+    assert [(m.exact, m.near) for m in found] == [(False, False)] and _marked(found[0]) == ["הכתובה"]
+    assert service.matches(P, "כתובה") == ([], 0)
+    found, _ = service.matches(P, "כתובה", near_spellings=True)
+    assert [(m.exact, m.near) for m in found] == [(False, True)] and _marked(found[0]) == ["הכתבה"]
+    found, _ = service.matches(P, "Saadia", near_spellings=True)
+    assert _marked(found[0]) == ["Saadya"]
+
+
+def test_matches_follows_the_translations_switch(service):
+    found, _ = service.matches(D, "marriage contract")
+    assert [(m.field, m.automatic) for m in found] == [("FreeDesc", True)]
+    assert _marked(found[0]) == ["Marriage", "contract"]
+    assert service.matches(D, "marriage contract", include_translations=False) == ([], 0)
+
+
+def test_matches_marks_a_phrase_only_where_it_stands(service):
+    found, _ = service.matches(K, '"shipment of cheese"')
+    assert len(found) == 1 and _marked(found[0]) == ["shipment", "of", "cheese"]
 
 
 def test_the_process_wide_instance_can_be_reset(monkeypatch, sidecar):

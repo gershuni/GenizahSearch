@@ -95,6 +95,18 @@ def highlight_full_text_html(text, pattern):
 _SNIPPET_MATCH_RE = re.compile(r'\*([^*]+)\*')
 
 
+def _browse_match_params(result, snippet: str) -> str:
+    """The Browse address's part that carries what the search matched: a catalogue search's
+    result carries that search, so Browse shows where it found the manuscript
+    (web/components/catalog_found.py); any other result its matched phrase (SEED-033)."""
+    from web.components.catalog_found import browse_params
+    catalogue = browse_params(result)
+    if catalogue:
+        return catalogue
+    phrase = _snippet_match_phrase(snippet)
+    return f'&highlight={quote(phrase)}' if phrase else ''
+
+
 def _snippet_match_phrase(snippet: str) -> str:
     """The first ``*...*``-marked matched phrase in a search ``snippet``,
     whitespace-collapsed, for the ``/browse?highlight=`` deep-link param.
@@ -1077,9 +1089,7 @@ def create_result_card(search_state, refs, index, result):
                     # SEED-033 Option A: carry the matched phrase so the browse
                     # page's version chooser can default to whichever source
                     # actually contains it.
-                    _card_phrase = _snippet_match_phrase(snippet)
-                    if _card_phrase:
-                        _card_browse_url += f'&highlight={quote(_card_phrase)}'
+                    _card_browse_url += _browse_match_params(result, snippet)
                     if result.get('edition'):
                         # A scholarly transcription leads this result: open that edition,
                         # its match mapped from the search (editions plan section 3.4).
@@ -1931,6 +1941,10 @@ def open_advanced_dialog(search_state, refs, index, result):
         source = display.get('source', '')
         page_num = display.get('img', '')
         library_code = display.get('library_code', '')
+        # A catalogue search's result: where the search found it, its records whole, first (the
+        # lookup runs off the event loop: web/components/catalog_found.py).
+        from web.components.catalog_found import lookup_for_result
+        _catalogue_lookup = lookup_for_result(result)
 
         # Use current page data if available
         page = adv_state.current_page
@@ -2096,6 +2110,9 @@ def open_advanced_dialog(search_state, refs, index, result):
         text_html = _apply_highlight_marks(display_text or '', adv_state.highlight_terms)
 
         with adv_state.content_container:
+            if _catalogue_lookup:
+                from web.components.catalog_found import place_found_panel
+                place_found_panel(_catalogue_lookup)
 
             # ============================================================
             # FULLSCREEN MODE - Compact layout with text and image only
@@ -2153,9 +2170,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             if current_p_num:
                                 browse_url += f'&page={current_p_num}'
                             # SEED-033 Option A: carry the matched phrase.
-                            _phrase = _snippet_match_phrase(snippet)
-                            if _phrase:
-                                browse_url += f'&highlight={quote(_phrase)}'
+                            browse_url += _browse_match_params(result, snippet)
                             # A scholarly transcription leading this result, on its own page: that
                             # edition, its exact match marked (as the card's link; Codex review of #18).
                             if _hit_scope_version(result, adv_state, page):
@@ -2297,9 +2312,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 if current_p_num:
                                     browse_url += f'&page={current_p_num}'
                                 # SEED-033 Option A: carry the matched phrase.
-                                _phrase = _snippet_match_phrase(snippet)
-                                if _phrase:
-                                    browse_url += f'&highlight={quote(_phrase)}'
+                                browse_url += _browse_match_params(result, snippet)
                                 # A scholarly transcription leading this result, on its own page: that
                                 # edition, its exact match marked (as the card's link; Codex review of #18).
                                 if _hit_scope_version(result, adv_state, page):
@@ -2820,9 +2833,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                         if current_p_num:
                             browse_url += f'&page={current_p_num}'
                         # SEED-033 Option A: carry the matched phrase.
-                        _phrase = _snippet_match_phrase(snippet)
-                        if _phrase:
-                            browse_url += f'&highlight={quote(_phrase)}'
+                        browse_url += _browse_match_params(result, snippet)
                         # A scholarly transcription leading this result, on its own page: that
                         # edition, its exact match marked (as the card's link; Codex review of #18).
                         if _hit_scope_version(result, adv_state, page):

@@ -296,3 +296,257 @@ def test_start_search_records_the_mode_it_dispatched():
     import inspect
     src = inspect.getsource(_app().GenizahGUI.start_search)
     assert "mode_index=mode_idx)" in src
+
+
+# --- where the search found a manuscript (the viewer's pane, the Browse box) ----------------
+
+_FOUND = {"records": [{"label": "FJMS Catalog · Note", "rtl": True,
+                       "segments": [("רשומה <מוטעית> (", False), ("טעות", True), (" בסיגנטורה)", False)]}],
+          "count": 3}
+_ROW = {"display": {"id": "990000000000000003"},
+        "catalogue": {"source": "fjms", "field": "Comment",
+                      "searched": {"query": "טעות", "include_translations": True, "near_spellings": False}}}
+
+
+def test_found_html_marks_the_words_escapes_the_text_and_says_what_is_left_out():
+    html = cs.found_html(_FOUND, lambda s: s)
+    assert "<span style='color:gray;'>FJMS Catalog · Note</span>" in html
+    assert "<b style='color:red;'>טעות</b>" in html and "&lt;מוטעית&gt;" in html
+    assert "<span dir='rtl'>" in html and "1 of 3 matching records" in html
+    assert cs.found_html({"records": [], "count": 0}) == "" and cs.found_html(None) == ""
+    two_lines = {"records": [{"label": "x", "segments": [("a\n<b>", False), ("c\nd", True)]}], "count": 1}
+    assert "a<br>&lt;b&gt;<b style='color:red;'>c<br>d</b>" in cs.found_html(two_lines)
+
+
+_LOOKUP = ("990000000000000003", "טעות", False, True)
+
+
+class _Match:
+    source, field, lang, automatic, near = "fjms", "Comment", "he", False, False
+    text, spans = "רשומה זו מוטעית (טעות בסיגנטורה)", ((17, 21),)
+
+
+_ANSWER = ([_Match()], 1)
+
+
+def test_a_rows_lookup_is_the_search_it_carries():
+    assert cs.found_lookup(_ROW) == _LOOKUP
+    assert cs.found_lookup({"display": {"id": "1"}, "snippet": "x"}) is None
+    assert cs.found_lookup({"display": {"id": "1"}, "catalogue": {"source": "fjms"}}) is None
+
+
+@pytest.fixture
+def empty_found_cache(monkeypatch):
+    from collections import OrderedDict
+    monkeypatch.setattr(cs, "_FOUND_CACHE", OrderedDict())
+
+
+def test_kept_answers_are_bounded(empty_found_cache, monkeypatch):
+    monkeypatch.setattr(cs, "FOUND_CACHE_SIZE", 2)
+    for word in ("a", "b", "c"):
+        cs.keep_found(("1", word, False, True), ([], 0))
+    assert cs.cached_found(("1", "a", False, True)) is None
+    assert cs.cached_found(("1", "c", False, True)) == ([], 0)
+
+
+def test_the_worker_answers_with_the_lookups_matches(monkeypatch):
+    import shared.catalog_text_rows as rows
+    asked = []
+    monkeypatch.setattr(rows, "catalogue_matches", lambda *a: asked.append(a) or _ANSWER)
+    worker = cs.CatalogFoundWorker(_LOOKUP)
+    got = []
+    worker.answered.connect(lambda lookup, answer: got.append((lookup, answer)))
+    worker.run()                                   # in this thread: the signal is delivered at once
+    assert got == [(_LOOKUP, _ANSWER)]
+    assert asked == [("990000000000000003", "טעות", {"near_spellings": False, "include_translations": True})]
+
+
+class _Signal:
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+    def emit(self, *args):
+        for slot in self.slots:
+            slot(*args)
+
+
+class _FakeWorker:
+    """CatalogFoundWorker without a thread: the test answers it."""
+    made = []
+
+    def __init__(self, lookup, parent=None):
+        self.lookup, self.started, self.interrupted = lookup, False, False
+        self.answered, self.finished = _Signal(), _Signal()
+        _FakeWorker.made.append(self)
+
+    def start(self):
+        self.started = True
+
+    def isRunning(self):
+        return self.started
+
+    def requestInterruption(self):
+        self.interrupted = True
+
+    def wait(self, _ms=None):
+        return True
+
+    def deleteLater(self):
+        pass
+
+    def finish(self, answer=None):
+        """The thread's end: its answer (if any), then finished, as Qt delivers them."""
+        if answer is not None:
+            self.answered.emit(self.lookup, answer)
+        self.started = False
+        self.finished.emit()
+
+
+@pytest.fixture
+def fake_worker(monkeypatch, empty_found_cache):
+    _FakeWorker.made = []
+    monkeypatch.setattr(cs, "CatalogFoundWorker", _FakeWorker)
+    return _FakeWorker
+
+
+class _View:
+    def __init__(self):
+        self.html, self.visible = None, None
+
+    def setHtml(self, html):
+        self.html = html
+
+    def setVisible(self, visible):
+        self.visible = visible
+
+    def clear(self):
+        self.html = ""
+
+
+def _browse_host():
+    gui = _app().GenizahGUI
+    host = SimpleNamespace(browse_found_view=_View(), _browse_catalogue_row=_ROW)
+    for name in ("_update_browse_found", "_on_browse_found_answered", "_fill_browse_found"):
+        setattr(host, name, getattr(gui, name).__get__(host))
+    return host
+
+
+def test_browse_looks_up_off_the_gui_thread_and_draws_the_answer(fake_worker):
+    """Codex review of #51: the lookup ran on the GUI thread. Browse now starts a worker, shows
+    nothing until it answers, keeps the answer and draws it; a reopened manuscript draws at once."""
+    host = _browse_host()
+    host._update_browse_found("990000000000000003")
+    assert len(fake_worker.made) == 1 and fake_worker.made[0].started
+    assert host.browse_found_view.visible is False
+    fake_worker.made[0].finish(_ANSWER)
+    assert host.browse_found_view.visible and "טעות" in host.browse_found_view.html
+    assert cs.cached_found(_LOOKUP) == _ANSWER
+    host._update_browse_found("990000000000000099")          # another manuscript: no box
+    assert host.browse_found_view.visible is False
+    host._update_browse_found("990000000000000003")          # back: the kept answer, no worker
+    assert len(fake_worker.made) == 1 and host.browse_found_view.visible
+
+
+def test_browse_drops_an_answer_for_a_manuscript_it_left(fake_worker):
+    host = _browse_host()
+    host._update_browse_found("990000000000000003")
+    host._update_browse_found("990000000000000099")
+    fake_worker.made[0].finish(_ANSWER)
+    assert host.browse_found_view.visible is False
+
+
+class _Splitter:
+    def __init__(self):
+        self.set = None
+
+    def sizes(self):
+        return [600, 40]
+
+    def setSizes(self, sizes):
+        self.set = sizes
+
+
+def _viewer_host():
+    from desktop.result_dialog import ResultDialog
+    host = SimpleNamespace(src_widget=_View(), text_src=_View(), lbl_src_heading=_View(),
+                           ms_text_splitter=_Splitter())
+    host.lbl_src_heading.setText = host.lbl_src_heading.setHtml
+    for name in ("_show_catalogue_found", "_on_found_answered", "_fill_found_pane", "_give_found_pane_room"):
+        setattr(host, name, getattr(ResultDialog, name).__get__(host))
+    return host
+
+
+def test_the_viewer_looks_up_off_the_gui_thread_and_fills_its_pane(fake_worker):
+    host = _viewer_host()
+    assert host._show_catalogue_found(_ROW) is True
+    assert host.src_widget.visible is False and fake_worker.made[0].started
+    fake_worker.made[0].finish(_ANSWER)
+    assert host.src_widget.visible and "טעות" in host.text_src.html
+    assert host.ms_text_splitter.set == [427, 213]           # a third of the column for the pane
+
+
+def test_the_viewer_keeps_the_pane_for_other_rows_and_drops_stale_answers(fake_worker):
+    host = _viewer_host()
+    host._show_catalogue_found(_ROW)
+    assert host._show_catalogue_found({"display": {"id": "1"}, "snippet": "x"}) is False
+    fake_worker.made[0].finish(_ANSWER)                      # the row it was for is gone
+    assert host.src_widget.visible is False
+    assert cs.cached_found(_LOOKUP) == _ANSWER               # kept all the same
+    cs._FOUND_CACHE.clear()
+    host._workers_torn_down = True                           # a closed viewer draws nothing
+    host._show_catalogue_found(_ROW)
+    fake_worker.made[1].finish(_ANSWER)
+    assert host.src_widget.visible is False
+
+
+def _row_for(sys_id):
+    return {"display": {"id": sys_id}, "catalogue": dict(_ROW["catalogue"])}
+
+
+def test_paging_through_results_runs_one_lookup_at_a_time(fake_worker):
+    """Codex review of #51: each result paged to started its own thread, all repeating the same
+    near spellings. One runs at a time; of those asked for meanwhile only the latest runs next."""
+    host = _viewer_host()
+    rows = [_row_for(f"99000000000000000{n}") for n in (1, 2, 3)]
+    for row in rows:
+        host._show_catalogue_found(row)
+    assert len(fake_worker.made) == 1
+    fake_worker.made[0].finish(_ANSWER)
+    assert len(fake_worker.made) == 2 and fake_worker.made[1].lookup == cs.found_lookup(rows[2])
+    assert host.src_widget.visible is False                  # the first row's answer is not the third's
+    fake_worker.made[1].finish(_ANSWER)
+    assert host.src_widget.visible and len(fake_worker.made) == 2
+
+
+def test_a_closed_viewer_stops_its_lookup_and_starts_no_other(fake_worker):
+    host = _viewer_host()
+    host._show_catalogue_found(_row_for("990000000000000001"))
+    host._show_catalogue_found(_row_for("990000000000000002"))
+    host._rd_found_queue.stop()
+    assert fake_worker.made[0].interrupted
+    fake_worker.made[0].finish(_ANSWER)
+    assert len(fake_worker.made) == 1 and host.src_widget.visible is False
+
+
+def test_the_viewer_and_browse_call_the_catalogue_pane():
+    """The call sites: the viewer fills its lower pane from the row and stops the lookups when
+    it closes; Browse keeps the row it was opened from and refreshes the box on every page."""
+    import ast
+    import inspect
+    import textwrap
+    from desktop.result_dialog import ResultDialog
+
+    def calls(func):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+        return {n.func.attr for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+
+    gui = _app().GenizahGUI
+    assert "_show_catalogue_found" in calls(ResultDialog.load_result_by_index)
+    assert "_rd_found_queue" in inspect.getsource(ResultDialog._teardown_workers)
+    assert "_update_browse_found" in calls(gui.open_result_in_browse)
+    assert "_update_browse_found" in calls(gui.browse_render_page)
+    assert "self._browse_catalogue_row = " in inspect.getsource(gui.open_result_in_browse)

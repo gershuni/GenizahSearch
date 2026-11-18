@@ -4063,3 +4063,10 @@ What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
     - Method `choose` (Line 93) — On the folio this hit owns, choose its edition in the version chooser *combo*
     - Method `marked` (Line 112) — *text* with the match marked (``*...*``, one stretch per line: the viewers lay the
     - Method `notice` (Line 127) — What the reader should be told about this hit (in English, translated where shown),
+
+## web/components/catalog_found.py
+
+- **Function** `found_records_html` — a catalogue search's matching records of one manuscript as HTML: each under its source line ("FJMS Catalog · Note"), whole, the search's words in `mark.highlight-match`, every text escaped (2026-11-18)
+- **Function** `render_found_panel` — the "Found in the catalogue records" panel; Quick View draws it first, Browse under its header
+- **Function** `found_for_result` / `found_for_browse` — the panel's records for a result row (the search it carries) or for Browse's `cq` / `cnear` / `ctr` address, where `catalog_available()`
+- **Function** `browse_params` — the Browse address part that carries a catalogue result's search (search_results.py `_browse_match_params`)
