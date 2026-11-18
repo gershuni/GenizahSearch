@@ -63,6 +63,27 @@ os.environ["NLI_METADATA_STORE_FILE"] = os.path.join(_NLI_IMAGE_STORE_TMP, "sess
 
 
 # ---------------------------------------------------------------------------
+# The interface language at import. genizah_core sets CURRENT_LANG from
+# lang.pkl when it is first imported, and desktop modules copy it by value
+# (`from genizah_core import CURRENT_LANG`). That happens while test files are
+# collected, before `_isolate_personal_state_files` below can run, so on a
+# machine whose desktop app is set to Hebrew every tr() in the run spoke
+# Hebrew and tests expecting English failed locally while passing on CI.
+# Point the three personal-state files at an empty folder now, before any test
+# file imports genizah_core, so the run starts in English as CI does. Tests
+# that want Hebrew patch CURRENT_LANG themselves.
+# ---------------------------------------------------------------------------
+_PERSONAL_STATE_AT_IMPORT = _tempfile.mkdtemp(prefix="personal_state_at_import_")
+_atexit.register(_shutil.rmtree, _PERSONAL_STATE_AT_IMPORT, True)
+
+from shared.config import Config as _Config  # noqa: E402
+
+_Config.SESSION_FILE = os.path.join(_PERSONAL_STATE_AT_IMPORT, "session.json")
+_Config.CONFIG_FILE = os.path.join(_PERSONAL_STATE_AT_IMPORT, "config.pkl")
+_Config.LANGUAGE_FILE = os.path.join(_PERSONAL_STATE_AT_IMPORT, "lang.pkl")
+
+
+# ---------------------------------------------------------------------------
 # Skip Phase 97.3 / 100 / 97.2 desktop tests on CI runners (D-F15).
 #
 # Phase 97.3 (2026-05-26) introduced the FolderWalkWorker QThread + heavily

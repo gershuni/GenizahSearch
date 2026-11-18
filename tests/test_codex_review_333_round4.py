@@ -181,10 +181,19 @@ class TestSearchScopeDoesNotFollowTheReader:
     def test_every_manuscript_change_site_clears_it_first(self):
         src = _read("web/pages/browse.py")
         lines = src.split("\n")
+        # The bootstrap dispatch opens the page's FIRST manuscript (the address, a saved
+        # position, the saved desk's first fragment). Nothing is open before it, so no
+        # earlier phrase can follow the reader there, and the helper would do nothing
+        # (it clears only when state.sys_id is already set to another manuscript).
+        start = next(k for k, l in enumerate(lines)
+                     if l.strip() == "action = bootstrap['action']")
+        end = next(k for k in range(start, len(lines))
+                   if lines[k].strip() == "else:  # action == 'none'")
+        opening = range(start, end)
         assigns = [k for k, l in enumerate(lines)
                    if l.strip().startswith("state.sys_id = ")
+                   and k not in opening
                    and "initial_sys_id" not in l
-                   and "bootstrap[" not in l
                    and "page.sys_id" not in l
                    and "meta_page.sys_id" not in l]
         assert assigns, "no navigation assignments found — has the page been refactored?"
