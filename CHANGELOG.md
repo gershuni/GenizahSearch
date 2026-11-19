@@ -15,8 +15,8 @@ the FJMS catalogue, PGP's descriptions and the library titles, with their automa
 — on the website, in the public API and MCP, and in the desktop app (also by `%` and a space),
 with a Fuzzy search switch (near spellings) that Title search gains too; a manuscript opened from
 a catalogue result shows the records the search found, and the installer carries the catalogue
-file. The search box says what to type in each mode, with an example; the homepage and header
-boxes take the mode signs; `R` is the Responsa sign only with a space after it; Title search
+file. The search box says what to type in each mode, with an example, and the desktop's tooltip
+lists every mode sign; the homepage and header boxes take the mode signs; `R` is the Responsa sign only with a space after it; Title search
 finds abbreviations. On the website, the Reading Desk shows a document's edition once beside its
 images, the Fragment Puzzle gains full screen and an exact PNG export with flip fixes, and images
 turn freely at every screen width. Deploy: the code first, then
@@ -173,6 +173,21 @@ catalogue is served); desktop What's New 10.1.0.
   by a sign typed in the box (`$ `, `# `...), or from history. One table for both apps
   (`shared/search_mode_examples.py`; `web/pages/search.py`,
   `desktop/catalog_search.py::show_mode_examples`). The Joins Lab box is unchanged.
+
+### The desktop search box's tooltip lists every mode sign (desktop)
+
+#### Fixed
+- **The desktop search box's shortcuts tooltip is up to date.** Its list of signs was written
+  out by hand and had fallen behind: it had no `%` (Catalog), no `??` or `???` (the Variants
+  levels, which it told the reader to pick with the buttons), and gave `R` as a sign with no
+  space after it, which since v10.1.0 searches a word (`R שלום` is a Responsa search, `Rashi`
+  is not). Since v10.1.0 the tooltip also opens with the mode's lead ("Type a term to search"),
+  so the old list showed on every hover. It now reads the one table of signs
+  (`shared/search_mode_signs.py::MODE_SIGNS`) through
+  `desktop/catalog_search.py::signs_tooltip`, so a sign added there is listed too: each mode by
+  the name the mode lists use ("Variants Extended: ??"), `R` with "and a space", `%` only where
+  the catalogue is installed, and an example of each kind (`?שלום`, `R שלום`), in English and
+  Hebrew.
 
 ### The search-mode signs work in the homepage box and the header box (web)
 
