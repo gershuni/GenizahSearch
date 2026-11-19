@@ -317,6 +317,10 @@ friedman_data/
 # libraries_translations.db, rebuilt after every refresh of any of them; never committed.
 catalog_data/
 
+# Shelf tree sidecar (library > collection > volume > shelfmark): shelfmark_tree.db is DERIVED by
+# scripts/build_shelfmark_tree.py from the FGP dump (fist_data/FIST.db) and libraries.csv; never committed.
+shelfmark_tree_data/
+
 # Private material lives in the private repository checked out BESIDE this one, never here.
 .planning/
 GenizahSearch-private/
