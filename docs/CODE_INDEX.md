@@ -2121,7 +2121,7 @@ What a search or go-to box holds (moved from `web/` on 2026-11-04, so the deskto
 
 ## shared/search_mode_signs.py
 
-The search-mode signs, one table for every box (2026-11-18): the engine's `parse_query_syntax`, the /search box's live switch (`web/pages/search.py`, `on_query_input_change`) and the go-to boxes (`web/home_query.py::mode_sign_target`). Tests: `tests/test_search_mode_signs.py`.
+The search-mode signs, one table for every box (2026-11-18): the engine's `parse_query_syntax`, the /search box's live switch (`web/pages/search.py`, `on_query_input_change`) and the go-to boxes (`web/home_query.py::mode_sign_target`); also the desktop query box's shortcuts tooltip (`desktop/catalog_search.py::signs_tooltip`, one line a sign named by `SIGN_NAMES`, `%` only where the catalogue is offered). Tests: `tests/test_search_mode_signs.py`, `tests/test_desktop_mode_signs_tooltip.py`.
 
 - **Constant** `MODE_SIGNS` — (sign, mode): `???` `??` `?` `=` `~` `/` `$` `#` `%` `R`, a sign that begins another after it.
 - **Constant** `CATALOG_MODE` — `'Catalog'`, the mode of `%`, a sign only where the catalogue text search is served.

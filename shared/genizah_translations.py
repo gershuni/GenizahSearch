@@ -67,7 +67,10 @@ TRANSLATIONS = {
 
     # --- Main Search Tab ---
     "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
-    "Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\nR = Responsa mode\n\nExample: ?שלום": "קיצורי דרך לחיפוש:\n= = חיפוש מדויק\n? = וריאנטים (השתמש בכפתורים לבחירת רמה)\n~ = חיפוש מקורב (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\nR = מצב פרויקט השו\"ת\n\nדוגמה: ?שלום",
+    # The query box's shortcuts (desktop/catalog_search.py::signs_tooltip); the modes' names
+    # are the mode lists' own ("Exact", "Variants Basic", ...).
+    "Search Shortcuts (type the sign before the term):": "קיצורי דרך לחיפוש (הקלידו את הסימן לפני המונח):",
+    "{sign} and a space": "{sign} ורווח",
     "Query:": "שאילתא:",
     "Mode:": "מצב:",
     "Gap:": "מרחק:",

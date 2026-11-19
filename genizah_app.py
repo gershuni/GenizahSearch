@@ -71,7 +71,7 @@ from desktop.catalog_search import (MODE_INDEX_CATALOG, MODE_INDEX_TITLE, CATALO
                                     CATALOG_TRANSLATIONS_TOOLTIP, ModeCombo,
                                     CatalogCountWorker, catalog_offered, catalog_options as _catalog_options,
                                     combo_index as _mode_combo_index, engine_mode as _combo_engine_mode,
-                                    show_mode_examples, source_text as _catalog_source_text,
+                                    show_mode_examples, signs_tooltip, source_text as _catalog_source_text,
                                     step_mode as _combo_step_mode, telemetry_mode as _combo_telemetry_mode)
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
@@ -6317,7 +6317,6 @@ class GenizahGUI(QMainWindow):
         row1 = QHBoxLayout(self.search_row1_container)
         row1.setContentsMargins(0, 0, 0, 0)
         self.query_input = QLineEdit()   # its lead text: the mode's example (show_mode_examples below)
-        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\nR = Responsa mode\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._on_query_text_changed)
 
@@ -6366,6 +6365,8 @@ class GenizahGUI(QMainWindow):
             self.mode_combo.show_after(MODE_INDEX_CATALOG, MODE_INDEX_TITLE)
             self.mode_combo.setItemData(MODE_INDEX_CATALOG, tr(self.CATALOG_MODE_TIP),
                                         Qt.ItemDataRole.ToolTipRole)
+        # The box's shortcuts, one line a sign of shared/search_mode_signs.py (% where offered).
+        self.query_input.setToolTip(signs_tooltip(tr, self._catalog_offered))
         row1.addWidget(self.mode_combo)
 
         # Phase 55: Refine mode badge (D-02) + cancel (D-02a)

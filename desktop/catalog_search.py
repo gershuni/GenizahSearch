@@ -168,6 +168,64 @@ def show_mode_examples(combo, query_box, translate) -> None:
     show()
 
 
+#: The mode each sign of shared/search_mode_signs.py::MODE_SIGNS chooses, named as the mode lists
+#: name it (their Hebrew is in shared/genizah_translations.py), in the order the tooltip lists
+#: them (Catalog right under Title, as the mode combo shows it; owner, 2026-11-19). A sign added
+#: to MODE_SIGNS without a name here is still listed, under its mode's key;
+#: tests/test_desktop_mode_signs_tooltip.py fails until it has one.
+SIGN_NAMES = {
+    'exact': 'Exact',
+    'variants': 'Variants Basic',
+    'variants_extended': 'Variants Extended',
+    'variants_maximum': 'Variants Maximum',
+    'fuzzy': 'Fuzzy',
+    'Regex': 'Regex',
+    'Title': 'Title',
+    'Catalog': 'Catalog',
+    'Shelfmark': 'Shelfmark',
+    'responsa': 'Responsa',
+}
+SIGNS_HEADER = 'Search Shortcuts (type the sign before the term):'
+#: A letter sign counts only with a space after it (``R שלום``; search_engine.parse_query_syntax).
+LETTER_SIGN = '{sign} and a space'
+
+
+def signs_tooltip(translate, catalog_offered: bool) -> str:
+    """The query box's shortcuts, read off MODE_SIGNS so the list cannot fall behind it: one line
+    a sign, its mode's name first ('Title: $'), a letter sign with the space it needs
+    ('Responsa: R and a space'), the catalogue's only where it is offered; then an example of a
+    symbol sign and of a letter sign (Variants' and Responsa's while the table has them, else the
+    first listed of each kind; none of a kind, no example of it). show_mode_examples puts the
+    mode's lead above it."""
+    from shared.search_mode_examples import EXAMPLE_TEMPLATE
+    from shared.search_mode_signs import CATALOG_MODE, MODE_SIGNS
+
+    signs_of: dict[str, list[str]] = {}       # a mode may have more than one sign: each is listed
+    for sign, mode in MODE_SIGNS:
+        signs_of.setdefault(mode, []).append(sign)
+    lines = [translate(SIGNS_HEADER)]
+    listed = []                               # (mode, sign), in the order shown
+    for mode in list(SIGN_NAMES) + [mode for mode in signs_of if mode not in SIGN_NAMES]:
+        if mode == CATALOG_MODE and not catalog_offered:
+            continue
+        for sign in signs_of.get(mode, ()):
+            listed.append((mode, sign))
+            shown = translate(LETTER_SIGN).format(sign=sign) if sign.isalpha() else sign
+            lines.append(f"{translate(SIGN_NAMES.get(mode, mode))}: {shown}")
+
+    def example_sign(preferred_mode, letter):
+        of_kind = [(mode, sign) for mode, sign in listed if sign.isalpha() == letter]
+        preferred = [sign for mode, sign in of_kind if mode == preferred_mode]
+        return (preferred or [sign for _mode, sign in of_kind] or [None])[0]
+
+    symbol, letter = example_sign('variants', False), example_sign('responsa', True)
+    examples = ([f"{symbol}שלום"] if symbol else []) + ([f"{letter} שלום"] if letter else [])
+    text = "\n".join(lines)
+    if examples:
+        text += "\n\n" + translate(EXAMPLE_TEMPLATE).format(query=", ".join(examples))
+    return text
+
+
 def catalog_options(near_spellings: bool, include_translations: bool) -> dict:
     """The switches a catalogue search runs with, as the engine takes them."""
     return {"near_spellings": bool(near_spellings), "include_translations": bool(include_translations)}
