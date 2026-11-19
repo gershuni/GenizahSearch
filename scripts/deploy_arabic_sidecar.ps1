@@ -40,7 +40,10 @@ $RemoteDir = "$RemoteRepo/arabic_data"
 $Served = "arabic.db"
 $Incoming = "arabic.db.new"
 $Previous = "arabic.db.prev-$Stamp"
-$Gate = "python3 scripts/verify_arabic_sidecar.py --expect-entries $Entries --expect-version $Version"
+# The server's own Python for the web app (venv/bin/python, as deploy.sh activates it): the gate imports the
+# repository's modules, and the system python3 lacks their dependencies (rapidfuzz stopped the first
+# catalogue deploy, 2026-11-19).
+$Gate = "venv/bin/python scripts/verify_arabic_sidecar.py --expect-entries $Entries --expect-version $Version"
 # A first deploy has no served file to keep; a rollback then removes the served file (Lane's tab hides).
 $Rollback = "cd $RemoteDir && if [ -f $Previous ]; then mv $Previous $Served; else rm -f $Served; fi && sudo systemctl restart genizah-web"
 
@@ -53,7 +56,7 @@ Write-Host "   sha256 $Sha"
 if ($DryRun) {
     Write-Host ""
     Write-Host "Dry run. Would now run:"
-    Write-Host "  ssh: test that $RemoteRepo/scripts/verify_arabic_sidecar.py and shared/arabic_service.py exist (the code is deployed)"
+    Write-Host "  ssh: test that $RemoteRepo/venv/bin/python, $RemoteRepo/scripts/verify_arabic_sidecar.py and shared/arabic_service.py exist (the code is deployed)"
     Write-Host "  scp $Candidate ${RemoteHost}:$RemoteDir/$Incoming"
     Write-Host "  ssh: sha256sum -c on $Incoming ($Sha); $Gate --db arabic_data/$Incoming"
     Write-Host "  ssh: mv $Served $Previous (if it exists); mv $Incoming $Served; sudo systemctl restart genizah-web"
@@ -62,8 +65,8 @@ if ($DryRun) {
 }
 
 Write-Host "== 2/7 the gate is on the server (the code of PR #480 is deployed)"
-ssh $RemoteHost "test -f $RemoteRepo/scripts/verify_arabic_sidecar.py && test -f $RemoteRepo/scripts/build_arabic_sidecar.py && test -f $RemoteRepo/shared/arabic_normalize.py && test -f $RemoteRepo/shared/arabic_service.py && mkdir -p $RemoteDir"
-if ($LASTEXITCODE -ne 0) { Fail "scripts/verify_arabic_sidecar.py is not on the server: deploy the code first (git pull), then run this again" }
+ssh $RemoteHost "test -x $RemoteRepo/venv/bin/python && test -f $RemoteRepo/scripts/verify_arabic_sidecar.py && test -f $RemoteRepo/scripts/build_arabic_sidecar.py && test -f $RemoteRepo/shared/arabic_normalize.py && test -f $RemoteRepo/shared/arabic_service.py && mkdir -p $RemoteDir"
+if ($LASTEXITCODE -ne 0) { Fail "scripts/verify_arabic_sidecar.py or venv/bin/python is not on the server: deploy the code first (git pull), then run this again" }
 
 Write-Host "== 3/7 upload under a temporary name: ${RemoteHost}:$RemoteDir/$Incoming"
 scp $Candidate "${RemoteHost}:$RemoteDir/$Incoming"

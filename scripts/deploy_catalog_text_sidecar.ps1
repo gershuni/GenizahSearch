@@ -50,7 +50,10 @@ $RemoteDir = "$RemoteRepo/catalog_data"
 $Served = "catalog_text.db"
 $Incoming = "catalog_text.db.new"
 $Previous = "catalog_text.db.prev-$Stamp"
-$Gate = "python3 scripts/verify_catalog_text_sidecar.py --expect-rows $Rows"
+# The server's own Python for the web app (venv/bin/python, as deploy.sh activates it): the gate imports the
+# repository's modules, and the system python3 lacks their dependencies (rapidfuzz stopped the first
+# catalogue deploy, 2026-11-19).
+$Gate = "venv/bin/python scripts/verify_catalog_text_sidecar.py --expect-rows $Rows"
 # A first deploy has no served file to keep; a rollback then removes the served file (the search hides).
 $Rollback = "cd $RemoteDir && if [ -f $Previous ]; then mv $Previous $Served; else rm -f $Served; fi && sudo systemctl restart genizah-web"
 
@@ -63,7 +66,7 @@ Write-Host "   sha256 $Sha"
 if ($DryRun) {
     Write-Host ""
     Write-Host "Dry run. Would now run:"
-    Write-Host "  ssh: test that $RemoteRepo/scripts/verify_catalog_text_sidecar.py and shared/catalog_text_service.py exist (the code is deployed)"
+    Write-Host "  ssh: test that $RemoteRepo/venv/bin/python, $RemoteRepo/scripts/verify_catalog_text_sidecar.py and shared/catalog_text_service.py exist (the code is deployed)"
     Write-Host "  scp $Candidate ${RemoteHost}:$RemoteDir/$Incoming"
     Write-Host "  ssh: sha256sum -c on $Incoming ($Sha); $Gate --db catalog_data/$Incoming"
     Write-Host "  ssh: mv $Served $Previous (if it exists); mv $Incoming $Served; sudo systemctl restart genizah-web"
@@ -72,8 +75,8 @@ if ($DryRun) {
 }
 
 Write-Host "== 2/7 the gate is on the server (the code is deployed)"
-ssh $RemoteHost "test -f $RemoteRepo/scripts/verify_catalog_text_sidecar.py && test -f $RemoteRepo/shared/catalog_text_normalize.py && test -f $RemoteRepo/shared/catalog_text_service.py && test -f $RemoteRepo/web/catalog_assets.py && mkdir -p $RemoteDir"
-if ($LASTEXITCODE -ne 0) { Fail "scripts/verify_catalog_text_sidecar.py or web/catalog_assets.py is not on the server: deploy the code first (git pull), then run this again" }
+ssh $RemoteHost "test -x $RemoteRepo/venv/bin/python && test -f $RemoteRepo/scripts/verify_catalog_text_sidecar.py && test -f $RemoteRepo/shared/catalog_text_normalize.py && test -f $RemoteRepo/shared/catalog_text_service.py && test -f $RemoteRepo/web/catalog_assets.py && mkdir -p $RemoteDir"
+if ($LASTEXITCODE -ne 0) { Fail "scripts/verify_catalog_text_sidecar.py or web/catalog_assets.py or venv/bin/python is not on the server: deploy the code first (git pull), then run this again" }
 
 Write-Host "== 3/7 upload under a temporary name: ${RemoteHost}:$RemoteDir/$Incoming"
 scp $Candidate "${RemoteHost}:$RemoteDir/$Incoming"

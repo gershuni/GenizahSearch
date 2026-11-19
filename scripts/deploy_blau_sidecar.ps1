@@ -43,7 +43,10 @@ $RemoteDir = "$RemoteRepo/blau_data"
 $Served = "blau.db"
 $Incoming = "blau.db.new"
 $Previous = "blau.db.prev-$Stamp"
-$Gate = "python3 scripts/verify_blau_sidecar.py --expect-roots $Roots --expect-forms $Forms --expect-tokens $Tokens --expect-version $Version"
+# The server's own Python for the web app (venv/bin/python, as deploy.sh activates it): the gate imports the
+# repository's modules, and the system python3 lacks their dependencies (rapidfuzz stopped the first
+# catalogue deploy, 2026-11-19).
+$Gate = "venv/bin/python scripts/verify_blau_sidecar.py --expect-roots $Roots --expect-forms $Forms --expect-tokens $Tokens --expect-version $Version"
 
 Write-Host "== 1/7 local gate: $Candidate"
 python scripts/verify_blau_sidecar.py --db $Candidate --expect-roots $Roots --expect-forms $Forms --expect-tokens $Tokens --expect-version $Version
@@ -54,7 +57,7 @@ Write-Host "   sha256 $Sha"
 if ($DryRun) {
     Write-Host ""
     Write-Host "Dry run. Would now run:"
-    Write-Host "  ssh: test that $RemoteRepo/scripts/verify_blau_sidecar.py exists (the code is deployed)"
+    Write-Host "  ssh: test that $RemoteRepo/venv/bin/python, $RemoteRepo/scripts/verify_blau_sidecar.py exists (the code is deployed)"
     Write-Host "  scp $Candidate ${RemoteHost}:$RemoteDir/$Incoming"
     Write-Host "  ssh: sha256sum -c on $Incoming ($Sha); $Gate --db blau_data/$Incoming"
     Write-Host "  ssh: mv $Served $Previous (if it exists); mv $Incoming $Served; sudo systemctl restart genizah-web"
@@ -63,8 +66,8 @@ if ($DryRun) {
 }
 
 Write-Host "== 2/7 the gate is on the server (the code of PR #472 is deployed)"
-ssh $RemoteHost "test -f $RemoteRepo/scripts/verify_blau_sidecar.py && test -f $RemoteRepo/shared/blau_normalize.py && mkdir -p $RemoteDir"
-if ($LASTEXITCODE -ne 0) { Fail "scripts/verify_blau_sidecar.py is not on the server: deploy the code first (git pull), then run this again" }
+ssh $RemoteHost "test -x $RemoteRepo/venv/bin/python && test -f $RemoteRepo/scripts/verify_blau_sidecar.py && test -f $RemoteRepo/shared/blau_normalize.py && mkdir -p $RemoteDir"
+if ($LASTEXITCODE -ne 0) { Fail "scripts/verify_blau_sidecar.py or venv/bin/python is not on the server: deploy the code first (git pull), then run this again" }
 
 Write-Host "== 3/7 upload under a temporary name: ${RemoteHost}:$RemoteDir/$Incoming"
 scp $Candidate "${RemoteHost}:$RemoteDir/$Incoming"
