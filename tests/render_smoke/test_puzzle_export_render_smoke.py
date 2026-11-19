@@ -99,8 +99,19 @@ def _run(driver):
         nicegui_context.slot_stack.extend(saved_slots)
 
 
+def _answer_save_token(user):
+    """The canvas is never mid-flip here: its save token is 0, as when it does not answer,
+    but at once (an unanswered call waits out its 5 s timeout, twice per save)."""
+    user.javascript_rules[re.compile(r'.*puzzleCanvas\.saveToken')] = lambda _m: 0
+
+
 async def _open_with_one_fragment(user):
     user.javascript_rules[re.compile(r'.*puzzleCanvas\.get(Crop)?State\(\)')] = lambda _m: '{}'
+    # Since the browser draws the export from its canvas (exportPng), the server composes
+    # the file only when the browser cannot read its canvas. These tests are about that
+    # composition, so the browser answers that it could not.
+    user.javascript_rules[re.compile(r'.*puzzleCanvas\.exportPng\(')] = lambda _m: 'unreadable'
+    _answer_save_token(user)
     await user.open('/puzzle')
     with user._client:
         # Restored by the page's init_canvas (scheduled 0.5 s after load),
@@ -312,6 +323,7 @@ def test_canvas_positions_are_kept_in_the_tab(image_service, monkeypatch):
         # What the browser's canvas reports: only the fragment it could draw.
         user.javascript_rules[re.compile(r'.*puzzleCanvas\.getState\(\)')] = lambda _m: json.dumps(drawn)
         user.javascript_rules[re.compile(r'.*puzzleCanvas\.getCropState\(\)')] = lambda _m: '{}'
+        _answer_save_token(user)
         await user.open('/puzzle')
         with user._client:
             # Restored by the page's init_canvas (0.5 s after load).

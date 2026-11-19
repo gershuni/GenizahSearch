@@ -136,7 +136,12 @@ def test_a_lookup_is_counted_without_the_word():
 def test_reset_hints_makes_the_switch_new_again():
     main = (REPO / "web" / "main.py").read_text(encoding="utf-8")
     route = main[main.index("def reset_hints_route"):main.index("@ui.page('/settings'")]
-    assert "SEEN_KEY as dictionaries_seen" in route and "'hint_tabular_seen', dictionaries_seen)" in route
+    # The dictionaries' key is among the keys the route pops (with the one-time "New"
+    # marks' keys since 10.1.0), whatever follows it in that tuple.
+    popped = re.search(r"for key in \((.*?)\):", route, re.S)
+    assert "SEEN_KEY as dictionaries_seen" in route and popped
+    assert re.search(r"\bdictionaries_seen\b", popped.group(1)), popped.group(1)
+    assert "safe_user_pop(key, None)" in route
 
 
 def test_the_switch_says_what_pressing_it_will_do():

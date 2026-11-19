@@ -771,21 +771,44 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "10.0.0-scholarly"
-# The keys before it, newest first. 10.0.0's key needs the scholarly transcriptions served to
-# every reader (the switch on and the index installed: they go to the server after the code);
-# 9.16.0's needs the letter-level index. Where a gate is off, the key stays at the one before,
-# so the unread dot lights only where the new entry is there to read.
-WHATS_NEW_PREVIOUS_VERSION = "9.16.0-long-passages"
-WHATS_NEW_EARLIER_VERSION = "9.15.0-friedman"
+WHATS_NEW_VERSION = "10.1.0-catalogue"
+# The keys before it, newest first. 10.1.0's key needs the catalogue text search served (the
+# switch on and the file checked: they go to the server after the code); 10.0.0's needs the
+# scholarly transcriptions served to every reader (switch and index); 9.16.0's needs the
+# letter-level index. Where a gate is off, the key stays at the one before, so the unread dot
+# lights only where the new entry is there to read.
+WHATS_NEW_PREVIOUS_VERSION = "10.0.0-scholarly"
+WHATS_NEW_EARLIER_VERSION = "9.16.0-long-passages"
+WHATS_NEW_EARLIEST_VERSION = "9.15.0-friedman"
+
+
+def _whats_new_gates() -> list:
+    """The gated What's New lines, newest first: ``(name, the key it starts, shown now)``.
+    The dictionaries line came with 10.0.0 and starts no key of its own."""
+    from web.editions_assets import served_to as editions_served_to
+    from web.keyboard_shortcuts import served_dictionaries
+    return [
+        ('catalogue', WHATS_NEW_VERSION, catalog_available()),
+        ('editions', WHATS_NEW_PREVIOUS_VERSION, editions_served_to(False)),
+        ('dictionaries', None, all(served_dictionaries().values())),
+        ('passages', WHATS_NEW_EARLIER_VERSION, passage_available()),
+    ]
 
 
 def whats_new_content_key() -> str:
-    """The What's New content this deployment shows (before any AI-listing suffix)."""
-    from web.editions_assets import served_to as editions_served_to
-    if editions_served_to(False):
-        return WHATS_NEW_VERSION
-    return WHATS_NEW_PREVIOUS_VERSION if passage_available() else WHATS_NEW_EARLIER_VERSION
+    """The What's New content this deployment shows (before any AI-listing suffix).
+
+    The newest key whose line is shown, and ``-no-<line>`` for each older gated line that is
+    not (a sidecar that failed its check, a switch off). When that line comes back the key
+    changes, so a reader who dismissed What's New without it gets the unread dot again (Codex
+    on #57). With every older line shown the key is the plain one, as before.
+    """
+    gates = _whats_new_gates()
+    for at, (_name, key, shown) in enumerate(gates):
+        if key and shown:
+            missing = [name for name, _key, on in gates[at + 1:] if not on]
+            return key + ''.join(f'-no-{name}' for name in missing)
+    return WHATS_NEW_EARLIEST_VERSION
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1879,6 +1902,12 @@ def create_layout():
                                     "the automatic ones. You can choose to search all the transcriptions, "
                                     "only the scholarly ones, or only the automatic ones."),
                                  '/search'))
+    # v10.1.0 (2026-11-18), approved with the release texts, newest on top. Gated like the
+    # key: the Catalog mode and the % sign exist only where the catalogue text search is served.
+    if catalog_available():
+        _new_surfaces.insert(0, (tr('New: search the catalogue information about the manuscripts. '
+                                    'Choose Catalog search, or type % and a space.'),
+                                 '/search?mode=Catalog'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

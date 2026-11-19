@@ -1034,7 +1034,11 @@ def test_no_attribute_is_read_via_getattr_but_never_assigned():
         if (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
                 and n.value.id == 'self' and isinstance(n.ctx, ast.Store)):
             assigned.add(n.attr)
-    for n in cls.body:                       # class-level: signals, constants
+    for n in cls.body:                       # class-level: signals, constants, methods
+        # A method always exists on the instance, so getattr(self, '<method>', None)
+        # is a guard for a stand-in object, not a default that is its only value.
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            assigned.add(n.name)
         if isinstance(n, ast.Assign):
             for tg in n.targets:
                 if isinstance(tg, ast.Name):

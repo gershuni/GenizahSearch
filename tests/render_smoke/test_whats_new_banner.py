@@ -371,11 +371,12 @@ def test_an_unread_announcement_carries_a_dot():
 
 
 def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
-    """10.0.0's entry is gated on the scholarly transcriptions being served to every reader,
-    9.16.0's on the letter-level index, and so is each key: a reader who dismissed the
-    content before gets the dot where the new entry is there to read, and no dot where
-    nothing new is shown."""
-    from web.main import WHATS_NEW_EARLIER_VERSION, WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION
+    """10.1.0's entry is gated on the catalogue text search being served, 10.0.0's on the
+    scholarly transcriptions being served to every reader, 9.16.0's on the letter-level
+    index, and so is each key: a reader who dismissed the content before gets the dot where
+    the new entry is there to read, and no dot where nothing new is shown."""
+    from web.main import (WHATS_NEW_EARLIER_VERSION, WHATS_NEW_EARLIEST_VERSION,
+                          WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION)
 
     def dot_after_dismissing(key):
         async def driver(user):
@@ -389,18 +390,116 @@ def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
 
     from datetime import date
     with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
-          patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''})):
+          patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''}),
+          patch('web.keyboard_shortcuts.served_dictionaries', return_value=dict(_EVERY_DICTIONARY))):
         found = []
-        with patch('web.editions_assets.served_to', side_effect=lambda editor: not editor):
+        with (patch('web.main.catalog_available', return_value=True),
+              patch('web.editions_assets.served_to', side_effect=lambda editor: not editor)):
             _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
             _run(dot_after_dismissing(WHATS_NEW_VERSION), passage_on=True)
         assert found == [True, False], found
         found = []
-        with patch('web.editions_assets.served_to', return_value=False):
+        with (patch('web.main.catalog_available', return_value=False),
+              patch('web.editions_assets.served_to', side_effect=lambda editor: not editor)):
             _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=True)
             _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
-            _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=False)
+        assert found == [True, False], found
+        found = []
+        with (patch('web.main.catalog_available', return_value=False),
+              patch('web.editions_assets.served_to', return_value=False)):
+            _run(dot_after_dismissing(WHATS_NEW_EARLIEST_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_EARLIEST_VERSION), passage_on=False)
         assert found == [True, False, False], found
+
+
+_EVERY_DICTIONARY = {'blau': True, 'friedman': True, 'lane': True}
+
+
+def _key_with(*, catalogue=True, editions=True, dictionaries=True, passages=True):
+    from web.main import whats_new_content_key
+    served = dict(_EVERY_DICTIONARY) if dictionaries else dict.fromkeys(_EVERY_DICTIONARY, False)
+    with (patch('web.main.catalog_available', return_value=catalogue),
+          patch('web.editions_assets.served_to', side_effect=lambda editor: editions and not editor),
+          patch('web.keyboard_shortcuts.served_dictionaries', return_value=served),
+          patch('web.main.passage_available', return_value=passages)):
+        return whats_new_content_key()
+
+
+def test_the_key_names_every_older_line_that_is_not_shown():
+    """Codex on #57: with the catalogue line shown, the key named only it, so a reader who
+    dismissed What's New while the scholarly transcriptions' line was off (a sidecar that
+    failed its check) got no dot when that line came back. Every older gated line that is not
+    shown is now in the key; with all of them shown the keys are the plain ones, so readers
+    who dismissed before this change are not shown the dot again for nothing."""
+    from web.main import (WHATS_NEW_EARLIER_VERSION, WHATS_NEW_EARLIEST_VERSION,
+                          WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION)
+
+    assert _key_with() == WHATS_NEW_VERSION
+    assert _key_with(editions=False) == WHATS_NEW_VERSION + '-no-editions'
+    assert _key_with(dictionaries=False, passages=False) == (
+        WHATS_NEW_VERSION + '-no-dictionaries-no-passages')
+    # Before the catalogue is served (the code goes to the server first): as before.
+    assert _key_with(catalogue=False) == WHATS_NEW_PREVIOUS_VERSION
+    assert _key_with(catalogue=False, passages=False) == WHATS_NEW_PREVIOUS_VERSION + '-no-passages'
+    assert _key_with(catalogue=False, editions=False) == WHATS_NEW_EARLIER_VERSION
+    assert _key_with(catalogue=False, editions=False, dictionaries=False) == WHATS_NEW_EARLIER_VERSION
+    assert _key_with(catalogue=False, editions=False, passages=False) == WHATS_NEW_EARLIEST_VERSION
+    # Every state has its own key wherever the lines shown differ under the same newest line.
+    states = [dict(editions=e, dictionaries=d, passages=p)
+              for e in (True, False) for d in (True, False) for p in (True, False)]
+    assert len({_key_with(**s) for s in states}) == len(states)
+
+
+def test_a_line_that_comes_back_lights_the_dot_again():
+    """The page, not only the key: dismissed while the scholarly transcriptions' line was
+    off, the dot lights once that line is shown again, and not before."""
+    def dot_after_dismissing(key, found):
+        async def driver(user):
+            from nicegui import app
+            await user.open('/')
+            with user._client:
+                app.storage.user['whats_new_dismissed'] = key
+            await user.open('/')
+            found.append(bool(_by_class(_elements(user), 'whats-new-dot')))
+        return driver
+
+    from datetime import date
+    dismissed = 'unset'
+    found = []
+    with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
+          patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''}),
+          patch('web.keyboard_shortcuts.served_dictionaries', return_value=dict(_EVERY_DICTIONARY)),
+          patch('web.main.catalog_available', return_value=True)):
+        with patch('web.editions_assets.served_to', return_value=False):
+            from web.main import whats_new_content_key
+            with patch('web.main.passage_available', return_value=True):
+                dismissed = whats_new_content_key()
+            _run(dot_after_dismissing(dismissed, found), passage_on=True)
+        with patch('web.editions_assets.served_to', side_effect=lambda editor: not editor):
+            _run(dot_after_dismissing(dismissed, found), passage_on=True)
+    assert dismissed.endswith('-no-editions'), dismissed
+    assert found == [False, True], found
+
+
+def test_the_catalogue_line_is_shown_only_where_the_catalogue_is_served():
+    """The 10.1.0 line leads to the Catalog mode and its % sign, which exist only where the
+    catalogue text search is served; in Hebrew it is the owner's sentence, not the English."""
+    lines = {'en': "New: search the catalogue information about the manuscripts",
+             'he': "חדש: חפשו במידע הקטלוגי על כתבי היד"}
+
+    def driver_for(lang):
+        async def driver(user):
+            await user.open('/')
+            seen.append(lines[lang] in _texts(_elements(user)))
+        return driver
+
+    seen = []
+    for served in (True, False):
+        with patch('web.main.catalog_available', return_value=served):
+            _run(driver_for('en'))
+            _run(driver_for('he'), lang='he')
+    assert seen == [True, True, False, False], seen
 
 
 def test_the_scholarly_transcriptions_line_is_shown_only_where_they_are_served():

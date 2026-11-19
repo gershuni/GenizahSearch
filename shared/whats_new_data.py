@@ -8,6 +8,131 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "10.1.0",
+        "date": "2026-11-19",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Search the catalogue information",
+            "he": "חיפוש במידע הקטלוגי"
+        },
+        "items": [
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Search the catalogue information about the manuscripts: the FJMS catalogue, the PGP descriptions and the library titles, in Hebrew and English, with their automatic translations. Choose Catalog search, or type % and a space. Each result shows the catalogue text that matched and its source.",
+                "he": "חפשו במידע הקטלוגי על כתבי היד: קטלוג FJMS, תיאורי PGP וכותרות הספריות, בעברית ובאנגלית, יחד עם התרגומים האוטומטיים שלהם. בחרו בחיפוש \"קטלוג\" או הקלידו % ורווח. כל תוצאה מציגה את הטקסט מהקטלוג שבו נמצאה ההתאמה ואת מקורו."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "When you open a manuscript from a Catalog search, you see the catalogue records where your words were found, with the words marked, notes and colophons included.",
+                "he": "כשפותחים כתב יד מחיפוש קטלוג, מוצגות רשומות הקטלוג שבהן נמצאו המילים, והמילים מסומנות, כולל הערות וקולופונים."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Fuzzy search, in Title and Catalog search, also finds plene and defective spellings, and close spellings in Latin letters (Saadia, Saadya). In Title search, the words can appear anywhere in the title, in any order.",
+                "he": "חיפוש מקורב, בחיפוש כותרת ובחיפוש קטלוג, מוצא גם כתיב מלא וחסר, וכתיב קרוב באותיות לטיניות (Saadia, Saadya). בחיפוש כותרת המילים יכולות להופיע בכל מקום בכותרת ובכל סדר."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "When a text search finds nothing, it offers the manuscripts whose catalogue information mentions your words. On the website, a search in Latin letters goes to the catalogue information.",
+                "he": "חיפוש טקסט שלא מצא תוצאות מציע את כתבי היד שהמידע הקטלוגי עליהם מזכיר את המילים. באתר, חיפוש באותיות לטיניות נעשה במידע הקטלוגי."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "The search box says what to type in each search mode, with an example that changes each time.",
+                "he": "תיבת החיפוש אומרת מה להקליד בכל סוג חיפוש, עם דוגמה שמתחלפת בכל פעם."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The Reading Desk shows a document that lies on several fragments as one text: its own edition, whole, beside the images. The images can be seen one at a time, all together, or, for a saved join, assembled.",
+                "he": "שולחן העיון מציג מסמך שמפוזר על כמה קטעים כטקסט אחד: המהדורה שלו, במלואה, לצד התמונות. אפשר לראות את התמונות אחת-אחת, את כולן יחד, או, לצירוף שנשמר, מורכבות."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Fragment Puzzle: full screen, Open in Puzzle for a whole join, and an exported picture that holds exactly what is on screen. Flipping the puzzle keeps every crop and place.",
+                "he": "פאזל קטעים: מסך מלא, פתיחת צירוף שלם בפאזל, ותמונה מיוצאת שמכילה בדיוק את מה שעל המסך. היפוך הפאזל שומר על כל חיתוך ומקום."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Images turn freely at every screen width, from -180° to 180°, under Image adjustments.",
+                "he": "סיבוב חופשי של התמונה בכל רוחב מסך, מ-180°- עד 180°, תחת \"כוונון תמונה\"."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The search page's buttons are clearer, Filter Results and Export sit over the results, and a search of only the scholarly or only the automatic transcriptions says so, with a button to search them all.",
+                "he": "הכפתורים בעמוד החיפוש ברורים יותר, \"סנן תוצאות\" ו\"ייצוא\" נמצאים מעל התוצאות, וחיפוש בתעתיקים המדעיים בלבד או באוטומטיים בלבד אומר זאת, עם כפתור לחיפוש בכולם."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The search boxes on the home page and in the header take the search-mode signs too: $ and a space opens a Title search, % a Catalog search, and so on.",
+                "he": "תיבות החיפוש בדף הבית ובכותרת מקבלות גם הן את סימני סוג החיפוש: $ ורווח פותחים חיפוש כותרת, % חיפוש קטלוג, וכן הלאה."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Title search now finds abbreviations (רי\"ד), whichever quote mark the title uses.",
+                "he": "חיפוש כותרת מוצא כעת ראשי תיבות (רי\"ד), בכל סוג של גרשיים."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "A search that starts with R (such as Rashi) is no longer treated as a Responsa search: R starts one only with a space after it.",
+                "he": "חיפוש שמתחיל ב-R (כמו Rashi) כבר לא נחשב לחיפוש שו\"ת: R פותח חיפוש שו\"ת רק כשאחריו רווח."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "PGP Tags mode can be left again from the search-mode list.",
+                "he": "אפשר שוב לצאת ממצב תגיות PGP דרך רשימת סוגי החיפוש."
+            }
+        ]
+    },
+    {
         "version": "10.0.2",
         "date": "2026-11-17",
         "apps": [

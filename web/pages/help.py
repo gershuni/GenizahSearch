@@ -855,6 +855,29 @@ def _editions_served() -> bool:
     return served_to(GlobalAuthState.is_editor())
 
 
+def _catalog_served() -> bool:
+    """The catalogue text search is served (web/catalog_assets.py): only then does Help
+    describe the Catalog mode and its % sign."""
+    from web.catalog_assets import catalog_available
+    return catalog_available()
+
+
+#: The Catalog mode's line in the search-mode list, placed after Title where it is served
+#: (v10.1.0, approved with the release texts).
+_CATALOG_MODE_HELP = {
+    'en': ('Catalog (%)', "Searches the catalogue information about the manuscripts: the FJMS catalogue, the PGP descriptions and the library titles, in Hebrew and English, with their automatic translations. One result per manuscript, with the catalogue text that matched and its source. Fuzzy search adds plene and defective spellings and close spellings in Latin letters; Automatic translations can be switched off. When you open a manuscript from a result, you see the catalogue records where your words were found."),
+    'he': ('קטלוג (%)', 'חיפוש במידע הקטלוגי על כתבי היד: קטלוג FJMS, תיאורי PGP וכותרות הספריות, בעברית ובאנגלית, יחד עם התרגומים האוטומטיים שלהם. תוצאה אחת לכל כתב יד, עם הטקסט מהקטלוג שבו נמצאה ההתאמה ומקורו. "חיפוש מקורב" מוסיף כתיב מלא וחסר וכתיב קרוב באותיות לטיניות; אפשר לכבות את "תרגומים אוטומטיים". כשפותחים כתב יד מתוצאה, מוצגות רשומות הקטלוג שבהן נמצאו המילים.'),
+}
+
+
+def _with_catalog_mode(modes_data: list, lang: str) -> list:
+    """*modes_data* with the Catalog line after Title ($) where the catalogue is served."""
+    if not _catalog_served():
+        return modes_data
+    title_at = next(i for i, (mode, _desc) in enumerate(modes_data) if '($)' in mode)
+    return modes_data[:title_at + 1] + [_CATALOG_MODE_HELP[lang]] + modes_data[title_at + 1:]
+
+
 def _dictionary_bullets(lang: str) -> str:
     """The dictionaries' bullets, or nothing where no dictionary is served to this reader (an
     editor also reads those switched to editors only, as /browse shows them)."""
@@ -1038,10 +1061,11 @@ The site fetches metadata and images from:
             ('Responsa (R)', 'Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Also includes a convenient and flexible tabular query builder. Familiar to Responsa Project users; easy to learn for newcomers. See [Responsa-Style Search](#help-responsa) below.'),
             ('Fuzzy (~)', 'Finds near spellings, useful for decoding errors: whole words that differ from the query by one letter (two in words of 5 letters or more) — a letter added, dropped or changed, or two neighbouring letters swapped.'),
             ('Regex (/)', 'Advanced search for experienced users. Example: \\b\u05d0[\u05d0-\u05ea]{3}\\b finds 4-letter words starting with Aleph. You can use your preferred AI assistant to help build a regex that fits your needs. For a more intuitive advanced search, Responsa-style search is recommended.'),
-            ('Title ($)', 'Searches within the catalog titles of compositions.'),
+            ('Title ($)', 'Searches within the catalog titles of compositions. With Fuzzy search, the words can appear anywhere in the title, in any order, in plene or defective spelling.'),
             ('Shelfmark (#)', 'Fast search for shelfmarks (e.g., "T-S NS 13.15").'),
             ('PGP Tags', 'Browse manuscripts by topic tags from the Princeton Geniza Project (PGP). See [PGP Data](#help-pgp) below.'),
         ]
+        modes_data = _with_catalog_mode(modes_data, 'en')
 
         with ui.column().classes('gap-3 mb-4'):
             for mode, desc in modes_data:
@@ -1859,10 +1883,11 @@ def _create_hebrew_content(precision=None, band_counts=None):
             ('פרויקט השו"ת (R)', 'חיפוש בתחביר בסגנון החיפוש המתקדם של פרויקט השו"ת של אוניברסיטת בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. כולל גם בונה שאילתות טבלאי נוח וגמיש. מוכר למשתמשי פרויקט השו"ת; קל ללמוד גם למי שלא מכיר. ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן.'),
             ('מקורב (~)', 'מוצא כתיב קרוב, שימושי לשגיאות פענוח: מילים שלמות השונות מהמילה המבוקשת באות אחת (בשתיים במילים של 5 אותיות ומעלה) — אות שנוספה, נשמטה או הוחלפה, או שתי אותיות סמוכות שהתחלפו.'),
             ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם. לחיפוש מתקדם אינטואיטיבי יותר מומלץ להשתמש בחיפוש בסגנון פרויקט השו"ת.'),
-            ('כותרת ($)', 'חיפוש בתוך כותרות הקטלוג של חיבורים.'),
+            ('כותרת ($)', 'חיפוש בתוך כותרות הקטלוג של חיבורים. עם חיפוש מקורב, המילים יכולות להופיע בכל מקום בכותרת ובכל סדר, בכתיב מלא או חסר.'),
             ('מספר מדף (#)', 'חיפוש מהיר של מספרי מדף (למשל: "T-S NS 13.15").'),
             ('תגיות PGP', 'עיון לפי נושאים בכתבי יד שקוטלגו על ידי פרויקט הגניזה של פרינסטון (Princeton Geniza Project). ראו [מידע PGP](#help-pgp) להלן.'),
         ]
+        modes_data = _with_catalog_mode(modes_data, 'he')
 
         with ui.column().classes('gap-3 mb-4 w-full'):
             for mode, desc in modes_data:

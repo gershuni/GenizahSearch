@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 10.0.2
+# Dicta Genizah Search Pro 10.1.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,19 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 10.0.0?
+## What's New in Version 10.1.0?
 
-**Scholarly transcriptions and dictionaries**
+**Search the catalogue information**
 
-The search now reads the scholarly transcriptions — the editions of the Friedberg Genizah Project
-(FGP) and the Princeton Geniza Project (PGP) — together with the automatic ones, on the website and
-in the desktop app: a *Transcriptions* choice (All, Scholarly, Automatic), one result per page
-naming every text it matched in, and a result opens on its edition with the match marked. On the
-website, the Judeo-Arabic dictionaries find a word's quotations, verb stem and root and open in
-Quick View too; a Scholarly transcriptions filter keeps the results whose page has an edition, or
-those whose page has none yet; the result filters are tags with a short menu; and a Hebrew
-keyboard on screen is in every search box. In the desktop app, Find in text goes from match to
-match, and the app keeps you logged in after an upgrade.
+A new **Catalog** search, on the website and in the desktop app, searches the catalogue
+information about the manuscripts — the FJMS catalogue, the PGP descriptions and the library
+titles, in Hebrew and English, with their automatic translations. Choose Catalog search, or type
+`%` and a space. When you open a manuscript from its results, you see the catalogue records where
+your words were found, with the words marked. **Fuzzy search**, in Title and Catalog search, also
+finds plene and defective spellings, and close spellings in Latin letters; in Title search the
+words can appear anywhere in the title, in any order. On the website, the Reading Desk shows a
+document that lies on several fragments as one text beside its images, the Fragment Puzzle gains
+full screen and an exported picture that holds exactly what is on screen, and images turn freely
+at every screen width.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
@@ -97,7 +98,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V10.0.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
+1. **Download:** the installer (`GenizahSearchPro_V10.1.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

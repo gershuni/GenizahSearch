@@ -6502,6 +6502,23 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v10.1.0 web What's New entry and desktop What's New bar and dialog (2026-11-18),
+# approved with the release texts (the web line's Hebrew is the owner's).
+TRANSLATIONS.update({
+    "New: search the catalogue information about the manuscripts. Choose Catalog search, or type % and a space.":
+        'חדש: חפשו במידע הקטלוגי על כתבי היד. בחרו בחיפוש "קטלוג" או הקלידו % ורווח',
+    "New: search the catalogue information about the manuscripts, and Fuzzy search in Title search":
+        "חדש: חפשו במידע הקטלוגי על כתבי היד, וחיפוש מקורב בחיפוש כותרת",
+    "Search the catalogue information about the manuscripts: the FJMS catalogue, the PGP descriptions and the library titles, in Hebrew and English. Choose Catalog search, or type % and a space.":
+        'חפשו במידע הקטלוגי על כתבי היד: קטלוג FJMS, תיאורי PGP וכותרות הספריות, בעברית ובאנגלית. בחרו בחיפוש "קטלוג" או הקלידו % ורווח.',
+    "Fuzzy search, in Title and Catalog search, also finds plene and defective spellings, and close spellings in Latin letters (Saadia, Saadya). In Title search, the words can appear anywhere in the title, in any order.":
+        "חיפוש מקורב, בחיפוש כותרת ובחיפוש קטלוג, מוצא גם כתיב מלא וחסר, וכתיב קרוב באותיות לטיניות (Saadia, Saadya). בחיפוש כותרת המילים יכולות להופיע בכל מקום בכותרת ובכל סדר.",
+    "When a text search finds nothing, it offers the manuscripts whose catalogue information mentions your words.":
+        "חיפוש טקסט שלא מצא תוצאות מציע את כתבי היד שהמידע הקטלוגי עליהם מזכיר את המילים.",
+    'Fixes: Title search now finds abbreviations (רי"ד), and a search that starts with R (such as Rashi) is no longer treated as a Responsa search.':
+        'תיקונים: חיפוש כותרת מוצא כעת ראשי תיבות (רי"ד), וחיפוש שמתחיל ב-R (כמו Rashi) כבר לא נחשב לחיפוש שו"ת.',
+})
+
 # v10.0.0 web What's New entries and desktop What's New bar and dialog (2026-11-17),
 # approved with the release texts (the Hebrew is the owner's).
 TRANSLATIONS.update({

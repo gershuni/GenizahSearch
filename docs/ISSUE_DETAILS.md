@@ -4355,3 +4355,119 @@ thumbnail chosen. None of this exists on the desktop. The rule and the data are 
 modules today (`document_desk`, `desk_images`, `find_joins`): the parts that are not NiceGUI would
 have to move to `shared/` first. The desktop's saved joins are not kept per visitor, so its lookup
 is simpler than the web's.
+
+## GS-295
+
+**A saved Catalog search shows the Exact marker in the history menu** · P3 · Desktop app · ❌ Open · opened 2026-11-18
+
+Where: `genizah_app.py::GenizahGUI._MODE_CHARS`, `GenizahGUI._add_history_menu_item`
+
+The Catalog mode is row 8 of the mode list (`desktop/catalog_search.py::COMBO_ROWS`), but
+`_MODE_CHARS` still has eight markers, for rows 0-7. `_add_history_menu_item` shows `=` for a row
+it has no marker for, so every saved Catalog search is listed with the Exact marker. Restoring it
+still runs the catalogue search (the entry keeps its row and switches); only the marker is wrong.
+
+Found by an automated review of the desktop catalogue PR (2026-11-18), confirmed by reading the
+code, not seen in the app. Fix sketch: add `'%'` as the ninth marker, and a test that the marker
+list has one entry per row of `COMBO_ROWS`.
+
+## GS-296
+
+**A search-within step records the mode shown when the results arrive, not the one searched** · P3 · Desktop app · ❌ Open · opened 2026-11-18
+
+Where: `genizah_app.py` (`_combo_step_mode(self.mode_combo.currentIndex())` where the refinement step is built; `_apply_run_params`)
+
+When results arrive in a search-within chain, the new step takes its mode from the mode list as
+it is then. The list can be changed while the search runs. `_apply_run_params` then copies the
+run's own query, settings and catalogue switches from `_last_search_params`, but not its mode. A
+Catalog search whose mode list was changed to Exact before it finished is recorded as an Exact
+step carrying catalogue switches, so a replay or a restored chain runs a different search from
+the one that gave the results. The same live read was already there for the other modes; the
+catalogue switches make the mismatch visible.
+
+Found by an automated review of the desktop catalogue PR (2026-11-18), confirmed by reading the
+code (the mode list is not disabled during a search), not reproduced in the app. Fix sketch: in
+`_apply_run_params`, set `step.mode` from `_last_search_params['mode_index']` (recorded at
+dispatch) through `_combo_step_mode`, as the history entry already does.
+
+## GS-297
+
+**Fragment Puzzle forgets that a mirrored fragment stands in for a missing side** · P3 · Website · ❌ Open · opened 2026-11-18
+
+Where: `web/pages/puzzle.py` (`flipAllPuzzle`, `_standIn`, `getState`), `shared/puzzle_model.py::PuzzleFragment`
+
+Flip Puzzle shows a fragment mirrored when there is no picture of its other side (none exists,
+it failed to load, or the list of sides had not arrived). The canvas remembers this in
+`_standIn`, so the next flip shows the fragment as it is again. That mark is not part of what is
+saved: a saved join and the tab's copy keep only `flip_h`. After a reload the fragment is an
+ordinary flipped picture, so flipping back turns it to its other side (if that now loads) and
+leaves it mirrored, where it should return to the original unmirrored side.
+
+Found by an external review of the flip changes (2026-11-18); reproduced there with a probe, not
+in a browser. It needs a failed or missing other side, a reload while flipped, and a flip back.
+
+Fix sketch: a `stand_in` field on `PuzzleFragment`, carried through `getState`, the tab state,
+`shared/puzzle_service.py`'s explicit serialization and the published `fragments_json`. The
+desktop puzzle reads the same model, so the field needs a default that old documents load with.
+
+## GS-298
+
+**Fragment Puzzle shows transparency faults around fragments** · P3 · Website · ❌ Open · opened 2026-11-18
+
+Where: `web/pages/puzzle.py` (canvas, background removal), `shared/puzzle_image_service.py`, `shared/puzzle_export.py::compose_puzzle_export`
+
+Reported by the owner on 2026-11-18 while testing the Reading Desk's assembled picture: the
+puzzle has "transparency issues". Not reproduced or narrowed down yet -- it is not recorded
+whether the fault is in what background removal leaves around a fragment, in how transparent
+areas of one fragment lie over another on the canvas, or in the exported picture. One thing was
+seen in passing: in the saved join of ENA 2740.3 + ENA 2805.2 the shelfmark strip beside the
+fragment survives background removal as a dark bar, in the Puzzle and in the picture the desk
+shows.
+
+Next step: a screenshot or a named join from the owner, then tell the three cases apart.
+
+## GS-299
+
+**Zooming in is slow in the Fragment Puzzle** · P3 · Website · ❌ Open · opened 2026-11-18
+
+Where: `web/pages/puzzle.py` (canvas zoom)
+
+Reported by the owner on 2026-11-18: zooming in on the puzzle canvas is slow. Not measured
+yet -- neither the delay, nor the number or size of the fragments it needs, nor whether the
+time goes to redrawing the canvas or to fetching larger images.
+
+## GS-300
+
+**The image controls turn an image only in quarter turns** · P3 · Browse and viewer · ❌ Open · opened 2026-11-18
+
+Where: `web/pages/browse_desk_images.py::_toolbar` (`window.rdRotate`, +/-90), the single-page viewer's rotate buttons in `web/pages/browse.py`
+
+The Reading Desk's image toolbar and the Browse viewer rotate by 90 degrees a click. A fragment
+photographed at a slant cannot be set straight to read against its text; the Fragment Puzzle
+turns a fragment freely. Asked for by the owner on 2026-11-18.
+
+Fix sketch: a fine-rotation control beside the quarter-turn buttons (a small slider or +/-1
+degree steps) writing the same `rotation` the viewer script already keeps per image, with
+Reset View returning it to zero.
+
+## GS-301
+
+**"Search all transcriptions" reruns with the current "Search only in..." filters** · P3 · Website · ❌ Open · opened 2026-11-18
+
+Where: `web/pages/search.py::_search_all_sources`, `execute_search`
+
+The button over the results of a scholarly-only or automatic-only search reruns that search in
+every transcription. It puts back the shown run's query, mode, Responsa options and every control
+`_show_run_controls` restores (gap, NOT words, text position, variant level, Num Changes, Lab
+Mode), and passes its recorded variant settings. It does not put back the run's "Search only
+in..." filters (`last_run['pre_search_filters']`): `execute_search` reads them from
+`search_state` (`_dispatch_criteria = copy.deepcopy(search_state.filter_criteria)` and the other
+`RUN_FILTER_FIELDS`), so a reader who changed those filters after the search gets a rerun under
+the new ones. They stay visible as chips and on the button's badge, so the rerun is not silent,
+but it is not the search the notice describes.
+
+Fix sketch: `apply_run_filter_state(search_state, shown['pre_search_filters'])`, then refresh the
+filter panel's controls, the criteria chips and the badge from `search_state`, as
+`_on_history_item_clicked` does for the fields it restores (it covers domains, authors, works,
+include mode, material, criteria and the text filters; the measurement fields would need the same).
+Found during the Codex review of gershuni/GenizahSearch-dev#50.

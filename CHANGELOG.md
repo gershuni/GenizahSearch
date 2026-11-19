@@ -8,6 +8,388 @@ which is not public.
 
 ---
 
+## [10.1.0] - 2026-11-19 — Search the catalogue information
+
+Both apps. A **Catalog** search mode searches the catalogue information about the manuscripts —
+the FJMS catalogue, PGP's descriptions and the library titles, with their automatic translations
+— on the website, in the public API and MCP, and in the desktop app (also by `%` and a space),
+with a Fuzzy search switch (near spellings) that Title search gains too; a manuscript opened from
+a catalogue result shows the records the search found, and the installer carries the catalogue
+file. The search box says what to type in each mode, with an example; the homepage and header
+boxes take the mode signs; `R` is the Responsa sign only with a space after it; Title search
+finds abbreviations. On the website, the Reading Desk shows a document's edition once beside its
+images, the Fragment Puzzle gains full screen and an exact PNG export with flip fixes, and images
+turn freely at every screen width. Deploy: the code first, then
+`scripts/deploy_catalog_text_sidecar.ps1 -Rows 2456035`, then in the server's `.env`
+`CATALOG_TEXT_SEARCH_ENABLED=1`, and a restart. Web What's New "10.1.0-catalogue" (lit once the
+catalogue is served); desktop What's New 10.1.0.
+
+### Catalogue text search on the website, with near spellings (web)
+
+#### Added
+- **Search what the catalogues say about a manuscript** (switched off until the file is on the
+  server: `CATALOG_TEXT_SEARCH_ENABLED`, and `catalog_data/catalog_text.db` passing its checks,
+  `web/catalog_assets.py`). A **Catalog** mode on `/search`, also by typing `%` and a space,
+  searches the FJMS catalogue's titles, descriptions and full entries, PGP's descriptions and the
+  library titles, in Hebrew and English, with their automatic translations: one result per
+  manuscript, ranked titles first, original text before translation, the words as typed before
+  their Hebrew prefixes. Each result shows the catalogue text that matched and where it comes from
+  ("FJMS Catalog · Free Description · automatic translation"). Catalogue results are never mixed
+  into a transcription search's.
+- **Fuzzy search** (near spellings), a switch in Catalog mode (off by default; the text search's own
+  word for it, with a rule of its own): Hebrew words also in their plene or
+  defective spelling (one ו or י added or dropped, as Responsa's `%word`: כתובה finds כתבה), Latin
+  words with one letter different from five letters, two from nine (Saadia finds the catalogue's
+  Saadya and Saadiah: 281 manuscripts as typed, 10,125 with them). Only spellings the catalogue
+  holds are searched; manuscripts found only through one come after the rest, and the line under
+  the count names the spellings added (`shared/near_spellings.py`). The text search's Fuzzy rule
+  was measured first and floods single catalogue words (כתובה: 2,216 manuscripts as typed,
+  135,943 with it).
+- **Automatic translations**, a second switch (on by default), leaves the catalogue's automatic
+  translations out.
+- An empty text search offers the catalogue's count ("No matches in the transcriptions. N
+  manuscripts whose catalogue records mention X"), after "Did you mean" when that applies; a
+  Latin-script query, which the transcriptions never answer, is searched in the catalogue, with
+  the transcription search one click away. PostHog `search_suggestion` gains `kind='catalogue'`.
+- Public API and MCP: `search_mode='catalog'` with `near_spellings` and `include_translations`;
+  each result adds `catalogue_source`, `catalogue_field`, `automatic_translation` and
+  `near_spelling`. Listed in `/api/capabilities` only where served; elsewhere 400
+  `catalog_unavailable`.
+- The web app opens the file once at startup (when the flag is on) and logs when it was built
+  from FJMS or PGP data other than the installed ones; `scripts/deploy_catalog_text_sidecar.ps1`
+  gates, uploads and swaps it (code first, then the file, then the flag).
+
+### Catalogue text search in the desktop app (desktop)
+
+#### Added
+- **Catalog mode in the desktop app** (also by typing `%` and a space), as on the website: the FJMS
+  catalogue's titles, descriptions and full entries, PGP's descriptions and the library titles,
+  with their automatic translations, one result per manuscript. The Source column names where
+  each result's words were found ("FJMS Catalog · Free Description"). Two switches beside the
+  mode: **Fuzzy search** (near spellings: plene/defective Hebrew, near Latin spellings; off) and
+  **Automatic translations** (on). A search within, and a restored session, replay them.
+- A text search that finds nothing offers the catalogue's count in the results box ("No matches
+  in the transcriptions. N manuscripts whose catalogue records mention X"), when no "Did you
+  mean" is shown; the link runs the catalogue search.
+- The installer carries `catalog_data/catalog_text.db` (about 190 MB compressed):
+  `build_app.bat` refuses to build without it and checks it first
+  (`scripts/verify_catalog_text_sidecar.py --rows-from-meta`). The mode shows only where the file
+  is installed; `CATALOG_TEXT_SEARCH_ENABLED=0` hides it.
+
+#### Changed
+- The search mode combo's rows are written once (`desktop/catalog_search.py`), not five times in
+  `genizah_app.py`; the catalogue is appended at index 8, so no existing index moves.
+
+### Where a catalogue search found a manuscript (web + desktop)
+
+#### Added
+- **Found in the catalogue records**: a manuscript opened from a catalogue search's result shows
+  the catalogue records the search matched, whole, each under its source line ("FJMS Catalog ·
+  Note"), the searched words marked. The records come from the catalogue search's own file, so a
+  hit in a field no catalogue panel shows (an FJMS note or colophon, a mention's description, a
+  record from a general source, an automatic translation) is shown too. Where: the website's
+  Quick View (first) and Browse (under the header, for the manuscript the link opened); the
+  desktop viewer (the lower pane beside the text) and the Browse tab (a box under the header).
+  The links from a catalogue result to Browse carry the search (`&cq=`, `&cnear=1`, `&ctr=0`),
+  not a transcription phrase.
+
+#### Changed
+- A catalogue result row carries the search that found it (`catalogue.searched`: the query and
+  the two switches, one object shared by every row), so a restored session or history entry
+  still shows where.
+
+### Fuzzy search (near spellings) in the Title search (web + desktop)
+
+#### Added
+- **Fuzzy search in Title mode**: the catalogue search's near-spellings switch, off by default,
+  now in Title mode too, in both apps (website: beside the mode, without the translations switch,
+  `&near=1` in the address; desktop: a switch under the search bar in Title mode, kept in the
+  search history). With it each word of the query is found on its own, anywhere in the title and
+  in any order, as typed or in its plene or defective spelling (one ו or י added or dropped, as
+  Responsa's `%word`): תפילין finds תפלין, פירוש תהלים finds "פרוש כתובים (תהלים, קטע)". A
+  Latin-letter word of five letters or more also matches one letter different (two from nine),
+  only where some title holds that spelling as a word: Saadia finds Saadya. A word with a quote
+  mark is an abbreviation and is found with its mark, as without the switch. Without the switch
+  the Title search is unchanged: the query is one phrase. Search within and Back replay it
+  (`RefinementStep.catalog_options`).
+- Measured over the 192,426 titles of `libraries.csv` (the scan alone): 0.25-0.6 s a search with
+  the switch, against 0.15-0.4 s without; the titles' Latin words (10,812) are read once, 0.4 s.
+  תפילין 194 -> 197 titles, ירושלים 228 -> 237, תהילים 3,038 -> 4,181, saadia 1,340 -> 1,447; a
+  short word gathers more (קדיש 220 -> 871, mostly קדש).
+- Public API and MCP: `near_spellings` is valid with `search_mode='title'` too (echoed in
+  `request`); `include_translations` stays `catalog` only.
+
+### "New" beside the catalogue search and Title's Fuzzy search, and three startup tips (web + desktop)
+
+#### Added
+- **A one-time "New"**, in both apps, as letter-level search and the
+  dictionaries were announced: the control highlighted and its label saying it is new, no badge.
+  - While the catalogue search is offered, the search-mode list is highlighted, and its Catalog
+    item reads "New! Catalog (%)", highlighted in the open list too. The list's tooltip says
+    "Search the catalogue information".
+  - In Title mode the Fuzzy search switch is highlighted and reads "New! Fuzzy search".
+  - Each is shown one time. It is spent on the launch (on the website, the visit) the reader
+    first sees it.
+  - It goes at once when the reader chooses a mode, works the switch, or uses the feature. Only
+    the reader's own acts count: a mode set in code or restored does not.
+  - It is never shown where the feature is already in use.
+  - Website: `web/components/new_mark.py`, kept per reader; `/reset-hints` forgets it. Desktop:
+    `GenizahGUI._update_new_feature_marks`, spent in config.pkl as letter-level search's marker
+    is.
+- **The Catalog item's tooltip** in both apps: "Search the catalogue information" ("חיפוש במידע
+  קטלוגי").
+- **Three desktop startup tips**, right after the strongest five:
+  - Catalog mode and its % sign.
+  - "Found in the catalogue records".
+  - Title's Fuzzy search.
+
+  The two catalogue tips are shown only where the catalogue search is offered (`Tip.requires`).
+  Each tip's Show me opens its mode.
+
+#### Changed
+- **Desktop: Catalog is listed right under Title** in the search-mode list, as on the website
+  (it came last, after PGP Tags). Every mode keeps its index, so the search history and the
+  steps saved before read as they did (`desktop/catalog_search.py::ModeCombo`).
+- The mode-signs tip says "$ for titles, % for the catalogues" (it said "$ for catalog titles",
+  which now reads as the Catalog mode).
+
+#### Fixed
+- **Desktop: PGP Tags could not be left.** The mode hid the whole query row, the mode list with
+  it. Now it hides the row's text controls and keeps the list (`_show_row1_for_tags`).
+
+### The search box says what to type in its mode, with an example (web + desktop)
+
+#### Changed
+- **The search box now says what to type in the mode chosen, and shows an example.** It read
+  "Enter Hebrew text to search" on the website and "Search terms, title or shelfmark..." on the
+  desktop in every mode. Now a short lead names what
+  the mode takes -- "Type a term to search" (Exact, Variants, Fuzzy), "Type words with operators
+  for an advanced search" (Responsa, Regex), "...the titles", "...the catalog data", "Type a
+  string to search the shelfmarks" -- and the box's grey text is one example, drawn at random
+  from the mode's own each time the page opens or the mode changes (in Responsa and Regex mode
+  each example shows a different operator). Every example finds results. On the website the lead
+  is the box's label, on its top border as the Mode field's is; on the desktop it heads the
+  box's tooltip, above the shortcuts. The box follows the mode however it is chosen: in the list,
+  by a sign typed in the box (`$ `, `# `...), or from history. One table for both apps
+  (`shared/search_mode_examples.py`; `web/pages/search.py`,
+  `desktop/catalog_search.py::show_mode_examples`). The Joins Lab box is unchanged.
+
+### The search-mode signs work in the homepage box and the header box (web)
+
+#### Added
+- **A sign and a space choose the search mode in the homepage box and the header box**, as they
+  already did in the /search box: `$ שלום` opens /search in Title mode with `שלום` as the query,
+  the sign removed. Every sign of the /search box works: `?` `??` `???` Spelling Variants (with
+  the slider, at the level the sign names, on that page only), `=` Exact, `~` Fuzzy, `/` Regex, `$` Title,
+  `#` Shelfmark, `R` Responsa, and `%` Catalog where the catalogue text search is served
+  (elsewhere `%` is no sign, as before). The sign alone (`$ `) opens /search in its mode.
+  `R` is the one sign that is a letter, and 33 shelfmarks begin with it: text of their shape
+  (`R 15` Mosseri, `R II 5` Turin) is routed as before; anything else after `R` is a Responsa
+  query, digits only too (`R 99 [3] 100`). A sign with no space after it is routed as before.
+
+#### Changed
+- **One table of signs** (`shared/search_mode_signs.py`): the engine's prefix parsing
+  (`SearchEngine.parse_query_syntax`), the /search box's live switch and the go-to boxes
+  (`web/home_query.py::mode_sign_target`) read it; the /search page and the engine each kept a
+  copy before. The desktop app's own copy in `genizah_app.py` is unchanged.
+
+### A query beginning with R is no longer a Responsa search (web + desktop)
+
+#### Fixed
+- **`Rashi` searched Responsa for `ashi`.** The engine's own reading of the search-mode signs
+  (`shared/search_engine.py::SearchEngine.parse_query_syntax`) took any sign with no space after
+  it, and `R`, the Responsa sign, is a letter: every query beginning with a capital R lost that
+  letter and ran as a Responsa search (`Rabbi` for `abbi`, `R. Isaac` for `. Isaac`). On the
+  website this also left the mode selector on Responsa for the searches after it, and kept such a
+  query from the catalogue, where a Latin-script query now goes. `R` now counts only with a space
+  after it, as Help has always described it (`R שלום`); the symbol signs still need none
+  (`$שלום`, `#T-S 12.1`). The website's /search box, the addresses the homepage and header boxes
+  open (`/search?q=Rashi`) and the desktop app all read the query through this one method.
+
+#### Tests
+- `tests/test_responsa_integration.py::TestResponsaSignNeedsASpace` pins the rule on the engine;
+  `tests/render_smoke/test_search_box_input_render_smoke.py` pins it on the /search page, opened
+  from its address and typed, with and without the catalogue served. Both fail on the code before
+  the fix.
+
+### Title search finds abbreviations (web + desktop)
+
+#### Fixed
+- **A title search for an abbreviation found everything but the abbreviation.** The quote mark
+  was taken out of the query and not out of the titles, so `רי"ד` was looked for as `ריד`: the
+  titles holding `רי"ד` were never found, and every title with those letters inside a longer word
+  came back instead. A query typed with a quote mark now finds the titles holding the
+  abbreviation with its mark, whichever way the mark is written (`"`, `״`, `'`, `׳`, curly
+  quotes); a query typed without one finds them too, along with the plain-letter matches as
+  before (`shared/metadata_manager.py::_title_matcher`). Double quotes around the whole query
+  are not read as a mark. Shelfmark search is unchanged.
+
+### Reading Desk: a document's edition, shown once (web)
+
+A PGP document that lies on several fragments is one text. The Reading Desk showed it
+fragment by fragment: it asked for sources per fragment, which returns the sources of every
+document the fragment belongs to. Measured on the sidecar's 1,722 documents on two or more
+fragments: on 548 the same source was the one shown under two or more of the fragments; on
+128 a fragment opened on an edition of a different document that shares it; and a text with
+"recto"/"verso" headings was cut at them and dealt out to each fragment's first and later
+pages, without the headings.
+
+#### Changed
+- A desk opened for a document ("View All Fragments") shows that document's text once,
+  beside the stack of images: one selector over the document's own editions, the chosen
+  source whole, with its headings and its attribution. Translations are a separate choice,
+  not entries in the edition list. "By fragment" shows one text per fragment, opening on
+  what the fragment has of its own (not the PGP edition again under each), and "Edition"
+  returns.
+- The rule for "the desk is the document": every fragment on it belongs to the document it
+  was opened for. Removing a fragment keeps the edition and says how many of the document's
+  fragments are on the desk. Adding a fragment from elsewhere makes it a hand-built desk
+  (one text per fragment, titled "Reading Desk") until that fragment is removed.
+- The image side has two views, chosen above it. "One at a time": a strip of thumbnails of
+  every page of every fragment and one large image with one toolbar -- the default beside a
+  document's edition. "All images": the scrolling stack, one compact row of controls per
+  image -- the default on any other desk. Brightness, contrast, gamma and invert are behind
+  one button. A fragment of one leaf keeps Recto/Verso; a longer one is numbered.
+- A third image view, "Assembled", on a desk of two or more fragments: the picture of a
+  saved join of these fragments -- the visitor's own saved joins (each visitor sees only
+  their own; the picture comes from the Puzzle's export route) and published joins (which
+  carry their picture). A join counts when it holds at least two of the desk's fragments.
+  "Open in Puzzle" opens it there; with no saved join, "Arrange in Puzzle" takes the desk's
+  fragments there. The picture is read-only here: arranging stays in the Fragment Puzzle.
+- With one image on show and the text one per fragment, the text side is that image's
+  alone -- its fragment, and its side of the fragment, not recto and verso together -- with
+  its version chooser, and follows the thumbnail chosen. Only the text side is redrawn, so
+  the page stays where the reader was. Beside a
+  document's edition it opens on the fragment's own text (FGP, else automatic); the PGP
+  sources stay in the chooser. A document's edition is not cut to the fragment: the sidecar
+  does not say which part belongs to which image (of the 607 editions of multi-fragment
+  documents, 147 carry parts that can be found in their text, numbered by PGP's canvases,
+  not by the images shown).
+- A Bodleian fragment named as PGP names it ("Bodl. MS heb. ...") is told by its library in
+  the catalogue and asked of the Bodleian; the desk asked NLI, which has no image of it.
+- In document mode the two panes stack on a narrow screen, images above text.
+- Every desk: the titles, fragment headers and image toolbars sit close together (they were
+  1rem apart, and padded twice).
+- A restored desk has the reader's choices before it is first drawn, and every choice on the
+  desk (edition, translation, text view, image view, image shown, join, a fragment's
+  version) is saved as it is made. A fragment's chosen version stays chosen when its text is
+  redrawn for another image.
+- A saved join of more fragments than the export route composes for an outside caller is
+  said to be too large to show on the desk, with the way to the Puzzle, not reported as a
+  failure.
+- `/browse` with no address and a saved desk was a server error (the desk was drawn before
+  any page was loaded); it now loads the desk's first fragment and the desk comes up with it.
+  A desk restored as the page opens is filled without being drawn until its page arrives;
+  before, the restore raised on drawing it, was logged as an error, and the page load that
+  followed drew the desk.
+
+#### Unchanged
+- A hand-built desk, a join without a PGP document, and a document with no edition or
+  translation keep the per-fragment layout (more compact, as above). Automatic transcriptions are never joined into
+  one text.
+
+#### Files
+- `web/pages/browse_desk_document.py` (new): the rule, the sources, the panel.
+- `web/pages/browse_desk_images.py` (new): the image side's views.
+- `web/pages/browse_desk_puzzle.py` (new): the assembled picture of a saved join.
+- `web/pages/browse.py`: the desk's text pane; `enter_joined_view(selected_sources=)`.
+- `shared/genizah_translations.py`: two strings.
+- `tests/test_reading_desk_document.py`, `tests/render_smoke/test_reading_desk_document_render_smoke.py`.
+
+### Search page: clearer buttons, and a search of one kind of transcription says so (web)
+
+#### Fixed
+- **Buttons that looked disabled on the dark theme.** Advanced Options, Search only in..., the
+  row-density toggle and the sections of the criteria panel were Quasar's fixed grey while off,
+  which reads as a disabled button on the dark theme. Off now takes the theme's secondary text
+  colour, as the result filter chips already did (`web/components/toggle_button.py`,
+  `.q-btn.btn-off` in `common.css`); on stays the primary colour.
+
+#### Changed
+- **A search of the scholarly or the automatic transcriptions only says so.** While the
+  Transcriptions selector is not on All it is framed and tinted in the primary colour, its value
+  in bold; the results of such a search carry a line over them -- "Search restricted to the
+  scholarly transcriptions (FGP and PGP)" or "... to the automatic transcriptions" -- with a
+  "Search all transcriptions" button that sets the selector to All and runs the search again
+  (`web/pages/search_editions.py::sources_notice`). The line follows the shown search: a restored
+  search shows its own, and New Search clears it.
+- **Advanced Options and Search only in... are icon buttons**, named by their tooltips (and
+  aria-labels); the active-filter count stays on the second.
+- **Filter Results and Export left the "More actions" menu**, where they were hard to find: the
+  results header has a Filter Results button (on while its panel is open) and an Export button
+  whose menu holds Word, Excel and JSON. The "More actions" menu is gone.
+
+### Free image rotation at every screen width (web)
+
+#### Fixed
+- **Free rotation was gone below 1440px.** Since the compact layout of 2026-10-22 the /browse
+  rotation slider sat in the image toolbar and was hidden on any screen narrower than 1440px, so
+  a laptop or a phone could only turn the image by 90°. The slider now sits behind the
+  **Image adjustments** (tune) button with brightness, contrast and gamma, at every width, so the
+  toolbar stays one row and the image keeps its full height; on a wide screen the toolbar is one
+  control shorter than before.
+
+#### Changed
+- **The slider runs from -180° to 180°**, upright in the middle, so a small tilt either way is
+  beside the centre (it was 0-360, where a slight turn to the left meant dragging to the far
+  end). The angle shows beside it; the arrow keys move it one degree at a time, and the image
+  turns in the browser while it is dragged. The 90° buttons land in the same range and move the
+  slider with them; Reset Image now zeroes the rotation as well, keeping the zoom.
+- **The full-screen editor and Quick View** have the same slider. In Quick View the 90° buttons
+  and Reset View go through it, Reset View now resets the brightness, contrast and gamma sliders
+  too, and a library image that arrives after the dialog opened keeps the reader's angle.
+
+### Fragment Puzzle: flip, PNG export and full screen (web)
+
+#### Fixed
+- **Export PNG left fragments out.** The file was composed on the server, which had to find
+  every picture again in its own cache; a picture that had reached the canvas another way (the
+  browser extension, a library fallback) was skipped without a word, so the file held some of the
+  fragments and an empty space. The browser now draws the file from the canvas itself
+  (`puzzleCanvas.exportPng`): what is on screen is what is saved, with crops, flips and stacking
+  order, on white with the shelfmark banner. The server composition remains as the fallback for a
+  canvas the browser may not read (a picture shown straight from a library).
+- **Flip Puzzle with slow pictures.** Each side's picture was drawn whenever it arrived, at the
+  place recorded when it was asked for. Flipping again before it arrived left fragments on the
+  wrong side or at the wrong place. Every picture request now carries a number
+  (`_loadSeq`); only the newest one for a fragment draws, and it takes its place from the object
+  on the canvas at that moment (`_swapFragmentImage`).
+- **Flip Puzzle lost every crop**, which also moved the fragment. The crop is now kept, mirrored,
+  and flipping back restores the puzzle exactly. Stacking order is kept too. A fragment with no
+  picture of its other side is shown mirrored, so its outline still fits its neighbours.
+- **A fragment appearing twice.** `?add=` and `?doc=` stayed in the address, so every reload of
+  the page (a language switch, a lost connection) added the fragment again beside the saved one,
+  recto next to verso once the saved one had been flipped. Both are taken out of the address once
+  carried out. Adding the same fragment twice while its picture was loading, and a picture asked
+  for by a document opened earlier, also drew a second copy; both are now dropped.
+- **A half-flipped puzzle is not saved.** While other sides are still loading the fragments stand
+  at their new places with their old pictures; auto-save and the tab's copy now wait until the
+  canvas reports it has settled (`isBusy`, `_swapEnded`). A side that fails to load, or whose
+  list of sides has not arrived, is shown mirrored and flips back.
+- **Crop:** cropping a fragment cropped before is measured against the whole picture (it saved a
+  negative crop, and could not be opened up again); Revert returns to the crop the session
+  started from; deleting the fragment being cropped ends the crop; exporting no longer ends it.
+- **Changing the threshold or background while another side was loading** left the fragment
+  showing one side and recorded as the other. A page of an external library's manuscript is now
+  saved with its own address after moving to another page.
+- **The canvas never grew with the window**: the resize handler measured Fabric's own fixed-size
+  wrapper. The toolbar now wraps instead of running off the side.
+
+#### Added
+- **Full screen** button in the puzzle toolbar: the toolbars and canvas fill the window (and the
+  screen, where the browser allows it). Escape leaves it.
+
+- **Open in Puzzle** for a whole join: in the Connected Fragments panel (beside View All
+  Fragments) and in the Reading Desk header. All the join's fragments open on one canvas
+  (`web/joins_lab_storage.py::stage_fragments_for_puzzle`, the handoff the Joins Lab already
+  uses). They open as a puzzle of their own, never inside a saved draft the tab had open; when
+  the tab holds an unsaved puzzle, the visitor is asked whether to replace it or add to it.
+
+#### Tests
+- `tests/test_puzzle_canvas_js.py` runs the real canvas script in Node against a stand-in for
+  Fabric and replays the orders that went wrong. Five of its seven canvas cases fail on the
+  script as it was.
+
 ## [10.0.2] - 2026-11-17 — Each text shown once, in any order
 
 Website only. With the scholarly transcriptions, a text found on several fragments of one

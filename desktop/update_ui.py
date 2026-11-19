@@ -113,7 +113,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "10.0.0"
+WHATS_NEW_CONTENT_VERSION = "10.1.0"
 
 
 class WhatsNewBar(QFrame):
@@ -199,7 +199,9 @@ class WhatsNewBar(QFrame):
         # v9.16.0: "Only long passages" (approved with the release texts, 2026-11-15).
         # v10.0.0: the scholarly transcriptions in the search (approved with the release
         # texts, 2026-11-17).
-        self.lbl_msg.setText(tr("New: search the scholarly transcriptions (FGP and PGP) together with the automatic ones"))
+        # v10.1.0: the catalogue search and Title's Fuzzy search (approved with the release
+        # texts, 2026-11-18).
+        self.lbl_msg.setText(tr("New: search the catalogue information about the manuscripts, and Fuzzy search in Title search"))
         self.show()
 
     def on_learn_more(self):
@@ -344,12 +346,15 @@ class WhatsNewDialog(QDialog):
         # scholarly transcriptions in the search, a result opening on its edition, Find
         # going from match to match, PGP editions of both sides, and the sign-in kept;
         # 9.16.0's stays in "All versions".
+        # v10.1.0 (2026-11-18, approved with the release texts): four bullets, the
+        # catalogue search, Fuzzy search, the catalogue offer on an empty search, and the
+        # fixes ("Found in the catalogue records" left to the version history); 10.0.0's
+        # stay in "All versions".
         items = [
-            tr("The app now also searches the scholarly transcriptions (FGP and PGP). Choose which transcriptions to search in the Transcriptions box on the Search tab."),
-            tr("A result found in a scholarly transcription opens on that edition, with the match marked, in the Manuscript Viewer and in Browse. Lists keep it, and the exports name every text that matched."),
-            tr("In Browse and in the Manuscript Viewer, Find in text now goes from match to match: Enter or ▼ to the next, Shift+Enter or ▲ to the previous, with a count of where you are."),
-            tr("PGP editions of both sides of a leaf now appear in the version chooser on each page."),
-            tr("The app keeps you logged in after an upgrade or a restart."),
+            tr("Search the catalogue information about the manuscripts: the FJMS catalogue, the PGP descriptions and the library titles, in Hebrew and English. Choose Catalog search, or type % and a space."),
+            tr("Fuzzy search, in Title and Catalog search, also finds plene and defective spellings, and close spellings in Latin letters (Saadia, Saadya). In Title search, the words can appear anywhere in the title, in any order."),
+            tr("When a text search finds nothing, it offers the manuscripts whose catalogue information mentions your words."),
+            tr('Fixes: Title search now finds abbreviations (רי"ד), and a search that starts with R (such as Rashi) is no longer treated as a Responsa search.'),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

@@ -1883,20 +1883,6 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     text-align: start;
 }
 
-/* The one-time "New" on /search (web/components/new_mark.py, owner 2026-11-18), in the
-   dictionaries switch's amber (.blau-switch.new): the mode list's frame, the Catalog item in
-   its open list, and the Fuzzy search switch in Title mode. */
-.q-field--outlined.gs-new-highlight .q-field__control:before { border: 2px solid #f59e0b; }
-.q-field--outlined.gs-new-highlight .q-field__control { background: #fef3c7; }
-[data-theme="dark"] .q-field--outlined.gs-new-highlight .q-field__control { background: rgba(245, 158, 11, 0.16); }
-.q-item.gs-new-option { color: #92400e; background: #fef3c7; font-weight: 600; }
-[data-theme="dark"] .q-item.gs-new-option { color: #fcd34d; background: rgba(245, 158, 11, 0.16); }
-.q-checkbox.gs-new-highlight {
-    color: #92400e; background: #fef3c7; font-weight: 600;
-    border: 1px solid #f59e0b; border-radius: 999px; padding-inline-end: 10px;
-}
-[data-theme="dark"] .q-checkbox.gs-new-highlight { color: #fcd34d; background: rgba(245, 158, 11, 0.16); }
-
 .gs-discovery .chip {
     display: inline-block;
     font-size: 12px;
@@ -2194,6 +2180,20 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
    below this line is OUTSIDE discovery; add new site-wide rules here, not
    above.
    ------------------------------------------------------------------------ */
+
+/* The one-time "New" on /search (web/components/new_mark.py, owner 2026-11-18), in the
+   dictionaries switch's amber (.blau-switch.new): the mode list's frame, the Catalog item in
+   its open list, and the Fuzzy search switch in Title mode. */
+.q-field--outlined.gs-new-highlight .q-field__control:before { border: 2px solid #f59e0b; }
+.q-field--outlined.gs-new-highlight .q-field__control { background: #fef3c7; }
+[data-theme="dark"] .q-field--outlined.gs-new-highlight .q-field__control { background: rgba(245, 158, 11, 0.16); }
+.q-item.gs-new-option { color: #92400e; background: #fef3c7; font-weight: 600; }
+[data-theme="dark"] .q-item.gs-new-option { color: #fcd34d; background: rgba(245, 158, 11, 0.16); }
+.q-checkbox.gs-new-highlight {
+    color: #92400e; background: #fef3c7; font-weight: 600;
+    border: 1px solid #f59e0b; border-radius: 999px; padding-inline-end: 10px;
+}
+[data-theme="dark"] .q-checkbox.gs-new-highlight { color: #fcd34d; background: rgba(245, 158, 11, 0.16); }
 
 /* ==========================================================================
    Dismiss controls  (owner, 2026-09-04: the closing X was unclear)

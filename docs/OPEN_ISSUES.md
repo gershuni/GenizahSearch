@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-17 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-16-filters-panel-ignores-result-filters.md). 176 open: P1 0, P2 42, P3 134.
+> **Last Updated:** 2026-11-18 (folded 4 fragment(s) from `docs/open_issues.d/`: 2026-11-18-desktop-catalogue-history-and-refinement.md, 2026-11-18-puzzle-mirrored-stand-in-not-saved.md, 2026-11-18-puzzle-transparency-zoom-and-image-rotation.md, 2026-11-18-search-all-transcriptions-filters.md). 183 open: P1 0, P2 42, P3 141.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -23,9 +23,9 @@ the private repository; grep only).
 | Area | P1 | P2 | P3 | Total |
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
-| Browse and viewer | 0 | 4 | 5 | 9 |
-| Desktop app | 0 | 9 | 28 | 37 |
-| Website | 0 | 5 | 25 | 30 |
+| Browse and viewer | 0 | 4 | 6 | 10 |
+| Desktop app | 0 | 9 | 30 | 39 |
+| Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 4 | 4 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **42** | **134** | **176** |
+| **Total** | **0** | **42** | **141** | **183** |
 
 ## P1 - Critical
 
@@ -160,6 +160,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-300](ISSUE_DETAILS.md#gs-300) | The image controls turn an image only in quarter turns | `web/pages/browse_desk_images.py::_toolbar` (`window.rdRotate`, +/-90), the single-page viewer's rotate buttons in `web/pages/browse.py` | 2026-11-18 | ❌ Open |
 | [GS-61](ISSUE_DETAILS.md#gs-61) | Browse: a paged deep-link URL still carries `highlight`, so a reload lets the NEW folio claim the search phrase | `web/pages/browse.py::_update_browser_url` (877-906), _search_scope_phrase (835-859) | 2026-09-03 | ❌ Open |
 | [GS-62](ISSUE_DETAILS.md#gs-62) | `switchImageCredit()` updates the FIRST `data-role="image-credit"` node in the document — a hidden earlier Advanced View, not the open one | `web/static/manuscript_viewer.js::switchImageCredit`; `search_results.py::open_advanced_dialog` | 2026-09-03 | ❌ Open |
 | [GS-63](ISSUE_DETAILS.md#gs-63) | FGP version menu still lists whole-document rows unrelated to the displayed folio (demoted from the default, not hidden) | `shared/fgp_service.py::choose_default_source`, _select_fgp_editions_by_similarity | 2026-09-02 | ❌ Open |
@@ -170,6 +171,8 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-295](ISSUE_DETAILS.md#gs-295) | A saved Catalog search shows the Exact marker in the history menu | `genizah_app.py::GenizahGUI._MODE_CHARS`, `GenizahGUI._add_history_menu_item` | 2026-11-18 | ❌ Open |
+| [GS-296](ISSUE_DETAILS.md#gs-296) | A search-within step records the mode shown when the results arrive, not the one searched | `genizah_app.py` (`_combo_step_mode(self.mode_combo.currentIndex())` where the refinement step is built; `_apply_run_params`) | 2026-11-18 | ❌ Open |
 | [GS-291](ISSUE_DETAILS.md#gs-291) | A list upload racing the user's edits can fail with "dictionary changed size during iteration" | `shared/lists_sync.py` (the upload's `try` block, `logger.error(f"Error syncing to cloud: {e}")` near line 1196); `tests/test_list_sync_identity.py::test_an_auto_upload_racing_the_user_on_another_thread_succeeds` | 2026-11-05 | ❌ Open |
 | [GS-284](ISSUE_DETAILS.md#gs-284) | "Search in these results" drops the Catalog tab's text, PGP and edition filters | `genizah_app.py::_catalog_build_browse_filters`, `_CatalogHandoffWorker`, `_catalog_on_handoff_scope` | 2026-11-01 | ❌ Open |
 | [GS-285](ISSUE_DETAILS.md#gs-285) | Opening "Search only in..." loses a library restriction handed over from the Catalog tab | `desktop/dialogs_filter.py::PreSearchFilterDialog._get_current_filter_dict` | 2026-11-01 | ❌ Open |
@@ -203,6 +206,10 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-297](ISSUE_DETAILS.md#gs-297) | Fragment Puzzle forgets that a mirrored fragment stands in for a missing side | `web/pages/puzzle.py` (`flipAllPuzzle`, `_standIn`, `getState`), `shared/puzzle_model.py::PuzzleFragment` | 2026-11-18 | ❌ Open |
+| [GS-298](ISSUE_DETAILS.md#gs-298) | Fragment Puzzle shows transparency faults around fragments | `web/pages/puzzle.py` (canvas, background removal), `shared/puzzle_image_service.py`, `shared/puzzle_export.py::compose_puzzle_export` | 2026-11-18 | ❌ Open |
+| [GS-299](ISSUE_DETAILS.md#gs-299) | Zooming in is slow in the Fragment Puzzle | `web/pages/puzzle.py` (canvas zoom) | 2026-11-18 | ❌ Open |
+| [GS-301](ISSUE_DETAILS.md#gs-301) | "Search all transcriptions" reruns with the current "Search only in..." filters | `web/pages/search.py::_search_all_sources`, `execute_search` | 2026-11-18 | ❌ Open |
 | [GS-293](ISSUE_DETAILS.md#gs-293) | The Toggle Filters panel drops the other result filters | `web/pages/search.py::apply_filters`, `clear_filters` | 2026-11-16 | ❌ Open |
 | [GS-292](ISSUE_DETAILS.md#gs-292) | An NLI image served by the Cambridge route keeps the Cambridge credit | `web/api.py::_cambridge_image`, `web/pages/browse.py` (image credit footer), `web/pages/search_results.py::open_advanced_dialog` | 2026-11-11 | ❌ Open |
 | [GS-278](ISSUE_DETAILS.md#gs-278) | Search-hit highlighting in the reading view does not match through vowel points | `web/pages/browse.py::highlight_text` | 2026-10-27 | ❌ Open |
