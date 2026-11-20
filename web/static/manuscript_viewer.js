@@ -234,7 +234,13 @@ function progressiveLoad(img) {
         // back to NLI: the image on screen is then NLI's full one, and the upgrade would put
         // back the library image whose thumbnail failed, under the NLI credit it switched to
         // (Codex review, 2026-11-11).
-        if (fullSrc && img.src !== fullSrc && !img.dataset.triedManifest && !img.dataset.triedServerProxy) {
+        // An image drawn at full size already (the browse page's full screen draws no
+        // preview) needs no upgrade. `img.src` is the URL the browser resolved and
+        // data-full-src the one as written, so compare the written `src` too: the
+        // relative full URL never equals the absolute one, and the same full image was
+        // fetched again and reassigned (Codex on #64, 2026-11-20).
+        if (fullSrc && img.src !== fullSrc && img.getAttribute('src') !== fullSrc
+                && !img.dataset.triedManifest && !img.dataset.triedServerProxy) {
             var full = new Image();
             full.onload = function() {
                 img.src = fullSrc;

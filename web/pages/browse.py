@@ -502,7 +502,7 @@ VIEWER_STYLES = '''
         .image-container { height: auto !important; min-height: 120px !important; max-height: 75vh !important; }
         .image-container img.zoomable-image { max-height: 75vh !important; }
         .fullscreen-mode .image-container { max-height: none !important; }
-        .fullscreen-mode .image-container img.zoomable-image { max-height: 100vh !important; }
+        .fullscreen-mode .image-container img.zoomable-image { max-height: 100% !important; }
 
         /* Transcription: the page scrolls, not a pane inside it. The same
            un-scroll as the print rules in common.css, scoped to the viewer. */
@@ -614,24 +614,34 @@ VIEWER_STYLES = '''
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
 
-    /* Fullscreen mode */
+    /* Fullscreen mode: the image card covers the window, its toolbar on top and
+       the image fitted in the rest. The image box was 100vh under the toolbar
+       and the image's max-height had nothing to resolve against (ui.html wraps
+       the <img> in a div of auto height), so a tall folio ran off the bottom of
+       the screen; the card also kept its white padding (2026-11-20). */
     .fullscreen-mode {
         position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
+        inset: 0 !important;
+        width: auto !important;
+        height: auto !important;
         z-index: 9999 !important;
         border-radius: 0 !important;
         margin: 0 !important;
-        background: #000;
+        padding: 0 !important;
+        background: #000 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        transition: none !important;  /* the card's 0.2s would fade it in from white */
     }
 
     .fullscreen-mode .image-container {
-        height: 100vh !important;
-        width: 100vw !important;
+        flex: 1 1 0 !important;
+        min-height: 0 !important;
+        height: auto !important;
+        width: 100% !important;
     }
-    
+    .fullscreen-mode .image-container .img-loading-container > div { display: contents; }
+
     /* Zoomable Image Class */
     .zoomable-image {
         transform-origin: center center;
@@ -2017,29 +2027,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.label().bind_text_from(slider, 'value', backward=lambda v: f'{clamp_rotation(v)}°').classes(
             'text-white text-xs browse-rotate-angle').style('min-width: 2.8em; direction: ltr; unicode-bidi: isolate;')
 
-    def toggle_fullscreen():
-        """Toggle fullscreen mode."""
-        state.is_fullscreen = not state.is_fullscreen
-        update_content()
+    # The image card of the page on screen, for the full-screen toggle.
+    image_card = {'el': None}
 
     def toggle_image_fullscreen():
-        """Toggle fullscreen mode for image only."""
-        ui.run_javascript('''
-            const imageCard = document.querySelector('.image-container')?.closest('.q-card');
-            if (imageCard) {
-                imageCard.classList.toggle('fullscreen-mode');
-                // Add ESC key handler to exit
-                const escHandler = (e) => {
-                    if (e.key === 'Escape' && imageCard.classList.contains('fullscreen-mode')) {
-                        imageCard.classList.remove('fullscreen-mode');
-                        document.removeEventListener('keydown', escHandler);
-                    }
-                };
-                if (imageCard.classList.contains('fullscreen-mode')) {
-                    document.addEventListener('keydown', escHandler);
-                }
-            }
-        ''')
+        """The image alone, full screen (F; Esc leaves). The state is the page's
+        and the card is drawn with it: Prev/Next rebuild the page, and a class
+        set only in the browser went with the old card, so the next folio
+        opened out of full screen (2026-11-19)."""
+        card = image_card['el']
+        if card is None or card.is_deleted:
+            state.image_fullscreen = False
+            return
+        state.image_fullscreen = not state.image_fullscreen
+        if state.image_fullscreen:
+            card.classes(add='fullscreen-mode')
+        else:
+            card.classes(remove='fullscreen-mode')
 
     def toggle_fullscreen_edit():
         """Toggle fullscreen edit mode with side-by-side image and text."""
@@ -4939,10 +4943,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 ):
 
                     # === LEFT PANEL: Image (only if available) ===
+                    if not has_image:
+                        state.image_fullscreen = False  # nothing to show full screen
                     if has_image:
                         image_panel_ref['container'] = ui.card().style(
                             'flex: 0 0 50%; min-height: 60vh; display: block;'
                         )
+                        if state.image_fullscreen:
+                            image_panel_ref['container'].classes(add='fullscreen-mode')
+                        image_card['el'] = image_panel_ref['container']
                         with image_panel_ref['container']:
                             # Image header with zoom controls
                             with ui.row().classes('w-full items-center justify-between p-3 print-hide browse-image-head').style(
@@ -5033,7 +5042,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # Progressive loading: thumbnail first, then full resolution
                                     _thumb_url = safe_img_url
                                     _full_url = safe_img_url
-                                    if '/api/nli_image_by_sysid/' in safe_img_url:
+                                    # Not in full screen: the 400 px preview showed at its own
+                                    # size, small in the middle of the screen, before the full
+                                    # image filled it -- on every page turn (2026-11-20).
+                                    if '/api/nli_image_by_sysid/' in safe_img_url and not state.image_fullscreen:
                                         _sep = '&' if '?' in safe_img_url else '?'
                                         _thumb_url = f"{safe_img_url}{_sep}width=400"
                                     _ox_direct_attr = html_module.escape(_ox_direct_link, quote=True)
@@ -5869,6 +5881,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 // dropdown): its keys are its own, never the manuscript's behind it
                 // (Codex, PR #484). Browse's full-screen modes are classes, not dialogs.
                 if (document.querySelector('.q-dialog, .q-menu')) return;
+                // Esc leaves the image's full screen through its own button, so
+                // the page's state follows (a rebuilt page draws the card with it).
+                if (e.key === 'Escape') {
+                    if (document.querySelector('.fullscreen-mode')) {
+                        document.querySelector('[data-action="fullscreen"]')?.click();
+                    }
+                    return;
+                }
                 // A page is loading: the old content is inert, so no second load
                 // from its (still clickable, programmatically) navigation buttons.
                 if (document.querySelector('.browse-loading')) return;

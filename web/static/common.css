@@ -2429,7 +2429,10 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 /* /browse while a page loads: the previous content stays under the spinner,
    dimmed and inert, instead of being rebuilt as a spinner and rebuilt again.
    (update_content also sets the `inert` attribute: no focus, no keyboard.) */
-.browse-loading { opacity: .5; pointer-events: none; }
+.browse-loading { pointer-events: none; }
+/* Not the image in full screen: it covers the page, and dimming it made each
+   page turn flash. The new image's own spinner shows the wait there. */
+.browse-loading:not(:has(.fullscreen-mode)) { opacity: .5; }
 /* The spinner row takes no height, so the content does not jump down while a
    page loads, and sticks in view when the reader has scrolled down. */
 .browse-loading-row { position: sticky; top: 35vh; height: 0; overflow: visible; z-index: 5; align-items: flex-start;

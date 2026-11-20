@@ -281,4 +281,6 @@ def test_the_keyboard_listener_ignores_keys_while_a_page_loads():
     script = script[:script.index('let action = null;')]
     assert "if (document.querySelector('.browse-loading')) return;" in script
     css = (_REPO / 'web' / 'static' / 'common.css').read_text(encoding='utf-8')
-    assert '.browse-loading { opacity: .5; pointer-events: none; }' in css
+    assert '.browse-loading { pointer-events: none; }' in css
+    # Dimmed, except the image in full screen (each page turn flashed it, 2026-11-20).
+    assert '.browse-loading:not(:has(.fullscreen-mode)) { opacity: .5; }' in css

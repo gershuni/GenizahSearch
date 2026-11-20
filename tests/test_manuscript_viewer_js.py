@@ -45,12 +45,13 @@ CREDIT_CHECK = REPO / 'tests' / 'js' / 'manuscript_viewer_credit_check.js'
 def test_the_viewer_credit_checks_pass_under_node():
     """After a fall-back to NLI the full-size upgrade must not put the library image back
     under the NLI credit (Codex review, 2026-11-11); a thumbnail that loaded from the cache
-    before the viewer started is still upgraded."""
+    before the viewer started is still upgraded; an image drawn at full size (browse's
+    full screen) is not fetched a second time (Codex on #64, 2026-11-20)."""
     run = subprocess.run([_node(), str(CREDIT_CHECK)], capture_output=True, text=True, cwd=str(REPO), timeout=120)
     sys.stdout.write(run.stdout)
     sys.stderr.write(run.stderr)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert 'all 6 credit checks passed' in run.stdout
+    assert 'all 8 credit checks passed' in run.stdout
 
 
 def test_the_check_reads_the_shipped_viewer_file():

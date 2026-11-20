@@ -49,7 +49,12 @@ function makePage(attrs, props) {
         createElement() { return { style: {}, appendChild() {}, setAttribute() {} }; },
     };
     // Any full-size image the viewer preloads loads at once (the library's full image works).
-    class Image { set src(v) { this._src = v; setTimeout(() => this.onload && this.onload(), 0); } get src() { return this._src; } }
+    const preloads = [];
+    class Image {
+        constructor() { preloads.push(this); }
+        set src(v) { this._src = v; setTimeout(() => this.onload && this.onload(), 0); }
+        get src() { return this._src; }
+    }
     const manifest = { sequences: [{ canvases: [
         { images: [{ resource: { service: { '@id': 'https://iiif.nli.org.il/IIIFv21/FL167042239' } } }] },
     ] }] };
@@ -61,7 +66,7 @@ function makePage(attrs, props) {
     vm.createContext(sandbox);
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'static', 'manuscript_viewer.js'), 'utf8');
     vm.runInContext(src, sandbox, { filename: 'manuscript_viewer.js' });
-    return { sandbox, img, credit };
+    return { sandbox, img, credit, preloads };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -106,6 +111,27 @@ const checks = {
         page.sandbox.initProgressiveImages();
         await sleep(20);
         assert.equal(page.img.src, THUMB);
+    },
+    async 'an image drawn at full size is not fetched again'() {
+        // The browse page's full screen writes the full URL as both src and data-full-src;
+        // the browser resolves img.src to an absolute URL (Codex on #64).
+        const page = makePage({}, {
+            src: `http://localhost:8081${FULL}`,
+            getAttribute(name) { return (name === 'data-full-src' || name === 'src') ? FULL : null; },
+        });
+        page.sandbox.initProgressiveImages();
+        page.img.fire('load');
+        await sleep(20);
+        assert.equal(page.preloads.length, 0, 'the full image was preloaded a second time');
+        assert.equal(page.img.src, `http://localhost:8081${FULL}`);
+    },
+    async 'a thumbnail is upgraded with one preload'() {
+        const page = makePage({});
+        page.sandbox.initProgressiveImages();
+        page.img.fire('load');
+        await sleep(20);
+        assert.equal(page.preloads.length, 1);
+        assert.equal(page.img.src, FULL);
     },
     async 'an NLI fallback that loaded before init is not upgraded'() {
         const page = makePage({ creditFallback: 'nli', triedManifest: 'true' },

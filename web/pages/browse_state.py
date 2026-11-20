@@ -109,7 +109,9 @@ class BrowseState:
         # `reportSeq`), drawn on the image as `data-zoom-seq`.
         self.zoom_seq: int = 0
         self.rotation: int = 0
-        self.is_fullscreen: bool = False
+        # The image's full screen (F): kept here, not only as a class in the
+        # browser, so a rebuilt page (Prev/Next, the arrow keys) stays in it.
+        self.image_fullscreen: bool = False
         self.highlight_terms: Optional[str] = None
         # (sys_id, p_num) the `?highlight=` phrase arrived for. The SEED-033
         # `must_contain` override applies on that folio only; None until the
