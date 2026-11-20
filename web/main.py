@@ -3976,6 +3976,16 @@ async def open_catalog_text_sidecar_on_startup():
 app.on_startup(open_catalog_text_sidecar_on_startup)
 
 
+async def open_shelf_tree_sidecar_on_startup():
+    """The shelf tree (Pick from the shelf, the shelf order), opened and checked off the loop
+    (web/shelfmark_tree_assets.py)."""
+    from web.shelfmark_tree_assets import open_shelf_tree_on_startup
+    await open_shelf_tree_on_startup()
+
+
+app.on_startup(open_shelf_tree_sidecar_on_startup)
+
+
 async def stop_research_workers():
     from web.research_jobs import shutdown_research
     await asyncio.to_thread(shutdown_research)

@@ -91,6 +91,7 @@ EXTRACTED_MODULES = [
     "shared/catalog_text_rows.py",       # catalogue text search result rows, PR 2, 2026-11-18
     "shared/near_spellings.py",          # catalogue near spellings, PR 2, 2026-11-18
     "shared/shelfmark_tree_service.py",  # shelf tree sidecar reader, PR 1, 2026-11-19
+    "shared/shelfmark_tree_view.py",     # shelf tree names, starts, places for both apps, PR 2, 2026-11-19
     "shared/edition_search_text.py",     # editions search: an edition's search text, PR 1, 2026-11-15
     "shared/editions_indexer.py",        # editions search: the editions index builder, PR 1, 2026-11-15
     "shared/editions_search.py",         # editions search: switch, source choice, grouping, PR 2, 2026-11-15

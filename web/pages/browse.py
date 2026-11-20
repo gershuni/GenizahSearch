@@ -78,6 +78,11 @@ from web.supabase_client import create_correction, update_correction, get_correc
 from web.components.typography import h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
+from web.components.shelfmark_tree_picker import open_shelf_picker
+from web.shelfmark_tree_assets import shelf_tree_service
+from shared.shelfmark_tree_view import (crumbs as shelf_crumbs, display_name as shelf_display_name,
+                                        place_of as shelf_place_of, placement_request_is_spent,
+                                        position as shelf_position, step_from as shelf_step_from)
 from web import io_bound_result
 from web.pages.browse_state import (
     BrowseState, page_has_reading_view, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
@@ -997,6 +1002,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     refs.page_client = ui.context.client
     _page_client = refs.page_client
     _url_state = {'highlight': highlight, 'last_sys_id': initial_sys_id}  # Track across navigations
+    # The manuscript's place on the shelf (_load_shelf_place): {'sys_id', 'info'}, and 'want', the
+    # (sys_id, placement id) the reader arrived by from the shelf, for a manuscript with two places.
+    shelf_info: dict = {}
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
@@ -1282,6 +1290,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Generation guard: prevent stale updates from superseded loads
         _load_generation['value'] += 1
         my_gen = _load_generation['value']
+        # A placement asked for from the shelf is for the manuscript opened right after it: once the
+        # reader opens another, it is spent (a load by fl_id learns its manuscript later, and drops
+        # it in _ensure_shelf_place).
+        if not fl_id and placement_request_is_spent(shelf_info.get('want'), state.sys_id):
+            shelf_info.pop('want', None)
         _recent = None  # (sys_id, fl_id) to record in Recently Viewed after Phase A
 
         # Reset enrichment state
@@ -1370,6 +1383,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Update volume_ie from the loaded page (auto-detect if not set)
                 if page.volume_ie:
                     state.volume_ie = page.volume_ie
+                if not await _ensure_shelf_place(page.sys_id, my_gen):
+                    return  # Superseded by newer load
 
                 # Save position to storage for persistence (Phase 74: via helper).
                 # R2-1 embed: skip — an embedded candidate must not overwrite a
@@ -1423,6 +1438,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.current_page = meta_page
                     state.page_input_value = meta_page.p_num
                     state.error = None
+                    # A manuscript without a transcription has its place on the shelf too.
+                    if not await _ensure_shelf_place(meta_page.sys_id, my_gen):
+                        return  # Superseded by newer load
                     _update_browser_url()
                     # Phase 85 D-06: expose synthetic-row flag to client-side JS
                     _is_synth_js = 'true' if is_synthetic_sys_id(meta_page.sys_id) else 'false'
@@ -1531,8 +1549,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             new_page = state.current_page.total_pages  # an unknown count (0) is no ceiling
         await load_page(p_num=new_page)
 
+    async def _open_other_manuscript(new_sys_id: str):
+        """Leave the current manuscript for another, from its first page (previous / next, the
+        shelf picker)."""
+        _clear_search_scope_for_new_manuscript(new_sys_id)
+        state.sys_id = new_sys_id
+        state.view_all = False  # Reset to single page view
+        state.view_joined = False  # Exit reading desk if active
+        state.full_manuscript = []
+        state.reading_desk_entries = []
+        state.active_source = 'nli'  # Reset image source for new manuscript
+        state.volume_ie = None  # Reset volume for new manuscript
+        state.source_user_override = False
+        enrichment_refs.clear()  # Prevent stale ref usage across navigations
+        await load_page(p_num=1)  # Load first page of new manuscript
+
     async def navigate_shelfmark(direction: int):
-        """Navigate to next/prev shelfmark based on file order."""
+        """Next/previous manuscript: on the shelf (the shelf tree, shelf tree picker plan D6) when
+        the manuscript has a place there; otherwise in the transcription file's order, as before."""
         if not state.sys_id:
             return
 
@@ -1541,21 +1575,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         try:
             _sys_id = state.sys_id
+            on_shelf = shelf_info.get('info') if shelf_info.get('sys_id') == _sys_id else None
+            tree = shelf_tree_service()
+            if on_shelf is None and tree is not None and shelf_info.get('sys_id') != _sys_id:
+                # A second step while the first is still opening its manuscript: its place is not
+                # installed yet. Read it now, by the placement it was opened with, so the step
+                # follows the shelf and not the transcription file's order.
+                _want = shelf_info.get('want')
+                step = await run.io_bound(lambda: shelf_step_from(tree, _sys_id, _want))
+                if state.sys_id != _sys_id:
+                    return                          # the reader went elsewhere meanwhile
+                if step is not None:
+                    on_shelf = {'prev': step[0], 'next': step[1]}
+            if on_shelf is not None:
+                target = on_shelf['next'] if direction > 0 else on_shelf['prev']
+                if target is None:
+                    # the page stays, so the error card would not show: say it where a touch reader sees it
+                    state.is_loading = False
+                    update_content()
+                    ui.notify(tr('At the end of the shelf') if direction > 0 else tr('At the start of the shelf'),
+                              type='info', position='top')
+                    return
+                shelf_info['want'] = (target.sys_id, target.id)
+                await _open_other_manuscript(target.sys_id)
+                return
             adjacent_sys_id = await run.io_bound(
                 lambda: service.get_adjacent_shelfmark(_sys_id, direction)
             )
             if adjacent_sys_id:
-                _clear_search_scope_for_new_manuscript(adjacent_sys_id)
-                state.sys_id = adjacent_sys_id
-                state.view_all = False  # Reset to single page view
-                state.view_joined = False  # Exit reading desk if active
-                state.full_manuscript = []
-                state.reading_desk_entries = []
-                state.active_source = 'nli'  # Reset image source for new manuscript
-                state.volume_ie = None  # Reset volume for new manuscript
-                state.source_user_override = False
-                enrichment_refs.clear()  # Prevent stale ref usage across navigations
-                await load_page(p_num=1)  # Load first page of new manuscript
+                await _open_other_manuscript(adjacent_sys_id)
             else:
                 state.is_loading = False
                 # Show message: at first/last manuscript
@@ -1565,6 +1613,73 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             state.error = f"{tr('Error')}: {str(e)}"
             state.is_loading = False
             update_content()
+
+    async def _ensure_shelf_place(sys_id: str, my_gen) -> bool:
+        """Read the place on the shelf when the manuscript changed, or when the reader asked for
+        another of its placements. False when a newer load superseded this one meanwhile."""
+        want = shelf_info.get('want')
+        if placement_request_is_spent(want, sys_id) and my_gen == _load_generation['value']:
+            # this load, still the current one, reached another manuscript than the one asked for
+            shelf_info.pop('want', None)
+            want = None
+        shown = (shelf_info.get('info') or {}).get('leaf')
+        if shelf_info.get('sys_id') != sys_id or (
+                want and want[0] == sys_id and (shown is None or shown.id != want[1])):
+            await _load_shelf_place(sys_id, my_gen)
+        return my_gen == _load_generation['value']
+
+    async def _load_shelf_place(sys_id: str, my_gen=None):
+        """The manuscript's place on the shelf and its neighbours, for the header and previous /
+        next (off the loop). Nothing when the shelf tree is not served or has no place for it.
+        Installed only while the load that asked for it is still the current one (overlapping
+        loads must not put an older manuscript's place back)."""
+        tree = shelf_tree_service()
+        want = shelf_info.get('want')
+        placement_id = want[1] if want and want[0] == sys_id else None
+        info = None
+        # synthetic sys_ids are in libraries.csv too, so in the tree; a manuscript without a place has none
+        if tree is not None:
+            lang = get_language()
+
+            def _compute():
+                place = shelf_place_of(tree, sys_id, placement_id)
+                if place is None:
+                    return None
+                prev_leaf, next_leaf = tree.neighbours(place.leaf.id)
+                return {'crumbs': [(n.id, shelf_display_name(n, lang)) for n in shelf_crumbs(place)],
+                        'leaf': place.leaf, 'position': shelf_position(tree, place.leaf),
+                        'prev': prev_leaf, 'next': next_leaf}
+            try:
+                info = await run.io_bound(_compute)
+            except Exception as shelf_err:  # the shelf is an aid: never stop the page
+                logger.warning("Shelf place for %s not read: %s", sys_id, shelf_err)
+        if my_gen is not None and my_gen != _load_generation['value']:
+            return
+        if state.sys_id != sys_id:
+            return
+        shelf_info.update({'sys_id': sys_id, 'info': info})
+        if want and want[0] == sys_id:
+            # served: a later arrival at this manuscript by search, not by the shelf, gets its own place
+            shelf_info.pop('want', None)
+
+    def _shelf_start() -> Optional[str]:
+        """Where the picker opens from the lookup row: the placement shown (a manuscript may sit at
+        two places), else the manuscript, else what was typed."""
+        on_shelf = shelf_info.get('info') if shelf_info.get('sys_id') == state.sys_id else None
+        if on_shelf is not None:
+            return on_shelf['leaf'].id
+        return state.sys_id or (getattr(slider_refs.get('search_input'), 'value', '') or '').strip() or None
+
+    def open_shelf_picker_at(start: Optional[str]):
+        """Pick from the shelf; the chosen manuscript opens here."""
+        tree = shelf_tree_service()
+        if tree is None:
+            return
+
+        async def _picked(selection: dict):
+            shelf_info['want'] = (selection['sys_id'], selection['placement_id'])
+            await _open_other_manuscript(selection['sys_id'])
+        open_shelf_picker(_page_client.layout, tree, _picked, start=start)
 
     async def toggle_view_all():
         """Toggle between single page and full manuscript view."""
@@ -2415,10 +2530,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ):
                 with ui.row().classes('w-full items-center justify-between'):
                     # Prev Shelfmark Button
+                    _on_shelf = shelf_info.get('info') if shelf_info.get('sys_id') == page.sys_id else None
+                    _prev_tip = tr('Previous manuscript')
+                    if _on_shelf is not None:
+                        _prev_tip = (tr('Previous on the shelf: {shelfmark}').format(shelfmark=_on_shelf['prev'].shelfmark)
+                                     if _on_shelf['prev'] else tr('At the start of the shelf'))
                     ui.button(
                         icon='skip_next' if is_rtl() else 'skip_previous',
                         on_click=lambda: navigate_shelfmark(-1)
-                    ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Previous manuscript'))
+                    ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(_prev_tip)
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4 browse-header-center'):
@@ -2603,10 +2723,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Copy Link'))
 
                     # Next Shelfmark Button
+                    _next_tip = tr('Next manuscript')
+                    if _on_shelf is not None:
+                        _next_tip = (tr('Next on the shelf: {shelfmark}').format(shelfmark=_on_shelf['next'].shelfmark)
+                                     if _on_shelf['next'] else tr('At the end of the shelf'))
                     ui.button(
                         icon='skip_previous' if is_rtl() else 'skip_next',
                         on_click=lambda: navigate_shelfmark(1)
-                    ).props('flat round aria-label="Next manuscript" data-action="next-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Next manuscript'))
+                    ).props('flat round aria-label="Next manuscript" data-action="next-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(_next_tip)
+
+                # The place on the shelf (shelf tree picker plan §3.4): each level opens the picker there.
+                if _on_shelf is not None and _on_shelf['crumbs']:
+                    with ui.element('nav').props(f'aria-label="{tr("Place on the shelf")}" data-testid="shelf-place"').classes(
+                            'w-full flex flex-wrap items-center justify-center gap-1 text-sm mt-1 browse-shelf-place'):
+                        for _i, (_nid, _name) in enumerate(_on_shelf['crumbs']):
+                            if _i:
+                                ui.label('‹' if is_rtl() else '›').style('color: #d1fae5 !important;')
+                            _open_here = (lambda _e=None, n=_nid: open_shelf_picker_at(n))
+                            ui.link(_name).on('click', _open_here).on('keydown.enter', _open_here).on(
+                                'keydown.space.prevent', _open_here).props(
+                                f'data-node="{_nid}" tabindex="0" role="button"').style(
+                                'color: #ffffff !important; text-decoration: underline; cursor: pointer;')
+                        _pos = _on_shelf['position']
+                        if _pos is not None:
+                            ui.label('· ' + tr('{index} of {total}').format(index=f'{_pos.index:,}', total=f'{_pos.total:,}')).style(
+                                'color: #d1fae5 !important;')
 
             # Opened from a catalogue search's result: where the search found this manuscript.
             if catalogue_found['lookup'] and page.sys_id == catalogue_found['sys_id']:
@@ -5776,6 +5917,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     icon='search',
                     on_click=do_search
                 ).props(f'color=green aria-label="{tr("Go")}"').classes('px-6 browse-icon-collapse')
+
+                # Pick from the shelf (shelf tree picker plan §3.4): only when the shelf tree is served.
+                if shelf_tree_service() is not None:
+                    ui.button(
+                        tr('Pick from the shelf'),
+                        icon='shelves',
+                        on_click=lambda: open_shelf_picker_at(_shelf_start()),
+                    ).props(f'outline color=green no-caps aria-label="{tr("Pick from the shelf")}" data-testid="shelf-picker-open"').classes('browse-icon-collapse')
 
             # Error notice area (below search bar)
             search_error_container = ui.row().classes('w-full mt-2 items-center')

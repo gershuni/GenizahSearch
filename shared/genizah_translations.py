@@ -6828,3 +6828,19 @@ TRANSLATIONS.update({
     "Found in the catalogue records": "נמצא ברשומות הקטלוג",
     "{shown} of {count} matching records": "{shown} מתוך {count} רשומות תואמות",
 })
+
+# Pick from the shelf (shelf tree picker, PR 2; 2026-11-19, awaiting the owner's approval).
+TRANSLATIONS.update({
+    "Pick from the shelf": "בחירה מהמדף",
+    "Filter": "סינון",
+    "Show more": "הצג עוד",
+    "All other libraries, A-Z": "שאר הספריות, לפי סדר האלפבית",
+    "Place on the shelf": "המקום על המדף",
+    "{index} of {total}": "{index} מתוך {total}",
+    "At the start of the shelf": "בתחילת המדף",
+    "At the end of the shelf": "בסוף המדף",
+    "Previous on the shelf: {shelfmark}": "הקודם על המדף: {shelfmark}",
+    "Next on the shelf: {shelfmark}": "הבא על המדף: {shelfmark}",
+    "Shown inside {place}": "מוצג בתוך {place}",
+    "Part: {part}": "חלק: {part}",
+})

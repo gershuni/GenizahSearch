@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Gate ``shelfmark_tree_data/shelfmark_tree.db`` before it is served or shipped.
 
-    python scripts/verify_shelfmark_tree.py --db shelfmark_tree_data/shelfmark_tree.db \
+    python scripts/verify_shelfmark_tree_sidecar.py --db shelfmark_tree_data/shelfmark_tree.db \
         --expect-leaves <N> [--libraries libraries.csv]
 
 Plan: docs/plans/SHELFMARK_TREE_PICKER_PLAN.md (private repository), §3.1 and §10.3. It FAILS
@@ -38,8 +38,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.build_shelfmark_tree import (  # noqa: E402  -- the one schema definition
+    CATALOGUE,
     DEFAULT_LIBRARIES,
     HOW,
+    LEFT_OUT,
     RANGE_MAX,
     RANGE_SIZE,
     SCHEMA_VERSION,
@@ -49,26 +51,36 @@ from shared.shelfmark_tree_service import ShelfmarkTreeService  # noqa: E402
 
 NODE_COLUMNS = ("id", "parent_id", "kind", "level", "name_en", "name_he", "short", "private", "sort_key",
                 "lo", "hi", "manuscripts", "direct_leaves", "child_nodes")
-LEAF_COLUMNS = ("id", "node_id", "library_id", "sys_id", "shelfmark", "shelf_label", "part", "inventory_id",
-                "how", "pos")
+LEAF_COLUMNS = ("id", "node_id", "library_id", "sys_id", "shelfmark", "shelf_label", "label", "part",
+                "inventory_id", "how", "pos", "aliases")
 META_COLUMNS = ("key", "value")
 LIBRARY_CODE_COLUMNS = ("code", "node_id")
 NODE_ALIAS_COLUMNS = ("node_id", "alias")
+SHORTCUT_COLUMNS = ("id", "name_en", "name_he", "short", "target_id")
 CHILD_KINDS = {
     None: {"library"},
     "library": {"collection", "other"},
-    "collection": {"volume", "range"},
+    "collection": {"volume", "range", "group"},
     "volume": {"range"},
-    "other": {"range"},
+    "other": {"range", "group"},
+    "group": {"volume", "range", "group"},
     "range": set(),
 }
 #: What the real tree must show (FGP's screen, 2026-11-19; plan §2.1, §10.10).
-CUL_COLLECTIONS = ("T-S A - K", "T-S Bound", "T-S Ar.", "T-S Misc.", "T-S 8 - 32", "T-S NS", "T-S AS",
-                   "Oriental", "Add.")
+CUL_COLLECTIONS = ("T-S A - K",
+                   # FGP's two groups of "T-S Bound", in its place (owner, 2026-11-20)
+                   "T-S 6F - 8K", "T-S 10C - 18K",
+                   "T-S Ar.", "T-S Misc.", "T-S 8 - 32", "T-S NS", "T-S AS",
+                   "Oriental", "Add.",
+                   # the libraries shown inside CUL (owner, 2026-11-19), after its own collections
+                   "Lewis-Gibson (formerly Westminster College)", "Mosseri Collection")
 CANARIES = {
     "collections": (("CUL", CUL_COLLECTIONS),),
     "first_leaves": (("T-S AS 39", ("T-S AS 39.1", "T-S AS 39.2", "T-S AS 39.3")),),
-    "other": ("990001465150205171",),   # coded Harkavy, names the NLI: never placed by the code
+    # coded Sofer, its long form names the Museum of the Bible: held back, never placed by the code
+    "other": ("990001627910205171",),
+    # coded Harkavy, its long form the NLI's "Ms. Heb. 1151.3=4": in the NLI, not where the code is
+    "in_library": (("990001465150205171", "NLI"),),
 }
 
 
@@ -87,12 +99,13 @@ def _columns(con, table) -> tuple:
 
 def schema_problems(con) -> list[str]:
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    problems = [f"missing table {t}" for t in ("meta", "node", "leaf", "library_code", "node_alias")
+    problems = [f"missing table {t}" for t in ("meta", "node", "leaf", "library_code", "node_alias", "shortcut")
                 if t not in tables]
     if problems:
         return problems
     for table, want in (("meta", META_COLUMNS), ("node", NODE_COLUMNS), ("leaf", LEAF_COLUMNS),
-                        ("library_code", LIBRARY_CODE_COLUMNS), ("node_alias", NODE_ALIAS_COLUMNS)):
+                        ("library_code", LIBRARY_CODE_COLUMNS), ("node_alias", NODE_ALIAS_COLUMNS),
+                        ("shortcut", SHORTCUT_COLUMNS)):
         if _columns(con, table) != want:
             problems.append(f"{table} columns {_columns(con, table)} != {want}")
     indexes = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
@@ -189,6 +202,9 @@ def structure_problems(con) -> list[str]:
             bad[f"more than {RANGE_MAX} leaves directly in a node"] += 1
         if n["kind"] == "range" and len(own) > RANGE_SIZE:
             bad[f"a range of more than {RANGE_SIZE}"] += 1
+        if not (n["name_en"] or "").strip() or "NULL" in {(n["name_en"] or "").strip().upper(),
+                                                         (n["name_he"] or "").strip().upper()}:
+            bad["an empty name or the text NULL as a name"] += 1
     for reason, count in bad.items():
         problems.append(f"{count:,} node(s): {reason}")
 
@@ -198,14 +214,14 @@ def structure_problems(con) -> list[str]:
             continue
         if lf["library_id"] != library_of(lf["node_id"]):
             lbad["library_id is not its node's library"] += 1
-        if lf["how"] not in HOW:
+        if lf["how"] not in HOW and lf["how"] != CATALOGUE:
             lbad["unknown how"] += 1
-        elif lf["how"] == "fist" and (lf["inventory_id"] is None or not lf["shelf_label"]):
+        elif lf["how"] in ("fist", CATALOGUE) and (lf["inventory_id"] is None or not lf["shelf_label"]):
             lbad["a FGP leaf without its inventory row"] += 1
-        elif lf["how"] != "fist" and lf["inventory_id"] is not None:
+        elif lf["how"] not in ("fist", CATALOGUE) and lf["inventory_id"] is not None:
             lbad["a matched leaf with an inventory row"] += 1
         holder = nodes[lf["node_id"]]
-        while holder["kind"] == "range":          # a range belongs to the node above it
+        while holder["kind"] in ("range", "group"):   # ranges and groups belong to the node above them
             holder = nodes[holder["parent_id"]]
         if (lf["how"] == "other") != (holder["kind"] == "other"):
             lbad["Other shelfmarks does not hold exactly the other leaves"] += 1
@@ -216,6 +232,11 @@ def structure_problems(con) -> list[str]:
              if nid not in nodes or nodes[nid]["kind"] != "collection"]
     if stray:
         problems.append(f"{len(stray):,} alias(es) not on a collection (first: {stray[:3]})")
+    if any(not (lf["label"] or "").strip() and (lf["shelfmark"] or "").strip() for lf in leaves):
+        problems.append("a leaf with a shelfmark but no label")
+    dangling = [sid for sid, target in con.execute("SELECT id, target_id FROM shortcut") if target not in nodes]
+    if dangling:
+        problems.append(f"{len(dangling):,} shortcut(s) to no node (first: {dangling[:3]})")
     loose = [nid for _code, nid in con.execute("SELECT code, node_id FROM library_code")
              if nid not in nodes or nodes[nid]["kind"] != "library"]
     if loose:
@@ -247,6 +268,10 @@ def canary_problems(db: str, canaries) -> list[str]:
             hows = [p.leaf.how for p in service.path_of(sys_id)]
             if hows != ["other"]:
                 problems.append(f"canary: {sys_id} is placed {hows}, not only in Other shelfmarks")
+        for sys_id, short in canaries.get("in_library", ()):
+            got = [getattr(service.node(p.leaf.library_id), "short", None) for p in service.path_of(sys_id)]
+            if got != [short]:
+                problems.append(f"canary: {sys_id} is in {got}, not only in {short}")
     finally:
         service.close()
     return problems
@@ -291,7 +316,7 @@ def verify(db: str, expect_leaves: int, libraries=DEFAULT_LIBRARIES, canaries=CA
         if meta.get("input_libraries_sha256") != digest:
             problems.append(f"built from another libraries.csv (meta.input_libraries_sha256 "
                             f"{meta.get('input_libraries_sha256')!r}, {libraries} is {digest}): rebuild the tree")
-        wanted = _csv_sys_ids(libraries)
+        wanted = _csv_sys_ids(libraries) - set(LEFT_OUT)      # records the tree leaves out on purpose
         have = {r[0] for r in con.execute("SELECT DISTINCT sys_id FROM leaf")}
         if have - wanted:
             problems.append(f"{len(have - wanted):,} leaf manuscript(s) not in {libraries} "

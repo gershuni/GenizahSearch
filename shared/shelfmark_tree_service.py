@@ -2,7 +2,7 @@
 """Read-only access to the shelf tree (``shelfmark_tree_data/shelfmark_tree.db``).
 
 Plan: docs/plans/SHELFMARK_TREE_PICKER_PLAN.md (private repository), §3.2 as amended by §10.
-``scripts/build_shelfmark_tree.py`` builds the file and ``scripts/verify_shelfmark_tree.py`` gates
+``scripts/build_shelfmark_tree.py`` builds the file and ``scripts/verify_shelfmark_tree_sidecar.py`` gates
 it; this module only reads it. No Qt, no NiceGUI.
 
 The tree is library > collection > volume > shelfmark, with range nodes over large flat nodes and
@@ -32,17 +32,20 @@ from shared.thread_local_db import ThreadLocalConnection
 logger = logging.getLogger(__name__)
 
 #: The sidecar schema this reader serves; tests pin it to scripts/build_shelfmark_tree.py's.
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"      # 1.1.0: leaf.aliases
 SIDECAR_DIR = "shelfmark_tree_data"
 SIDECAR_FILENAME = "shelfmark_tree.db"
-REQUIRED_TABLES = ("meta", "node", "leaf", "library_code", "node_alias")
+REQUIRED_TABLES = ("meta", "node", "leaf", "library_code", "node_alias", "shortcut")
 #: The most leaves one ``leaves`` call returns.
 MAX_PAGE = 1000
 
 _NODE_COLUMNS = ("id, parent_id, kind, level, name_en, name_he, short, private, sort_key, lo, hi, "
                  "manuscripts, direct_leaves, child_nodes")
-_LEAF_COLUMNS = "id, node_id, library_id, sys_id, shelfmark, shelf_label, part, inventory_id, how, pos"
+_LEAF_COLUMNS = ("id, node_id, library_id, sys_id, shelfmark, shelf_label, label, part, inventory_id, how, pos, "
+                 "aliases")
 _TOKEN = re.compile(r"[^\W\d_]+|\d+")
+#: ``leaf.how`` of a manuscript's second place, under its entry in a catalogue FGP lists a collection by.
+CATALOGUE = "catalogue"
 
 
 def default_sidecar_path() -> str:
@@ -81,10 +84,12 @@ class ShelfLeaf:
     sys_id: str
     shelfmark: str       # the shelfmark the apps show for the manuscript
     shelf_label: str     # FGP's shelfmark of the inventory row ('' when not placed by FGP)
+    label: str           # what a picker shows: FGP's shelfmark, else ours without institution or file names
     part: str            # the Oxford (Neubauer) Part, information only ('' elsewhere)
     inventory_id: Optional[int]
-    how: str             # fist | exact | collection | single | other
+    how: str             # fist | exact | collection | single | name | other; catalogue (a second place)
     pos: int
+    aliases: str = ""    # the record's other call numbers, " | " (a filter finds them; 1.1.0)
 
     @property
     def placement_id(self) -> str:
@@ -210,13 +215,72 @@ class ShelfmarkTreeService:
         text = (filter or "").strip()
         if text:
             pattern = f"%{_like_escape(text)}%"
-            where += (" AND (shelfmark LIKE ? ESCAPE '\\' OR shelf_label LIKE ? ESCAPE '\\'"
-                      " OR part LIKE ? ESCAPE '\\')")
-            args += [pattern, pattern, pattern]
+            where += (" AND (shelfmark LIKE ? ESCAPE '\\' OR label LIKE ? ESCAPE '\\'"
+                      " OR part LIKE ? ESCAPE '\\' OR aliases LIKE ? ESCAPE '\\')")
+            args += [pattern, pattern, pattern, pattern]
         total = self._rows(f"SELECT COUNT(*) FROM leaf WHERE {where}", tuple(args))
         rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE {where} ORDER BY pos LIMIT ? OFFSET ?",
                           tuple(args) + (limit, offset))
         return [_leaf(r) for r in rows], (total[0][0] if total else 0)
+
+    def search_leaves(self, node_id: str, text: str, limit: int = 200,
+                      offset: int = 0) -> tuple[list[ShelfLeaf], int]:
+        """Shelfmarks anywhere under a node (inside its ranges, groups and volumes) whose
+        shelfmark, label or Oxford Part contains ``text``: for a reader who knows the shelfmark.
+        Answers the page and the total that match. A node that holds the shelf and a catalogue's
+        list of the same manuscripts answers their places on the shelf, once each; a search inside
+        the list answers the list's."""
+        node = self.node(node_id)
+        text = (text or "").strip()
+        if node is None or not text:
+            return [], 0
+        pattern = f"%{_like_escape(text)}%"
+        where = ("pos BETWEEN ? AND ? AND (shelfmark LIKE ? ESCAPE '\\' OR label LIKE ? ESCAPE '\\'"
+                 " OR part LIKE ? ESCAPE '\\' OR aliases LIKE ? ESCAPE '\\')" + self._shelf_only(node))
+        args = (node.lo, node.hi, pattern, pattern, pattern, pattern)
+        total = self._rows(f"SELECT COUNT(*) FROM leaf WHERE {where}", args)
+        rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE {where} ORDER BY pos LIMIT ? OFFSET ?",
+                          args + (max(0, min(int(limit), MAX_PAGE)), max(0, int(offset))))
+        return [_leaf(r) for r in rows], (total[0][0] if total else 0)
+
+    def _node_search(self, node_id: str, text: str):
+        node = self.node(node_id)
+        text = (text or "").strip()
+        if node is None or not text:
+            return None
+        pattern = f"%{_like_escape(text)}%"
+        # every kind a column shows, so a filter reaches what the unfiltered column offers
+        return ("lo >= ? AND hi <= ? AND id <> ? AND kind IN ('collection', 'group', 'volume', 'range', 'other') "
+                "AND (name_en LIKE ? ESCAPE '\\' OR name_he LIKE ? ESCAPE '\\')",
+                (node.lo, node.hi, node.id, pattern, pattern))
+
+    def search_nodes(self, node_id: str, text: str, limit: int = 200, offset: int = 0) -> list[ShelfNode]:
+        """Collections, groups and volumes anywhere under a node whose name contains ``text``."""
+        found = self._node_search(node_id, text)
+        if found is None:
+            return []
+        where, args = found
+        rows = self._rows(f"SELECT {_NODE_COLUMNS} FROM node WHERE {where} ORDER BY lo, level LIMIT ? OFFSET ?",
+                          args + (max(0, min(int(limit), MAX_PAGE)), max(0, int(offset))))
+        return [_node(r) for r in rows]
+
+    def count_nodes(self, node_id: str, text: str) -> int:
+        """How many nodes ``search_nodes`` would answer without a limit."""
+        found = self._node_search(node_id, text)
+        if found is None:
+            return 0
+        where, args = found
+        rows = self._rows(f"SELECT COUNT(*) FROM node WHERE {where}", args)
+        return rows[0][0] if rows else 0
+
+    def shortcuts(self) -> list:
+        """The libraries shown inside another: (id, name_en, name_he, short, target node)."""
+        out = []
+        for sid, en, he, short, target in self._rows("SELECT id, name_en, name_he, short, target_id FROM shortcut"):
+            node = self.node(target)
+            if node is not None:
+                out.append((sid, en, he, short, node))
+        return out
 
     def leaf(self, placement_id: str) -> Optional[ShelfLeaf]:
         rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE id = ?", (placement_id,))
@@ -234,9 +298,12 @@ class ShelfmarkTreeService:
         return tuple(reversed(out))
 
     def path_of(self, sys_id: str) -> list[Placement]:
-        """Every place of a manuscript, in shelf order (empty when it has none)."""
-        rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE sys_id = ? ORDER BY pos",
-                          (str(sys_id),))
+        """Every place of a manuscript (empty when it has none): its places on the shelf, in shelf
+        order, then those under a catalogue's entries. The shelf comes first whatever the positions
+        say: a collection's own shelfmarks are written after its children, a catalogue's list among
+        them."""
+        rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE sys_id = ? "
+                          "ORDER BY (how = 'catalogue'), pos", (str(sys_id),))
         return [Placement(leaf, self.ancestors(leaf.node_id)) for leaf in map(_leaf, rows)]
 
     def neighbours(self, placement_id: str) -> tuple[Optional[ShelfLeaf], Optional[ShelfLeaf]]:
@@ -246,18 +313,54 @@ class ShelfmarkTreeService:
         here = self.leaf(placement_id)
         if here is None:
             return None, None
+        # A catalogue's list (Oxford by Neubauer-Cowley number) is a second way through manuscripts
+        # that are on the shelf: stepping stays in the list it began in, and the shelf's own order
+        # does not run on into a catalogue's.
+        same, args = "how <> 'catalogue'", (here.library_id, here.pos, here.sys_id)
+        if here.how == CATALOGUE:
+            # ... and in that list alone: a library may list two of its collections by a catalogue
+            lo, hi = self._list_bounds(here)
+            same, args = "how = 'catalogue' AND pos BETWEEN ? AND ?", args + (lo, hi)
         prev = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE library_id = ? AND pos < ? AND sys_id <> ? "
-                          "ORDER BY pos DESC LIMIT 1", (here.library_id, here.pos, here.sys_id))
+                          f"AND {same} ORDER BY pos DESC LIMIT 1", args)
         nxt = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE library_id = ? AND pos > ? AND sys_id <> ? "
-                         "ORDER BY pos LIMIT 1", (here.library_id, here.pos, here.sys_id))
+                         f"AND {same} ORDER BY pos LIMIT 1", args)
         return (_leaf(prev[0]) if prev else None), (_leaf(nxt[0]) if nxt else None)
 
+    def _list_bounds(self, leaf: ShelfLeaf) -> tuple[int, int]:
+        """The positions of the catalogue list a catalogue placement stands in: the topmost node
+        above it that holds no place on the shelf."""
+        for node in self.ancestors(leaf.node_id):
+            if not self._rows("SELECT 1 FROM leaf WHERE pos BETWEEN ? AND ? AND how <> 'catalogue' LIMIT 1",
+                              (node.lo, node.hi)):
+                return node.lo, node.hi
+        return leaf.pos, leaf.pos
+
+    def place_among(self, leaf: ShelfLeaf, lo: int, hi: int) -> tuple[int, int]:
+        """(the 1-based index of a place, how many there are) among the places ``lo..hi`` of its own
+        kind: those on the shelf, or those of a catalogue's list. A collection holds both, and a
+        shelfmark's "7 of 279" does not count the list's copies."""
+        same = "how = 'catalogue'" if leaf.how == CATALOGUE else "how <> 'catalogue'"
+        rows = self._rows(f"SELECT COALESCE(SUM(pos <= ?), 0), COUNT(*) FROM leaf "
+                          f"WHERE pos BETWEEN ? AND ? AND {same}", (leaf.pos, lo, hi))
+        return (int(rows[0][0]), int(rows[0][1])) if rows else (0, 0)
+
+    def _shelf_only(self, node: ShelfNode) -> str:
+        """The condition that keeps a node's places on the shelf when it holds any: a collection
+        holds its shelfmarks and a catalogue's list of the same manuscripts, written before them.
+        Inside the list itself (no place on the shelf at all) nothing is left out."""
+        on_shelf = self._rows("SELECT 1 FROM leaf WHERE pos BETWEEN ? AND ? AND how <> 'catalogue' LIMIT 1",
+                              (node.lo, node.hi))
+        return " AND how <> 'catalogue'" if on_shelf else ""
+
     def sys_ids_under(self, node_id: str) -> list[str]:
-        """Every manuscript under a node, each once, in shelf order ("the whole volume")."""
+        """Every manuscript under a node, each once, in shelf order ("the whole volume"); in a
+        catalogue's list, in the list's order."""
         node = self.node(node_id)
         if node is None:
             return []
-        rows = self._rows("SELECT sys_id FROM leaf WHERE pos BETWEEN ? AND ? ORDER BY pos", (node.lo, node.hi))
+        rows = self._rows(f"SELECT sys_id FROM leaf WHERE pos BETWEEN ? AND ?{self._shelf_only(node)} ORDER BY pos",
+                          (node.lo, node.hi))
         return list(dict.fromkeys(r[0] for r in rows))
 
     def libraries_of_code(self, code: str) -> list[str]:
@@ -306,7 +409,15 @@ class ShelfmarkTreeService:
     def _name_index(self) -> list[tuple[tuple, ShelfNode]]:
         with self._names_lock:
             if self._names is None:
-                rows = self._rows(f"SELECT {_NODE_COLUMNS} FROM node WHERE kind IN ('collection', 'volume')")
+                # and a group that is a shelf of its own, holding shelfmarks (or their ranges) under a
+                # collection: Lehmann's series "Ms. FR", Toronto's "Friedberg MSS 9-004". Not a group
+                # of volumes, nor a series of "Other shelfmarks" (a typed "Ms. 9160" is JTS's "MS")
+                columns = ", ".join(f"n.{c}" for c in _NODE_COLUMNS.split(", "))
+                rows = self._rows(
+                    f"SELECT {columns} FROM node n WHERE n.kind IN ('collection', 'volume') OR (n.kind = 'group'"
+                    " AND (SELECT kind FROM node p WHERE p.id = n.parent_id) = 'collection'"
+                    " AND (n.direct_leaves > 0 OR n.child_nodes > 0)"
+                    " AND NOT EXISTS (SELECT 1 FROM node c WHERE c.parent_id = n.id AND c.kind <> 'range'))")
                 names = [(_key(r[4]), _node(r)) for r in rows if _key(r[4])]
                 # a collection is also found by the shelfmark heads its leaves are written with
                 # (the builder's ``collection_aliases``: CUL "Oriental" by ``Or.``)
@@ -324,7 +435,8 @@ def _node(row) -> ShelfNode:
 
 
 def _leaf(row) -> ShelfLeaf:
-    return ShelfLeaf(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], int(row[9]))
+    return ShelfLeaf(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], int(row[10]),
+                     row[11] or "")
 
 
 def _validate(conn: Any) -> tuple[str, dict[str, str]]:
@@ -349,6 +461,20 @@ def _validate(conn: Any) -> tuple[str, dict[str, str]]:
 
 _default_service: Optional[ShelfmarkTreeService] = None
 _lock = threading.Lock()
+
+
+def shelfmark_tree_enabled() -> bool:
+    """The ``SHELFMARK_TREE_ENABLED`` switch, read on every call; on unless set off. Necessary, not
+    sufficient: a surface also needs the file open and checked (``is_ready``)."""
+    value = os.environ.get("SHELFMARK_TREE_ENABLED")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def peek_shelfmark_tree_service() -> Optional[ShelfmarkTreeService]:
+    """The default service if it was opened already, else None (never opens the file)."""
+    return _default_service
 
 
 def get_shelfmark_tree_service(thread_safe: bool = True) -> ShelfmarkTreeService:

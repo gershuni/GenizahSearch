@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-GATED = ["catalog_text", "arabic", "blau", "friedman"]
+GATED = ["catalog_text", "arabic", "blau", "friedman", "shelfmark_tree"]
 
 
 @pytest.mark.parametrize("name", GATED)

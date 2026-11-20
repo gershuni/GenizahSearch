@@ -10,7 +10,7 @@
   an exact shelfmark, 1,735 by the collection their shelfmark names, 46 as the leftovers of a
   single-collection library, 698 in "Other shelfmarks"). A manuscript is never placed by a
   collector's library code, nor when its catalogue form names another institution.
-  `scripts/verify_shelfmark_tree.py` gates the file and fails rather than skips;
+  `scripts/verify_shelfmark_tree_sidecar.py` gates the file and fails rather than skips;
   `shared/shelfmark_tree_service.py` reads it (children, paged leaves with a filter, every place of
   a manuscript, previous / next across volumes and collections, everything under a node, where a
   typed shelfmark starts). Oxford leaves carry their Neubauer Part as information.

@@ -15,6 +15,9 @@ Where: `libraries.csv` columns 2-3
 Opened: 2026-11-19
 
 13 rows of `libraries.csv` have neither a call number nor a `library_code`. They cannot be found by
-shelfmark or library; the shelf tree lists them under "No library code" so they stay reachable.
-Find their records in the NLI catalogue and fill both columns, or drop them if they are not
-Genizah manuscripts.
+shelfmark or library. The shelf tree places 11 of them by the library the catalogue's own notes
+name (`RECORD_LIBRARY` in `scripts/build_shelfmark_tree.py`, 2026-11-20: Oxford 1, the National
+Library of Russia 4, Manchester 1, Mosseri 2, a private collection in Jerusalem 1, the Academy of
+the Hebrew Language 1, Frankfurt 1) and shows them by their system number; the other 2 are under "Location
+unknown". The codes and call numbers should still be filled at the source, which would make that
+table unnecessary; one of the 13 is a typed list of Bodleian fragments, not a manuscript.
