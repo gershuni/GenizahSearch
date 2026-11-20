@@ -120,7 +120,7 @@ class BrowsePage:
     image_source_info: Dict = field(default_factory=dict)  # {nli_fgp: bool, cambridge: bool, image_count: int}
     folio_images: List[Dict] = field(default_factory=list)  # Folio sequence from NliCrossrefService
     cambridge_images: List[Dict] = field(default_factory=list)  # Cambridge IIIF canvas URLs from nli_cache images_ext
-    external_provider: str = ''  # Which library provided images_ext: 'manchester', 'jts', or '' (Cambridge)
+    external_provider: str = ''  # Provider of images_ext, e.g. cambridge, manchester, jts, katz
     cambridge_alignment: Optional[Dict] = None  # 260421-aln: CUDL↔NLI alignment verdict (see shared.nli_crossref_service.classify_cambridge_alignment)
     physical_metadata: Optional[Dict] = None  # {material, num_folio, num_bifolio, size} from NLI crossref
     nli_stale_from: Optional[float] = None  # epoch of the oldest stored NLI answer served because NLI could not answer (shared/nli_metadata_store.py); None when fresh
@@ -130,6 +130,9 @@ class BrowsePage:
     volume_suffix: int = 1  # IIIF manifest suffix for active IE (1=primary)
     volume_count: int = 1  # Total number of volumes/IEs for this manuscript
     volumes: List[Dict] = field(default_factory=list)  # [{ie_id, suffix, page_count}, ...]
+    bodleian_links: Dict[str, str] = field(default_factory=dict)  # recto, verso, volume as catalogued
+    katz_component_links: List[Dict[str, str]] = field(default_factory=list)
+    metadata_only: bool = False
 
 @dataclass
 class ManuscriptPageIds:
@@ -259,6 +262,20 @@ def is_oxford_manuscript(shelfmark: str = '', library_code: str = '') -> bool:
         return True
     shelfmark_lower = (shelfmark or '').strip().lower()
     return shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb')
+
+
+def bodleian_links_for_page(page, codico, folio_images, part_meta=None):
+    """Resolve this browse or search-result page against the Bodleian catalogue."""
+    from shared.codicological import get_bodleian_links
+    if part_meta is None and codico:
+        part_id = codico.get_part_for_folio(page.sys_id)
+        part_meta = codico.get_part_metadata(part_id) if part_id else None
+    if not part_meta and codico:
+        part_meta = {'volume_url': codico.get_bodleian_volume_url(page.shelfmark)}
+    return get_bodleian_links(
+        part_meta, page.shelfmark, folio_offset=max(0, (page.volume_suffix or 1) - 1),
+        page_num=page.p_num or 1, total_pages=page.total_pages or len(folio_images), folio_images=folio_images,
+    )
 
 
 def get_oxford_direct_image_url(shelfmark: str = '', page_idx: int = 0, folio_offset: int = 0) -> str:
@@ -428,6 +445,7 @@ class GenizahService:
 
             return BrowsePage(
                 uid=result.get('uid', ''),
+                metadata_only=result.get('metadata_only', False),
                 p_num=result.get('p_num', 0),
                 text=result.get('text', ''),
                 full_header=result.get('full_header', ''),
@@ -545,6 +563,7 @@ class GenizahService:
 
             return BrowsePage(
                 uid='',
+                metadata_only=True,
                 p_num=requested_p,
                 text='',
                 full_header='',

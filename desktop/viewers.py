@@ -18,7 +18,8 @@ from PyQt6 import sip
 
 from genizah_core import Config, get_logger, tr
 from desktop.image_loader import ImageLoaderThread
-from desktop.widgets import map_matching_image_index
+from desktop.widgets import LibraryLinkButton, map_matching_image_index
+from shared.codicological import bodleian_image_link_items, get_bodleian_links
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
@@ -721,10 +722,7 @@ class ManuscriptViewerWidget(QWidget):
         btn_rot_reset.setMaximumWidth(60)
         btn_rot_reset.clicked.connect(lambda: self.slider_rotation.setValue(0))
 
-        self.btn_external = QPushButton(f"\U0001f517 {tr('External')}")
-        self.btn_external.setToolTip(tr("External Website"))
-        self.btn_external.setVisible(False)
-        self.btn_external.clicked.connect(self.open_external)
+        self.btn_external = LibraryLinkButton("🔗 ")
 
         # KTIV / NLI Viewer button (Phase 31)
         self.btn_ktiv = QPushButton(f"\U0001f517 {tr('Ktiv')}")
@@ -872,6 +870,17 @@ class ManuscriptViewerWidget(QWidget):
         self.lbl_attribution.setVisible(False)
         layout.addWidget(self.lbl_attribution)
 
+        self.bodleian_links = QLabel()
+        self.bodleian_links.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.bodleian_links.setWordWrap(True)
+        self.bodleian_links.setMargin(3)
+        self.bodleian_links.setTextFormat(Qt.TextFormat.RichText)
+        self.bodleian_links.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        self.bodleian_links.setOpenExternalLinks(True)
+        self.bodleian_links.hide()
+        layout.addWidget(self.bodleian_links)
+
         # Image Area
         self.scroll_area = ZoomableScrollArea()
         layout.addWidget(self.scroll_area, 1)
@@ -936,6 +945,14 @@ class ManuscriptViewerWidget(QWidget):
         derived from the image ACTUALLY on screen (Codex P2, 2026-09-02) -- otherwise
         switching back jumps to a stale folio, and aligned lists lose their place.
         """
+        # Penn's two lists were joined on the NLI scan ID, even if the
+        # manifest listed verso before recto.
+        if getattr(self, 'external_provider', None) == 'katz' and 0 <= old_idx < len(old_list):
+            fl_id = old_list[old_idx].get('fl_id')
+            if fl_id:
+                for idx, image in enumerate(new_list):
+                    if image.get('fl_id') == fl_id:
+                        return idx
         remembered = self._last_idx_by_source.get(new_source)
         unmoved = getattr(self, '_last_switch_landed_at', None) == (self.current_source, old_idx)
         if unmoved and remembered is not None and 0 <= remembered < len(new_list):
@@ -980,6 +997,29 @@ class ManuscriptViewerWidget(QWidget):
             attr = getattr(self, '_attr_ext', '')
         self.lbl_attribution.setText(attr)
         self.lbl_attribution.setVisible(bool(attr))
+
+    def set_katz_page(self, meta, fl_id, page_num, *, metadata_only=False):
+        """Show the Penn scan for an indexed page or a catalogue-only folio."""
+        if metadata_only and not fl_id:
+            from shared.nli_crossref_service import katz_catalogue_page_fl
+            fl_id = katz_catalogue_page_fl(meta.get('images_ext') or [], meta.get('folio_images'), page_num)
+        fl_id = str(fl_id or '').removeprefix('FL')
+        for idx, image in enumerate(meta.get('images_ext') or []):
+            if fl_id and image.get('fl_id') == fl_id:
+                if getattr(self, '_current_meta', None) is meta:
+                    self.set_page(idx)  # preserve the reader's selected source
+                else:
+                    self.load_images(meta, idx)
+                return
+
+        # A sparse transcription can refer to a scan outside the Penn set.
+        # Keep the item link, and show NLI's own scan when an ID is available.
+        nli = meta.get('images_nli') or []
+        idx = max(0, (page_num or 1) - 1)
+        if fl_id.isascii() and fl_id.isdigit():
+            nli = [{'fl_id': fl_id, 'url': f'{Config.NLI_IIIF_BASE}/FL{fl_id}', 'label': f'FL{fl_id}'}]
+            idx = 0
+        self.load_images({**meta, 'external_provider': '', 'images_ext': [], 'images_nli': nli}, idx)
 
     def load_images(self, meta, initial_idx=0, target_folio=None):
         self.external_provider = self._detect_external_provider(meta)
@@ -1045,6 +1085,8 @@ class ManuscriptViewerWidget(QWidget):
                 ext_label = "Manchester"
             elif self.external_provider == "jts":
                 ext_label = "JTS/Princeton"
+            elif self.external_provider == "katz":
+                ext_label = tr("Katz Center")
             else:
                 ext_label = "External"
             # 260419-cfx / 260421-aln: when external is misaligned with NLI
@@ -1099,30 +1141,8 @@ class ManuscriptViewerWidget(QWidget):
                 if self.set_image_by_fl_id(fl):
                     break
 
-        # External Link
-        # external_url carries the record's Cambridge decision; the raw MARC 856 link
-        # does not (it can name another library's or another fragment's item).
-        self.external_url = meta.get('external_url')
-
-        # Prefer library_viewer_url when available (detail page > generic manifest URL)
-        lib_viewer = meta.get('library_viewer_url')
-        if lib_viewer and lib_viewer.get('url'):
-            if self.external_provider in ('manchester', 'jts'):
-                self.external_url = lib_viewer['url']
-
-        if self.external_url:
-            if self.external_provider == "cambridge":
-                btn_label = f"\U0001f517 {tr('Cambridge')}"
-            elif self.external_provider == "oxford":
-                btn_label = f"\U0001f517 {tr('Oxford')}"
-            elif self.external_provider == "manchester":
-                btn_label = "\U0001f517 Manchester"
-            elif self.external_provider == "jts":
-                btn_label = "\U0001f517 Princeton"
-            else:
-                btn_label = f"\U0001f517 {tr('External')}"
-            self.btn_external.setText(btn_label)
-        self.btn_external.setVisible(bool(self.external_url))
+        # Oxford has its own links in the image pane, including when the toolbar overflows.
+        self.btn_external.set_record({} if meta.get('oxford_part_metadata') else meta, provider=self.external_provider)
 
         # KTIV button: show when NLI FGP images available (Phase 31)
         # Phase 85 D-06: synthetic sys_ids never show the KTIV button
@@ -1292,6 +1312,7 @@ class ManuscriptViewerWidget(QWidget):
 
     def set_page(self, index):
         if not self.active_list:
+            self._update_bodleian_links()
             self.scroll_area.set_image(None)
             self.scroll_area.set_status_message(tr("No images available"))
             return
@@ -1301,6 +1322,7 @@ class ManuscriptViewerWidget(QWidget):
         if index >= len(self.active_list): index = len(self.active_list) - 1
 
         self.current_idx = index
+        self._update_bodleian_links()
         self._load_generation += 1  # Invalidate any in-flight callbacks immediately
 
         # The credit is per-IMAGE, not per-list: `images_ext` may hold a synthetic
@@ -1385,6 +1407,11 @@ class ManuscriptViewerWidget(QWidget):
         fallback was already active (avoid retrying the dead source).
         """
         if gen != self._load_generation or self._closing:
+            return
+
+        if self.external_provider == 'katz' and self.current_source == 'ext' and self.images_nli:
+            self.combo_source.setCurrentIndex(self.combo_source.findData('nli'))
+            self._show_fallback_notice(tr('Katz Center image unavailable'), transient=True)
             return
 
         if self.external_provider == "oxford" and self.current_source == "ext":
@@ -1503,13 +1530,30 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_gamma.setValue(100)
         self.btn_invert.setChecked(False)
 
-    def open_external(self):
-        if self.external_url:
-            url = self.external_url
-            # Transform CUDL IIIF manifest URL to viewer URL
-            if "cudl.lib.cam.ac.uk/iiif/" in url:
-                url = url.replace("/iiif/", "/view/")
-            QDesktopServices.openUrl(QUrl(url))
+    def _update_bodleian_links(self):
+        meta = getattr(self, '_current_meta', None) or {}
+        part = meta.get('oxford_part_metadata')
+        if not part:
+            self.bodleian_links.clear()
+            self.bodleian_links.hide()
+            return
+
+        # An Oxford image list may span several leaves and start on either side.
+        folio = None
+        if self.active_list and self.current_source == 'ext':
+            image = self.active_list[self.current_idx]
+            label = image.get('label') or ''
+            folio = label[:-1] if label.endswith(('a', 'b')) else image.get('folio_num')
+        links = get_bodleian_links(
+            part, meta.get('shelfmark'), folio_num=folio,
+            page_num=self.current_idx + 1 if self.active_list else 1,
+            total_pages=len(self.active_list), folio_images=meta.get('folio_images') or [],
+            folio_offset=max(0, meta.get('oxford_volume_suffix', 1) - 1),
+        )
+        anchors = [f'<a href="{html.escape(url, quote=True)}">{html.escape(tr(label))}</a>'
+                   for _, label, url in bodleian_image_link_items(links)]
+        self.bodleian_links.setText(' · '.join([html.escape(tr('Bodleian')), *anchors]) if anchors else '')
+        self.bodleian_links.setVisible(bool(anchors))
 
     def _open_ktiv_viewer(self):
         """Open the NLI KTIV manuscript viewer at the current page."""

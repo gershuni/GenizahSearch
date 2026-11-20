@@ -54,7 +54,7 @@ from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
-    ActionsHoverWidget, _format_add_to_list_label,
+    ActionsHoverWidget, LibraryLinkButton, _format_add_to_list_label,
     FindNavigator, apply_find_highlight, markers_to_bold_html, mark_pattern_hits, text_lines_to_html,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_folio_side_image_index,
@@ -1991,6 +1991,7 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = None
         self.current_browse_p = None
         self.current_browse_internal_idx = None
+        self._browse_displayed_scan = (None, None, None, False)
         self.current_browse_volume_ie = None  # Active IE for multi-volume manuscripts (None = default/all)
         self.browse_highlight_data = []
         self.browse_highlight_pattern = None
@@ -7980,11 +7981,7 @@ class GenizahGUI(QMainWindow):
         self._browse_measurements_data = None
 
         # External link button (browse tab) - populated dynamically per manuscript
-        self.btn_b_external_link = QPushButton(tr("External Website"))
-        self.btn_b_external_link.setToolTip(tr("Open in external library website"))
-        self.btn_b_external_link.setVisible(False)
-        self.btn_b_external_link.clicked.connect(self._browse_open_external_link)
-        self._browse_external_url = None
+        self.btn_b_external_link = LibraryLinkButton("🌐 ")
 
         # Phase 95 REQ-6 D-10 — three-state LOCAL filter button (parallels surface).
         self.local_filter_btn_parallels = QPushButton(self)
@@ -8699,7 +8696,6 @@ class GenizahGUI(QMainWindow):
             self.current_browse_part_folio_idx = 0
         # Reset stale UI immediately (before async enrichment returns)
         self.btn_b_external_link.setVisible(False)
-        self._browse_external_url = None
         self._update_browse_pgp_button(None)
         # Disconnect old worker's slot (stored reference, not bare method)
         if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
@@ -9105,6 +9101,7 @@ class GenizahGUI(QMainWindow):
         if not part_id:
             part_id = self.meta_mgr.get_part_for_folio(sid)
 
+        part_meta = None
         if part_id:
             part_meta = self.meta_mgr.get_part_metadata(part_id)
             oxford_title = part_meta.get('title', '') if part_meta else ''
@@ -9240,7 +9237,13 @@ class GenizahGUI(QMainWindow):
                     folio_num=folio_num,
                     page_num=self.current_browse_p if folio_num is None else None,
                 )
-            self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
+            if display_meta.get('external_provider') == 'katz':
+                scan_sid, scan_page, fl_id, metadata_only = self._browse_displayed_scan
+                same_page = (scan_sid, scan_page) == (sid, self.current_browse_p)
+                self.browse_viewer.set_katz_page(display_meta, fl_id if same_page else None, self.current_browse_p,
+                                                metadata_only=same_page and metadata_only)
+            else:
+                self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
@@ -9267,34 +9270,15 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, "btn_b_find_joins"):
             self.btn_b_find_joins.setEnabled(True)
 
-        # Populate external library link button
-        # external_url carries the record's Cambridge decision (enrich_metadata); the raw
-        # MARC 856 link does not.
-        self._browse_external_url = meta.get('external_url')
-        # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
-        _b_lib_viewer = meta.get('library_viewer_url')
-        if _b_lib_viewer and _b_lib_viewer.get('url'):
-            _b_provider = meta.get('external_provider', '')
-            if _b_provider in ('manchester', 'jts'):
-                self._browse_external_url = _b_lib_viewer['url']
-        if self._browse_external_url:
-            provider = meta.get('external_provider', '')
-            part_id_for_link = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
-            oxford_part_id_meta = meta.get('oxford_part_id')
-            if oxford_part_id_meta or part_id_for_link or provider == 'oxford':
-                btn_label = f"🌐 {tr('Oxford')}"
-            elif provider == 'cambridge' or "cudl.lib.cam.ac.uk" in (self._browse_external_url or "").lower():
-                btn_label = f"🌐 {tr('Cambridge')}"
-            elif provider == 'manchester':
-                btn_label = "🌐 Manchester LUNA"
-            elif provider == 'jts':
-                btn_label = "🌐 Princeton Digital Library"
-            else:
-                btn_label = f"🌐 {tr('External Website')}"
-            self.btn_b_external_link.setText(btn_label)
-            self.btn_b_external_link.setVisible(True)
-        else:
-            self.btn_b_external_link.setVisible(False)
+        from genizah_core import resolve_volume_suffix
+        self.btn_b_external_link.set_record(
+            meta, part_meta=part_meta,
+            shelfmark=meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(sid)[0],
+            position=lambda: {
+                'page_num': self.current_browse_p or 1, 'total_pages': self.combo_browse_page.count(),
+                'folio_offset': resolve_volume_suffix(sid, self.current_browse_volume_ie) - 1,
+            },
+        )
 
         # Check for comments and corrections FIRST (resets PGP state and version combo)
         self._check_document_community_status()
@@ -10729,12 +10713,16 @@ class GenizahGUI(QMainWindow):
         if not sys_id:
             return
         meta = self.meta_mgr.nli_cache.get(sys_id, {})
+        from shared.codicological import bodleian_cache_needs_refresh
         from shared.cudl_identity import entry_decision_stale
+        from shared.nli_crossref_service import katz_cache_needs_refresh
         # An entry cached before the record's current Cambridge decision may hold
         # another item's images (shared/cudl_identity.py): enrich it again. The
         # decision checked is this entry's own, not a re-read of the cache.
         if ((meta.get('images_nli') or meta.get('images_ext'))
-                and not entry_decision_stale(self.meta_mgr, meta)):
+                and not entry_decision_stale(self.meta_mgr, meta)
+                and not katz_cache_needs_refresh(sys_id, meta)
+                and not bodleian_cache_needs_refresh(self.meta_mgr, sys_id, meta)):
             return
 
         # Initialise the tracking dict lazily — create_browse_tab also does this
@@ -11703,6 +11691,8 @@ class GenizahGUI(QMainWindow):
         display_meta = copy.copy(meta)
         if data and data.get('images_nli'):
             display_meta['images_nli'] = data['images_nli']
+            if display_meta.get('oxford_part_metadata'):
+                display_meta['oxford_volume_suffix'] = data['suffix']
 
         # Filter external images (Manchester/Cambridge/JTS) to the active volume.
         # External canvases span all volumes sequentially, so we slice by offset.
@@ -28501,6 +28491,7 @@ class GenizahGUI(QMainWindow):
 
         # 3. Populate Browse panel state.
         self.current_browse_sid = sys_id
+        self.btn_b_external_link.hide()
         self._sync_browse_cite_button()  # Cite + website buttons follow the document
         self.current_browse_p = None
         self.current_browse_internal_idx = None
@@ -28787,6 +28778,7 @@ class GenizahGUI(QMainWindow):
         if not page_data:
             return
 
+        self.btn_b_external_link.hide()
         text = page_data.get('text', '') or ''
         cur = page_data.get('current_idx', 1)
         total = page_data.get('total_pages', 1)
@@ -34799,6 +34791,8 @@ class GenizahGUI(QMainWindow):
         self._update_browse_add_to_list_button()
 
         parsed = self.meta_mgr.parse_full_id_components(full_header)
+        metadata_only = pd.get('metadata_only', False)
+        self._browse_displayed_scan = (self.current_browse_sid, self.current_browse_p, parsed.get('fl_id'), metadata_only)
         if parsed.get('fl_id'):
             self.browse_fl_input.setText(f"FL{parsed['fl_id']}")
         else:
@@ -34828,7 +34822,10 @@ class GenizahGUI(QMainWindow):
                 getattr(self.browse_viewer, 'external_provider', None) == 'cambridge'
                 and getattr(self.browse_viewer, 'current_source', None) == 'ext'
             )
-            if not folio_in_viewer and folio_num is not None and meta:
+            if meta.get('external_provider') == 'katz':
+                self.browse_viewer.set_katz_page(meta, parsed.get('fl_id'), self.current_browse_p,
+                                                metadata_only=metadata_only)
+            elif not folio_in_viewer and folio_num is not None and meta:
                 # Check if this is Oxford with folio_range that includes this folio
                 oxford_part_meta = meta.get('oxford_part_metadata', {})
                 folio_range = oxford_part_meta.get('folio_range', [])
@@ -34942,13 +34939,6 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'btn_b_pgp'):
             self.btn_b_pgp.setVisible(bool(url))
 
-    def _browse_open_external_link(self):
-        if hasattr(self, '_browse_external_url') and self._browse_external_url:
-            url = self._browse_external_url
-            if "cudl.lib.cam.ac.uk/iiif/" in url:
-                url = url.replace("/iiif/", "/view/")
-            QDesktopServices.openUrl(QUrl(url))
-
     def _on_browse_thumb_resolved(self, sid, _unused_url):
         if sid != self.current_browse_sid:
             return
@@ -35015,6 +35005,10 @@ class GenizahGUI(QMainWindow):
 
         # Load from cache if not provided
         meta = meta or self.meta_mgr.nli_cache.get(sys_id)
+        from shared.codicological import bodleian_cache_needs_refresh
+        if meta and bodleian_cache_needs_refresh(self.meta_mgr, sys_id, meta):
+            self.browse_thumb.setText(tr("No Image"))
+            return  # avoid the old part's image while enrichment is running
         
         # In genizah_core, we now guarantee that 'thumb_url' comes from 907 $d if available
         thumb_url = meta.get('thumb_url') if meta else None

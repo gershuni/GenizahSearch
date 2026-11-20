@@ -182,6 +182,9 @@ def _pick_preview_image_url(
     if ext_provider == 'jts' and images_ext:
         return f"/api/jts_image/{sys_id}?page=0{width_param}"
 
+    if ext_provider == 'katz' and images_ext:
+        return f"/api/katz_image/{sys_id}?page=0{width_param}"
+
     if ext_provider == 'manchester' and images_ext:
         return f"/api/manchester_image/{sys_id}?page=0{width_param}"
 

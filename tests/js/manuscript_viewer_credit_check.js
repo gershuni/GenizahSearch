@@ -83,6 +83,13 @@ async function thumbnailFailsThenNliLoads(attrs) {
 }
 
 const checks = {
+    async 'a Penn image falls back to the same NLI scan even if its page number differs'() {
+        const page = makePage({ nliFl: '262908052', creditFallback: 'nli' });
+        await page.sandbox.handleImageError(page.img, SYS, 0, false, null);
+        assert.equal(page.img.src, '/api/nli_image/262908052');
+        page.img.fire('load');
+        assert.equal(page.credit.textContent, 'National Library of Israel');
+    },
     async 'a library image that fell back to NLI keeps NLI image and NLI credit'() {
         const { img, credit } = await thumbnailFailsThenNliLoads({ creditFallback: 'nli' });
         assert.match(img.src, /iiif\.nli\.org\.il/, `the upgrade put the library image back: ${img.src}`);

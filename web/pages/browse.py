@@ -20,6 +20,7 @@ import asyncio
 import re
 import weakref
 import html as html_module
+from web.components.bodleian_links import render_bodleian_links
 from urllib.parse import quote
 from shared.fgp_service import (
     number_repeated_labels, source_provider, source_relation_kind,
@@ -2530,7 +2531,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     'background: rgba(255, 255, 255, 0.2);'
                                 ):
                                     ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
-                                    ui.label(lib_info.get('label', tr('Library'))).classes('text-sm font-semibold').style('color: #ffffff !important;')
+                                    ui.label(tr(lib_info.get('label') or 'Library')).classes('text-sm font-semibold').style('color: #ffffff !important;')
 
                         # Search for Parallels button
                         ui.button(
@@ -2772,12 +2773,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             _external_link('NLI Ktiv', ktiv_url)
 
                         # Oxford Bodleian
-                        if page.is_oxford and page.external_url:
-                            _external_link('Oxford Bodleian', page.external_url)
+                        if page.is_oxford:
+                            volume_url = page.bodleian_links.get('volume')
+                            if page.external_url and page.external_url != volume_url:
+                                _external_link(tr('Bodleian part'), page.external_url)
+                            if volume_url:
+                                _external_link(f"{tr('Bodleian')} · {tr('Whole volume')}", volume_url)
 
                         # Cambridge CUDL
                         if page.is_cambridge and page.external_url:
                             _external_link('Cambridge CUDL', page.external_url)
+
+                        for component in page.katz_component_links:
+                            _external_link(f"{tr('Katz Center')} · {component['label']}", component['url'])
 
                         # Princeton Geniza Project
                         if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
@@ -2789,7 +2797,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Only show if not already covered by Oxford/Cambridge links above
                             if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
                                 _external_link(
-                                    lib_url.get('label', tr('View in Library Catalog')),
+                                    tr(lib_url.get('label') or 'View in Library Catalog'),
                                     lib_url['url'],
                                 )
 
@@ -4333,10 +4341,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 fallback_url = None
                 has_image = False
 
-                # Compute FL ID digits once (for proper fallback logic)
-                fl_digits = ""
-                if fl_id:
-                    fl_digits = re.sub(r"\D", "", str(fl_id))
+                fl_digits = str(fl_id or '').removeprefix('FL')
 
                 # Use pre-computed is_oxford from BrowsePage (computed in services.py)
                 # Also check shelfmark pattern as fallback
@@ -4352,8 +4357,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _img_result = resolve_image_url(
                     sys_id=page.sys_id,
                     p_num=page.p_num,
+                    fl_id=fl_digits,
+                    catalogue_folios=page.folio_images if page.metadata_only else None,
                     is_oxford=is_oxford,
                     shelfmark=page.shelfmark,
+                    oxford_image_url=page.bodleian_links.get('current', ''),
                     volume_suffix=page.volume_suffix,
                     cambridge_images=page.cambridge_images,
                     external_provider=page.external_provider,
@@ -4364,6 +4372,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     source_user_override=state.source_user_override,
                 )
                 img_url = _img_result['img_url']
+                fl_digits = _img_result.get('katz_fl_id') or fl_digits
                 has_image = _img_result['has_image']
                 state.active_source = _img_result['active_source']
                 fallback_url = None
@@ -4375,10 +4384,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # (these were formerly computed inline above; now derived from page fields
                 # after active_source has been set by resolve_image_url).
                 _has_ext_images = bool(page.cambridge_images)
-                _has_cambridge_images = _has_ext_images and (page.external_provider or '') not in ('manchester', 'jts')
+                _has_cambridge_images = _has_ext_images and not is_oxford and (page.external_provider or '') not in ('manchester', 'jts', 'katz')
                 _has_manchester_images = _has_ext_images and page.external_provider == 'manchester'
                 _has_jts_images = _has_ext_images and page.external_provider == 'jts'
-                _has_oxford_images = bool(is_oxford and page.sys_id)
+                _has_katz_image = _img_result['has_katz_image']
+                _has_oxford_images = _img_result['has_oxford_image']
 
                 # Header bar with folio info, navigation, controls
                 # Determine effective image count and folio data
@@ -4390,18 +4400,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # _has_nli forced False so the NLI source chip + viewer deep-link
                 # button never render. Cambridge / Manchester / JTS chips still
                 # appear when their respective images are available.
-                _has_nli = (not is_synthetic_sys_id(page.sys_id)) and _src_info.get('nli_fgp', False)
+                _has_nli = (not is_synthetic_sys_id(page.sys_id)) and (_src_info.get('nli_fgp', False) or _has_katz_image)
                 _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
                 _has_manchester = _src_info.get('manchester', False)
                 _has_jts = _src_info.get('jts', False)
 
                 # Source switching setup -- any external source with NLI enables toggling
-                _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images or _has_oxford_images
+                _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images or _has_oxford_images or _has_katz_image
                 _both_sources = _has_nli and _any_ext_images
                 _is_nli_active = state.active_source == 'nli' or not _any_ext_images
                 _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
                 _is_manchester_active = state.active_source == 'manchester' and _has_manchester_images
                 _is_jts_active = state.active_source == 'jts' and _has_jts_images
+                _is_katz_active = state.active_source == 'katz' and _has_katz_image
+                _fallback_attrs = 'data-credit-fallback="nli"' if _is_katz_active else ''
+                if (_is_katz_active or is_oxford) and fl_digits.isascii() and fl_digits.isdigit():
+                    _fallback_attrs += f' data-nli-fl="{fl_digits}"'
                 _is_oxford_active = state.active_source == 'oxford' and _has_oxford_images
 
                 async def _switch_source(source):
@@ -4432,6 +4446,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 async def switch_to_jts():
                     await _switch_source('jts')
+
+                async def switch_to_katz():
+                    await _switch_source('katz')
 
                 async def switch_to_oxford():
                     await _switch_source('oxford')
@@ -4547,6 +4564,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _source_chip('JTS', _open_dpul, jts_style, tr('Open in Princeton Digital Library'), opens_external=True)
                                     else:
                                         _source_external_button(_open_dpul, jts_color, tr('Open in Princeton Digital Library'))
+
+                            if page.katz_component_links:
+                                ui.label(tr('Katz Center')).classes('text-xs font-semibold')
+                                for component in page.katz_component_links:
+                                    _external_link(component['label'], component['url'])
+
+                            if page.library_code == 'Katz' and (page.library_viewer_url or {}).get('label') == 'Katz Center':
+                                katz_url = page.library_viewer_url['url']
+                                katz_color = '#176b7b'
+                                katz_style = (f'border: 1.5px solid {katz_color}; border-radius: 12px; min-height: 22px; '
+                                              + (f'background: {katz_color}; color: white;' if _is_katz_active else f'color: {katz_color};'))
+                                if _has_katz_image and _has_nli:
+                                    _source_chip(tr('Katz Center'), switch_to_katz, katz_style,
+                                                 tr('Viewing Katz Center images') if _is_katz_active else tr('View Katz Center images'),
+                                                 opens_external=False)
+                                    _source_external_button(katz_url, katz_color, tr('Open in Penn Libraries'))
+                                else:
+                                    _source_chip(tr('Katz Center'), katz_url, katz_style, tr('Open in Penn Libraries'), opens_external=True)
 
                             if page.is_oxford:
                                 oxford_color = '#8e44ad'
@@ -4958,17 +4993,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'background: #1a1a1a; border-radius: 8px 8px 0 0;'
                             ):
                                 ui.label(tr('Manuscript Image')).classes('text-white font-semibold browse-image-title')
-                                # 260902: direct link to the current folio side on the Genizah Fragments site.
-                                # The Bodleian fronts images with a JS bot-challenge that an <img> or a server
-                                # fetch cannot pass, but the reader's own browser can -- and the Oxford licence
-                                # asks for a link to the site as the source in any case. `is_oxford`, `page_idx`
-                                # and `page` come from the enclosing page-render scope (same as the <img> below).
-                                _ox_direct_link = ''
-                                if is_oxford and page.sys_id:
-                                    from web.services import get_oxford_direct_image_url as _ox_direct_url
-                                    _ox_direct_link = _ox_direct_url(page.shelfmark, page_idx, folio_offset=max(0, (page.volume_suffix or 1) - 1)) or ''
-                                    if _ox_direct_link:
-                                        ui.link(tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True).classes('text-xs').style('color: #9ecbff;').props('data-role="oxford-direct-link"')
+                                _ox_direct_link = page.bodleian_links.get('current', '')
+                                render_bodleian_links(page.bodleian_links)
                                 with ui.row().classes('gap-1 browse-image-tools') as _image_tools_row:
                                     ui.button(icon='remove').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').on('click', js_handler=ZOOM_OUT_JS).tooltip(f'{tr("Zoom out")} (−)')
                                     ui.label(f'{zoom_percent(state.zoom_level)}%').classes('zoom-level-label text-white text-sm px-2')
@@ -5038,7 +5064,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                     safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
 
-                                    is_oxford_js = 'true' if is_oxford else 'false'
+                                    is_oxford_js = 'true' if _has_oxford_images else 'false'
                                     # Progressive loading: thumbnail first, then full resolution
                                     _thumb_url = safe_img_url
                                     _full_url = safe_img_url
@@ -5059,6 +5085,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         data-zoom-seq="{int(state.zoom_seq)}"
                                         draggable="false"
                                         data-oxford-direct="{_ox_direct_attr}"
+                                        data-volume-suffix="{int(page.volume_suffix or 1)}"
+                                        {_fallback_attrs}
                                         data-oxford-direct-label="{_ox_direct_label}"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
                                         onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'manuscriptViewer')"
@@ -5098,7 +5126,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # what should be on screen from the start
                                     # (Codex P2, 2026-09-02).
                                     credit_text = (
-                                        _credit_nli_text if (_is_nli_active and page.is_oxford)
+                                        _credit_nli_text if (_is_nli_active and (page.is_oxford or page.external_provider == 'katz'))
                                         else (_credit_ox_text or _credit_nli_text)
                                     )
                                     # Route credit link based on the actively viewed source,
@@ -5119,6 +5147,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         credit_link = _ox_direct_link or page.external_url or 'https://hebrew.bodleian.ox.ac.uk/'
                                     elif _is_manchester_active or page.external_provider == 'manchester':
                                         credit_link = 'https://luna.manchester.ac.uk/'
+                                    elif _is_katz_active:
+                                        credit_link = (page.library_viewer_url or {}).get('url') or page.external_url
                                     elif _is_cambridge_active or page.is_cambridge:
                                         credit_link = 'https://cudl.lib.cam.ac.uk/'
                                     elif _is_jts_active or page.external_provider == 'jts':
@@ -5564,13 +5594,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if has_image and img_url:
                                         safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                         safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
-                                        is_oxford_js = 'true' if is_oxford else 'false'
+                                        is_oxford_js = 'true' if _has_oxford_images else 'false'
+                                        _fs_oxford = html_module.escape(page.bodleian_links.get('current', ''), quote=True)
                                         _fs_thumb = safe_img_url
                                         _fs_full = safe_img_url
                                         if '/api/nli_image_by_sysid/' in safe_img_url:
                                             _sep = '&' if '?' in safe_img_url else '?'
                                             _fs_thumb = f"{safe_img_url}{_sep}width=400"
-                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" data-oxford-direct="{_fs_oxford}" data-volume-suffix="{int(page.volume_suffix or 1)}" {_fallback_attrs} class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')
                                     else:

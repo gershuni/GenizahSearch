@@ -265,7 +265,11 @@ def fresh_external_entry(meta_mgr, sys_id) -> dict:
     if cache is None:
         return {}
     entry = cache.get(sys_id) or {}
-    if entry.get('images_ext') and not entry_decision_stale(meta_mgr, entry):
+    from shared.codicological import bodleian_cache_needs_refresh
+    from shared.nli_crossref_service import katz_cache_needs_refresh
+    if (entry.get('images_ext') and not entry_decision_stale(meta_mgr, entry)
+            and not katz_cache_needs_refresh(sys_id, entry)
+            and not bodleian_cache_needs_refresh(meta_mgr, sys_id, entry)):
         return entry
     fresh = meta_mgr.enrich_metadata(sys_id)
     return fresh if isinstance(fresh, dict) else (cache.get(sys_id) or {})

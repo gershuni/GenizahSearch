@@ -3,11 +3,86 @@
 import html
 import re
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QTextEdit, QToolButton, QCompleter
-from PyQt6.QtCore import Qt, QEvent, QRect
-from PyQt6.QtGui import QColor, QTextCursor, QTextCharFormat
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QMenu, QTextEdit, QToolButton, QCompleter
+from PyQt6.QtCore import Qt, QEvent, QRect, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices, QTextCursor, QTextCharFormat
 
 from genizah_core import tr
+from shared.codicological import get_bodleian_links
+
+
+class LibraryLinkButton(QToolButton):
+    """Open the holding library's item, or choose a Bodleian folio side or volume."""
+
+    def __init__(self, icon_text=''):
+        super().__init__()
+        self._icon_text = icon_text
+        self._item_url = ''
+        self._library_menu = QMenu(self)
+        self._library_menu.aboutToShow.connect(self._fill_library_menu)
+        self.clicked.connect(self._open_item)
+        self.setToolTip(tr('Open in external library website'))
+        self.hide()
+
+    def set_record(self, meta, *, part_meta=None, shelfmark='', provider='', position=None):
+        provider = provider or meta.get('external_provider')
+        self._part = part_meta or meta.get('oxford_part_metadata') or {}
+        self._katz_components = meta.get('katz_component_links') or []
+        self._shelfmark = shelfmark or meta.get('shelfmark') or ''
+        self._folio_images = meta.get('folio_images') or []
+        self._position = position
+        # The Cambridge URL has already passed the catalogue identity check.
+        self._item_url = meta.get('external_url') or ''
+        viewer = meta.get('library_viewer_url') or {}
+        if viewer.get('label') == 'Katz Center':
+            provider = 'katz'
+        if provider in ('manchester', 'jts', 'katz'):
+            self._item_url = viewer.get('url') or self._item_url
+
+        if self._part or self._katz_components:
+            self.setText(self._icon_text + tr('Katz Center' if self._katz_components else 'Bodleian'))
+            self.setMenu(self._library_menu)
+            self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            self._fill_library_menu()
+            self.setVisible(bool(self._library_menu.actions()))
+        else:
+            self.setMenu(None)
+            self.setPopupMode(QToolButton.ToolButtonPopupMode.DelayedPopup)
+            if 'cudl.lib.cam.ac.uk' in self._item_url.lower():
+                provider = 'cambridge'
+            label = {
+                'cambridge': 'Cambridge', 'oxford': 'Oxford', 'katz': 'Katz Center',
+                'manchester': 'Manchester LUNA', 'jts': 'Princeton Digital Library',
+            }.get(provider, 'External Website')
+            self.setText(self._icon_text + tr(label))
+            self.setVisible(bool(self._item_url))
+
+    def _fill_library_menu(self):
+        menu = self._library_menu
+        menu.clear()
+        if self._katz_components:
+            entries = [(item['label'], item['url']) for item in self._katz_components]
+        else:
+            position = self._position() if self._position else {}
+            urls = get_bodleian_links(self._part, self._shelfmark, folio_images=self._folio_images, **position)
+            if urls.get('current') in (urls.get('recto'), urls.get('verso')):
+                urls.pop('current', None)
+            part_url = self._part.get('direct_link')
+            if part_url and part_url not in urls.values():
+                urls['part'] = part_url
+            labels = (('recto', 'Recto'), ('verso', 'Verso'), ('current', 'Open in Bodleian Libraries'),
+                      ('volume', 'Whole volume'), ('part', 'Bodleian part'))
+            entries = [(tr(label), urls[key]) for key, label in labels if urls.get(key)]
+        for label, url in entries:
+            action = menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+
+    def _open_item(self):
+        if self.menu() is None and self._item_url:
+            url = self._item_url
+            if 'cudl.lib.cam.ac.uk/iiif/' in url:
+                url = url.replace('/iiif/', '/view/')
+            QDesktopServices.openUrl(QUrl(url))
 
 
 class ActionsHoverWidget(QWidget):

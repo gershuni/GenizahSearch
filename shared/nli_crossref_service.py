@@ -14,9 +14,13 @@ Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
 so concurrent NiceGUI run.io_bound() calls each get their own connection.
 """
 
+import csv
+import hashlib
+import io
 import logging
 import re
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote as url_quote
@@ -70,6 +74,112 @@ def parse_folio_label(image_name: str) -> str:
 # Default sidecar filename
 _SIDECAR_FILENAME = "nli_crossref.db"
 _SIDECAR_DIR = "nli_data"
+
+
+_PENN_ITEMS = 'https://digitalcollections.library.upenn.edu/items/'
+
+
+@lru_cache(maxsize=1)
+def _katz_references():
+    """Penn items and uniquely identified scan sides from scripts/import_katz_images.py."""
+    records = {}
+    components = {}
+    revision = None
+    try:
+        data = Path(__file__).with_name('katz_images.csv').read_bytes()
+        revision = hashlib.sha256(data).hexdigest()
+        for row in csv.DictReader(io.StringIO(data.decode('utf-8'))):
+            if row['component']:
+                components.setdefault(row['sys_id'], []).append(
+                    (row['component'], _PENN_ITEMS + row['penn_item']))
+                continue
+            _, sides = records.setdefault(row['sys_id'], (row['penn_item'], {}))
+            if row['penn_image']:
+                sides[row['folio']] = row['penn_image']
+    except OSError as exc:
+        logger.warning("Katz image references unavailable: %s", exc)
+    return records, components, revision
+
+
+def katz_viewer_url(sys_id: str) -> Optional[dict]:
+    """Exact Penn collection item, available even when the NLI sidecar is absent."""
+    records, _, _ = _katz_references()
+    record = records.get(sys_id)
+    if not record:
+        return None
+    return {
+        'url': _PENN_ITEMS + record[0],
+        'label': 'Katz Center', 'library_abbrev': 'Penn CAJS',
+        'library_name_eng': 'Library at the Katz Center, University of Pennsylvania',
+    }
+
+
+def katz_component_links(sys_id: str) -> list[dict]:
+    """Named Penn items for a record containing several identified manuscripts."""
+    _, components, _ = _katz_references()
+    return [{'label': label, 'url': url} for label, url in components.get(sys_id, ())]
+
+
+def katz_reference_revision(sys_id: str) -> Optional[str]:
+    """Version of Penn's reference data for a linked manuscript; absent for all others."""
+    records, components, revision = _katz_references()
+    return revision if sys_id in records or sys_id in components else None
+
+
+def katz_cache_needs_refresh(sys_id: str, meta: dict) -> bool:
+    """Detect newly supported manuscripts as well as corrected or withdrawn links."""
+    return (meta or {}).get('katz_checked') != katz_reference_revision(sys_id)
+
+
+def katz_canvases(sys_id: str, nli_images: list[dict]) -> list[dict]:
+    """Match every NLI canvas to a Penn scan by explicit leaf and side.
+
+    The cross-reference carries Penn's original filename for each labeled
+    side. Ambiguous canvases, supplementary images and multi-IE records keep
+    their catalogue link. This also preserves safety for viewers using a
+    page index, which require a complete list in the same order as NLI.
+    """
+    records, _, _ = _katz_references()
+    record = records.get(sys_id)
+    if not record or not record[1] or len(record[1]) != len(nli_images):
+        return []
+    from shared.browse_map_utils import _load_ie_volume_map
+    if sys_id in _load_ie_volume_map():
+        return []
+    images = []
+    seen = set()
+    for image in nli_images:
+        label = image.get('label')
+        if not isinstance(label, str):
+            return []
+        match = re.fullmatch(r'(?:Frag\.\s*)?0*(\d+)\s*([rv])', label.strip(), re.I)
+        if not match or not image.get('fl_id'):
+            return []
+        folio = str(int(match[1])) + match[2].lower()
+        asset = record[1].get(folio)
+        if not asset or folio in seen:
+            return []
+        seen.add(folio)
+        images.append({
+            'label': folio, 'folio_num': int(match[1]), 'folio_side': match[2].lower(),
+            'fl_id': image['fl_id'],
+            'url': f'https://iiif-images.library.upenn.edu/iiif/3/{asset}',
+        })
+    return images
+
+
+def katz_catalogue_page_fl(scans, folio_rows, page_num):
+    """Find the NLI image ID for a page browsed by image, without a transcription."""
+    if not page_num or not 1 <= page_num <= len(scans):
+        return None
+    if not folio_rows:
+        # Without local folio labels, the viewer pages through the matched manifest itself.
+        return scans[page_num - 1].get('fl_id')
+    labels = [row.get('folio_label') for row in folio_rows]
+    by_label = {scan.get('label'): scan.get('fl_id') for scan in scans}
+    if len(labels) != len(scans) or len(by_label) != len(scans) or set(labels) != by_label.keys():
+        return None
+    return by_label[labels[page_num - 1]]
 
 
 def _find_project_root() -> Optional[Path]:
@@ -464,6 +574,9 @@ class NliCrossrefService:
             Returns None if no URL can be constructed (unknown library,
             missing data, or Oxford which uses a separate path).
         """
+        katz = katz_viewer_url(sys_id)
+        if katz:
+            return katz
         if self._conn is None:
             return None
         try:

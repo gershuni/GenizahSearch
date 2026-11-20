@@ -136,8 +136,8 @@ class TestRosettaThumbnailFallback:
 class TestBodleianDirectLinkWiring:
     def test_web_header_offers_direct_link_and_passes_it_to_the_image(self):
         src = open("web/pages/browse.py", encoding="utf-8").read()
-        assert "get_oxford_direct_image_url as _ox_direct_url" in src
-        assert "tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True" in src
+        assert "_ox_direct_link = page.bodleian_links.get('current', '')" in src
+        assert 'render_bodleian_links(page.bodleian_links)' in src
         assert 'data-oxford-direct="{_ox_direct_attr}"' in src
         assert "html_module.escape(_ox_direct_link, quote=True)" in src
 

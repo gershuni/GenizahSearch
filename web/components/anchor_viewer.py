@@ -615,6 +615,8 @@ class AnchorViewer:
         resolved = resolve_image_url(
             sys_id=page.sys_id,
             p_num=page.p_num,
+            fl_id=getattr(page, 'fl_id', None),
+            catalogue_folios=(ext.get('folio_images') or []) if getattr(page, 'metadata_only', False) else None,
             is_oxford=page.is_oxford,
             shelfmark=page.shelfmark,
             volume_suffix=page.volume_suffix,

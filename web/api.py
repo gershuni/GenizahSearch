@@ -205,7 +205,7 @@ def get_runtime_cache_stats() -> dict:
 
 
 def _make_image_cache(name: str) -> _TTLMemoryCache:
-    shard_count = 5
+    shard_count = 6
     max_bytes = IMAGE_CACHE_MAX_BYTES // shard_count if IMAGE_CACHE_MAX_BYTES else 0
     max_entries = IMAGE_CACHE_MAX_ENTRIES // shard_count if IMAGE_CACHE_MAX_ENTRIES else 0
     cache = _TTLMemoryCache(
@@ -1604,6 +1604,43 @@ def init_api_routes(app_override=None):
             logger.exception("Error fetching JTS image")
             return Response(content="Error fetching JTS image", status_code=500)
 
+    _katz_images = _make_image_cache('image_katz')
+
+    @target_app.get('/api/katz_image/{sys_id}')
+    @_image_cache_headers
+    def katz_image(sys_id: str, page: int = 0, width: int = 2000, fl: str = ''):
+        """Serve a Penn scan from the matched manuscript and image sequence."""
+        from shared.nli_crossref_service import katz_viewer_url
+        from shared.puzzle_image_service import get_with_checked_redirects
+
+        if page < 0 or not katz_viewer_url(sys_id):
+            return Response(status_code=404)
+        entry = _external_entry(sys_id)
+        images = entry.get('images_ext') or []
+        if entry.get('external_provider') != 'katz' or page >= len(images):
+            return Response(status_code=404)
+        scan = images[page]
+        if fl and fl != scan.get('fl_id'):
+            return Response(status_code=404)
+        width = max(100, min(width, 2000))
+        url = f"{scan['url']}/full/{width},/0/default.jpg"
+        cached = _katz_images.get(url)
+        if cached is not None:
+            return Response(content=cached, media_type='image/jpeg')
+
+        try:
+            response = get_with_checked_redirects(
+                url, allowed=lambda u: u.startswith('https://iiif-images.library.upenn.edu/'),
+                timeout=(5, 30),
+            )
+            if response.status_code != 200 or response.headers.get('Content-Type', '').split(';')[0] != 'image/jpeg':
+                return Response(status_code=502)
+            _katz_images.set(url, response.content)
+            return Response(content=response.content, media_type='image/jpeg')
+        except requests.RequestException as exc:
+            logger.warning("Katz Center image request failed for %s: %s", sys_id, exc)
+            return Response(status_code=502)
+
     def _extract_folio_number(shelfmark: str) -> int:
         """Extract folio number from Oxford shelfmark like 'MS heb. f.21/21' -> 21"""
         # Pattern: MS heb. X.YY/ZZ where ZZ is the folio number
@@ -2103,6 +2140,8 @@ def init_api_routes(app_override=None):
             return manchester_image(sys_id=sys_id, page=page)
         elif provider == 'jts':
             return jts_image(sys_id=sys_id, page=page)
+        elif provider == 'katz':
+            return katz_image(sys_id=sys_id, page=page)
         elif provider == 'oxford':
             return oxford_image(sys_id=sys_id, page=page)
         else:
@@ -2130,7 +2169,7 @@ def init_api_routes(app_override=None):
         if not provider or not sys_id:
             return Response(content="Missing provider or sys_id", status_code=400)
 
-        valid_providers = ('cambridge', 'manchester', 'jts', 'oxford')
+        valid_providers = ('cambridge', 'manchester', 'jts', 'oxford', 'katz')
         if provider not in valid_providers:
             return Response(content=f"Unknown provider: {provider}", status_code=400)
 

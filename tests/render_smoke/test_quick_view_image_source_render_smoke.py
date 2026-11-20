@@ -12,6 +12,8 @@ Harness: tests/render_smoke/test_quick_view_without_automatic_text_render_smoke.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from nicegui import ui
@@ -20,6 +22,7 @@ from tests.render_smoke.test_quick_view_without_automatic_text_render_smoke impo
     PAGE, SID, _elements, _html, _run, _version_label, _wait_until,
 )
 from web.pages import search_results
+from shared.codicological import CodicologicalManager
 
 CUDL = [{'url': 'https://cudl.lib.cam.ac.uk/iiif/MS-TS-NS-00243-00146/canvas/1'},
         {'url': 'https://cudl.lib.cam.ac.uk/iiif/MS-TS-NS-00243-00146/canvas/2'}]
@@ -42,6 +45,30 @@ def _shows(user, prefix):
 def _image_element(user):
     found = [e for e in _elements(user) if isinstance(e, ui.html) and 'adv-zoomable-image' in (e.content or '')]
     return found[0] if found else None
+
+
+def test_quick_view_opens_the_current_bodleian_side_and_the_whole_volume():
+    from tests.render_smoke.test_quick_view_without_automatic_text_render_smoke import PAGES
+
+    shelfmark = 'MS heb. g.2/27'
+    codico = CodicologicalManager()
+    codico.load({SID: {'shelfmark': shelfmark, 'oxford_part_id': 'MS. Heb. g. 2'}})
+    pages = [replace(p, library_code='Oxford', shelfmark=shelfmark, is_oxford=True) for p in PAGES[SID]]
+
+    async def driver(user):
+        # The search hit still has its old catalogue label; the opened page identifies the volume.
+        with patch.dict(PAGES, {SID: pages}), \
+                patch.object(search_results.state, 'meta_mgr', SimpleNamespace(codico_mgr=codico)), \
+                patch.object(search_results, 'quick_view_external_images', lambda sid: {'sys_id': sid}):
+            await user.open(f'{PAGE}?case=hit')
+            await _wait_until(lambda: 'MS_HEB_g_2_27b.jpg' in _html(user))
+            links = {e.props.get('data-role'): e.props.get('href') for e in _elements(user) if isinstance(e, ui.link)}
+            assert links['bodleian-recto'].endswith('/MS_HEB_g_2_27a.jpg')
+            assert links['bodleian-verso'].endswith('/MS_HEB_g_2_27b.jpg')
+            assert links['bodleian-volume'].endswith('/catalog/volume_215')
+            assert 'data-oxford-direct="https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_g_2_27b.jpg"' in _html(user)
+
+    _run(driver)
 
 
 def _credit_label(user):

@@ -207,6 +207,16 @@ def test_resolve_image_url_oxford_bodleian_derivable():
     assert 'iiif.nli.org.il' not in result['img_url']
 
 
+def test_missing_bodleian_side_stays_on_nli_with_an_oxford_part_image_list():
+    result = resolve_image_url(
+        sys_id=REAL_SYS_ID, p_num=2, is_oxford=True, shelfmark="MS heb. a.4/1",
+        oxford_image_url="", active_source="oxford", cambridge_images=[{"label": "1a"}],
+        nli_circuit_open=True,
+    )
+    assert result["active_source"] == "nli"
+    assert result["img_url"].startswith(f"/api/nli_image_by_sysid/{REAL_SYS_ID}?page=1")
+
+
 def test_resolve_image_url_oxford_no_bodleian_shelfmark():
     """Oxford with non-Bodleian-derivable shelfmark → /api/oxford_image proxy fallback."""
     result = resolve_image_url(
@@ -420,3 +430,18 @@ class TestSeed010SourceFirst:
             active_source='nli',  # nli_circuit_open omitted → read from breaker
         )
         assert result['active_source'] == 'cambridge'
+
+
+def test_penn_uses_the_current_scan_id_to_select_the_side():
+    scans = [{'fl_id': '262908051'}, {'fl_id': '262908052'}]
+    args = dict(sys_id='990001664240205171', p_num=1, cambridge_images=scans,
+                external_provider='katz', nli_circuit_open=True)
+    verso = resolve_image_url(**args, fl_id='FL262908052')
+    assert verso['active_source'] == 'katz'
+    assert verso['img_url'] == '/api/katz_image/990001664240205171?page=1&fl=262908052'
+    for fl in (None, '262908050'):
+        unmatched = resolve_image_url(**args, fl_id=fl, active_source='katz')
+        assert not unmatched['has_katz_image'] and unmatched['active_source'] == 'nli'
+    chosen = resolve_image_url(**args, fl_id='262908052', active_source='nli', source_user_override=True)
+    assert chosen['has_katz_image'] and chosen['active_source'] == 'nli'
+    assert chosen['img_url'] == '/api/nli_image/262908052'

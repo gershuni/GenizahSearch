@@ -17,7 +17,7 @@ from PyQt6.QtGui import (
 
 from genizah_core import (
     CURRENT_LANG, get_library_display, get_logger,
-    load_app_config, save_app_config, tr,
+    load_app_config, resolve_volume_suffix, save_app_config, tr,
 )
 from desktop.gui_threads import EnrichMetadataThread, PGPSourceWorker
 from desktop.corrections_client import correction_author_key, is_own_correction
@@ -27,7 +27,7 @@ from desktop.corrections_ui import (
 from desktop.widgets import (
     text_has_pattern_markers,
     _format_add_to_list_label,
-    FindNavigator, apply_find_highlight, mark_pattern_hits, markers_to_bold_html, text_lines_to_html,
+    FindNavigator, LibraryLinkButton, apply_find_highlight, mark_pattern_hits, markers_to_bold_html, text_lines_to_html,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index,
 )
@@ -51,6 +51,7 @@ from desktop.widgets.overflow_row import (
 from desktop.widgets.side_nav import LayoutProofShortcuts
 from desktop.shortcuts_dialog import arrow_keys, key_label
 from shared.catalog_text_rows import FOUND_HEADING
+from shared.codicological import bodleian_cache_needs_refresh
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
@@ -76,16 +77,14 @@ def _saved_text_pt():
 
 
 def _cached_meta_needs_enrichment(meta_mgr, sys_id, cached_meta) -> bool:
-    """Must the dialog enrich this record before showing it, rather than reuse the cache?
-
-    Yes when nothing is cached, when the entry was never enriched (no MARC), and when it
-    was enriched before the record's current Cambridge decision: such an entry may hold
-    another item's CUDL link and images (shared/cudl_identity.py).
-    """
+    """Refresh partial metadata and library links or images resolved by obsolete rules."""
     from shared.cudl_identity import entry_decision_stale
+    from shared.nli_crossref_service import katz_cache_needs_refresh
     # The decision of THIS entry -- the one the dialog would show -- not a re-read.
     return (not cached_meta or 'marc' not in cached_meta
-            or entry_decision_stale(meta_mgr, cached_meta))
+            or entry_decision_stale(meta_mgr, cached_meta)
+            or katz_cache_needs_refresh(sys_id, cached_meta)
+            or bodleian_cache_needs_refresh(meta_mgr, sys_id, cached_meta))
 
 class _ReadingTextSize(QObject):
     """The transcription text size, one for the Manuscript Viewer and the Browse
@@ -209,7 +208,9 @@ class ResultDialog(QDialog):
         # State for internal browsing
         self.current_sys_id = None
         self.current_p_num = None
+        self.current_total_pages = 0
         self.current_fl_id = None
+        self.current_metadata_only = False
         self.current_page_text = None
         self.current_page_uid = None
         self.current_internal_idx = None
@@ -217,7 +218,6 @@ class ResultDialog(QDialog):
 
         self.current_meta_request = 0
         self.extended_info_visible = False
-        self.external_url = None
 
         # External Viewer State
         self.ext_data = None
@@ -461,6 +461,8 @@ class ResultDialog(QDialog):
         self.btn_compact_ext_info.setVisible(False)  # shown when extended info available
         self.btn_compact_ext_info.toggled.connect(self.toggle_extended_info)
         self.compact_actions.add(self.btn_compact_ext_info, 1)
+        self.btn_compact_library_link = LibraryLinkButton()
+        self.compact_actions.add(self.btn_compact_library_link, 2)
 
         # Bib buttons (compact)
         self.btn_compact_bib_fjms = QPushButton()
@@ -564,9 +566,7 @@ class ResultDialog(QDialog):
 
         # Controls Row
         self.btn_img = QPushButton(tr("Go to Ktiv")); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_catalog); self.btn_img.setFixedWidth(100)
-        self.btn_external_link = QPushButton(tr("External Website"))
-        self.btn_external_link.setVisible(False)
-        self.btn_external_link.clicked.connect(self.open_external_link)
+        self.btn_external_link = LibraryLinkButton()
         # Princeton Geniza Project. Hidden until _on_rd_pgp_loaded reports a
         # url for this manuscript -- most manuscripts have no PGP document,
         # so this follows btn_external_link rather than btn_img (Ktiv), which
@@ -2906,14 +2906,6 @@ class ResultDialog(QDialog):
             if _btn is not None:
                 _btn.setVisible(bool(url))
 
-    def open_external_link(self):
-        if self.external_url:
-            url = self.external_url
-            # Transform CUDL IIIF manifest URL to viewer URL
-            if "cudl.lib.cam.ac.uk/iiif/" in url:
-                url = url.replace("/iiif/", "/view/")
-            QDesktopServices.openUrl(QUrl(url))
-
     def _rd_open_local_file(self):
         """Phase 95 smoke-fix (E): launch the LOCAL source file in the OS default app.
 
@@ -3150,6 +3142,7 @@ class ResultDialog(QDialog):
             # Fallback for tag search results: get sys_id from display dict
             self.current_sys_id = data.get('display', {}).get('id', '')
         self.current_fl_id = ids.get('fl_id')
+        self.current_metadata_only = data.get('metadata_only', False)
         try: p = int(ids['p_num'])
         except (ValueError, TypeError, KeyError): p = 1
         # Phase 96 fix-4: for LOCAL hits, raw_header is empty so ids['p_num']
@@ -3511,6 +3504,8 @@ class ResultDialog(QDialog):
             self.current_sys_id = new_sys
 
         self.current_p_num = page_data['p_num']
+        self.current_total_pages = page_data['total_pages']
+        self.current_metadata_only = page_data.get('metadata_only', False)
         self.current_internal_idx = page_data['internal_index'] # <--- SAVE IT
         
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
@@ -3620,6 +3615,8 @@ class ResultDialog(QDialog):
         self._rd_pgp_doc = None
         self._rd_pgp_sources = []
         self._update_rd_pgp_button(None)
+        self.btn_external_link.hide()
+        self.btn_compact_library_link.hide()
         self._rd_enriched_data_loaded = False
         self._rd_fjms_bib = []
         self._rd_marc_bib = []
@@ -3703,6 +3700,8 @@ class ResultDialog(QDialog):
         # load_page's reset block, so the button has to be dropped here
         # or it keeps pointing at the previous Genizah result.
         self._update_rd_pgp_button(None)
+        self.btn_external_link.hide()
+        self.btn_compact_library_link.hide()
 
         # Fetch the page dict from the engine primitive (plan 96-03).
         if target is not None:
@@ -4184,6 +4183,7 @@ class ResultDialog(QDialog):
                 oxford_part_id = part_id
                 part_meta = self.meta_mgr.get_part_metadata(part_id)
 
+        shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(sid)[0]
         # 2. Populate External / Image Viewer
         has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
         _prev_img_visible = self.btn_toggle_image.isChecked()
@@ -4200,15 +4200,18 @@ class ResultDialog(QDialog):
             self.txt_ext_meta.setVisible(False)
 
             # Load images into widget
-            shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
-            folio_num = _get_folio_number_from_shelfmark(shelfmark)
-            side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
-            initial_idx = _get_folio_image_index(
-                meta,
-                folio_num if folio_num is not None else self.current_p_num,
-                side_offset=side_offset
-            )
-            self.ms_viewer.load_images(meta, initial_idx, target_folio=folio_num)
+            if meta.get('external_provider') == 'katz':
+                self.ms_viewer.set_katz_page(meta, self.current_fl_id, self.current_p_num,
+                                             metadata_only=self.current_metadata_only)
+            else:
+                folio_num = _get_folio_number_from_shelfmark(shelfmark)
+                side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
+                initial_idx = _get_folio_image_index(
+                    meta,
+                    folio_num if folio_num is not None else self.current_p_num,
+                    side_offset=side_offset
+                )
+                self.ms_viewer.load_images(meta, initial_idx, target_folio=folio_num)
 
             # Preserve user's image toggle preference across navigation
             if not _prev_img_visible:
@@ -4218,31 +4221,14 @@ class ResultDialog(QDialog):
             self.external_pane.setVisible(False)
             self.btn_toggle_image.setChecked(False)
 
-        # external_url carries the record's Cambridge decision (enrich_metadata); the raw
-        # MARC 856 link does not.
-        self.external_url = meta.get('external_url')
-        # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
-        lib_viewer = meta.get('library_viewer_url')
-        if lib_viewer and lib_viewer.get('url'):
-            provider_check = meta.get('external_provider', '')
-            if provider_check in ('manchester', 'jts'):
-                self.external_url = lib_viewer['url']
-        if self.external_url:
-            provider = meta.get('external_provider', '')
-            if oxford_part_id or provider == 'oxford':
-                btn_label = tr("Oxford")
-            elif provider == 'cambridge' or "cudl.lib.cam.ac.uk" in (self.external_url or "").lower():
-                btn_label = tr("Cambridge")
-            elif provider == 'manchester':
-                btn_label = "Manchester LUNA"
-            elif provider == 'jts':
-                btn_label = "Princeton Digital Library"
-            else:
-                btn_label = tr("External Website")
-            self.btn_external_link.setText(btn_label)
-            self.btn_external_link.setVisible(True)
-        else:
-            self.btn_external_link.setVisible(False)
+        for button in (self.btn_external_link, self.btn_compact_library_link):
+            button.set_record(
+                meta, part_meta=part_meta, shelfmark=shelfmark,
+                position=lambda: {
+                    'page_num': self.current_p_num or 1, 'total_pages': self.current_total_pages,
+                    'folio_offset': resolve_volume_suffix(sid, self.current_volume_ie) - 1,
+                },
+            )
 
         # 3. Populate bibliography buttons (before early-return guard)
         marc = meta.get('marc', {})
@@ -4371,6 +4357,10 @@ class ResultDialog(QDialog):
         meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {})
         if not meta:
             return
+        if meta.get('external_provider') == 'katz':
+            self.ms_viewer.set_katz_page(meta, self.current_fl_id, self.current_p_num,
+                                         metadata_only=self.current_metadata_only)
+            return
         shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
         side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
@@ -4415,6 +4405,9 @@ class ResultDialog(QDialog):
         # Ensure we look at the global cache which acts as the "Source of Truth"
         if not meta:
             meta = self.meta_mgr.nli_cache.get(sys_id)
+        if meta and bodleian_cache_needs_refresh(self.meta_mgr, sys_id, meta):
+            self.lbl_thumb.setText(tr("No Preview"))
+            return  # enrichment will supply the current part's thumbnail
 
         # Retrieve the URL that MetadataManager logic (XML 907 $d) has determined
         thumb_url = meta.get('thumb_url') if meta else None

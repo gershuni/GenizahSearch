@@ -110,7 +110,7 @@ def _is_session_free_path(path: str) -> bool:
 # signed-out upload only to its own browser. tests/test_image_route_sessions.py pins it.
 _PUBLIC_IMAGE_ROUTE_RE = re.compile(
     r'^/api/(?:nli_image|nli_image_by_sysid|cambridge_image|manchester_image'
-    r'|jts_image|oxford_image)/[^/]+'
+    r'|jts_image|katz_image|oxford_image)/[^/]+'
 )
 
 

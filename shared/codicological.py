@@ -16,6 +16,132 @@ from shared.config import Config
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
+_OXFORD_SHELFMARK = re.compile(
+    r"(?:MS\.?\s*)?(Heb|Georg|Syr)\.?\s*([a-z])\.?\s*(\d+)"
+    r"\s*(\*|\([PR]\))?(?:\s*[/.]\s*(\d+)(?:\(([a-z]+)\)|([a-z]+))?"
+    r"(?:[-–]\d+)?)?",
+    re.IGNORECASE,
+)
+_OXFORD_SIDE_LABEL = re.compile(r"(\d+(?:\([a-z]+\))?)([ab])")
+_OXFORD_SITE = "https://hebrew.bodleian.ox.ac.uk/"
+
+
+def _oxford_volume_and_folio(shelfmark):
+    """Convert local and Oxford punctuation to the catalogue's volume and folio keys."""
+    match = _OXFORD_SHELFMARK.fullmatch((shelfmark or "").partition("|")[0].strip())
+    if not match:
+        return "", ""
+    language, letter, number, mark, folio, qualifier, bare_qualifier = match.groups()
+    volume = f"MS. {language.title()}. {letter.lower()}. {number}"
+    if mark:
+        volume += "*" if mark == "*" else f" {mark.upper()}"
+    qualifier = qualifier or bare_qualifier
+    if qualifier:
+        folio += f"({qualifier.lower()})"
+    return volume, folio or ""
+
+
+def bodleian_cache_needs_refresh(meta_mgr, sys_id, entry):
+    """Check persisted Oxford assignments against the currently loaded catalogue."""
+    record = (getattr(meta_mgr, "csv_bank", {}) or {}).get(sys_id) or {}
+    if record.get("library_code") != "Oxford":
+        return False
+    catalogue = getattr(meta_mgr, "codico_mgr", None)
+    entry = entry or {}
+    if getattr(catalogue, "_loaded", False) is not True:
+        # During startup the volume names may already disprove the cached part.
+        old_volume, _ = _oxford_volume_and_folio((entry.get("oxford_part_id") or "").partition("/")[0])
+        volume, _ = _oxford_volume_and_folio(record.get("shelfmark"))
+        return bool(volume and old_volume and volume != old_volume)
+    part = catalogue.get_part_for_folio(sys_id)
+    if entry.get("oxford_part_id") != part:
+        return True
+    current = catalogue.get_part_metadata(part)
+    volume = current.get("volume_url") or catalogue.get_bodleian_volume_url(record.get("shelfmark"))
+    cached = entry.get("oxford_part_metadata") or {}
+    if (cached.get("volume_url") or "") != volume:
+        return True
+    old_url = entry.get("external_url") or ""
+    return old_url.startswith(_OXFORD_SITE) and old_url != current.get("direct_link")
+
+
+def get_bodleian_links(part_meta, shelfmark, *, folio_offset=0, folio_num=None,
+                       page_num=1, total_pages=0, folio_images=()):
+    """Link a catalogue volume and the attested image(s) of one physical leaf.
+
+    The Oxford image list can be incomplete or out of order. For records with
+    several leaves, match the original library filename from the NLI crossref.
+    An explicit folio from the Oxford image viewer takes precedence.
+    """
+    part_meta = part_meta or {}
+    links = {}
+    volume_url = part_meta.get("volume_url") or ""
+    if re.fullmatch(re.escape(_OXFORD_SITE) + r"catalog/volume_\d+", volume_url):
+        links["volume"] = volume_url
+    images = part_meta.get("images") or []
+    volume, folio = _oxford_volume_and_folio(shelfmark)
+    side = {1: "a", 2: "b"}.get(page_num)
+    if folio_num is not None:
+        folio = str(folio_num).lower()
+    elif folio_offset:
+        # Each of the mapped secondary Oxford IEs represents the next leaf.
+        folio = str(int(folio) + folio_offset) if folio.isdigit() else ""
+        if page_num not in (1, 2):
+            return links
+    elif folio_images and len(folio_images) == total_pages and 1 <= page_num <= total_pages:
+        row = folio_images[page_num - 1]
+        # Repeated local labels mean the rows cannot be aligned to display order.
+        if sum(i.get("folio_label") == row.get("folio_label") for i in folio_images) != 1:
+            return links
+        filename = (row.get("image_source_name") or "").lower().removesuffix(".jpg")
+        for image in images:
+            url = image.get("full_url") or ""
+            if filename and url.lower().endswith("/" + filename + ".jpg"):
+                match = _OXFORD_SIDE_LABEL.fullmatch(image.get("label") or "")
+                if not match:
+                    return links
+                folio, side = match.groups()
+                break
+        else:
+            # Some leaves are absent from the harvested Oxford catalogue. Keep
+            # the historical direct link only if the NLI crossref records the
+            # exact expected filename for this leaf and side.
+            if total_pages <= 2 and folio.isdigit() and volume.startswith("MS. Heb. "):
+                prefix = volume.replace("MS. Heb. ", "MS_HEB_").replace(". ", "_")
+                source = f"{prefix}_{folio}{side}"
+                if source.lower() == filename and not any(
+                        i.get("label") in (folio + "a", folio + "b") for i in images):
+                    links["current"] = _OXFORD_SITE + "fragments/full/" + source + ".jpg"
+                    return links
+            if total_pages > 2 or filename.startswith("ms_"):
+                # Keep any other attested side of this leaf visible, even
+                # when the active side's filename is absent.
+                side = None
+                if total_pages > 2:
+                    return links
+    elif total_pages > 2 or page_num > 2:
+        return links
+
+    for image in images:
+        label = image.get("label") or ""
+        url = image.get("full_url") or ""
+        if label not in (folio + "a", folio + "b") or not url.startswith(_OXFORD_SITE + "fragments/full/"):
+            continue
+        links["recto" if label.endswith("a") else "verso"] = url
+        if label[-1] == side:
+            links["current"] = url
+    return links
+
+
+def bodleian_image_link_items(links):
+    """The links offered together above a Bodleian scan in either app."""
+    for key, label in (('recto', 'Recto'), ('verso', 'Verso'), ('volume', 'Whole volume')):
+        if links.get(key):
+            yield key, label, links[key]
+    current = links.get('current')
+    if current and current not in (links.get('recto'), links.get('verso')):
+        yield 'current', 'Open in Bodleian Libraries', current
+
 
 class CodicologicalManager:
     """
@@ -150,36 +276,21 @@ class CodicologicalManager:
         if not shelfmark:
             return None
 
-        # Parse shelfmark to extract volume and folio
-        # Pattern: MS heb. X.Y/Z or MS heb. X. Y/Z
-        match = re.match(
-            r'(?:MS\.?\s*)?heb\.?\s*([a-z])\.?\s*(\d+)[/.](\d+)',
-            shelfmark,
-            re.IGNORECASE
-        )
-        if not match:
+        volume, folio = _oxford_volume_and_folio(shelfmark)
+        if not folio:
             return None
 
-        letter, volume_num, folio_num = match.groups()
-        folio_num = int(folio_num)
-
-        # Construct volume identifier pattern to find in our volume_parts
-        # The JSON uses volume numbers like "56" which correspond to specific volumes
-        # We need to find parts that match "MS. Heb. {letter}. {volume_num}"
-        volume_pattern = f"heb. {letter}. {volume_num}"
-
-        for part_id, metadata in self.part_metadata.items():
-            # Check if part_id matches the volume pattern
-            if volume_pattern.lower() not in part_id.lower():
-                continue
-
-            folio_range = metadata.get('folio_range', [])
-            if len(folio_range) == 2:
-                start, end = folio_range
-                if start <= folio_num <= end:
-                    return part_id
-
+        folio_num = int(folio.partition("(")[0])
+        for part_id, (start, end) in self._volume_parts.get(volume, {}).items():
+            if start <= folio_num <= end:
+                return part_id
         return None
+
+    def get_bodleian_volume_url(self, shelfmark):
+        """The volume remains identifiable when the catalogue has no matching part."""
+        volume, _ = _oxford_volume_and_folio(shelfmark)
+        first_part = next(iter(self._oxford_db.get(volume, {}).values()), {})
+        return first_part.get("volume_url", "")
 
     def _get_folio_number(self, shelfmark):
         """Extract folio number from shelfmark for sorting."""

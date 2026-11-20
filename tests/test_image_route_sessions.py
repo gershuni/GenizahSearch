@@ -163,6 +163,27 @@ def test_no_images_known_is_a_404_that_is_not_kept(stack, monkeypatch):
     assert response.headers['cache-control'] == 'no-store'
 
 
+def test_penn_proxy_serves_only_the_matched_scan(stack, monkeypatch):
+    from shared import nli_crossref_service
+
+    client, _, upstream = stack
+    monkeypatch.setattr(nli_crossref_service, 'katz_viewer_url', lambda sid: {'url': 'item'} if sid == SYS else None)
+    scan = {'fl_id': FL, 'url': 'https://iiif-images.library.upenn.edu/iiif/3/scan'}
+    record = {'external_provider': 'katz', 'images_ext': [scan], 'katz_checked': True}
+    monkeypatch.setattr('shared.cudl_identity.fresh_external_entry', lambda *args: record)
+    path = f'/api/katz_image/{SYS}'
+    response = client.get(path, params={'fl': FL, 'width': 300})
+    assert response.content == JPEG and response.headers['cache-control'] == LONG
+    assert 'set-cookie' not in response.headers and _is_public_image_route(path)
+    assert client.get(path, params={'fl': '123'}).status_code == 404
+    assert client.get(path, params={'page': 3}).status_code == 404
+    upstream['response'] = _Upstream(content=b'<html>', content_type='text/html')
+    error = client.get(path)
+    assert error.status_code == 502 and error.headers['cache-control'] == 'no-store'
+    record['external_provider'] = 'cambridge'
+    assert client.get(path, params={'width': 300}).status_code == 404
+
+
 def test_the_synthetic_sys_id_204_is_unchanged(stack):
     client, _, _ = stack
     response = client.get('/api/nli_image_by_sysid/990001234560000000')

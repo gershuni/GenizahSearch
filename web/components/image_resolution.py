@@ -75,8 +75,11 @@ def resolve_image_url(
     *,
     sys_id: str,
     p_num: int,
+    fl_id: Optional[str] = None,
+    catalogue_folios: Optional[List[Dict]] = None,
     is_oxford: bool = False,
     shelfmark: str = '',
+    oxford_image_url: Optional[str] = None,
     volume_suffix: int = 1,
     cambridge_images: Optional[List[Dict]] = None,
     external_provider: Optional[str] = None,
@@ -112,6 +115,7 @@ def resolve_image_url(
           ``has_image``     — True when an image is expected at this URL
           ``active_source`` — the (possibly auto-defaulted) active source so callers
                               can persist it (e.g. state.active_source = result['active_source'])
+          ``has_oxford_image``, ``has_katz_image`` — source available for this page
 
     SEED-010 (source-first resolution):
         The final ``active_source`` is decided BEFORE any URL is built, then a single
@@ -151,13 +155,28 @@ def resolve_image_url(
     # The old interleaved order built the NLI URL, THEN flipped active_source to
     # 'oxford' with no Oxford branch to rewrite the URL -> NLI URL leaked through.
     _has_ext_images = bool(cambridge_images)
-    _has_cambridge_images = _has_ext_images and external_provider not in ('manchester', 'jts')
+    _has_cambridge_images = _has_ext_images and not is_oxford and external_provider not in ('manchester', 'jts', 'katz')
     _has_manchester_images = _has_ext_images and external_provider == 'manchester'
     _has_jts_images = _has_ext_images and external_provider == 'jts'
-    # Oxford manuscripts always have a Bodleian direct/proxy path — treat
-    # it as an external source like Cambridge/JTS so the user can switch
-    # between it and the NLI IIIF view of the same manuscript.
-    _has_oxford_images = bool(is_oxford and sys_id)
+    # Penn scans are paired with NLI's individual image IDs. A transcription's
+    # page number can differ from its position in the library's image sequence.
+    # Only catalogue-only pages are numbered by scans. An indexed page
+    # without an image ID must never borrow the scan at that ordinal.
+    katz_idx = None
+    if external_provider == 'katz' and not fl_id and catalogue_folios is not None:
+        from shared.nli_crossref_service import katz_catalogue_page_fl
+        fl_id = katz_catalogue_page_fl(cambridge_images, catalogue_folios, p_num)
+    if external_provider == 'katz' and fl_id:
+        current_fl = str(fl_id).removeprefix('FL')
+        katz_idx = next((i for i, img in enumerate(cambridge_images)
+                         if img.get('fl_id') == current_fl), None)
+    if active_source == 'katz' and katz_idx is None:
+        active_source = 'nli'
+    # Browse supplies the exact side (empty when unavailable). Callers that
+    # omit it retain the historical shelfmark/proxy path.
+    _has_oxford_images = bool(is_oxford and sys_id and oxford_image_url != '')
+    if active_source == 'oxford' and not _has_oxford_images:
+        active_source = 'nli'
     _is_synth = is_synthetic_sys_id(sys_id)
 
     # ---- NLI circuit-breaker state (SEED-010) ----
@@ -180,6 +199,8 @@ def resolve_image_url(
         active_source = 'cambridge'
     if _has_jts_images and active_source == 'nli' and not source_user_override:
         active_source = 'jts'
+    if katz_idx is not None and active_source == 'nli' and not source_user_override:
+        active_source = 'katz'
     if _has_manchester_images and active_source == 'nli' and not source_user_override:
         active_source = 'manchester'
     if _has_oxford_images and active_source == 'nli' and not source_user_override:
@@ -224,7 +245,7 @@ def resolve_image_url(
         # browser to avoid production /api proxy failures. Bodleian is a STATIC,
         # non-NLI host with no circuit breaker. The ANC-02 NLI-proxy restriction
         # applies only to NLI/iiif.nli.org.il paths, NOT to Bodleian.
-        oxford_direct = get_oxford_direct_image_url(shelfmark, page_idx, folio_offset=_ox_folio_offset)
+        oxford_direct = oxford_image_url or get_oxford_direct_image_url(shelfmark, page_idx, folio_offset=_ox_folio_offset)
         if oxford_direct:
             img_url = f"{oxford_direct}{cache_bust_direct}"
         else:
@@ -251,6 +272,12 @@ def resolve_image_url(
     elif active_source == 'jts' and _has_jts_images and not is_oxford:
         has_image = True
         img_url = f"/api/jts_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+    elif active_source == 'katz' and katz_idx is not None:
+        has_image = True
+        img_url = f"/api/katz_image/{sys_id}?page={katz_idx}&fl={current_fl}{_width_api}"
+    elif active_source == 'nli' and katz_idx is not None:
+        has_image = True
+        img_url = f"/api/nli_image/{current_fl}"
     elif sys_id:
         # NLI default. ANC-02 / HIGH-2: ONLY /api/nli_image_by_sysid — never a
         # direct iiif.nli.org.il URL. Phase 85 D-06/D-08: synthetic sys_ids have
@@ -267,6 +294,9 @@ def resolve_image_url(
         'img_url': img_url,
         'has_image': has_image,
         'active_source': active_source,
+        'has_oxford_image': _has_oxford_images,
+        'has_katz_image': katz_idx is not None,
+        'katz_fl_id': current_fl if katz_idx is not None else None,
     }
 
 
@@ -296,7 +326,7 @@ def resolve_external_images(
     Returns:
         dict with keys:
           ``cambridge_images``    — list of IIIF canvas URLs (empty list if none)
-          ``external_provider``   — 'manchester', 'jts', '' (Cambridge), or ''
+          ``external_provider``   — the library providing the canvases, including 'katz'
           ``cambridge_alignment`` — CUDL↔NLI alignment verdict dict or None
           ``cambridge_resolution`` — the record's Cambridge decision (shared/cudl_identity.py)
           ``external_url``        — the external library link
@@ -320,6 +350,7 @@ def resolve_external_images(
     if not sys_id or not hasattr(meta_mgr, 'nli_cache'):
         return {
             'cambridge_images': [],
+            'folio_images': [],
             'external_provider': '',
             'cambridge_alignment': None,
             'cambridge_resolution': None,
@@ -346,6 +377,7 @@ def resolve_external_images(
 
     return {
         'cambridge_images': cached.get('images_ext', []),
+        'folio_images': cached.get('folio_images') or [],
         'external_provider': cached.get('external_provider', ''),
         'cambridge_alignment': cached.get('cambridge_alignment'),
         'cambridge_resolution': cached.get('cambridge_resolution'),

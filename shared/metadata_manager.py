@@ -32,7 +32,7 @@ from shared.nli_circuit_breaker import (
 # marked stale when NLI cannot answer (the module, not its names, so a test can
 # intercept it).
 from shared import nli_metadata_store as _nli_store
-from shared.codicological import CodicologicalManager
+from shared.codicological import CodicologicalManager, bodleian_cache_needs_refresh
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
 from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
 from shared.text_normalize import strip_search_diacritics
@@ -1621,6 +1621,17 @@ class MetadataManager:
         # place showed them a new Cambridge decision beside the old item's images, and the
         # Puzzle's disk cache saved those pixels under the new item's name.
         current_meta = dict(self.nli_cache.get(system_id) or {})
+        if current_meta.pop('katz_checked', None):
+            # Recompute the holding and images from the bundled references. A
+            # withdrawn link must not survive in the persisted metadata cache.
+            current_meta.pop('katz_component_links', None)
+            if (current_meta.get('library_viewer_url') or {}).get('library_abbrev') == 'Penn CAJS':
+                current_meta.pop('library_viewer_url')
+            if (current_meta.get('external_url') or '').startswith('https://digitalcollections.library.upenn.edu/'):
+                current_meta.pop('external_url')
+            if current_meta.get('external_provider') == 'katz':
+                current_meta.pop('external_provider')
+                current_meta.pop('attribution', None)
         current_meta['sys_id'] = system_id  # Store for downstream consumers
         # The catalogue's name is the record's name (get_meta_for_id reads it first too).
         # An entry first fetched from NLI keeps NLI's 942 shelfmark, which for a renamed
@@ -1628,6 +1639,19 @@ class MetadataManager:
         csv_shelfmark = (self.csv_bank.get(system_id) or {}).get('shelfmark')
         if csv_shelfmark:
             current_meta['shelfmark'] = csv_shelfmark
+        if bodleian_cache_needs_refresh(self, system_id, current_meta):
+            old_part = current_meta.pop('oxford_part_metadata', None) or {}
+            current_meta.pop('oxford_part_id', None)
+            current_meta.pop('oxford_volume_suffix', None)
+            if old_part.get('title') and current_meta.get('title') == old_part['title']:
+                current_meta['title'] = (self.csv_bank.get(system_id) or {}).get('title') or ''
+            if current_meta.get('external_provider') == 'oxford':
+                current_meta.pop('external_provider')
+            if current_meta.get('attribution') == OXFORD_IMAGE_CREDIT_EN:
+                current_meta.pop('attribution')
+            for field in ('external_url', 'thumb_url'):
+                if (current_meta.get(field) or '').startswith(OXFORD_GENIZAH_FRAGMENTS_URL):
+                    current_meta.pop(field)
 
         # 1. Submit both NLI network calls concurrently (fetch_marc_data + fetch_iiif_manifest)
         # These are independent calls; running in parallel halves metadata fetch time.
@@ -1726,6 +1750,7 @@ class MetadataManager:
             part_id = self.get_part_for_folio(system_id)
             if part_id:
                 current_meta['oxford_part_id'] = part_id
+                current_meta['oxford_volume_suffix'] = suffix
                 part_meta = self.get_part_metadata(part_id)
                 if part_meta:
                     current_meta['oxford_part_metadata'] = part_meta
@@ -1745,6 +1770,11 @@ class MetadataManager:
                     } for img in part_images]
                     current_meta['attribution'] = OXFORD_IMAGE_CREDIT_EN
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
+            elif (self.csv_bank.get(system_id) or {}).get('library_code') == 'Oxford':
+                # A volume can be catalogued even when this leaf has no assigned part.
+                volume_url = self.codico_mgr.get_bodleian_volume_url(csv_shelfmark)
+                if volume_url:
+                    current_meta['oxford_part_metadata'] = {'volume_url': volume_url}
 
         # 2b. Fetch NLI IIIF manifest for image FL IDs (crossref FGPImageNumberId != IIIF FL number)
         # Crossref is used for metadata (folio labels, image count) but NOT for image URLs.
@@ -1778,6 +1808,25 @@ class MetadataManager:
                 url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
                 images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
 
+        # Penn item links survive an NLI outage. Publishing Penn images requires
+        # a fresh match to the NLI folio labels for this record.
+        from shared.nli_crossref_service import (
+            katz_canvases, katz_component_links, katz_reference_revision, katz_viewer_url,
+        )
+        katz = katz_viewer_url(system_id)
+        components = katz_component_links(system_id)
+        if katz or components:
+            current_meta['katz_checked'] = katz_reference_revision(system_id)
+        if components:
+            current_meta['katz_component_links'] = components
+        if katz:
+            current_meta['library_viewer_url'] = katz
+            if not ext_link and not images_ext:
+                current_meta['external_url'] = katz['url']
+                images_ext = katz_canvases(system_id, images_nli) if suffix == 1 else []
+                if images_ext:
+                    current_meta['external_provider'] = 'katz'
+
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
@@ -1791,7 +1840,9 @@ class MetadataManager:
         _nli_attr = nli_iiif_data.get('attribution', '') or ''
         if _nli_attr or 'attribution_nli' not in current_meta:
             current_meta['attribution_nli'] = _nli_attr
-        if marc_attribution:
+        if images_ext and current_meta.get('external_provider') == 'katz':
+            current_meta['attribution'] = 'Provided by the University of Pennsylvania Libraries.'
+        elif marc_attribution:
             current_meta['attribution'] = marc_attribution
         elif not current_meta.get('attribution'):
             current_meta['attribution'] = current_meta['attribution_nli']

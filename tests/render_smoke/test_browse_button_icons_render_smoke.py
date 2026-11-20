@@ -103,13 +103,14 @@ def _click(user, element):
                 events.handle_event(listener.handler, args)
 
 
-def _run_browse(page, driver, lang='en'):
+def _run_browse(page, driver, lang='en', *, crossref=None):
     # The metadata panel's related-fragments loader goes to the network; stub it.
     # The browse enrichment overwrites the stubbed page's image_source_info from
     # nli_crossref.db when that sidecar is present (it is locally, not on CI), so
     # make it absent: the chips must come from the page above, not local data.
-    crossref = MagicMock()
-    crossref.is_available.return_value = False
+    if crossref is None:
+        crossref = MagicMock()
+        crossref.is_available.return_value = False
     with patch.object(browse, 'get_service', return_value=_service(page)), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
             patch.object(browse, 'load_connected_fragments_into', AsyncMock()), \

@@ -35,18 +35,19 @@ const _flIdCache = {};
  * page render time. Saves cold-cache external requests + prevents
  * polluting NLI access logs with PNX_MANUSCRIPTS99...000000 404s.
  */
-async function fetchFlIdsFromManifest(sysId) {
+async function fetchFlIdsFromManifest(sysId, suffix = 1) {
     if (typeof window !== 'undefined' && window.GENIZAH_IS_SYNTHETIC) {
         console.log(`[Manifest] Skipping NLI manifest fetch for synthetic ${sysId}`);
         return [];
     }
 
-    if (_flIdCache[sysId]) {
+    const cacheKey = sysId + '-' + suffix;
+    if (_flIdCache[cacheKey]) {
         console.log(`[Manifest] Cache hit for ${sysId}`);
-        return _flIdCache[sysId];
+        return _flIdCache[cacheKey];
     }
 
-    const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
+    const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-${suffix}/manifest`;
     console.log(`[Manifest] Fetching ${manifestUrl}`);
     try {
         const resp = await fetch(manifestUrl);
@@ -76,7 +77,7 @@ async function fetchFlIdsFromManifest(sysId) {
         }
 
         if (flIds.length > 0) {
-            _flIdCache[sysId] = flIds;
+            _flIdCache[cacheKey] = flIds;
             console.log(`[Manifest] Cached ${flIds.length} FL IDs for ${sysId}`);
         } else {
             console.log(`[Manifest] No FL IDs extracted for ${sysId}`);
@@ -123,10 +124,17 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
     console.log(`[handleImageError] src=${currentSrc}, sysId=${sysId}, pageIdx=${pageIdx}, isOxford=${isOxford}, viewer=${viewerName}`);
 
-    // Try 1: If Oxford and the CURRENT src is NOT already the Oxford API, try the server proxy
-    if (isOxford && sysId && !isOxfordApiUrl && !img.dataset.triedOxford) {
+    const suffix = Number(img.dataset.volumeSuffix) || 1;
+    // Browse knows the exact side. Retrying by ordinal in a whole-volume
+    // image list can show a different leaf, especially after a change of IE.
+    const exactOxford = img.dataset.oxfordDirect;
+    const canRetryOxford = exactOxford === undefined || (
+        /^https:\/\/hebrew\.bodleian\.ox\.ac\.uk\//.test(exactOxford) &&
+        currentSrc.split('?')[0] !== exactOxford
+    );
+    if (isOxford && sysId && canRetryOxford && !isOxfordApiUrl && !img.dataset.triedOxford) {
         img.dataset.triedOxford = 'true';
-        const oxfordUrl = `/api/oxford_image/${sysId}?page=${pageIdx || 0}`;
+        const oxfordUrl = exactOxford || `/api/oxford_image/${sysId}?page=${pageIdx || 0}`;
         console.log(`Trying Oxford API: ${oxfordUrl}`);
         img.src = oxfordUrl;
         img.onload = function() {
@@ -146,13 +154,14 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     }
 
     // Try 2: Fetch FL IDs from NLI IIIF manifest (client-side fallback)
-    if (sysId && !img.dataset.triedManifest) {
+    const matchedFl = /^\d+$/.test(img.dataset.nliFl || '') ? img.dataset.nliFl : '';
+    if (sysId && !matchedFl && !img.dataset.triedManifest) {
         img.dataset.triedManifest = 'true';
         console.log(`Trying NLI manifest for sysId: ${sysId}, page: ${pageIdx}`);
 
-        const flIds = await fetchFlIdsFromManifest(sysId);
-        if (flIds.length > 0) {
-            const idx = Math.min(pageIdx || 0, flIds.length - 1);
+        const flIds = await fetchFlIdsFromManifest(sysId, suffix);
+        const idx = pageIdx || 0;
+        if (flIds[idx]) {
             const newUrl = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/2000,/0/default.jpg`;
             console.log(`Trying FL ID from manifest: ${flIds[idx]}`);
             img.src = newUrl;
@@ -173,7 +182,8 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     const isSynth = (typeof window !== 'undefined' && window.GENIZAH_IS_SYNTHETIC);
     if (sysId && !img.dataset.triedServerProxy && !isSynth) {
         img.dataset.triedServerProxy = 'true';
-        const proxyUrl = `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}`;
+        const proxyUrl = matchedFl ? `/api/nli_image/${matchedFl}`
+                                   : `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}&suffix=${suffix}`;
         console.log(`Trying server-side NLI proxy: ${proxyUrl}`);
         img.src = proxyUrl;
         img.onload = function() {

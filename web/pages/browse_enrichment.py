@@ -367,7 +367,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         _total_pages = _page.total_pages
 
         def _browse_enrich_sync():
-            from web.services import ATTRIBUTION_BY_LIBRARY, _get_library_attribution
+            from web.services import ATTRIBUTION_BY_LIBRARY, _get_library_attribution, bodleian_links_for_page
             from web.state import state as state_mod
             result = {}
 
@@ -395,7 +395,9 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 result['attribution_nli'] = nli_attribution
 
             # Oxford codicological
+            part_meta = None
             if _is_oxford and _sys_id:
+                result['external_url'] = ''  # Only the local catalogue identifies the Bodleian part.
                 if hasattr(state_mod.meta_mgr, 'get_part_for_folio'):
                     part_id = state_mod.meta_mgr.get_part_for_folio(_sys_id)
                     if part_id:
@@ -422,6 +424,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             # NLI crossref queries. Cambridge is NOT decided here: the record's one
             # Cambridge decision is read back from enrich_metadata below.
             crossref_svc = None
+            if _library_code == 'Katz':
+                from shared.nli_crossref_service import katz_component_links, katz_viewer_url
+                result['katz_component_links'] = katz_component_links(_sys_id)
+                result['library_viewer_url'] = katz_viewer_url(_sys_id)
             try:
                 from shared.nli_crossref_service import get_nli_crossref_service
                 crossref_svc = get_nli_crossref_service(thread_safe=True)
@@ -456,13 +462,13 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                     # via get_crossref_metadata. We read it from crossref_data after gather.
                     # (library_viewer_url: below, once the Cambridge decision is known.)
 
-                    # Derive fl_id for metadata-only records (no Tantivy fl_id)
-                    if not _page.fl_id and folio_images:
-                        first_fl = folio_images[0].get('fl_id')
-                        if first_fl:
-                            result['derived_fl_id'] = first_fl
             except Exception as e:
                 logger.error("Browse enrichment crossref error: %s", e)
+
+            if _is_oxford:
+                result['bodleian_links'] = bodleian_links_for_page(
+                    _page, getattr(state_mod.meta_mgr, 'codico_mgr', None), result.get('folio_images') or [], part_meta,
+                )
 
             # External images from nli_cache (populated by enrich_metadata).
             # Phase 117 Plan 03: delegated to the shared resolve_external_images helper
@@ -481,18 +487,18 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 # above (resolve_external_images), never a later re-read of the cache.
                 _cam = _ext.get('cambridge_resolution') or {}
                 _cam_url = _cam.get('viewer_url') if _cam.get('status') == 'match' else None
-                if _cam_url:
+                if _cam_url and not _is_oxford:
                     result['is_cambridge'] = True
                     if result.get('image_source_info') is not None:
                         result['image_source_info']['cambridge'] = True
                     if not result.get('external_url'):
                         result['external_url'] = _cam_url
-                elif not result.get('external_url'):
+                elif not _is_oxford and not result.get('external_url'):
                     # Other providers' links (JTS / Manchester) resolved by enrich_metadata.
                     cached_url = _ext.get('external_url') or ''
                     if cached_url and 'cudl.lib.cam.ac.uk' not in cached_url.lower():
                         result['external_url'] = cached_url
-                if crossref_svc is not None and crossref_svc.is_available():
+                if _library_code != 'Katz' and crossref_svc is not None and crossref_svc.is_available():
                     try:
                         result['library_viewer_url'] = crossref_svc.get_library_viewer_url(
                             _sys_id, cambridge_viewer_url=_cam_url)
@@ -506,6 +512,8 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 # of the manifest's own. Read it back here, where the cache is warm.
                 if hasattr(state_mod.meta_mgr, 'nli_cache'):
                     _cached_attr = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    if _ext['external_provider'] == 'katz' and _cached_attr.get('attribution'):
+                        result['attribution'] = _cached_attr['attribution']
                     if not result.get('attribution_nli') and _cached_attr.get('attribution_nli'):
                         result['attribution_nli'] = _cached_attr['attribution_nli']
                     # Set by enrich_metadata when a MARC record or manifest came from the
@@ -662,7 +670,11 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 pg.oxford_part_display = browse_enrich.get('oxford_part_display', '')
                 pg.oxford_part_label = browse_enrich.get('oxford_part_label', '')
                 pg.oxford_part_metadata = browse_enrich.get('oxford_part_metadata', {})
-            if browse_enrich.get('external_url'):
+            if 'bodleian_links' in browse_enrich:
+                pg.bodleian_links = browse_enrich['bodleian_links']
+            if 'katz_component_links' in browse_enrich:
+                pg.katz_component_links = browse_enrich['katz_component_links']
+            if 'external_url' in browse_enrich:
                 pg.external_url = browse_enrich['external_url']
             if browse_enrich.get('is_cambridge'):
                 pg.is_cambridge = True
@@ -680,18 +692,6 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 pg.external_provider = browse_enrich['external_provider']
             if browse_enrich.get('cambridge_alignment') is not None:
                 pg.cambridge_alignment = browse_enrich['cambridge_alignment']
-            # Derived fl_id for metadata-only records
-            if browse_enrich.get('derived_fl_id') and not pg.fl_id:
-                from web.services import get_thumbnail_url, get_full_image_url
-                pg.fl_id = browse_enrich['derived_fl_id']
-                pg.thumb_url = get_thumbnail_url(pg.fl_id)
-                pg.image_url = get_full_image_url(pg.fl_id)
-                pg.p_num = 1
-                state.page_input_value = 1
-                if browse_enrich.get('folio_images'):
-                    pg.folio_label = browse_enrich['folio_images'][0].get('folio_label', '')
-                    pg.total_pages = len(browse_enrich['folio_images'])
-                    pg.current_idx = 1
             # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
             # folio_images but cambridge_images populated via the bridge.
             # Derive total_pages from cambridge_images so pagination works,
@@ -718,6 +718,21 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                         pg.sys_id, browse_enrich.get('folio_images'), suffix=pg.volume_suffix or 1,
                         on_late=_late_page_count)):
                     state.page_input_value = pg.p_num
+
+            # Only after pagination has settled can a catalogue folio identify the displayed scan.
+            if pg.metadata_only and (pg.volume_suffix or 1) == 1 and 1 <= pg.p_num <= pg.total_pages:
+                row = pg.folio_images[pg.p_num - 1] if len(pg.folio_images) == pg.total_pages else {}
+                pg.folio_label = row.get('folio_label', '')
+                if not pg.fl_id:
+                    if pg.external_provider == 'katz':
+                        from shared.nli_crossref_service import katz_catalogue_page_fl
+                        pg.fl_id = katz_catalogue_page_fl(pg.cambridge_images, pg.folio_images, pg.p_num)
+                    else:
+                        pg.fl_id = row.get('fl_id')
+                    if pg.fl_id:
+                        from web.services import get_thumbnail_url, get_full_image_url
+                        pg.thumb_url = get_thumbnail_url(pg.fl_id)
+                        pg.image_url = get_full_image_url(pg.fl_id)
 
         # Physical metadata from crossref_data (independent of browse_enrich success)
         if crossref_data and crossref_data.get('physical_metadata'):
