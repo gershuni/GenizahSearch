@@ -239,6 +239,23 @@ def load_view(service, path: tuple, filters: dict, shown: dict, lang: str, label
     return {'columns': columns, 'leaves': leaves, 'crumbs': crumbs}
 
 
+def leaf_in_view(view: Optional[dict], leaf, columns: Optional[list] = None) -> bool:
+    """Whether ``leaf`` is still in the lists ``view`` (``load_view``) draws: its own list of
+    shelfmarks, whatever that list's filter hides, or a row a column's filter found. ``columns``: the
+    node columns on screen (``shelfmark_tree_rows.shown_columns``: the last three, or the last one in
+    the table and the thumbnails); a column the layout leaves out is not in view (Codex #99). All of
+    the view's when not given. The details pane and the single choice follow it in both apps: a
+    shelfmark left behind is no longer shown or chosen (owner, 2026-11-22)."""
+    if not view or leaf is None:
+        return False
+    leaves = view.get('leaves')
+    if leaves is not None and leaves.get('node') == leaf.node_id:
+        return True
+    cols = view.get('columns') if columns is None else columns
+    return any(row.get('leaf') is not None and row['leaf'].id == leaf.id
+               for col in cols or () for row in col.get('rows') or ())
+
+
 def settle(service, path: tuple, current: tuple) -> tuple:
     """A path never ends at a level that is no choice (one child, no shelfmarks): its column is not
     drawn. Going back (a prefix of where the reader is) climbs past such levels; going anywhere

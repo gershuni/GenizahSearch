@@ -62,7 +62,8 @@ from PyQt6.QtWidgets import (
 import genizah_core
 from desktop.widgets.flow_layout import FlowLayout
 from genizah_core import tr
-from shared.shelfmark_tree_columns import NODE_ROWS, WIDE_COLUMNS, leaf_tooltip, load_view, passed_through, settle
+from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_in_view, leaf_tooltip, load_view,
+                                           passed_through, settle)
 from shared.shelfmark_tree_details import add_joins, field_lines, item_details, thumbnail_url
 from shared.shelfmark_tree_rows import (
     COLUMNS, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, folds_columns, normal_size, normal_view,
@@ -2078,6 +2079,26 @@ class _DetailsPane(QFrame):
         self._text_loads.request(gen, lambda: item_details(service, leaf, lang, meta_mgr=meta, page_count=pages_of,
                                                            page_texts=texts_of))
 
+    def clear(self) -> None:
+        """No shelfmark: the hint again, as at the opening. What is still being read for the one that
+        was shown is not drawn (a newer generation)."""
+        self._gen += 1
+        self.leaf_id, self.leaf, self.text = None, None, None
+        self.image.clear()
+        self.image.setVisible(False)
+        self.shelfmark.clear()
+        self.shelfmark.setVisible(False)
+        for label in (*self.fields.values(), self.links, self.joins_title):
+            label.setVisible(False)
+        self.textbox.clear()
+        self.textbox.setVisible(False)
+        self._clear(self.lines)
+        self.lines_box.setVisible(False)
+        self._clear(self.joins_rows)
+        self.joins_box.setVisible(False)
+        self.join_boxes, self.join_links = {}, {}
+        self.empty.setVisible(True)
+
     def _text_done(self, gen: int, out) -> None:
         if gen != self._gen or isinstance(out, Exception) or not isinstance(out, dict):
             return
@@ -2813,6 +2834,7 @@ class ShelfPickerDialog(QDialog):
         owed, self._owed = self._owed, set()
         if not self._whole and owed and self._draw_lists(view, owed):
             self._view = view
+            self._drop_left(view)                  # a filter may have hidden the row it was found in
         else:
             self._whole = False
             self._draw(view)
@@ -2894,11 +2916,26 @@ class ShelfPickerDialog(QDialog):
             self.leaf_panel.key = None
             self.leaf_panel.filter.key = None
         self._filler.setVisible(leaves is None)
+        self._drop_left(view, columns)
         if self._chosen_leaf is not None:          # the shelfmark chosen stays shown chosen
             self.leaf_panel.mark(self._chosen_leaf)
         if self._focus_after:
             self._focus_after = False
             self._focus_deepest(view)
+
+    def _drop_left(self, view: dict, columns: Optional[list] = None) -> None:
+        """A shelfmark left behind (no longer in the lists drawn: ``leaf_in_view``) is no longer in the
+        pane, nor chosen: Open would take one the reader no longer sees (owner, 2026-11-22). Asked after
+        every drawing, the whole dialog or a list alone (a filter typed: Codex #99). ``columns``: the
+        node columns drawn, as the layout shows them (``shown_columns``)."""
+        if columns is None:
+            columns = shown_columns(view['columns'], self.leaf_panel.view, view['leaves'] is not None,
+                                    WIDE_COLUMNS)
+        if self.details.leaf is not None and not leaf_in_view(view, self.details.leaf, columns):
+            self.details.clear()
+        if self._chosen_leaf is not None and not leaf_in_view(view, self._chosen_leaf, columns):
+            self._chosen_leaf = None
+            self._footer()
 
     def _focus_deepest(self, view: dict) -> None:
         """The keyboard goes where the next choice is: the chosen node's children, else its shelfmarks."""

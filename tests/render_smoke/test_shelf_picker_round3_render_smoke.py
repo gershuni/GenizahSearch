@@ -290,6 +290,144 @@ def test_the_pane_is_empty_until_a_shelfmark_is_chosen_and_a_newer_click_wins(tm
     assert seen['no_img']                                                # no thumbnail: none drawn
 
 
+def test_leaving_a_shelfmark_empties_the_pane_and_the_selection(tmp_path, monkeypatch):
+    """Owner, 2026-11-22: the pane and the selected shelfmark follow the place. A filter on the
+    shelfmark's own list keeps them; leaving the list (All libraries) empties the pane and turns the
+    foot's button off: it would open a shelfmark no longer in sight."""
+    from web.components import shelfmark_tree_picker as picker
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
+    svc = _setup(tmp_path)
+    here = SYS['as2'][6]
+    seen = {}
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-round3-open?start={here}')
+            await _connect(user)
+            assert await _until(lambda: _pane_shelfmark(user) == _label_of(svc, here))
+            with user.client:
+                boxes = [e for e in user.client.elements.values() if isinstance(e, ui.input) and not e.is_deleted]
+                boxes[-1].value = 'no such shelfmark'          # the shelfmarks' own filter
+            assert await _until(lambda: not _els(user, 'data-leaf'))
+            await asyncio.sleep(0.2)
+            seen['filtered'] = (_pane_shelfmark(user), [b.enabled for b in _testid(user, 'shelf-picker-confirm')])
+            with user.client:
+                boxes[-1].value = ''
+            assert await _until(lambda: _els(user, 'data-leaf'))
+            [crumb] = [e for e in _classed(user, 'stp-crumb') if e.text == 'All libraries']
+            UserInteraction(user, {crumb}, None).trigger('click')
+            assert await _until(lambda: not _classed(user, 'stp-leaves'))
+            assert await _until(lambda: _pane_shelfmark(user) == '')
+            seen['left'] = (_texts_in(_testid(user, 'shelf-details')[0]),
+                            [b.enabled for b in _testid(user, 'shelf-picker-confirm')])
+            # back to its list: it is not drawn selected (Codex #99), nor shown, nor chosen
+            for node in ('lib:1', 'col:10', 'vol:100'):
+                if any(e.props['data-sys-id'] == here for e in _els(user, 'data-leaf')):
+                    break
+                assert await _until(lambda n=node: [e for e in _els(user, 'data-node') if e.props['data-node'] == n])
+                row = next(e for e in _els(user, 'data-node') if e.props['data-node'] == node)
+                UserInteraction(user, {row}, None).click()
+                await _until(lambda n=node: any(e.props['data-sys-id'] == here for e in _els(user, 'data-leaf'))
+                             or any(e.props['data-node'] != n and e.props['data-node'] in ('col:10', 'vol:100')
+                                    for e in _els(user, 'data-node')), timeout=2)
+            assert await _until(lambda: any(e.props['data-sys-id'] == here for e in _els(user, 'data-leaf')))
+            back = _leaf(user, here)
+            seen['back'] = (back.props.get('aria-selected'), 'stp-on' in back.classes, _pane_shelfmark(user),
+                            [b.enabled for b in _testid(user, 'shelf-picker-confirm')])
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert seen['filtered'] == (_label_of(svc, here), [True])
+    assert seen['left'] == (['Choose a shelfmark to see it here'], [False])
+    assert seen['back'] == ('false', False, '', [False])
+
+
+def test_a_filter_that_hides_the_row_a_shelfmark_was_chosen_in_lets_it_go(tmp_path, monkeypatch):
+    """Codex #99: a shelfmark a column's filter found, selected there, goes from the pane and the selection
+    when the filter changes and its row is no longer drawn (that list drawn alone, not the whole dialog)."""
+    from web.components import shelfmark_tree_picker as picker
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
+    svc = _setup(tmp_path)
+    seen = {}
+
+    def column_box(user):
+        [holder] = [e for e in _els(user, 'data-col') if e.props['data-col'] == 'n:col:10']
+        panel = holder.parent_slot.parent
+        return next(d for d in panel.descendants() if isinstance(d, ui.input))
+
+    def found_rows(user):
+        [holder] = [e for e in _els(user, 'data-col') if e.props['data-col'] == 'n:col:10']
+        return [d for d in holder.descendants() if 'data-leaf' in d.props and not d.is_deleted]
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, '/_test/shelf-round3-open?start=col:10')
+            await _connect(user)
+            assert await _until(lambda: [e for e in _els(user, 'data-col') if e.props['data-col'] == 'n:col:10'])
+            with user.client:
+                column_box(user).value = 'T-S AS 2.4'
+            assert await _until(lambda: found_rows(user))
+            row = next(r for r in found_rows(user) if r.props['data-sys-id'] == '9900000040205171')
+            UserInteraction(user, {row}, None).click()
+            assert await _until(lambda: _pane_shelfmark(user) == 'T-S AS 2.4')
+            seen['chosen'] = [b.enabled for b in _testid(user, 'shelf-picker-confirm')]
+            with user.client:
+                column_box(user).value = 'T-S AS 2.9'
+            assert await _until(lambda: not any(r.props['data-sys-id'] == '9900000040205171' for r in found_rows(user)))
+            assert await _until(lambda: _pane_shelfmark(user) == '')
+            seen['gone'] = (_texts_in(_testid(user, 'shelf-details')[0]),
+                            [b.enabled for b in _testid(user, 'shelf-picker-confirm')])
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert seen['chosen'] == [True]
+    assert seen['gone'] == (['Choose a shelfmark to see it here'], [False])
+
+
+def test_the_pane_counts_only_the_columns_on_screen(tmp_path, monkeypatch):
+    """Codex #99: a shelfmark a column's filter found is in view only while that column is drawn; in the
+    table (and the thumbnails) only the last column is, so the check is asked with the columns on screen."""
+    from web.components import shelfmark_tree_picker as picker
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
+    asked = []
+    real = picker.leaf_in_view
+
+    def spy(view, leaf, columns=None):
+        asked.append(None if columns is None else [c['filter_key'] for c in columns])
+        return real(view, leaf, columns)
+
+    monkeypatch.setattr(picker, 'leaf_in_view', spy)
+    svc = _setup(tmp_path)
+    seen = {}
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-round3-open?start={SYS["as2"][6]}')
+            await _connect(user)
+            assert await _until(lambda: _pane_shelfmark(user) == _label_of(svc, SYS['as2'][6]))
+            for view in ('table', 'gallery', 'list'):
+                asked.clear()
+                [button] = [e for e in _els(user, 'data-view') if e.props['data-view'] == view
+                            and 'stp-view' in e.classes]
+                UserInteraction(user, {button}, None).click()
+                assert await _until(lambda: asked)
+                await asyncio.sleep(0.1)
+                drawn = [e.props['data-col'] for e in _els(user, 'data-col') if e.props['data-col'].startswith('n:')]
+                seen[view] = (list(asked), drawn)
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    for view, (asked_with, drawn) in seen.items():
+        assert asked_with and all(a == drawn for a in asked_with), (view, asked_with, drawn)
+        assert (len(drawn) == 1) == (view != 'list'), (view, drawn)
+
+
 # -- DX24 ----------------------------------------------------------------------------------------
 
 def test_a_shelfmarks_tooltip_has_its_title_on_its_own_line(tmp_path, monkeypatch):

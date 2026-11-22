@@ -47,8 +47,8 @@ from typing import Any, Callable, Optional
 
 from nicegui import background_tasks, run, ui
 
-from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_tooltip, load_view, passed_through,
-                                           settle)
+from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_in_view, leaf_tooltip, load_view,
+                                           passed_through, settle)
 from shared.shelfmark_tree_details import add_joins, field_lines, item_details
 from shared.shelfmark_tree_limits import chip_name, limit_for, refusal_message
 from shared.shelfmark_tree_rows import (
@@ -1975,6 +1975,21 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             'dense outlined clearable debounce=250').classes('w-full').on_value_change(
             lambda e, k=key: set_filter(k, e.value))
 
+    def forget_left(view: dict, columns: list):
+        """A shelfmark left behind (no longer in the lists drawn: ``leaf_in_view``, with ``columns`` the
+        node columns the layout draws) is no longer in the pane, nor selected: the foot's button would act
+        on one the reader no longer sees (owner, 2026-11-22). Asked after every drawing, the whole dialog
+        or a list alone (a filter typed: Codex #99)."""
+        if pane['leaf'] is not None and not leaf_in_view(view, pane['leaf'], columns):
+            pane['gen'] += 1                       # what is still being read for it is not drawn
+            pane.update(leaf=None, info=None, places={}, lines=None, joins=None)
+            draw_empty_pane()
+        if one['leaf'] is not None and not leaf_in_view(view, one['leaf'], columns):
+            if st['highlight'] == one['leaf'].id:  # its row is no longer drawn selected (Codex #99)
+                st['highlight'] = None
+            one['leaf'] = None
+            enable_actions()
+
     def after_draw():
         body.client.run_javascript(_RESTORE_SCROLL_JS + _FIT_GRID_JS + (_THUMBS_JS if vw['view'] == 'gallery' else '')
                                    + (_RESIZE_JS if vw['view'] == 'table' else ''))
@@ -2019,12 +2034,14 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                             fill_leaves(leaves)
                     if leaves is not None:
                         part['title'].set_text(leaves_title(leaves))
+                forget_left(view, on_screen)           # a filter may have hidden the row it was found in
                 after_draw()
                 await refresh()
                 return
         st['whole'] = False
         st['parts'] = parts = {}
         st['folded'] = folded
+        forget_left(view, on_screen)
         ms['ticks'], ms['boxes'], ms['whole'], ms['big'] = {}, {}, None, {}
         one['rows'] = {}
         vw['cells'], vw['thumbs'] = {}, {}         # the addresses follow the NLI breaker as it is now

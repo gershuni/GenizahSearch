@@ -584,6 +584,89 @@ def test_opened_at_a_manuscript_it_is_chosen_and_the_pane_shows_it(svc):
         _close(dialog)
 
 
+def test_leaving_a_shelfmark_empties_the_pane_and_the_choice(svc):
+    """Owner, 2026-11-22: the pane, and in the single choice the shelfmark chosen, follow the place. A filter
+    on the shelfmark's own list keeps them; leaving the list empties the pane and turns Open off (it would
+    take a shelfmark no longer in sight); coming back brings neither back by itself."""
+    here = SYS["as2"][3]
+    dialog = _open(svc, start=here, act_label="Open")
+    try:
+        assert _wait(lambda: dialog.details.leaf is not None and dialog.details.leaf.sys_id == here)
+        path = tuple(dialog.path())
+        dialog.set_filter(dialog.leaf_panel.key, "no such shelfmark")
+        assert _wait(lambda: not dialog._owed and not dialog._loads.busy())
+        assert dialog.leaf_panel.current_leaf() is None                         # hidden by the filter ...
+        assert dialog.details.leaf.sys_id == here and dialog._chosen_leaf.sys_id == here   # ... still its place
+        assert dialog.act_button.isEnabled()
+        dialog.go(())
+        assert _wait(lambda: dialog._drawn_path == () and not dialog._loads.busy())
+        assert dialog.details.leaf is None and dialog.details.text is None
+        assert dialog.details.empty.isVisibleTo(dialog) and not dialog.details.shelfmark.isVisibleTo(dialog)
+        assert dialog._chosen_leaf is None and not dialog.act_button.isEnabled()
+        dialog.go(path)
+        assert _wait(lambda: dialog._drawn_path == path and not dialog._loads.busy())
+        assert dialog.details.leaf is None and dialog._chosen_leaf is None and not dialog.act_button.isEnabled()
+    finally:
+        _close(dialog)
+    store = picker.SelectionStore()                  # the multiple choice: the pane alone, nothing is ticked
+    dialog = _open(svc, start=here, mode="multi", purpose="test_leave", store=store, on_confirm=lambda *_a: None)
+    try:
+        assert _wait(lambda: dialog.details.leaf is not None and dialog.details.leaf.sys_id == here)
+        dialog.go(())
+        assert _wait(lambda: dialog._drawn_path == () and not dialog._loads.busy())
+        assert dialog.details.leaf is None and dialog.details.empty.isVisibleTo(dialog)
+        assert store.load("test_leave").count(members_function(svc)) == 0
+    finally:
+        _close(dialog)
+
+
+def test_the_pane_counts_only_the_columns_on_screen(svc, monkeypatch):
+    """Codex #99: a shelfmark a column's filter found is in view only while that column is drawn; in the
+    table (and the thumbnails) only the last column is, so the check is asked with the columns on screen."""
+    asked = []
+    real = picker.leaf_in_view
+
+    def spy(view, leaf, columns=None):
+        asked.append(None if columns is None else [c['filter_key'] for c in columns])
+        return real(view, leaf, columns)
+
+    monkeypatch.setattr(picker, 'leaf_in_view', spy)
+    dialog = _open(svc, start=SYS["as2"][3], act_label="Open")
+    try:
+        assert _wait(lambda: dialog.details.leaf is not None)
+        for view in ('table', 'gallery', 'list'):
+            asked.clear()
+            dialog.leaf_panel.set_view(view)
+            shown = [c.key for c in dialog.node_columns if c.isVisibleTo(dialog)]
+            assert asked and all(a == shown for a in asked), (view, asked, shown)
+            assert (len(shown) == 1) == (view != 'list')
+    finally:
+        _close(dialog)
+
+
+def test_a_filter_that_hides_the_row_a_shelfmark_was_chosen_in_lets_it_go(svc):
+    """Codex #99: a shelfmark a column's filter found, chosen there, goes from the pane and the choice when
+    the filter changes and its row is no longer drawn (a list drawn alone, not the whole dialog)."""
+    dialog = _open(svc, start="col:10", act_label="Open")
+    try:
+        dialog.set_filter("n:col:10", "T-S AS 2.4")
+        column = next(c for c in dialog.node_columns if c.key == "n:col:10")
+        assert _wait(lambda: not dialog._owed and not dialog._loads.busy()
+                     and any('leaf' in r for r in column.rows))
+        row = next(i for i, r in enumerate(column.rows) if 'leaf' in r and r['leaf'].label == "T-S AS 2.4")
+        leaf = column.rows[row]['leaf']
+        assert leaf.node_id != dialog.leaf_panel.leaves['node']           # found below, not in the list shown
+        dialog._open_row(column, row)
+        assert dialog._chosen_leaf.id == leaf.id and dialog.details.leaf.id == leaf.id
+        assert dialog.act_button.isEnabled()
+        dialog.set_filter("n:col:10", "T-S AS 2.9")
+        assert _wait(lambda: not dialog._owed and not dialog._loads.busy())
+        assert not any(r.get('leaf') is not None and r['leaf'].id == leaf.id for r in column.rows)
+        assert dialog.details.leaf is None and dialog._chosen_leaf is None and not dialog.act_button.isEnabled()
+    finally:
+        _close(dialog)
+
+
 def test_opened_at_a_manuscript_in_the_multiple_choice_the_pane_shows_it_unticked(svc):
     here = SYS["as2"][3]
     store = picker.SelectionStore()

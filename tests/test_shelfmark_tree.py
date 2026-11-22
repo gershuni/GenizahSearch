@@ -539,6 +539,37 @@ def test_a_filtered_column_offers_the_matches_past_its_first_page(tmp_path, monk
         s.close()
 
 
+def test_a_shelfmark_is_in_view_while_its_list_or_a_filter_row_is_drawn(svc):
+    """The pane and the single choice follow the place (owner, 2026-11-22): a shelfmark is in a view
+    while its own list is drawn, whatever that list's filter hides, or while a column's filter found it;
+    elsewhere (another list, the libraries alone) it is not."""
+    from shared.shelfmark_tree_columns import leaf_in_view, load_view
+    from shared.shelfmark_tree_view import start_at
+    labels = {"library": "Library", "others": "Others", "in": "in {place}"}
+    begin = start_at(svc, SYS["as2"][3])
+    leaf, path = begin.leaf, tuple(begin.path)
+    own = load_view(svc, path, {}, {}, "en", labels)
+    assert own["leaves"]["node"] == leaf.node_id and leaf_in_view(own, leaf)
+    hidden = load_view(svc, path, {f"l:{leaf.node_id}": "no such shelfmark"}, {}, "en", labels)
+    assert not hidden["leaves"]["rows"] and leaf_in_view(hidden, leaf)          # still its place
+    assert not leaf_in_view(load_view(svc, (), {}, {}, "en", labels), leaf)       # the libraries alone
+    up = load_view(svc, path[:-1], {}, {}, "en", labels)
+    assert (up["leaves"] or {}).get("node") != leaf.node_id and not leaf_in_view(up, leaf)
+    # a column's filter that finds it (a number): in view there, though its own list is not drawn
+    parent = svc.node(leaf.node_id).parent_id
+    at = tuple(a.id for a in svc.ancestors(parent))                         # the path to it, it included
+    assert at[-1] == parent and leaf.node_id not in at
+    found = load_view(svc, at, {f"n:{parent}": leaf.label or leaf.shelfmark}, {}, "en", labels)
+    assert any(r.get("leaf") is not None and r["leaf"].id == leaf.id for c in found["columns"] for r in c["rows"])
+    assert leaf_in_view(found, leaf)
+    # ... only while that column is on screen (the layout draws the last three, or the last one): Codex #99
+    finder = [c for c in found["columns"] if c["parent"] == parent]
+    assert leaf_in_view(found, leaf, finder) and not leaf_in_view(found, leaf, [])
+    assert not leaf_in_view(found, leaf, [c for c in found["columns"] if c["parent"] != parent])
+    assert leaf_in_view(own, leaf, [])                 # its own list needs no column
+    assert not leaf_in_view(None, leaf) and not leaf_in_view(own, None)
+
+
 def test_other_shelfmarks_divided_by_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr(builder, "GROUP_MIN", 2)
     db, libraries, meta = build_fixture(tmp_path)
