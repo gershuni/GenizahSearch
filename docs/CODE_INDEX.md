@@ -1639,6 +1639,22 @@ documents of several fragments, `get_all_joined_sys_ids`, and FJMS join groups,
 `FjmsService.get_all_joined_sys_ids`; the community's joins are named in the pane only). Tests:
 `tests/test_shelfmark_tree_round4.py`.
 
+## shared/shelfmark_tree_rows.py
+
+The shelfmarks pane's table and thumbnail views in both apps' shelf pickers (2026-11-22), pure: `VIEWS`
+(`list`, `table`, `gallery`), `SIZES` (the Joins Lab's `s` / `m` / `l`), `normal_view`, `normal_size`,
+`read_choice` / `choice_value` (the stored choice, `STORAGE_KEY`; anything unknown is the list, medium),
+`folds_columns` / `shown_columns` (the layout rule: the table and the thumbnails keep only the last node
+column while a shelfmarks pane is shown), `COLUMNS` (the desktop results table's words: Shelfmark, Title,
+Snippet, Domain, Pages, Printed, PGP, Edition) and `HEADER_TIPS`. `row_details(sys_ids, lang, *, meta_mgr,
+page_count, page_texts, thumb_of)` answers a page of shelfmarks at once (blocking, off the UI thread / event
+loop; never raises, a failed source leaves its field None): title (catalogue row), `snippet` (the details
+pane's rule on the first `SNIPPET_PAGES` pages, read one at a time, on one line), pages, printed and domains
+(FJMS batches), PGP (`get_sys_ids_with_transcriptions`, the green badge), edition (PGP editions and FGP digital
+editions: the row sign's rule), thumb (`thumb_of`, only an address the app names without the network).
+`wanted(sys_ids, known)` batches what a view still lacks, `PAGE_SIZE` at a time. Tests:
+`tests/test_shelfmark_tree_rows.py`.
+
 ## shared/shelfmark_tree_selection.py
 
 What a reader has chosen in the shelf picker's multiple-choice mode, for both apps, pure (no Qt, no NiceGUI): a `Selection` of `Chip`s in the order chosen, each a shelfmark (a placement) or a whole node (`scope` `all`, or `direct`: a node's own shelfmarks; `scope_for(node)`); a whole volume is one chip whose `removed` holds what was unticked inside it. `add_leaf`, `add_node` (previous choice and all the node's manuscripts; covered chips fold in; a node inside a chosen one is ticked again there), `drop_leaf`, `drop_node` (out of every chip), `remove_chip`, `clear`, `consume(applied_ids)` (a partial application keeps the rest); `count` of distinct manuscripts, `chip_count`, `node_state` (all / some / none); `resolve_entries(service)` the picker's contract `{sys_id, shelfmark, placement_id}` in the order chosen, corpus ids only, `sys_ids`, `summary` (a host's label); `to_dict` / `from_dict` (versioned JSON, never raise), `prune(service)` (brought up to a rebuilt tree; nothing dropped when the tree is not served). Changes take `members_function(service)`. Tests: `tests/test_shelfmark_tree_selection.py`.

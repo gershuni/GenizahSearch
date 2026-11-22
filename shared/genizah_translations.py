@@ -6973,3 +6973,10 @@ TRANSLATIONS.update({
     "Some fragments' images could not be loaded: {missing} of {total}.":
         "חלק מתמונות הקטעים לא נטענו: {missing} מתוך {total}.",
 })
+
+# The shelf picker's views (2026-11-22): the shelfmarks as a list, a table or thumbnails (both apps)
+TRANSLATIONS.update({
+    "Show as a list": "הצגה כרשימה",
+    "Show as a table": "הצגה כטבלה",
+    "Show as thumbnails": "הצגה בתמונות ממוזערות",
+})
