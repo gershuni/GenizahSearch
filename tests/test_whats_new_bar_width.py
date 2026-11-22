@@ -34,7 +34,9 @@ def test_a_wide_bar_still_shows_the_whole_line():
     bar = update_ui.WhatsNewBar()
     try:
         bar.show_whats_new(update_ui.WHATS_NEW_CONTENT_VERSION)
-        bar.resize(1600, 40)
+        # Wider than the bar asks for, whatever the fonts measure: on the public CI's Windows
+        # runner the line alone was 1,872 px (2026-11-22), so a fixed 1,600 was not wide.
+        bar.resize(bar.sizeHint().width() + 200, 40)
         bar.layout().activate()
         assert bar.lbl_msg.width() >= bar.lbl_msg.sizeHint().width()
     finally:

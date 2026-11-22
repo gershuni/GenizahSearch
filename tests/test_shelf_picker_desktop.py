@@ -952,13 +952,23 @@ def test_the_chosen_row_stays_in_sight_when_the_rows_are_measured_again(svc):
         column.table.setFixedWidth(900)
         column.show_column({"depth": 0, "parent": None, "title": "T", "rows": rows, "more": 0, "filter_key": "n:test"})
         column.scroll_to(None)
-        _wait(lambda: False, timeout=0.2)
-        column.table.setFixedWidth(160)                          # the names wrap: every row grows
-        _wait(lambda: False, timeout=0.3)
         table = column.table
-        assert table.rowHeight(0) > table.fontMetrics().height() + picker._RowDelegate.PAD  # several lines now
+
+        def chosen_in_sight():
+            return table.viewport().rect().intersects(table.visualItemRect(table.item(250, 0)))
+
+        def wrapped():
+            return table.rowHeight(0) > table.fontMetrics().height() + picker._RowDelegate.PAD
+
+        # Waits for the outcome, not fixed sleeps: on a slow runner (public CI, Ubuntu, 2026-11-22)
+        # the rows' timer fired in the last pass of a 0.3 s sleep, and the scroll back to the
+        # chosen row, posted for the next turn, had not run yet when the test looked.
+        _wait(chosen_in_sight, timeout=5)
+        column.table.setFixedWidth(160)                          # the names wrap: every row grows
+        _wait(lambda: wrapped() and chosen_in_sight(), timeout=5)
+        assert wrapped()                                         # several lines now
         rect = table.visualItemRect(table.item(250, 0))
-        assert table.viewport().rect().intersects(rect), (rect, table.viewport().rect())
+        assert chosen_in_sight(), (rect, table.viewport().rect())
         # once the reader scrolls the list, a later measure leaves the list where they put it
         QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
                          table.viewport().rect().center())
