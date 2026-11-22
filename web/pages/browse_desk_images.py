@@ -242,16 +242,16 @@ def move_buttons(sys_id: str, index: int, count: int, on_move: Optional[Callable
         return
     with ui.row().classes('rd-move items-center no-wrap').style('gap: 0;'):
         up = ui.button(icon='arrow_upward', on_click=lambda: on_move(sys_id, -1)).props(
-            'flat round dense size=sm').classes('rd-move-up text-gray-500').tooltip(tr('Move up'))
+            'flat round dense size=sm').classes('rd-move-up rd-redraws text-gray-500').tooltip(tr('Move up'))
         down = ui.button(icon='arrow_downward', on_click=lambda: on_move(sys_id, 1)).props(
-            'flat round dense size=sm').classes('rd-move-down text-gray-500').tooltip(tr('Move down'))
+            'flat round dense size=sm').classes('rd-move-down rd-redraws text-gray-500').tooltip(tr('Move down'))
         up.set_enabled(index > 0)
         down.set_enabled(index < count - 1)
 
 
 def _remove_button(image: Dict[str, Any], on_remove: Callable[[str], Any]) -> None:
     ui.button(icon='close', on_click=lambda sid=image['sys_id']: on_remove(sid)).props(
-        'flat round dense size=sm').classes('rd-remove-fragment text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
+        'flat round dense size=sm').classes('rd-remove-fragment rd-redraws text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
 
 def _links(entries: Optional[List[Dict[str, Any]]], image: Dict[str, Any]) -> None:
@@ -378,7 +378,7 @@ def render_image_pane(entries: List[Dict[str, Any]], state: Any, *, document_tex
         ui.toggle(views, value=view, on_change=on_view).props(
             'no-caps unelevated size=sm padding="4px 12px" color=white text-color=green-9 '
             'toggle-color=green-7 toggle-text-color=white'
-        ).classes('rd-image-view').style('border: 1px solid #15803d; border-radius: 6px; overflow: hidden;')
+        ).classes('rd-image-view rd-redraws').style('border: 1px solid #15803d; border-radius: 6px; overflow: hidden;')
         ui.element('div').classes('flex-grow')
         if view != VIEW_JOIN:  # the puzzles are not the desk's images
             ui.label(f'{len(images)} {tr("images")}').classes('text-xs').style('color: var(--text-secondary);')

@@ -446,6 +446,27 @@ def test_each_image_has_its_links_menu_filled_when_opened(tmp_path):
         _run(tmp_path, driver)
 
 
+def test_every_control_that_redraws_the_desk_lets_go_of_the_focus(tmp_path):
+    """A control the redraw destroys must not keep the focus a click gave it, or the browser takes
+    the page to its top (2026-11-22): web/static/reading_desk_place.js acts on ``rd-redraws``."""
+    async def driver(user, enter):
+        enter(FRAGMENTS, DOC)
+        await _wait_until(lambda: _thumbs(user))
+        _set(user, _image_toggle(user), di.VIEW_ALL)
+        _set(user, _view_toggle(user), dd.VIEW_FRAGMENTS)
+        await _wait_until(lambda: len(_large_images(user)) == 4 and 'automatic Frag B p2' in _labels(user))
+        assert 'rd-redraws' in _image_toggle(user).classes and 'rd-redraws' in _view_toggle(user).classes
+        for marker in ('rd-move-up', 'rd-move-down', 'rd-remove-fragment'):
+            buttons = _of(user, ui.button, marker)
+            assert buttons and all('rd-redraws' in b.classes for b in buttons), marker
+        # The text side's own remove buttons too.
+        removes = [b for b in _all_elements(user) if isinstance(b, ui.button) and b.props.get('icon') == 'close'
+                   and any('rd-text-frag-' in str(p.props.get('id', '')) for p in _ancestors(b))]
+        assert len(removes) == 2 and all('rd-redraws' in b.classes for b in removes)
+
+    _run(tmp_path, driver)
+
+
 def test_move_entry_moves_one_place_and_never_off_the_desk():
     entries = [{'sys_id': 'a'}, {'sys_id': 'b'}, {'sys_id': 'c'}]
     ids = lambda moved: [e['sys_id'] for e in moved]  # noqa: E731

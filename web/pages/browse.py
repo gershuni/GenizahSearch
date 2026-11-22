@@ -153,8 +153,8 @@ async def add_to_reading_desk_by_shelfmark(service, query, container, add_entry)
 # Custom Styles for Manuscript Viewer
 # ============================================================================
 
-def _viewer_js_version() -> str:
-    """A stamp of /static/manuscript_viewer.js for its <script> URL.
+def _viewer_js_version(name: str = 'manuscript_viewer.js') -> str:
+    """A stamp of /static/<name> (manuscript_viewer.js by default) for its <script> URL.
 
     The static route lets a browser keep a file for an hour. The zoom buttons
     below are wired to this file's viewer (``zoomIn`` tells the page through
@@ -164,7 +164,7 @@ def _viewer_js_version() -> str:
     import hashlib
     from pathlib import Path
     try:
-        data = (Path(__file__).resolve().parent.parent / 'static' / 'manuscript_viewer.js').read_bytes()
+        data = (Path(__file__).resolve().parent.parent / 'static' / name).read_bytes()
     except OSError:
         return '0'
     return hashlib.md5(data).hexdigest()[:10]
@@ -172,6 +172,8 @@ def _viewer_js_version() -> str:
 
 VIEWER_STYLES = '''
 <script src="/static/manuscript_viewer.js?v=__VIEWER_JS_VERSION__"></script>
+<!-- the Reading Desk keeps the reader's place when it is redrawn -->
+<script src="/static/reading_desk_place.js?v=__DESK_PLACE_JS_VERSION__"></script>
 <!-- progressiveLoad, initProgressiveImages, fetchFlIdsFromManifest, handleImageError,
      NLI_IIIF_BASE are all in /static/manuscript_viewer.js (shared with /search) -->
 <style>
@@ -711,7 +713,8 @@ VIEWER_STYLES = '''
 </script>
 <svg style="position:absolute;width:0;height:0"><filter id="gamma-main"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
 <svg style="position:absolute;width:0;height:0"><filter id="gamma-fs"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
-'''.replace('__VIEWER_JS_VERSION__', _viewer_js_version())
+'''.replace('__VIEWER_JS_VERSION__', _viewer_js_version()).replace(
+    '__DESK_PLACE_JS_VERSION__', _viewer_js_version('reading_desk_place.js'))
 
 
 # BrowseState and _crossref_cache imported from web.pages.browse_state (Phase 73, Plan 01)
@@ -4274,7 +4277,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                                 ui.button(
                                                     icon='close', on_click=make_remove_text()
-                                                ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
+                                                ).props('flat round size=xs').classes('rd-redraws text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
                                         # Per-fragment version selector
                                         # Build source options for dropdown
@@ -4639,65 +4642,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     }, 300);
                 ''')
 
-                # Inject synchronized scrolling JS
-                rd_frag_count = len(state.reading_desk_entries)
-                ui.run_javascript(f'''
-                    (function() {{
-                        const fragCount = {rd_frag_count};
-                        if (fragCount <= 1) return;
-
-                        // Wait for scroll areas to render
-                        setTimeout(function() {{
-                            const imgPane = document.querySelector('.rd-image-pane .q-scrollarea__container');
-                            const textPane = document.querySelector('.rd-text-pane .q-scrollarea__container');
-                            if (!imgPane || !textPane) {{
-                                console.log('[ReadingDesk] Scroll panes not found');
-                                return;
-                            }}
-
-                            const imgHeaders = document.querySelectorAll('[id^="rd-img-frag-"]');
-                            const textHeaders = document.querySelectorAll('[id^="rd-text-frag-"]');
-
-                            let syncing = false;
-
-                            const imgObserver = new IntersectionObserver((entries) => {{
-                                if (syncing) return;
-                                for (const entry of entries) {{
-                                    if (entry.isIntersecting) {{
-                                        const idx = entry.target.id.replace('rd-img-frag-', '');
-                                        const textTarget = document.getElementById('rd-text-frag-' + idx);
-                                        if (textTarget) {{
-                                            syncing = true;
-                                            textTarget.scrollIntoView({{behavior: 'smooth', block: 'start'}});
-                                            setTimeout(() => syncing = false, 600);
-                                        }}
-                                        break;
-                                    }}
-                                }}
-                            }}, {{root: imgPane, threshold: 0.3}});
-
-                            const textObserver = new IntersectionObserver((entries) => {{
-                                if (syncing) return;
-                                for (const entry of entries) {{
-                                    if (entry.isIntersecting) {{
-                                        const idx = entry.target.id.replace('rd-text-frag-', '');
-                                        const imgTarget = document.getElementById('rd-img-frag-' + idx);
-                                        if (imgTarget) {{
-                                            syncing = true;
-                                            imgTarget.scrollIntoView({{behavior: 'smooth', block: 'start'}});
-                                            setTimeout(() => syncing = false, 600);
-                                        }}
-                                        break;
-                                    }}
-                                }}
-                            }}, {{root: textPane, threshold: 0.3}});
-
-                            imgHeaders.forEach(h => imgObserver.observe(h));
-                            textHeaders.forEach(h => textObserver.observe(h));
-                            console.log('[ReadingDesk] Synchronized scrolling initialized for ' + fragCount + ' fragments');
-                        }}, 500);
-                    }})();
-                ''')
+                # The image and text panes scroll in step, each on its own -- never the page
+                # (web/static/reading_desk_place.js).
+                ui.run_javascript(f'window.rdSyncPanes && window.rdSyncPanes({len(state.reading_desk_entries)});')
 
             else:
                 # Single page view

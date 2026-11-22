@@ -2218,6 +2218,10 @@ The Reading Desk's links beside each image (2026-11-21): the single page's "Exte
 - **Function** `image_links` — one image's links: its leaf's, then the fragment's
 - **Function** `links_button` — the `open_in_new` menu beside an image (`browse_desk_images.py::_links`), filled on first opening in the visitor's language
 
+## web/static/reading_desk_place.js
+
+The Reading Desk keeps the reader's place when it is redrawn (2026-11-22): a click on a control that redraws the desk (class `rd-redraws`) lets go of the focus, which the browser would otherwise follow to the top of the page as the control is destroyed; `rdSyncPanes(fragCount)` makes the image and text panes of "All images" follow each other by their own scroll (never the page's, not on the observers' first report). Loaded by `web/pages/browse.py` (`VIEWER_STYLES`); checked by `tests/js/reading_desk_place_check.js`.
+
 ## web/pages/browse_desk_puzzle.py
 
 The Reading Desk's third image view, "Puzzle images" (2026-11-18; several at once and renamed from "Assembled" 2026-11-21): the pictures of the saved puzzles of the fragments on the desk (a join's recto and verso, or one per page). Read-only; arranging stays in the Fragment Puzzle.

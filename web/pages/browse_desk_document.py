@@ -246,7 +246,7 @@ def render_document_text_panel(desk: Dict[str, Any], state: Any, view: str,
         ui.toggle(views, value=view, on_change=on_view).props(
             'no-caps unelevated size=sm padding="4px 12px" color=white text-color=green-9 '
             'toggle-color=green-7 toggle-text-color=white'
-        ).classes('rd-document-view').style('border: 1px solid #15803d; border-radius: 6px; overflow: hidden;')
+        ).classes('rd-document-view rd-redraws').style('border: 1px solid #15803d; border-radius: 6px; overflow: hidden;')
         ui.element('div').classes('flex-grow')
         if desk.get('pgp_url'):
             ui.link(tr('View on PGP'), desk['pgp_url'], new_tab=True).classes('text-sm')
