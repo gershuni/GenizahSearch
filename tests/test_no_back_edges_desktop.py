@@ -29,6 +29,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # moment Plan 02 creates the file — no test edit needed.
 DESKTOP_MODULES = [
     "desktop/__init__.py",
+    "desktop/browse_prefetch.py",
     "desktop/consent_dialog.py",
     "desktop/dialogs_filter.py",
     "desktop/dialogs_scholarly.py",

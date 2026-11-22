@@ -2,7 +2,6 @@
 
 import html
 import re
-import threading
 
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame,
@@ -17,7 +16,7 @@ from PyQt6.QtGui import (
 from PyQt6 import sip
 
 from genizah_core import Config, get_logger, tr
-from desktop.image_loader import ImageLoaderThread
+from desktop.image_loader import ImageLoaderThread, is_on_disk, memory_image
 from desktop.widgets import LibraryLinkButton, map_matching_image_index
 from shared.codicological import bodleian_image_link_items, get_bodleian_links
 from shared.synthetic_sys_id import is_synthetic_sys_id
@@ -195,9 +194,17 @@ class ZoomableScrollArea(QGraphicsView):
         self.scene.setSceneRect(QRectF())
         self._pixmap_item.setPos(0, 0)
         self._pixmap_item.setTransformOriginPoint(rect.center())
+        self._sync_scene_rect()
 
         if not self._apply_fit_to_viewport():
              self.centerOn(self._pixmap_item)
+
+    def _sync_scene_rect(self):
+        """The view scrolls over the image alone. The scene's own rect only grows (every image
+        and message it ever held), so a fitted image landed off centre, and a page's preview
+        and its sharp image at different places: the image seemed to jump (2026-11-22)."""
+        if self._pixmap and not self._pixmap.isNull() and not sip.isdeleted(self._pixmap_item):
+            self.setSceneRect(self._pixmap_item.sceneBoundingRect())
 
     def set_status_message(self, text):
         if sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item):
@@ -222,11 +229,13 @@ class ZoomableScrollArea(QGraphicsView):
         """Set absolute rotation (degrees clockwise) and update view."""
         self._rotation = angle % 360 if angle is not None else 0
         self._pixmap_item.setRotation(self._rotation)
+        self._sync_scene_rect()
 
     def rotate_view(self, degrees):
         """Add degrees to current rotation and update."""
         self._rotation = (self._rotation + degrees) % 360
         self._pixmap_item.setRotation(self._rotation)
+        self._sync_scene_rect()
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -271,8 +280,10 @@ class ZoomableScrollArea(QGraphicsView):
         if not self._pixmap or self._pixmap.isNull():
             return False
 
+        self._sync_scene_rect()
         self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
-        # Scale down a bit to have margins
+        # Scale down a bit to have margins (the image, now smaller than the view, is centred by
+        # the view's alignment: it scrolls over the image alone, _sync_scene_rect)
         self.scale(0.95, 0.95)
         return True
 
@@ -626,6 +637,72 @@ class FullscreenImageWindow(QMainWindow):
         self.setFocus()
 
 
+def default_source(meta, images_ext, images_nli, external_provider):
+    """'ext', 'nli' or None: the list ``load_images`` shows first. One rule with the Browse
+    neighbour prefetch (desktop/browse_prefetch.py), which fetches that list's page.
+
+    260419-cfx / 260421-aln: when external is misaligned with NLI (count OR per-position
+    mismatch via classify_cambridge_alignment), default to NLI (transcription aligns with
+    NLI canvases). Oxford is exempt -- it doesn't have a parallel NLI list in the same sense
+    and its positional mapping is handled elsewhere. For non-CUL external providers
+    (Manchester, JTS, non-CUL Cambridge) the alignment verdict is not computed; the legacy
+    length check is kept as a defensive fallback.
+    """
+    if images_ext:
+        align = (meta or {}).get('cambridge_alignment') or {}
+        misaligned = align.get('verdict') == 'misaligned'
+        legacy_count_mismatch = (not align and external_provider != "oxford" and images_nli
+                                 and len(images_ext) != len(images_nli))
+        if external_provider != "oxford" and images_nli and (misaligned or legacy_count_mismatch):
+            return "nli"
+        return "ext"
+    return "nli" if images_nli else None
+
+
+def detect_external_provider(meta):
+    """The library of ``meta``'s external images (cambridge, oxford, manchester, jts, katz)."""
+    # Check explicit provider from enrich_metadata (set by Plan 03 for Manchester/JTS)
+    if meta.get('external_provider'):
+        return meta['external_provider']
+
+    # Not the NLI catalogue's CUDL link (MARC 856): enrich_metadata folds it into
+    # the record's one Cambridge decision, and sets external_provider when it holds.
+    for img in meta.get('images_ext', []) or []:
+        img_url = (img.get('url', '').lower())
+        if "cudl.lib.cam.ac.uk" in img_url:
+            return "cambridge"
+        if "bodleian.ox.ac.uk" in img_url or "hebrew.bodleian" in img_url:
+            return "oxford"
+        if "luna.manchester.ac.uk" in img_url:
+            return "manchester"
+        if "iiif-cloud.princeton.edu" in img_url or "figgy.princeton.edu" in img_url:
+            return "jts"
+
+    # Check for Oxford Part ID
+    if meta.get('oxford_part_id'):
+        return "oxford"
+
+    return None
+
+
+def default_page_list(meta):
+    """The image list ``load_images`` shows first for ``meta`` (without its Oxford
+    dynamic folios)."""
+    meta = meta or {}
+    ext, nli = list(meta.get('images_ext') or []), list(meta.get('images_nli') or [])
+    source = default_source(meta, ext, nli, detect_external_provider(meta))
+    return ext if source == "ext" else nli if source == "nli" else []
+
+
+def resolve_full_url(base_url):
+    """The URL the viewer loads a page's sharp image from (2000 px for IIIF)."""
+    if not base_url:
+        return None
+    if base_url.endswith('.jpg'):
+        return base_url
+    return f"{base_url}/full/2000,/0/default.jpg"
+
+
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
     _thumbnail_ready = pyqtSignal(QPixmap, int, int)  # pixmap, page_index, load_generation
@@ -660,10 +737,12 @@ class ManuscriptViewerWidget(QWidget):
         self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
         self.preload_worker = None
+        self.preview_thread = None  # the page's small image (any IIIF library), before the sharp one
+        self._wanted_page_url = None  # the page set_page shows or is loading (None: ask again)
+        self._sharp_shown_gen = None  # the load generation whose sharp image is on screen
         self._inflight_threads = []  # Canceled-but-still-running QThreads kept alive until finished
         self.external_provider = None
         self._closing = False
-        self._thumb_threads = []  # Track thumbnail threads for cleanup
         self._nav_debounce_timer = QTimer(self)  # Persistent QTimer for debouncing rapid set_page calls
         self._nav_debounce_timer.setSingleShot(True)
         self._nav_debounce_timer.timeout.connect(self._execute_set_page)
@@ -867,6 +946,12 @@ class ManuscriptViewerWidget(QWidget):
         self.lbl_attribution.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_attribution.setWordWrap(True)
         self.lbl_attribution.setStyleSheet("font-size: 10px; color: #7f8c8d; background: transparent; margin: 0px;")
+        # Its line is kept when it is hidden: Browse empties the viewer between two
+        # manuscripts, and the image grew by that line and shrank back, refitted twice
+        # (2026-11-22: the image seemed to jump on arrival).
+        _attr_policy = self.lbl_attribution.sizePolicy()
+        _attr_policy.setRetainSizeWhenHidden(True)
+        self.lbl_attribution.setSizePolicy(_attr_policy)
         self.lbl_attribution.setVisible(False)
         layout.addWidget(self.lbl_attribution)
 
@@ -886,28 +971,7 @@ class ManuscriptViewerWidget(QWidget):
         layout.addWidget(self.scroll_area, 1)
 
     def _detect_external_provider(self, meta):
-        # Check explicit provider from enrich_metadata (set by Plan 03 for Manchester/JTS)
-        if meta.get('external_provider'):
-            return meta['external_provider']
-
-        # Not the NLI catalogue's CUDL link (MARC 856): enrich_metadata folds it into
-        # the record's one Cambridge decision, and sets external_provider when it holds.
-        for img in meta.get('images_ext', []) or []:
-            img_url = (img.get('url', '').lower())
-            if "cudl.lib.cam.ac.uk" in img_url:
-                return "cambridge"
-            if "bodleian.ox.ac.uk" in img_url or "hebrew.bodleian" in img_url:
-                return "oxford"
-            if "luna.manchester.ac.uk" in img_url:
-                return "manchester"
-            if "iiif-cloud.princeton.edu" in img_url or "figgy.princeton.edu" in img_url:
-                return "jts"
-
-        # Check for Oxford Part ID
-        if meta.get('oxford_part_id'):
-            return "oxford"
-
-        return None
+        return detect_external_provider(meta)
 
     def set_image_by_fl_id(self, fl_id):
         digits = re.sub(r"\D", "", str(fl_id or ""))
@@ -1098,19 +1162,8 @@ class ManuscriptViewerWidget(QWidget):
             # For non-CUL external providers (Manchester, JTS, non-CUL Cambridge)
             # the alignment verdict is not computed; legacy length check is
             # kept as a defensive fallback.
-            _align = (meta or {}).get('cambridge_alignment') or {}
-            _verdict_misaligned = _align.get('verdict') == 'misaligned'
-            _legacy_count_mismatch = (
-                not _align
-                and self.external_provider != "oxford"
-                and self.images_nli
-                and len(self.images_ext) != len(self.images_nli)
-            )
-            _count_mismatch = (
-                self.external_provider != "oxford"
-                and self.images_nli
-                and (_verdict_misaligned or _legacy_count_mismatch)
-            )
+            _count_mismatch = default_source(meta, self.images_ext, self.images_nli,
+                                             self.external_provider) == "nli"
             if _count_mismatch:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")
                 self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)} pages)", "ext")
@@ -1165,7 +1218,8 @@ class ManuscriptViewerWidget(QWidget):
         # The source is decided by now -- credit the image that will be shown.
         self._apply_attribution_for_source()
 
-        # Set Page
+        # Set Page (a new list: always shown, even the same image)
+        self._wanted_page_url = None
         self.set_page(initial_idx)
 
     def _on_source_changed(self):
@@ -1205,9 +1259,7 @@ class ManuscriptViewerWidget(QWidget):
         self.set_page(self.current_idx)
 
     def _resolve_url(self, base_url):
-        if not base_url: return None
-        if base_url.endswith('.jpg'): return base_url
-        return f"{base_url}/full/2000,/0/default.jpg"
+        return resolve_full_url(base_url)
 
     def _retire_thread(self, thread):
         """Move a canceled QThread to the in-flight list so it stays alive until finished."""
@@ -1259,7 +1311,7 @@ class ManuscriptViewerWidget(QWidget):
         self._closing = True
         self._nav_debounce_timer.stop()
         # Cancel active threads
-        for thread in [self.loader_thread, self.preload_worker]:
+        for thread in [self.loader_thread, self.preload_worker, self.preview_thread]:
             if thread and thread.isRunning():
                 try:
                     thread.image_loaded.disconnect()
@@ -1273,45 +1325,72 @@ class ManuscriptViewerWidget(QWidget):
         self._inflight_threads.clear()
 
     def _on_thumbnail_ready(self, pix, page_idx, generation):
-        """Handle thumbnail loaded signal - only display if still on same page and same load generation."""
+        """Handle thumbnail loaded signal - only display if still on same page and same load
+        generation, and the sharp image of that load is not on screen yet (a preview that
+        arrives late must not replace it)."""
         if self._closing:
             return
-        if self._load_generation == generation and self.current_idx == page_idx and pix and not pix.isNull():
+        if (self._load_generation == generation and self.current_idx == page_idx and pix and not pix.isNull()
+                and self._sharp_shown_gen != generation):
             self.scroll_area.set_image(pix)
             self._sync_fullscreen_image()
 
-    def _load_thumbnail_async(self, thumb_url):
-        """Load thumbnail asynchronously for quick display while full image loads."""
-        current_idx = self.current_idx  # Capture current state
-        generation = self._load_generation  # Capture generation to reject stale callbacks
-        signal = self._thumbnail_ready  # Capture signal reference for thread
-        closing_ref = lambda: self._closing  # Capture closing flag check
+    @staticmethod
+    def preview_url_for(base_url):
+        """The 400-px preview of a page: any IIIF image service (NLI, Cambridge, JTS,
+        Manchester, Penn); None for a plain image file (an Oxford .jpg brings its own
+        ``thumb_url``). Cambridge pages had no preview before 2026-11-22: the reader waited
+        for the 2000-px image, about 3 s from CUDL."""
+        if not base_url or base_url.endswith('.jpg') or '/full/' in base_url:
+            return None
+        return f"{base_url}/full/400,/0/default.jpg"
 
-        def fetch_and_emit():
-            try:
-                if closing_ref():
-                    return
-                import urllib.request
-                req = urllib.request.Request(thumb_url, headers=Config.HTTP_HEADERS)
-                with urllib.request.urlopen(req, timeout=3) as response:
-                    data = response.read()
-                    if data and not closing_ref():
-                        image = QImage()
-                        if image.loadFromData(data):
-                            pix = QPixmap.fromImage(image)
-                            signal.emit(pix, current_idx, generation)
-            except Exception:
-                pass  # Thumbnail load failed, full image will replace it
+    def _start_preview(self, preview_url, page_idx, generation):
+        """The page's small image through the cached loader (disk and memory; a neighbour
+        prefetch may have fetched it already)."""
+        if self.preview_thread:
+            self._retire_thread(self.preview_thread)
+        self.preview_thread = ImageLoaderThread(preview_url)
+        self.preview_thread.image_loaded.connect(
+            lambda img, i=page_idx, g=generation: self._on_thumbnail_ready(QPixmap.fromImage(img), i, g)
+        )
+        self.preview_thread.load_failed.connect(lambda: None)
+        self.preview_thread.start()
 
-        # Run in background thread to avoid blocking UI
-        t = threading.Thread(target=fetch_and_emit, daemon=True)
-        # Track thread references to prevent premature GC
-        self._thumb_threads = [t2 for t2 in self._thumb_threads if t2.is_alive()]
-        self._thumb_threads.append(t)
-        t.start()
+    def flush_pending_page(self):
+        """Start the page set_page is waiting to load now, not after its debounce: Browse
+        calls it right after load_images, before it builds the manuscript's panels (about
+        a quarter of a second on the UI thread, which the debounce timer waited out)."""
+        if self._nav_debounce_timer.isActive():
+            self._nav_debounce_timer.stop()
+            self._execute_set_page()
+
+    def _show_from_memory(self, index):
+        """Draw the page at once when its sharp image is decoded in memory (a page just
+        seen, or a neighbour prefetched); True when it did."""
+        if not (0 <= index < len(self.active_list)):
+            return False
+        img = memory_image(self._resolve_url(self.active_list[index].get('url')))
+        if img is None:
+            return False
+        self._nav_debounce_timer.stop()
+        self._pending_page_idx = None
+        if self.loader_thread:
+            self._retire_thread(self.loader_thread)
+            self.loader_thread = None
+        if self.preview_thread:
+            self._retire_thread(self.preview_thread)
+            self.preview_thread = None
+        self._load_generation += 1
+        self.display_image(img)
+        self._sharp_shown_gen = self._load_generation
+        self._preload(index + 1)
+        return True
+
 
     def set_page(self, index):
         if not self.active_list:
+            self._wanted_page_url = None
             self._update_bodleian_links()
             self.scroll_area.set_image(None)
             self.scroll_area.set_status_message(tr("No images available"))
@@ -1321,6 +1400,14 @@ class ManuscriptViewerWidget(QWidget):
         if index < 0: index = 0
         if index >= len(self.active_list): index = len(self.active_list) - 1
 
+        # The page on screen, or on its way, asked for again: Browse does so when it renders
+        # the page text after load_images. Starting it over hid the image ("Loading...") and
+        # its preview, and began the download again (2026-11-22).
+        url = self.active_list[index].get('url')
+        if url and index == self.current_idx and url == self._wanted_page_url:
+            return
+        self._wanted_page_url = url
+
         self.current_idx = index
         self._update_bodleian_links()
         self._load_generation += 1  # Invalidate any in-flight callbacks immediately
@@ -1329,6 +1416,10 @@ class ManuscriptViewerWidget(QWidget):
         # NLI entry, and genizah_app's CUDL-coverage switches assign `current_source`
         # then call set_page directly (Codex P2, 2026-09-02).
         self._apply_attribution_for_source()
+
+        # A page decoded in memory is drawn now, with no debounce and no thread.
+        if self._show_from_memory(index):
+            return
 
         # Update status text immediately for responsiveness
         self.scroll_area.set_status_message(tr("Loading..."))
@@ -1356,25 +1447,27 @@ class ManuscriptViewerWidget(QWidget):
         img_data = self.active_list[index]
         base_url = img_data['url']
 
-        # Check for thumbnail URL (Oxford images have this)
-        thumb_url = img_data.get('thumb_url', '')
-        # For NLI IIIF images, auto-generate a fast preview URL (400px)
-        if not thumb_url and 'iiif.nli.org.il' in base_url:
-            thumb_url = f"{base_url}/full/400,/0/default.jpg"
+        if self._show_from_memory(index):   # decoded since set_page asked (a prefetch landed)
+            return
+
+        # Check for thumbnail URL (Oxford images have this); any IIIF library has a
+        # 400-px preview (preview_url_for), not only NLI's since 2026-11-22.
+        thumb_url = img_data.get('thumb_url', '') or self.preview_url_for(base_url)
 
         # Retire previous loader safely (stays alive in _inflight_threads until finished)
         if self.loader_thread:
             self._retire_thread(self.loader_thread)
 
-        # Load low-res preview first for instant display, then high-res replaces it
-        if thumb_url:
-            self._load_thumbnail_async(thumb_url)
-
         final_url = self._resolve_url(base_url)
+
+        # Load low-res preview first for instant display, then high-res replaces it --
+        # unless the sharp image is on disk already (it is drawn in a few ms).
+        if thumb_url and not is_on_disk(final_url):
+            self._start_preview(thumb_url, index, gen)
 
         self.loader_thread = ImageLoaderThread(final_url)
         self.loader_thread.image_loaded.connect(
-            lambda img, g=gen: self.display_image(img) if g == self._load_generation and not self._closing else None
+            lambda img, g=gen: self._show_sharp(img, g)
         )
         self.loader_thread.load_failed.connect(
             lambda g=gen: self._on_image_load_failed(g)
@@ -1408,6 +1501,7 @@ class ManuscriptViewerWidget(QWidget):
         """
         if gen != self._load_generation or self._closing:
             return
+        self._wanted_page_url = None   # asked for again, the page is tried again
 
         if self.external_provider == 'katz' and self.current_source == 'ext' and self.images_nli:
             self.combo_source.setCurrentIndex(self.combo_source.findData('nli'))
@@ -1514,6 +1608,13 @@ class ManuscriptViewerWidget(QWidget):
             )
         else:
             self.lbl_fallback_notice.setVisible(False)
+
+    def _show_sharp(self, image, generation):
+        """The page's sharp image, when it is still the page asked for."""
+        if generation != self._load_generation or self._closing:
+            return
+        self._sharp_shown_gen = generation
+        self.display_image(image)
 
     def display_image(self, image):
         if self._closing:

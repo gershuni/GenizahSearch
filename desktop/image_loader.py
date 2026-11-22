@@ -1,11 +1,31 @@
-"""Image loader thread for desktop manuscript viewers."""
+"""Image loader thread for desktop manuscript viewers.
+
+Since 2026-11-22 (faster Browse images, IMAGE_LOADING_SPEED_PLAN in the private
+repository) the loader also:
+
+- keeps one disk file per size (``cache_path_for``): an NLI page at 2000 px stays
+  ``FL<id>_v2.jpg``, any other width is ``FL<id>_w<width>.jpg`` (GS-66: a 400-px
+  preview and the 2000-px page shared one file, so the page could show blurred);
+- lets a request wait for a download of the same image already running (a preload, a
+  neighbour prefetch) instead of downloading it again (``_claim_download``);
+- keeps a completed download even when its view moved on, written atomically
+  (GS-76 d: a reader could see half a file);
+- keeps a few decoded images in memory (``memory_image``), so a return to a page just
+  seen is drawn at once;
+- reuses library connections from a small pool of sessions, each leased by one
+  download at a time.
+"""
 
 import os
+import queue
 import re
+import threading
+import time
+from collections import OrderedDict
 
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
-from PyQt6.QtGui import QImage
+from PyQt6.QtGui import QImage, QImageReader
 
 from genizah_core import Config, MetadataManager, get_logger
 # SEED-015: wire desktop image fetches into the shared NLI circuit breaker and
@@ -22,13 +42,182 @@ from shared.metadata_manager import ROSETTA_PLACEHOLDER_MAX_BYTES
 
 logger = get_logger(__name__)
 
+#: The width the viewer shows a page at; its NLI cache file keeps the old name.
+FULL_WIDTH = 2000
+#: Decoded images kept in memory (bytes): about ten 2000-px pages.
+MEMORY_BUDGET_BYTES = 120 * 1024 * 1024
+#: How long a request waits for another one downloading the same image.
+INFLIGHT_WAIT_SECONDS = 20.0
+#: Library connections kept open for reuse.
+SESSION_POOL_SIZE = 4
+
+_WIDTH_RE = re.compile(r'/full/(\d+),')
+
+
+def cache_path_for(url):
+    """The disk cache file of ``url``: by FL id and width for NLI, by URL otherwise."""
+    if not url:
+        return None
+    fl_match = re.search(r'FL(\d+)', url)
+    if fl_match:
+        width = _WIDTH_RE.search(url)
+        w = int(width.group(1)) if width else FULL_WIDTH
+        name = f"FL{fl_match.group(1)}_v2.jpg" if w == FULL_WIDTH else f"FL{fl_match.group(1)}_w{w}.jpg"
+        return os.path.join(Config.IMAGE_CACHE_DIR, name)
+    import hashlib
+    url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:16]
+    return os.path.join(Config.IMAGE_CACHE_DIR, f"ext_{url_hash}.jpg")
+
+
+def is_on_disk(url):
+    """True when the cache file of ``url`` is one the loader will show as it is: an image
+    whose header reads, and not preview-sized under an NLI page's name (``_fits``). The
+    viewer then skips the page's preview; a file the loader would refuse, and fetch again,
+    must not (Codex on #98: the pane stayed at "Loading..." with no preview). Reads the
+    header only, on any thread."""
+    path = cache_path_for(url)
+    if not (path and os.path.exists(path) and os.path.getsize(path) > 0):
+        return False
+    reader = QImageReader(path)
+    reader.setDecideFormatFromContent(True)
+    size = reader.size()
+    return size.isValid() and _fits_width(path, size.width())
+
+
+# --- decoded images in memory ---------------------------------------------------------
+
+_memory = OrderedDict()   # cache path -> QImage
+_memory_bytes = [0]
+_memory_lock = threading.Lock()
+
+
+def _fits(path, img):
+    """False for a preview-sized image under an NLI page's name (``FL<id>_v2.jpg``): a Rosetta
+    thumbnail answered for a page whose 2000-px image failed, or a file from before the cache
+    kept one file per size (GS-66). Shown for that load, never kept as the page."""
+    return _fits_width(path, img.width())
+
+
+def _fits_width(path, width):
+    return not (os.path.basename(path).endswith('_v2.jpg') and width < 1000)
+
+
+def memory_image(url):
+    """The decoded image of ``url`` when it is in memory, else None (any thread)."""
+    path = cache_path_for(url)
+    if not path:
+        return None
+    with _memory_lock:
+        img = _memory.get(path)
+        if img is not None and not _fits(path, img):
+            return None
+        if img is not None:
+            _memory.move_to_end(path)
+        return img
+
+
+def _remember(path, img):
+    if not path or img is None or img.isNull() or not _fits(path, img):
+        return
+    size = img.sizeInBytes()
+    if size > MEMORY_BUDGET_BYTES:
+        return
+    with _memory_lock:
+        old = _memory.pop(path, None)
+        if old is not None:
+            _memory_bytes[0] -= old.sizeInBytes()
+        _memory[path] = img
+        _memory_bytes[0] += size
+        while _memory_bytes[0] > MEMORY_BUDGET_BYTES and _memory:
+            _p, dropped = _memory.popitem(last=False)
+            _memory_bytes[0] -= dropped.sizeInBytes()
+
+
+def clear_memory():
+    with _memory_lock:
+        _memory.clear()
+        _memory_bytes[0] = 0
+
+
+# --- one download per image at a time --------------------------------------------------
+
+_inflight = {}            # cache path -> (threading.Event set when that download ends, claimed at)
+_inflight_lock = threading.Lock()
+
+
+def _claim_download(path, take_over=False):
+    """(True, event) when this request downloads ``path``; (False, event) when another
+    one already is, and this one should wait for ``event``.
+
+    A claim older than ``INFLIGHT_WAIT_SECONDS`` is taken over, and ``take_over`` takes it
+    at once (a request that waited that long): a loader terminated at shutdown never
+    releases its claim (Codex on #98), which must not make every later request for that
+    image wait."""
+    now = time.monotonic()
+    with _inflight_lock:
+        held = _inflight.get(path)
+        if held is not None and not take_over and not held[0].is_set() \
+                and now - held[1] < INFLIGHT_WAIT_SECONDS:
+            return False, held[0]
+        event = threading.Event()
+        _inflight[path] = (event, now)
+        return True, event
+
+
+def _release_download(path, event):
+    with _inflight_lock:
+        held = _inflight.get(path)
+        if held is not None and held[0] is event:
+            del _inflight[path]
+    event.set()
+
+
+# --- library connections ------------------------------------------------------------------
+
+_sessions = queue.LifoQueue(maxsize=SESSION_POOL_SIZE)
+
+
+def _lease_session():
+    try:
+        return _sessions.get_nowait()
+    except queue.Empty:
+        return requests.Session()
+
+
+def _return_session(session):
+    try:
+        _sessions.put_nowait(session)
+    except queue.Full:
+        session.close()
+
+
+def _write_cache_atomically(img, path):
+    """Save ``img`` as ``path`` through a temporary file, so nothing ever reads half
+    of it (GS-76 d)."""
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        if img.save(tmp, "JPEG", 85):
+            os.replace(tmp, path)
+            logger.debug("Saved image cache to %s", path)
+        else:
+            logger.warning("Failed to write image cache for %s", path)
+    except Exception as e:
+        logger.warning("Failed to write image cache for %s: %s; future loads will re-download.", path, e)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
 
 class ImageLoaderThread(QThread):
     """
     Smart Image Loader:
-    1. Checks Local Disk Cache first.
-    2. If missing, Downloads from IIIF (with Rosetta fallback).
-    3. Saves successful downloads to Disk Cache.
+    1. Memory, then the local disk cache.
+    2. If missing, downloads from IIIF (with Rosetta fallback) -- or waits for another
+       request already downloading the same image.
+    3. Saves successful downloads to the disk cache.
     """
 
     image_loaded = pyqtSignal(QImage)
@@ -53,37 +242,65 @@ class ImageLoaderThread(QThread):
     def cancel(self):
         self._cancelled = True
 
+    def _from_cache(self, local_path):
+        """The image from memory or disk, or None (a corrupt file is removed)."""
+        img = memory_image(self.url)
+        if img is not None:
+            return img
+        if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            img = QImage(local_path)
+            if not img.isNull() and self._too_small_for_full_page(local_path, img):
+                # GS-66: a 400-px image saved under a page's name before 2026-11-22. Not
+                # removed: the download below writes the page over it.
+                return None
+            if not img.isNull():
+                _remember(local_path, img)
+                return img
+            # Corrupt file? Delete it so we re-download
+            try:
+                os.remove(local_path)
+            except Exception as e:
+                logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
+        return None
+
     def run(self):
         if not self.url:
             self.load_failed.emit()
             return
 
-        # 1. Determine cache filename: FL ID for NLI, URL hash for external
-        fl_match = re.search(r'FL(\d+)', self.url)
-        local_path = None
+        local_path = cache_path_for(self.url)
 
-        if fl_match:
-            fl_id = fl_match.group(1)
-            # v2 cache: high resolution (2000px). Old v1 cache was 600px.
-            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}_v2.jpg")
-        else:
-            # Cache external images (Cambridge, Manchester, Oxford, JTS) by URL hash
-            import hashlib
-            url_hash = hashlib.md5(self.url.encode('utf-8')).hexdigest()[:16]
-            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"ext_{url_hash}.jpg")
+        # --- CHECK MEMORY AND LOCAL CACHE ---
+        img = self._from_cache(local_path)
+        if img is not None:
+            self.image_loaded.emit(img)
+            return
 
-        # --- CHECK LOCAL CACHE ---
-        if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-            img = QImage(local_path)
-            if not img.isNull():
+        # --- ANOTHER REQUEST DOWNLOADING THE SAME IMAGE? WAIT FOR IT ---
+        owner, event = _claim_download(local_path)
+        if not owner:
+            waited = 0.0
+            while not event.wait(0.1):
+                waited += 0.1
+                if self._cancelled or waited >= INFLIGHT_WAIT_SECONDS:
+                    break
+            if self._cancelled:
+                return
+            img = self._from_cache(local_path)
+            if img is not None:
                 self.image_loaded.emit(img)
                 return
-            else:
-                # Corrupt file? Delete it so we re-download
-                try:
-                    os.remove(local_path)
-                except Exception as e:
-                    logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
+            # It failed, or never ended (its thread was terminated): download ourselves,
+            # holding the claim so a later request waits for us and finds it released.
+            owner, event = _claim_download(local_path, take_over=True)
+        try:
+            self._download_and_emit(local_path)
+        finally:
+            if owner:
+                _release_download(local_path, event)
+
+    def _download_and_emit(self, local_path):
+        fl_match = re.search(r'FL(\d+)', self.url)
 
         # 2. Download from Network (if not in cache)
         headers = dict(Config.HTTP_HEADERS)
@@ -125,23 +342,23 @@ class ImageLoaderThread(QThread):
         if data:
             img = QImage.fromData(data)
             if not img.isNull():
-                self.image_loaded.emit(img)
-
+                _remember(local_path, img)
                 # --- SAVE TO LOCAL CACHE (always as JPEG for compact storage) ---
-                if local_path and not self._cancelled:
-                    try:
-                        img.save(local_path, "JPEG", 85)
-                        logger.debug("Saved image cache to %s", local_path)
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to write image cache for %s: %s; future loads will re-download.",
-                            local_path,
-                            e,
-                        )
-            else:
+                # Kept even when the view moved on: the bytes are whole, and the
+                # reader may come back (or a neighbour prefetch fetched it for them).
+                if local_path:
+                    _write_cache_atomically(img, local_path)
+                if not self._cancelled:
+                    self.image_loaded.emit(img)
+            elif not self._cancelled:
                 self.load_failed.emit()
-        else:
+        elif not self._cancelled:
             self.load_failed.emit()
+
+    @staticmethod
+    def _too_small_for_full_page(local_path, img):
+        """An NLI page file (``FL<id>_v2.jpg``) holding a preview-sized image."""
+        return not _fits(local_path, img)
 
     @staticmethod
     def _is_rosetta_placeholder(data):
@@ -176,12 +393,15 @@ class ImageLoaderThread(QThread):
         else:
             timeout = (NLI_CONNECT_TIMEOUT, 10)
 
+        session = _lease_session()
         try:
             # nli_image_get applies the host TLS policy (verification disabled,
             # warning suppressed host-scoped, only for NLI's legacy cert chain;
             # full TLS verification for every other library host).
-            resp = nli_image_get(target_url, headers=headers, timeout=timeout, stream=True)
+            resp = nli_image_get(target_url, headers=headers, timeout=timeout, stream=True,
+                                 session=session)
             if self._cancelled:
+                resp.close()
                 return None
             if resp.status_code == 200:
                 # #A (oxford-fgp-image-mismatch): the Bodleian image host now
@@ -230,3 +450,5 @@ class ImageLoaderThread(QThread):
         except Exception as e:
             logger.warning("Image download failed for %s: %s", target_url, e)
             return None
+        finally:
+            _return_session(session)

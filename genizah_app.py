@@ -8784,9 +8784,32 @@ class GenizahGUI(QMainWindow):
         gen = self._browse_enrich_gen
         vol_ie = self.current_browse_volume_ie  # capture at launch time
         self._browse_enrich_slot = lambda s, m, g=gen, v=vol_ie: self.on_browse_enriched_loaded(s, m, g, v)
+        # The reader moved: neighbours prepared for the manuscript left behind are dropped,
+        # except this one's own (its downloads are what the viewer will wait for) and its own
+        # neighbours' (walking the shelf, the one after next is being fetched).
+        try:
+            keep = [sid, *self._browse_neighbour_sids(sid)]
+        except Exception:
+            keep = [sid]
+        self._browse_prefetcher().cancel(keep=keep)
         # Resolve IIIF suffix from volume_ie (1 for primary/single-IE)
         from genizah_core import resolve_volume_suffix
         suffix = resolve_volume_suffix(sid, vol_ie) if vol_ie else 1
+        # Enriched in this session (a page seen, a neighbour prepared): shown from memory at
+        # once, after this load's page text (the event loop's next turn, as the thread's
+        # answer would come), not after a refresh that took 0.5-2 s (measured 2026-11-22).
+        fresh = self._browse_fresh_meta(sid) if (suffix == 1 and not is_part) else None
+        if fresh is not None:
+            self.enrich_browse_worker = None
+            QTimer.singleShot(0, lambda s=sid, m=fresh, g=gen, v=vol_ie: self.on_browse_enriched_loaded(s, m, g, v))
+            return
+        # The neighbour prefetch is fetching this manuscript's metadata right now: take its
+        # answer instead of a second fetch racing it for the cache entry (Codex on #98).
+        pending = self._browse_prefetcher().pending_enrichment(sid) if (suffix == 1 and not is_part) else None
+        if pending is not None:
+            self.enrich_browse_worker = pending
+            pending.finished_signal.connect(self._browse_enrich_slot)
+            return
         self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid, suffix=suffix)
         self.enrich_browse_worker.finished_signal.connect(self._browse_enrich_slot)
         self.enrich_browse_worker.start()
@@ -8901,10 +8924,18 @@ class GenizahGUI(QMainWindow):
                 return True
         return False
 
-    def _resolve_cambridge_page_or_fallback(self, sys_id, page_idx, display_meta, folio_num):
+    def _resolve_cambridge_page_or_fallback(self, sys_id, page_num, display_meta, folio_num):
         """Compute (display_meta, idx) for a Cambridge CUDL page using
         folio+side resolution, injecting a synthetic NLI-fallback entry
         when no CUDL canvas matches.
+
+        ``page_num`` is the transcription page as Browse keeps it
+        (``current_browse_p``, from 1). The resolver and the NLI URL count
+        pages from 0. Until 2026-11-22 the page went to them as it was:
+        page 1 resolved to the second leaf side, and the page text's
+        positional choice (browse_render_page) replaced that image a moment
+        later -- a second download, and the image shown, hidden and shown
+        again on every new manuscript.
 
         display_meta is treated as IMMUTABLE: when we need to append a
         synthetic NLI fallback entry, we return a SHALLOW COPY with a
@@ -8931,6 +8962,10 @@ class GenizahGUI(QMainWindow):
             except Exception:
                 _nli_svc = None
 
+        try:
+            page_idx = max(int(page_num) - 1, 0)
+        except (TypeError, ValueError):
+            page_idx = 0
         images_ext = (display_meta or {}).get('images_ext') or []
         resolved = None
         if _nli_svc is not None and images_ext:
@@ -8967,7 +9002,7 @@ class GenizahGUI(QMainWindow):
             idx = _get_initial_image_index(
                 display_meta,
                 folio_num=folio_num,
-                page_num=page_idx if folio_num is None else None,
+                page_num=page_num if folio_num is None else None,
             )
             return (display_meta, idx)
 
@@ -8976,7 +9011,7 @@ class GenizahGUI(QMainWindow):
         idx = _get_initial_image_index(
             display_meta,
             folio_num=folio_num,
-            page_num=page_idx if folio_num is None else None,
+            page_num=page_num if folio_num is None else None,
         )
         return (display_meta, idx)
 
@@ -9121,6 +9156,219 @@ class GenizahGUI(QMainWindow):
 
     # ── /260419-cfx helpers ──────────────────────────────────────────
 
+    def _browse_display_shelf(self, sid, meta):
+        """The shelfmark of the info label, with its library (CSV first, then MARC);
+        its folio number chooses the first image (_browse_image_choice)."""
+        shelf = meta.get('shelfmark')
+        if shelf and shelf != "Unknown":
+            # Try CSV library_code first, then MARC as fallback
+            library_code = self.meta_mgr.get_library_for_id(sid)
+            if library_code:
+                library = get_library_display(library_code, short=False)
+            else:
+                library = (meta.get('marc') or {}).get('current_owner', '')
+            if library:
+                shelf = f"{library} | {shelf}"
+        return shelf
+
+    #: How long a move to a prepared manuscript keeps the old image painted, at most.
+    BROWSE_IMAGE_HOLD_MS = 500
+
+    def _browse_hold_image(self):
+        """Keep the image pane as painted until the next manuscript's image replaces it.
+
+        browse_load clears the viewer ("No images available") a turn of the event loop before
+        a prepared manuscript's image is drawn from memory, and that blank was painted between
+        the two images (2026-11-22). Released by on_browse_enriched_loaded right after it
+        draws, or after ``BROWSE_IMAGE_HOLD_MS`` whatever happens."""
+        viewer = getattr(self, 'browse_viewer', None)
+        if viewer is None or not viewer.isVisible():
+            return
+        viewer.scroll_area.viewport().setUpdatesEnabled(False)
+        QTimer.singleShot(self.BROWSE_IMAGE_HOLD_MS, self._browse_release_image)
+
+    def _browse_release_image(self):
+        """Paint the image pane now (and end a hold)."""
+        viewer = getattr(self, 'browse_viewer', None)
+        if viewer is None:
+            return
+        try:
+            viewport = viewer.scroll_area.viewport()
+            if not viewport.updatesEnabled():
+                viewport.setUpdatesEnabled(True)
+            if viewer.isVisible():
+                viewport.repaint()
+        except RuntimeError:  # the window is closing
+            pass
+
+    # --- Browse's neighbours on the shelf, prepared ahead (desktop/browse_prefetch.py) ---
+
+    def _browse_prefetcher(self):
+        prefetcher = getattr(self, '_browse_prefetch', None)
+        if prefetcher is None:
+            from desktop.browse_prefetch import BrowsePrefetcher
+            prefetcher = self._browse_prefetch = BrowsePrefetcher(
+                meta_mgr=lambda: getattr(self, 'meta_mgr', None),
+                neighbours=self._browse_neighbour_sids,
+                fresh_meta=self._browse_fresh_meta,
+                image_urls=self._browse_prefetch_urls,
+                parent=self,
+            )
+        return prefetcher
+
+    def _browse_fresh_meta(self, sid):
+        """The cached metadata of ``sid`` when Browse may show it without enriching again:
+        a whole answer enriched in this session (MetadataManager.enriched_recently) and
+        complete by the Manuscript Viewer's rule (_cached_meta_needs_enrichment). Else None."""
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        if not sid or meta_mgr is None or not hasattr(meta_mgr, 'enriched_recently'):
+            return None
+        try:
+            if not meta_mgr.enriched_recently(sid):
+                return None
+            entry = meta_mgr.nli_cache.get(sid)
+            from desktop.result_dialog import _cached_meta_needs_enrichment
+            if not entry or _cached_meta_needs_enrichment(meta_mgr, sid, entry):
+                return None
+            return entry
+        except Exception:  # an aid: the refresh then runs as before
+            logger.debug("Browse fresh-metadata check failed for %s", sid, exc_info=True)
+            return None
+
+    def _browse_neighbour_sids(self, sid):
+        """The manuscripts previous / next would open from ``sid`` (the shelf, else the file
+        order), in the order the prefetch prepares them: the next two the reader's way, then
+        the one behind. Walking the shelf, the one after next was not ready: about 2 s
+        (2026-11-22). None inside an Oxford Part or the reading desk, and none that opens as a
+        Part (nor any beyond it)."""
+        if not sid or self.browse_reading_desk_active or self._browse_in_part():
+            return []
+        way = -1 if getattr(self, '_browse_last_direction', 1) < 0 else 1
+
+        def usable(s):
+            return s and s != sid and not self.meta_mgr.get_part_for_folio(s)
+
+        ahead = self._browse_adjacent_sid(sid, way)
+        ahead2 = self._browse_adjacent_sid(ahead, way) if usable(ahead) else None
+        behind = self._browse_adjacent_sid(sid, -way)
+        found = []
+        for s in (ahead, ahead2, behind):
+            if usable(s) and s not in found:
+                found.append(s)
+        return found
+
+    def _browse_adjacent_sid(self, sid, direction):
+        """The manuscript previous / next opens from ``sid``: the shelf's neighbour when it has
+        a place there, else the transcription file's order; None at an end or on failure."""
+        step = self._browse_shelf_step(sid)
+        if step is not None:
+            target = step[1] if direction > 0 else step[0]
+            return target.sys_id if target is not None else None
+        try:
+            return self.searcher.get_adjacent_sys_id_by_file_order(sid, direction)
+        except Exception:
+            return None
+
+    def _browse_prefetch_urls(self, sid, meta):
+        """The first page's preview and sharp image of ``sid``, as Browse would load them."""
+        if not meta or meta.get('external_provider') == 'katz' or is_synthetic_sys_id(sid):
+            return []
+        from desktop.viewers import ManuscriptViewerWidget, default_page_list, resolve_full_url
+        shelf = self._browse_display_shelf(sid, meta)
+        display_meta, idx, _folio = self._browse_image_choice(sid, meta, shelf, 1, None)
+        pages = default_page_list(display_meta)
+        if not (0 <= idx < len(pages)):
+            return []
+        page = pages[idx]
+        base = page.get('url') or ''
+        preview = page.get('thumb_url') or ManuscriptViewerWidget.preview_url_for(base)
+        return [preview, resolve_full_url(base)]
+
+    def _browse_image_choice(self, sid, meta, shelf, page, volume_ie):
+        """(display_meta, image index, folio number) Browse shows for ``sid``'s ``page``:
+        the volume's external images, the Cambridge folio+side resolver or the initial index.
+        One rule for the page on screen (on_browse_enriched_loaded) and the neighbour
+        prefetch (desktop/browse_prefetch.py), which fetches the same image."""
+        # For multi-IE manuscripts, filter external images to the active volume
+        display_meta = meta
+        if volume_ie and meta.get('images_ext'):
+            import copy as _copy
+            display_meta = _copy.copy(meta)
+            from genizah_core import get_volumes_for_sys_id, resolve_volume_suffix
+            _volumes = get_volumes_for_sys_id(sid)
+            _suffix = resolve_volume_suffix(sid, volume_ie)
+            if _volumes and _suffix > 0:
+                _offset = 0
+                _vol_pages = 0
+                for _v in _volumes:
+                    if _v.get('suffix', 1) < _suffix:
+                        _offset += _v.get('transcription_pages', 0)
+                    elif _v.get('suffix', 1) == _suffix:
+                        _vol_pages = _v.get('transcription_pages', 0)
+                all_ext = meta['images_ext']
+                if _vol_pages > 0 and _offset + _vol_pages <= len(all_ext):
+                    display_meta['images_ext'] = all_ext[_offset:_offset + _vol_pages]
+                elif _offset < len(all_ext):
+                    display_meta['images_ext'] = all_ext[_offset:]
+                if display_meta.get('images_ext'):
+                    # 260419-cfx / 260421-aln: prefer NLI when CUDL is
+                    # misaligned per classify_cambridge_alignment (count
+                    # OR per-position mismatch). CUDL stays available for
+                    # manual switch. Fall back to legacy length check
+                    # when the verdict was not computed (non-CUL Cambridge
+                    # or sidecar unavailable).
+                    _ext_list = display_meta.get('images_ext') or []
+                    _nli_list = display_meta.get('images_nli') or []
+                    _align = display_meta.get('cambridge_alignment') or {}
+                    _misaligned = (
+                        _align.get('verdict') == 'misaligned'
+                        or (
+                            not _align
+                            and _nli_list
+                            and len(_ext_list) != len(_nli_list)
+                        )
+                    )
+                    if _misaligned:
+                        display_meta['images'] = _nli_list
+                    else:
+                        display_meta['images'] = _ext_list
+
+        folio_num = _get_folio_number_from_shelfmark(shelf)
+        # 260419-cfx / 260421-aln: when the active source is Cambridge
+        # CUDL, consult the folio+side resolver. It may inject a
+        # synthetic NLI fallback canvas on a shallow copy of
+        # display_meta for transcription pages with no matching CUDL
+        # canvas (e.g. T-S NS 158.112 pages 13–14 → folios 8r/8v).
+        # Skip the resolver when CUDL is misaligned at the manuscript
+        # level — the viewer defaults to NLI in that case and per-page
+        # resolution is unnecessary (and would synthesize images_ext
+        # entries that defeat the NLI default).
+        _ext_count = len(display_meta.get('images_ext') or [])
+        _nli_count = len(display_meta.get('images_nli') or [])
+        _align = display_meta.get('cambridge_alignment') or {}
+        _skip_cambridge_resolver = (
+            _align.get('verdict') == 'misaligned'
+            or (
+                not _align
+                and _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
+            )
+        )
+        if (
+            self._is_cambridge_display(display_meta)
+            and display_meta.get('images_ext')
+            and not _skip_cambridge_resolver
+        ):
+            display_meta, idx = self._resolve_cambridge_page_or_fallback(
+                sid, page, display_meta, folio_num,
+            )
+        else:
+            idx = _get_initial_image_index(
+                display_meta,
+                folio_num=folio_num,
+                page_num=page if folio_num is None else None,
+            )
+        return display_meta, idx, folio_num
+
     def on_browse_enriched_loaded(self, sid, meta, gen=None, expected_vol_ie=None):
         if not meta: return
         # Generation guard: reject stale enrichment from a previous browse action
@@ -9162,19 +9410,10 @@ class GenizahGUI(QMainWindow):
 
         # 1. Update Info Label (Top Bar)
         marc = meta.get('marc', {})
-        shelf = meta.get('shelfmark')
         title = _resolve_display_title(
             sid, meta.get('title', ''), marc.get('english_title', '')
         )
-        if shelf and shelf != "Unknown":
-            # Try CSV library_code first, then MARC as fallback
-            library_code = self.meta_mgr.get_library_for_id(sid)
-            if library_code:
-                library = get_library_display(library_code, short=False)
-            else:
-                library = marc.get('current_owner', '')
-            if library:
-                shelf = f"{library} | {shelf}"
+        shelf = self._browse_display_shelf(sid, meta)
 
         # Check for Oxford Part metadata - integrated into shelfmark
         part_id = self.current_browse_part_id
@@ -9218,7 +9457,10 @@ class GenizahGUI(QMainWindow):
             tooltip_parts = []
             if title:
                 truncated, full = _truncate_title(title)
-                label_text += f" | {truncated}"
+                # The title on its own line, as browse_render_page writes it moments later:
+                # one line here and two there moved the image pane up and back down, and
+                # the image with it (2026-11-22).
+                label_text += f"<br/>{truncated}"
                 if full: tooltip_parts.append(full)
             if meta.get('physical_desc'):
                 label_text += f" | {meta['physical_desc']}"
@@ -9239,84 +9481,8 @@ class GenizahGUI(QMainWindow):
         # This handles both new requests and in-flight enrichment threads that
         # complete after reading desk activation.
         if not self.browse_reading_desk_active:
-            # For multi-IE manuscripts, filter external images to the active volume
-            display_meta = meta
-            if self.current_browse_volume_ie and meta.get('images_ext'):
-                import copy as _copy
-                display_meta = _copy.copy(meta)
-                from genizah_core import get_volumes_for_sys_id, resolve_volume_suffix
-                _volumes = get_volumes_for_sys_id(self.current_browse_sid)
-                _suffix = resolve_volume_suffix(self.current_browse_sid, self.current_browse_volume_ie)
-                if _volumes and _suffix > 0:
-                    _offset = 0
-                    _vol_pages = 0
-                    for _v in _volumes:
-                        if _v.get('suffix', 1) < _suffix:
-                            _offset += _v.get('transcription_pages', 0)
-                        elif _v.get('suffix', 1) == _suffix:
-                            _vol_pages = _v.get('transcription_pages', 0)
-                    all_ext = meta['images_ext']
-                    if _vol_pages > 0 and _offset + _vol_pages <= len(all_ext):
-                        display_meta['images_ext'] = all_ext[_offset:_offset + _vol_pages]
-                    elif _offset < len(all_ext):
-                        display_meta['images_ext'] = all_ext[_offset:]
-                    if display_meta.get('images_ext'):
-                        # 260419-cfx / 260421-aln: prefer NLI when CUDL is
-                        # misaligned per classify_cambridge_alignment (count
-                        # OR per-position mismatch). CUDL stays available for
-                        # manual switch. Fall back to legacy length check
-                        # when the verdict was not computed (non-CUL Cambridge
-                        # or sidecar unavailable).
-                        _ext_list = display_meta.get('images_ext') or []
-                        _nli_list = display_meta.get('images_nli') or []
-                        _align = display_meta.get('cambridge_alignment') or {}
-                        _misaligned = (
-                            _align.get('verdict') == 'misaligned'
-                            or (
-                                not _align
-                                and _nli_list
-                                and len(_ext_list) != len(_nli_list)
-                            )
-                        )
-                        if _misaligned:
-                            display_meta['images'] = _nli_list
-                        else:
-                            display_meta['images'] = _ext_list
-
-            folio_num = _get_folio_number_from_shelfmark(shelf)
-            # 260419-cfx / 260421-aln: when the active source is Cambridge
-            # CUDL, consult the folio+side resolver. It may inject a
-            # synthetic NLI fallback canvas on a shallow copy of
-            # display_meta for transcription pages with no matching CUDL
-            # canvas (e.g. T-S NS 158.112 pages 13–14 → folios 8r/8v).
-            # Skip the resolver when CUDL is misaligned at the manuscript
-            # level — the viewer defaults to NLI in that case and per-page
-            # resolution is unnecessary (and would synthesize images_ext
-            # entries that defeat the NLI default).
-            _ext_count = len(display_meta.get('images_ext') or [])
-            _nli_count = len(display_meta.get('images_nli') or [])
-            _align = display_meta.get('cambridge_alignment') or {}
-            _skip_cambridge_resolver = (
-                _align.get('verdict') == 'misaligned'
-                or (
-                    not _align
-                    and _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
-                )
-            )
-            if (
-                self._is_cambridge_display(display_meta)
-                and display_meta.get('images_ext')
-                and not _skip_cambridge_resolver
-            ):
-                display_meta, idx = self._resolve_cambridge_page_or_fallback(
-                    self.current_browse_sid, self.current_browse_p, display_meta, folio_num,
-                )
-            else:
-                idx = _get_initial_image_index(
-                    display_meta,
-                    folio_num=folio_num,
-                    page_num=self.current_browse_p if folio_num is None else None,
-                )
+            display_meta, idx, folio_num = self._browse_image_choice(
+                self.current_browse_sid, meta, shelf, self.current_browse_p, self.current_browse_volume_ie)
             if display_meta.get('external_provider') == 'katz':
                 scan_sid, scan_page, fl_id, metadata_only = self._browse_displayed_scan
                 same_page = (scan_sid, scan_page) == (sid, self.current_browse_p)
@@ -9324,6 +9490,12 @@ class GenizahGUI(QMainWindow):
                                                 metadata_only=same_page and metadata_only)
             else:
                 self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
+                # Start the page now, not after the panels below are built: about a
+                # quarter of a second on the UI thread, which the viewer's debounce
+                # waited out on every manuscript (measured 2026-11-22).
+                self.browse_viewer.flush_pending_page()
+                # And paint it now: an image drawn from memory waited for those panels.
+                self._browse_release_image()
 
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
@@ -9484,6 +9656,10 @@ class GenizahGUI(QMainWindow):
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
         self._browse_pgp_worker.start()
+
+        # Prepare the manuscripts previous / next would open, while the reader reads this one.
+        if not self.browse_reading_desk_active:
+            self._browse_prefetcher().schedule(sid)
 
     def _on_browse_pgp_loaded(self, sys_id, sources, pgp_doc):
         """Handle PGP sources loaded from background thread."""
@@ -35905,8 +36081,23 @@ class GenizahGUI(QMainWindow):
         self.browse_thumb.setText("No Preview")
 
     def cancel_browse_image_thread(self):
+        """Silence the thumbnail's running loader and keep it until it finishes.
+
+        It is handed to ``_browse_inflight``, which deletes it once it has finished, so this
+        window lets go of it: ``fetch_browse_thumbnail`` returns early (no thumbnail URL, a
+        Bodleian refresh) without starting another, and the next call -- the next page, the
+        window closing -- touched a deleted object (RuntimeError, 2026-11-22: Browse's instant
+        draws took that path on almost every move)."""
         thread = getattr(self, 'browse_img_thread', None)
-        if thread and thread.isRunning():
+        if thread is None:
+            return
+        try:
+            running = thread.isRunning()
+        except RuntimeError:  # deleted already (held from before this guard)
+            self.browse_img_thread = None
+            return
+        if running:
+            self.browse_img_thread = None
             thread.cancel()
             try:
                 thread.image_loaded.disconnect()
@@ -38719,6 +38910,8 @@ class GenizahGUI(QMainWindow):
             # Stop browse tab viewer image threads
             if getattr(self, 'browse_viewer', None):
                 self.browse_viewer.stop_threads()
+            if getattr(self, '_browse_prefetch', None) is not None:
+                self._browse_prefetch.stop()
             # Stop browse thumbnail threads
             self.cancel_browse_image_thread()
             for t in getattr(self, '_browse_inflight', []):
@@ -39056,6 +39249,7 @@ class GenizahGUI(QMainWindow):
 
         # On the shelf (plan §10.5): the neighbour of the placement shown. Its end is told, not
         # crossed; a manuscript without a place, or no shelf tree, keeps the file order.
+        self._browse_last_direction = direction   # the neighbour prefetch looks this way first
         step = self._browse_shelf_step(current)
         if step is not None:
             target = step[1] if direction > 0 else step[0]
@@ -39084,6 +39278,8 @@ class GenizahGUI(QMainWindow):
                 if shelf and shelf != "Unknown":
                     self.browse_shelf_input.setText(shelf)
                 self._set_last_browse_field("sys")
+                if not self.browse_reading_desk_active and self._browse_fresh_meta(new_sid) is not None:
+                    self._browse_hold_image()   # drawn at once: no blank between the two images
                 self.browse_load()
         else:
             QMessageBox.information(self, tr("Nav"), tr("End of file list."))

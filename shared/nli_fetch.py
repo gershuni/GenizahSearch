@@ -91,16 +91,19 @@ class RedirectNotAllowed(requests.exceptions.RequestException):
     """
 
 
-def _get_once(url, *, verify, headers, timeout, stream, **kwargs):
+def _get_once(url, *, verify, headers, timeout, stream, session=None, **kwargs):
     """Single ``requests.get`` (no auto-redirect) honouring ``verify``.
 
     When ``verify`` is False the ``InsecureRequestWarning`` is suppressed
     *host-scoped* — the ignore filter is installed inside a
     :func:`warnings.catch_warnings` block around this one call and torn down
     afterwards, so it never leaks to the rest of the process.
+    ``session``: a ``requests.Session`` the caller holds alone (its open connections
+    are reused); the per-request ``verify`` still decides the TLS policy.
     """
+    get = session.get if session is not None else requests.get
     if verify:
-        return requests.get(
+        return get(
             url, headers=headers, timeout=timeout, stream=stream,
             verify=True, allow_redirects=False, **kwargs,
         )
@@ -109,14 +112,14 @@ def _get_once(url, *, verify, headers, timeout, stream, **kwargs):
             warnings.simplefilter('ignore', InsecureRequestWarning)
         else:  # pragma: no cover - defensive packaging fallback
             warnings.simplefilter('ignore')
-        return requests.get(
+        return get(
             url, headers=headers, timeout=timeout, stream=stream,
             verify=False, allow_redirects=False, **kwargs,
         )
 
 
 def nli_image_get(url, *, headers=None, timeout=None, stream=False,
-                  allowed_url=None, **kwargs):
+                  allowed_url=None, session=None, **kwargs):
     """``requests.get`` with the NLI host TLS policy applied per-hop.
 
     For NLI image hosts, TLS verification is disabled (with host-scoped warning
@@ -134,6 +137,10 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
     Without it (the default, and every desktop caller) redirects are followed
     as before.
 
+    ``session``: a ``requests.Session`` held by this call alone (the desktop image
+    loader leases one per download), so a library's open connection is reused instead
+    of a new TLS handshake per image (~0.6 s to Cambridge, measured 2026-11-22).
+
     Does NOT consult or feed the circuit breaker — the caller records
     success/failure so it can attach a call-site ``path``.
     """
@@ -144,7 +151,7 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
         verify = nli_verify_for(current_url)
         resp = _get_once(
             current_url, verify=verify, headers=headers, timeout=timeout,
-            stream=stream, **kwargs,
+            stream=stream, session=session, **kwargs,
         )
         if not allow_redirects:
             return resp

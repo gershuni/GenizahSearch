@@ -6,10 +6,12 @@ genizah_core.py retains a permanent same-object re-export shim so all
 existing ``from genizah_core import MetadataManager`` callers continue working.
 """
 
+import copy
 import logging
 import os
 import re
 import threading
+import time as _time
 from array import array
 import pickle
 import requests
@@ -615,6 +617,14 @@ class _BoundedLRUCache:
 MARC_FUTURE_TIMEOUT = 15          # await fetch_marc_data() future result
 NLI_IIIF_FUTURE_TIMEOUT = 15      # await fetch_iiif_manifest() future result
 EXTERNAL_IIIF_HTTP_TIMEOUT = 5    # external IIIF manifest GET (Figgy/CUDL etc.)
+# A library's image list (CUDL, Figgy) kept in memory (2026-11-22). enrich_metadata
+# downloaded it on every visit -- 0.5-1.7 s of the desktop's 0.8 s return to a manuscript
+# seen a minute before (measured). The lists change rarely; a failed fetch is not kept.
+EXTERNAL_IIIF_CACHE_TTL = 6 * 3600
+EXTERNAL_IIIF_CACHE_MAX = 256
+# How long a manuscript enriched in this process counts as fresh for Browse, which then
+# shows it from memory instead of enriching again (enriched_recently).
+ENRICHED_FRESH_SECONDS = 6 * 3600
 
 
 class _RefusedHopResponse:
@@ -1797,6 +1807,8 @@ class MetadataManager:
         # oldest stored copy served stale above (the web's browse note reads it), and
         # nothing once both answers are fresh again -- the entry is reused and saved.
         stale_since = _nli_store.stale_from(marc_data, nli_iiif_data)
+        served_stale = any(isinstance(a, dict) and a.get(_nli_store.STALE_KEY)
+                           for a in (marc_data, nli_iiif_data))
         if stale_since is not None:
             current_meta['nli_stale_from'] = stale_since
         else:
@@ -1947,7 +1959,31 @@ class MetadataManager:
             current_meta['shelfmark'] = marc_data['shelfmark_alt']
 
         self.nli_cache[system_id] = current_meta
+        has_images = bool(current_meta.get('images_nli') or current_meta.get('images_ext')
+                          or current_meta.get('images'))
+        if suffix == 1 and marc_data and has_images and not served_stale:
+            # Only a whole, current answer counts as fresh: a failed catalogue or image-list
+            # fetch (NLI's manifest can fail while its MARC record comes), or an old copy served
+            # while NLI was down, is tried again on the next visit, not kept for hours (Codex
+            # on #98).
+            self._enriched_times()[system_id] = _time.monotonic()
+        else:
+            self._enriched_times().pop(system_id, None)
         return current_meta
+
+    def _enriched_times(self) -> dict:
+        times = getattr(self, '_enriched_at', None)
+        if times is None:
+            times = self._enriched_at = {}
+        return times
+
+    def enriched_recently(self, system_id, max_age=ENRICHED_FRESH_SECONDS) -> bool:
+        """True when ``enrich_metadata`` gave ``system_id`` a whole answer in this process
+        within ``max_age`` seconds. Browse then shows the cached entry at once instead of
+        enriching it again (2026-11-22: the desktop's return to a manuscript took 0.8 s,
+        most of it this refresh)."""
+        at = self._enriched_times().get(system_id)
+        return at is not None and (_time.monotonic() - at) <= max_age
 
     def fetch_volume_manifest(self, system_id, suffix):
         """Lightweight manifest-only fetch for volume switches (no MARC, no FJMS, no crossref).
@@ -1971,7 +2007,43 @@ class MetadataManager:
         Returns: {'attribution': str, 'metadata': dict, 'canvases': [{'label': str, 'url': str}]}
         """
         if not view_url: return {}
+        cached = self._external_iiif_cached(view_url)
+        if cached is not None:
+            return cached
+        result = self._fetch_external_iiif_data(view_url)
+        if result.get('canvases'):
+            self._external_iiif_store(view_url, result)
+        return copy.deepcopy(result)
 
+    def _external_iiif_state(self):
+        state = getattr(self, '_ext_iiif', None)
+        if state is None:
+            state = self._ext_iiif = (OrderedDict(), threading.Lock())
+        return state
+
+    def _external_iiif_cached(self, view_url):
+        entries, lock = self._external_iiif_state()
+        with lock:
+            hit = entries.get(view_url)
+            if hit is None:
+                return None
+            stored_at, result = hit
+            if _time.monotonic() - stored_at > EXTERNAL_IIIF_CACHE_TTL:
+                del entries[view_url]
+                return None
+            entries.move_to_end(view_url)
+            return copy.deepcopy(result)
+
+    def _external_iiif_store(self, view_url, result):
+        entries, lock = self._external_iiif_state()
+        with lock:
+            entries[view_url] = (_time.monotonic(), copy.deepcopy(result))
+            entries.move_to_end(view_url)
+            while len(entries) > EXTERNAL_IIIF_CACHE_MAX:
+                entries.popitem(last=False)
+
+    def _fetch_external_iiif_data(self, view_url):
+        """The network half of ``fetch_external_iiif_data`` (which keeps its answers)."""
         # CUDL Conversion Logic
         manifest_url = view_url
         if "cudl.lib.cam.ac.uk/view/" in view_url:

@@ -1742,11 +1742,19 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 
 ## desktop/image_loader.py
 
-- **Class** `ImageLoaderThread` (Line 15) — Smart Image Loader:
-    - Method `__init__` (Line 26)
-    - Method `cancel` (Line 42)
-    - Method `run` (Line 45)
-    - Method `_download_bytes` (Line 123) — Helper to download bytes safely.
+- **Class** `ImageLoaderThread` — Smart Image Loader: memory, disk cache, then the network; waits for a download of the same image already running; keeps a completed download even when its view moved on
+    - Method `__init__`
+    - Method `cancel`
+    - Method `run`
+    - Method `_download_bytes` — Helper to download bytes safely (a leased library session).
+- **Function** `cache_path_for(url)` — the disk file of an image: NLI by FL id and width (`FL<id>_v2.jpg` at 2000 px, `FL<id>_w<width>.jpg` otherwise; GS-66), others by URL hash (2026-11-22)
+- **Function** `memory_image(url)` — the decoded image when it is in memory (`MEMORY_BUDGET_BYTES`), any thread
+- **Function** `is_on_disk(url)`
+
+## desktop/browse_prefetch.py
+
+Browse's neighbours on the shelf, prepared while the reader looks at a manuscript (2026-11-22).
+- **Class** `BrowsePrefetcher` — the manuscripts the window names (the next two the reader's way, then the one behind), one at a time: metadata unless fresh, then the first page's preview and sharp image into the image cache; `schedule(sid)`, `cancel(keep=...)` (a move drops the rest, keeps a job for the manuscript being opened or one of its neighbours), `stop()`
 
 ## desktop/result_dialog.py
 
