@@ -581,4 +581,90 @@ def test_the_list_chooser_reads_the_lists_already_loaded():
         def _is_recent_list(self, list_id):
             raise AssertionError('asked about a list one by one')
 
-    assert picker._list_options(Lists()) == {'L1': 'Letters'}
+    assert picker._list_options(Lists().data) == {'L1': 'Letters'}
+
+
+def test_no_list_chooser_once_the_picker_is_closed(tmp_path, monkeypatch):
+    # Codex on #92: the reader closes the picker while the lists are read (a slow database); the
+    # Add to List dialog must not open on its own afterwards
+    import threading
+
+    from web.auth_state import GlobalAuthState
+    monkeypatch.setattr(GlobalAuthState, 'is_logged_in', classmethod(lambda cls: True))
+    gate = threading.Event()
+
+    class SlowLists(_Lists):
+        def _worker_context(self):
+            return True, 'u1', None
+
+        def _get_cached_data(self, **kwargs):
+            gate.wait(5)
+            return self.data
+
+    LISTS['mgr'] = SlowLists()
+    svc = _setup(tmp_path)
+    seen = {}
+    a = SYS['as2'][1]
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, '/_test/shelf-round3-multi?start=vol:100')
+            await _connect(user)
+            assert await _until(lambda: _els(user, 'data-leaf'))
+            UserInteraction(user, {_leaf(user, a)}, None).click()
+            assert await _until(lambda: any(e.props.get('aria-checked') == 'true'
+                                            for e in _els(user, 'data-leaf')))
+            UserInteraction(user, {_classed(user, 'stp-save')[0]}, None).click()
+            await asyncio.sleep(0.3)                       # the lists are being read
+            with user.client:
+                for d in list(user.client.elements.values()):
+                    if isinstance(d, ui.dialog) and d.value and not d.is_deleted:
+                        d.close()                          # the reader closes the picker
+            gate.set()
+            await asyncio.sleep(0.6)
+            seen['chooser'] = bool(_testid(user, 'shelf-save-target') or _testid(user, 'shelf-save-list'))
+            seen['open'] = _dialog_open(user)
+
+    try:
+        _run(go)
+    finally:
+        gate.set()
+        svc.close()
+        LISTS.clear()
+    assert seen == {'chooser': False, 'open': False}
+
+
+def test_the_list_chooser_reads_the_lists_off_the_event_loop():
+    # Codex on #88: the manager's `data` is a fresh database read; on the event loop a slow answer
+    # holds every reader on the server. Read in a worker, with the reader's context resolved first.
+    import threading
+
+    from web.components import shelfmark_tree_picker as picker
+    seen = {}
+
+    class Lists:
+        def _worker_context(self):
+            seen['context_thread'] = threading.get_ident()
+            return True, 'u1', 'CLIENT'
+
+        def _get_cached_data(self, *, client=None, user_id=None, is_authenticated=None):
+            seen['read'] = (threading.get_ident(), client, user_id, is_authenticated)
+            return {'lists': {'L1': {'name': 'Letters'}, 'R': {'name': 'Recent', 'is_system': True}}}
+
+        @property
+        def data(self):
+            raise AssertionError('the lists were read on the event loop')
+
+    async def go():
+        seen['loop_thread'] = threading.get_ident()
+        return await picker._load_list_options(Lists())
+
+    assert asyncio.run(go()) == {'L1': 'Letters'}
+    assert seen['context_thread'] == seen['loop_thread']               # the reader's context, on the loop
+    thread, client, user_id, authed = seen['read']
+    assert thread != seen['loop_thread'] and (client, user_id, authed) == ('CLIENT', 'u1', True)
+
+    class Broken(Lists):
+        def _get_cached_data(self, **kwargs):
+            raise RuntimeError('database down')
+    assert asyncio.run(picker._load_list_options(Broken())) == {}       # a new list only

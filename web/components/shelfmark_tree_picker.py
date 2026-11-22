@@ -527,13 +527,38 @@ def _resolve(service, selection: Selection, lang: str):
 _NEW_LIST = '__new__'
 
 
-def _list_options(lists_mgr) -> dict:
-    """The reader's own lists a choice can be added to, ``{list_id: name}`` (not the system lists,
-    among them the recent list the site fills by itself), as the site's own Add to List offers them.
-    Read from the lists already loaded: asking the manager about each list would read them all
-    again from the database, on the event loop, once per list (Codex on #88)."""
+def _read_lists(lists_mgr, context) -> dict:
+    """In a worker thread: the reader's lists and projects, one read of the database. ``context``:
+    ``(authed, user_id, client)`` resolved on the event loop (``UserListsManager._worker_context``):
+    a worker cannot read the visitor's storage, so the manager's own ``data`` would answer for a
+    signed-out visitor there. None for a manager without one (a test's), whose ``data`` is read."""
+    if context is not None:
+        authed, user_id, client = context
+        return lists_mgr._get_cached_data(client=client, user_id=user_id, is_authenticated=authed) or {}
+    return getattr(lists_mgr, 'data', None) or {}
+
+
+async def _load_list_options(lists_mgr) -> dict:
+    """The reader's own lists for Add to List (``_list_options``), read off the event loop: the
+    manager's ``data`` is a fresh database read, and a slow answer on the loop would hold every
+    reader on the server (Codex on #88). ``{}`` (a new list only) when the read fails."""
     try:
-        lists = (getattr(lists_mgr, 'data', None) or {}).get('lists', {}) or {}
+        worker_context = getattr(lists_mgr, '_worker_context', None)
+        context = worker_context() if callable(worker_context) else None
+        data = await run.io_bound(_read_lists, lists_mgr, context)
+    except Exception:   # noqa: BLE001 -- a new list only
+        return {}
+    return _list_options(data)
+
+
+def _list_options(data) -> dict:
+    """The reader's own lists a choice can be added to, ``{list_id: name}`` (not the system lists,
+    among them the recent list the site fills by itself), as the site's own Add to List offers them,
+    from the lists ``data`` read once (``_load_list_options``): asking the manager about each list
+    would read them all again from the database, once per list (Codex on #88). On the loop: the
+    names are translated for the reader."""
+    try:
+        lists = (data or {}).get('lists', {}) or {}
     except Exception:   # noqa: BLE001 -- a new list only
         return {}
     try:
@@ -1304,6 +1329,11 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                     ms['since'] = None
             paint()
 
+    def still_open() -> bool:
+        """The multiple choice is still on and its picker still open: a read awaited meanwhile may
+        have outlived either (the reader closed the picker while the lists were read; Codex on #92)."""
+        return bool(multi) and not dialog.is_deleted and bool(dialog.value)
+
     async def save_as_list():
         """Add to List (D12, DX22): the choice into one of the reader's lists, or a new one named by
         its chips; it stays chosen. Up to a list's limit (``limit_for('lists')``), the rest named."""
@@ -1317,7 +1347,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         async with lock:
             frozen = ms['sel'].copy()
         resolved = await run.io_bound(_resolve, service, frozen, lang)
-        if not resolved or not resolved[0] or not multi:   # switched off while it was read: no dialog
+        if not resolved or not resolved[0] or not still_open():   # switched off or closed meanwhile: no dialog
             return
         entries, label = resolved
         ids = [e['sys_id'] for e in entries]
@@ -1334,7 +1364,9 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         # and a list made by a try whose items were not added (filled by the next try, under the
         # name it was made with). Closing the dialog forgets it.
         saving = {'busy': False, 'list_id': None, 'name': ''}
-        options = _list_options(lists_mgr)
+        options = await _load_list_options(lists_mgr)
+        if not still_open() or not owner_ok():   # switched off, closed, or another tab, while it was read
+            return
         with container, ui.dialog() as ask, ui.card().classes('stp-save-card').props(
                 f'dir={"rtl" if is_rtl() else "ltr"} data-testid="shelf-save-list"'):
             ui.label(tr('Add to List')).classes('font-semibold')
