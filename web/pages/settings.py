@@ -71,9 +71,9 @@ def create_settings_page():
                                     document.querySelectorAll(".theme-btn").forEach(b => b.classList.remove("active"));
                                     const sb = document.querySelector(".theme-btn-{theme}");
                                     if (sb) sb.classList.add("active");
-                                    const hi = document.querySelector(".theme-btn-header i");
-                                    if (hi) hi.textContent = {{light: "light_mode", parchment: "history_edu", dark: "dark_mode"}}["{theme}"];
                                 ''')
+                                from web.header_theme import sync_header_theme_button
+                                sync_header_theme_button(theme)
 
                             theme_select.on('update:model-value', change_theme)
 

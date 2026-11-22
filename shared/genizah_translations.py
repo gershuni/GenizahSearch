@@ -3968,7 +3968,8 @@ TRANSLATIONS.update({
     "Light theme": "ערכת נושא בהירה",
     "Parchment theme": "ערכת נושא קלף",
     "Switch language": "החלף שפה",
-    "Change theme (light, parchment, dark)": "החלף ערכת נושא (בהירה, קלף, כהה)",
+    "Switch to the light theme": "מעבר לערכת הנושא הבהירה",
+    "Switch to the dark theme": "מעבר לערכת הנושא הכהה",
     "Open navigation menu": "פתח תפריט ניווט",
     "Toggle sidebar": "הצג/הסתר סרגל צד",
     "February 2025": "פברואר 2025",
@@ -6537,8 +6538,8 @@ TRANSLATIONS.update({
         "חדש: חיפוש בתעתיקים המדעיים (FGP ו-PGP) יחד עם התעתיקים האוטומטיים. ניתן לבחור לחפש בכל התעתיקים, רק בתעתיקים המדעיים, או רק בתעתיקים האוטומטיים.",
     "New: Judeo-Arabic dictionaries (Blau and Friedman) and an Arabic one (Lane) in Browse and in Quick View. The dictionary also finds Judeo-Arabic expressions, and takes the words around into account. Press Alt and click an Arabic word, or press M/D and then click a word, and try it! The dictionary works better on scholarly transcriptions.":
         "חדש: מילוני ערבית-יהודית (בלאו ופרידמן) וערבית (ליין) בתצוגת עיון ובתצוגת מבט מהיר. המילון מחפש גם ביטויים בערבית-יהודית, ומתחשב במילים בסביבה. לחצו על ALT ועל מילה ערבית, או על M/D ואחר כך על מילה, ותנסו! המילון עובד טוב יותר בתעתיקים מדעיים.",
-    "A Hebrew keyboard on screen (⌨) in every search box, and a theme button (light, parchment, dark) in the header":
-        "מקלדת עברית על המסך (⌨) בכל תיבת חיפוש, וכפתור ערכת נושא (בהירה, קלף, כהה) בסרגל הכותרת",
+    "A Hebrew keyboard on screen (⌨) in every search box, and a theme button (light or dark) in the header":
+        "מקלדת עברית על המסך (⌨) בכל תיבת חיפוש, וכפתור ערכת נושא (בהירה או כהה) בסרגל הכותרת",
     "New: search the scholarly transcriptions (FGP and PGP) together with the automatic ones":
         "חדש: חיפוש בתעתיקים המדעיים (FGP ו-PGP) יחד עם התעתיקים האוטומטיים",
     "The app now also searches the scholarly transcriptions (FGP and PGP). Choose which transcriptions to search in the Transcriptions box on the Search tab.":

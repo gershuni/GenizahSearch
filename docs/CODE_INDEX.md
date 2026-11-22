@@ -1401,6 +1401,12 @@ A website restart must not reload every open tab at once (2026-10-21). Browser s
 - **Function** `enabled` / `config` — the switch (independent of `POSTHOG_API_KEY`) and the three numbers the browser reads
 - **Script** `reconnect_backoff.js` — an accessor on `window.io` wraps socket.io's `io(url, opts)`: merges `reconnectionDelay`/`reconnectionDelayMax`/`randomizationFactor` (caller keys win) and delays NiceGUI's `connect_error` handler for "Implicit handshake failed" and "timeout" by `base * 2^n`, jittered x0.5-1.5 (n: consecutive reloads in `sessionStorage['gs_reload_n']`, reset after 60 s connected); a hidden tab waits for `visibilitychange`; other errors pass through; `posthog.capture('reload_scheduled', ...)` before the deferred handler
 
+## web/header_theme.py
+
+The header's theme button (2026-11-22): light and dark only; parchment counts as light, so a click from it goes to dark. Parchment is chosen in Settings and the sidebar switcher. Tests: `tests/render_smoke/test_header_theme_button_render_smoke.py`.
+- **Function** `header_next_theme` / `header_theme_icon` / `header_theme_label` — the theme a click goes to, and the icon and tooltip saying so
+- **Function** `sync_header_theme_button` — points this page's button (marker `theme-btn-header`) at the next theme; called by the header click, the sidebar switcher and Settings
+
 ## web/hebrew_keyboard.py
 
 The on-screen Hebrew keyboard on the /search box (pilot, 2026-11-15): a ⌨ button in the box (`query_input`'s append slot) opens keys in alphabet order, each final form beside its letter, plus space, `*`, `'`, `"` and backspace; no `?` (it switches the mode at the start of the box) and no typing with the physical keys. Browser side: `web/static/js/hebrew_keyboard.js`, which types at the cursor through the box's own `input` event, so the model and the mode-prefix detection see a key as a typed one.

@@ -1888,7 +1888,7 @@ def create_layout():
     from web.keyboard_shortcuts import served_dictionaries as _public_dictionaries
     from web.editions_assets import served_to as _editions_served_to
     _new_surfaces.insert(0, (tr("A Hebrew keyboard on screen (⌨) in every search box, and a theme "
-                                "button (light, parchment, dark) in the header"), '/search'))
+                                "button (light or dark) in the header"), '/search'))
     if all(_public_dictionaries().values()):
         _new_surfaces.insert(0, (tr("New: Judeo-Arabic dictionaries (Blau and Friedman) and an Arabic one "
                                     "(Lane) in Browse and in Quick View. The dictionary also finds "
@@ -2037,10 +2037,13 @@ def create_layout():
             lang_label = "EN" if resolved_lang == 'he' else "\u05E2\u05D1"
             ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
 
-            # Theme toggle: one button cycling light -> parchment -> dark. The icon
-            # shows the CURRENT theme; the sidebar switcher keeps it in sync.
-            _theme_icons = {'light': 'light_mode', 'parchment': 'history_edu', 'dark': 'dark_mode'}
-            _theme_next = {'light': 'parchment', 'parchment': 'dark', 'dark': 'light'}
+            # Theme toggle: light <-> dark only (parchment counts as light, so it
+            # goes to dark). The icon and tooltip say what the next click does;
+            # parchment is chosen in Settings and the sidebar switcher.
+            from web.header_theme import (
+                HEADER_THEME_MARKER, header_next_theme, header_theme_icon,
+                header_theme_label, sync_header_theme_button,
+            )
 
             async def cycle_theme():
                 # Advance from the theme THIS tab shows: user storage is shared
@@ -2053,9 +2056,9 @@ def create_layout():
                     )
                 except Exception:
                     pass
-                if cur not in _theme_next:
+                if cur not in ('light', 'parchment', 'dark'):
                     cur = safe_user_get('theme', 'light')
-                new_theme = _theme_next.get(cur, 'light')
+                new_theme = header_next_theme(cur)
                 safe_user_set('theme', new_theme)
                 ui.run_javascript(f'''
                     document.documentElement.setAttribute("data-theme", "{new_theme}");
@@ -2063,15 +2066,17 @@ def create_layout():
                     document.querySelectorAll(".theme-btn").forEach(b => b.classList.remove("active"));
                     const sb = document.querySelector(".theme-btn-{new_theme}");
                     if (sb) sb.classList.add("active");
-                    const hi = document.querySelector(".theme-btn-header i");
-                    if (hi) hi.textContent = "{_theme_icons[new_theme]}";
                 ''')
+                sync_header_theme_button(new_theme)
 
             _header_theme = safe_user_get('theme', 'light')
-            _theme_label = tr('Change theme (light, parchment, dark)')
-            ui.button(icon=_theme_icons.get(_header_theme, 'light_mode'), on_click=cycle_theme).props(
-                f'flat round text-color=white aria-label="{_theme_label}"'
-            ).tooltip(_theme_label).classes('theme-btn-header')
+            _theme_label = header_theme_label(_header_theme)
+            _theme_btn = ui.button(icon=header_theme_icon(_header_theme), on_click=cycle_theme).props(
+                'flat round text-color=white'
+            ).classes('theme-btn-header').mark(HEADER_THEME_MARKER)
+            _theme_btn.props['aria-label'] = _theme_label
+            with _theme_btn:
+                ui.tooltip(_theme_label)
 
             # "What's New" — a header button with an unread dot, NOT a toast.
             #
@@ -2431,9 +2436,9 @@ def create_layout():
                             document.body.setAttribute("data-theme", "{theme_name}");
                             document.querySelectorAll(".theme-btn").forEach(btn => btn.classList.remove("active"));
                             document.querySelector(".theme-btn-{theme_name}").classList.add("active");
-                            const hi = document.querySelector(".theme-btn-header i");
-                            if (hi) hi.textContent = {{light: "light_mode", parchment: "history_edu", dark: "dark_mode"}}["{theme_name}"];
                         ''')
+                        from web.header_theme import sync_header_theme_button
+                        sync_header_theme_button(theme_name)
 
                     current_theme = safe_user_get('theme', 'light')
 
