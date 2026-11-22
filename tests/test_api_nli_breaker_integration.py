@@ -280,6 +280,106 @@ class TestFailureTypingViaApi:
             )
 
 
+class TestOneManifestDownloadPerManuscript:
+    """Browse asks for a page's preview and its full image together (2026-11-22): two
+    requests for a manuscript nobody has opened must download its manifest once."""
+
+    @staticmethod
+    def _manifest():
+        return _MockResponse(status_code=200, json_data={'sequences': [{'canvases': [
+            {'images': [{'resource': {'service': {'@id': 'https://x/FL777/...'}}}]},
+        ]}]})
+
+    def _two_at_once(self, first, second):
+        import threading
+        from web import api as api_mod
+
+        calls = {'n': 0}
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_get(url, *args, **kwargs):
+            calls['n'] += 1
+            entered.set()
+            release.wait(5)  # the second request arrives while this download runs
+            return self._manifest()
+
+        results = {}
+
+        def run(name, sys_id):
+            results[name] = _api_fetch_fl_ids_from_nli(sys_id)
+
+        with patch.object(api_mod._nli_session, 'get', side_effect=slow_get), \
+             patch.object(api_mod, '_save_nli_persistent_cache', lambda *a, **kw: True):
+            a = threading.Thread(target=run, args=('a', first))
+            a.start()
+            assert entered.wait(5)
+            b = threading.Thread(target=run, args=('b', second))
+            b.start()
+            b.join(0.3)  # b is now waiting for a's download, or downloading its own
+            release.set()
+            a.join(10)
+            b.join(10)
+        return calls['n'], results
+
+    def test_the_second_request_reads_the_first_ones_answer(self):
+        from web import api as api_mod
+        n, results = self._two_at_once('sysid_dedup_same', 'sysid_dedup_same')
+        assert n == 1, f'the manifest was downloaded {n} times'
+        assert results == {'a': ['777'], 'b': ['777']}
+        assert api_mod._fl_fetch_inflight == {}, 'an entry outlived its requests'
+
+    def test_different_manuscripts_do_not_wait_for_each_other(self):
+        """Codex on #96: striped locks made unrelated manuscripts wait for each other.
+        Any two ids, whatever they hash to, download side by side."""
+        from web import api as api_mod
+        for first, second in (('sysid_dedup_x', 'sysid_dedup_y'), ('990000000000017', '990000000000025')):
+            n, results = self._two_at_once(first, second)
+            assert n == 2, (first, second)
+            assert results == {'a': ['777'], 'b': ['777']}
+        assert api_mod._fl_fetch_inflight == {}
+
+    def test_the_wait_for_another_request_is_bounded(self):
+        """A request waits at most FL_FETCH_WAIT for another one fetching the same
+        manuscript, then fetches for itself rather than hold a worker."""
+        import threading
+        import time as _t
+        from web import api as api_mod
+
+        calls = {'n': 0}
+        release = threading.Event()
+
+        def slow_get(url, *args, **kwargs):
+            calls['n'] += 1
+            if calls['n'] == 1:
+                release.wait(5)  # the first download hangs past the second one's wait
+            return self._manifest()
+
+        results, took = {}, {}
+
+        def run(name):
+            start = _t.monotonic()
+            results[name] = _api_fetch_fl_ids_from_nli('sysid_dedup_bounded')
+            took[name] = _t.monotonic() - start
+
+        with patch.object(api_mod._nli_session, 'get', side_effect=slow_get), \
+             patch.object(api_mod, '_save_nli_persistent_cache', lambda *a, **kw: True), \
+             patch.object(api_mod, 'FL_FETCH_WAIT', 0.3):
+            a = threading.Thread(target=run, args=('a',))
+            a.start()
+            _t.sleep(0.1)
+            b = threading.Thread(target=run, args=('b',))
+            b.start()
+            b.join(3)
+            assert not b.is_alive(), 'the second request waited without a limit'
+            release.set()
+            a.join(10)
+        assert calls['n'] == 2
+        assert took['b'] < 2
+        assert results == {'a': ['777'], 'b': ['777']}
+        assert api_mod._fl_fetch_inflight == {}
+
+
 class TestStaticInvariantsInWebApi:
     """Source-level audits — cheap regression guards."""
 

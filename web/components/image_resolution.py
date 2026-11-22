@@ -36,6 +36,7 @@ stay on the server-side proxy.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from shared.cudl_identity import RESOLVER_REVISION as CUDL_RESOLVER_REVISION
@@ -300,6 +301,136 @@ def resolve_image_url(
     }
 
 
+#: The library image proxies that take ``width=`` (web/api.py). Not /api/nli_image/<fl>,
+#: which always answers at 2000 px: a "preview" of it would be a second full download.
+_PREVIEW_ROUTE_RE = re.compile(
+    r'^/api/(?:nli_image_by_sysid|cambridge_image|manchester_image|jts_image|katz_image'
+    r'|oxford_image)/'
+)
+PREVIEW_WIDTH = 400
+
+
+def preview_url(img_url: str, width: int = PREVIEW_WIDTH) -> Optional[str]:
+    """The small preview of a library proxy image, or None when the URL has none.
+
+    Browse draws it first and swaps in the full image when that arrives
+    (manuscript_viewer.js ``progressiveLoad``); Quick View does the same. Only NLI's
+    route had one on Browse until 2026-11-22, so a Cambridge page waited for its
+    2000-px image, 3-4 s from CUDL, before showing anything.
+    """
+    if not img_url or not _PREVIEW_ROUTE_RE.match(img_url):
+        return None
+    if re.search(r'[?&]width=', img_url):
+        return None
+    sep = '&' if '?' in img_url else '?'
+    return f"{img_url}{sep}width={int(width)}"
+
+
+def _external_images_of(cached: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'cambridge_images': cached.get('images_ext', []),
+        'folio_images': cached.get('folio_images') or [],
+        'external_provider': cached.get('external_provider', ''),
+        'cambridge_alignment': cached.get('cambridge_alignment'),
+        'cambridge_resolution': cached.get('cambridge_resolution'),
+        'external_url': cached.get('external_url', '') or '',
+    }
+
+
+def cached_external_images(sys_id: str, meta_mgr: Any = None) -> Optional[Dict[str, Any]]:
+    """``resolve_external_images``'s answer when it is already in memory, else None.
+
+    Never enriches, so it never touches the network (``shared.cudl_identity.
+    cached_external_entry``): Browse's Phase A uses it to draw a Cambridge, Manchester,
+    JTS or Katz page with its library's image from the first draw. A page turn used to
+    draw NLI's image, throw it away when Phase B found the library's, and fetch that one
+    after (2026-11-22, IMAGE_LOADING_SPEED_PLAN in the private repository). None when
+    Phase B would have to enrich first: the page is then drawn as before.
+    """
+    if not sys_id:
+        return None
+    if meta_mgr is None:
+        from web.state import state as _state
+        meta_mgr = _state.meta_mgr
+    if not hasattr(meta_mgr, 'nli_cache'):
+        return None
+    from shared.cudl_identity import cached_external_entry
+    try:
+        cached = cached_external_entry(meta_mgr, sys_id)
+    except Exception:  # an aid to the first draw: never stop the page
+        logger.debug("cached_external_images failed for %s", sys_id, exc_info=True)
+        return None
+    return _external_images_of(cached) if cached else None
+
+
+def image_credits(entry: Dict[str, Any], library_code: str, is_oxford: bool,
+                  with_katz: bool = True) -> tuple:
+    """(credit, NLI credit) for a page's image, from the manuscript's cache entry.
+
+    The one rule for both of Browse's draws: Phase B's enrichment
+    (web/pages/browse_enrichment.py) and Phase A when it draws a library image from
+    memory (``apply_cached_external_images``). The manifest's credit, a library's own
+    where it has one (``web.services.ATTRIBUTION_BY_LIBRARY``), the Bodleian's for
+    Oxford; a Katz record's own. The NLI credit is the NLI manifest's.
+    ``with_katz=False``: Phase B applies the Katz credit itself, after its enrichment,
+    from the entry that enrichment answered with.
+    """
+    from web.services import ATTRIBUTION_BY_LIBRARY, _get_library_attribution
+    entry = entry or {}
+    attribution = entry.get('attribution', '') or ''
+    nli_attribution = entry.get('attribution_nli', '') or ''
+    if library_code in ATTRIBUTION_BY_LIBRARY:
+        lib_attr = _get_library_attribution(library_code)
+        if lib_attr is not None:
+            attribution = lib_attr
+    elif is_oxford:
+        attribution = _get_library_attribution('Oxford') or ''
+    if with_katz and entry.get('external_provider') == 'katz' and entry.get('attribution'):
+        attribution = entry['attribution']
+    return attribution, nli_attribution
+
+
+def apply_cached_external_images(page: Any, meta_mgr: Any = None) -> bool:
+    """Put the manuscript's in-memory external images on a freshly fetched ``page``
+    (a ``web.services.BrowsePage``) before its first draw; True when it did.
+
+    Only the manuscript-level fields Phase B would set from the same cache entry
+    (images, provider, alignment) and the credit that goes with them
+    (``image_credits``: a Cambridge image under the NLI credit until Phase B came was
+    Codex's finding on #96); page-specific data (a Katz page's FL id, an Oxford side,
+    folio labels) is the page's own. Phase B sets them all again.
+    """
+    if page is None or getattr(page, 'cambridge_images', None):
+        return False
+    sys_id = getattr(page, 'sys_id', '') or ''
+    if not sys_id:
+        return False
+    if meta_mgr is None:
+        from web.state import state as _state
+        meta_mgr = _state.meta_mgr
+    if not hasattr(meta_mgr, 'nli_cache'):
+        return False
+    from shared.cudl_identity import cached_external_entry
+    try:
+        entry = cached_external_entry(meta_mgr, sys_id)
+        if not entry:
+            return False
+        snapshot = _external_images_of(entry)
+        credit, nli_credit = image_credits(entry, getattr(page, 'library_code', '') or '',
+                                           bool(getattr(page, 'is_oxford', False)))
+    except Exception:  # an aid to the first draw: never stop the page
+        logger.debug("apply_cached_external_images failed for %s", sys_id, exc_info=True)
+        return False
+    page.cambridge_images = snapshot['cambridge_images']
+    page.external_provider = snapshot['external_provider']
+    page.cambridge_alignment = snapshot['cambridge_alignment']
+    if credit:
+        page.attribution = credit
+    if nli_credit:
+        page.attribution_nli = nli_credit
+    return True
+
+
 def resolve_external_images(
     sys_id: str,
     meta_mgr: Any = None,
@@ -375,11 +506,4 @@ def resolve_external_images(
         )
         cached = {}
 
-    return {
-        'cambridge_images': cached.get('images_ext', []),
-        'folio_images': cached.get('folio_images') or [],
-        'external_provider': cached.get('external_provider', ''),
-        'cambridge_alignment': cached.get('cambridge_alignment'),
-        'cambridge_resolution': cached.get('cambridge_resolution'),
-        'external_url': cached.get('external_url', '') or '',
-    }
+    return _external_images_of(cached)

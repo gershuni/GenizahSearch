@@ -155,6 +155,9 @@ GENIZAH_PERF_SUMMARY_SECONDS=300      # periodic counter summary; 0 disables
 # search's first visible rows, a Quick View, an add-to-list or a comment -- from the user's
 # click (or the navigation, for a URL-started load) to the next paint, split into
 # server_ms / transport_ms / render_ms, with the page image's load time (img_ms) apart.
+# Event v2 (2026-11-22) adds the image the reader ends up seeing, followed across the page's
+# second draw: img_final (full / fallback / error / moved_on / timeout), img_full_ms and
+# img_source (nli, cambridge, manchester, jts, katz, oxford, nli_direct).
 # $web_vitals cannot see these: in-page NiceGUI updates are websocket round trips. Nothing is
 # sent without POSTHOG_API_KEY, and posthog-js keeps its localhost opt-out.
 UX_TIMING_ENABLED=1                   # 0/false turns the browser side off (the head snippet is not served)

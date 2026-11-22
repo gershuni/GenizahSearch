@@ -34,7 +34,7 @@ class TestNliCreditIsRereadAfterEnrichment:
 
     def test_it_runs_after_the_cache_is_populated(self):
         body = _sync_body()
-        first_read = body.index("nli_attribution = cached_meta.get('attribution_nli'")
+        first_read = body.index("image_credits(cached_meta")  # the first read (since #96)
         enrich = body.index("resolve_external_images(")
         reread = body.index("result['attribution_nli'] = _cached_attr")
         assert first_read < enrich < reread, (

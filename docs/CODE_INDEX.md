@@ -1143,6 +1143,13 @@ The page side of the dictionary lookup, shared by /browse and the search page's 
     - Method `switch` — the switch, its hint and the "type a word" button for one pane
 - Quick View (`search_results.open_advanced_dialog`) makes one popover per dialog in the card beside the scroll area, hides it on every `render_content`, version change and the start of the dialog's close; `blau_lookup.js` stands down for a menu or a dialog that does not hold the panel, uses up the Esc that closes the panel in a dialog, and puts the phone chip beside the panel (`tests/js/blau_lookup_dialog_check.js`)
 
+## web/components/image_resolution.py
+
+Per-library image URLs for Browse, the anchor pane and Compare (`resolve_image_url`, `resolve_external_images`).
+- **Function** `preview_url(img_url, width=400)` — the small preview of a library proxy image (every `/api/*_image` route that takes `width`; not `/api/nli_image/<fl>`), or None (2026-11-22)
+- **Function** `cached_external_images(sys_id, meta_mgr=None)` / `apply_cached_external_images(page, meta_mgr=None)` — the manuscript's external images when they are already in memory, never enriched (`shared.cudl_identity.cached_external_entry`): Browse's Phase A draws the library's image first, with its credit; Phase B replaces the snapshot whole (2026-11-22)
+- **Function** `image_credits(entry, library_code, is_oxford, with_katz=True)` — the image credit and the NLI credit from a manuscript's cache entry: the one rule for both of Browse's draws (#96)
+
 ## web/components/show_more.py
 
 The rest of a dictionary card behind one button that draws it in place (2026-11-11: never only on the site or the PDF page).
@@ -1390,7 +1397,7 @@ How the web Fragment Puzzle saves (2026-10-20). Checked in a real browser by `sc
 
 ## web/ux_timing.py
 
-User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20). Browser side: `web/static/js/ux_timing.js`; env: `UX_TIMING_ENABLED`, `UX_TIMING_SAMPLE_RATE`.
+User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20). Browser side: `web/static/js/ux_timing.js`; env: `UX_TIMING_ENABLED`, `UX_TIMING_SAMPLE_RATE`. Event v2 (2026-11-22): `img_final` / `img_full_ms` / `img_source`, the image the reader ends up seeing (`sharpState` follows the selector across redraws).
 - **Function** `ux_done(client, workflow, outcome, *, server_ms, nav, img_selector)` — tell the page's browser an update was just sent; always pass the page's own client
 - **Function** `ux_ignored(client, workflow)` — the server turned the latest action away (Enter again while a search runs); the browser keeps the earlier start
 - **Function** `pending_wait_ms` — per-workflow time the browser keeps a start (a search: `WEB_SEARCH_TIME_LIMIT` + 30 s; others 60 s)

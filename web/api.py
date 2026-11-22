@@ -16,6 +16,7 @@ from shared.nli_fetch import RedirectNotAllowed, nli_image_get
 from shared.puzzle_image_service import RedirectNotFollowed
 import re
 import os
+import contextlib
 import threading
 import time as _module_time
 from collections import OrderedDict
@@ -69,10 +70,49 @@ IMAGE_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_ENTRIES', '
 # (web/framework_patches.py _is_public_image_route), so the answer is the same for everyone.
 IMAGE_HTTP_MAX_AGE = max(0, int(os.environ.get('IMAGE_HTTP_MAX_AGE', '604800')))
 NLI_MEMORY_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('NLI_MEMORY_CACHE_MAX_ENTRIES', '50000')))
+# /api/oxford_image's fetch from the Bodleian (connect, read). It was 30 s; the host has
+# sat behind a bot-check page since 2026-09 (GS-255) that no server fetch passes, and the
+# website waited 31 s for this route before showing "Image not available" with its
+# Bodleian link (measured 2026-11-22). Short, so the link comes in seconds; a host that
+# answers at all answers well inside it.
+OXFORD_IMAGE_TIMEOUT = (3, 5)
 PUZZLE_RATE_LIMIT_BUCKET_TTL = max(60, int(os.environ.get('PUZZLE_RATE_LIMIT_BUCKET_TTL', '3600')))
 
 # Concurrency cap for NLI IIIF fetches (prevents burst-flooding the upstream)
 _nli_semaphore = threading.Semaphore(NLI_MAX_CONCURRENT_FETCHES)
+
+# One manifest download per manuscript at a time (2026-11-22). Browse asks for a page's
+# preview and its full image together, so two requests for a manuscript nobody has
+# opened arrived at once and each downloaded its NLI manifest. The second now waits for
+# the first and reads its answer from the memory cache. Only requests for the same
+# manuscript wait, and at most FL_FETCH_WAIT seconds (a manifest's own connect + read
+# limits): past that one fetches for itself rather than hold a worker. A manuscript's
+# entry exists only while a request for it is here (Codex on #96: striped locks made
+# unrelated manuscripts wait for each other, without a limit).
+FL_FETCH_WAIT = NLI_CONNECT_TIMEOUT + NLI_IIIF_READ_TIMEOUT
+_fl_fetch_guard = threading.Lock()
+_fl_fetch_inflight: dict = {}  # cache key -> [lock, requests holding or waiting]
+
+
+@contextlib.contextmanager
+def _fl_fetch_turn(cache_key: str):
+    """Wait (bounded) for another request fetching this manuscript's ids; yields whether
+    this request holds the turn (False: it waited FL_FETCH_WAIT and goes ahead anyway)."""
+    with _fl_fetch_guard:
+        slot = _fl_fetch_inflight.get(cache_key)
+        if slot is None:
+            slot = _fl_fetch_inflight[cache_key] = [threading.Lock(), 0]
+        slot[1] += 1
+    held = slot[0].acquire(timeout=FL_FETCH_WAIT)
+    try:
+        yield held
+    finally:
+        if held:
+            slot[0].release()
+        with _fl_fetch_guard:
+            slot[1] -= 1
+            if slot[1] <= 0 and _fl_fetch_inflight.get(cache_key) is slot:
+                del _fl_fetch_inflight[cache_key]
 
 # Persistent session for NLI requests (connection reuse via keep-alive)
 _nli_session = requests.Session()
@@ -703,21 +743,25 @@ def init_api_routes(app_override=None):
         if _nli_circuit_is_open():
             return []
 
-        # Acquire semaphore to cap concurrent NLI requests
-        acquired = _nli_semaphore.acquire(timeout=NLI_SEMAPHORE_TIMEOUT)
-        if not acquired:
-            logger.warning(f"NLI semaphore timeout for {cache_key} — too many concurrent fetches")
-            return []
-        try:
-            # Phase 98 D-12: defensive re-check AFTER semaphore acquire. Another
-            # thread may have tripped the breaker while we were waiting. The
-            # try/finally ensures the semaphore slot is released even on this
-            # short-circuit path (RESEARCH Pitfall 3 — semaphore leak).
-            if _nli_circuit_is_open():
+        # A request for the same manuscript already downloading its manifest is waited
+        # for here (at most FL_FETCH_WAIT), holding no semaphore slot;
+        # _fetch_fl_ids_network then finds its answer in the memory cache.
+        with _fl_fetch_turn(cache_key):
+            # Acquire semaphore to cap concurrent NLI requests
+            acquired = _nli_semaphore.acquire(timeout=NLI_SEMAPHORE_TIMEOUT)
+            if not acquired:
+                logger.warning(f"NLI semaphore timeout for {cache_key} — too many concurrent fetches")
                 return []
-            return _fetch_fl_ids_network(system_id, suffix)
-        finally:
-            _nli_semaphore.release()
+            try:
+                # Phase 98 D-12: defensive re-check AFTER semaphore acquire. Another
+                # thread may have tripped the breaker while we were waiting. The
+                # try/finally ensures the semaphore slot is released even on this
+                # short-circuit path (RESEARCH Pitfall 3 — semaphore leak).
+                if _nli_circuit_is_open():
+                    return []
+                return _fetch_fl_ids_network(system_id, suffix)
+            finally:
+                _nli_semaphore.release()
 
     def _fetch_fl_ids_network(system_id: str, suffix: int = 1) -> list:
         """Network fetch for FL IDs (called under semaphore)."""
@@ -1750,7 +1794,7 @@ def init_api_routes(app_override=None):
         try:
             # Each redirect hop is checked against the library image hosts.
             from shared.puzzle_image_service import get_with_checked_redirects
-            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=OXFORD_IMAGE_TIMEOUT, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 # Cache the image

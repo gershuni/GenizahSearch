@@ -55,6 +55,22 @@ def test_the_viewer_credit_checks_pass_under_node():
     assert 'all 9 credit checks passed' in run.stdout
 
 
+PROGRESSIVE_CHECK = REPO / 'tests' / 'js' / 'manuscript_viewer_progressive_check.js'
+
+
+def test_the_viewer_progressive_checks_pass_under_node():
+    """The preview and the full image are asked for together (2026-11-22): a full image
+    that arrives first wins, a failed one leaves the preview, a fallback is never
+    overridden, an image that left the page is neither swapped nor kept downloading, and
+    Save-Data or 2G keeps the old one-after-the-other order."""
+    run = subprocess.run([_node(), str(PROGRESSIVE_CHECK)], capture_output=True, text=True, cwd=str(REPO),
+                         timeout=120)
+    sys.stdout.write(run.stdout)
+    sys.stderr.write(run.stderr)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert 'all 12 progressive checks passed' in run.stdout
+
+
 def test_the_check_reads_the_shipped_viewer_file():
     src = CHECK.read_text(encoding='utf-8')
     assert "'web', 'static', 'manuscript_viewer.js'" in src

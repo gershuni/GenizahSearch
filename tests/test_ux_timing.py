@@ -89,7 +89,7 @@ def test_head_html_loads_the_browser_side(measuring, monkeypatch):
     from shared.config import Config
     # A search may run to the website's limit before its first rows; the
     # browser must keep its start that long (Codex 2026-10-21, P2).
-    assert config == {'rate': 0.25, 'v': 1,
+    assert config == {'rate': 0.25, 'v': 2,
                       'wait': {'search_results': (Config.WEB_SEARCH_TIME_LIMIT + 30) * 1000}}
     assert re.search(r'src="/static/js/ux_timing\.js\?v=[0-9a-f]{10}" defer', html)
     assert (WEB / 'static' / 'js' / 'ux_timing.js').is_file()
@@ -361,6 +361,8 @@ def test_a_browse_load_and_a_page_turn_report_after_phase_a(measuring, monkeypat
                 listener.handler(None)
         await asyncio.sleep(1.0)
         seen['after_click'] = dones(client)[len(seen['bootstrap']):]
+        seen['settled'] = sum(1 for m in client.outbox.messages
+                              if m[1] == 'run_javascript' and 'gsUx.settled(' in m[2].get('code', ''))
 
     asyncio.run(_run())
     assert len(seen['bootstrap']) == 1 and seen['bootstrap'][0].startswith(
@@ -368,3 +370,28 @@ def test_a_browse_load_and_a_page_turn_report_after_phase_a(measuring, monkeypat
     assert ',true,' in seen['bootstrap'][0], 'the URL-started load must be measured from navigation'
     assert seen['next_has_trigger']
     assert len(seen['after_click']) == 1 and ',false,' in seen['after_click'][0]
+    # Browse draws again after its enrichment: the image is taken after the settle word.
+    assert seen['after_click'][0].endswith(',".img-loading-container img.zoomable-image",true)'), seen['after_click']
+    assert seen['settled'] >= 2, 'no settle word after the enrichment'
+
+
+def test_ux_settled_sends_one_call_and_never_raises(measuring):
+    rec = _Recorder()
+    ux.ux_settled(rec, 'browse_page')
+    assert rec.code == ['window.gsUx&&gsUx.settled&&gsUx.settled("browse_page")']
+    ux.ux_settled(rec, 'no_such_workflow')
+    ux.ux_settled(None, 'browse_page')
+    assert len(rec.code) == 1
+
+    class _Gone:
+        def run_javascript(self, *_a, **_k):
+            raise RuntimeError('the page is gone')
+
+    ux.ux_settled(_Gone(), 'browse_page')
+
+
+def test_settle_is_sent_only_when_asked(measuring):
+    rec = _Recorder()
+    ux.ux_done(rec, 'browse_page', 'ok', server_ms=1, img_selector='img', settle=True)
+    ux.ux_done(rec, 'browse_page', 'ok', server_ms=1, img_selector='img')
+    assert rec.code[0].endswith(',"img",true)') and rec.code[1].endswith(',"img")')

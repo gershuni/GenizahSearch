@@ -22,11 +22,15 @@
   // samples (a page loaded from its URL usually finishes before that).
   var PH_WAIT_MS = 15000, PH_POLL_MS = 250;
   var pending = {}, replaced = {}, spoiled = {};
+  var marks = {};  // actions started per workflow: a newer one ends the image watch
+  var dones = {}, settledSeq = {};  // done() calls per workflow, and the one last settled
+  var SHARP_POLL_MS = 100;
   var navDone = false;
 
   function now() { return performance.now(); }
 
   function mark(workflow, event, trigger) {
+    marks[workflow] = (marks[workflow] || 0) + 1;
     if (spoiled[workflow]) return;  // its start is lost; nothing is sent until done()
     var t0 = event.timeStamp;
     // An old epoch-based timeStamp, or none: use the time the listener ran.
@@ -79,6 +83,60 @@
     setTimeout(function () { settle('timeout'); }, IMAGE_MAX_MS);
   }
 
+  // Where the image on screen comes from: a low-cardinality name, never a URL or an id.
+  function imageSource(el) {
+    var url = (el && (el.currentSrc || el.src)) || '';
+    var m = /\/api\/([a-z]+)_image(?:_by_sysid)?\//.exec(url);
+    if (m) return m[1];
+    if (/^https:\/\/iiif\.nli\.org\.il\//.test(url)) return 'nli_direct';
+    if (/^https:\/\/hebrew\.bodleian\.ox\.ac\.uk\//.test(url)) return 'oxford';
+    return url ? 'other' : null;
+  }
+
+  // The image the reader ends up seeing, followed across the page being drawn again
+  // (Browse draws once more after its enrichment, 2026-11-22): its full-size version
+  // shown ('full'), a library fallback shown ('fallback'), every source failed
+  // ('error'), the reader moved on first ('moved_on'), or 'timeout'. The first
+  // image's load (`img`, `img_ms`) can be a preview, or one replaced by the next draw.
+  // `doneSeq`: with a `settle` wait, an image is final only once the server has said
+  // its last draw is out (gsUx.settled, after Browse's enrichment): an image already
+  // sharp from the cache in the first draw is not the one shown if the second draw
+  // replaces it. Without that word by IMAGE_MAX_MS, the image sharp then is reported.
+  function sharpState(selector, since, workflow, doneSeq, callback) {
+    if (!selector) return callback('none', null, null);
+    var started = marks[workflow] || 0, seen = false, candidate = null, candidateEl = null;
+    function settledNow() { return !doneSeq || settledSeq[workflow] === doneSeq; }
+    (function poll() {
+      var el;
+      try { el = document.querySelector(selector); } catch (_) { return callback('none', null, null); }
+      var elapsed = now() - since;
+      if (candidateEl && candidateEl !== el) candidate = candidateEl = null;
+      if (el) {
+        seen = true;
+        var data = el.dataset || {};
+        var fell = !!(data.triedOxford || data.triedManifest || data.triedServerProxy);
+        var full = el.getAttribute && el.getAttribute('data-full-src');
+        var shown = el.complete && el.naturalWidth > 0;
+        var kind = shown && fell ? 'fallback'
+          : (shown && (!full || el.getAttribute('src') === full) ? 'full' : null);
+        if (kind && !candidate) {
+          candidate = [kind, Math.round(elapsed), imageSource(el)];
+          candidateEl = el;
+        }
+        if (candidate && settledNow()) return callback(candidate[0], candidate[1], candidate[2]);
+        if (el.style && el.style.display === 'none') return callback('error', null, imageSource(el));
+      } else if (seen) {
+        return callback('error', null, null);  // the fallback chain replaced it with its notice
+      }
+      if ((marks[workflow] || 0) !== started) return callback('moved_on', null, null);
+      if (elapsed >= IMAGE_MAX_MS) {
+        if (candidate) return callback(candidate[0], candidate[1], candidate[2]);
+        return callback('timeout', null, el ? imageSource(el) : null);
+      }
+      setTimeout(poll, SHARP_POLL_MS);
+    })();
+  }
+
   function send(props) {
     if (!sampled) return;
     var waited = 0;
@@ -104,8 +162,10 @@
   }
 
   window.gsUx = {
-    done: function (workflow, outcome, serverMs, nav, imageSelector) {
+    done: function (workflow, outcome, serverMs, nav, imageSelector, settle) {
       try {
+        dones[workflow] = (dones[workflow] || 0) + 1;
+        var doneSeq = settle ? dones[workflow] : 0;
         var received = now(), start = pending[workflow], base, trigger;
         var wasSpoiled = spoiled[workflow];
         delete pending[workflow];
@@ -125,7 +185,12 @@
         }
         afterPaint(function (paintTimedOut) {
           var painted = now();
-          imageState(imageSelector, received, function (img, imgMs) {
+          // Both watches start now; the event goes once both have an answer.
+          var first = null, sharp = null;
+          function both() {
+            if (!first || !sharp) return;
+            var img = first[0], imgMs = first[1];
+            var imgFinal = sharp[0], imgFullMs = sharp[1], imgSource = sharp[2];
             var navEntry = nav && performance.getEntriesByType
               ? performance.getEntriesByType('navigation')[0] : null;
             var props = {
@@ -139,6 +204,9 @@
               render_ms: Math.round(painted - received),
               img: img,
               img_ms: imgMs,
+              img_final: imgFinal,
+              img_full_ms: imgFullMs,
+              img_source: imgSource,
               ttfb_ms: navEntry ? Math.round(navEntry.responseStart) : null,
               from_path: nav ? referrerPath() : null,
               hidden: paintTimedOut || document.visibilityState !== 'visible',
@@ -148,9 +216,20 @@
             };
             window.gsUx.last = props;  // for debugging in the browser console
             send(props);
-          });
+          }
+          function bothSafely() {
+            try { both(); } catch (_) { /* measuring must never break the page */ }
+          }
+          imageState(imageSelector, received, function (img, imgMs) { first = [img, imgMs]; bothSafely(); });
+          sharpState(imageSelector, received, workflow, doneSeq,
+                     function (f, ms, s) { sharp = [f, ms, s]; bothSafely(); });
         });
       } catch (_) { /* measuring must never break the page */ }
+    },
+    // The server's last draw for the latest done(workflow) is out (Browse: after its
+    // enrichment), so the image on screen now is the one the reader is shown.
+    settled: function (workflow) {
+      try { settledSeq[workflow] = dones[workflow] || 0; } catch (_) { /* never break the page */ }
     },
     // The server turned the latest action away (e.g. Enter again while a search
     // runs): keep measuring from the action it is still working on.

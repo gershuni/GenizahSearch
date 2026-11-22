@@ -70,7 +70,7 @@ def _merge_fgp_sources(sys_id: str, pgp_sources):
 from web.components.typography import render_line_numbered_html as _render_line_numbered_html
 
 # Phase 117 Plan 03: per-provider image-URL resolution extracted to web/components/image_resolution.py.
-from web.components.image_resolution import resolve_image_url
+from web.components.image_resolution import apply_cached_external_images, preview_url, resolve_image_url
 
 
 from web.safe_storage import safe_user_get, safe_user_set
@@ -81,7 +81,7 @@ from web.services import (
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.translations import tr, is_rtl, get_language, using_language, in_visitor_language
-from web.ux_timing import ux_done
+from web.ux_timing import ux_done, ux_settled
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections, get_user_client
@@ -1392,7 +1392,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 else:
                     return service.get_browse_page(_sys_id, p_num=1, volume_ie=_volume_ie)
 
-            page = await run.io_bound(in_visitor_language(_fetch_page))
+            def _fetch_page_with_images():
+                # The library's images when they are already in memory, so the first draw
+                # asks for the image Phase B would show (no network: cached_external_images).
+                fetched = _fetch_page()
+                apply_cached_external_images(fetched)
+                return fetched
+
+            page = await run.io_bound(in_visitor_language(_fetch_page_with_images))
 
             if my_gen != _load_generation['value']:
                 return  # Superseded by newer load
@@ -1456,7 +1463,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 else:
                     _requested_p = state.current_page.p_num if state.current_page else None
                 def _fetch_metadata_only():
-                    return service.get_metadata_only_browse_page(_fallback_sys, p_num=_requested_p)
+                    fetched = service.get_metadata_only_browse_page(_fallback_sys, p_num=_requested_p)
+                    apply_cached_external_images(fetched)
+                    return fetched
                 meta_page = await run.io_bound(in_visitor_language(_fetch_metadata_only))
                 if my_gen != _load_generation['value']:
                     return
@@ -1525,15 +1534,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         if my_gen == _load_generation['value']:
             ux_done(_page_client, 'browse_page', 'error' if state.error else 'ok',
                     server_ms=(time.perf_counter() - _ux_t0) * 1000, nav=_ux_nav,
-                    img_selector='.img-loading-container img.zoomable-image')
+                    img_selector='.img-loading-container img.zoomable-image', settle=True)
         # Only the current load: one overtaken during the title lookup above
         # would otherwise record its page after the newer one's.
         if _recent and my_gen == _load_generation['value']:
             background_tasks.create(_record_recent(*_recent), name='browse-recents')
 
         # === Phase B: Background enrichment ===
-        if state.current_page and state.current_page.sys_id and not state.error:
-            await _load_enrichment(state.current_page, my_gen)
+        try:
+            if state.current_page and state.current_page.sys_id and not state.error:
+                await _load_enrichment(state.current_page, my_gen)
+        finally:
+            # Phase B may draw the image again (another library's); the page's
+            # measurement takes the image on screen after this (ux_timing event v2).
+            if my_gen == _load_generation['value']:
+                ux_settled(_page_client, 'browse_page')
 
     async def _record_recent(sys_id: str, fl_id: Optional[str], user_id: Optional[str]) -> None:
         """Record a viewed manuscript in the visitor's Recently Viewed, off the loop.
@@ -5428,9 +5443,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # Not in full screen: the 400 px preview showed at its own
                                     # size, small in the middle of the screen, before the full
                                     # image filled it -- on every page turn (2026-11-20).
-                                    if '/api/nli_image_by_sysid/' in safe_img_url and not state.image_fullscreen:
-                                        _sep = '&' if '?' in safe_img_url else '?'
-                                        _thumb_url = f"{safe_img_url}{_sep}width=400"
+                                    # Every library route that takes a width has one, not only
+                                    # NLI's (2026-11-22): a Cambridge page showed nothing until
+                                    # its 2000-px image came, 3-4 s from CUDL.
+                                    if not state.image_fullscreen:
+                                        _thumb_url = preview_url(safe_img_url) or safe_img_url
                                     _ox_direct_attr = html_module.escape(_ox_direct_link, quote=True)
                                     _ox_direct_label = html_module.escape(tr('Open in Bodleian Libraries'), quote=True)
                                     img_html = f'''
@@ -5953,11 +5970,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
                                         is_oxford_js = 'true' if _has_oxford_images else 'false'
                                         _fs_oxford = html_module.escape(page.bodleian_links.get('current', ''), quote=True)
-                                        _fs_thumb = safe_img_url
                                         _fs_full = safe_img_url
-                                        if '/api/nli_image_by_sysid/' in safe_img_url:
-                                            _sep = '&' if '?' in safe_img_url else '?'
-                                            _fs_thumb = f"{safe_img_url}{_sep}width=400"
+                                        _fs_thumb = preview_url(safe_img_url) or safe_img_url
                                         img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" data-oxford-direct="{_fs_oxford}" data-volume-suffix="{int(page.volume_suffix or 1)}" {_fallback_attrs} class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')

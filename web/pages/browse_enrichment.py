@@ -367,28 +367,22 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         _total_pages = _page.total_pages
 
         def _browse_enrich_sync():
-            from web.services import ATTRIBUTION_BY_LIBRARY, _get_library_attribution, bodleian_links_for_page
+            from web.services import bodleian_links_for_page
             from web.state import state as state_mod
             result = {}
 
-            # Attribution cascade
-            attribution = ''
-            nli_attribution = ''
+            # Attribution cascade: one rule with Phase A's draw from memory
+            # (image_credits). The NLI credit is NLI's OWN manifest credit, which
+            # MetadataManager stores separately from the primary one. Codex P2
+            # (2026-09-02): copying `attribution` here put the Bodleian credit under the
+            # NLI image whenever the browser's Oxford->NLI fallback fired. Empty when the
+            # manuscript has no NLI manifest; the footer then keeps the primary credit.
+            from web.components.image_resolution import image_credits
+            cached_meta = {}
             if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
-                cached_meta = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
-                attribution = cached_meta.get('attribution', '')
-                # NLI's OWN manifest credit, which MetadataManager stores separately
-                # from the primary one. Codex P2 (2026-09-02): copying `attribution`
-                # here put the Bodleian credit under the NLI image whenever the
-                # browser's Oxford->NLI fallback fired. Empty when the manuscript has
-                # no NLI manifest; the footer then keeps the primary credit.
-                nli_attribution = cached_meta.get('attribution_nli', '') or ''
-            if _library_code in ATTRIBUTION_BY_LIBRARY:
-                lib_attr = _get_library_attribution(_library_code)
-                if lib_attr is not None:
-                    attribution = lib_attr
-            elif _is_oxford:
-                attribution = _get_library_attribution('Oxford') or ''
+                cached_meta = state_mod.meta_mgr.nli_cache.get(_sys_id, {}) or {}
+            attribution, nli_attribution = image_credits(cached_meta, _library_code, _is_oxford,
+                                                         with_katz=False)
             if attribution:
                 result['attribution'] = attribution
             if nli_attribution:
@@ -686,12 +680,14 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 pg.folio_label = browse_enrich['folio_label']
             if browse_enrich.get('library_viewer_url'):
                 pg.library_viewer_url = browse_enrich['library_viewer_url']
-            if browse_enrich.get('cambridge_images'):
-                pg.cambridge_images = browse_enrich['cambridge_images']
-            if browse_enrich.get('external_provider'):
-                pg.external_provider = browse_enrich['external_provider']
-            if browse_enrich.get('cambridge_alignment') is not None:
-                pg.cambridge_alignment = browse_enrich['cambridge_alignment']
+            if 'cambridge_images' in browse_enrich:
+                # One snapshot, replaced whole (resolve_external_images reads all three from
+                # one cache entry). Phase A may have drawn from the copy in memory
+                # (apply_cached_external_images); an empty answer here withdraws it, where
+                # assigning only non-empty values would keep a stale copy on the page.
+                pg.cambridge_images = browse_enrich['cambridge_images'] or []
+                pg.external_provider = browse_enrich.get('external_provider') or ''
+                pg.cambridge_alignment = browse_enrich.get('cambridge_alignment')
             # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
             # folio_images but cambridge_images populated via the bridge.
             # Derive total_pages from cambridge_images so pagination works,

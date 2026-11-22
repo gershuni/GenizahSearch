@@ -225,55 +225,110 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     }
 }
 
+// The full-size downloads progressiveLoad has started, so one whose image left the page
+// (the browse page draws again after its enrichment) can be dropped.
+var _progressiveFulls = [];
+
+// Fetch the full image only after the preview has arrived, as before 2026-11-22, when
+// the browser asks to save data or is on a 2G connection: there the two would share
+// too little bandwidth.
+function _progressiveSequential() {
+    try {
+        var c = typeof navigator !== 'undefined' && navigator.connection;
+        return !!(c && (c.saveData || /(^|-)2g$/.test(c.effectiveType || '')));
+    } catch (e) { return false; }
+}
+
 /**
- * Progressive image loading: show spinner → thumbnail (400px) → full (2000px).
- * Marks the surrounding .img-loading-container as loaded on first paint (or
- * error), then upgrades the <img> to its data-full-src resolution once the
- * full image has preloaded.
+ * Progressive image loading: a 400-px preview (src) and the full image
+ * (data-full-src), asked for together; the full one replaces the preview when it
+ * has arrived. Marks the surrounding .img-loading-container as loaded on the first
+ * paint (or error).
+ *
+ * The full image used to be asked for only after the preview had arrived, so the
+ * two waits added up: about a second more on every page (2026-11-22). Started
+ * together, one owner decides what is shown:
+ * - a full image that arrives first replaces the preview at once (the preview's
+ *   request is dropped with it);
+ * - a full image that fails leaves the preview on screen;
+ * - once handleImageError has taken over (a failed preview), nothing here touches
+ *   the image again: it would put the library's image back under the NLI credit
+ *   the fallback switched to (Codex review, 2026-11-11);
+ * - an image no longer in the page (drawn again meanwhile) starts nothing, and is
+ *   not swapped when its full image arrives.
  *
  * @param {HTMLImageElement} img - Image element with an optional data-full-src
  */
 function progressiveLoad(img) {
     var container = img.closest('.img-loading-container');
     var fullSrc = img.getAttribute('data-full-src');
-    // Mark loaded on first successful paint
-    function onThumbLoad() {
+    // The src this image was drawn with: a fallback that changes it takes the image over.
+    var drawnSrc = img.getAttribute('src');
+    var full = null;
+
+    function markLoaded() {
         if (container) container.classList.add('img-loaded');
-        img.removeEventListener('load', onThumbLoad);
-        // Upgrade to full resolution if available -- but not after handleImageError fell
-        // back to NLI: the image on screen is then NLI's full one, and the upgrade would put
-        // back the library image whose thumbnail failed, under the NLI credit it switched to
-        // (Codex review, 2026-11-11).
-        // An image drawn at full size already (the browse page's full screen draws no
-        // preview) needs no upgrade. `img.src` is the URL the browser resolved and
-        // data-full-src the one as written, so compare the written `src` too: the
-        // relative full URL never equals the absolute one, and the same full image was
-        // fetched again and reassigned (Codex on #64, 2026-11-20).
-        if (fullSrc && img.src !== fullSrc && img.getAttribute('src') !== fullSrc
-                && !img.dataset.triedManifest && !img.dataset.triedServerProxy) {
-            var full = new Image();
-            full.onload = function() {
-                img.src = fullSrc;
-            };
-            full.src = fullSrc;
-        }
     }
-    img.addEventListener('load', onThumbLoad);
+    function fallenBack() {
+        return !!(img.dataset.triedOxford || img.dataset.triedManifest || img.dataset.triedServerProxy);
+    }
+    function stillOurs() {
+        return img.isConnected !== false && !fallenBack() && img.getAttribute('src') === drawnSrc;
+    }
+    // An image drawn at full size already (the browse page's full screen draws no
+    // preview) needs no upgrade. `img.src` is the URL the browser resolved and
+    // data-full-src the one as written, so compare the written `src` too: the
+    // relative full URL never equals the absolute one, and the same full image was
+    // fetched again and reassigned (Codex on #64, 2026-11-20).
+    function needsFull() {
+        return !!fullSrc && img.src !== fullSrc && img.getAttribute('src') !== fullSrc;
+    }
+    function startFull() {
+        if (full || !needsFull() || !stillOurs()) return;
+        full = new Image();
+        full.onload = function() {
+            if (!stillOurs()) return;
+            img.src = fullSrc;
+            markLoaded();
+        };
+        full.src = fullSrc;
+        _progressiveFulls.push({ img: img, full: full });
+    }
+
+    function onPreviewLoad() {
+        img.removeEventListener('load', onPreviewLoad);
+        markLoaded();
+        startFull();
+    }
+    img.addEventListener('load', onPreviewLoad);
     // Also mark loaded on error (hide spinner)
     img.addEventListener('error', function onErr() {
-        if (container) container.classList.add('img-loaded');
+        markLoaded();
         img.removeEventListener('error', onErr);
     });
-    // A thumbnail from the browser's cache can finish loading before this runs (Quick View
-    // calls initProgressiveImages 200 ms after drawing the image): its load event is gone,
-    // so the image would stay at 400 px. Treat it as loaded now (2026-11-11).
-    if (img.complete && img.naturalWidth > 0) onThumbLoad();
+    if (img.complete) {
+        // A preview from the browser's cache can finish loading before this runs (Quick
+        // View calls initProgressiveImages 200 ms after drawing the image): its load
+        // event is gone, so the image would stay at 400 px (2026-11-11). One that failed
+        // before this ran is handleImageError's: nothing is fetched for it.
+        if (img.naturalWidth > 0) onPreviewLoad();
+        return;
+    }
+    if (!_progressiveSequential()) startFull();
 }
 
 /**
- * Auto-init all progressive images on the page (idempotent per image).
+ * Auto-init all progressive images on the page (idempotent per image). Full-size
+ * downloads started for images that have left the page are dropped first.
  */
 function initProgressiveImages() {
+    _progressiveFulls = _progressiveFulls.filter(function(entry) {
+        if (entry.img.isConnected !== false) return true;
+        entry.full.onload = null;
+        entry.full.onerror = null;
+        try { entry.full.src = ''; } catch (e) { /* best effort */ }
+        return false;
+    });
     document.querySelectorAll('img[data-full-src]').forEach(function(img) {
         if (!img.dataset.progressiveInit) {
             img.dataset.progressiveInit = 'true';

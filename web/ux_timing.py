@@ -37,7 +37,9 @@ WORKFLOWS = frozenset({
 OUTCOMES = frozenset({'ok', 'preview', 'partial', 'zero', 'error', 'duplicate'})
 
 _JS_PATH = Path(__file__).resolve().parent / 'static' / 'js' / 'ux_timing.js'
-_EVENT_VERSION = 1
+# 2 (2026-11-22): img_final, img_full_ms and img_source -- the image the reader ends up
+# seeing, after the page is drawn again; the event is sent once that is known.
+_EVENT_VERSION = 2
 
 
 def enabled() -> bool:
@@ -78,12 +80,14 @@ def head_html() -> str:
 
 
 def ux_done(client, workflow: str, outcome: str, *, server_ms: float | None = None,
-            nav: bool = False, img_selector: str | None = None) -> None:
+            nav: bool = False, img_selector: str | None = None, settle: bool = False) -> None:
     """Tell ``client``'s browser that ``workflow`` has just finished on the server.
 
     ``server_ms``: the server's own time for it. ``nav``: the work was started by
     the page's URL, not by a click, so the browser measures from the start of the
     navigation. ``img_selector``: an image whose load is reported separately.
+    ``settle``: the page draws again later (Browse after its enrichment); the image
+    the reader ends up seeing is taken only after ``ux_settled``.
     Never raises: measuring must not break a page.
     """
     if workflow not in WORKFLOWS or outcome not in OUTCOMES:
@@ -93,10 +97,24 @@ def ux_done(client, workflow: str, outcome: str, *, server_ms: float | None = No
         return
     args = [workflow, outcome, None if server_ms is None else round(server_ms, 1),
             bool(nav), img_selector]
+    if settle:
+        args.append(True)
     try:
         client.run_javascript('window.gsUx&&gsUx.done(' + ','.join(json.dumps(a) for a in args) + ')')
     except Exception as exc:  # the page is gone
         logger.debug('ux_timing(%s) not sent: %s', workflow, exc)
+
+
+def ux_settled(client, workflow: str) -> None:
+    """Tell ``client``'s browser that the last draw for the latest ``ux_done(...,
+    settle=True)`` of ``workflow`` is out, so the image on screen is the one the reader
+    is shown (event v2's ``img_final``). Never raises."""
+    if workflow not in WORKFLOWS or client is None or not enabled():
+        return
+    try:
+        client.run_javascript('window.gsUx&&gsUx.settled&&gsUx.settled(' + json.dumps(workflow) + ')')
+    except Exception as exc:  # the page is gone
+        logger.debug('ux_timing(%s) settled not sent: %s', workflow, exc)
 
 
 def ux_ignored(client, workflow: str) -> None:
