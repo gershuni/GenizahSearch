@@ -53,15 +53,18 @@ def _service():
     return svc
 
 
-def _run(tmp_path, driver, lang='en', saved=None):
+def _run(tmp_path, driver, lang='en', saved=None, orders=None):
     """``driver(user, enter)``: ``enter(fragments, pgpid)`` opens the desk as the joins dialog does.
-    ``saved``: a list that receives the reader's choices each time the desk's snapshot is saved."""
+    ``saved``: a list that receives the reader's choices each time the desk's snapshot is saved;
+    ``orders``: one that receives the desk's fragments (their sys_ids, in order) each time."""
     made = []
     real_persist = browse.persist_browse_snapshot
 
     def persist(state, page=None):
         if saved is not None:
             saved.append(dict(state.reading_desk_selected_sources))
+        if orders is not None:
+            orders.append([e.get('sys_id') for e in state.reading_desk_entries])
         return real_persist(state, page)
 
     class Refs(browse.BrowsePageRefs):
@@ -287,7 +290,7 @@ def test_a_document_desk_shows_one_image_beside_a_filmstrip(tmp_path):
         await _wait_until(lambda: _thumbs(user))
         assert _image_toggle(user).value == di.VIEW_ONE
         assert _image_toggle(user).options == {
-            di.VIEW_ONE: 'One at a time', di.VIEW_ALL: 'All images', di.VIEW_JOIN: 'Assembled'}
+            di.VIEW_ONE: 'One at a time', di.VIEW_ALL: 'All images', di.VIEW_JOIN: 'Puzzle images'}
         thumbs = _thumbs(user)
         assert [t.props['aria-label'] for t in thumbs] == [
             'Frag A Recto', 'Frag A Verso', 'Frag B Recto', 'Frag B Verso']
@@ -327,6 +330,132 @@ def test_all_images_is_the_stack_and_the_choice_is_kept(tmp_path):
     _run(tmp_path, driver)
 
 
+def _headers(user):
+    """The fragment names over the images, in the order drawn."""
+    return [e.text for e in _all_elements(user) if isinstance(e, ui.label) and 'cursor-pointer' in e.classes
+            and e.text in SHELFMARKS.values() and any('rd-img-frag-' in str(p.props.get('id', '')) for p in _ancestors(e))]
+
+
+def _ancestors(element):
+    parent = element.parent_slot.parent if element.parent_slot else None
+    while parent is not None:
+        yield parent
+        parent = parent.parent_slot.parent if parent.parent_slot else None
+
+
+def test_the_reader_moves_a_fragment_up_or_down_the_desk(tmp_path):
+    orders = []
+
+    async def driver(user, enter):
+        enter(FRAGMENTS, DOC)
+        await _wait_until(lambda: _thumbs(user))
+        # One at a time: the shown image's fragment has its own up and down beside its name.
+        assert len(_of(user, ui.button, 'rd-move-up')) == 1
+        _set(user, _image_toggle(user), di.VIEW_ALL)
+        await _wait_until(lambda: len(_large_images(user)) == 4)
+        assert _headers(user) == ['Frag A', 'Frag B']
+        ups, downs = _of(user, ui.button, 'rd-move-up'), _of(user, ui.button, 'rd-move-down')
+        # The first cannot go up, the last cannot go down.
+        assert [b.enabled for b in ups] == [False, True] and [b.enabled for b in downs] == [True, False]
+
+        _click(user, downs[0])
+        await _wait_until(lambda: _headers(user) == ['Frag B', 'Frag A'])
+        images = _large_images(user)
+        assert SID_B in images[0] and SID_A in images[-1]  # the images follow
+        assert orders[-1] == [SID_B, SID_A]  # and the order is kept with the desk
+
+        # The text side by fragment follows too, and has the same buttons.
+        _set(user, _view_toggle(user), dd.VIEW_FRAGMENTS)
+        await _wait_until(lambda: 'automatic Frag B p2' in _labels(user))
+        texts = [t for t in _labels(user) if t.startswith('automatic ')]
+        assert texts.index('automatic Frag B p1') < texts.index('automatic Frag A p1')
+        text_ups = [b for b in _of(user, ui.button, 'rd-move-up')
+                    if any('rd-text-frag-' in str(p.props.get('id', '')) for p in _ancestors(b))]
+        assert [b.enabled for b in text_ups] == [False, True]
+        _click(user, text_ups[1])  # Frag A back up, from the text side
+        await _wait_until(lambda: orders[-1] == [SID_A, SID_B])
+
+        # A desk of one has nothing to order.
+        _click(user, [b for b in _all_elements(user) if isinstance(b, ui.button) and b.text == 'Back to Page View'][0])
+        enter(FRAGMENTS[:1], DOC)
+        await _wait_until(lambda: _thumbs(user))
+        assert not _of(user, ui.button, 'rd-move-up') and not _of(user, ui.button, 'rd-move-down')
+
+    _run(tmp_path, driver, orders=orders)
+
+
+def test_the_image_on_show_stays_on_show_when_its_fragment_moves(tmp_path):
+    """One at a time, the image shown when the reader chose none is found by position (the first,
+    when the page's own fragment is not on the desk): moving its fragment must not show another."""
+    async def driver(user, enter):
+        enter([{'shelfmark': 'Frag B', 'document_id': SID_B}, {'shelfmark': 'Frag C', 'document_id': SID_C}], None)
+        await _wait_until(lambda: len(_large_images(user)) == 4)  # a hand-built desk: all images
+        _set(user, _image_toggle(user), di.VIEW_ONE)
+        await _wait_until(lambda: _thumbs(user))
+        assert f'{SID_B}?page=0' in _large_images(user)[0]
+        down = _of(user, ui.button, 'rd-move-down')[0]  # beside the shown image (the text side has one too)
+        _click(user, down)
+        await _wait_until(lambda: [t.props['aria-label'] for t in _thumbs(user)][:1] == ['Frag C Recto'])
+        assert f'{SID_B}?page=0' in _large_images(user)[0]  # Frag B, now second, is still the one shown
+
+    _run(tmp_path, driver)
+
+
+def test_each_image_has_its_links_menu_filled_when_opened(tmp_path):
+    import asyncio
+
+    from web.pages import browse_desk_links as dl
+    asked = []
+    complete = {'value': True}
+
+    def resolve(entry):
+        asked.append(entry['sys_id'])
+        return {'fragment': [(('NLI Ktiv',), f"https://ktiv/{entry['sys_id']}")],
+                'pages': {1: [(('Bodleian', 'Verso'), 'https://bodleian/verso.jpg')]},
+                'complete': complete['value']}
+
+    def links(user):
+        return [(e.text, e.props.get('href')) for e in _all_elements(user) if isinstance(e, ui.link) and 'rd-link' in e.classes]
+
+    async def driver(user, enter):
+        enter(FRAGMENTS, DOC)
+        await _wait_until(lambda: _thumbs(user))
+        _set(user, _image_toggle(user), di.VIEW_ALL)
+        await _wait_until(lambda: len(_large_images(user)) == 4)
+        assert len(_of(user, ui.button, 'rd-links')) == 4  # one beside each image
+        assert not asked  # nothing is looked up until a menu is opened
+        menus = _of(user, ui.menu, 'rd-links-menu')
+        _set(user, menus[1], True)  # Frag A's verso
+        await _wait_until(lambda: links(user))
+        assert asked == [SID_A]
+        assert links(user) == [('Bodleian · Verso', 'https://bodleian/verso.jpg'), ('NLI Ktiv', f'https://ktiv/{SID_A}')]
+        _set(user, menus[1], False)
+        _set(user, menus[1], True)  # opened again: not looked up again
+        await asyncio.sleep(0.5)  # time for a second lookup to run, were one started
+        assert asked == [SID_A]
+        # A result a source left incomplete: the same menu asks again at its next opening.
+        complete['value'] = False
+        _set(user, menus[2], True)  # Frag B's recto
+        await _wait_until(lambda: SID_B in asked)
+        _set(user, menus[2], False)
+        _set(user, menus[2], True)
+        await _wait_until(lambda: asked.count(SID_B) == 2)
+        assert asked == [SID_A, SID_B, SID_B]
+
+    with patch.object(dl, '_resolve', side_effect=resolve):
+        _run(tmp_path, driver)
+
+
+def test_move_entry_moves_one_place_and_never_off_the_desk():
+    entries = [{'sys_id': 'a'}, {'sys_id': 'b'}, {'sys_id': 'c'}]
+    ids = lambda moved: [e['sys_id'] for e in moved]  # noqa: E731
+    assert ids(di.move_entry(entries, 'a', 1)) == ['b', 'a', 'c']
+    assert ids(di.move_entry(entries, 'c', -1)) == ['a', 'c', 'b']
+    assert ids(entries) == ['a', 'b', 'c']  # a new list; the desk's own is replaced, not changed
+    assert di.move_entry(entries, 'a', -1) is None and di.move_entry(entries, 'c', 1) is None
+    assert di.move_entry(entries, 'gone', 1) is None
+
+
 def test_a_leaf_keeps_recto_and_verso_and_a_longer_fragment_is_numbered():
     with using_language('en'):
         two = di.desk_images([{'sys_id': SID_A, 'shelfmark': 'Frag A', 'pages': []}])
@@ -349,7 +478,7 @@ def test_a_leaf_keeps_recto_and_verso_and_a_longer_fragment_is_numbered():
     assert (shown['frag_idx'], shown['page_index']) == (1, 1)
     assert di.shown_text_image(entries, {}, document_text=True, current_shelfmark='frag b')['frag_idx'] == 1
     assert di.shown_text_image(entries, {}, document_text=False) is None  # all images: every fragment's text
-    # The assembled picture is of several fragments: no one image's text. Where it is not on
+    # The puzzle images are of several fragments: no one image's text. Where they are not on
     # offer (no Puzzle, or one fragment), the image side falls back and the text side with it.
     in_join = {di.KEY_IMAGE_VIEW: di.VIEW_JOIN}
     assert di.shown_text_image(entries, in_join, document_text=True, can_arrange=True) is None
@@ -366,13 +495,14 @@ PUBLISHED_JOIN = {'kind': 'published', 'id': 'pub-1', 'title': 'A published join
                   'covers': 2, 'author': 'A Reader', 'image_url': 'https://example.org/joins/pub-1.png'}
 
 
-def _join_picture(user):
-    [picture] = [e.content for e in _all_elements(user)
-                 if isinstance(e, ui.html) and f'<img id="{dp.VIEWER_ID}"' in e.content]
-    return picture
+def _join_pictures(user):
+    return [e.content for e in _all_elements(user)
+            if isinstance(e, ui.html) and f'<img id="{dp.VIEWER_ID}-' in e.content]
 
 
-def test_the_assembled_view_shows_a_saved_joins_picture_and_leads_to_the_puzzle(tmp_path):
+def test_puzzle_images_show_every_puzzle_one_under_another_and_lead_to_the_puzzle(tmp_path):
+    saved = []
+
     async def driver(user, enter):
         enter(FRAGMENTS, DOC)
         await _wait_until(lambda: _thumbs(user))
@@ -380,39 +510,56 @@ def test_the_assembled_view_shows_a_saved_joins_picture_and_leads_to_the_puzzle(
         await _wait_until(lambda: _of(user, ui.select, 'rd-join-choice'))
         [choice] = _of(user, ui.select, 'rd-join-choice')
         assert choice.options == {'own-1': 'My join · Your saved join', 'pub-1': 'A published join · Published by A Reader'}
-        assert choice.value == 'own-1'
+        # Both shown, one under another, each with its own picture, controls and way to the Puzzle.
+        assert choice.value == ['own-1', 'pub-1']
+        own, published = _join_pictures(user)
         # The visitor's own join has no picture stored: the browser asks the Puzzle's export route.
-        assert 'src=' not in _join_picture(user) and 'Assembling the picture' in _join_picture(user)
-        assert len(_of(user, ui.button, 'rd-join-open')) == 1 and len(_of(user, ui.button, 'rd-image-adjust')) == 1
-        assert not _thumbs(user) and not _large_images(user)[1:]  # the one picture, not the fragments' images
+        assert f'id="{dp.VIEWER_ID}-0"' in own and 'src=' not in own and 'Preparing the puzzle image' in own
+        assert f'id="{dp.VIEWER_ID}-1"' in published and 'src="https://example.org/joins/pub-1.png"' in published
+        assert len(_of(user, ui.button, 'rd-join-open')) == 2 and len(_of(user, ui.button, 'rd-image-adjust')) == 2
+        assert len(_of(user, ui.button, 'rd-join-new')) == 1  # another puzzle: another page, or the other side
+        assert _of(user, ui.scroll_area, 'rd-join-stack')
+        assert not _thumbs(user) and not _large_images(user)[2:]  # the puzzles, not the fragments' images
+        assert '4 images' not in _labels(user)  # the desk's image count is not the puzzles'
         assert _labels(user).count(EDITION_ONE) == 1  # the text side is as it was
 
-        # By fragment, beside the assembled picture: every fragment's text, not one image's.
+        # By fragment, beside the puzzle images: every fragment's text, not one image's.
         _set(user, _view_toggle(user), dd.VIEW_FRAGMENTS)
         await _wait_until(lambda: 'automatic Frag B p2' in _labels(user) and _of(user, ui.select, 'rd-join-choice'))
         assert [t for t in _labels(user) if t.startswith('automatic ')] == [
             'automatic Frag A p1', 'automatic Frag A p2', 'automatic Frag B p1', 'automatic Frag B p2']
-        [choice] = _of(user, ui.select, 'rd-join-choice')
+        assert len(_join_pictures(user)) == 2
 
-        _set(user, choice, 'pub-1')
-        await _wait_until(lambda: 'pub-1.png' in _join_picture(user))
-        assert 'src="https://example.org/joins/pub-1.png"' in _join_picture(user)
+        # One taken off: the other alone, at the full height, and the choice is kept with the desk.
+        [choice] = _of(user, ui.select, 'rd-join-choice')
+        _set(user, choice, ['pub-1'])
+        await _wait_until(lambda: len(_join_pictures(user)) == 1)
+        [published] = _join_pictures(user)
+        assert f'id="{dp.VIEWER_ID}-1"' in published and 'pub-1.png' in published
+        assert not _of(user, ui.scroll_area, 'rd-join-stack')
+        assert saved[-1][dp.KEY_JOIN_SHOWN] == 'pub-1'
+
+        # Every one taken off: none shown, and none it stays.
+        [choice] = _of(user, ui.select, 'rd-join-choice')
+        _set(user, choice, [])
+        await _wait_until(lambda: 'Choose the puzzles to show.' in _labels(user))
+        assert not _join_pictures(user) and saved[-1][dp.KEY_JOIN_SHOWN] == dp.NONE_SHOWN
 
     with patch.object(dp, 'find_joins', return_value=[OWN_JOIN, PUBLISHED_JOIN]):
-        _run(tmp_path, driver)
+        _run(tmp_path, driver, saved=saved)
 
 
-def test_the_assembled_view_without_a_saved_join_offers_the_puzzle(tmp_path):
+def test_puzzle_images_without_a_saved_join_offer_the_puzzle(tmp_path):
     async def driver(user, enter):
         enter(FRAGMENTS, DOC)
         await _wait_until(lambda: _thumbs(user))
         _set(user, _image_toggle(user), di.VIEW_JOIN)
-        await _wait_until(lambda: 'No saved join of these fragments yet.' in _labels(user))
-        assert 'No saved join of these fragments yet.' in _labels(user)
+        await _wait_until(lambda: 'No puzzle of these fragments yet.' in _labels(user))
+        assert 'No puzzle of these fragments yet.' in _labels(user)
         assert [b.text for b in _all_elements(user) if isinstance(b, ui.button) and b.text == 'Arrange in Puzzle']
         assert not _of(user, ui.button, 'rd-join-open')
 
-        # A desk of one fragment has nothing to assemble: the view is not offered, and a
+        # A desk of one fragment has no puzzle to show: the view is not offered, and a
         # reader who was in it is back with the images.
         _click(user, [b for b in _all_elements(user) if isinstance(b, ui.button) and b.text == 'Back to Page View'][0])
         enter(FRAGMENTS[:1], DOC)
@@ -421,6 +568,31 @@ def test_the_assembled_view_without_a_saved_join_offers_the_puzzle(tmp_path):
 
     with patch.object(dp, 'find_joins', return_value=[]):
         _run(tmp_path, driver)
+
+
+def test_the_puzzles_shown_are_the_readers_choice_else_the_first_few():
+    joins = [{'id': f'j{n}'} for n in range(6)]
+    ids = lambda found: [j['id'] for j in found]  # noqa: E731
+    assert ids(dp.shown_joins(joins, {})) == ['j0', 'j1', 'j2', 'j3']  # SHOWN_FIRST, best first
+    assert dp.SHOWN_FIRST == 4
+    # The reader's choice, in the order found (not the order ticked); one no longer found is dropped.
+    assert ids(dp.shown_joins(joins, {dp.KEY_JOIN_SHOWN: '\n'.join(('j5', 'gone', 'j1'))})) == ['j1', 'j5']
+    # A choice naming none still found is no choice; one cleared on purpose shows none.
+    assert ids(dp.shown_joins(joins, {dp.KEY_JOIN_SHOWN: 'gone'})) == ['j0', 'j1', 'j2', 'j3']
+    assert dp.shown_joins(joins, {dp.KEY_JOIN_SHOWN: dp.NONE_SHOWN}) == []
+    # One puzzle alone has no chooser to bring it back with: it is shown whatever was chosen.
+    assert ids(dp.shown_joins(joins[:1], {dp.KEY_JOIN_SHOWN: dp.NONE_SHOWN})) == ['j0']
+    assert ids(dp.shown_joins(joins[:1], {dp.KEY_JOIN_SHOWN: 'gone'})) == ['j0']
+    # The one join an earlier desk kept (a single id) is still read.
+    assert ids(dp.shown_joins(joins, {dp.KEY_JOIN_SHOWN: 'j2'})) == ['j2']
+    # A document desk on a narrow screen stacks its cards with no fixed height: the stack of
+    # puzzles, like the images' pane, is given one there (flex: 1 alone would be no height).
+    narrow = dd.DESK_CSS.split('@media (max-width: 900px)')[1]
+    assert '.rd-document-mode .rd-join-stack' in narrow and '.rd-document-mode .rd-image-pane' in narrow
+    # Each puzzle's picture goes to its own viewer.
+    js = dp.own_picture_js(OWN_JOIN, 'failed', 'too many', viewer_id=f'{dp.VIEWER_ID}-3')
+    assert f"getElementById('{dp.VIEWER_ID}-3')" in js and f"rdInitDrag('{dp.VIEWER_ID}-3')" in js
+    assert f"getElementById('{dp.VIEWER_ID}')" not in js
 
 
 def test_find_joins_ranks_and_keeps_each_visitor_to_their_own():

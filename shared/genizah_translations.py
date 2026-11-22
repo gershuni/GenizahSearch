@@ -3744,13 +3744,23 @@ TRANSLATIONS.update({
     "All images": "כל התמונות",
     "images": "תמונות",
     "Image Adjustments": "התאמות תמונה",
-    # Reading Desk, the assembled picture of a join (web/pages/browse_desk_puzzle.py)
-    "Assembled": "צירוף",
-    "Looking for a saved join of these fragments…": "מחפש צירוף שמור של הקטעים…",
-    "No saved join of these fragments yet.": "עדיין אין צירוף שמור של הקטעים האלה.",
+    # The desk's order: a fragment up or down (web/pages/browse_desk_images.py::move_buttons)
+    "Move up": "העבר למעלה",
+    "Move down": "העבר למטה",
+    # Each desk image's links menu (web/pages/browse_desk_links.py)
+    "No links": "אין קישורים",
+    # Reading Desk, puzzle images: the pictures of a join's saved puzzles, several at once
+    # (web/pages/browse_desk_puzzle.py)
+    "Puzzle images": "תמונות פאזל",
+    "Looking for puzzles of these fragments…": "מחפש פאזלים של הקטעים…",
+    "No puzzle of these fragments yet.": "עדיין אין פאזל של הקטעים האלה.",
     "Arrange in Puzzle": "סידור בפאזל",
-    "Assembling the picture…": "מרכיב את התמונה…",
-    "The picture could not be assembled.": "לא ניתן היה להרכיב את התמונה.",
+    "Preparing the puzzle image…": "מכין את תמונת הפאזל…",
+    "The puzzle image could not be prepared.": "לא ניתן היה להכין את תמונת הפאזל.",
+    "Puzzles shown": "פאזלים מוצגים",
+    "Choose the puzzles to show.": "בחרו את הפאזלים להצגה.",
+    "Arrange the fragments on the desk in another puzzle: another page, or the other side":
+        "סידור הקטעים שבשולחן בפאזל נוסף: דף אחר, או הצד השני",
     "This join has too many fragments to show here. Open it in the Puzzle.": "בצירוף הזה יותר מדי קטעים להצגה כאן. פתחו אותו בפאזל.",
     "Your saved join": "צירוף שמור שלך",
     "Published by {}": "פורסם על ידי {}",

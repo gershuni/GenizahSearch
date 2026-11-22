@@ -2108,15 +2108,26 @@ The Reading Desk's image side (2026-11-18): one image at a time beside a filmstr
 - **Function** `image_view` — the reader's view, else one at a time beside a document's edition and all images on any other desk
 - **Function** `shown_image` — the image on show in the one-at-a-time view (the reader's, else the fragment they came from, else the first)
 - **Function** `page_label` — Recto/Verso for a fragment of one leaf, a number beyond that
-- **Function** `render_image_pane` — the view switcher, then the filmstrip view or the stack; one compact toolbar per image, the adjustments behind one button
+- **Function** `render_image_pane` — the view switcher (One at a time / All images / Puzzle images), then the filmstrip view, the stack or the puzzle images; one compact toolbar per image, the adjustments behind one button
+- **Function** `move_entry` — the desk's fragments with one moved a place up or down (None at either end or when it is not there); `browse.py::move_on_desk` applies it, saves the desk and redraws
+- **Function** `move_buttons` — up / down beside a fragment's name, on both image views and the text side's fragment headers (2026-11-21); none on a desk of one, the way out disabled at either end
+
+## web/pages/browse_desk_links.py
+
+The Reading Desk's links beside each image (2026-11-21): the single page's "External link" row, found for one desk fragment when its menu is first opened, off the event loop, kept per sys_id for the process only when every source answered.
+
+- **Function** `fragment_links` — BLOCKING; `{'fragment': [...], 'pages': {page_index: [...]}}`: the image's own Bodleian leaf (`web/services.py::bodleian_links_for_page`, as Browse and Quick View), then NLI Ktiv, the Bodleian part and whole volume, Cambridge CUDL (the record's Cambridge decision), the Katz Center components and viewer (bundled, no sidecar needed), the library's viewer (`NliCrossrefService.get_library_viewer_url`) and the PGP document (each side's, where recto and verso are in two: `get_document_for_fragment(sys_id, page_num)`); with no pages known, the two sides of one leaf; the Bodleian leaf read from the catalogue's shelfmark, not PGP's; each source may fail alone (`complete` False); each address once
+- **Function** `image_links` — one image's links: its leaf's, then the fragment's
+- **Function** `links_button` — the `open_in_new` menu beside an image (`browse_desk_images.py::_links`), filled on first opening in the visitor's language
 
 ## web/pages/browse_desk_puzzle.py
 
-The Reading Desk's third image view (2026-11-18): the assembled picture of a saved join of the fragments on the desk. Read-only; arranging stays in the Fragment Puzzle.
+The Reading Desk's third image view, "Puzzle images" (2026-11-18; several at once and renamed from "Assembled" 2026-11-21): the pictures of the saved puzzles of the fragments on the desk (a join's recto and verso, or one per page). Read-only; arranging stays in the Fragment Puzzle.
 
 - **Function** `find_joins` — BLOCKING; the visitor's own saved joins (through `web/saved_joins.py`) and the published joins holding at least two of the desk's fragments, best first; either half may fail alone
 - **Function** `own_picture_js` — the browser asks `POST /api/puzzle_export` for the picture of the visitor's own join and keeps it for the page's life
-- **Function** `render_join_view` — the lookup off the event loop, then the picture with the image toolbar and "Open in Puzzle", a chooser when there are several, or "Arrange in Puzzle" when there is none
+- **Function** `shown_joins` — the puzzles on show: the reader's choice (`KEY_JOIN_SHOWN`, ids one per line; `NONE_SHOWN` when cleared), in the order found, else the first `SHOWN_FIRST` (4)
+- **Function** `render_join_view` — the lookup off the event loop, then the puzzles shown one under another, each with its own viewer (`rd-viewer-join-<n>`), image toolbar and "Open in Puzzle"; a multiple chooser when there are several, "New Puzzle" to arrange another, or "Arrange in Puzzle" when there is none
 
 ## web/pages/browse_enrichment.py
 

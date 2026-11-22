@@ -72,7 +72,8 @@ DESK_CSS = '''
         flex: 0 0 auto !important; width: 100% !important; min-height: 0 !important;
     }
     /* flex: 1 has a zero basis, which in a stacked card of no fixed height is no height at all */
-    .reading-desk-panels.rd-document-mode .rd-image-pane { flex: 0 0 auto !important; height: 55vh !important; }
+    .reading-desk-panels.rd-document-mode .rd-image-pane,
+    .reading-desk-panels.rd-document-mode .rd-join-stack { flex: 0 0 auto !important; height: 55vh !important; }
     .reading-desk-panels.rd-document-mode .rd-text-pane { flex: 0 0 auto !important; height: 70vh !important; }
 }
 '''

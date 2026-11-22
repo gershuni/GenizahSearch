@@ -10,8 +10,14 @@ desk order):
 * ``all``  -- every image under its fragment's header, one compact row of controls each.
   The default for a hand-built desk, and what the desk always was.
 
-* ``join`` -- the assembled picture of a saved join of these fragments
-  (``web/pages/browse_desk_puzzle.py``), offered on a desk of two or more fragments.
+* ``join`` -- puzzle images: the pictures of the saved joins of these fragments, several at
+  once (``web/pages/browse_desk_puzzle.py``), offered on a desk of two or more fragments.
+
+Beside each image, a menu of its links: its own leaf at the Bodleian, the library's viewer,
+NLI Ktiv, the PGP document (``web/pages/browse_desk_links.py``).
+
+The fragments are in the desk's order, which the reader changes with the up / down buttons
+beside each fragment's name (``move_buttons``; ``move_entry`` is the change itself).
 
 Each image keeps the id ``rd-viewer-<fragment>-<page>`` and the ``rd-zoomable`` class the
 desk's viewer script (zoom, rotate, drag, brightness) works on; the fragment headers of the
@@ -43,7 +49,7 @@ _BODL_PREFIX = re.compile(r'^\s*Bodl\.\s*', re.IGNORECASE)
 
 def image_view(selected: Dict[str, Any], document_text: bool, join_offered: bool = False) -> str:
     """The reader's choice, else one at a time beside a document's edition and all images
-    on any other desk. The assembled picture is theirs only while it is on offer."""
+    on any other desk. The puzzle images are theirs only while they are on offer."""
     wanted = (selected or {}).get(KEY_IMAGE_VIEW)
     if wanted in (VIEW_ONE, VIEW_ALL) or (wanted == VIEW_JOIN and join_offered):
         return wanted
@@ -51,7 +57,7 @@ def image_view(selected: Dict[str, Any], document_text: bool, join_offered: bool
 
 
 def join_is_offered(entries: List[Dict[str, Any]], can_arrange: bool) -> bool:
-    """The assembled picture is on offer: the Fragment Puzzle is there to arrange in, and the
+    """The puzzle images are on offer: the Fragment Puzzle is there to arrange in, and the
     desk holds two or more fragments. One rule for the image side and for the text side,
     which must agree on the view the reader is in."""
     return bool(can_arrange) and len([e for e in entries if e.get('sys_id')]) >= 2
@@ -120,7 +126,7 @@ def shown_text_image(entries: List[Dict[str, Any]], selected: Dict[str, Any], *,
                      current_shelfmark: str = '', can_arrange: bool = False,
                      library_for: Optional[Callable[[str], str]] = None) -> Optional[Dict[str, Any]]:
     """The image on show in the one-at-a-time view (its ``frag_idx`` and ``page_index``);
-    None in the all-images view and in the assembled picture, which is of several fragments.
+    None in the all-images view and in the puzzle images, which are of several fragments.
     Where the text is one per fragment, the text side shows this image's alone: its
     fragment, and its side of the fragment.
 
@@ -217,12 +223,48 @@ def _fragment_name(image: Dict[str, Any], current: str, on_navigate: Callable[[s
         ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
 
 
+def move_entry(entries: List[Dict[str, Any]], sys_id: str, delta: int) -> Optional[List[Dict[str, Any]]]:
+    """The desk's fragments with ``sys_id`` moved ``delta`` places (-1 up, +1 down); None when it
+    is not on the desk or would leave it (the first moved up, the last moved down)."""
+    index = next((i for i, e in enumerate(entries) if e.get('sys_id') == sys_id), None)
+    if index is None or not 0 <= index + delta < len(entries):
+        return None
+    moved = list(entries)
+    moved.insert(index + delta, moved.pop(index))
+    return moved
+
+
+def move_buttons(sys_id: str, index: int, count: int, on_move: Optional[Callable[[str, int], Any]]) -> None:
+    """Up and down for the fragment at ``index`` of ``count`` on the desk: the order of its
+    images, its texts and what the Puzzle takes. Nothing on a desk of one; at either end the
+    way out is not offered."""
+    if on_move is None or count < 2:
+        return
+    with ui.row().classes('rd-move items-center no-wrap').style('gap: 0;'):
+        up = ui.button(icon='arrow_upward', on_click=lambda: on_move(sys_id, -1)).props(
+            'flat round dense size=sm').classes('rd-move-up text-gray-500').tooltip(tr('Move up'))
+        down = ui.button(icon='arrow_downward', on_click=lambda: on_move(sys_id, 1)).props(
+            'flat round dense size=sm').classes('rd-move-down text-gray-500').tooltip(tr('Move down'))
+        up.set_enabled(index > 0)
+        down.set_enabled(index < count - 1)
+
+
 def _remove_button(image: Dict[str, Any], on_remove: Callable[[str], Any]) -> None:
     ui.button(icon='close', on_click=lambda sid=image['sys_id']: on_remove(sid)).props(
         'flat round dense size=sm').classes('rd-remove-fragment text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
 
-def _render_all(images: List[Dict[str, Any]], current: str, on_navigate, on_remove) -> None:
+def _links(entries: Optional[List[Dict[str, Any]]], image: Dict[str, Any]) -> None:
+    """The image's links menu (``browse_desk_links.links_button``), for a fragment of the corpus."""
+    if not entries or not image['sys_id'] or image['frag_idx'] >= len(entries):
+        return
+    from web.pages.browse_desk_links import links_button
+    links_button(entries[image['frag_idx']], image['page_index'])
+
+
+def _render_all(images: List[Dict[str, Any]], current: str, on_navigate, on_remove, on_move=None,
+                entries: Optional[List[Dict[str, Any]]] = None) -> None:
+    count = len({i['frag_idx'] for i in images})
     with ui.scroll_area().classes('rd-image-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
         last_fragment = None
         for image in images:
@@ -234,18 +276,22 @@ def _render_all(images: List[Dict[str, Any]], current: str, on_navigate, on_remo
                         ui.icon('description', size='xs').classes('text-green-600')
                         _fragment_name(image, current, on_navigate)
                         ui.element('div').classes('flex-grow')
+                        move_buttons(image['sys_id'], image['frag_idx'], count, on_move)
                         _remove_button(image, on_remove)
             with ui.row().classes('items-center no-wrap w-full').style('gap: 6px;'):
                 ui.label(image['label']).classes('text-xs font-medium text-gray-500')
                 ui.element('div').classes('flex-grow')
                 _toolbar(image['viewer_id'])
+                _links(entries, image)
             _image_box(image, '300px', '500px')
 
 
 def _render_one(images: List[Dict[str, Any]], state: Any, current: str, on_navigate, on_remove,
                 on_image_change: Optional[Callable[[], None]],
-                on_choice: Optional[Callable[[], None]] = None) -> None:
+                on_choice: Optional[Callable[[], None]] = None, on_move=None,
+                entries: Optional[List[Dict[str, Any]]] = None) -> None:
     selected = state.reading_desk_selected_sources
+    count = len({i['frag_idx'] for i in images})
     refs: Dict[str, Any] = {}
 
     def draw_main() -> None:
@@ -258,6 +304,8 @@ def _render_one(images: List[Dict[str, Any]], state: Any, current: str, on_navig
                 ui.label(image['label']).classes('text-xs font-medium text-gray-500')
                 ui.element('div').classes('flex-grow')
                 _toolbar(image['viewer_id'])
+                _links(entries, image)
+                move_buttons(image['sys_id'], image['frag_idx'], count, on_move)
                 _remove_button(image, on_remove)
             _image_box(image, 'calc(70vh - 96px)', 'calc(70vh - 96px)')
         for key, thumb in refs['thumbs'].items():
@@ -301,14 +349,16 @@ def render_image_pane(entries: List[Dict[str, Any]], state: Any, *, document_tex
                       on_remove: Callable[[str], Any], on_layout_change: Callable[[], None],
                       on_image_change: Optional[Callable[[], None]] = None,
                       on_arrange: Optional[Callable[[], None]] = None,
-                      on_choice: Optional[Callable[[], None]] = None) -> None:
+                      on_choice: Optional[Callable[[], None]] = None,
+                      on_move: Optional[Callable[[str, int], Any]] = None) -> None:
     """The image side of the desk: the view switcher, then the view.
 
     ``text_per_fragment``: the text side is one text per fragment, so choosing another image
     calls ``on_image_change`` for the text to follow. ``on_layout_change`` redraws the desk.
     ``on_arrange`` takes the desk's fragments to the Fragment Puzzle; with it, a desk of two
-    or more fragments also offers the assembled picture of a saved join. ``on_choice`` is
-    called after every choice, before anything is redrawn (the desk's snapshot is saved there)."""
+    or more fragments also offers the puzzle images of its saved joins. ``on_choice`` is
+    called after every choice, before anything is redrawn (the desk's snapshot is saved there).
+    ``on_move(sys_id, delta)`` moves a fragment up (-1) or down (+1) on the desk."""
     selected = state.reading_desk_selected_sources
     join_offered = join_is_offered(entries, on_arrange is not None)
     view = image_view(selected, document_text, join_offered)
@@ -324,13 +374,14 @@ def render_image_pane(entries: List[Dict[str, Any]], state: Any, *, document_tex
     with ui.row().classes('items-center w-full px-1').style('gap: 8px;'):
         views = {VIEW_ONE: tr('One at a time'), VIEW_ALL: tr('All images')}
         if join_offered:
-            views[VIEW_JOIN] = tr('Assembled')
+            views[VIEW_JOIN] = tr('Puzzle images')
         ui.toggle(views, value=view, on_change=on_view).props(
             'no-caps unelevated size=sm padding="4px 12px" color=white text-color=green-9 '
             'toggle-color=green-7 toggle-text-color=white'
         ).classes('rd-image-view').style('border: 1px solid #15803d; border-radius: 6px; overflow: hidden;')
         ui.element('div').classes('flex-grow')
-        ui.label(f'{len(images)} {tr("images")}').classes('text-xs').style('color: var(--text-secondary);')
+        if view != VIEW_JOIN:  # the puzzles are not the desk's images
+            ui.label(f'{len(images)} {tr("images")}').classes('text-xs').style('color: var(--text-secondary);')
     if view == VIEW_JOIN:
         from web.pages.browse_desk_puzzle import render_join_view
         render_join_view(entries, state, toolbar=_toolbar, on_arrange=on_arrange, on_choice=on_choice)
@@ -339,9 +390,9 @@ def render_image_pane(entries: List[Dict[str, Any]], state: Any, *, document_tex
         return
     if view == VIEW_ONE:
         _render_one(images, state, current, on_navigate, on_remove,
-                    on_image_change if text_per_fragment else None, on_choice)
+                    on_image_change if text_per_fragment else None, on_choice, on_move, entries)
     else:
-        _render_all(images, current, on_navigate, on_remove)
+        _render_all(images, current, on_navigate, on_remove, on_move, entries)
 
 
 IMAGES_CSS = '''

@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Reading Desk, image side, third view: the assembled picture of a join.
+"""Reading Desk, image side, third view: puzzle images, the pictures of saved joins.
 
-The Fragment Puzzle is where fragments are arranged; this view only shows the picture of an
-arrangement that already exists for the fragments on the desk, and sends the reader to the
-Puzzle to make or change one. Two kinds are looked for:
+The Fragment Puzzle is where fragments are arranged; this view only shows the pictures of the
+arrangements that already exist for the fragments on the desk, and sends the reader to the
+Puzzle to make or change one. One join of fragments may have several puzzles -- its recto and
+its verso, or one for each page of a document on several leaves -- so several are shown one
+under another, the reader choosing which. Two kinds are looked for:
 
 * the visitor's own saved joins (``web/saved_joins.py``: each visitor sees only their own),
   whose picture the browser asks of ``POST /api/puzzle_export`` -- the Puzzle's own export
@@ -28,8 +30,14 @@ from web.translations import tr
 
 logger = logging.getLogger(__name__)
 
-VIEWER_ID = 'rd-viewer-join'
-KEY_JOIN_SHOWN = '__join_shown__'  # in state.reading_desk_selected_sources
+VIEWER_ID = 'rd-viewer-join'  # the n-th puzzle shown is VIEWER_ID-n
+# In state.reading_desk_selected_sources: the ids of the puzzles shown, one per line (a string,
+# as every value there). Absent, or naming none still found: the first SHOWN_FIRST.
+KEY_JOIN_SHOWN = '__join_shown__'
+NONE_SHOWN = '-'  # the reader took every puzzle off the list (no puzzle id is "-")
+#: Puzzles shown before the reader chooses: each of the reader's own is composed by the server
+#: when shown, so a desk whose fragments are in many puzzles does not ask for all of them at once.
+SHOWN_FIRST = 4
 
 
 def _own_joins(joins: Any, sys_ids: List[str]) -> List[Dict[str, Any]]:
@@ -103,9 +111,25 @@ def join_label(join: Dict[str, Any]) -> str:
     return f"{join['title']} · {whose}" if join['title'] else whose
 
 
-def own_picture_js(join: Dict[str, Any], failed: str, too_many: str = '') -> str:
-    """Asks the Puzzle's export route for the picture of the visitor's own join and shows it.
-    Kept for the page's life under the join's id and save time, so coming back is instant.
+def shown_joins(joins: List[Dict[str, Any]], selected: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The puzzles on show, in the order found: the reader's choice of them, else the first
+    SHOWN_FIRST. A choice naming none still found (each was deleted) is no choice; a choice
+    cleared by the reader (NONE_SHOWN) shows none. One puzzle alone is always shown: there is
+    no chooser to bring it back with."""
+    if len(joins) <= 1:
+        return list(joins)
+    raw = str((selected or {}).get(KEY_JOIN_SHOWN) or '')
+    if raw == NONE_SHOWN:
+        return []
+    chosen = set(raw.split('\n')) - {''}
+    shown = [j for j in joins if j['id'] in chosen]
+    return shown if shown else joins[:SHOWN_FIRST]
+
+
+def own_picture_js(join: Dict[str, Any], failed: str, too_many: str = '', viewer_id: str = VIEWER_ID) -> str:
+    """Asks the Puzzle's export route for the picture of the visitor's own join and shows it
+    in ``viewer_id``. Kept for the page's life under the join's id and save time, so coming
+    back is instant.
 
     The route refuses a join of more fragments than it will compose for an outside caller
     (413): that is said as what it is (``too_many``), not as a failure -- the join is whole
@@ -113,7 +137,7 @@ def own_picture_js(join: Dict[str, Any], failed: str, too_many: str = '') -> str
     key = json.dumps(f"{join['id']}@{join['when']}")
     return (
         "(async function(){"
-        f"var img=document.getElementById('{VIEWER_ID}'),note=document.getElementById('{VIEWER_ID}-note');"
+        f"var img=document.getElementById('{viewer_id}'),note=document.getElementById('{viewer_id}-note');"
         "if(!img)return;"
         "try{"
         "window.rdJoinPictures=window.rdJoinPictures||{};"
@@ -125,7 +149,7 @@ def own_picture_js(join: Dict[str, Any], failed: str, too_many: str = '') -> str
         "if(!r.ok)throw new Error('export '+r.status);"
         f"url=URL.createObjectURL(await r.blob());window.rdJoinPictures[{key}]=url;}}"
         "img.src=url;img.style.display='';if(note)note.style.display='none';"
-        f"if(window.rdInitDrag)window.rdInitDrag('{VIEWER_ID}');"
+        f"if(window.rdInitDrag)window.rdInitDrag('{viewer_id}');"
         f"}}catch(e){{if(note)note.textContent={json.dumps(failed)};}}"
         "})();"
     )
@@ -133,15 +157,16 @@ def own_picture_js(join: Dict[str, Any], failed: str, too_many: str = '') -> str
 
 def render_join_view(entries: List[Dict[str, Any]], state: Any, *, toolbar: Callable[[str], None],
                      on_arrange: Callable[[], None], on_choice: Optional[Callable[[], None]] = None) -> None:
-    """The assembled picture, or the way to make one. ``toolbar(viewer_id)`` draws the image
-    controls; ``on_arrange`` takes the desk's fragments to the Fragment Puzzle."""
+    """The puzzle images, or the way to make one. ``toolbar(viewer_id)`` draws the image
+    controls; ``on_arrange`` takes the desk's fragments to the Fragment Puzzle (a new puzzle
+    there: another page, or the other side)."""
     selected = state.reading_desk_selected_sources
     sys_ids = [e.get('sys_id') for e in entries if e.get('sys_id')]
     box = ui.column().classes('rd-join w-full').style('flex: 1; min-height: 0; gap: 4px;')
     with box:
         with ui.row().classes('rd-join-wait items-center w-full justify-center').style('gap: 8px; padding: 24px 0;'):
             ui.spinner(size='sm', color='green')
-            ui.label(tr('Looking for a saved join of these fragments…')).classes('text-sm').style(
+            ui.label(tr('Looking for puzzles of these fragments…')).classes('text-sm').style(
                 'color: var(--text-secondary);')
 
     # The visitor is told apart here, in the page's context; the worker thread cannot.
@@ -158,57 +183,85 @@ def render_join_view(entries: List[Dict[str, Any]], state: Any, *, toolbar: Call
     except Exception as e:
         logger.debug('[ReadingDesk] no Supabase client for published joins: %s', e)
 
+    def draw_puzzle(join: Dict[str, Any], viewer_id: str, height: str) -> None:
+        """One puzzle: its name, the image toolbar and "Open in Puzzle", then its picture."""
+        with ui.row().classes('rd-join-shown items-center w-full').style('gap: 2px 6px;'):
+            ui.label(join_label(join)).classes('rd-join-name text-sm font-bold').style(
+                'color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;')
+            ui.element('div').classes('flex-grow')
+            toolbar(viewer_id)
+            ui.button(tr('Open in Puzzle'), icon='extension',
+                      on_click=lambda j=join: ui.navigate.to(f"/puzzle?doc={j['id']}")).props(
+                'flat dense no-caps size=sm color=green').classes('rd-join-open')
+        src = html_module.escape(join.get('image_url', ''), quote=True)
+        waiting = '' if join['kind'] == 'published' else html_module.escape(tr('Preparing the puzzle image…'))
+        with ui.element('div').classes('rd-image-box').style(
+                'background: #1a1a1a; border-radius: 6px; overflow: hidden; display: flex; align-items: center; '
+                f'justify-content: center; min-height: {height}; position: relative; width: 100%;'):
+            ui.html(
+                f'<span id="{viewer_id}-note" style="color: #e5e7eb; font-size: 0.85rem; position: absolute;">{waiting}</span>'
+                f'<img id="{viewer_id}" class="rd-zoomable" {"src=" + chr(34) + src + chr(34) if src else ""} '
+                f'style="max-height: {height}; max-width: 100%; object-fit: contain; cursor: grab; '
+                f'transition: none;{"" if src else " display: none;"}" draggable="false" />', sanitize=False)
+
+    def show_puzzle(join: Dict[str, Any], viewer_id: str) -> None:
+        # The viewer ids are reused from one drawing to the next: forget the view kept for the
+        # puzzle last drawn under this one, or the first zoom or drag jumps to where that was left.
+        ui.run_javascript(f"window.rdResetView && window.rdResetView('{viewer_id}');")
+        if join['kind'] == 'own':
+            ui.run_javascript(own_picture_js(
+                join, tr('The puzzle image could not be prepared.'),
+                tr('This join has too many fragments to show here. Open it in the Puzzle.'), viewer_id))
+        else:
+            ui.run_javascript(
+                f"setTimeout(function(){{ window.rdInitDrag && window.rdInitDrag('{viewer_id}'); }}, 200);")
+
     def draw(joins: List[Dict[str, Any]]) -> None:
         box.clear()
         with box:
             if not joins:
                 with ui.column().classes('rd-join-none items-center w-full').style('gap: 8px; padding: 24px 8px;'):
                     ui.icon('extension', size='lg').classes('text-green-600')
-                    ui.label(tr('No saved join of these fragments yet.')).classes('text-sm').style(
+                    ui.label(tr('No puzzle of these fragments yet.')).classes('text-sm').style(
                         'color: var(--text-secondary); text-align: center;')
                     ui.button(tr('Arrange in Puzzle'), icon='extension', on_click=on_arrange).props(
                         'unelevated no-caps color=green size=sm')
                 return
-            join = next((j for j in joins if j['id'] == selected.get(KEY_JOIN_SHOWN)), joins[0])
+            shown = shown_joins(joins, selected)
 
-            def choose_join(e) -> None:
-                selected[KEY_JOIN_SHOWN] = e.value
+            def choose_joins(e) -> None:
+                chosen = set(e.value or ())
+                # In the order found, whatever order they were ticked in. None ticked is kept as
+                # none: the reader cleared the list on purpose.
+                selected[KEY_JOIN_SHOWN] = '\n'.join(j['id'] for j in joins if j['id'] in chosen) or NONE_SHOWN
                 if on_choice:
                     on_choice()
                 draw(joins)
 
             with ui.row().classes('rd-join-bar items-center w-full').style('gap: 2px 6px;'):
                 if len(joins) > 1:
-                    ui.select({j['id']: join_label(j) for j in joins}, value=join['id'], on_change=choose_join).props(
-                        'dense outlined options-dense').classes('rd-join-choice text-sm').style('min-width: 0; flex: 1 1 160px;')
-                else:
-                    ui.label(join_label(join)).classes('rd-join-name text-sm font-bold').style(
-                        'color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;')
+                    ui.select({j['id']: join_label(j) for j in joins}, value=[j['id'] for j in shown], multiple=True,
+                              label=tr('Puzzles shown'), on_change=choose_joins).props(
+                        'dense outlined options-dense use-chips').classes('rd-join-choice text-sm').style(
+                        'min-width: 0; flex: 1 1 200px;')
                 ui.element('div').classes('flex-grow')
-                toolbar(VIEWER_ID)
-                ui.button(tr('Open in Puzzle'), icon='extension',
-                          on_click=lambda j=join: ui.navigate.to(f"/puzzle?doc={j['id']}")).props(
-                    'flat dense no-caps size=sm color=green').classes('rd-join-open')
-            src = html_module.escape(join.get('image_url', ''), quote=True)
-            waiting = '' if join['kind'] == 'published' else html_module.escape(tr('Assembling the picture…'))
-            with ui.element('div').classes('rd-image-box').style(
-                    'background: #1a1a1a; border-radius: 6px; overflow: hidden; display: flex; align-items: center; '
-                    'justify-content: center; min-height: calc(70vh - 96px); position: relative; width: 100%;'):
-                ui.html(
-                    f'<span id="{VIEWER_ID}-note" style="color: #e5e7eb; font-size: 0.85rem; position: absolute;">{waiting}</span>'
-                    f'<img id="{VIEWER_ID}" class="rd-zoomable" {"src=" + chr(34) + src + chr(34) if src else ""} '
-                    f'style="max-height: calc(70vh - 96px); max-width: 100%; object-fit: contain; cursor: grab; '
-                    f'transition: none;{"" if src else " display: none;"}" draggable="false" />', sanitize=False)
-            # Every join is drawn under the one viewer id: forget the view kept for the
-            # last one, or this picture's first zoom or drag jumps to where that one was left.
-            ui.run_javascript(f"window.rdResetView && window.rdResetView('{VIEWER_ID}');")
-            if join['kind'] == 'own':
-                ui.run_javascript(own_picture_js(
-                    join, tr('The picture could not be assembled.'),
-                    tr('This join has too many fragments to show here. Open it in the Puzzle.')))
+                ui.button(tr('New Puzzle'), icon='add', on_click=on_arrange).props(
+                    'flat dense no-caps size=sm color=green').classes('rd-join-new').tooltip(
+                    tr('Arrange the fragments on the desk in another puzzle: another page, or the other side'))
+            if not shown:
+                ui.label(tr('Choose the puzzles to show.')).classes('rd-join-none-shown text-sm').style(
+                    'color: var(--text-secondary); padding: 24px 8px; text-align: center; width: 100%;')
+                return
+            viewer_ids = [f'{VIEWER_ID}-{joins.index(j)}' for j in shown]
+            if len(shown) == 1:
+                draw_puzzle(shown[0], viewer_ids[0], 'calc(70vh - 96px)')
             else:
-                ui.run_javascript(
-                    f"setTimeout(function(){{ window.rdInitDrag && window.rdInitDrag('{VIEWER_ID}'); }}, 200);")
+                # One under another, as all the images are: each its own picture and controls.
+                with ui.scroll_area().classes('rd-join-stack w-full').style('flex: 1; height: calc(70vh - 40px);'):
+                    for join, viewer_id in zip(shown, viewer_ids):
+                        draw_puzzle(join, viewer_id, '360px')
+            for join, viewer_id in zip(shown, viewer_ids):
+                show_puzzle(join, viewer_id)
 
     async def load() -> None:
         try:

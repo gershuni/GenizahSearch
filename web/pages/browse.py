@@ -98,7 +98,9 @@ from web.pages.browse_desk_document import (
     is_other_desk, render_document_text_panel,
 )
 from web.pages.browse_desk_images import (
-    IMAGES_CSS as _RD_IMAGES_CSS, page_label as desk_page_label, render_image_pane, shown_text_image,
+    IMAGES_CSS as _RD_IMAGES_CSS, KEY_IMAGE_SHOWN as DESK_KEY_IMAGE_SHOWN, move_buttons as desk_move_buttons,
+    move_entry as desk_move_entry,
+    page_label as desk_page_label, render_image_pane, shown_text_image,
 )
 from web.pages.browse_enrichment import (
     BrowsePageRefs,
@@ -3661,6 +3663,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     _persist_reading_desk_state()
                     update_content()
 
+                def move_on_desk(sys_id_to_move, delta):
+                    """Move a fragment up (-1) or down (+1) on the desk: its images, its text and
+                    the Puzzle's order follow, and the order is kept with the desk."""
+                    moved = desk_move_entry(state.reading_desk_entries, sys_id_to_move, delta)
+                    if moved is None:
+                        return
+                    # The image on show, one at a time, stays on show: kept by its key, since the
+                    # one shown when none was chosen is found by position (Codex CLI, #83).
+                    shown = shown_text_image(
+                        state.reading_desk_entries, state.reading_desk_selected_sources,
+                        document_text=rd_view is not None, current_shelfmark=page.shelfmark or '',
+                        can_arrange=WEB_PUZZLE_ENABLED, library_for=rd_library_for)
+                    if shown:
+                        state.reading_desk_selected_sources[DESK_KEY_IMAGE_SHOWN] = shown['key']
+                    state.reading_desk_entries = moved
+                    _persist_reading_desk_state()
+                    update_content()
+
                 async def toolbar_add_by_shelfmark(shelfmark_text, on_added=None):
                     """Add a manuscript to the reading desk by shelfmark search.
 
@@ -3978,6 +3998,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_image_change=lambda: rd_text['draw'](),
                             on_arrange=open_desk_in_puzzle if WEB_PUZZLE_ENABLED else None,
                             on_choice=_persist_reading_desk_state,
+                            on_move=move_on_desk,
                         )
 
                     # === RIGHT PANE: Text Stack ===
@@ -4037,6 +4058,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 if is_current_frag:
                                                     ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
                                                 ui.element('div').classes('flex-grow')
+                                                desk_move_buttons(frag_sid, frag_idx, len(state.reading_desk_entries),
+                                                                  move_on_desk)
 
                                                 def make_remove_text(sid=frag_sid):
                                                     return lambda: remove_from_desk(sid)
