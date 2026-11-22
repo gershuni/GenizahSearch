@@ -143,7 +143,8 @@ class TestInitialOxfordCreditIsComplete:
         src = _read("web/pages/browse.py")
         i = src.index("credit_text = (")
         window = src[i:i + 400]
-        assert "_is_nli_active and page.is_oxford" in window
+        # #61 widened the Oxford test ("page.is_oxford or ..."): NLI still comes first
+        assert "_is_nli_active and (page.is_oxford" in window
         assert window.index("_credit_nli_text") < window.index("_credit_ox_text")
 
 

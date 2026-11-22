@@ -28491,8 +28491,8 @@ class GenizahGUI(QMainWindow):
 
         # 3. Populate Browse panel state.
         self.current_browse_sid = sys_id
-        self.btn_b_external_link.hide()
         self._sync_browse_cite_button()  # Cite + website buttons follow the document
+        self.btn_b_external_link.hide()
         self.current_browse_p = None
         self.current_browse_internal_idx = None
         self.current_browse_volume_ie = None

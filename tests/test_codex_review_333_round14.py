@@ -51,7 +51,7 @@ class TestNliCreditIsRereadAfterEnrichment:
         body = _sync_body()
         url_reread = body.index("result['external_url'] = cached_url")
         attr_reread = body.index("result['attribution_nli'] = _cached_attr")
-        assert 0 < attr_reread - url_reread < 1200
+        assert 0 < attr_reread - url_reread < 2000      # #61 added the Katz / Bodleian re-reads between
 
     def test_the_page_still_receives_the_field(self):
         src = _read(SRC)
