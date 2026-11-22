@@ -34858,7 +34858,7 @@ class GenizahGUI(QMainWindow):
         ``pick_from_shelf_or_several``."""
         return dict(switch_label=tr("Open more than one"), purpose='reading_desk',
                     on_confirm=self._browse_open_several_from_shelf, store=getattr(self, '_shelf_selections', None),
-                    confirm_label=tr("Open them in the Reading Desk"), lists_mgr=getattr(self, 'lists_mgr', None),
+                    confirm_label=tr("Open"), lists_mgr=getattr(self, 'lists_mgr', None),
                     on_list_saved=self._lists_after_shelf_save, limit=self._shelf_choice_limit(),
                     act_label=tr("Open"), actions=self._shelf_open_actions())
 

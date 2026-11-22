@@ -289,7 +289,8 @@ def test_browse_opens_the_picker_with_the_switch_and_the_desk_s_kept_choice(app,
     assert seen["switch_label"] == "Open more than one" and seen["purpose"] == "reading_desk"
     assert seen["store"] is host._shelf_selections                          # the desk button's choice
     assert seen["on_confirm"] == host._browse_open_several_from_shelf       # the call site
-    assert seen["confirm_label"] == "Open them in the Reading Desk" and seen["start"] == "vol:100"
+    # owner, 2026-11-22: the confirm says "Open" ("פתח"), not "Open them in the Reading Desk"
+    assert seen["confirm_label"] == "Open" and seen["start"] == "vol:100"
 
 
 def test_with_a_desk_open_the_choice_is_added_to_it(app, svc):

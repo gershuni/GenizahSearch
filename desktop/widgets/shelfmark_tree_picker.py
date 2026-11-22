@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import copy
 import html
+from collections import OrderedDict
 import logging
 import unicodedata
 from typing import Callable, Optional
@@ -49,12 +50,13 @@ from typing import Callable, Optional
 from PyQt6.QtCore import QEvent, QObject, QRect, QSize, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import (
     QColor, QFont, QFontMetrics, QImage, QPalette, QPixmap, QTextBlockFormat, QTextCharFormat, QTextCursor,
+    QTextLayout,
 )
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem, QPushButton,
-    QScrollArea, QSizePolicy, QStyle, QStyledItemDelegate, QStyleOption, QStyleOptionViewItem,
-    QTableWidget, QTableWidgetItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
+    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOption,
+    QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 import genizah_core
@@ -62,6 +64,10 @@ from desktop.widgets.flow_layout import FlowLayout
 from genizah_core import tr
 from shared.shelfmark_tree_columns import NODE_ROWS, WIDE_COLUMNS, leaf_tooltip, load_view, passed_through, settle
 from shared.shelfmark_tree_details import add_joins, field_lines, item_details, thumbnail_url
+from shared.shelfmark_tree_rows import (
+    COLUMNS, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, folds_columns, normal_size, normal_view,
+    read_choice, row_details, shown_columns, wanted,
+)
 from shared.shelfmark_tree_selection import (
     ALL, CHOOSABLE_KINDS, DIRECT, NODE, Chip, Selection, members_function, scope_for,
 )
@@ -104,6 +110,107 @@ SIGN_MARKS = {'pgp': ('PGP', '#27ae60'), 'edition': ('\U0001F4C4', None), 'join'
 SIGN_GAP = 4
 #: How a join's sources are named in the pane.
 _JOIN_SOURCE_NAMES = {'pgp': 'PGP', 'fjms': 'FJMS', 'community': 'Community'}
+#: A thumbnail tile's picture (a QPixmap made on the UI thread), or False: the manuscript has none.
+_THUMB_ROLE = Qt.ItemDataRole.UserRole + 2
+#: A thumbnail tile's title (the catalogue's), whose start is drawn under the shelfmark.
+_TITLE_ROLE = Qt.ItemDataRole.UserRole + 3
+#: The lines of the title a tile shows.
+TILE_TITLE_LINES = 2
+
+
+def tile_title_lines(text: str, font: QFont, width: int, lines: int = TILE_TITLE_LINES) -> list:
+    """The start of a title as a tile shows it: broken into at most ``lines`` lines of ``width`` pixels,
+    the last cut with an ellipsis when more of the title is left."""
+    text = ' '.join((text or '').split())
+    if not text or width <= 0:
+        return []
+    layout = QTextLayout(text, font)
+    layout.beginLayout()
+    spans = []
+    while len(spans) < lines:
+        line = layout.createLine()
+        if not line.isValid():
+            break
+        line.setLineWidth(width)
+        spans.append((line.textStart(), line.textLength()))
+    layout.endLayout()
+    out = [text[start:start + length].strip() for start, length in spans]
+    if spans and spans[-1][0] + spans[-1][1] < len(text):
+        out[-1] = QFontMetrics(font).elidedText(text[spans[-1][0]:], Qt.TextElideMode.ElideRight, width)
+    return [line for line in out if line]
+
+
+def _title_font(font: QFont) -> QFont:
+    small = QFont(font)
+    if font.pointSizeF() > 0:
+        small.setPointSizeF(font.pointSizeF() * 0.9)
+    return small
+#: The table's badges, as the search results table colours them (``genizah_app.py``'s results fill).
+TABLE_MARKS = {'pgp': ('PGP', '#27ae60'), 'printed': (None, '#dc2626'), 'edition': ('✓', '#b45309'),
+               'domain': (None, '#8e44ad')}
+#: Thumbnails fetched at once (each may ask NLI for the manuscript's image ids, then its image).
+THUMBS_AT_ONCE = 3
+#: How long the gallery waits for the scrolling to pause before it asks for the tiles in sight (ms).
+THUMBS_DELAY_MS = 120
+#: How the table's columns first take their widths: the title and the snippet share what is left, the
+#: domain has a width of its own, the others are as wide as what they hold, so every column shows in the
+#: pane without scrolling sideways. The reader may then resize any of them (owner, 2026-11-22): the widths
+#: they set are kept for the rest of the run (``_table_widths``), across nodes, views and pickers.
+TABLE_STRETCH = ('title', 'snippet')
+TABLE_WIDTHS = {'domain': 120}
+#: The share of the room left that the title takes first (the snippet the rest), and their least widths.
+TABLE_TITLE_SHARE = 0.4
+TABLE_MIN_WIDTH = 120
+#: In a narrow pane: the least width of any column (the others shrink in proportion to fit).
+TABLE_FLOOR = 40
+_table_widths: dict = {}
+
+#: The thumbnails fetched in this run of the app (QImage, by sys_id), shared by the details pane and the
+#: gallery of every picker: a manuscript's first image is fetched once (owner, 2026-11-22: clicking the
+#: same shelfmark again fetched it again). The oldest leave first. Read and written on the UI thread.
+THUMB_CACHE_SIZE = 500
+_thumb_cache: "OrderedDict[str, QImage]" = OrderedDict()
+
+
+def cached_thumbnail(sys_id: str) -> Optional[QImage]:
+    image = _thumb_cache.get(sys_id) if sys_id else None
+    if image is not None:
+        _thumb_cache.move_to_end(sys_id)
+    return image
+
+
+def keep_thumbnail(sys_id: str, image) -> None:
+    if not sys_id or not isinstance(image, QImage) or image.isNull():
+        return
+    _thumb_cache[sys_id] = image
+    _thumb_cache.move_to_end(sys_id)
+    while len(_thumb_cache) > THUMB_CACHE_SIZE:
+        _thumb_cache.popitem(last=False)
+
+
+def card_sizes() -> dict:
+    """Each thumbnail size's picture, ``(width, height)``: the Join Workbench's cards'
+    (``desktop/join_workbench.py::CARD_SIZES``), read when first needed (a large module)."""
+    try:
+        from desktop.join_workbench import CARD_SIZES
+        return {key: (CARD_SIZES[key][1], CARD_SIZES[key][2]) for key in SIZES}
+    except Exception:  # noqa: BLE001 -- its numbers as they were written
+        return {'s': (188, 100), 'm': (220, 130), 'l': (300, 240)}
+
+
+def load_view_choice() -> tuple:
+    """The reader's view and thumbnail size (the app's settings), the list and medium when none is kept."""
+    try:
+        return read_choice((genizah_core.load_app_config() or {}).get(STORAGE_KEY))
+    except Exception:  # noqa: BLE001 -- the default
+        return read_choice(None)
+
+
+def save_view_choice(view: str, size: str) -> None:
+    try:
+        genizah_core.save_app_config({STORAGE_KEY: choice_value(view, size)})
+    except Exception:  # noqa: BLE001 -- kept for this session only
+        logger.warning("Shelf picker: the view could not be saved", exc_info=True)
 
 
 class _Staged:
@@ -518,6 +625,82 @@ class _Loads(QObject):
             job.finished.connect(job.deleteLater)
 
 
+class _ThumbPool(QObject):
+    """Every thumbnail load of a picker, the gallery's and the details pane's: at most
+    ``THUMBS_AT_ONCE`` at a time, each ``_thumbnail_image`` on a ``_Job`` (a child of the application),
+    one image never fetched twice at once. ``want(sys_ids)`` replaces what the gallery waits for with the
+    tiles in sight now (one scrolled away before its turn is not fetched); ``fetch(sys_id)`` is the
+    pane's: first in line, kept by ``want`` (the pane's newest replaces an older one not started);
+    ``on_image(sys_id, QImage or None)`` gets each answer on the UI thread. ``stop()`` (the dialog
+    closing): nothing more is started or delivered, the running loads are asked to stop and none is
+    waited for (a network call)."""
+
+    def __init__(self, on_image: Callable[[str, object], None], parent=None,
+                 skip: Optional[Callable[[str], bool]] = None):
+        super().__init__(parent)
+        self._on_image = on_image
+        self._skip = skip                          # an image known already: not fetched
+        self._queue: list = []
+        self._first: Optional[str] = None          # the pane's request, ahead of the gallery's
+        self._running: dict = {}                   # job -> sys_id
+        self._gen = 0
+        self._stopped = False
+
+    def want(self, sys_ids) -> None:
+        if self._stopped:
+            return
+        running = set(self._running.values())
+        self._queue = [s for s in dict.fromkeys(sys_ids) if s not in running]
+        self._pump()
+
+    def fetch(self, sys_id: str) -> None:
+        """The details pane's picture: next to start (unless it is under way already)."""
+        if self._stopped or not sys_id or sys_id in self.running():
+            return
+        self._first = sys_id
+        self._pump()
+
+    def running(self) -> set:
+        return set(self._running.values())
+
+    def _pump(self) -> None:
+        while not self._stopped and len(self._running) < THUMBS_AT_ONCE and (self._first or self._queue):
+            if self._first:
+                sid, self._first = self._first, None
+                if sid in self._queue:
+                    self._queue.remove(sid)
+            else:
+                sid = self._queue.pop(0)
+            if sid in self.running() or (self._skip is not None and self._skip(sid)):
+                continue
+            meta = catalogue
+            job = _Job(self._gen, lambda s=sid, m=meta: (s, _thumbnail_image(s, m)), QApplication.instance())
+            job.done.connect(self._done)
+            job.finished.connect(self._finished)
+            job.finished.connect(job.deleteLater)
+            self._running[job] = sid
+            job.start()
+
+    @pyqtSlot(int, object)
+    def _done(self, gen: int, out) -> None:
+        if self._stopped or gen != self._gen or not isinstance(out, tuple):
+            return
+        self._on_image(*out)
+
+    @pyqtSlot()
+    def _finished(self) -> None:
+        job = self.sender()
+        self._running.pop(job, None)
+        self._pump()
+
+    def stop(self) -> None:
+        self._stopped = True
+        self._gen += 1
+        self._queue, self._first = [], None
+        for job in list(self._running):
+            job.requestInterruption()
+
+
 # -- the lists --------------------------------------------------------------------------------
 
 class _LinkButton(QPushButton):
@@ -639,6 +822,86 @@ class _RowDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
         return QSize(size.width(), size.height() + self.PAD)
+
+
+class _TileDelegate(QStyledItemDelegate):
+    """A thumbnail's tile: the picture (``_THUMB_ROLE``; a grey place while it comes, a dash when the
+    manuscript has none), the shelfmark under it with its signs, the tick box over the picture's
+    start corner in the multiple choice, a frame in the highlight's colour when it is the one chosen."""
+
+    def __init__(self, panel: "_LeafPanel"):
+        super().__init__(panel.gallery)
+        self.panel = panel
+
+    def sizeHint(self, option, index):
+        return self.panel.tile_size()
+
+    def paint(self, painter, option, index):
+        painter.save()
+        rect = option.rect.adjusted(3, 3, -3, -3)
+        palette = option.palette
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        ticked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+        if ticked:
+            painter.fillRect(rect, palette.color(QPalette.ColorRole.AlternateBase))
+        pen = painter.pen()
+        pen.setColor(palette.color(QPalette.ColorRole.Highlight) if selected or ticked
+                     else palette.color(QPalette.ColorRole.Mid))
+        pen.setWidth(3 if selected else 1)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 6, 6)
+        width, height = self.panel.picture_size()
+        pic = QRect(rect.left() + (rect.width() - width) // 2, rect.top() + 5, width, height)
+        picture = index.data(_THUMB_ROLE)
+        if isinstance(picture, QPixmap) and not picture.isNull():
+            x = pic.left() + (pic.width() - picture.width()) // 2
+            y = pic.top() + (pic.height() - picture.height()) // 2
+            painter.drawPixmap(x, y, picture)
+        else:
+            painter.fillRect(pic, palette.color(QPalette.ColorRole.Button))
+            if picture is False:                   # none to show: a dash, not an endless grey
+                painter.setPen(palette.color(QPalette.ColorRole.PlaceholderText))
+                painter.drawText(pic, int(Qt.AlignmentFlag.AlignCenter), '—')
+        check = index.data(Qt.ItemDataRole.CheckStateRole)
+        if check is not None:
+            box = QStyleOptionViewItem(option)
+            box.palette = box_palette(palette)
+            size = option.widget.style().pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth) if option.widget else 16
+            rtl = option.direction == Qt.LayoutDirection.RightToLeft
+            box.rect = QRect(pic.right() - size - 4 if rtl else pic.left() + 4, pic.top() + 4, size, size)
+            box.state = (box.state & ~QStyle.StateFlag.State_Selected) | (
+                QStyle.StateFlag.State_On if check == Qt.CheckState.Checked else QStyle.StateFlag.State_Off)
+            painter.fillRect(box.rect.adjusted(-2, -2, 2, 2), palette.color(QPalette.ColorRole.Base))
+            style = option.widget.style() if option.widget else QApplication.style()
+            style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck, box, painter, option.widget)
+        line = QFontMetrics(option.font).height()
+        caption = QRect(rect.left() + 6, pic.bottom() + 4, rect.width() - 12, line + 4)
+        marks = tuple(index.data(_SIGNS_ROLE) or ())
+        room = signs_room(option.font, marks) if marks else 0
+        text_rect = (caption.adjusted(room, 0, 0, 0) if option.direction == Qt.LayoutDirection.RightToLeft
+                     else caption.adjusted(0, 0, -room, 0))
+        painter.setPen(palette.color(QPalette.ColorRole.Text))
+        text = QFontMetrics(option.font).elidedText(index.data(Qt.ItemDataRole.DisplayRole) or '',
+                                                    Qt.TextElideMode.ElideRight, text_rect.width())
+        painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeading), text)
+        if marks:
+            sign = QStyleOptionViewItem(option)
+            sign.rect = caption
+            _draw_signs(painter, sign, marks)
+        # the start of the title, readable at a glance (owner, 2026-11-22), lined up as it reads
+        title = index.data(_TITLE_ROLE) or ''
+        if title:
+            font = _title_font(option.font)
+            painter.setFont(font)
+            painter.setPen(palette.color(QPalette.ColorRole.PlaceholderText))
+            side = (Qt.AlignmentFlag.AlignRight if _direction_of(title) == Qt.LayoutDirection.RightToLeft
+                    else Qt.AlignmentFlag.AlignLeft)
+            step = QFontMetrics(font).height()
+            top = caption.bottom() + 2
+            for n, text in enumerate(tile_title_lines(title, font, caption.width())):
+                painter.drawText(QRect(caption.left(), top + n * step, caption.width(), step),
+                                 int(Qt.AlignmentFlag.AlignAbsolute | side | Qt.AlignmentFlag.AlignVCenter), text)
+        painter.restore()
 
 
 class _NodeColumn(QWidget):
@@ -896,26 +1159,71 @@ class _NodeColumn(QWidget):
 
 
 class _LeafPanel(QWidget):
-    """The shelfmarks of the node chosen last: a title, a filter, the grid and "Show more". In the
-    multiple-choice mode each shelfmark has a box, and "Select all in <node>" sits above the grid."""
+    """The shelfmarks of the node chosen last: a title with the view switch (VX1: List, Table,
+    Thumbnails, and the thumbnails' size), a filter, the shelfmarks in the view chosen and "Show more".
+    In the multiple-choice mode each shelfmark has a box, and "Select all in <node>" sits above them.
+
+    The views are a stack: the list (a wrapping grid, as before), the table (the search results table's
+    columns, ``shared.shelfmark_tree_rows.COLUMNS``, its details from ``row_details`` through the
+    dialog's ``_request_rows``) and the thumbnails (tiles, ``_TileDelegate``, each picture fetched once
+    in sight by the dialog's ``_ThumbPool``). Only the view shown is filled; every item holds its leaf
+    (``_ROW``), so a click anywhere on it is that shelfmark's, and the dialog asks this panel for the
+    leaf at a point, the current one, the marking, the boxes, the focus and the scroll of whichever
+    view is shown."""
+
+    VIEW_INDEX = {'list': 0, 'table': 1, 'gallery': 2}
 
     def __init__(self, dialog: "ShelfPickerDialog"):
         super().__init__(dialog)
         self.dialog = dialog
         self.key: Optional[str] = None
         self.leaves: Optional[dict] = None
-        self.chosen: Optional[QListWidgetItem] = None
-        self.items_by_sid: dict = {}               # sys_id -> grid items (multiple choice)
+        self.chosen = None                         # the list's / tiles' item, or the table's row, chosen
+        self.items_by_sid: dict = {}               # sys_id -> boxes (list items, tiles, the table's box cells)
+        self.table_rows: dict = {}                 # sys_id -> the table's rows
+        self.tiles: dict = {}                      # sys_id -> tiles
+        self.view, self.size = load_view_choice()
+        self._anchor: Optional[str] = None         # a view switch: the shelfmark to bring to the top
+        # the place a view was entered with, kept until the reader scrolls it (``_moved``)
+        self._entered: Optional[str] = None
+        self._moved = False
         self._need = LEAF_MIN_WIDTH
         self._row_height = self.fontMetrics().height() + 12
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
+        # the title on its line, the switch on the next (beside the title it wrapped it in a narrow pane)
+        head = QHBoxLayout()
+        head.setSpacing(4)
         self.title = QLabel()
         self.title.setWordWrap(True)
         bold = self.title.font()
         bold.setBold(True)
         self.title.setFont(bold)
+        self.view_buttons: dict = {}
+        self._view_group = QButtonGroup(self)
+        self._view_group.setExclusive(True)
+        for key, label, tip in (('list', 'List', 'Show as a list'), ('table', 'Table', 'Show as a table'),
+                                ('gallery', 'Thumbnails', 'Show as thumbnails')):
+            button = QToolButton(self)
+            button.setText(tr(label))
+            button.setToolTip(tr(tip))
+            button.setAccessibleName(tr(tip))
+            button.setCheckable(True)
+            button.setAutoRaise(True)
+            button.setObjectName(f"shelfView_{key}")
+            button.clicked.connect(lambda _checked=False, k=key: self.set_view(k))
+            self._view_group.addButton(button)
+            self.view_buttons[key] = button
+            head.addWidget(button)
+        self.size_box = QComboBox(self)
+        for key in SIZES:
+            self.size_box.addItem(tr(SIZE_LABELS[key]), key)
+        self.size_box.setToolTip(tr('Thumbnail size'))
+        self.size_box.setAccessibleName(tr('Thumbnail size'))
+        self.size_box.activated.connect(lambda i: self.set_size(self.size_box.itemData(i)))
+        head.addWidget(self.size_box)
+        head.addStretch(1)
         self.filter = _FilterBox(dialog._filter_typed, dialog._filter_load, self)
         # "Select all in <node>": the whole node, whatever the filter shows (its count is the node's)
         self.whole = QCheckBox(self)
@@ -932,23 +1240,187 @@ class _LeafPanel(QWidget):
         self.grid.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.grid.setItemDelegate(_RowDelegate(self.grid))
-        self.grid.itemClicked.connect(lambda item: dialog._clicked_leaf(item))
-        self.grid.installEventFilter(dialog)
-        self.grid.viewport().installEventFilter(dialog)
-        self.grid.viewport().installEventFilter(self)
+        self.table = QTableWidget(0, 0, self)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
+        self.table.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.table.setItemDelegate(_RowDelegate(self.table))
+        # every column the reader may resize (owner, 2026-11-22), the widths kept for the run
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.horizontalHeader().sectionResized.connect(self._column_resized)
+        self._sizing = False                       # the widths being set here, not by the reader
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(0)
+        self._fit_timer.timeout.connect(self.fit_table)
+        self.gallery = QListWidget(self)
+        self.gallery.setViewMode(QListView.ViewMode.IconMode)
+        self.gallery.setMovement(QListView.Movement.Static)
+        self.gallery.setResizeMode(QListView.ResizeMode.Adjust)
+        self.gallery.setWrapping(True)
+        self.gallery.setUniformItemSizes(True)
+        self.gallery.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.gallery.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.gallery.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.gallery.setItemDelegate(_TileDelegate(self))
+        self.stack = QStackedWidget(self)
+        for widget in (self.grid, self.table, self.gallery):
+            self.stack.addWidget(widget)
+            widget.itemClicked.connect(lambda item: dialog._clicked_leaf(item))
+            widget.installEventFilter(dialog)
+            widget.viewport().installEventFilter(dialog)
+            widget.viewport().installEventFilter(self)
+        # the tiles in sight are asked for once the scrolling pauses
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setSingleShot(True)
+        self._thumb_timer.setInterval(THUMBS_DELAY_MS)
+        self._thumb_timer.timeout.connect(self.queue_visible)
+        self.gallery.verticalScrollBar().valueChanged.connect(lambda _v: self._thumb_timer.start())
+        for widget in (self.grid, self.table, self.gallery):     # the reader's own scrolling (not ours)
+            widget.verticalScrollBar().actionTriggered.connect(lambda _a: setattr(self, '_moved', True))
         self.more = QPushButton()
         self.more.setAutoDefault(False)
         self.more.clicked.connect(lambda: dialog._show_more(self.key, PAGE_SIZE))
         layout.addWidget(self.title)
+        layout.addLayout(head)
         layout.addWidget(self.filter)
         layout.addWidget(self.whole)
-        layout.addWidget(self.grid, 1)
+        layout.addWidget(self.stack, 1)
         layout.addWidget(self.more)
+        self._show_view_parts()
+
+    # -- the view ---------------------------------------------------------------------------
+
+    def _show_view_parts(self) -> None:
+        for key, button in self.view_buttons.items():
+            button.setChecked(key == self.view)
+        self.size_box.setCurrentIndex(SIZES.index(self.size))
+        self.size_box.setVisible(self.view == 'gallery')
+        self.stack.setCurrentIndex(self.VIEW_INDEX[self.view])
+
+    def set_view(self, view: str) -> None:
+        """The switch (VX1): kept in the app's settings; the dialog is drawn again, as the columns it
+        shows change (VX2)."""
+        view = normal_view(view)
+        if view == self.view:
+            self._show_view_parts()
+            return
+        # the reader's place in the view being left: the one it was entered with while the reader has not
+        # scrolled it (a table showing all its rows has its first at the top), else what is at its top
+        if self._entered is not None and not self._moved:
+            place = self._entered
+        else:
+            place = getattr(self.top_leaf(), 'id', None)
+        self.view = view
+        save_view_choice(self.view, self.size)
+        # its pixel offset means nothing in another view: the next drawing brings that shelfmark to the top
+        self.dialog._scroll.pop(self.key, None)
+        self._anchor = self._entered = place
+        self._moved = False
+        if view != 'gallery':
+            # the thumbnails still waiting are not fetched (none is in sight now); those under way end
+            self.dialog._thumb_pool.want([])
+        self._show_view_parts()
+        self.dialog._view_changed()
+
+    def set_size(self, size: str) -> None:
+        size = normal_size(size)
+        if size == self.size:
+            return
+        self.size = size
+        save_view_choice(self.view, self.size)
+        if self.leaves is not None and self.view == 'gallery':
+            top = self.top_tile()                        # the reader's place, kept across the new sizes
+            self.fill(self.leaves)
+            if self.dialog._chosen_leaf is not None:     # the tile chosen stays chosen (and current)
+                self.mark(self.dialog._chosen_leaf)
+            self.gallery.doItemsLayout()
+            item = self.tiles.get(top, [None])[0] if top else None
+            if item is not None:
+                self.gallery.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtTop)
+            else:
+                self.gallery.scrollToTop()
+            self._thumb_timer.start()
+
+    def top_leaf(self):
+        """The shelfmark at the top of the view shown (its first row or tile in sight), or None."""
+        view = self.active()
+        if isinstance(view, QTableWidget):
+            row = view.rowAt(0)
+            item = view.item(row, 0) if row >= 0 else None
+            return item.data(_ROW) if item is not None else None
+        sight = view.viewport().rect()
+        for i in range(view.count()):
+            item = view.item(i)
+            if view.visualItemRect(item).intersects(sight):
+                return item.data(_ROW)
+        return None
+
+    def _bring_to_top(self, leaf_id: str) -> bool:
+        view = self.active()
+        if isinstance(view, QTableWidget):
+            for r in range(view.rowCount()):
+                item = view.item(r, 0)
+                if item is not None and getattr(item.data(_ROW), 'id', None) == leaf_id:
+                    view.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtTop)
+                    return True
+            return False
+        view.doItemsLayout()
+        for i in range(view.count()):
+            item = view.item(i)
+            if getattr(item.data(_ROW), 'id', None) == leaf_id:
+                view.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtTop)
+                return True
+        return False
+
+    def top_tile(self) -> Optional[str]:
+        """The sys_id of the first tile in sight (at the gallery's top), or None."""
+        sight = self.gallery.viewport().rect()
+        for i in range(self.gallery.count()):
+            item = self.gallery.item(i)
+            if self.gallery.visualItemRect(item).intersects(sight):
+                leaf = item.data(_ROW)
+                return leaf.sys_id if leaf is not None else None
+        return None
+
+    def active(self) -> QAbstractItemView:
+        return (self.grid, self.table, self.gallery)[self.VIEW_INDEX[self.view]]
+
+    def views(self) -> tuple:
+        return (self.grid, self.table, self.gallery)
+
+    def viewports(self) -> tuple:
+        return tuple(view.viewport() for view in self.views())
+
+    def leaf_at(self, viewport, point):
+        """The shelfmark under ``point`` in ``viewport`` (any cell of the table), or None."""
+        for view in self.views():
+            if view.viewport() is viewport:
+                item = view.itemAt(point)
+                return item.data(_ROW) if item is not None else None
+        return None
+
+    def current_leaf(self):
+        item = self.active().currentItem()
+        return item.data(_ROW) if item is not None else None
 
     def eventFilter(self, obj, event):
-        if obj is self.grid.viewport() and event.type() == QEvent.Type.Resize:
-            self.fit()
+        if event.type() == QEvent.Type.Resize:
+            if obj is self.grid.viewport():
+                self.fit()
+            elif obj is self.gallery.viewport():
+                self._thumb_timer.start()
+            elif obj is self.table.viewport() and not _table_widths:
+                self._fit_timer.start()             # fitted to the pane until the reader sizes a column
         return False
+
+    # -- painting ---------------------------------------------------------------------------
 
     def paint(self, state: dict) -> None:
         """The boxes and "Select all", as ``state`` (``paint_state``) has them."""
@@ -971,7 +1443,7 @@ class _LeafPanel(QWidget):
             self.whole.setToolTip(tr("Too many to choose here (up to {n})").format(n=f"{limit_n:,}") if off else '')
 
     def scroll_value(self) -> int:
-        return self.grid.verticalScrollBar().value()
+        return self.active().verticalScrollBar().value()
 
     def title_text(self, leaves: dict) -> str:
         return f"{tr('Shelfmarks')} ({leaves['total']:,}) — {own_direction(leaves['title'], self.isRightToLeft())}"
@@ -984,19 +1456,52 @@ class _LeafPanel(QWidget):
         self.fill(leaves)
 
     def fill(self, leaves: dict) -> None:
+        """The shelfmarks in the view shown (the others emptied); then the table's details and the tiles'
+        pictures are asked for, off the UI thread."""
         self.leaves = leaves
+        # the tiles are replaced: what waited for the old ones is not fetched (the new ones in sight are
+        # asked for once drawn); those under way end
+        self.dialog._thumb_pool.want([])
         self.title.setText(self.title_text(leaves))
-        rtl = self.isRightToLeft()
-        highlight = self.dialog._highlight
+        self.chosen = None
+        self.items_by_sid, self.table_rows, self.tiles = {}, {}, {}
         multi = self.dialog.multi
         known = self.dialog._paint_state if multi else None    # the last answer, until the next one
+        for view in self.views():
+            if view is not self.active():
+                if isinstance(view, QTableWidget):
+                    view.setRowCount(0)
+                else:
+                    view.clear()
+        if self.view == 'table':
+            self._fill_table(leaves, multi, known)
+        elif self.view == 'gallery':
+            self._fill_gallery(leaves, multi, known)
+        else:
+            self._fill_list(leaves, multi, known)
+        if multi and (known is None or (known.get('whole') or {}).get('id') != leaves['node']):
+            self.whole.setVisible(False)          # until the answer for this node says what it holds
+        more = leaves.get('more') or 0
+        self.more.setText(f"{tr('Show more')} ({more:,})")
+        self.more.setVisible(bool(more))
+        if self.view == 'table':
+            self.dialog._request_rows()
+        elif self.view == 'gallery':
+            self._thumb_timer.start()
+
+    def _box(self, item, sid: str, known: Optional[dict]) -> None:
+        item.setFlags(_BOX_FLAGS)
+        item.setCheckState(_CHECK['all' if known is not None and sid in known['chosen'] else 'none'])
+        self.items_by_sid.setdefault(sid, []).append(item)
+
+    def _fill_list(self, leaves: dict, multi: bool, known: Optional[dict]) -> None:
+        rtl = self.isRightToLeft()
+        highlight = self.dialog._highlight
         grid = self.grid
         grid.setUpdatesEnabled(False)
         grid.clear()
         bold = QFont(grid.font())
         bold.setBold(True)
-        self.chosen = None
-        self.items_by_sid = {}
         labels = []
         for row in leaves['rows']:
             leaf = row['leaf']
@@ -1007,16 +1512,12 @@ class _LeafPanel(QWidget):
             if marks:
                 item.setData(_SIGNS_ROLE, marks)
             if multi:
-                item.setFlags(_BOX_FLAGS)
-                item.setCheckState(_CHECK['all' if known is not None and leaf.sys_id in known['chosen'] else 'none'])
-                self.items_by_sid.setdefault(leaf.sys_id, []).append(item)
+                self._box(item, leaf.sys_id, known)
             if leaf.id == highlight:
                 item.setFont(bold)
                 self.chosen = item
             grid.addItem(item)
             labels.append(row['label'])
-        if multi and (known is None or (known.get('whole') or {}).get('id') != leaves['node']):
-            self.whole.setVisible(False)          # until the answer for this node says what it holds
         # As many columns as show the longest shelfmark whole (the web's _FIT_GRID_JS).
         bold_metrics = QFontMetrics(bold)
         widest = max((bold_metrics.horizontalAdvance(text) for text in labels), default=0)
@@ -1035,26 +1536,272 @@ class _LeafPanel(QWidget):
         if self.chosen is not None:
             grid.setCurrentItem(self.chosen)
         grid.setUpdatesEnabled(True)
-        more = leaves.get('more') or 0
-        self.more.setText(f"{tr('Show more')} ({more:,})")
-        self.more.setVisible(bool(more))
+
+    def table_columns(self) -> dict:
+        """Each table column's index: a box column first in the multiple choice."""
+        start = 1 if self.dialog.multi else 0
+        return {key: i + start for i, (key, _label) in enumerate(COLUMNS)}
+
+    def _fill_table(self, leaves: dict, multi: bool, known: Optional[dict]) -> None:
+        rtl = self.isRightToLeft()
+        highlight = self.dialog._highlight
+        table = self.table
+        cols = self.table_columns()
+        table.setUpdatesEnabled(False)
+        table.clearContents()
+        table.setColumnCount(len(cols) + (1 if multi else 0))
+        heads = ([''] if multi else []) + [tr(label) for _key, label in COLUMNS]
+        table.setHorizontalHeaderLabels(heads)
+        header = table.horizontalHeader()
+        for key, col in cols.items():
+            head = table.horizontalHeaderItem(col)
+            if head is not None and key in HEADER_TIPS:
+                head.setToolTip(tr(HEADER_TIPS[key]))
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        if multi:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        table.setRowCount(len(leaves['rows']))
+        details = self.dialog._row_details
+        for r, row in enumerate(leaves['rows']):
+            leaf = row['leaf']
+            sid = leaf.sys_id
+            self.table_rows.setdefault(sid, []).append(r)
+            for col in range(table.columnCount()):
+                cell = QTableWidgetItem('')
+                cell.setData(_ROW, leaf)
+                cell.setFlags(_BOX_FLAGS)
+                table.setItem(r, col, cell)
+            if multi:
+                self._box(table.item(r, 0), sid, known)
+            table.item(r, cols['shelfmark']).setText(own_direction(row['label'], rtl))
+            if leaf.id == highlight:
+                self.chosen = r
+            self._fill_row(r, row, details.get(sid))
+        table.setUpdatesEnabled(True)
+        if _table_widths:
+            self._apply_widths(_table_widths)
+        else:
+            self._fit_timer.start()                 # once laid out: the pane's width is known then
+        if self.chosen is not None:                 # the row selected with it (see ``mark``)
+            table.setCurrentCell(self.chosen, cols['shelfmark'])
+
+    def _apply_widths(self, widths: dict) -> None:
+        self._sizing = True
+        try:
+            for key, col in self.table_columns().items():
+                if widths.get(key):
+                    self.table.setColumnWidth(col, int(widths[key]))
+        finally:
+            self._sizing = False
+
+    def fit_table(self) -> None:
+        """The first widths (``TABLE_STRETCH``, ``TABLE_WIDTHS``): every column in sight; not once the
+        reader has resized one."""
+        if _table_widths or self.view != 'table' or not self.table.rowCount():
+            return
+        table, cols = self.table, self.table_columns()
+        self._sizing = True
+        try:
+            room = table.viewport().width() - (table.columnWidth(0) if self.dialog.multi else 0) - 2
+            natural = {}
+            for key, col in cols.items():
+                if key in TABLE_STRETCH:
+                    continue
+                if key in TABLE_WIDTHS:
+                    natural[key] = TABLE_WIDTHS[key]
+                else:
+                    table.resizeColumnToContents(col)
+                    natural[key] = table.columnWidth(col)
+            left = room - sum(natural.values())
+            if left >= 2 * TABLE_MIN_WIDTH:
+                title = max(TABLE_MIN_WIDTH, int(left * TABLE_TITLE_SHARE))
+                widths = {**natural, 'title': title, 'snippet': left - title}
+            else:
+                # a narrow pane: the title and the snippet keep two fifths of it, the others shrink in
+                # proportion to the rest
+                rest = max(1, room - max(2 * TABLE_FLOOR, int(room * TABLE_TITLE_SHARE)))
+                scale = min(1.0, rest / max(1, sum(natural.values())))
+                widths = {key: max(TABLE_FLOOR, int(w * scale)) for key, w in natural.items()}
+                spare = max(2 * TABLE_FLOOR, room - sum(widths.values()))
+                title = max(TABLE_FLOOR, int(spare * TABLE_TITLE_SHARE))
+                widths.update(title=title, snippet=max(TABLE_FLOOR, spare - title))
+            for key, width in widths.items():
+                table.setColumnWidth(cols[key], width)
+        finally:
+            self._sizing = False
+
+    def _column_resized(self, _index: int, _old: int, _new: int) -> None:
+        """The reader resized a column: every width as it is now kept for the run."""
+        if self._sizing or self.view != 'table' or not self.table.rowCount():
+            return
+        for key, col in self.table_columns().items():
+            _table_widths[key] = self.table.columnWidth(col)
+
+    def _fill_row(self, r: int, row: dict, det: Optional[dict]) -> None:
+        """A table row's cells from ``row_details`` (blank while not known): the shelfmark's join sign
+        and tooltip, the title, the snippet, the domains, the pages, and the search table's badges for
+        printed, PGP and edition (until the details come, PGP and edition are the row's signs)."""
+        table = self.table
+        cols = self.table_columns()
+        det = det or {}
+        leaf = row['leaf']
+        marks = _signs_of(leaf.sys_id)
+        name = table.item(r, cols['shelfmark'])
+        name.setToolTip(_with_signs(leaf_tooltip(row) or row['label'], marks))
+        name.setData(_SIGNS_ROLE, ('join',) if 'join' in marks else None)
+        rtl = self.isRightToLeft()
+
+        def put(key: str, text: str, tip: str = '', colour: Optional[str] = None, bold: bool = False,
+                align: Optional[Qt.AlignmentFlag] = None) -> None:
+            cell = table.item(r, cols[key])
+            cell.setText(text)
+            cell.setToolTip(tip)
+            if colour:
+                cell.setForeground(QColor(colour))
+            if bold:
+                font = cell.font()
+                font.setBold(True)
+                cell.setFont(font)
+            if align is not None:
+                cell.setTextAlignment(align | Qt.AlignmentFlag.AlignVCenter)
+
+        title = det.get('title') or ''
+        put('title', own_direction(title, rtl), title)
+        snippet = det.get('snippet') or ''
+        put('snippet', snippet, snippet)
+        domains = det.get('domains') or []
+        put('domain', ', '.join(domains), ', '.join(domains), TABLE_MARKS['domain'][1])
+        pages = det.get('pages')
+        put('pages', '' if pages is None else f"{pages:,}", align=Qt.AlignmentFlag.AlignTrailing)
+        center = Qt.AlignmentFlag.AlignHCenter
+        if det.get('printed'):
+            from shared.fjms_service import PRINTED_LABEL_EN, PRINTED_LABEL_HE
+            put('printed', PRINTED_LABEL_HE if self.dialog._lang == 'he' else PRINTED_LABEL_EN,
+                tr(HEADER_TIPS['printed']), TABLE_MARKS['printed'][1], align=center)
+        else:
+            put('printed', '', align=center)
+        pgp = det.get('pgp') if det.get('pgp') is not None else ('pgp' in marks)
+        put('pgp', TABLE_MARKS['pgp'][0] if pgp else '', tr(HEADER_TIPS['pgp']) if pgp else '',
+            TABLE_MARKS['pgp'][1], bold=True, align=center)
+        edition = det.get('edition') if det.get('edition') is not None else ('edition' in marks)
+        put('edition', TABLE_MARKS['edition'][0] if edition else '', tr(HEADER_TIPS['edition']) if edition else '',
+            TABLE_MARKS['edition'][1], bold=True, align=center)
+
+    def fill_details(self, sys_ids) -> None:
+        """The table's rows of these manuscripts filled with their details, now come."""
+        if self.view != 'table' or self.leaves is None:
+            return
+        rows = self.leaves['rows']
+        details = self.dialog._row_details
+        for sid in sys_ids:
+            for r in self.table_rows.get(sid, ()):
+                if 0 <= r < len(rows) and r < self.table.rowCount():
+                    self._fill_row(r, rows[r], details.get(sid))
+
+    def picture_size(self) -> tuple:
+        return card_sizes()[self.size]
+
+    def tile_size(self) -> QSize:
+        width, height = self.picture_size()
+        title = QFontMetrics(_title_font(self.font())).height() * TILE_TITLE_LINES
+        return QSize(width + 16, height + self.fontMetrics().height() + title + 24)
+
+    def _fill_gallery(self, leaves: dict, multi: bool, known: Optional[dict]) -> None:
+        rtl = self.isRightToLeft()
+        highlight = self.dialog._highlight
+        gallery = self.gallery
+        gallery.setUpdatesEnabled(False)
+        gallery.clear()
+        tile = self.tile_size()
+        gallery.setGridSize(QSize(tile.width() + 6, tile.height() + 6))
+        gallery.setIconSize(QSize(*self.picture_size()))
+        for row in leaves['rows']:
+            leaf = row['leaf']
+            item = QListWidgetItem(own_direction(row['label'], rtl))
+            item.setData(_ROW, leaf)
+            item.setSizeHint(tile)
+            item.setData(_TITLE_ROLE, row.get('title') or '')
+            marks = _signs_of(leaf.sys_id)
+            item.setToolTip(_with_signs(leaf_tooltip(row) or row['label'], marks))
+            if marks:
+                item.setData(_SIGNS_ROLE, marks)
+            if multi:
+                self._box(item, leaf.sys_id, known)
+            else:
+                item.setFlags(_BOX_FLAGS)
+            self._put_picture(item, leaf.sys_id)
+            if leaf.id == highlight:
+                self.chosen = item
+            gallery.addItem(item)
+            self.tiles.setdefault(leaf.sys_id, []).append(item)
+        if self.chosen is not None:
+            gallery.setCurrentItem(self.chosen)
+        gallery.setUpdatesEnabled(True)
+
+    def _put_picture(self, item, sid: str) -> None:
+        known, image = self.dialog.known_thumb(sid)
+        if not known:
+            item.setData(_THUMB_ROLE, None)
+            return
+        if image is None:
+            item.setData(_THUMB_ROLE, False)
+            return
+        width, height = self.picture_size()
+        item.setData(_THUMB_ROLE, QPixmap.fromImage(image).scaled(
+            width, height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def queue_visible(self) -> None:
+        """The tiles in sight (and a little past) whose pictures are not here yet, asked for: what was
+        waiting and is no longer in sight is dropped."""
+        if self.view != 'gallery' or not self.gallery.isVisible():
+            return
+        sight = self.gallery.viewport().rect().adjusted(0, -100, 0, 100)
+        want = []
+        for i in range(self.gallery.count()):
+            item = self.gallery.item(i)
+            leaf = item.data(_ROW)
+            if (leaf is not None and self.gallery.visualItemRect(item).intersects(sight)
+                    and not self.dialog.known_thumb(leaf.sys_id)[0]):
+                want.append(leaf.sys_id)
+        self.dialog._thumb_pool.want(want)
+
+    def show_picture(self, sid: str) -> None:
+        for item in self.tiles.get(sid, ()):
+            self._put_picture(item, sid)
 
     def show_signs(self) -> None:
         """The signs, now loaded, on the shelfmarks drawn before."""
         rows = (self.leaves or {}).get('rows') or []
-        for i, row in enumerate(rows[:self.grid.count()]):
+        if self.view == 'table':
+            for r, row in enumerate(rows[:self.table.rowCount()]):
+                self._fill_row(r, row, self.dialog._row_details.get(row['leaf'].sys_id))
+            return
+        view = self.active()
+        for i, row in enumerate(rows[:view.count()]):
             marks = _signs_of(row['leaf'].sys_id)
             if marks:
-                item = self.grid.item(i)
+                item = view.item(i)
                 item.setData(_SIGNS_ROLE, marks)
                 item.setToolTip(_with_signs(leaf_tooltip(row) or row['label'], marks))
 
     def mark(self, leaf) -> None:
-        """The shelfmark a click chose (single choice), shown chosen: the grid's current item."""
-        for i in range(self.grid.count()):
-            item = self.grid.item(i)
+        """The shelfmark a click chose (single choice), shown chosen: the current item or row."""
+        if self.view == 'table':
+            for r in range(self.table.rowCount()):
+                item = self.table.item(r, 0)
+                if getattr(item.data(_ROW) if item is not None else None, 'id', None) == leaf.id:
+                    # the current cell, which selects the row (rows are chosen whole): Enter and Space read
+                    # it (current_leaf). Not selectRow: in a right-to-left table it looks for a column at
+                    # the viewport's far edge, finds none where the columns end short of it, and leaves no
+                    # row selected or current (owner, 2026-11-22: the line went after a click, Hebrew)
+                    self.table.setCurrentCell(r, self.table_columns()['shelfmark'])
+                    return
+            return
+        view = self.active()
+        for i in range(view.count()):
+            item = view.item(i)
             if getattr(item.data(_ROW), 'id', None) == leaf.id:
-                self.grid.setCurrentItem(item)
+                view.setCurrentItem(item)
                 return
 
     def line_height(self) -> int:
@@ -1105,13 +1852,27 @@ class _LeafPanel(QWidget):
             self.grid.setGridSize(size)
 
     def scroll_to(self, saved: Optional[int]) -> None:
-        self.grid.doItemsLayout()
+        anchor, self._anchor = self._anchor, None
+        if anchor is not None and self._bring_to_top(anchor):   # a view switch keeps the reader's place
+            if self.view == 'gallery':
+                self._thumb_timer.start()
+            return
+        view = self.active()
+        if isinstance(view, QListWidget):
+            view.doItemsLayout()
         if saved is not None:
-            self.grid.verticalScrollBar().setValue(saved)
+            view.verticalScrollBar().setValue(saved)
         elif self.chosen is not None:
-            self.grid.scrollToItem(self.chosen, QAbstractItemView.ScrollHint.PositionAtCenter)
+            if isinstance(self.chosen, int):
+                cell = self.table.item(self.chosen, 0)
+                if cell is not None:
+                    self.table.scrollToItem(cell, QAbstractItemView.ScrollHint.PositionAtCenter)
+            else:
+                view.scrollToItem(self.chosen, QAbstractItemView.ScrollHint.PositionAtCenter)
         else:
-            self.grid.scrollToTop()
+            view.scrollToTop()
+        if self.view == 'gallery':
+            self._thumb_timer.start()
 
 
 def _box_off(item: QTableWidgetItem, off: bool, tip: str, limit_tip: str) -> None:
@@ -1147,11 +1908,13 @@ def _thumbnail_image(sys_id: str, meta_mgr) -> Optional[QImage]:
         if nli and (resp.status_code == 429 or 500 <= resp.status_code < 600):
             record_failure(failure_type='429' if resp.status_code == 429 else '5xx', path='shelf_picker_thumb')
         return None
-    if nli:
-        record_success(path='shelf_picker_thumb')
     image = QImage()
     image.loadFromData(resp.content)
-    return None if image.isNull() else image
+    if image.isNull():                             # a 200 that is no image (an error page): no success
+        return None
+    if nli:
+        record_success(path='shelf_picker_thumb')
+    return image
 
 
 def _community_facts(sys_id: str, client) -> tuple:
@@ -1218,7 +1981,6 @@ class _DetailsPane(QFrame):
         self.join_links: dict = {}                 # sys_id -> a join partner's link
         self._places: dict = {}                    # sys_id -> its first place's ShelfLeaf, or None
         self._text_loads = _Loads(self._text_done, self)
-        self._image_loads = _Loads(self._image_done, self)
         self._community_loads = _Loads(self._community_done, self)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1296,6 +2058,9 @@ class _DetailsPane(QFrame):
         self.empty.setVisible(False)
         self.image.clear()
         self.image.setVisible(False)
+        known, image = self.dialog.known_thumb(leaf.sys_id)
+        if known and image is not None:            # fetched already (the gallery, an earlier click): at once
+            self._show_image(image)
         self.shelfmark.setText(own_direction(leaf.label or leaf.shelfmark or leaf.sys_id, self.isRightToLeft()))
         self.shelfmark.setVisible(True)
         for label in (*self.fields.values(), self.links, self.joins_title):
@@ -1337,8 +2102,10 @@ class _DetailsPane(QFrame):
         meta, sid, client = catalogue, out.get('sys_id'), community
         if client is not None and sid:
             self._community_loads.request(gen, lambda: _community_facts(sid, client))
-        if meta is not None and sid:
-            self._image_loads.request(gen, lambda: _thumbnail_image(sid, meta))
+        # asked of the picker's one loader (shared with the gallery: never fetched twice at once); its
+        # answer comes back through the dialog (_thumb_done -> show_known_image)
+        if meta is not None and sid and not self.dialog.known_thumb(sid)[0]:
+            self.dialog._thumb_pool.fetch(sid)
 
     def _put(self, name: str, pairs: list) -> None:
         label = self.fields[name]
@@ -1488,11 +2255,15 @@ class _DetailsPane(QFrame):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    def _image_done(self, gen: int, out) -> None:
-        if gen != self._gen or not isinstance(out, QImage) or out.isNull():
-            return
-        pixmap = QPixmap.fromImage(out).scaled(self.WIDTH - 40, self.IMAGE_HEIGHT, Qt.AspectRatioMode.KeepAspectRatio,
-                                               Qt.TransformationMode.SmoothTransformation)
+    def show_known_image(self) -> None:
+        """The picture of the shelfmark shown, now that it has been fetched."""
+        known, image = self.dialog.known_thumb(self.leaf.sys_id) if self.leaf is not None else (False, None)
+        if known and image is not None and self.image.pixmap().isNull():
+            self._show_image(image)
+
+    def _show_image(self, image: QImage) -> None:
+        pixmap = QPixmap.fromImage(image).scaled(self.WIDTH - 40, self.IMAGE_HEIGHT, Qt.AspectRatioMode.KeepAspectRatio,
+                                                 Qt.TransformationMode.SmoothTransformation)
         self.image.setPixmap(pixmap)
         self.image.setVisible(True)
 
@@ -1501,7 +2272,6 @@ class _DetailsPane(QFrame):
         # tree must not be read after its dialog has gone); the image is not, it may take seconds to
         # come over the network (Codex pre-flight: never freeze the close) and it reads no tree
         self._text_loads.stop()
-        self._image_loads.stop(wait_ms=0)
         self._community_loads.stop(wait_ms=0)
 
 
@@ -1583,6 +2353,18 @@ class ShelfPickerDialog(QDialog):
         self._state_loads = _Loads(self._painted, self)    # what the boxes show: the newest wins
         self._work_loads = _Loads(self._worked, self)      # a confirm, a save, the prune on opening
         self._signs_loads = _Loads(self._signs_done, self)  # the rows' signs, once a process
+        # the table's details (row_details, by sys_id, in this dialog's one language), read a page at a
+        # time by one job that works out again what is missing when it ends (VX5); the thumbnails'
+        # pictures (QImage, or None: none), fetched for the tiles in sight (VX7)
+        self._row_details: dict = {}
+        self._rows_job: Optional[_Job] = None
+        self._rows_gen = 0
+        self._closing = False
+        self._thumbs: dict = {}
+        # the gallery's loads skip a picture known already or under way in the details pane (one fetch)
+        # every thumbnail load, the gallery's and the pane's: an image known already is not fetched
+        self._thumb_pool = _ThumbPool(self._thumb_done, self, skip=lambda sid: self.known_thumb(sid)[0])
+        self._folded: Optional[bool] = None         # the layout on screen folds its columns (VX2)
 
         self.setWindowTitle(title or tr("Pick from the shelf"))
         screen = (parent.screen() if parent is not None else None) or QApplication.primaryScreen()
@@ -1794,6 +2576,13 @@ class ShelfPickerDialog(QDialog):
         self.details.setVisible(self.width() >= self.DETAILS_MIN_WIDTH)
 
     def done(self, result):
+        self._closing = True
+        self._thumb_pool.stop()
+        job = self._rows_job
+        if job is not None:                        # local reads: waited for as the lists' loads are
+            job.requestInterruption()
+            if not job.wait(STOP_WAIT_MS):
+                job.finished.connect(job.deleteLater)
         self.details.stop()
         self._loads.stop()
         self._state_loads.stop()
@@ -1823,10 +2612,10 @@ class ShelfPickerDialog(QDialog):
             self._eat_release = obj
             # single choice: a double click on a shelfmark is its act button (DX21); the first click
             # chose it already
-            if obj is self.leaf_panel.grid.viewport() and not self.multi:
-                item = self.leaf_panel.grid.itemAt(event.position().toPoint())
-                if item is not None:
-                    self._pick(item.data(_ROW))
+            if obj in self.leaf_panel.viewports() and not self.multi:
+                leaf = self.leaf_panel.leaf_at(obj, event.position().toPoint())
+                if leaf is not None:
+                    self._pick(leaf)
             elif not self.multi:
                 for column in self.node_columns:
                     if obj is column.table.viewport():
@@ -1840,14 +2629,14 @@ class ShelfPickerDialog(QDialog):
         # Enter and Space open the row or pick the shelfmark that has the keyboard's focus.
         if kind == QEvent.Type.KeyPress and event.key() in (
                 Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            if obj is self.leaf_panel.grid:
-                item = obj.currentItem()
-                if item is not None:
+            if obj in self.leaf_panel.views():
+                leaf = self.leaf_panel.current_leaf() if obj is self.leaf_panel.active() else None
+                if leaf is not None:
                     # single choice: Space chooses, Enter takes (the act button); multiple: its box
                     if event.key() == Qt.Key.Key_Space:
-                        self._select(item.data(_ROW))
+                        self._select(leaf)
                     else:
-                        self._pick(item.data(_ROW))
+                        self._pick(leaf)
                 return True
             for column in self.node_columns:
                 if obj is column.table:
@@ -1863,7 +2652,7 @@ class ShelfPickerDialog(QDialog):
         return super().eventFilter(obj, event)
 
     def _viewports(self) -> tuple:
-        return (*(c.table.viewport() for c in self.node_columns), self.leaf_panel.grid.viewport())
+        return (*(c.table.viewport() for c in self.node_columns), *self.leaf_panel.viewports())
 
     # -- what the reader does ---------------------------------------------------------------
 
@@ -2008,11 +2797,17 @@ class ShelfPickerDialog(QDialog):
             self.status.setText(tr("Not loaded"))
             self.status.setVisible(True)
             return
+        opened_at = None                           # the manuscript the picker opened at (not a join's link)
         if 'path' in out:
             self._path = tuple(out['path'])
             self._shown = dict(out['shown'])
             if out['leaf'] is not None:
                 self._highlight = out['leaf'].id
+                if not out.get('reveal'):
+                    opened_at = out['leaf']
+        if opened_at is not None and self._chosen_leaf is None:
+            # opened at a manuscript: it is the one chosen, as on the web (DX21), drawn so by _draw
+            self._chosen_leaf = opened_at
         view = out['view']
         self._drawn_path = tuple(out['for_path'])
         owed, self._owed = self._owed, set()
@@ -2023,6 +2818,10 @@ class ShelfPickerDialog(QDialog):
             self._draw(view)
         if out.get('reveal') and out.get('leaf') is not None:
             self._show_revealed(out['leaf'])
+        if opened_at is not None:
+            if self.details.leaf is None:          # ... and the pane shows it, in either mode (DX25)
+                self.details.show_leaf(opened_at)
+            self._footer()
         if self.multi:                             # the rows drawn now: what their boxes show
             self._request_state()
 
@@ -2045,11 +2844,15 @@ class ShelfPickerDialog(QDialog):
     def _draw_lists(self, view: dict, owed: set) -> bool:
         """The lists whose filter or length changed, alone, when they are still on screen; False
         when one is not (then the whole dialog is drawn)."""
+        has_leaves = view['leaves'] is not None
+        if folds_columns(self.leaf_panel.view, has_leaves) != self._folded:
+            return False
         on_screen = self._on_screen()
         self._remember_scroll()
         plan = []
+        shown = shown_columns(view['columns'], self.leaf_panel.view, has_leaves, WIDE_COLUMNS)
         for key in owed:
-            col = next((c for c in view['columns'][-WIDE_COLUMNS:] if c['filter_key'] == key), None)
+            col = next((c for c in shown if c['filter_key'] == key), None)
             leaves = view['leaves'] if view['leaves'] is not None and view['leaves']['filter_key'] == key else None
             part = on_screen.get(key)
             if part is None or (col is None and leaves is None):
@@ -2068,7 +2871,10 @@ class ShelfPickerDialog(QDialog):
         self._view = view
         self.status.setVisible(False)
         self._draw_crumbs(view['crumbs'])
-        columns = view['columns'][-WIDE_COLUMNS:]
+        # the last three; in the table and the thumbnails only the last (VX2, the owner's rule)
+        has_leaves = view['leaves'] is not None
+        self._folded = folds_columns(self.leaf_panel.view, has_leaves)
+        columns = shown_columns(view['columns'], self.leaf_panel.view, has_leaves, WIDE_COLUMNS)
         for i, column in enumerate(self.node_columns):
             if i < len(columns):
                 column.show_column(columns[i])
@@ -2101,7 +2907,7 @@ class ShelfPickerDialog(QDialog):
             if column.isVisibleTo(self) and column.col and column.col['depth'] == len(self._path):
                 target, owner = column.table, column
         if target is None and self.leaf_panel.isVisibleTo(self):
-            target = self.leaf_panel.grid
+            target = self.leaf_panel.active()
         if target is None:
             shown = [c for c in self.node_columns if c.isVisibleTo(self)]
             target, owner = (shown[-1].table, shown[-1]) if shown else (None, None)
@@ -2292,6 +3098,84 @@ class ShelfPickerDialog(QDialog):
         if self._all_chips is not None:
             self._all_chips.fill(out)
         self._footer()
+
+    def _view_changed(self) -> None:
+        """The shelfmarks pane in another view: the whole dialog drawn again from the view on screen
+        (the columns shown change, VX2), the boxes asked for again in the multiple choice."""
+        if self._view is None:
+            return
+        self._draw(self._view)
+        if self.multi:
+            self._request_state()
+
+    def _request_rows(self) -> None:
+        """The table's rows that have no details yet, the first page of them read off the UI thread
+        (``row_details``); when that job ends, what is still missing is worked out again (a "Show
+        more", a filter or another node meanwhile), so no page is left blank. One job at a time."""
+        if self._closing or self._rows_job is not None or self.leaf_panel.view != 'table':
+            return
+        leaves = self.leaf_panel.leaves
+        if leaves is None:
+            return
+        batches = wanted([row['leaf'].sys_id for row in leaves['rows']], self._row_details)
+        if not batches:
+            return
+        batch, lang = batches[0], self._lang
+        meta, pages_of, texts_of = catalogue, page_count_of, page_texts_of
+        self._rows_gen += 1
+        self._rows_batch = batch
+        job = _Job(self._rows_gen, lambda: row_details(batch, lang, meta_mgr=meta, page_count=pages_of,
+                                                       page_texts=texts_of), QApplication.instance())
+        job.done.connect(self._rows_done)
+        job.finished.connect(self._rows_finished)
+        self._rows_job = job
+        job.start()
+
+    @pyqtSlot(int, object)
+    def _rows_done(self, _gen: int, out) -> None:
+        if self._closing:
+            return
+        if not isinstance(out, dict):
+            # the read failed (row_details guards each source, so something escaped them): its rows stay
+            # blank and are not asked for again, or the loader would read the same batch without end
+            out = {sid: {} for sid in getattr(self, '_rows_batch', ())}
+        self._row_details.update(out)                # kept whatever the table shows now
+        self.leaf_panel.fill_details(out)
+
+    @pyqtSlot()
+    def _rows_finished(self) -> None:
+        job, self._rows_job = self._rows_job, None
+        if job is not None:
+            job.deleteLater()
+        if not self._closing:
+            self._request_rows()
+
+    def _thumb_done(self, sys_id: str, image) -> None:
+        """A tile's picture (or none), on the UI thread: kept, and drawn on its tiles."""
+        if self._closing:
+            return
+        self.thumb_known(sys_id, image)
+        if self.details.leaf is not None and self.details.leaf.sys_id == sys_id and image is not None:
+            self.details.show_known_image()
+
+    def known_thumb(self, sys_id: str) -> tuple:
+        """``(known, QImage or None)``: a manuscript's picture as this dialog knows it (None: it has none),
+        else as the run's cache has it (fetched by another picker or the pane); ``(False, None)``: not
+        fetched yet."""
+        if sys_id in self._thumbs:
+            return True, self._thumbs[sys_id]
+        image = cached_thumbnail(sys_id)
+        if image is not None:
+            self._thumbs[sys_id] = image
+            return True, image
+        return False, None
+
+    def thumb_known(self, sys_id: str, image) -> None:
+        """A picture fetched (or none), from the gallery or the pane: kept for both, drawn on its tiles."""
+        image = image if isinstance(image, QImage) and not image.isNull() else None
+        self._thumbs[sys_id] = image
+        keep_thumbnail(sys_id, image)
+        self.leaf_panel.show_picture(sys_id)
 
     def _load_signs(self) -> None:
         """The rows' signs, read off the UI thread when they are not loaded yet (once a process)."""
