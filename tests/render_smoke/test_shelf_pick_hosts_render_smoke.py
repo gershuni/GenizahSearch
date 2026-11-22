@@ -444,7 +444,7 @@ async def _opens_several_in_the_desk(user, opened):
     (web/reading_desk_handoff.py)."""
     from web.reading_desk_handoff import take_reading_desk_handoff
     assert (opened['switch_label'], opened['purpose'], opened['confirm_label']) == (
-        'Open more than one', 'reading_desk', 'Open them in the Reading Desk')
+        'Open more than one', 'reading_desk', 'Open')
     assert opened.get('mode') is None and opened['on_pick'] is not None     # opens as the single choice
     assert (opened['limit'].max_items, opened['limit'].max_pages, opened['limit'].base()) == (30, 1000, frozenset())
     second = '990000000000000888'

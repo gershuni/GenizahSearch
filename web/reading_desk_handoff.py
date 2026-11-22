@@ -70,7 +70,7 @@ def take_reading_desk_handoff(first_sys_id: Optional[str]) -> list:
 
 
 def open_in_reading_desk(entries: list, _label: str = '') -> list:
-    """The home page's and the header's "Open them in the Reading Desk": the list kept, then Browse.
+    """The home page's and the header's "Open" of several (to the Reading Desk): the list kept, then Browse.
     Answers the ids handed over (none, and nothing opened, when the storage refused)."""
     url = stage_for_reading_desk(entries)
     if url is None:

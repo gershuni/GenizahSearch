@@ -210,7 +210,7 @@ def test_browse_has_one_shelf_button_whose_switch_opens_several_in_the_desk(tmp_
         [one] = browse_picker.opened                       # one dialog, both modes (the switch in it)
         assert one['on_pick'] is not None and one.get('mode') is None      # opens as the single choice
         assert (one['switch_label'], one['purpose'], one['confirm_label']) == (
-            'Open more than one', 'reading_desk', 'Open them in the Reading Desk')
+            'Open more than one', 'reading_desk', 'Open')
         # "Open", with Add to List and Add to Puzzle beside it (DX21, DX22); a tick is limited by the
         # choice alone, not by what the desk holds (the manuscript shown is not counted): the desk's
         # room is applied by "Open them in the Reading Desk" (Codex on the round-3 design)

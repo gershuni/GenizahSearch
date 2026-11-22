@@ -176,7 +176,8 @@ def test_hebrew_crumbs_use_the_mirrored_arrow_and_a_code_finds_its_library(tmp_p
 
 def test_a_click_selects_the_button_opens_and_the_pane_follows(tmp_path, monkeypatch):
     from web.components import shelfmark_tree_picker as picker
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: f'/api/nli_image_by_sysid/{sys_id}?page=0&width=320')
+    monkeypatch.setattr(picker, '_thumbnail_src',
+                        lambda sys_id, shelfmark, width=320: f'/api/nli_image_by_sysid/{sys_id}?page=0&width=320')
     svc = _setup(tmp_path)
     seen = {}
 
@@ -258,7 +259,7 @@ def test_the_pane_is_empty_until_a_shelfmark_is_chosen_and_a_newer_click_wins(tm
         return real(service, leaf, lang, **kw)
 
     monkeypatch.setattr(picker, 'item_details', slow_for_the_first)
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     svc = _setup(tmp_path)
     seen = {}
 
@@ -536,7 +537,7 @@ def test_the_pane_says_what_the_manuscript_has(tmp_path, monkeypatch):
     page = ('בשם השם נעשה ונצליח ' * 3 + '\n') * 5               # five lines, all of them shown
     monkeypatch.setattr(picker, '_page_texts', lambda: (lambda sys_id: iter([page, '', 'שורה אחרונה'])))
     monkeypatch.setattr(picker, '_page_count', lambda: (lambda sys_id: 3))
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     asked = []
 
     def community(sys_id):

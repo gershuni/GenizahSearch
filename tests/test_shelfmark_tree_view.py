@@ -136,7 +136,8 @@ def test_the_picker_follows_the_site_theme():
     from web.components.shelfmark_tree_picker import _CSS
     css = Path(__file__).resolve().parents[1].joinpath("web", "static", "common.css").read_text(encoding="utf-8")
     dark = "".join(re.findall(r'\[data-theme="dark"\]\s*\{([^}]*)\}', css))
-    used = set(re.findall(r"var\((--[\w-]+)", _CSS)) - {"--stp-leaf"}
+    # the picker's own layout variables (--stp-leaf, the table's columns, the tiles' sizes) are no theme colours
+    used = {name for name in re.findall(r"var\((--[\w-]+)", _CSS) if not name.startswith("--stp-")}
     assert used and all(f"{name}:" in dark for name in used), sorted(n for n in used if f"{n}:" not in dark)
     assert re.search(r"\.stp-list \{[^}]*color: var\(--text-primary", _CSS)      # text follows the background
 

@@ -198,7 +198,7 @@ def create_page():
                                   confirm_label=tr('Open'), add_to=True, lists_mgr=lambda: state.lists_mgr,
                                   switch_label=tr('Open more than one'), purpose='reading_desk',
                                   on_several=open_in_reading_desk,
-                                  several_label=tr('Open them in the Reading Desk'), limit=desk_choice_limit,
+                                  several_label=tr('Open'), limit=desk_choice_limit,
                                   testid='home-shelf-pick')
             # A first-class escape hatch for the many visitors who arrive
             # curious about the Genizah but without a query in mind.  This is

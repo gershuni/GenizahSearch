@@ -1981,7 +1981,7 @@ def create_layout():
                                   confirm_label=tr('Open'), add_to=True, lists_mgr=lambda: state.lists_mgr,
                                   switch_label=tr('Open more than one'), purpose='reading_desk',
                                   on_several=open_in_reading_desk,
-                                  several_label=tr('Open them in the Reading Desk'), limit=desk_choice_limit,
+                                  several_label=tr('Open'), limit=desk_choice_limit,
                                   testid='header-shelf-pick')
                 ui.button(icon='close').props(
                     f'flat round dense text-color=white aria-label="{tr("Close")}"'

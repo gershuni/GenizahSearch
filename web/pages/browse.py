@@ -1734,7 +1734,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # the Reading Desk" is pressed (_desk_add_chosen), the list's and the Puzzle's at theirs.
         open_shelf_picker(_page_client.layout, tree, _picked, start=start, purpose='reading_desk',
                           on_confirm=lambda entries, _label: _browse_open_chosen(entries, opened_on),
-                          confirm_label=tr('Open them in the Reading Desk'), lists_mgr=_lists_mgr_now(),
+                          confirm_label=tr('Open'), lists_mgr=_lists_mgr_now(),
                           switch_label=tr('Open more than one'), limit=_choice_limit(),
                           pick_label=tr('Open'), add_to=True)
 

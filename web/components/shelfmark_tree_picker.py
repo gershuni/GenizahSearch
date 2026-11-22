@@ -51,6 +51,10 @@ from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_tooltip
                                            settle)
 from shared.shelfmark_tree_details import add_joins, field_lines, item_details
 from shared.shelfmark_tree_limits import chip_name, limit_for, refusal_message
+from shared.shelfmark_tree_rows import (
+    COLUMNS, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, folds_columns,
+    normal_size, normal_view, read_choice, row_details, shown_columns, wanted,
+)
 from shared.shelfmark_tree_selection import ALL, DIRECT, NODE, Chip, Selection, members_function, scope_for
 from shared.shelfmark_tree_signs import SIGN_LABELS, shelf_signs, signs_text
 from shared.shelfmark_tree_view import CRUMB_SEP, PAGE_SIZE, direct_index, display_name, place_of, start_at
@@ -58,6 +62,7 @@ from web import shelf_selection_store as store
 from web.auth_state import GlobalAuthState
 from web.components.shelf_selection_lists import save_selection_as_list
 from web.components.typography import h3
+from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import get_language, is_rtl, tr
 
 logger = logging.getLogger(__name__)
@@ -117,7 +122,7 @@ _CSS = """
 /* the pane below the columns where both would not fit side by side */
 @media (max-width: 1180px) {
   .stp-main { flex-direction: column; }
-  .stp-details { flex: 0 0 auto; max-height: 38%; min-width: 0; flex-direction: row; align-items: flex-start;
+  .stp-details { flex: 0 0 auto; max-height: 34%; min-width: 0; flex-direction: row; align-items: flex-start;
     padding-inline-start: 0; border-inline-start: 0; border-top: 1px solid var(--border-light, #d5d8de); padding-top: 8px; }
   .stp-d-thumb { flex: 0 0 120px; }
   .stp-d-thumb img { max-height: 160px; }
@@ -160,7 +165,7 @@ _CSS = """
 @media (max-width: 900px) {
   .stp-card { width: 100vw; max-width: 100vw; height: 100vh; border-radius: 0; padding: 10px 12px; }
   .stp-body { flex-direction: column; overflow-y: auto; }
-  .stp-details { max-height: 45%; }
+  .stp-details { max-height: 30%; }
   /* a phone: the links right under the shelfmark, in sight without scrolling the pane */
   .stp-d-text > * { order: 3; }
   .stp-d-text > .stp-d-f-sm { order: 1; }
@@ -169,10 +174,17 @@ _CSS = """
   .stp-d-thumb img { max-height: 110px; }
   .stp-d-textbox { max-height: calc(6 * 1.5em + 12px); }
   .stp-body > .stp-panel:not(.stp-phone) { display: none; }
-  .stp-col { flex: 1 1 auto; min-height: 260px; }
+  .stp-col { flex: 1 1 auto; min-height: 220px; }
   .stp-grid { grid-template-columns: 1fr; }
   .stp-back { display: inline-flex; }
   .stp-foot { flex-wrap: wrap; }
+}
+/* a short window: the dialog takes nearly all its height (86% left the shelfmarks a few rows) */
+@media (max-height: 760px) and (min-width: 901px) { .stp-card { height: 96vh; } }
+/* a short window (a laptop's, a phone held sideways): the pane smaller still, its picture too */
+@media (max-height: 760px) and (max-width: 1180px) {
+  .stp-details { max-height: 28%; }
+  .stp-d-thumb img { max-height: 90px; }
 }
 /* multiple choice (PR 4): boxes, "Select all", the chips bar (D11) and the footer */
 .stp-row.stp-pick { justify-content: flex-start; }
@@ -204,6 +216,78 @@ _CSS = """
 .stp-all-list { display: flex; flex-wrap: wrap; gap: 6px; overflow-y: auto; }
 .stp-all-list .stp-chip { max-width: 100%; }
 .stp-save-card { width: min(440px, 96vw); }
+/* the shelfmarks pane's views (list, table, thumbnails), its switch in the pane's header */
+.stp-lhead { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.stp-lhead > .stp-title { flex: 1 1 auto; min-width: 0; }
+.stp-views { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.stp-view.stp-view-on { background: var(--bg-tertiary, #eef3fb); color: #1f5fbf; }
+[data-theme="dark"] .stp-view.stp-view-on { color: #93c5fd; }
+.stp-views .q-btn-group { margin-inline-start: 4px; }
+/* the table: a header that stays, rows of cells; scrolled sideways in its own box where narrow */
+.stp-table { overflow: auto; --stp-tcols: minmax(110px, 1fr) minmax(140px, 1.5fr) minmax(200px, 2.6fr)
+  minmax(90px, 1fr) 62px 66px 48px 58px; }
+.stp-table.stp-multi { --stp-tcols-all: 30px var(--stp-tcols); }
+.stp-table > * { min-width: 860px; }
+.stp-thead, .stp-trow { display: grid; grid-template-columns: var(--stp-tcols-all, var(--stp-tcols)); gap: 0 10px;
+  align-items: center; padding: 6px 10px; }
+.stp-thead { position: sticky; top: 0; z-index: 2; background: var(--bg-tertiary, #f3f5f8); font-size: 12px;
+  font-weight: 600; color: var(--text-secondary, #5b6270); border-bottom: 1px solid var(--border-light, #d5d8de); }
+.stp-trow { min-height: 34px; padding-top: 4px; padding-bottom: 4px; cursor: pointer; border-bottom: 1px solid var(--border-light, #eef0f3); font-size: 13px; }
+.stp-trow:hover { background: var(--bg-tertiary, #f3f5f8); }
+.stp-trow.stp-ticked { background: var(--bg-tertiary, #eef3fb); }
+.stp-trow.stp-on { background: #1f5fbf; color: #fff; }
+.stp-trow:focus-visible, .stp-tile:focus-visible { outline: 2px solid #1f5fbf; outline-offset: -2px; }
+.stp-cells { display: contents; }
+/* a heading's grip, at its end edge: drag to resize the column, double click for the first widths */
+.stp-thead > .stp-c { position: relative; }
+.stp-rsz { position: absolute; top: 0; bottom: 0; inset-inline-end: 0; width: 8px; cursor: col-resize;
+  touch-action: none; border-inline-end: 2px solid transparent; }
+.stp-rsz:hover { border-inline-end-color: var(--border-light, #b8bec8); }
+.stp-c { min-width: 0; overflow: hidden; }
+.stp-c-sm { display: flex; align-items: center; gap: 4px; }
+.stp-c-sm > .stp-c-name { direction: ltr; unicode-bidi: isolate; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0; }
+.stp-c-clamp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.stp-c-snip { font-size: 12px; color: var(--text-secondary, #5b6270); }
+.stp-trow.stp-on .stp-c-snip { color: #e5edf9; }
+.stp-c-num { text-align: end; font-variant-numeric: tabular-nums; }
+.stp-c-mark { text-align: center; }
+.stp-trow.stp-on .stp-sign-icon { color: #fff; }
+.stp-dom { display: inline-block; max-width: 100%; vertical-align: middle; font-size: 11px; padding: 1px 6px;
+  border-radius: 4px; background: #f3e8ff; color: #7c3aed; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stp-dom-more { background: #ede9fe; cursor: help; flex: none; }
+.stp-c-dom { display: flex; align-items: center; gap: 2px; }
+[data-theme="dark"] .stp-dom { background: rgba(167, 139, 250, .18); color: #c4b5fd; }
+.stp-printed { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #fee2e2; color: #dc2626; font-weight: 500;
+  white-space: nowrap; }
+[data-theme="dark"] .stp-printed { background: rgba(248, 113, 113, .18); color: #fca5a5; }
+/* the thumbnails: tiles that wrap, each the first image, the shelfmark and its signs under it */
+.stp-gallery { display: grid; align-content: start; gap: 10px; padding: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--stp-tw, 180px)), 1fr)); }
+.stp-size-s { --stp-tw: 150px; --stp-th: 140px; }
+.stp-size-m { --stp-tw: 180px; --stp-th: 160px; }
+.stp-size-l { --stp-tw: 280px; --stp-th: 240px; }
+.stp-tile { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 0;
+  border: 1px solid var(--border-light, #d5d8de); border-radius: 8px; cursor: pointer; background: var(--bg-primary, #fff); }
+.stp-tile:hover { background: var(--bg-tertiary, #f3f5f8); }
+.stp-tile.stp-ticked { background: var(--bg-tertiary, #eef3fb); border-color: #1f5fbf; }
+.stp-tile.stp-on { outline: 3px solid #1f5fbf; outline-offset: -1px; }
+.stp-tile > .stp-box { position: absolute; top: 9px; inset-inline-start: 9px; z-index: 1; border-radius: 4px;
+  background: var(--bg-primary, #fff); }
+.stp-thumb { height: var(--stp-th, 160px); display: flex; align-items: center; justify-content: center; overflow: hidden;
+  border-radius: 6px; background: var(--bg-tertiary, #f3f5f8); }
+.stp-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity .2s; }
+.stp-thumb.stp-loaded img { opacity: 1; }
+.stp-thumb .stp-ph { display: none; font-size: 32px; color: var(--text-secondary, #5b6270); }
+.stp-thumb.stp-noimg img { display: none; }
+.stp-thumb.stp-noimg .stp-ph { display: block; }
+.stp-tcap { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13px; }
+/* the start of the title, two lines kept for it in every tile so the rows stay even */
+.stp-ttitle { font-size: 12px; line-height: 1.3; min-height: 2.6em; color: var(--text-secondary, #5b6270);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere; text-align: start; }
+.stp-tcap > .stp-c-name { flex: 1 1 auto; direction: ltr; unicode-bidi: isolate; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0; }
 """
 
 
@@ -306,16 +390,208 @@ def _title_of(sys_id: str) -> str:
         return ''
 
 
-def _thumbnail_src(sys_id: str, shelfmark: str) -> str:
+def _thumbnail_src(sys_id: str, shelfmark: str, width: int = 320) -> str:
     """The manuscript's first image, small, by the site's own image routes (``/api/nli_image_by_sysid``,
     Oxford's, a provider's while NLI is down: ``web/components/candidate_grid.py::build_thumbnail_url``),
     never NLI's own address, as every thumbnail on the site; '' when there is none to ask for. Whether it
     exists is known when it loads: one that fails is hidden."""
     try:
         from web.components.candidate_grid import build_thumbnail_url
-        return build_thumbnail_url(sys_id, 1, shelfmark or '', _code_of(sys_id), width=320) or ''
+        return build_thumbnail_url(sys_id, 1, shelfmark or '', _code_of(sys_id), width=width) or ''
     except Exception:   # noqa: BLE001 -- the pane without its image
         return ''
+
+
+# -- the table and the thumbnails (shared/shelfmark_tree_rows.py, VX1-VX9) ------------------------
+
+#: Each thumbnail size's image width, as the Joins Lab fetches its cards' (``candidate_grid.CARD_SIZES``).
+_THUMB_WIDTH = {'s': 300, 'm': 300, 'l': 600}
+#: The switch's buttons: a view, its icon, what the button does.
+_VIEW_BUTTONS = (('list', 'view_list', 'Show as a list'), ('table', 'table_rows', 'Show as a table'),
+                 ('gallery', 'grid_view', 'Show as thumbnails'))
+
+
+def _view_choice() -> tuple:
+    """The reader's view and thumbnail size (``safe_storage``), the list and medium when none is kept."""
+    try:
+        return read_choice(safe_user_get(STORAGE_KEY))
+    except Exception:   # noqa: BLE001 -- the default
+        return read_choice(None)
+
+
+def _icon_html(name: str, classes: str, label: str = '') -> str:
+    aria = f' role="img" aria-label="{_attr(label)}"' if label else ' aria-hidden="true"'
+    return f'<i class="q-icon notranslate material-icons {classes}"{aria}>{html.escape(name)}</i>'
+
+
+def _signs_html(marks: tuple) -> str:
+    """The row's signs as HTML, as ``_sign_marks`` draws them (a tile, a table's shelfmark cell)."""
+    out = []
+    for mark in marks:
+        name = tr(SIGN_LABELS[mark])
+        if mark == 'pgp':
+            out.append(f'<span class="stp-sign-pgp" role="img" aria-label="{_attr(name)}">PGP</span>')
+        else:
+            out.append(_icon_html('description' if mark == 'edition' else 'link', f'stp-sign-icon stp-sign-{mark}', name))
+    return f'<span class="stp-signs" data-signs="{_attr(" ".join(marks))}">{"".join(out)}</span>' if out else ''
+
+
+def _leaf_tip(row: dict, marks: tuple) -> str:
+    """A shelfmark's tooltip, as the list's (``_leaf_name``): its name and other call numbers, its
+    title, its signs."""
+    text, hint = row['label'], row.get('hint')
+    tip = leaf_tooltip({'hint': f"{text} · {hint}" if hint else text, 'title': row.get('title') or ''})
+    return tip + ('\n' + signs_text(marks, tr) if marks else '')
+
+
+def _header_html(multi: bool = False) -> str:
+    """The table's header cells (the desktop results table's words, ``COLUMNS``; its tooltips), after a
+    blank one over the tick boxes in the multiple choice, so each heading stands over its column."""
+    cells = ['<span class="stp-c" data-head="box"></span>'] if multi else []
+    for key, label in COLUMNS:
+        tip = HEADER_TIPS.get(key)
+        title = f' title="{_attr(tr(tip))}"' if tip else ''
+        align = ' stp-c-num' if key == 'pages' else (' stp-c-mark' if key in ('printed', 'pgp', 'edition') else '')
+        cells.append(f'<span class="stp-c{align}" data-head="{key}"{title}>{html.escape(tr(label))}'
+                     '<span class="stp-rsz" aria-hidden="true"></span></span>')
+    return ''.join(cells)
+
+
+def _cells_html(row: dict, det: Optional[dict], marks: tuple, lang: str) -> str:
+    """A table row's cells: the shelfmark (its join sign beside it), then ``row_details``' title,
+    snippet, domain (the first, "+N" naming the rest), pages, printed, PGP and edition, each blank while
+    not known. PGP and the edition are the row's signs until the details come (the same rules)."""
+    det = det or {}
+    name = html.escape(row['label'])
+    join = _icon_html('link', 'stp-sign-icon stp-sign-join', tr(SIGN_LABELS['join'])) if 'join' in marks else ''
+    cells = [f'<span class="stp-c stp-c-sm" data-cell="shelfmark" title="{_attr(_leaf_tip(row, marks))}">'
+             f'<span class="stp-c-name">{name}</span>{join}</span>']
+    title = det.get('title') or ''
+    cells.append(f'<span class="stp-c stp-c-clamp" data-cell="title" dir="auto" title="{_attr(title)}">'
+                 f'{html.escape(title)}</span>')
+    snip = det.get('snippet') or ''
+    cells.append(f'<span class="stp-c stp-c-clamp stp-c-snip" data-cell="snippet" dir="auto" title="{_attr(snip)}">'
+                 f'{html.escape(snip)}</span>')
+    domains = det.get('domains') or []
+    dom = ''
+    if domains:
+        dom = f'<span class="stp-dom" dir="auto">{html.escape(domains[0])}</span>'
+        if len(domains) > 1:
+            dom += (f'<span class="stp-dom stp-dom-more" title="{_attr(", ".join(domains))}">'
+                    f'+{len(domains) - 1}</span>')
+    cells.append(f'<span class="stp-c stp-c-dom" data-cell="domain" title="{_attr(", ".join(domains))}">{dom}</span>')
+    pages = det.get('pages')
+    cells.append(f'<span class="stp-c stp-c-num" data-cell="pages">{"" if pages is None else f"{pages:,}"}</span>')
+    printed = ''
+    if det.get('printed'):
+        from shared.fjms_service import PRINTED_LABEL_EN, PRINTED_LABEL_HE
+        printed = f'<span class="stp-printed">{html.escape(PRINTED_LABEL_HE if lang == "he" else PRINTED_LABEL_EN)}</span>'
+    cells.append(f'<span class="stp-c stp-c-mark" data-cell="printed">{printed}</span>')
+    pgp = det.get('pgp') if det.get('pgp') is not None else ('pgp' in marks)
+    cells.append('<span class="stp-c stp-c-mark" data-cell="pgp">'
+                 + (f'<span class="stp-sign-pgp" role="img" aria-label="{_attr(tr(SIGN_LABELS["pgp"]))}">PGP</span>'
+                    if pgp else '') + '</span>')
+    edition = det.get('edition') if det.get('edition') is not None else ('edition' in marks)
+    cells.append('<span class="stp-c stp-c-mark" data-cell="edition">'
+                 + (_icon_html('description', 'stp-sign-icon stp-sign-edition', tr(SIGN_LABELS['edition']))
+                    if edition else '') + '</span>')
+    return ''.join(cells)
+
+
+def _tile_html(row: dict, det: Optional[dict], thumb: Optional[str], marks: tuple) -> str:
+    """A thumbnail's tile: the image (its address in ``data-src``, set by ``_THUMBS_JS`` once the tile
+    is in sight; a placeholder when there is none or it fails), the shelfmark and its signs under it,
+    then the start of the manuscript's title, two lines, readable at a glance (owner, 2026-11-22; the
+    row's title from the catalogue, at once, else the details' when they come)."""
+    title = row.get('title') or (det or {}).get('title') or ''
+    tip = _leaf_tip({**row, 'title': title}, marks)
+    if thumb:
+        img = f'<img class="stp-lazy" data-src="{_attr(thumb)}" alt="{_attr(row["label"])}">'
+        box = 'stp-thumb'
+    else:
+        img, box = '', 'stp-thumb' + (' stp-noimg' if thumb == '' else '')
+    return (f'<div class="{box}" data-thumb="{"1" if thumb else ""}">{img}'
+            f'{_icon_html("image_not_supported", "stp-ph")}</div>'
+            f'<div class="stp-tcap" title="{_attr(tip)}"><span class="stp-c-name">{html.escape(row["label"])}</span>'
+            f'{_signs_html(marks)}</div>'
+            f'<div class="stp-ttitle" dir="auto" data-cell="title">{html.escape(title)}</div>')
+
+
+#: The table's columns resized by their headings' grips (owner, 2026-11-22): the widths, in pixels, become
+#: the table's --stp-tcols in a style of their own (a server update of the table never wipes it), kept in
+#: this browser for the next time; a double click on a grip gives the columns back their first widths.
+_RESIZE_JS = """
+(() => {
+  const KEY = 'stpTableCols';
+  const put = (cols) => {
+    let el = document.getElementById('stp-tcols-style');
+    if (!el) { el = document.createElement('style'); el.id = 'stp-tcols-style'; document.head.appendChild(el); }
+    el.textContent = cols ? `.stp-table { --stp-tcols: ${cols}; } `
+      + `.stp-table > * { width: max-content; min-width: max(860px, 100%); }` : '';
+  };
+  if (window.__stpResize) { return; }
+  window.__stpResize = true;
+  try { const kept = localStorage.getItem(KEY); if (kept) { put(kept); } } catch (e) { /* no storage */ }
+  document.addEventListener('pointerdown', (e) => {
+    const grip = e.target.closest && e.target.closest('.stp-rsz');
+    if (!grip) { return; }
+    e.preventDefault();
+    e.stopPropagation();
+    const head = grip.closest('.stp-thead');
+    const cells = [...head.querySelectorAll('[data-head]:not([data-head="box"])')];
+    const widths = cells.map((c) => c.getBoundingClientRect().width);
+    const i = cells.indexOf(grip.parentElement);
+    const rtl = getComputedStyle(head).direction === 'rtl';
+    const x0 = e.clientX, w0 = widths[i];
+    const cols = () => widths.map((w) => Math.round(w) + 'px').join(' ');
+    const move = (ev) => { widths[i] = Math.max(40, w0 + (ev.clientX - x0) * (rtl ? -1 : 1)); put(cols()); };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      try { localStorage.setItem(KEY, cols()); } catch (err) { /* kept while the page is open */ }
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  }, true);
+  document.addEventListener('dblclick', (e) => {
+    if (!(e.target.closest && e.target.closest('.stp-rsz'))) { return; }
+    put('');
+    try { localStorage.removeItem(KEY); } catch (err) { /* nothing kept */ }
+  }, true);
+})();
+"""
+
+
+#: The thumbnails load only once in sight, at most four at a time (each asks the site's image route,
+#: which may ask NLI): the tiles in sight are queued, one that leaves the sight before its turn is
+#: dropped, a loaded image is shown, a failed one makes way for the placeholder.
+_THUMBS_JS = """
+(() => {
+  if (!window.__stpThumbs) {
+    const MAX = 4; let active = 0; const seen = new Set();
+    const pump = () => {
+      for (const img of [...seen]) {
+        if (active >= MAX) { break; }
+        seen.delete(img);
+        if (!document.body.contains(img) || !img.dataset.src || img.getAttribute('src')) { continue; }
+        active += 1;
+        const box = img.closest('.stp-thumb');
+        const done = (ok) => { active -= 1; if (box) { box.classList.add(ok ? 'stp-loaded' : 'stp-noimg'); } pump(); };
+        img.addEventListener('load', () => done(true), {once: true});
+        img.addEventListener('error', () => done(false), {once: true});
+        img.setAttribute('src', img.dataset.src);
+      }
+    };
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) { seen.add(e.target); } else { seen.delete(e.target); } });
+      pump();
+    }, {rootMargin: '150px'});
+    window.__stpThumbs = {scan: () => document.querySelectorAll('img.stp-lazy[data-src]:not([data-watched])')
+      .forEach((img) => { img.dataset.watched = '1'; io.observe(img); })};
+  }
+  setTimeout(() => window.__stpThumbs.scan(), 30);
+})();
+"""
 
 
 def _page_texts():
@@ -381,12 +657,25 @@ if (!window.__stpScrollOn) {
   }, true);
 }
 """
-_RESTORE_SCROLL_JS = """
+#: A row brought into sight within its own list only: ``scrollIntoView`` scrolled every box around it too,
+#: and on a narrow screen (the columns one under the other, in a box that scrolls) the pane's header --
+#: the view switch, the filter -- went out of sight above (owner, 2026-11-22).
+_IN_LIST_JS = """
+window.__stpInList = window.__stpInList || ((el, center) => {
+  const list = el && el.closest('.stp-list');
+  if (!list) { return; }
+  const r = el.getBoundingClientRect(), l = list.getBoundingClientRect();
+  if (center) { list.scrollTop += (r.top - l.top) - (l.height - r.height) / 2; }
+  else if (r.top < l.top) { list.scrollTop += r.top - l.top; }
+  else if (r.bottom > l.bottom) { list.scrollTop += r.bottom - l.bottom; }
+});
+"""
+_RESTORE_SCROLL_JS = _IN_LIST_JS + """
 setTimeout(() => document.querySelectorAll('.stp-list[data-col]').forEach((el) => {
   const v = (window.__stpScroll || {})[el.dataset.col];
   if (v) { el.scrollTop = v; return; }
   const on = el.querySelector('.stp-on');               // first shown: the chosen row in sight
-  if (on) { on.scrollIntoView({block: 'nearest'}); }
+  if (on) { window.__stpInList(on, false); }
 }), 30);
 """
 #: The shelfmarks are in as many columns as show every one of them whole: a column is as wide as the
@@ -635,6 +924,11 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     one = {'leaf': None, 'rows': {}}
     # ... the pane's contents as shown, the places of its join partners and the holders filled again
     pane = {'gen': 0, 'leaf': None, 'info': None, 'places': {}, 'lines': None, 'joins': None}
+    # the shelfmarks pane's view (VX1, kept per reader), the details of the rows (by sys_id, this dialog's
+    # language), the thumbnails' addresses (by width, worked out again at each whole drawing), the HTML
+    # each row's cells are drawn in, and the one loader (VX5)
+    view0, size0 = _view_choice()
+    vw = {'view': view0, 'size': size0, 'rows': {}, 'thumbs': {}, 'cells': {}, 'loading': False, 'again': False}
     words = {'single': pick_label or tr('Select'), 'multi': confirm_label or tr('Done')}
     switch = None
 
@@ -912,7 +1206,12 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             return
         pane['info'], pane['places'] = info, dict(places)
         thumb = draw_pane(info)
-        url = await run.io_bound(_thumbnail_src, leaf.sys_id, leaf.shelfmark or leaf.label)
+        # the tiles' address when they have it (the browser serves it from its cache: no new fetch), else
+        # one of the tiles' width, so a gallery drawn later takes it from the cache too (owner, 2026-11-22)
+        url = known_thumb_url(leaf.sys_id)
+        if url is None:
+            url = await run.io_bound(_thumbnail_src, leaf.sys_id, leaf.shelfmark or leaf.label,
+                                     _THUMB_WIDTH[vw['size']])
         if gen != pane['gen'] or thumb.is_deleted:
             return
         if url:
@@ -1424,37 +1723,161 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
 
     # -- drawing ------------------------------------------------------------------------------
 
-    def leaf_row(row: dict):
-        """A shelfmark's row. Single choice: a click selects it (DX21). Multiple choice: a click ticks
-        it. Either way the pane shows it (DX25)."""
-        leaf = row['leaf']
+    def leaf_el(leaf, base: str):
+        """A shelfmark's element in any view (a list row, a table row, a tile), its contents for the
+        caller to add inside it. Single choice: a click selects it (DX21), a double click or Enter on
+        the selected one acts, shown chosen through ``one['rows']`` (by placement). Multiple choice: a
+        click, Enter or Space ticks it, its tick icon first inside it, painted through ``ms['ticks']``
+        (by sys_id). Either way the pane shows it (DX25)."""
         on = leaf.id == st['highlight']
-        marks = _signs_of(leaf.sys_id)
         if not multi:
-            with ui.element('div').classes('stp-row' + (' stp-on' if on else '')).props(
-                    f'data-leaf="{leaf.id}" data-sys-id="{leaf.sys_id}" role="option" '
-                    f'aria-selected="{"true" if on else "false"}" tabindex="0"').on(
-                    'click', lambda _e=None, lf=leaf: select(lf)).on(
-                    'dblclick', lambda _e=None, lf=leaf: double(lf)).on(
-                    'keydown.enter', lambda _e=None, lf=leaf: enter(lf)).on(
-                    'keydown.space.prevent', lambda _e=None, lf=leaf: select(lf)) as el:
-                _leaf_name(row, marks).classes('stp-sm')
-                _sign_marks(marks)
+            el = ui.element('div').classes(base + (' stp-on' if on else '')).props(
+                f'data-leaf="{leaf.id}" data-sys-id="{leaf.sys_id}" role="option" '
+                f'aria-selected="{"true" if on else "false"}" tabindex="0"').on(
+                'click', lambda _e=None, lf=leaf: select(lf)).on(
+                'dblclick', lambda _e=None, lf=leaf: double(lf)).on(
+                'keydown.enter', lambda _e=None, lf=leaf: enter(lf)).on(
+                'keydown.space.prevent', lambda _e=None, lf=leaf: select(lf))
             one['rows'].setdefault(leaf.id, []).append(el)
-            return
+            return el
         ticked = ms['state'] is not None and leaf.sys_id in ms['state']['chosen']
         state = 'all' if ticked else 'none'
-        with ui.element('div').classes('stp-row stp-pick' + (' stp-on' if on else '')
+        el = ui.element('div').classes(base + ' stp-pick' + (' stp-on' if on else '')
                                        + (' stp-ticked' if ticked else '')).props(
-                f'data-leaf="{leaf.id}" data-sys-id="{leaf.sys_id}" role="checkbox" '
-                f'aria-checked="{_ARIA[state]}" tabindex="0"').on(
-                'click', lambda _e=None, lf=leaf: tick(lf)).on(
-                'keydown.enter', lambda _e=None, lf=leaf: tick(lf)).on(
-                'keydown.space.prevent', lambda _e=None, lf=leaf: tick(lf)) as el:
+            f'data-leaf="{leaf.id}" data-sys-id="{leaf.sys_id}" role="checkbox" '
+            f'aria-checked="{_ARIA[state]}" tabindex="0"').on(
+            'click', lambda _e=None, lf=leaf: tick(lf)).on(
+            'keydown.enter', lambda _e=None, lf=leaf: tick(lf)).on(
+            'keydown.space.prevent', lambda _e=None, lf=leaf: tick(lf))
+        with el:
             icon = ui.icon(_BOX[state]).classes('stp-box')
+        ms['ticks'].setdefault(leaf.sys_id, []).append((el, icon))
+        return el
+
+    def leaf_row(row: dict):
+        """A shelfmark's row in the list (and among a filter's rows in a node column)."""
+        marks = _signs_of(row['leaf'].sys_id)
+        with leaf_el(row['leaf'], 'stp-row'):
             _leaf_name(row, marks).classes('stp-sm')
             _sign_marks(marks)
-        ms['ticks'].setdefault(leaf.sys_id, []).append((el, icon))
+
+    def cells_of(row: dict) -> str:
+        """A table row's cells or a tile's contents, as the view shows them, with what is known now."""
+        sid = row['leaf'].sys_id
+        marks = _signs_of(sid)
+        if vw['view'] == 'gallery':
+            return _tile_html(row, vw['rows'].get(sid),
+                              vw['thumbs'].get(_THUMB_WIDTH[vw['size']], {}).get(sid), marks)
+        return _cells_html(row, vw['rows'].get(sid), marks, lang)
+
+    def table_row(row: dict, base: str):
+        """A table row or a tile (VX6): one element with its events, the tick icon, and one HTML of its
+        cells, drawn again when the row's details come (``refresh_cells``)."""
+        with leaf_el(row['leaf'], base):
+            cells = ui.html(cells_of(row), sanitize=False).classes('stp-cells')   # escaped: _cells_html
+        vw['cells'].setdefault(row['leaf'].sys_id, []).append((cells, row))
+
+    def refresh_cells(sys_ids):
+        """The rows of these manuscripts drawn again with their details (and new tiles watched)."""
+        for sid in sys_ids:
+            alive = [(cells, row) for cells, row in vw['cells'].get(sid, ()) if not cells.is_deleted]
+            if alive:
+                vw['cells'][sid] = alive
+            else:
+                vw['cells'].pop(sid, None)
+            for cells, row in alive:
+                cells.set_content(cells_of(row))
+        if vw['view'] == 'gallery' and not dialog.is_deleted:
+            body.client.run_javascript(_THUMBS_JS)
+
+    def known_thumb_url(sys_id: str) -> Optional[str]:
+        """The image address the tiles have for a manuscript (their size's first, then any), or None."""
+        widths = [_THUMB_WIDTH[vw['size']]] + [w for w in vw['thumbs'] if w != _THUMB_WIDTH[vw['size']]]
+        for width in widths:
+            url = vw['thumbs'].get(width, {}).get(sys_id)
+            if url is not None:
+                return url
+        return None
+
+    def open_now() -> bool:
+        return not dialog.is_deleted and bool(dialog.value)
+
+    async def load_rows():
+        """The details of the rows drawn that are not known yet (``row_details``), a page at a time off
+        the loop, each page's rows drawn again when it comes; one loader a dialog, which works out again
+        what is missing after each page (a newer drawing, a "Show more", another view). A page that comes
+        after the rows have changed is kept all the same: only its drawing waits for the next."""
+        if vw['loading']:
+            vw['again'] = True
+            return
+        vw['loading'] = True
+        try:
+            while True:
+                vw['again'] = False
+                leaves, view = st.get('leaves'), vw['view']
+                if not open_now() or leaves is None or view == 'list':
+                    return
+                width = _THUMB_WIDTH[vw['size']] if view == 'gallery' else None
+                thumbs = vw['thumbs'].setdefault(width, {}) if width else None
+                known = vw['rows'] if thumbs is None else {s: 1 for s in vw['rows'] if s in thumbs}
+                batches = wanted([r['leaf'].sys_id for r in leaves['rows']], known)
+                if not batches:
+                    return
+                names = {r['leaf'].sys_id: r['leaf'].shelfmark or r['label'] for r in leaves['rows']}
+                meta, pages_of, texts_of = _meta_mgr(), _page_count(), _page_texts()
+                for batch in batches:
+                    thumb_of = ((lambda s, w=width, n=names: _thumbnail_src(s, n.get(s, ''), w)) if width else None)
+                    got = await run.io_bound(row_details, batch, lang, meta_mgr=meta, page_count=pages_of,
+                                             page_texts=texts_of, thumb_of=thumb_of)
+                    for sid, det in (got or {}).items():
+                        det = dict(det)
+                        thumb = det.pop('thumb', None)
+                        vw['rows'][sid] = det
+                        if thumbs is not None:
+                            thumbs[sid] = thumb or ''
+                    if not open_now():
+                        return
+                    refresh_cells(batch)
+                    if vw['again']:
+                        break
+                if not vw['again']:
+                    return
+        except Exception:   # noqa: BLE001 -- the cells stay as they are
+            logger.warning("shelf picker: the rows' details could not be read", exc_info=True)
+        finally:
+            vw['loading'] = False
+
+    async def set_view(view: str):
+        """The switch (VX1): the pane in another view, kept for the reader; the whole dialog is drawn
+        again, as the columns shown change (VX2)."""
+        view = normal_view(view)
+        if view == vw['view']:
+            return
+        vw['view'] = view
+        safe_user_set(STORAGE_KEY, choice_value(vw['view'], vw['size']))
+        await draw()
+
+    async def set_size(size: str):
+        size = normal_size(size)
+        if size == vw['size']:
+            return
+        vw['size'] = size
+        safe_user_set(STORAGE_KEY, choice_value(vw['view'], vw['size']))
+        await draw()
+
+    def view_switch():
+        """List / Table / Thumbnails, and the thumbnails' size, in the shelfmarks pane's header."""
+        with ui.element('div').classes('stp-views').props('role="group" data-testid="shelf-views"') as group:
+            group.props['aria-label'] = tr('View')
+            for key, icon, tip in _VIEW_BUTTONS:
+                on = vw['view'] == key
+                ui.button(icon=icon, on_click=lambda _e=None, k=key: set_view(k)).props(
+                    f'flat round dense size=sm data-view="{key}" aria-pressed="{"true" if on else "false"}" '
+                    f'aria-label="{_attr(tr(tip))}"').classes('stp-view' + (' stp-view-on' if on else '')).tooltip(tr(tip))
+            if vw['view'] == 'gallery':
+                ui.toggle({k: tr(SIZE_LABELS[k]) for k in SIZES}, value=vw['size'],
+                          on_change=lambda e: set_size(e.value)).props(
+                    'dense no-caps data-testid="shelf-thumb-size"').tooltip(tr('Thumbnail size'))
 
     async def tick(leaf):
         """Multiple choice: the box, and the pane shows the row clicked last (not waited for)."""
@@ -1509,8 +1932,21 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                 'flat dense no-caps').classes('w-full')
 
     def fill_leaves(leaves):
+        """The shelfmarks in the pane's view: the list's rows, the table (its header first) or the tiles;
+        then the details the table and the tiles show, read off the loop (``load_rows``)."""
+        st['leaves'] = leaves
+        view = vw['view']
+        if view == 'table':
+            ui.html(_header_html(multi), sanitize=False).classes('stp-thead').props('aria-hidden="true"')
         for row in leaves['rows']:
-            leaf_row(row)
+            if view == 'table':
+                table_row(row, 'stp-trow')
+            elif view == 'gallery':
+                table_row(row, 'stp-tile')
+            else:
+                leaf_row(row)
+        if view != 'list':
+            background_tasks.create(load_rows(), name='shelf-picker-rows')
         if leaves['more']:
             ui.button(tr('Show more') + f" ({leaves['more']:,})",
                       on_click=lambda k=leaves['filter_key']: show_more(k, PAGE_SIZE)).props(
@@ -1540,7 +1976,8 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             lambda e, k=key: set_filter(k, e.value))
 
     def after_draw():
-        body.client.run_javascript(_RESTORE_SCROLL_JS + _FIT_GRID_JS)
+        body.client.run_javascript(_RESTORE_SCROLL_JS + _FIT_GRID_JS + (_THUMBS_JS if vw['view'] == 'gallery' else '')
+                                   + (_RESIZE_JS if vw['view'] == 'table' else ''))
 
     async def draw(only: Optional[str] = None):
         """Draw the dialog for the path. ``only``: one list's filter or length changed, so that list
@@ -1554,15 +1991,18 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             st['owed'].add(only)                   # ... and so is this list, by whichever load is the last
         view = await run.io_bound(load_view, service, tuple(st['path']), dict(st['filters']),
                                   dict(st['shown']), lang, labels, _title_of)
-        if gen != st['gen']:
+        if gen != st['gen'] or view is None:      # None: the app is stopping
             return
         # The last load answers for every list changed meanwhile: a filter typed in one column while
         # another column's load was under way is not left with its old list.
         owed, st['owed'] = st['owed'], set()
-        if not st.get('whole') and owed and all(k in st['parts'] for k in owed):
+        # the columns the layout rule shows (VX2): a partial drawing only while it folds as the one on screen
+        folded = folds_columns(vw['view'], view['leaves'] is not None)
+        on_screen = shown_columns(view['columns'], vw['view'], view['leaves'] is not None, WIDE_COLUMNS)
+        if not st.get('whole') and owed and all(k in st['parts'] for k in owed) and folded == st.get('folded'):
             drawn = {}
             for k in owed:
-                shown = next((c for c in view['columns'][-WIDE_COLUMNS:] if c['filter_key'] == k), None)
+                shown = next((c for c in on_screen if c['filter_key'] == k), None)
                 leaves = view['leaves'] if view['leaves'] is not None and view['leaves']['filter_key'] == k else None
                 if shown is None and leaves is None:
                     drawn = None                   # that list is not in this view any more: draw it all
@@ -1584,8 +2024,10 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                 return
         st['whole'] = False
         st['parts'] = parts = {}
+        st['folded'] = folded
         ms['ticks'], ms['boxes'], ms['whole'], ms['big'] = {}, {}, None, {}
         one['rows'] = {}
+        vw['cells'], vw['thumbs'] = {}, {}         # the addresses follow the NLI breaker as it is now
         crumbs_row.clear()
         with crumbs_row:
             if st['path']:
@@ -1606,7 +2048,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                 else:
                     crumb(name, lambda _e=None, d=i: go(tuple(st['path'][:d + 1])))
         body.clear()
-        columns = view['columns'][-WIDE_COLUMNS:]
+        columns = on_screen                        # the last three; in the table and thumbnails the last one
         # A phone shows the deepest level only: the last node column (the chosen node's children, which
         # stay reachable when the node also holds shelfmarks of its own) and the shelfmarks, stacked.
         phone_depth = view['columns'][-1]['depth'] if view['columns'] else -1
@@ -1626,12 +2068,17 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                     parts[col['filter_key']] = {'list': holder}
             leaves = view['leaves']
             if leaves is not None:
-                with ui.element('div').classes('stp-col stp-leaves stp-panel stp-phone'):
-                    heading = ui.label(leaves_title(leaves)).classes('stp-title stp-sm')
+                with ui.element('div').classes('stp-col stp-leaves stp-panel stp-phone').props(
+                        f'data-view="{vw["view"]}"'):
+                    with ui.element('div').classes('stp-lhead'):
+                        heading = ui.label(leaves_title(leaves)).classes('stp-title stp-sm')
+                        view_switch()
                     filter_box(leaves['filter_key'])
                     if multi:
                         whole_row(leaves)
-                    with ui.element('div').classes('stp-list stp-grid').props(
+                    kind = {'table': 'stp-table' + (' stp-multi' if multi else ''),
+                            'gallery': f'stp-gallery stp-size-{vw["size"]}'}.get(vw['view'], 'stp-grid')
+                    with ui.element('div').classes(f'stp-list {kind}').props(
                             f'data-col="{_attr(leaves["filter_key"])}"') as holder:
                         if not multi:                  # the selected row is an option of this list
                             holder.props.update({'role': 'listbox', 'aria-label': leaves['title']})
@@ -1640,8 +2087,8 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         after_draw()
         if st['highlight']:
             body.client.run_javascript(
-                f'setTimeout(() => document.querySelector(\'[data-leaf="{st["highlight"]}"]\')'
-                '?.scrollIntoView({block: "center"}), 50)')
+                _IN_LIST_JS + f'setTimeout(() => window.__stpInList('
+                f'document.querySelector(\'[data-leaf="{st["highlight"]}"]\'), true), 50)')
         await refresh()
 
     async def begin():

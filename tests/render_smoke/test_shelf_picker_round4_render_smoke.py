@@ -146,7 +146,7 @@ def _join_rows(user) -> dict:
 def test_the_pane_is_labelled_fields_in_their_order(tmp_path, monkeypatch):
     from web.components import shelfmark_tree_picker as picker
     monkeypatch.setattr(picker, 'item_details', _details_of(JOINS))
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     monkeypatch.setattr(picker, '_community', lambda sys_id: ([], 7))         # its comments, counted last
     svc = _setup(tmp_path)
     seen = {}
@@ -196,7 +196,7 @@ def test_the_pane_is_labelled_fields_in_their_order(tmp_path, monkeypatch):
 def test_a_joins_link_takes_the_dialog_to_that_shelfmark(tmp_path, monkeypatch):
     from web.components import shelfmark_tree_picker as picker
     monkeypatch.setattr(picker, 'item_details', _details_of(JOINS))
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     svc = _setup(tmp_path)
     seen = {}
 
@@ -238,7 +238,7 @@ def test_a_joins_link_takes_the_dialog_to_that_shelfmark(tmp_path, monkeypatch):
 def test_a_join_followed_in_the_multiple_choice_is_the_one_selected_after_the_switch_back(tmp_path, monkeypatch):
     from web.components import shelfmark_tree_picker as picker
     monkeypatch.setattr(picker, 'item_details', _details_of(JOINS))
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     svc = _setup(tmp_path)
     seen = {}
 
@@ -277,7 +277,7 @@ def test_a_join_followed_in_the_multiple_choice_is_the_one_selected_after_the_sw
 def test_a_joins_box_turns_the_multiple_choice_on_and_chooses_it(tmp_path, monkeypatch):
     from web.components import shelfmark_tree_picker as picker
     monkeypatch.setattr(picker, 'item_details', _details_of(JOINS))
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     svc = _setup(tmp_path)
     seen = {}
 
@@ -343,7 +343,7 @@ def test_the_rows_signs_come_when_they_are_loaded(tmp_path, monkeypatch):
     from web.components import shelfmark_tree_picker as picker
     signs = _Signs({SYS['as2'][5]: ('pgp', 'edition', 'join'), SYS['as2'][4]: ('join',)})
     monkeypatch.setattr(picker, 'shelf_signs', lambda: signs)
-    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark: '')
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
     svc = _setup(tmp_path)
     seen = {}
 
