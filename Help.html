@@ -101,6 +101,7 @@
         <li><a href="#translations">Catalog & Metadata Translations</a></li>
         <li><a href="#composition">Composition Search</a></li>
         <li><a href="#browse">Browse by Shelfmark</a></li>
+<li><a href="#shelf">Pick from the shelf</a></li>
         <li><a href="#catalog-browse">Browse by Identification</a></li>
         <li><a href="#pgp">Princeton Geniza Project (PGP) Data</a></li>
         <li><a href="#reading-desk">Reading Desk</a></li>
@@ -413,7 +414,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     <ul>
         <li><b>Load:</b> Enter a System ID, Shelfmark, or FL ID. The search is flexible and ignores spaces or punctuation (e.g., <code>TS NS 13 15</code> finds <code>T-S NS 13.15</code>). Autocomplete is available for shelfmarks.</li>
         <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
-        <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&#9664;</span> <span style="border:1px solid #ccc; padding:0 4px;">&#9654;</span> at the top left to move to the previous or next manuscript in the database file order.</li>
+        <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&#9664;</span> <span style="border:1px solid #ccc; padding:0 4px;">&#9654;</span> at the top left to move to the previous or next manuscript on the shelf (see <a href="#shelf">Pick from the shelf</a>), or in the database file order where a manuscript has no place on it.</li>
         <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge/Oxford where supported). Use &#128444;&#65039; to show/hide the image panel.</li>
         <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling and for saving as a text file.</li>
         <li><b>Find in Text:</b> Type in the search field to highlight every match in the text on screen (the page, or the whole manuscript under <b>View All</b>). The count beside it shows which match you are on, marked in orange: &#9660; or <b>Enter</b> goes to the next one, &#9650; or <b>Shift+Enter</b> to the previous one.</li>
@@ -421,6 +422,40 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>View on Ktiv:</b> Opens the manuscript in the National Library of Israel's online catalog.</li>
         <li><b>PGP Info:</b> If Princeton Geniza Project data is available, an information panel is displayed with transcriptions, description, tags, and dating.</li>
         <li><b>Volume Selector:</b> Manuscripts with multiple microfilm scans (~1.5% of the collection) show a volume dropdown. Previously, images could be mismatched with the text — the volume selector fixes this by displaying each volume's own images and transcription, with page navigation staying within the active volume.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="shelf">Pick from the shelf</h2>
+    <p>Find a manuscript where it stands on its library's shelf.</p>
+    <ul>
+      <li><b>Open it:</b> <b>Ctrl+W</b> from anywhere; the shelf button beside Go on Browse and at the
+          end of the Go to box (Ctrl+G); and beside the shelfmark box of the Reading Desk, the Fragment
+          Puzzle, the Joins Lab, the Fragment Joins dialog and Share a Discovery.</li>
+      <li><b>The columns:</b> libraries, collections, volumes and shelfmarks, with counts and a filter in
+          every column (the library filter takes codes too: CUL, RNL, LON). The breadcrumb goes back to
+          any level.</li>
+      <li><b>Look before you open:</b> a click on a shelfmark chooses it and shows its details: its
+          image, title, other shelfmarks, the first pages of its text as stored, how many pages it has
+          and how many have text, catalogue and bibliography entries, scholarly transcriptions,
+          comments, joins and links (Ktiv, the library's own viewer, PGP). A join's shelfmark takes you
+          to it on the shelf; its box adds it to your choice.</li>
+      <li><b>Act:</b> <b>Open</b> opens the chosen shelfmark (Enter does too); <b>Add to List</b> and
+          <b>Add to Puzzle</b> stand beside it.</li>
+      <li><b>Signs:</b> a green <b>PGP</b>, a &#128196; for a scholarly transcription (&#10003; in the
+          table) and &#128279; for joins. The tooltip adds the title.</li>
+      <li><b>Views:</b> List, Table or Thumbnails (small, medium, large), on the row under the shelfmarks'
+          title. The table shows title, a line of the text, subject, pages, printed, PGP and edition. In
+          the table and the thumbnails only the last column of collections or volumes stays beside them.
+          The view is kept for next time.</li>
+      <li><b>Several at once:</b> turn on <b>Open more than one</b> (on Browse and in Go to), tick
+          shelfmarks or take a whole volume with <b>Select all in ...</b>, and open them in the Reading
+          Desk. The Reading Desk, the Fragment Puzzle, a list and the Fragment Joins dialog take ticked
+          shelfmarks too, each up to its limit; a tick past it is refused with the reason.</li>
+      <li><b>Exclude from the shelf:</b> in the Exclude Manuscripts dialog (Search and Composition),
+          <b>Pick from the shelf</b> ticks volumes, collections or shelfmarks and excludes them.</li>
+      <li><b>On the shelf in Browse:</b> the manuscript's place on the shelf under its title, and
+          <b>Previous / Next manuscript</b> (Ctrl+Shift+arrows) follow the shelf.</li>
     </ul>
     </div>
 
@@ -945,6 +980,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><a href="#translations">תרגומי קטלוג ומטא-נתונים</a></li>
         <li><a href="#composition">חיפוש חיבורים</a></li>
         <li><a href="#browse">עיון לפי מספר מדף</a></li>
+<li><a href="#shelf">בחירה מהמדף</a></li>
         <li><a href="#catalog-browse">עיון לפי זיהוי</a></li>
         <li><a href="#pgp">מידע מפרויקט הגניזה של פרינסטון (PGP)</a></li>
         <li><a href="#reading-desk">שולחן עיון (Reading Desk)</a></li>
@@ -1222,13 +1258,44 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     <ul>
         <li><b>טעינה:</b> הזינו מספר מערכת, מספר מדף או מזהה FL. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS NS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S NS 13.15</bdi></code>). השלמה אוטומטית זמינה למספרי מדף.</li>
         <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
-        <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&#9654;</span> <span style="border:1px solid #ccc; padding:0 4px;">&#9664;</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
+        <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&#9654;</span> <span style="border:1px solid #ccc; padding:0 4px;">&#9664;</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם על המדף (ראו <a href="#shelf">בחירה מהמדף</a>), או לפי סדר הקבצים כשאין לכתב היד מקום על המדף.</li>
         <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצגות התמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג'/אוקספורד במקרים נתמכים). השתמשו ב-&#128444;&#65039; כדי להציג/להסתיר את פאנל התמונות.</li>
         <li><b>הכל:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה ולשמירה כקובץ טקסט.</li>
         <li><b>חיפוש בטקסט:</b> הקלידו בשדה החיפוש כדי להדגיש את כל ההתאמות בטקסט המוצג (העמוד, או כל כתב היד במצב <b>הכל</b>). המונה שלידו מראה באיזו התאמה אתם, והיא מסומנת בכתום: &#9660; או <bdi dir="ltr"><b>Enter</b></bdi> עוברים להתאמה הבאה, &#9650; או <bdi dir="ltr"><b>Shift+Enter</b></bdi> לקודמת.</li>
         <li><b>מקבילות:</b> שולח את טקסט העמוד הנוכחי ללשונית חיפוש חיבורים לאיתור מקבילות בכל הקורפוס.</li>
         <li><b>עיין בכתיב:</b> פותח את כתב היד בקטלוג המקוון של הספרייה הלאומית.</li>
         <li><b>מידע PGP:</b> אם קיים מידע מפרויקט הגניזה של פרינסטון, יוצג פאנל מידע עם תעתיקים, תיאור, תגיות ותיארוך.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="shelf">בחירה מהמדף</h2>
+    <p>מצאו כתב יד במקומו על מדף הספרייה.</p>
+    <ul>
+      <li><b>פתיחה:</b> <b>Ctrl+W</b> מכל מקום; כפתור המדף ליד "עבור" בעיון לפי מספר מדף ובסוף תיבת "מעבר
+          אל" (Ctrl+G); וליד תיבת מספר המדף בשולחן העיון, בפאזל הקטעים, במעבדת הצירופים, בחלון צירופי
+          הקטעים ובשיתוף תגלית.</li>
+      <li><b>העמודות:</b> ספריות, אוספים, כרכים ומספרי מדף, עם מספרים ותיבת סינון בכל עמודה (הסינון של
+          הספריות מקבל גם קודים: CUL, RNL, LON). שורת הניווט מחזירה לכל רמה.</li>
+      <li><b>הצצה לפני פתיחה:</b> לחיצה על מספר מדף בוחרת בו ומציגה את פרטיו: התמונה, הכותרת, מספרי
+          המדף הנוספים, תחילת הטקסט כפי שהוא שמור, כמה עמודים יש בו וכמה מהם עם טקסט, רשומות הקטלוג
+          והביבליוגרפיה, תעתיקים מדעיים, הערות, צירופים וקישורים (כתיב, אתר הספרייה, PGP). לחיצה על מספר
+          המדף של צירוף מעבירה אליו על המדף; התיבה שלו מוסיפה אותו לבחירה.</li>
+      <li><b>פעולה:</b> <b>פתח</b> פותח את מספר המדף שנבחר (גם Enter); <b>הוסף לרשימה</b> ו<b>הוסף
+          לפאזל</b> נמצאים לידו.</li>
+      <li><b>סימנים:</b> <b>PGP</b> ירוק, &#128196; לתעתיק מדעי (&#10003; בטבלה) ו-&#128279; לצירופים. כשהסמן
+          עומד על מספר מדף מוצגת גם הכותרת.</li>
+      <li><b>תצוגות:</b> רשימה, טבלה או תמונות ממוזערות (קטנות, בינוניות, גדולות), בשורה שמתחת לכותרת
+          מספרי המדף. הטבלה מציגה כותרת, שורה מהטקסט, נושא, עמודים, דפוס, PGP ומהדורה. בטבלה ובתמונות
+          הממוזערות נשארת לצידם רק העמודה האחרונה של האוספים או הכרכים. התצוגה נשמרת לפעם הבאה.</li>
+      <li><b>כמה בבת אחת:</b> הפעילו את <b>פתיחת כמה כתבי יד</b> (בעיון לפי מספר מדף ובחלון "מעבר אל"),
+          סמנו מספרי מדף או כרך שלם ב<b>בחירת הכל ב־...</b>, ופתחו אותם בשולחן העיון. גם שולחן העיון, פאזל
+          הקטעים, רשימה וחלון צירופי הקטעים מקבלים מספרי מדף מסומנים, כל אחד עד הגבול שלו; סימון שעובר
+          אותו לא מתקבל, עם הסבר.</li>
+      <li><b>החרגה מהמדף:</b> בחלון "החרג כתבי יד" (בחיפוש ובחיפוש חיבורים), <b>בחירה מהמדף</b> מסמן
+          כרכים, אוספים או מספרי מדף ומחריג אותם.</li>
+      <li><b>המדף בעיון לפי מספר מדף:</b> מקומו של כתב היד על המדף מוצג מתחת לכותרת, ו<b>כתב היד הקודם /
+          הבא</b> (Ctrl+Shift+חיצים) עוברים לפי סדר המדף.</li>
     </ul>
     </div>
 

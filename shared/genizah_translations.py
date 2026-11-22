@@ -6546,6 +6546,32 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v11.0.0 web What's New entry and desktop What's New bar and dialog (2026-11-22),
+# approved with the release texts (the web line, the bar and the faster-browsing bullet are
+# the owner's own Hebrew).
+TRANSLATIONS.update({
+    "New: Pick from the shelf - choose manuscripts by library and collection, preview them, and open one or several together.":
+        "חדש: בחירה מהמדף - בחרו כתבי יד לפי ספריות ואוספים, ראו תצוגה מקדימה שלהם ופתחו אחד או כמה ביחד.",
+    "New: Pick from the shelf - choose manuscripts by library and collection, preview them, and open one or several together. Press Ctrl+W to try it!":
+        "חדש: בחירה מהמדף - בחרו כתבי יד לפי ספריות ואוספים, ראו תצוגה מקדימה שלהם ופתחו אחד או כמה ביחד. לחצו על Ctrl-W כדי לנסות!",
+    "Pick from the shelf (Ctrl+W, or the shelf button on Browse and in Go to): find a manuscript where it stands on its library's shelf — library, collection, volume, shelfmark.":
+        'בחירה מהמדף (Ctrl+W, או כפתור המדף בעיון לפי מספר מדף ובחלון "מעבר אל"): מצאו כתב יד במקומו על מדף הספרייה – ספרייה, אוסף, כרך, מספר מדף.',
+    "Look before you open: beside the shelf, the shelfmark's image, title and the first pages of its text, its catalogue and bibliography entries, scholarly transcriptions, joins, and links to the library's own viewer. Signs on the shelfmarks mark PGP, scholarly transcriptions and joins.":
+        "הצצה לפני פתיחה: לצד המדף מוצגים התמונה, הכותרת ותחילת הטקסט של מספר המדף, רשומות הקטלוג והביבליוגרפיה, תעתיקים מדעיים, צירופים וקישורים לאתר הספרייה. סימנים ליד מספרי המדף מראים PGP, תעתיקים מדעיים וצירופים.",
+    "Several at once: open them together in the Reading Desk, add them to a list or to the Fragment Puzzle, add several fragments to one join, or exclude them from a search.":
+        "כמה בבת אחת: פתחו אותם יחד בשולחן העיון, הוסיפו אותם לרשימה או לפאזל הקטעים, צרפו כמה קטעים בצירוף אחד, או החריגו אותם מחיפוש.",
+    "Browse shows where the manuscript stands on the shelf, and Previous / Next manuscript follow the shelf.":
+        'העיון לפי מספר מדף מראה היכן כתב היד עומד על המדף, ו"כתב היד הקודם" ו"כתב היד הבא" עוברים לפי סדר המדף.',
+    "Faster browsing from manuscript to manuscript: the program prepares the next manuscripts while you read, and keeps the ones you have already viewed.":
+        "שיפור במהירות התגובה בדפדוף בכתבי היד: התוכנה מכינה את כתבי היד הבאים בזמן שאתם קוראים, ושומרת את אלה שכבר צפיתם בהם.",
+    "In Pick from the shelf, see the shelfmarks as a list, a table (title, a line of the text, subject, pages, printed, PGP, edition) or thumbnails in three sizes.":
+        "בבחירה מהמדף אפשר לראות את מספרי המדף כרשימה, כטבלה (כותרת, שורה מהטקסט, נושא, עמודים, דפוס, PGP, מהדורה) או בתמונות ממוזערות בשלושה גדלים.",
+    'A new Reading Desk: see the fragments one at a time, with a strip of thumbnails and the text of the fragment shown beside it; all the images together; or the join\'s puzzles ("Puzzle images"), each with Open in Puzzle, and New Puzzle to arrange another. Fragments can be moved up or down, and each image has its own adjustments.':
+        'שולחן עיון חדש: ראו את הקטעים תמונה אחת בכל פעם, עם פס של תמונות מוקטנות והטקסט של הקטע המוצג לצידן; את כל התמונות יחד; או את הפאזלים של הצירוף ("תמונות פאזל"), לכל אחד "פתח בפאזל", ו"פאזל חדש" לסידור פאזל נוסף. אפשר להזיז קטעים למעלה ולמטה, ולכל תמונה התאמות משלה.',
+    "Also new: Katz Center images, and the Bodleian's links to each leaf, part and volume.":
+        'עוד חדש: תמונות ממרכז כ"ץ, וקישורים לכל דף, חלק וכרך בספרייה הבודליאנית.',
+})
+
 # v10.1.0 web What's New entry and desktop What's New bar and dialog (2026-11-18),
 # approved with the release texts (the web line's Hebrew is the owner's).
 TRANSLATIONS.update({

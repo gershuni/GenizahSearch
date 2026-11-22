@@ -113,7 +113,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "10.1.0"
+WHATS_NEW_CONTENT_VERSION = "11.0.0"
 
 
 class WhatsNewBar(QFrame):
@@ -133,6 +133,11 @@ class WhatsNewBar(QFrame):
 
         self.lbl_msg = QLabel()
         self.lbl_msg.setStyleSheet("font-weight: bold; font-size: 13px; border: none; background: transparent;")
+        # A label that does not wrap asks for its whole line as its minimum width, and the
+        # bar passes that on to the main window: 11.0.0's line (about 1,000 px) would hold the
+        # window that wide while the bar shows. It may be cut short instead; "Learn More" has
+        # the rest.
+        self.lbl_msg.setMinimumWidth(1)
 
         self.btn_learn_more = QPushButton(tr("Learn More"))
         self.btn_learn_more.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
@@ -201,7 +206,9 @@ class WhatsNewBar(QFrame):
         # texts, 2026-11-17).
         # v10.1.0: the catalogue search and Title's Fuzzy search (approved with the release
         # texts, 2026-11-18).
-        self.lbl_msg.setText(tr("New: search the catalogue information about the manuscripts, and Fuzzy search in Title search"))
+        # v11.0.0: Pick from the shelf, in the owner's own Hebrew (approved with the release
+        # texts, 2026-11-22).
+        self.lbl_msg.setText(tr("New: Pick from the shelf - choose manuscripts by library and collection, preview them, and open one or several together. Press Ctrl+W to try it!"))
         self.show()
 
     def on_learn_more(self):
@@ -350,11 +357,20 @@ class WhatsNewDialog(QDialog):
         # catalogue search, Fuzzy search, the catalogue offer on an empty search, and the
         # fixes ("Found in the catalogue records" left to the version history); 10.0.0's
         # stay in "All versions".
+        # v11.0.0 (2026-11-22, approved with the release texts): eight bullets, Pick from the
+        # shelf, looking before opening, several at once, the shelf order on Browse, faster
+        # browsing (the owner's own Hebrew), the table and thumbnails, the new Reading Desk, and
+        # Katz and the Bodleian; no fixes (they are in the version history). 10.1.0's stay in
+        # "All versions".
         items = [
-            tr("Search the catalogue information about the manuscripts: the FJMS catalogue, the PGP descriptions and the library titles, in Hebrew and English. Choose Catalog search, or type % and a space."),
-            tr("Fuzzy search, in Title and Catalog search, also finds plene and defective spellings, and close spellings in Latin letters (Saadia, Saadya). In Title search, the words can appear anywhere in the title, in any order."),
-            tr("When a text search finds nothing, it offers the manuscripts whose catalogue information mentions your words."),
-            tr('Fixes: Title search now finds abbreviations (רי"ד), and a search that starts with R (such as Rashi) is no longer treated as a Responsa search.'),
+            tr("Pick from the shelf (Ctrl+W, or the shelf button on Browse and in Go to): find a manuscript where it stands on its library's shelf — library, collection, volume, shelfmark."),
+            tr("Look before you open: beside the shelf, the shelfmark's image, title and the first pages of its text, its catalogue and bibliography entries, scholarly transcriptions, joins, and links to the library's own viewer. Signs on the shelfmarks mark PGP, scholarly transcriptions and joins."),
+            tr("Several at once: open them together in the Reading Desk, add them to a list or to the Fragment Puzzle, add several fragments to one join, or exclude them from a search."),
+            tr("Browse shows where the manuscript stands on the shelf, and Previous / Next manuscript follow the shelf."),
+            tr("Faster browsing from manuscript to manuscript: the program prepares the next manuscripts while you read, and keeps the ones you have already viewed."),
+            tr("In Pick from the shelf, see the shelfmarks as a list, a table (title, a line of the text, subject, pages, printed, PGP, edition) or thumbnails in three sizes."),
+            tr('A new Reading Desk: see the fragments one at a time, with a strip of thumbnails and the text of the fragment shown beside it; all the images together; or the join\'s puzzles ("Puzzle images"), each with Open in Puzzle, and New Puzzle to arrange another. Fragments can be moved up or down, and each image has its own adjustments.'),
+            tr("Also new: Katz Center images, and the Bodleian's links to each leaf, part and volume."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 10.1.0
+# Dicta Genizah Search Pro 11.0.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,20 +8,25 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 10.1.0?
+## What's New in Version 11.0.0?
 
-**Search the catalogue information**
+**Pick from the shelf**
 
-A new **Catalog** search, on the website and in the desktop app, searches the catalogue
-information about the manuscripts — the FJMS catalogue, the PGP descriptions and the library
-titles, in Hebrew and English, with their automatic translations. Choose Catalog search, or type
-`%` and a space. When you open a manuscript from its results, you see the catalogue records where
-your words were found, with the words marked. **Fuzzy search**, in Title and Catalog search, also
-finds plene and defective spellings, and close spellings in Latin letters; in Title search the
-words can appear anywhere in the title, in any order. On the website, the Reading Desk shows a
-document that lies on several fragments as one text beside its images, the Fragment Puzzle gains
-full screen and an exported picture that holds exactly what is on screen, and images turn freely
-at every screen width.
+On the website and in the desktop app, **Pick from the shelf** finds a manuscript where it stands
+on its library's shelf: library, collection, volume and shelfmark, with counts and a filter in every
+column. A click on a shelfmark shows its details beside the shelf before you open it: its image,
+its title and the first pages of its text, its catalogue and bibliography entries, scholarly
+transcriptions, joins and links to the library's own viewer. Signs on the shelfmarks show which
+manuscripts the Princeton Geniza Project knows, which have a scholarly transcription and which have
+joins. Tick several shelfmarks, or a whole volume, to open them together in the Reading Desk, add
+them to a list or the Fragment Puzzle, join several fragments at once, or exclude them from a
+search. Browse shows where each manuscript stands on the shelf, and Previous / Next manuscript
+follow the shelf. The shelfmarks can be seen as a list, a table with their details, or thumbnails.
+In the desktop app, Ctrl+W opens the shelf from anywhere. On the website, manuscript images appear
+sooner on Browse. Also new: images from
+the Katz Center and the Bodleian's links to each leaf, part and volume. The desktop Reading Desk
+takes the website's new shape: one fragment at a time beside its text, all the images, or the join's
+puzzles; on the website it also moves fragments up or down and gives every image its links.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
@@ -101,7 +106,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V10.1.0_Setup.exe`, about 661 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
+1. **Download:** the installer (`GenizahSearchPro_V11.0.0_Setup.exe`, about 667 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

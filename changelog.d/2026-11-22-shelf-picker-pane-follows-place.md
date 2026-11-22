@@ -1,3 +1,0 @@
-## [Unreleased] -- Pick from the shelf: the details pane follows the place (web + desktop, branch `claude/shelf-pane-follows-place`)
-
-- Leaving a shelfmark's list (another library, collection or volume, or All libraries) empties the details pane again ("Choose a shelfmark to see it here"), and in the single choice the shelfmark is no longer chosen: the Open button (and Add to List, Add to Puzzle) is off until another is clicked. Before, the pane kept the shelfmark left behind and Open took it. A filter on the shelfmark's own list keeps it. A shelfmark a column's filter found stays only while that column is on screen and its row is drawn (a filter changed, a view that folds the column away). `shared/shelfmark_tree_columns.py::leaf_in_view`, checked after every drawing.

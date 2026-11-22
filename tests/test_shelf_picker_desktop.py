@@ -512,7 +512,10 @@ class _Host:
                "_on_browse_shelf_link", "_browse_open_several_from_shelf", "_browse_rd_limit",
                "_browse_rd_base_ids", "_browse_rd_images_drawn", "_shelf_library_code",
                "_shelf_title", "_shelf_page_count", "_shelf_page_texts", "_shelf_choice_limit", "_shelf_open_actions", "_shelf_picker_options",
-               "_shelf_outcome", "_shelf_add_to_list", "_shelf_add_to_puzzle")
+               "_shelf_outcome", "_shelf_add_to_list", "_shelf_add_to_puzzle",
+               # navigate_manuscript asks it since the Browse prefetch (#98): None here, as the
+               # stand-in meta_mgr has no enriched_recently.
+               "_browse_fresh_meta")
 
     def __init__(self, app, sid=None):
         gui = app.GenizahGUI

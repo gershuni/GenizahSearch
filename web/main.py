@@ -738,6 +738,7 @@ from web.home_query import catalogue_has_shelfmark, home_query_target  # the hea
 from web.catalog_assets import catalog_available  # and offers % where the catalogue search is served
 from web import hebrew_keyboard  # the on-screen keys in the header's box (and the script for every page's boxes)
 from web.components.shelf_pick import browse_url_for_pick, shelf_pick_button  # the header's shelf button
+from web.shelfmark_tree_assets import shelf_tree_available  # the 11.0.0 What's New line and its key
 from web.reading_desk_handoff import choice_limit as desk_choice_limit, open_in_reading_desk  # ... and its several
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
@@ -773,14 +774,15 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "10.1.0-catalogue"
-# The keys before it, newest first. 10.1.0's key needs the catalogue text search served (the
-# switch on and the file checked: they go to the server after the code); 10.0.0's needs the
-# scholarly transcriptions served to every reader (switch and index); 9.16.0's needs the
-# letter-level index. Where a gate is off, the key stays at the one before, so the unread dot
-# lights only where the new entry is there to read.
-WHATS_NEW_PREVIOUS_VERSION = "10.0.0-scholarly"
-WHATS_NEW_EARLIER_VERSION = "9.16.0-long-passages"
+WHATS_NEW_VERSION = "11.0.0-shelf"
+# The keys before it, newest first. 11.0.0's key needs the shelf tree served (the switch on and
+# the file checked: it goes to the server after the code); 10.1.0's needs the catalogue text
+# search served (switch and file); 10.0.0's needs the scholarly transcriptions served to every
+# reader (switch and index); 9.16.0's needs the letter-level index. Where a gate is off, the key
+# stays at the one before, so the unread dot lights only where the new entry is there to read.
+WHATS_NEW_PREVIOUS_VERSION = "10.1.0-catalogue"
+WHATS_NEW_EARLIER_VERSION = "10.0.0-scholarly"
+WHATS_NEW_OLDER_VERSION = "9.16.0-long-passages"
 WHATS_NEW_EARLIEST_VERSION = "9.15.0-friedman"
 
 
@@ -790,10 +792,11 @@ def _whats_new_gates() -> list:
     from web.editions_assets import served_to as editions_served_to
     from web.keyboard_shortcuts import served_dictionaries
     return [
-        ('catalogue', WHATS_NEW_VERSION, catalog_available()),
-        ('editions', WHATS_NEW_PREVIOUS_VERSION, editions_served_to(False)),
+        ('shelf', WHATS_NEW_VERSION, shelf_tree_available()),
+        ('catalogue', WHATS_NEW_PREVIOUS_VERSION, catalog_available()),
+        ('editions', WHATS_NEW_EARLIER_VERSION, editions_served_to(False)),
         ('dictionaries', None, all(served_dictionaries().values())),
-        ('passages', WHATS_NEW_EARLIER_VERSION, passage_available()),
+        ('passages', WHATS_NEW_OLDER_VERSION, passage_available()),
     ]
 
 
@@ -1910,6 +1913,12 @@ def create_layout():
         _new_surfaces.insert(0, (tr('New: search the catalogue information about the manuscripts. '
                                     'Choose Catalog search, or type % and a space.'),
                                  '/search?mode=Catalog'))
+    # v11.0.0 (2026-11-22), approved with the release texts (the owner's own Hebrew), newest on
+    # top. Gated like the key: the shelf button exists only where the shelf tree is served.
+    if shelf_tree_available():
+        _new_surfaces.insert(0, (tr('New: Pick from the shelf - choose manuscripts by library and '
+                                    'collection, preview them, and open one or several together.'),
+                                 '/browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

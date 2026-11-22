@@ -103,6 +103,20 @@ def _click(user, element):
                 events.handle_event(listener.handler, args)
 
 
+def _external_images(page):
+    """What the enrichment's resolver answers for *page*: its own library images.
+
+    Since the images-sooner change, Phase B replaces the page's library images with the
+    resolver's answer, and an empty answer withdraws them; the real resolver reads the
+    metadata cache, empty here, so without this the chips would follow no images at all."""
+    return lambda _sys_id, meta_mgr=None: {
+        'cambridge_images': list(page.cambridge_images or []),
+        'external_provider': page.external_provider or '',
+        'cambridge_alignment': page.cambridge_alignment,
+        'cambridge_resolution': {},
+    }
+
+
 def _run_browse(page, driver, lang='en', *, crossref=None):
     # The metadata panel's related-fragments loader goes to the network; stub it.
     # The browse enrichment overwrites the stubbed page's image_source_info from
@@ -113,6 +127,7 @@ def _run_browse(page, driver, lang='en', *, crossref=None):
         crossref.is_available.return_value = False
     with patch.object(browse, 'get_service', return_value=_service(page)), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
+            patch('web.components.image_resolution.resolve_external_images', side_effect=_external_images(page)), \
             patch.object(browse, 'load_connected_fragments_into', AsyncMock()), \
             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=True), \
             patch.object(browse.GlobalAuthState, 'get_user_id', return_value=None):
@@ -240,7 +255,7 @@ def test_switching_the_image_source_does_not_load_the_page_again():
 
     crossref = MagicMock()
     crossref.is_available.return_value = False
-    with patch.object(browse, 'get_service', return_value=svc),             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref),             patch.object(browse, 'load_connected_fragments_into', AsyncMock()),             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=True),             patch.object(browse.GlobalAuthState, 'get_user_id', return_value=None):
+    with patch.object(browse, 'get_service', return_value=svc),             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref),             patch('web.components.image_resolution.resolve_external_images', side_effect=_external_images(SWITCH_PAGE)),             patch.object(browse, 'load_connected_fragments_into', AsyncMock()),             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=True),             patch.object(browse.GlobalAuthState, 'get_user_id', return_value=None):
         _run_home_smoke(driver, lang='en')
 
 

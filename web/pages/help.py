@@ -862,6 +862,137 @@ def _catalog_served() -> bool:
     return catalog_available()
 
 
+def _shelf_served() -> bool:
+    """The shelf tree is served (web/shelfmark_tree_assets.py): only then does Help describe
+    Pick from the shelf, whose button exists only there."""
+    from web.shelfmark_tree_assets import shelf_tree_available
+    return shelf_tree_available()
+
+
+#: "Pick from the shelf", its card after "Browse by Shelfmark" and its contents entry
+#: (v11.0.0, approved with the release texts).
+_SHELF_HELP = {
+    'en': ('Pick from the shelf', '''
+Find a manuscript where it stands on its library's shelf, the way a reader walks along the shelves.
+
+**Opening it:** the shelf button (**Pick from the shelf**) is beside **Go** on Browse by Shelfmark,
+beside the go-to box in the header, under the search box on the home page, and wherever a page asks
+for a manuscript: the Fragment Puzzle, the Reading Desk, the Joins Lab, a new join, Share a
+Discovery and a comment's shelfmark reference. It opens at the manuscript you are on.
+
+**The columns:** libraries, then collections, volumes and shelfmarks, each column with its count and
+a filter box. The library filter also takes a library's code (CUL, RNL, LON). A collection's filter
+also finds the volumes and shelfmarks inside it: type `2556.4` in ENA. The breadcrumb above goes
+back to any level. On a phone the shelf shows one level at a time.
+
+**Look before you open:** a click on a shelfmark chooses it and shows its details beside the shelf:
+- its image, its title and its other shelfmarks;
+- the first pages of its text, as they are stored;
+- how many pages it has and how many have text; its catalogue and bibliography entries; its
+  scholarly transcriptions; readers' comments;
+- its joins: a join's shelfmark takes you to it on the shelf, and its box adds it to your choice;
+- links to Ktiv, the library's own viewer (such as the Cambridge Digital Library or Manchester) and
+  PGP.
+
+**Opening, and more:** **Open** opens the chosen shelfmark. **Add to List** and **Add to Puzzle**
+stand beside it where the shelf opens manuscripts.
+
+**Signs on the shelfmarks:** a green **PGP** for the manuscripts the Princeton Geniza Project
+knows, a mark for a scholarly transcription, and a link mark for joins. Hold the pointer on a
+shelfmark to see its title.
+
+**Views:** the switch above the shelfmarks shows them as a **list**, a **table** (title, a line of
+the text, subject, pages, printed, PGP, edition) or **thumbnails** (small, medium or large). In the
+table and the thumbnails the shelfmarks take most of the window, beside the last column of
+collections or volumes. Choosing, ticking and opening work the same in every view, and the view is
+kept for next time.
+
+**Several at once:** turn on **Open more than one** (on Browse, the header and the home page) and
+tick shelfmarks, or take a whole volume with **Select all in ...**. A bar shows what is chosen;
+**Open** opens them side by side in the Reading Desk. From the Reading Desk, the Fragment
+Puzzle, a list's **Add from the shelf** and a new join, ticked shelfmarks are added to them. Each
+place has its limit (the Reading Desk: 30 manuscripts and 1,000 pages; the Fragment Puzzle: 30; a
+join: 30 fragments; a list: 2,000 at a time), and a tick past it is refused with the reason. What
+you tick is kept until you use it or clear it, and can be saved as a list.
+
+**Exclude from the shelf:** in Search, **Exclude known manuscripts** > **Pick from the shelf** ticks
+whole volumes, collections or single shelfmarks, with no limit, and excludes them all.
+
+**On the shelf in Browse:** under a manuscript's title, Browse shows its place on the shelf (library,
+collection, volume, and its position in it); each opens the shelf there. **Previous** and **Next
+manuscript** follow the shelf, across volumes and collections.
+'''),
+    'he': ('בחירה מהמדף', '''
+מצאו כתב יד במקומו על מדף הספרייה, כמו קורא שעובר בין המדפים.
+
+**פתיחה:** כפתור המדף (**בחירה מהמדף**) נמצא ליד **עבור** בעיון לפי מספר מדף, ליד תיבת המעבר שבכותרת,
+מתחת לתיבת החיפוש בדף הבית, ובכל מקום שבו בוחרים כתב יד: פאזל הקטעים, שולחן העיון, מעבדת הצירופים,
+צירוף חדש, שיתוף תגלית והפניה למספר מדף בתגובה. הוא נפתח בכתב היד שבו אתם נמצאים.
+
+**העמודות:** ספריות, ואחריהן אוספים, כרכים ומספרי מדף, ובכל עמודה מספר ותיבת סינון. הסינון של
+הספריות מקבל גם את קוד הספרייה (CUL, RNL, LON). הסינון של אוסף מוצא גם את הכרכים ומספרי המדף שבתוכו:
+הקלידו `2556.4` ב-ENA. שורת הניווט שמעל העמודות מחזירה לכל רמה. בטלפון המדף מוצג רמה אחר רמה.
+
+**הצצה לפני פתיחה:** לחיצה על מספר מדף בוחרת בו ומציגה את פרטיו לצד המדף:
+- התמונה, הכותרת ומספרי המדף הנוספים;
+- תחילת הטקסט, כפי שהוא שמור;
+- כמה עמודים יש בו וכמה מהם עם טקסט; רשומות הקטלוג והביבליוגרפיה; תעתיקים מדעיים; הערות קוראים;
+- הצירופים: לחיצה על מספר המדף של צירוף מעבירה אליו על המדף, והתיבה שלו מוסיפה אותו לבחירה;
+- קישורים לכתיב, לאתר הספרייה (כמו הספרייה הדיגיטלית של קיימברידג' או מנצ'סטר) ול-PGP.
+
+**פתיחה ועוד:** **פתח** פותח את מספר המדף שנבחר. **הוסף לרשימה** ו**הוסף לפאזל** נמצאים לידו במקומות
+שבהם המדף פותח כתבי יד.
+
+**סימנים ליד מספרי המדף:** **PGP** ירוק לכתבי היד המוכרים לפרויקט הגניזה של פרינסטון, סימן לתעתיק
+מדעי וסימן קישור לצירופים. העמידו את הסמן על מספר מדף כדי לראות את כותרתו.
+
+**תצוגות:** המתג שמעל מספרי המדף מציג אותם **כרשימה**, **כטבלה** (כותרת, שורה מהטקסט, נושא, עמודים,
+דפוס, PGP, מהדורה) או **בתמונות ממוזערות** (קטנות, בינוניות או גדולות). בטבלה ובתמונות הממוזערות מספרי
+המדף תופסים את רוב החלון, לצד העמודה האחרונה של האוספים או הכרכים. בחירה, סימון ופתיחה פועלים אותו
+דבר בכל תצוגה, והתצוגה נשמרת לפעם הבאה.
+
+**כמה בבת אחת:** הפעילו את **פתיחת כמה כתבי יד** (בעיון לפי מספר מדף, בכותרת ובדף הבית) וסמנו מספרי
+מדף, או כרך שלם ב**בחירת הכל ב־...**. פס מראה את מה שנבחר; **פתח** פותח אותם זה לצד זה בשולחן
+העיון. משולחן העיון, מפאזל הקטעים, מ**הוספה מהמדף** ברשימה ומצירוף חדש, מספרי המדף שסומנו נוספים
+אליהם. לכל מקום יש גבול (שולחן העיון: 30 כתבי יד ו-1,000 עמודים; פאזל הקטעים: 30; צירוף: 30
+קטעים; רשימה: 2,000 בכל פעם), וסימון שעובר אותו לא מתקבל, עם הסבר. מה שסימנתם נשמר עד שתשתמשו בו או
+תנקו אותו, ואפשר לשמור אותו כרשימה.
+
+**החרגה מהמדף:** בחיפוש, **החרג כתבי יד מוכרים** > **בחירה מהמדף** מסמן כרכים, אוספים או מספרי מדף
+בודדים, בלי גבול, ומחריג את כולם.
+
+**המדף בעיון לפי מספר מדף:** מתחת לכותרת של כתב היד מוצג מקומו על המדף (ספרייה, אוסף, כרך ומיקומו
+בו); כל אחד מהם פותח את המדף שם. **כתב היד הקודם** ו**כתב היד הבא** עוברים לפי סדר המדף, גם בין כרכים
+ואוספים.
+'''),
+}
+
+
+def _with_shelf_entry(toc_items: list, lang: str) -> list:
+    """*toc_items* with Pick from the shelf after Browse by Shelfmark where the shelf is served."""
+    if not _shelf_served():
+        return toc_items
+    browse_at = [anchor for anchor, _title in toc_items].index('browse')
+    return toc_items[:browse_at + 1] + [('shelf', _SHELF_HELP[lang][0])] + toc_items[browse_at + 1:]
+
+
+def _render_shelf_help(lang: str) -> None:
+    """The Pick from the shelf card, only where the shelf tree is served."""
+    if not _shelf_served():
+        return
+    title, body = _SHELF_HELP[lang]
+    rtl = lang == 'he'
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props('name="help-shelf"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('shelves').classes('text-2xl text-primary')
+            h2(title, classes='text-xl font-bold', style='color: var(--text-primary);')
+        if rtl:
+            _md(body, extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+        else:
+            _md(body).style('color: var(--text-secondary);')
+
+
 #: The Catalog mode's line in the search-mode list, placed after Title where it is served
 #: (v10.1.0, approved with the release texts).
 _CATALOG_MODE_HELP = {
@@ -988,6 +1119,7 @@ def _create_english_content(precision=None, band_counts=None):
                 ('browse', 'Browse by Shelfmark'),
                 ('catalog-browse', 'Browse by Identification'),
             ]
+            toc_items = _with_shelf_entry(toc_items, 'en')
             if discovery_available():
                 toc_items.append(('computed-identifications', 'Computed Identifications (Beta)'))
                 # BAND-05 methods section (D-10), restored 2026-08-13 under the
@@ -1640,6 +1772,9 @@ This page enables convenient continuous reading of a full manuscript, synchroniz
 - **Volume Selector:** Manuscripts with multiple microfilm scans (~1.5% of the collection) show a volume dropdown. Each volume shows its own images and transcription, and page navigation stays within the chosen volume
 ''' + _dictionary_bullets('en')).style('color: var(--text-secondary);')
 
+    # === Pick from the shelf (where the shelf tree is served) ===
+    _render_shelf_help('en')
+
     # === Browse by Identification ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-catalog-browse"')
@@ -1815,6 +1950,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
                 ('browse', 'עיון לפי מספר מדף'),
                 ('catalog-browse', 'עיון לפי זיהוי'),
             ]
+            toc_items = _with_shelf_entry(toc_items, 'he')
             if discovery_available():
                 toc_items.append(('computed-identifications', 'זיהויים מחושבים (בטא)'))
                 # BAND-05 methods section (D-10), restored 2026-08-13 -- see the
@@ -2417,6 +2553,9 @@ def _create_hebrew_content(precision=None, band_counts=None):
 - **מידע PGP:** אם קיים מידע מפרויקט הגניזה של פרינסטון, יוצג פאנל מידע עם תעתוקים, תיאור, תגיות ותיארוך (ראו [מידע PGP](#help-pgp) לעיל)
 - **בורר כרכים:** בכתבי יד שיש להם כמה סריקות מיקרופילם (כ-1.5% מהאוסף) מופיע תפריט לבחירת כרך. לכל כרך מוצגות התמונות והתעתוק שלו, וניווט העמודים נשאר בתוך הכרך שנבחר
 ''' + _dictionary_bullets('he'), extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Pick from the shelf (where the shelf tree is served) ===
+    _render_shelf_help('he')
 
     # === Browse by Identification ===
     with ui.card().classes('w-full p-6'):

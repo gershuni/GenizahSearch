@@ -8,6 +8,817 @@ which is not public.
 
 ---
 
+## [11.0.0] - 2026-11-22 — Pick from the shelf
+
+### New Features
+- **Pick from the shelf** (website and desktop): every manuscript in its place on its library's
+  shelf, library > collection > volume > shelfmark, with counts and a filter in every column, in
+  both languages. On the website it opens from Browse, the header's go-to box, the home page and
+  every page that asks for a manuscript (the Fragment Puzzle, the Reading Desk, the Joins Lab, a new
+  join, Share a Discovery, a comment's shelfmark reference). In the desktop app it opens from
+  Browse, Go to (Ctrl+G), the Reading Desk, the Fragment Puzzle, the Joins Lab, the Fragment Joins
+  dialog and Share a Discovery, and Ctrl+W opens it from anywhere.
+- **Look before you open**: a click chooses a shelfmark and shows its details in a pane beside the
+  shelf: its image, its title, the first pages of its text as they are stored, how many pages have
+  text, its catalogue and bibliography entries, scholarly transcriptions, readers' comments, joins
+  (each a link to its place on the shelf) and links to the library's own viewer. A button opens it.
+- **Signs on the shelfmarks** for the manuscripts the Princeton Geniza Project knows, those with a
+  scholarly transcription, and those with joins. The row's tooltip adds the title.
+- **Several at once**: tick shelfmarks, or a whole volume with "Select all", and open them in the
+  Reading Desk (up to 30 manuscripts and 1,000 pages), add them to a list (up to 2,000) or to the
+  Fragment Puzzle (up to 30), join several fragments in one new join (up to 30; all are saved or
+  none), or exclude them from a search, a whole collection included. A choice past a limit is
+  refused when it is ticked. What is ticked is kept until it is used or cleared, and can be saved
+  as a list.
+- **Table and thumbnail views** of the shelfmarks (both apps): beside the list, a table with the
+  search results' columns (shelfmark with its join sign, title, a line of the text, domain, pages,
+  printed, PGP, edition) and thumbnails in the Joins Lab's three sizes. In those views only the last
+  column of collections or volumes stays beside the shelfmarks. The choice is kept for the reader.
+  The details are read a page of rows at a time, off the event loop, and the images load only once in
+  sight, a few at a time.
+- **Images from the Katz Center**, and links to each leaf, part and volume at the Bodleian (both
+  apps).
+
+### Improvements
+- **Manuscript images appear sooner on Browse** (website): a manuscript aligned with its library
+  (Cambridge, Manchester, JTS, Katz, Oxford) shows that library's image from the first draw; every
+  library gets a quick preview, as NLI did; the sharp image is asked for together with the preview;
+  one NLI manifest download per manuscript at a time; the Oxford image route waits seconds, not
+  half a minute, before showing the Bodleian link.
+- **Next and previous manuscript at once in desktop Browse**: while the reader stays on a
+  manuscript, the next two on the shelf in the reader's direction and the one behind are prepared
+  (metadata, a preview, the sharp image); a manuscript seen in the session opens from memory without
+  a new metadata read; every IIIF library gets a preview; an image is never downloaded twice; the
+  image arriving is drawn once, in its place, without the empty viewer between the two.
+- **Previous / Next manuscript follow the shelf** wherever a manuscript has a place on it, across
+  volumes and collections; Browse shows the place on the shelf under the title. In the desktop app,
+  paging past a manuscript's last page goes on to the next manuscript.
+- **Reading Desk** (desktop), like the website's: One at a time (a strip of thumbnails, the shown
+  fragment's text beside it), All images, and Puzzle images (the join's puzzles one under another,
+  Open in Puzzle, New Puzzle, or Arrange in Puzzle when there is none); fragments move up or down;
+  in One at a time the shown fragment's text is in the version chosen above it, and changing the
+  version keeps the fragment's other versions; each image has its own adjustments.
+- **Reading Desk** (website): all the puzzles of a join, one under another ("Puzzle images"), each
+  with its own controls; "New Puzzle" arranges another; fragments move up or down; every image has
+  a menu of its links.
+- The header's theme button switches between light and dark (website; parchment stays in
+  Settings).
+
+### Bug Fixes
+- On Browse, the image stays in full screen when you turn the page, without a flicker, and a tall
+  folio fits the screen (website).
+- A typed additional shelfmark of a shared discovery is kept (website).
+- The Fragment Joins dialog joins the record chosen from a list, also when two records share its
+  shelfmark; a Puzzle fragment added again keeps its external image; Exclude Manuscripts' Clear All
+  clears the chosen lists too; an edit after Resolve Shelfmarks is kept (desktop).
+- **Cambridge's first page** in Browse showed the second leaf side (the folio+side lookup counts
+  pages from 0, Browse passed its page from 1) (desktop).
+
+### Data and deploy
+- New sidecar `shelfmark_tree_data/shelfmark_tree.db` (266,673 places of 255,612 manuscripts), in
+  the installer and on the server. Web: code first, then
+  `scripts/deploy_shelfmark_tree_sidecar.ps1 -Leaves 266673`. `SHELFMARK_TREE_ENABLED`, on unless
+  set off, AND the file checked at start.
+
+### Pick from the shelf: the shelfmarks as a table or as thumbnails (web)
+
+#### Added
+- **A table and thumbnails in Pick from the shelf.** A switch in the shelfmarks pane's header shows a
+  volume's shelfmarks as a list (as before), as a table (shelfmark, title, a snippet of the text, domain,
+  pages, printed, PGP and edition, with the search results' badges; one line a row) or as thumbnails of
+  each manuscript's first image, small, medium or large, with the start of its title under it. In the table and the
+  thumbnails the shelfmarks take the room: only the column of volumes beside them stays, and the breadcrumb goes back. The choice is kept for the next
+  time. The details are read a page of shelfmarks at a time, off the event loop; the images load only once
+  in sight, four at a time. Ticks, signs, "Select all", the details pane and Open / Add to List / Add to
+  Puzzle work in every view. On a phone the table scrolls sideways in its own box and the thumbnails wrap;
+  on a small or short screen the details pane keeps a share of its own and the view switch stays in sight.
+  The table's columns can be resized (a grip at the end of each heading; kept in this browser, a double
+  click restores them); the details pane shows the thumbnail the tiles already have, from the browser's
+  cache. The header's, the home page's and Browse's pickers confirm several with "Open".
+
+### Pick from the shelf: the details of a page of shelfmarks for a table and thumbnails (web + desktop)
+
+#### Added
+- `shared/shelfmark_tree_rows.py`: what both apps' shelf pickers need to show a node's shelfmarks as a
+  table or as thumbnails as well as a list. `row_details` answers a page of shelfmarks at once (title, a
+  snippet of the text, domains, pages, printed, PGP, edition and the image's address where the app names it
+  without the network), each source in one batch, off the UI thread; the stored choice of view and
+  thumbnail size is read safely; the layout rule (the table and the thumbnails keep only the last column of
+  volumes or collections) is one function both apps call. Strings for the view switch.
+
+### Pick from the shelf: the shelfmarks as a table or as thumbnails (desktop)
+
+#### Added
+- **A table and thumbnails in Pick from the shelf.** In the shelfmarks pane's header, List / Table /
+  Thumbnails: the table has the search results table's columns (shelfmark, title, snippet, domain, pages,
+  printed, PGP, edition) and its badges, every column in sight; the thumbnails show each manuscript's first
+  image, small, medium or large, as in the Join Workbench, with the start of its title under it. In the table and the thumbnails the shelfmarks take the room: only the
+  column of volumes beside them stays, and the breadcrumb goes back. The choice is kept in the app's
+  settings. The table's details are read a page at a time off the UI thread; only the thumbnails in sight
+  are fetched, three at a time, and closing the picker waits for none of them. Ticks, signs, "Select all",
+  the details pane, Open, a double click, Enter and the foot's buttons work in every view. The table's
+  columns can be resized (kept while the app runs). A thumbnail is fetched once: the details pane and the
+  gallery share it, so clicking the same shelfmark again shows its picture at once. Opened at a
+  manuscript, the picker shows it in the details pane; Browse's picker confirms several with "Open".
+
+#### Fixed
+- A thumbnail answered by NLI with something that is not an image (an error page) no longer counts as a
+  success for the NLI circuit breaker.
+
+### The shelf picker: labelled details, signs on the shelfmarks, several from Go to (desktop)
+
+#### Fixed
+- **The list of shelfmarks no longer jumps.** In some collections (the Schøyen collection among them)
+  the shelfmarks moved between two and three columns without end; they now stay put.
+- **No blank line above the shelfmarks** (T-S C3, T-S C4 and many others), and their rows are as tall
+  as the rows of the columns beside them.
+- **Opening several brings Browse to the front.** Ctrl+W from another section, several shelfmarks
+  ticked and opened: the window now goes to Browse, where they open, as it does for one.
+- **The library's own viewer is linked in the details pane** (Cambridge Digital Library, Manchester
+  and the others): once a manuscript had been opened in Browse, the pane lost that link.
+- **Tick boxes show on a dark theme** before they are ticked: the boxes of the shelfmarks, and those
+  of the collections in "Exclude manuscripts from the shelf".
+
+#### Changed
+- **Go to (Ctrl+G)** opens the same shelf picker as Browse: its switch "Open more than one" ticks
+  several shelfmarks and opens them all in the Reading Desk.
+- **The details pane is labelled fields**: the shelfmark and its other shelfmarks, the title, the text
+  of its first pages as stored (in a box that scrolls, each page under its number), the pages and how
+  many have text, the catalogue and bibliography entries, the scholarly transcriptions, the comments,
+  the date and subjects, then its joins and its links (Ktiv, Cambridge Digital Library, Manchester,
+  Princeton and the others).
+- **Joins in the pane**: each joined fragment's shelfmark goes to it on the shelf; its box adds it to
+  the shelfmarks chosen together with the shelfmark shown, turning on "Open more than one" when it is
+  off.
+- **Signs on the shelfmarks**: a green "PGP" where the Princeton Geniza Project knows the fragment (as
+  in the search results), a document icon for a scholarly transcription and a link mark for a join;
+  the tooltip names them.
+
+### Pick from the shelf: the details pane follows the place (web + desktop)
+
+- Leaving a shelfmark's list (another library, collection or volume, or All libraries) empties the details pane again ("Choose a shelfmark to see it here"), and in the single choice the shelfmark is no longer chosen: the Open button (and Add to List, Add to Puzzle) is off until another is clicked. Before, the pane kept the shelfmark left behind and Open took it. A filter on the shelfmark's own list keeps it. A shelfmark a column's filter found stays only while that column is on screen and its row is drawn (a filter changed, a view that folds the column away). `shared/shelfmark_tree_columns.py::leaf_in_view`, checked after every drawing.
+
+### The shelf picker reads your lists without holding the site (web)
+
+#### Fixed
+- **Add to List from the shelf picker's multiple choice read the reader's lists on the server's
+  event loop.** The lists manager's `data` is a fresh database read, so a slow answer held every
+  reader on the server until it came. The lists are now read in a worker thread
+  (`web/components/shelfmark_tree_picker.py::_load_list_options`). The reader's sign-in and database
+  client are resolved first, on the loop (`UserListsManager._worker_context`), because a worker
+  cannot read the visitor's storage. A failed read offers a new list only.
+
+#### Tests
+- `tests/render_smoke/test_shelf_picker_round3_render_smoke.py::test_the_list_chooser_reads_the_lists_off_the_event_loop`:
+  the read runs off the loop thread with the context resolved on it. It fails with the read moved
+  back onto the loop, and with the context left unresolved.
+
+### Reading Desk: switching the image view keeps the page where it was (web)
+
+#### Fixed
+- **Switching the Reading Desk between "One at a time", "All images" and "Puzzle images" took the
+  page to its top.** The switch redraws the desk, and the redraw destroyed the toggle a mouse click
+  had left the focus in; as the focused element left the page the browser scrolled to the top
+  (measured in the local app: 250 px to 0, about a second after the click, with no script asking
+  for it; a click that left no focus did not jump). The controls that redraw the desk (both view
+  toggles, a fragment's up, down and remove) now let go of the focus as they are clicked
+  (`web/static/reading_desk_place.js`, class `rd-redraws`).
+- **The two panes of "All images" moved the page as they followed each other.** They scrolled with
+  `scrollIntoView`, which scrolls the page too, and followed the observers' first report, made as
+  soon as they were set up: every redraw brought the top of the text side into view. Each pane now
+  scrolls on its own, and the first report is not followed (`rdSyncPanes`, moved out of
+  `web/pages/browse.py`).
+
+#### Tests
+- `tests/test_reading_desk_place_js.py` runs `tests/js/reading_desk_place_check.js` under node
+  against the real script with a small fake DOM: focus let go on a click in a redrawing control
+  (mouse or keyboard), kept elsewhere; the panes follow each other by their own scroll, never the
+  page's, and not on the first report. The browse page loads the script, and every control that
+  redraws the desk carries `rd-redraws` (render-smoke). Mutations of each part fail a test.
+
+### The header's theme button switches between light and dark (web)
+
+#### Changed
+- **The theme button in the website's header now switches between light and dark only.** It
+  went light -> parchment -> dark, so dark took two clicks. Parchment counts as a light theme, so a
+  click from it goes to dark. The icon and tooltip say what the next click does ("Switch to the
+  dark theme" / "Switch to the light theme", in Hebrew too). Parchment is still chosen in Settings
+  and in the sidebar's theme switcher, and a saved parchment theme keeps working
+  (`web/header_theme.py`; the sidebar and Settings keep the button in step through
+  `sync_header_theme_button`).
+
+#### Tests
+- `tests/render_smoke/test_header_theme_button_render_smoke.py`: light -> dark -> light and
+  parchment -> dark, with the icon, tooltip and aria-label, in English and Hebrew. All three fail
+  with the old three-step cycle.
+
+### Desktop Reading Desk: one image at a time, all images, puzzle images, and the fragments' order (desktop)
+
+#### Added
+- **The desktop Reading Desk's image side has the website's three views**, in one frame (GS-294):
+  the image beside the text with its controls above it, and a narrow column on the outer edge
+  with the view switcher above it.
+  - **One at a time**: the column is a strip of thumbnails of every image of every fragment;
+    the image beside the text is the one chosen. The text side then shows only that image's
+    fragment, and only its page when the page records the image's NLI id (never by position:
+    a library's own images may be in another order). The fragment's line above its text is gone
+    (its name and remove are over the image) and the "Version" chooser above the text holds that
+    fragment's texts. The default on a desk opened for a PGP document with an edition or a
+    translation, as on the website.
+  - **All images**: the stack the desk always had, the text scrolling in step with it; a
+    thumbnail brings its image into view.
+  - **Puzzle images** (two or more fragments on the desk): the saved puzzles of these fragments,
+    the reader's own and the published ones, listed in the column with their pictures and a
+    check box each (the first four shown by default), the ticked ones one under another, each
+    with its controls and "Open in Puzzle"; "New Puzzle" opens the Fragment Puzzle on a new
+    canvas with the desk's fragments, after its own question about the puzzle on the canvas. An
+    own puzzle's picture is composed as the Puzzle exports it, and says when fragments' images
+    could not be loaded.
+- **A fragment moves up or down** (▲ ▼ beside its name, over the image in one at a time, on its
+  header in all images): its images, its text and the order the Puzzle takes follow.
+- **Every desk image has the adjustments** (brightness, contrast, gamma, invert) behind one
+  button, beside zoom, rotate and a new "Reset View".
+
+#### Fixed
+- The image side opens with half the room and keeps its width when the view changes or the
+  window grows; before, the text took every spare pixel and the images sat at their minimum
+  width. The divider comes back where it was when the desk is left.
+- "[change version]" keeps the fragment's sources: choosing V0.8 used to delete them (no way
+  back), and a translation chosen beside an edition was never shown.
+- The desk's text lines are in the interface's language: "[Change version]" / "[שנה גרסה]",
+  "[Remove]", "Current", the page separators, the title and the number of fragments were
+  English in the Hebrew interface.
+- Several fragments added to the Fragment Puzzle at once (New Puzzle, Add all) each get their
+  own place; they were laid on top of each other when their folios arrived before any image.
+  New Puzzle lays them out in the desk's order, whichever fragment's folios arrive first, and
+  each "Loading..." stands where its fragment will be.
+- A manuscript browsed while the desk is open no longer replaces the desk's text or its
+  "Version" chooser, and the chooser is the browsed page's own again when the desk is left.
+- Replacing the desk's sources worker, or leaving the desk, no longer drops a running thread;
+  every image loader the desk starts is let go safely when it is redrawn or left.
+
+#### Not in this change
+- A PGP document's edition shown once for the whole document (the website's document mode)
+  is still to come on the desktop: the text side remains one text per fragment.
+- Each image's "External link" menu (the website's, in review) is not on the desktop.
+
+#### Tests
+- `tests/test_reading_desk_views.py`, `tests/test_reading_desk_puzzles_shared.py` (the shared
+  rules), `tests/test_desktop_reading_desk_qt.py` (the frame, the views, the puzzle list, the
+  order, the text following the image, the version chooser, the divider, the scroll sync),
+  `tests/test_reading_desk_new_puzzle_qt.py` ("New Puzzle" on the real Puzzle window: Cancel
+  changes nothing).
+
+### Desktop Browse: the next and previous manuscript appear at once (desktop)
+
+Measured in the desktop window: moving to the next manuscript on a Cambridge shelf took 4.4-5.2 s
+to its sharp image, and a return to one just seen 0.8 s. After this change the sharp image is
+drawn in 6-35 ms, once and in one place, also walking on after half a second on each manuscript
+(was 3.5-6 s).
+
+#### Changed
+- **The manuscripts beside the one on screen are prepared ahead.** While the reader looks at a
+  manuscript, Browse prepares the next two the reader's way and the one behind on the shelf
+  (else in the file order): their metadata, then their first page's preview and sharp image
+  into the image cache, one manuscript at a time. A move drops the work no longer needed, and
+  keeps a download for a manuscript still beside the new one (`desktop/browse_prefetch.py`).
+  Not inside an Oxford Part or the Reading Desk.
+- **A manuscript seen in this session opens without refreshing its metadata.** Browse refreshed
+  it on every visit (Cambridge's image list was downloaded again each time, nothing kept it);
+  a whole answer from this session is now shown at once, as the Manuscript Viewer already did
+  (`MetadataManager.enriched_recently`), and a library's image list is kept in memory
+  (`fetch_external_iiif_data`, 6 hours).
+- **Every library's page has a preview.** Only NLI's pages had a 400-px image first; Cambridge,
+  Manchester, JTS and Penn pages now do too, through the image cache.
+- **The page's image starts at once, and is painted at once.** It waited out the viewer's short
+  debounce behind a quarter of a second of panel building; Browse now starts and paints it
+  first (`flush_pending_page`), and keeps the previous image on screen until then, not a blank.
+- **Images seen recently are kept decoded in memory** (about ten pages), so a return to one is
+  drawn at once, and library connections are reused instead of a new one per image.
+
+#### Fixed
+- **Cambridge: a new manuscript's first image was chosen for the wrong page.** Browse passed its
+  page number (from 1) to the folio and side resolver, which counts from 0: page 1 resolved to
+  the second leaf side, and the page text replaced it a moment later with a second download.
+- **The image no longer jumps on arrival.** The page asked for again was started over (hidden,
+  "Loading...", downloaded again); a fitted image was not centred the same way twice (the view
+  scrolled over everything it had ever shown); and the top line changed height twice (shelfmark
+  and title on one line, then on two).
+- **GS-66: a preview and its page shared one cache file**, so the page could show blurred. NLI
+  images are now kept by FL id and width; an old preview-sized page file is downloaded again.
+- **A page being prepared or preloaded is not downloaded twice**: a request waits for the
+  download of the same image already running. A completed download is kept even when the reader
+  moved on, and cache files are written atomically (GS-76 d).
+- A late preview no longer replaces a sharp image already on screen.
+- Browse no longer raises "wrapped C/C++ object ... has been deleted" on a page turn or when the
+  window closes (a thumbnail loader kept after it was deleted).
+
+### Manuscript images appear sooner on Browse (web)
+
+#### Changed
+- **A low-quality preview first for every library, not only NLI.** Browse drew a 400-px preview
+  only for images that come from the NLI; Cambridge, Manchester, JTS, Katz and Oxford pages showed
+  nothing until their full image came (3-4 s from Cambridge, measured on the live site). Every
+  library route that takes a width now has its preview, as Quick View already did
+  (`web/components/image_resolution.py::preview_url`).
+- **The sharp image is asked for together with the preview.** `progressiveLoad`
+  (`web/static/manuscript_viewer.js`) asked for the full image only after the preview had arrived,
+  so the two waits added up (about a second). Both now start together; a full image that arrives
+  first replaces the preview at once, one that fails leaves the preview, a fallback to another
+  library is never overridden, and an image that left the page is neither swapped nor kept
+  downloading. With Save-Data or on a 2G connection the old order stays. The two requests for a
+  manuscript nobody has opened no longer each download its NLI manifest: the second waits for the
+  first, at most a manifest's own time limit (`web/api.py::_fl_fetch_turn`; only requests for the
+  same manuscript wait).
+
+#### Fixed
+- **A Cambridge page turn fetched the NLI image first and threw it away.** The first draw of a page
+  (Phase A) had no library images, so it showed the NLI image; the enrichment (Phase B) then drew
+  the Cambridge one: two or three image requests, and the image shown the slowest of them. Phase A
+  now takes the manuscript's library images from memory when they are already there and current
+  (`shared/cudl_identity.py::cached_external_entry`, which never enriches and never touches the
+  network), with the credit that goes with them, and Phase B replaces them as a whole, so images it
+  no longer finds are withdrawn. Both draws take the credit from one rule
+  (`web/components/image_resolution.py::image_credits`).
+- **Oxford pages waited about 30 s for "Image not available" and its Bodleian link.** The
+  Bodleian's image host has been behind a bot-check page since September (GS-255), which no
+  server fetch passes; `/api/oxford_image` waited its 30 s timeout first. It now waits at most a few
+  seconds (`web/api.py::OXFORD_IMAGE_TIMEOUT`).
+
+#### Measuring
+- The `ux_timing` event (v2) now also reports the image the reader ends up seeing, followed across
+  the page's second draw: `img_final`, `img_full_ms` and `img_source`.
+
+### Pick from the shelf: a click chooses, a button opens, and a look before opening (web)
+
+#### Changed
+- **A click chooses, a button acts.** In "Pick from the shelf" a click on a shelfmark now selects
+  it (shown chosen) instead of opening it at once; the button at the foot of the dialog acts on it:
+  "Open" where the pick opens the manuscript (Browse, the header, the home page), the page's own
+  words elsewhere ("Load Anchor", "Add shelfmark", "Select"). A double click, or Enter on the
+  selected one, is that button.
+- **Add to List and Add to Puzzle** beside Open on Browse, the header and the home page, for the
+  selected shelfmark or the ticked ones. Add to List opens the list chooser over the picker, which
+  stays open; with several ticked it adds them to one of your lists or a new one ("Save as a list"
+  is now this "Add to List" everywhere). Add to Puzzle opens the Puzzle with them added (up to its
+  30 fragments; the Puzzle takes what fits its canvas and says how many it left out). The ticks stay
+  after either: only "Open them in the Reading Desk" takes them.
+- **Ticks on shelfmarks only.** With several to choose, a whole volume or collection is taken by
+  "Select all in ..." over its shelfmarks; the columns have no boxes. The search's "Exclude
+  manuscripts from the shelf" keeps them, since a whole collection is what it is for.
+- On Browse a tick is limited by the choice itself (30 manuscripts, 1,000 pages); what the Reading
+  Desk already holds is counted when "Open them in the Reading Desk" is pressed.
+- The Puzzle takes up to 30 fragments handed over at once (it took 21), from a join too.
+
+#### Added
+- **A look before opening**: a pane beside the columns (below them on a phone) shows the shelfmark
+  clicked last and what the manuscript has, each under its own label so it is easy to spot: its
+  image when there is one, the shelfmark and its other shelfmarks, the title, its text page by page
+  in a box that scrolls, a line each for the pages, the transcriptions, the catalogue and
+  bibliography entries and the comments, the joins known for it, and the links (Ktiv, the library's
+  own viewer such as Cambridge Digital Library or Manchester, PGP), right under the shelfmark on a
+  phone.
+- **Joins in the pane**: a join's shelfmark is a link that takes the dialog to it; its box adds it
+  to the shelfmarks chosen, turning "Open more than one" on where it is off.
+- **Several at once from the home page and the header too**: their "Pick from the shelf" is Browse's,
+  with "Open more than one": the shelfmarks ticked open together in Browse's Reading Desk, and what
+  is ticked is the same choice Browse's picker shows.
+- **Signs on the shelfmarks**: a PGP badge, a mark for a scholarly transcription and one for a join,
+  as in the search's results; the tooltip names them.
+- A shelfmark's tooltip has the manuscript's title on a line of its own.
+- The library filter finds a library by its codes too ("RNL", "CUL").
+
+#### Fixed
+- The arrows between the names of a place on the shelf (Browse and the picker) point the way
+  Hebrew is read.
+
+#### Data and deploy
+- No new data. Everything appears only where the shelf picker does (`SHELFMARK_TREE_ENABLED` and
+  `shelfmark_tree_data/shelfmark_tree.db` served).
+
+### The shelf picker: choose, then act; a details pane; Ctrl+W (desktop)
+
+#### Changed
+- **A click chooses, a button acts.** In the shelf picker a click on a shelfmark selects it and shows
+  it in a new pane beside the columns; the button at the foot takes it: "Open" where the picker opens
+  a manuscript (Browse, Go to, Ctrl+W), the window's own words elsewhere. A double-click or Enter is
+  the button.
+- **Add to List and Add to Puzzle** beside "Open" in the picker that opens manuscripts, for the
+  shelfmark chosen or the ones ticked (they stay ticked): the list menu opens over the picker, which
+  stays open; Add to Puzzle closes it and adds them to the puzzle, as many as it has room for.
+- **Whole volumes** are chosen with "Select all in <name>" above the shelfmarks; the columns have no
+  tick boxes (the Exclude picker keeps them).
+- **The details pane** shows the shelfmark clicked last: its image when there is one, its other
+  shelfmarks, its title, a few lines of its text, and what it has (pages with text, transcriptions,
+  joins, comments, catalogue and bibliography entries), with links. A shelfmark's tooltip adds its
+  title.
+- **The columns** start at the window's edge (the right in Hebrew), each at its own width.
+- **Go to's** shelf is an icon button at the end of its box. **Ctrl+W** opens the shelf picker from
+  any section, at the manuscript Browse shows.
+
+### Several fragments of one join from the shelf, on the desktop (desktop)
+
+#### Changed
+- **The Joins dialog's shelf button takes several fragments at once**: a join holds any number of
+  fragments, so tick them (up to 30 at a time) and Create Join makes one join from this fragment to
+  each, with the relationship and notes given, and says once how many were made. Those not made stay
+  in the box, so Create Join tries only them again. One ticked fragment works as before. The Join
+  Workbench's anchor stays a single fragment.
+
+### Reading Desk: "Puzzle images", several puzzles at once (web)
+
+#### Changed
+- **The Reading Desk's third image view is "Puzzle images" ("תמונות פאזל"), not "Assembled".**
+  One join of fragments may have several puzzles -- its recto and its verso, or one for each page
+  of a document on several leaves -- and the view showed one of them at a time, chosen from a list.
+  It now shows them one under another, each with its own image controls and "Open in Puzzle"
+  (`web/pages/browse_desk_puzzle.py::render_join_view`). The first four found are shown (each of
+  the reader's own puzzles is composed by the server when shown); a list with chips chooses which,
+  and the choice is kept with the desk. "New Puzzle" beside it takes the desk's fragments to the
+  Puzzle to arrange another one (another page, or the other side). The desk's image count is not
+  shown over the puzzles. The view's other texts say "puzzle" too ("No puzzle of these fragments
+  yet.", "Preparing the puzzle image…").
+
+#### Tests
+- `tests/render_smoke/test_reading_desk_document_render_smoke.py`: two puzzles found are both
+  shown, each its own viewer, controls and "Open in Puzzle"; one taken off leaves the other alone
+  and is kept with the desk; all taken off shows none; `shown_joins` (the first four, else the
+  reader's choice in the order found) and each picture in its own viewer.
+
+### Reading Desk: the links of each image (web)
+
+#### Added
+- **Beside every image on the Reading Desk, a menu of its links** (the "External link" icon), as
+  the single page shows them: the image's own leaf at the Bodleian (recto, verso, or the image
+  itself), then NLI Ktiv, the Bodleian part and the whole volume, Cambridge CUDL, the Katz Center's
+  components, the holding library's own viewer and the PGP document (each side's, where the recto
+  and verso are in two documents). The links are looked up the first time a fragment's menu is
+  opened, off the event loop, and kept once every source has answered
+  (`web/pages/browse_desk_links.py`). In "All images" every image has one; in "One at a time" the
+  shown image.
+
+#### Tests
+- `tests/test_reading_desk_image_links.py`: a Bodleian leaf's own links on its image and the
+  fragment's after them; Cambridge's CUDL item once; the Katz Center's components; one source
+  failing leaves the others; a catalogue-only record has the PGP link alone; one lookup per
+  fragment. `tests/render_smoke/test_reading_desk_document_render_smoke.py`: a menu beside each
+  image, nothing looked up until one is opened, its links in order, not looked up again. Mutations
+  of the menu's place, the one lookup, the order, the single address and the image's page each fail
+  a test.
+
+### Reading Desk: move a fragment up or down (web)
+
+#### Added
+- **The order of the fragments on the Reading Desk can be changed.** Up and down buttons ("העבר
+  למעלה" / "העבר למטה") stand beside each fragment's name: over its images in "All images", beside
+  the shown image in "One at a time", and on the text side's fragment headers. A fragment moves one
+  place; its images, its text and the order the Puzzle takes the desk in follow, and the order is
+  kept with the desk. The first cannot go up nor the last down; a desk of one has none
+  (`web/pages/browse_desk_images.py::move_entry`, `move_buttons`; `browse.py::move_on_desk`).
+
+#### Tests
+- `tests/render_smoke/test_reading_desk_document_render_smoke.py`: a fragment moved down from the
+  images and back up from the text side, its images and text following and the order saved; the
+  buttons at either end disabled; none on a desk of one; `move_entry`. Mutations of the move, the
+  wiring on either side, the disabled end and the saving each fail a test.
+
+### A join of several fragments from the shelf (web)
+
+#### Added
+- **A join of several fragments**: in the new-join form, "Pick from the shelf" now takes one
+  fragment or several (a join may hold many). Each one ticked is joined to the fragment shown, with
+  the same relationship and notes, and all are saved together: either every join is made or none
+  is. One can be taken out before saving. The fragment itself is left out, and at most 30 are
+  taken at a time.
+
+#### Data and deploy
+- No new data. The button appears only where the shelf picker does (`SHELFMARK_TREE_ENABLED` and
+  `shelfmark_tree_data/shelfmark_tree.db` served).
+
+### Several from the shelf at once: the Reading Desk, the Puzzle and a list, on the desktop (desktop)
+
+#### Added
+- **Several to the Reading Desk**: from the desk toolbar's shelf button, or from Browse's own "Pick
+  from the shelf" with its switch "Open more than one" on (the same window shows boxes to tick, where
+  it is): tick shelfmarks or whole volumes, and "Open them in the Reading Desk" adds them to the desk
+  that is open, or starts one with the manuscript shown, or, when none is shown, starting with the
+  first one ticked (one alone just opens). The desk holds up to 30 manuscripts and 1,000 pages,
+  counting what is on it: a tick past that is refused with the limit, a collection too big to take
+  whole cannot be ticked, and what does not fit when it is added stays ticked for the next time. One
+  already on the desk is not added twice; a window shows the pages loading.
+- **The Fragment Puzzle's shelf button** takes several at once, up to 30 fragments with those on the
+  canvas, placed side by side; a fragment leaves the choice only once its image is on the canvas, so
+  one whose image fails stays chosen.
+- **Add from the shelf on the Lists tab** (not on the recent list): the choice goes into the list
+  shown in one add, up to 2,000 at a time (ticking stops there); a manuscript the list holds already
+  is not added again.
+- What is chosen for each (Reading Desk, Puzzle, lists) is kept in the session file until it is
+  added or cleared. The chips name each choice with its library's code first ("CUL T-S 32").
+
+#### Fixed
+- **Reading Desk sources lost on overlapping adds:** each add replaced the source loader before it
+  and dropped its results (a manuscript's PGP sources could stay missing); every loader now keeps
+  its results, and the desk's exit lets them finish without them.
+
+### Several at once from the shelf, and Exclude from the shelf (web)
+
+#### Added
+- **Exclude manuscripts from the shelf** (`/search`, "Exclude known manuscripts" > "Pick from the
+  shelf"): tick whole volumes, whole collections or single shelfmarks, in any library, and exclude
+  them all at once. A whole volume is one choice ("T-S AS 39 · 120"); a shelfmark unticked inside
+  it is left out of it. The choice becomes one exclusion, named after what was chosen, beside the
+  pasted, listed and uploaded ones.
+- **The shelf picker's multiple choice** (`web/components/shelfmark_tree_picker.py`,
+  `shared/shelfmark_tree_selection.py`): a box on every shelfmark and every volume or collection,
+  "Select all in ..." over the shelfmarks shown, the choices as removable chips above the columns
+  ("+N more" when they do not fit), each named with its library's code ("CUL T-S AS 39"), the number
+  of manuscripts ticked (each counted once), Clear, and "Save as a list". A choice not yet applied
+  is kept for the reader and its purpose across closing the picker and reloading the page, until it
+  is applied or cleared.
+
+### Exclude from the shelf, several at once, on the desktop (desktop)
+
+#### Added
+- **Exclude manuscripts from the shelf** on the desktop, in the Search and the Composition tab's
+  Exclude Manuscripts dialog: "Pick from the shelf" opens the shelf picker in its multiple-choice
+  mode, where whole volumes (or collections, groups, ranges) and single shelfmarks from any library
+  are ticked. A whole volume is one chip; unticking a shelfmark inside it lowers its count. A bar of
+  chips shows what is chosen, with "+N more" opening the full list, beside a running count, Clear,
+  Save as a list and "Exclude them". The choice comes back as a source of its own above the dialog's
+  tabs, "From the shelf: <volumes>", and applies with the dialog's Apply; it can be removed there
+  like any source (`desktop/widgets/shelfmark_tree_picker.py`, `desktop/dialogs_filter.py`).
+- **What is chosen is kept** for each tab (Search, Composition) until it is applied or cleared,
+  across closing the picker and restarting the app, whatever the restore setting (the session
+  file's `shelf_selections`); a Cancel in the Exclude dialog applies nothing and keeps it.
+
+#### Fixed
+- **Exclude Manuscripts' Clear All** also clears the lists selected in the From List tab, which
+  came back on Apply.
+- **An edit after Resolve Shelfmarks** is no longer lost: Apply used the earlier resolution and
+  dropped ids added afterwards (from a list, a file or typed); an edit now forgets it.
+
+#### Notes
+- The picker's ids are excluded as they are: the shelfmarks shown are never looked up again, so a
+  second record sharing a shelfmark is not excluded with it.
+
+### Several from the shelf at once: the Reading Desk, the Puzzle and your lists (web)
+
+#### Added
+- **Several manuscripts from the shelf at once**: tick shelfmarks or whole volumes in the shelf
+  picker and add them all.
+  - **Reading Desk**: from the desk's toolbar, or from Browse's own "Pick from the shelf" with its
+    switch "Open more than one" on: "Open them in the Reading Desk" opens them side by side, with
+    the manuscript shown, or, when none is shown, starting with the first one ticked. The desk
+    holds up to 30 manuscripts and 1,000 pages, counting what is on it already; one already on the
+    desk is not added twice.
+  - **Fragment Puzzle**: the shelf button adds fragments onto the canvas, up to 30 on it. An image
+    that could not be drawn stays ticked.
+  - **Lists**: "Add from the shelf" on a list adds what is ticked to that list, up to 2,000 at a
+    time. One the list already holds is not added twice.
+- **Limited when ticking, not afterwards**: a shelfmark or volume that would pass the limit is not
+  ticked and the picker says why ("Up to 30 manuscripts here", or the desk's pages); a collection
+  too big for it is faded. Unticking always works. Excluding from the shelf has no limit: a whole
+  collection can still be excluded.
+- What is ticked is kept for each purpose and each account until it is added or cleared, and can
+  be saved as a list.
+
+#### Data and deploy
+- No new data. The buttons appear only where the shelf picker does (`SHELFMARK_TREE_ENABLED` and
+  `shelfmark_tree_data/shelfmark_tree.db` served).
+
+### Pick from the shelf in the Puzzle, the Reading Desk, the Joins Lab, a new join and the home page (web)
+
+#### Added
+- **Pick from the shelf wherever a page asks for one manuscript**: beside the Fragment Puzzle's
+  shelfmark box, in the Reading Desk's toolbar, beside the Joins Lab's Load Anchor, above the
+  choices for a new join's second fragment (new there: that form had no box to type in), under
+  the home page's search box, and beside the go-to box in the header on every page (on a phone,
+  once the search is opened). The picked manuscript goes where a typed shelfmark goes. The picker
+  opens again where the last pick was, so adding several fragments walks along the shelf; a new
+  join's picker opens at the fragment being joined, and refuses that fragment itself.
+- From the home page the pick opens in Browse at the place it was picked at; Browse keeps a place
+  other than a manuscript's first in its address (`/browse?sys_id=..&place=..`), so a reload or a
+  shared link opens there again.
+
+#### Data and deploy
+- No new data. The buttons appear only where `/browse`'s "Pick from the shelf" does
+  (`SHELFMARK_TREE_ENABLED` and `shelfmark_tree_data/shelfmark_tree.db` served).
+
+### Pick from the shelf in Share a Discovery and in comments (web)
+
+#### Added
+- **Pick from the shelf when sharing a discovery**: the linked document can be chosen on the shelf
+  (library > collection > volume > shelfmark), beside Recent Activity and My Lists, in the new and
+  in the edit dialog; and "Additional shelfmarks" can be added from the shelf, each keeping the
+  manuscript it names (typing over its text makes it a typed shelfmark again)
+  (`web/components/shelf_pick.py`, `web/pages/discoveries.py`).
+- **Pick from the shelf for a comment's shelfmark reference**, beside "Add shelfmark reference":
+  the same `[[shelfmark:…|id:…]]` reference the lists insert; the comment is not sent
+  (`web/components/comment_dialog.py`).
+- The buttons are shown only while the website serves the shelf tree file.
+
+#### Fixed
+- **A typed additional shelfmark of a discovery was dropped**: the box's text was never kept, so a
+  shelfmark typed under "Additional shelfmarks" was left out when the discovery was shared; and
+  removing one entry could remove another.
+
+### Pick from the shelf, and previous / next on the shelf (desktop)
+
+#### Added
+- **Pick from the shelf** in the desktop app: beside Go on Browse, and in the Go to box (Ctrl+G), a
+  button opens the library > collection > volume > shelfmark tree as the website has it, in
+  columns, with counts, a filter on every column, the breadcrumb back to any level, Hebrew names in
+  the Hebrew interface and the current manuscript marked. A click, Enter or Space on a shelfmark
+  opens it in Browse (`desktop/widgets/shelfmark_tree_picker.py`, drawing the website's own columns
+  from `shared/shelfmark_tree_columns.py`). Library names are never cut; the shelfmarks stand in
+  three, two or one columns, as many as show the longest whole.
+- **The place on the shelf** under the manuscript's title on Browse: its library, collection and
+  volume, each opening the picker there, and its position ("7 of 279").
+
+#### Changed
+- **Previous / next manuscript follow the shelf** (Ctrl+Shift+arrows, mirrored in Hebrew) wherever
+  the manuscript has a place on it, across volumes and collections, stopping with a notice at the
+  library's ends; their tooltips name the manuscript they lead to. Inside an Oxford Part they still
+  walk its folios and Parts. A manuscript with no place, or an installation without the shelf tree
+  file, keeps the transcription file's order.
+- **Paging past a manuscript's last page** (the page buttons, Ctrl+PgDown / Ctrl+PgUp) goes on to
+  the next manuscript in the same order: the Oxford Part's next folio or Part, else the next on the
+  shelf, else the file order as before; going back lands on the previous manuscript's last page.
+
+#### Data and packaging
+- The installer carries `shelfmark_tree_data/shelfmark_tree.db`: `GenizahSearchPro.spec` bundles it
+  and runs `scripts/verify_shelfmark_tree_sidecar.py --leaves-from-meta` before bundling,
+  `build_app.bat` stops early when it is missing, `scripts/checkpoint_sidecars.py` checkpoints it.
+  `SHELFMARK_TREE_ENABLED` (on unless set off) AND the file opened and checked at start, off the UI
+  thread: without it the button and the place on the shelf are absent.
+
+### Pick from the shelf in the Reading Desk, Puzzle, Joins Lab, Joins and Share a Discovery (desktop)
+
+#### Added
+- **Pick from the shelf** (📚) beside the shelfmark box of the Reading Desk, the Fragment Puzzle, the
+  Joins Lab's anchor, the Fragment Joins dialog's fragment B and Share a Discovery's references
+  (`desktop/widgets/shelf_pick_button.py`). The manuscript picked is added as a typed shelfmark is:
+  to the desk, to the canvas, as the anchor, as fragment B (by its record), as a reference on the
+  page given. Shown only where the shelf tree file is installed.
+
+#### Fixed
+- The Fragment Joins dialog joins the record picked from a personal list for fragment B, not only
+  its shelfmark: the record was forgotten as soon as its shelfmark was written into the box, so two
+  records sharing one shelfmark could be confused.
+- A fragment picked in Browse while the Reading Desk is open is added to the desk also when it is an
+  Oxford Part's folio (it used to replace the desk's page with the Part's).
+- A Puzzle fragment added again by its shelfmark keeps its external image (its address, provider
+  and page were dropped when its folios were already known).
+
+### Sidecar deploys check the uploaded file with the web app's own Python (web)
+
+#### Fixed
+- **The catalogue sidecar's deploy stopped on the server although the file was sound.** The
+  deploy scripts ran their server-side gate (`scripts/verify_*_sidecar.py`) with the system
+  `python3`, which lacks the web app's dependencies: the catalogue gate imports
+  `shared/near_spellings.py`, and the first deploy of `catalog_data/catalog_text.db` (2026-11-19)
+  stopped at `ModuleNotFoundError: No module named 'rapidfuzz'` after the upload. The gate now runs
+  with `venv/bin/python`, the environment `deploy.sh` activates for the web app, in all four
+  scripts that have one (`deploy_catalog_text_sidecar.ps1`, `deploy_arabic_sidecar.ps1`,
+  `deploy_blau_sidecar.ps1`, `deploy_friedman_sidecar.ps1`; the other three worked only because
+  their gates import nothing the system Python lacks). The check that the code is deployed, which
+  runs before the upload, also asks for `venv/bin/python`, so a server without it stops before
+  730 MB are sent. `deploy_fgp_sidecar.ps1` is unchanged: its checker is a standalone script
+  copied to `/tmp`.
+
+#### Tests
+- `tests/test_deploy_sidecar_gate_python.py`: each gated script runs its gate with
+  `venv/bin/python`, asks for it before the upload, and a new gated deploy script must join the
+  list. It fails on the scripts as they were.
+
+### The shelf tree: every manuscript on its library's shelf (web + desktop)
+
+#### Added
+- **The data and the reader behind "Pick from the shelf"** (nothing is shown yet; the picker and
+  Browse's previous / next on the shelf come in the following PRs).
+  `scripts/build_shelfmark_tree.py` builds `shelfmark_tree_data/shelfmark_tree.db` from the FGP
+  dump and `libraries.csv`: library > collection > volume > shelfmark, in FGP's order, with range
+  nodes over any node of more than 1,000 shelfmarks and an "Other shelfmarks" node per library.
+  FGP places 253,089 of our 255,723 manuscripts; the other 2,634 are placed by fixed rules (155 by
+  an exact shelfmark, 1,735 by the collection their shelfmark names, 46 as the leftovers of a
+  single-collection library, 698 in "Other shelfmarks"). A manuscript is never placed by a
+  collector's library code, nor when its catalogue form names another institution.
+  `scripts/verify_shelfmark_tree_sidecar.py` gates the file and fails rather than skips;
+  `shared/shelfmark_tree_service.py` reads it (children, paged leaves with a filter, every place of
+  a manuscript, previous / next across volumes and collections, everything under a node, where a
+  typed shelfmark starts). Oxford leaves carry their Neubauer Part as information.
+
+### Pick from the shelf, and previous / next on the shelf (web)
+
+#### Added
+- **Pick from the shelf** on `/browse`: beside Go, a button opens the library > collection >
+  volume > shelfmark tree as FGP's "find a fragment" screen has it, in columns on a wide screen
+  and one level at a time on a phone, with counts, a filter on every column and the current
+  manuscript marked. A click on a shelfmark opens it (`web/components/shelfmark_tree_picker.py`,
+  `shared/shelfmark_tree_view.py`).
+- **The place on the shelf** under the manuscript's title: its library, collection and volume,
+  each opening the picker there, and its position ("7 of 279").
+
+- **The shelf as a reader looks for it** (owner's review of the first version): libraries named
+  "City, Library" in both languages and never cut; the Mosseri Collection and Lewis-Gibson shown inside
+  Cambridge University Library, each with a shortcut in the list of libraries; a library's only
+  collection is no extra step (Oxford); ENA and T-S NS in FGP's own ranges (ENA 1-1000, 1001-2000,
+  2001-2500, ...), Oxford, BL Or. and T-S A - K by prefix, other large collections by number; RNL's
+  "Box D./K./O." records in FGP's "RNL Boxes"; "Other shelfmarks" divided by prefix; shelfmarks shown
+  without institution or image-file names. A column's filter also finds the volumes and shelfmarks
+  inside its groups: typing "2556.4" in ENA finds ENA 2556.4.
+
+- **FGP's own arrangement, and a tree audited library by library** (owner's notes and a read-only
+  audit of the built tree, 2026-11-20). A collection's volumes stand in FGP's order, with the
+  numbers and Roman numerals of one series in their own (Mosseri: "Moss. I ... Xa", then the letters,
+  then the "2nd Series"; "T-S Loan" after "T-S Misc.36"; Lewis-Gibson as FGP lists it). In place of
+  "T-S Bound" stand FGP's two groups of it, "T-S 6F - 8K" and "T-S 10C - 18K"; Oxford is "MS heb.a -
+  d", "MS heb.e - g", "Other" and a list **by Neubauer-Cowley catalogue** (a second place for 10,381
+  shelfmarks; previous / next stay inside the list they began in). A node of more than 600 shelfmarks is divided by round item
+  numbers as FGP does ("Moss. IV,1 - 100", "2nd Series: P 1 - 200"). A shelfmark is placed by its
+  record's other call numbers where its label names only its collection (FGP's "ENA 2b" is "ENA
+  2557.1"), and goes to the volume its label names ("D 37" in FGP's "F" of RNL Boxes is "Box D.37").
+  Volumes FGP keeps apart are no longer folded together ("T-S F11" and "T-S F1(1)", "MS heb. f.7" and
+  "f.7*"). Shelfmarks that showed one label in a node show what their call number adds ("OR 10578R
+  f. 37", "T-S K7.15n", "Yevr.-Arab. II 974.1": about 1,000), and a record FGP lists twice under one
+  shelfmark is shown once (247). A bare JTS "Ms. 9160" is "MS 9160", not "ENA 9160". FGP's slips in
+  a volume's number are read from its shelfmarks ("ENA NS I" among "ENA NS 2" ... is "ENA NS 1", the
+  volume FGP calls "ENA II 177" is "ENA II 117"; FGP's own writing is still found by a filter), and
+  a list that mixes several forms of shelfmark is divided by form (Budapest: "1 - 200" ..., the Roman
+  numerals, "M1 – M93", "H1 – H6"). Two records of one shelfmark stay two rows, the second marked
+  ("MS L45", "MS L45 [2]"), also where the library writes the shelfmark another way than FGP
+  (Columbia "X893.1 BC T 17" is FGP's "X893.1 BC T17"). The British Library's Halpern and Sassoon
+  manuscripts are in "Or."; a code that names an FGP library is that library's (Basel); the National
+  Library of Israel's "Ms. Heb. 577.2.26=4" is "577.2/26" of its volume; in a volume, its own
+  shelfmarks come before the few it holds under another name; Oxford's third group is "אחר" in
+  Hebrew, and the Oxford Part in a shelfmark's tooltip is called a Part. Eleven records that
+  `libraries.csv` gives neither a call number nor a library code stand in the library the
+  catalogue's notes name, shown by their system number; the two no library is known for are under
+  "Location unknown". The Hebrew library names are written one way: one geresh character
+  (מנצ'סטר, לוס אנג'לס), the city before the six names that lacked it, and a Hebrew name for five
+  libraries known only by a code. The Lehmann Collection, Kyiv and the Ben-Zvi Institute are shown
+  by their own series, FGP's shelfmarks among the library's ("Fr. 27/26" in Lehmann's "Ms. FR",
+  "Harkavi R 14" in Kyiv's "Ms. R"), in number order; Toronto, Sofer, Guenzburg and the Berlin
+  Jewish Community by volume number ("Friedberg MSS 9-004" holds "9-004/1" ... "9-004/32", Sofer's
+  "108" its folios). A record whose long form names the library it is shown in stands in that
+  library's collection, written as there (a Harkavy record is the NLI's "Ms. Heb. 1151.3=4"). A
+  shelfmark written without its series' letter stands in the series it continues (FGP's "Yevr. III
+  1155" in "Yevr. III B 1001 - 1200"). Empty records are left out: 111 records with no title, no
+  page in the corpus and nothing but a call number, each beside the record of its shelfmark that has
+  them (RNL "Box D.37", JTS "MS L502", Columbia "General 163.1" ...;
+  `scripts/shelfmark_tree_left_out.csv`); FGP's row passes to the record kept.
+- **The filter boxes keep what is typed**: a filter draws only its own list again, so the box keeps
+  the caret; and the shelfmarks stand in as many columns as show the longest one whole (three, else
+  two, else one).
+
+#### Changed
+- **Previous / next manuscript follow the shelf** wherever the manuscript has a place on it
+  (T-S AS 39.7 -> 39.8, across volumes and collections, stopping at the library's ends); a
+  manuscript with no place, or a server without the shelf tree file, keeps the transcription
+  file's order. The tooltips name the manuscript they lead to.
+
+#### Data and deploy
+- `SHELFMARK_TREE_ENABLED` (on unless set off) AND `shelfmark_tree_data/shelfmark_tree.db` opened
+  and checked at startup (`web/shelfmark_tree_assets.py`). Deploy: CODE FIRST, then
+  `scripts/deploy_shelfmark_tree_sidecar.ps1 -Leaves 266673` (the manuscripts' places on the
+  shelf and in the catalogue list).
+- The builder no longer takes FGP's text "NULL" for a Hebrew library name (10 libraries); the
+  verifier, renamed `scripts/verify_shelfmark_tree_sidecar.py` like the other sidecars' gates,
+  refuses a node named "NULL" or nothing.
+
+### The image stays full screen when you turn the page (web)
+
+#### Fixed
+- **On /browse, the arrow keys left the image's full screen instead of showing the next folio in
+  it.** The full screen (F) was a class the browser put on the image card, and a page turn rebuilds
+  the page, card included, so the next folio opened out of it. The page now holds the state
+  (`BrowseState.image_fullscreen`) and draws the card with it, so Prev/Next, the arrow keys and any
+  other rebuild (Show Metadata, Edit) keep it. Esc leaves through the Fullscreen button, so the
+  state follows; a page with no image ends it. The unused `toggle_fullscreen` and
+  `BrowseState.is_fullscreen` are gone.
+- **Each page turn in full screen flickered.** The page drew the 400 px preview first, which showed
+  at its own size, small in the middle of the screen, before the full image filled it (for seconds
+  on a first visit); and the page dimmed while the next folio loaded, the full-screen image with it.
+  In full screen the image is now drawn full size at once (its spinner shows the wait; the
+  viewer's upgrade step, `progressiveLoad`, now compares the `src` as written, so it no longer
+  fetches that same full image a second time), and
+  `.browse-loading` no longer dims a page that holds `.fullscreen-mode` (`common.css`). Out of full
+  screen both are as before.
+- **In full screen a tall folio ran off the bottom of the screen.** The image box was 100vh tall
+  under the toolbar, and the image's `max-height: 100%` had nothing to resolve against (ui.html
+  wraps the `<img>` in a div of auto height): a 2000x3179 folio drew 1400x2225 in a 1400x900
+  window. The card also kept its white padding. The card is now a column over the whole window
+  (`inset: 0`, no padding, black, no fade-in), the image box takes what the toolbar leaves, and
+  the wrapper is `display: contents`, so the folio fits (500x795 there; at phone width too). Zoom
+  works from the fitted size.
+
+#### Tests
+- `tests/render_smoke/test_browse_image_fullscreen_render_smoke.py`: full screen survives Next and
+  stays off after leaving it, drawn without the preview while in it; Esc clicks the Fullscreen
+  button. The first fails with the class line removed, and with the preview kept in full screen.
+- `tests/test_browse_rebuilds_per_page_change.py` pins the new `.browse-loading` rules; the
+  full-screen file pins the fit rules (the layout itself was measured in a browser).
+
 ## [10.1.0] - 2026-11-19 — Search the catalogue information
 
 Both apps. A **Catalog** search mode searches the catalogue information about the manuscripts —

@@ -8,6 +8,139 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "11.0.0",
+        "date": "2026-11-22",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Pick from the shelf",
+            "he": "בחירה מהמדף"
+        },
+        "items": [
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Pick from the shelf: find a manuscript where it stands on its library's shelf — library, collection, volume, shelfmark — with counts and a filter in every column. It opens from Browse, from the header's go-to box on the website, from Go to in the desktop app (Ctrl+G), and wherever a page asks for a manuscript; in the desktop app Ctrl+W opens it from anywhere.",
+                "he": "בחירה מהמדף: מצאו כתב יד במקומו על מדף הספרייה – ספרייה, אוסף, כרך, מספר מדף – עם מספרים ותיבת סינון בכל עמודה. אפשר לפתוח אותה מהעיון לפי מספר מדף, מתיבת המעבר שבכותרת האתר, מחלון \"מעבר אל\" בתוכנה (Ctrl+G) ומכל מקום שבו בוחרים כתב יד; בתוכנה Ctrl+W פותח אותה מכל מקום."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Look before you open: a click on a shelfmark shows its details beside the shelf — its image, its title and the first pages of its text, how many pages have text, its catalogue and bibliography entries, scholarly transcriptions, joins, and links to the library's own viewer (such as the Cambridge Digital Library and Manchester). A join's shelfmark takes you to it on the shelf.",
+                "he": "הצצה לפני פתיחה: לחיצה על מספר מדף מציגה את פרטיו לצד המדף – התמונה, הכותרת ותחילת הטקסט, כמה עמודים יש בו עם טקסט, רשומות הקטלוג והביבליוגרפיה, תעתיקים מדעיים, צירופים וקישורים לאתר הספרייה (כמו הספרייה הדיגיטלית של קיימברידג' ומנצ'סטר). לחיצה על מספר המדף של צירוף מעבירה אליו על המדף."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Signs on the shelfmarks show which manuscripts the Princeton Geniza Project knows, which have a scholarly transcription and which have joins.",
+                "he": "סימנים ליד מספרי המדף מראים אילו כתבי יד מוכרים לפרויקט הגניזה של פרינסטון, לאילו יש תעתיק מדעי ולאילו יש צירופים."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Several at once: tick shelfmarks, or a whole volume with Select all, and open them together in the Reading Desk, add them to a list or to the Fragment Puzzle, join several fragments in one new join, or exclude them from a search.",
+                "he": "כמה בבת אחת: סמנו מספרי מדף, או כרך שלם ב\"בחירת הכל\", ופתחו אותם יחד בשולחן העיון, הוסיפו אותם לרשימה או לפאזל הקטעים, צרפו כמה קטעים בצירוף חדש אחד, או החריגו אותם מחיפוש."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "See the shelfmarks of the shelf as a list, a table or thumbnails. The table shows each one's title, a line of its text, its subject, its pages, and whether it is printed, known to PGP or has a scholarly edition; the thumbnails come in three sizes. In the table and the thumbnails the shelfmarks take most of the window.",
+                "he": "אפשר לראות את מספרי המדף כרשימה, כטבלה או בתמונות ממוזערות. הטבלה מציגה לכל אחד את הכותרת, שורה מהטקסט, הנושא, מספר העמודים, והאם הוא דפוס, מוכר ל-PGP או שיש לו מהדורה מדעית; התמונות הממוזערות מוצגות בשלושה גדלים. בטבלה ובתמונות הממוזערות מספרי המדף תופסים את רוב החלון."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "A new Reading Desk, like the website's: see the fragments one at a time, with a strip of thumbnails and the text of the fragment shown beside it, in the version you choose; all the images together; or the join's puzzles one under another (\"Puzzle images\"), each with Open in Puzzle, and New Puzzle to arrange another. Fragments can be moved up or down, and each image has its own adjustments.",
+                "he": "שולחן עיון חדש, כמו באתר: ראו את הקטעים תמונה אחת בכל פעם, עם פס של תמונות מוקטנות והטקסט של הקטע המוצג לצידן, בגרסה שתבחרו; את כל התמונות יחד; או את הפאזלים של הצירוף זה מתחת לזה (\"תמונות פאזל\"), לכל אחד \"פתח בפאזל\", ו\"פאזל חדש\" לסידור פאזל נוסף. אפשר להזיז קטעים למעלה ולמטה, ולכל תמונה התאמות משלה."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Browse shows where a manuscript stands on the shelf, and Previous / Next manuscript follow the shelf, across volumes and collections.",
+                "he": "העיון לפי מספר מדף מראה היכן כתב היד עומד על המדף, ו\"כתב היד הקודם\" ו\"כתב היד הבא\" עוברים לפי סדר המדף, גם בין כרכים ואוספים."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Images from the Katz Center, and links to each leaf, part and volume at the Bodleian.",
+                "he": "תמונות ממרכז כ\"ץ, וקישורים לכל דף, חלק וכרך בספרייה הבודליאנית."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The Reading Desk shows all the puzzles of a join, one under another (\"Puzzle images\"); fragments can be moved up or down; and every image has a menu of its links.",
+                "he": "שולחן העיון מציג את כל הפאזלים של צירוף, זה מתחת לזה (\"תמונות פאזל\"); אפשר להזיז קטעים למעלה ולמטה; ולכל תמונה יש תפריט של הקישורים שלה."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Manuscript images on Browse appear sooner: the library's own image from the start, a quick preview for every library, and the sharp image on its way at once.",
+                "he": "תמונות כתבי היד בעיון לפי מספר מדף מופיעות מהר יותר: התמונה של הספרייה עצמה מההתחלה, תצוגה מקדימה מהירה לכל ספרייה, והתמונה החדה נטענת מיד."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "Faster browsing from manuscript to manuscript: the program prepares the next manuscripts while you read, and keeps the ones you have already viewed.",
+                "he": "שיפור במהירות התגובה בדפדוף בכתבי היד: התוכנה מכינה את כתבי היד הבאים בזמן שאתם קוראים, ושומרת את אלה שכבר צפיתם בהם."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The theme button in the header switches between light and dark in one click.",
+                "he": "כפתור ערכת הצבעים בכותרת עובר בין בהיר לכהה בלחיצה אחת."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "On Browse, the image stays in full screen when you turn the page.",
+                "he": "בעיון לפי מספר מדף, התמונה נשארת במסך מלא כשעוברים עמוד."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "A fragment chosen from a list for a join is joined by its own record, also when two records share its shelfmark.",
+                "he": "קטע שנבחר מרשימה לצירוף מצורף לפי הרשומה שלו, גם כשלשתי רשומות יש אותו מספר מדף."
+            }
+        ]
+    },
+    {
         "version": "10.1.0",
         "date": "2026-11-19",
         "apps": [

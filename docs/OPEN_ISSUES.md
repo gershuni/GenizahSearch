@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-18 (folded 4 fragment(s) from `docs/open_issues.d/`: 2026-11-18-desktop-catalogue-history-and-refinement.md, 2026-11-18-puzzle-mirrored-stand-in-not-saved.md, 2026-11-18-puzzle-transparency-zoom-and-image-rotation.md, 2026-11-18-search-all-transcriptions-filters.md). 183 open: P1 0, P2 42, P3 141.
+> **Last Updated:** 2026-11-22 (archived GS-66). 189 open: P1 0, P2 43, P3 146.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,16 +24,16 @@ the private repository; grep only).
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 6 | 10 |
-| Desktop app | 0 | 9 | 30 | 39 |
+| Desktop app | 0 | 10 | 30 | 40 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
-| Accounts and community | 0 | 8 | 27 | 35 |
-| Data and sidecars | 0 | 5 | 7 | 12 |
-| Build, CI and tests | 0 | 0 | 4 | 4 |
+| Accounts and community | 0 | 8 | 29 | 37 |
+| Data and sidecars | 0 | 5 | 9 | 14 |
+| Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **42** | **141** | **183** |
+| **Total** | **0** | **43** | **146** | **189** |
 
 ## P1 - Critical
 
@@ -63,6 +63,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-307](ISSUE_DETAILS.md#gs-307) | The desktop Reading Desk shows a document's edition under every fragment, sometimes another document's | `genizah_app.py::_browse_rd_render_text`, `desktop/gui_threads.py::ReadingDeskWorker` | 2026-11-22 | ❌ Open |
 | [GS-9](ISSUE_DETAILS.md#gs-9) | Desktop Search export, filters and counts see only the loaded rows | `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch | 2026-09-25 | ❌ Open |
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
 | [GS-11](ISSUE_DETAILS.md#gs-11) | Desktop: a stale `PGPBadgeWorker` can blank the PGP column of a table it never searched | `genizah_app.py::_on_pgp_badges_loaded`, _on_tag_search_results; PGPBadgeWorker | 2026-09-03 | ❌ Open |
@@ -171,12 +172,12 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-304](ISSUE_DETAILS.md#gs-304) | A shelfmark opened in the first seconds after start can fail with "dictionary changed size during iteration" | `shared/metadata_manager.py::_iter_shelfmark_sources` (iterates `self.csv_bank` while the catalogue is still being loaded), reached from `MetadataManager.resolve_system_by_shelfmark` -> `_get_shelfmark_index` | 2026-11-20 | ❌ Open |
 | [GS-295](ISSUE_DETAILS.md#gs-295) | A saved Catalog search shows the Exact marker in the history menu | `genizah_app.py::GenizahGUI._MODE_CHARS`, `GenizahGUI._add_history_menu_item` | 2026-11-18 | ❌ Open |
 | [GS-296](ISSUE_DETAILS.md#gs-296) | A search-within step records the mode shown when the results arrive, not the one searched | `genizah_app.py` (`_combo_step_mode(self.mode_combo.currentIndex())` where the refinement step is built; `_apply_run_params`) | 2026-11-18 | ❌ Open |
 | [GS-291](ISSUE_DETAILS.md#gs-291) | A list upload racing the user's edits can fail with "dictionary changed size during iteration" | `shared/lists_sync.py` (the upload's `try` block, `logger.error(f"Error syncing to cloud: {e}")` near line 1196); `tests/test_list_sync_identity.py::test_an_auto_upload_racing_the_user_on_another_thread_succeeds` | 2026-11-05 | ❌ Open |
 | [GS-284](ISSUE_DETAILS.md#gs-284) | "Search in these results" drops the Catalog tab's text, PGP and edition filters | `genizah_app.py::_catalog_build_browse_filters`, `_CatalogHandoffWorker`, `_catalog_on_handoff_scope` | 2026-11-01 | ❌ Open |
 | [GS-285](ISSUE_DETAILS.md#gs-285) | Opening "Search only in..." loses a library restriction handed over from the Catalog tab | `desktop/dialogs_filter.py::PreSearchFilterDialog._get_current_filter_dict` | 2026-11-01 | ❌ Open |
-| [GS-66](ISSUE_DETAILS.md#gs-66) | Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file | `desktop/image_loader.py::ImageLoaderThread.run` (line 68); metadata_manager._resolve_thumbnail | 2026-10-21 | ❌ Open |
 | [GS-67](ISSUE_DETAILS.md#gs-67) | Quit still waits, at interpreter exit, for an NLI request in flight on the shared metadata executor | `shared/metadata_manager.py` (nli_executor, line 289); `genizah_app.py::_stop_meta_loader_for_close` | 2026-10-20 | ❌ Open |
 | [GS-68](ISSUE_DETAILS.md#gs-68) | Desktop Excel export: a search-within whose completion step Stop interrupted exports the plain count | `genizah_app.py::export_results` (`_run_left_matches_out()`), the refinement chain | 2026-10-20 | ❌ Open |
 | [GS-69](ISSUE_DETAILS.md#gs-69) | The Quoted texts dialog (old Filter Text) is wider than a small screen at 300% scaling | `desktop/filter_text_dialog.py::FilterTextDialog` (the Sefaria buttons row and the intro label) | 2026-10-14 | ❌ Open |
@@ -263,6 +264,8 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-305](ISSUE_DETAILS.md#gs-305) | The discovery dialogs never offer the image of a linked document | `web/pages/discoveries.py::create_new_discovery_dialog`, `open_edit_discovery_dialog` (`select_document`) | 2026-11-20 | ❌ Open |
+| [GS-306](ISSUE_DETAILS.md#gs-306) | The feed reads a discovery's document and additional shelfmarks from keys the web never writes | `web/supabase_client.py::create_discovery`, `get_community_feed` | 2026-11-20 | ⏳ Needs a check of the live `discoveries` table |
 | [GS-124](ISSUE_DETAILS.md#gs-124) | Web: no way to ask for a new confirmation email | `web/auth_state.py` (`create_login_dialog`; the "not confirmed yet" sign-in error) | 2026-10-21 | ❌ Open |
 | [GS-125](ISSUE_DETAILS.md#gs-125) | Hardening: narrow `profiles` column grants | `supabase_setup.sql` (profiles SELECT grants); every profiles select('*') | 2026-10-21 | ❌ Open |
 | [GS-126](ISSUE_DETAILS.md#gs-126) | Closing while an upload request is unanswered can bring a removed or moved entry back later | `desktop/lists_sync_runner.py::shutdown`, `shared/lists_manager.py::abandon_upload` | 2026-09-27 | ❌ Open |
@@ -295,6 +298,8 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-302](ISSUE_DETAILS.md#gs-302) | Vernadsky and Budapest seminary records carry another library's code in libraries.csv | `libraries.csv` column 3 (`library_code`) | 2026-11-19 | ❌ Open |
+| [GS-303](ISSUE_DETAILS.md#gs-303) | 13 records in libraries.csv have no library code and no shelfmark | `libraries.csv` columns 2-3 | 2026-11-19 | ❌ Open |
 | [GS-288](ISSUE_DETAILS.md#gs-288) | The Blau gate does not check form-level cross-reference targets | `scripts/verify_blau_sidecar.py` (the cross-reference checks); `scripts/build_blau_sidecar.py` (`forms.target_ids`) | 2026-11-03 | ❌ Open |
 | [GS-279](ISSUE_DETAILS.md#gs-279) | Our copy of CUDL's item list lacks items CUDL publishes, so their records get no Cambridge link | `cambridge_genizah.json` -> `nli_data/nli_crossref.db` (`cambridge_manifests`, built by `scripts/import_nli_crossref.py`) | 2026-10-29 | ❌ Open |
 | [GS-272](ISSUE_DETAILS.md#gs-272) | FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship | `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py` | 2026-10-26 | ❌ Partly fixed |
@@ -307,6 +312,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-308](ISSUE_DETAILS.md#gs-308) | The scholarly-filter panel test fails now and then on a busy machine | `tests/test_scholarly_transcription_filter.py::test_the_filters_panel_keeps_the_scholarly_filter` (`_count_line_after`, 15 s) | 2026-11-22 | ❌ Open |
 | [GS-290](ISSUE_DETAILS.md#gs-290) | The FGP gate-4 release-check test fails on one slow timing sample | `tests/test_fgp_gate4_chooser_validation.py::test_release_check_requires_the_file_gate_4_validated`, `scripts/fgp_gate4_chooser_validation.py` (C6 latency, the `latency.ratio_vs_today` budget) | 2026-11-05 | ❌ Open |
 | [GS-281](ISSUE_DETAILS.md#gs-281) | Collecting the Joins Lab compare-details Qt test makes the Responsa refusal tests fail | `tests/test_join_workbench_compare_details_qt.py` (the polluter); `tests/test_responsa_api_refusal.py`, `tests/test_responsa_refusal_surfaces.py`, `tests/test_responsa_star_crossings.py` (the victims) | 2026-10-30 | ❌ Open |
 | [GS-282](ISSUE_DETAILS.md#gs-282) | The Fragment Puzzle close tests and the update-check thread tests fail when run with other desktop tests | `tests/test_puzzle_canvas_integrity.py`, `tests/test_update_check_thread_lifetime_qt.py` (victims; polluter not found yet) | 2026-10-30 | ❌ Open |

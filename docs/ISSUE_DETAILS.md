@@ -921,21 +921,6 @@ Moved 2026-10-25 from `4.5 FGP Transcriptions — data ready, integration pendin
 
 *Triage 2026-10-25:* still open. web/api.py:621-700 still returns the live NLI manifest's FL ids in canvas order (cache keys system_id/suffix only) and page N uses canvas N; no transcription-time FL per page is stored or matched anywhere (no commit since 2026-10-06 touched this logic: only the image-store/caching commits bac67736, d67984ad, 79d56ab8).
 
-## GS-66
-
-**Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file** · P3 · Desktop app · ❌ Open · opened 2026-10-21
-
-Where: `desktop/image_loader.py::ImageLoaderThread.run` (line 68); metadata_manager._resolve_thumbnail
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P3 - Low Priority`, where it read:
-
-- **Issue:** **Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file**
-- **File:** `desktop/image_loader.py::ImageLoaderThread.run` (cache name `FL<id>_v2.jpg` from the FL id alone); thumbnails from `shared/metadata_manager.py::_resolve_thumbnail` (`/full/400,`)
-- **Status:** ❌ Open (found 2026-10-21 by reading the code; not reproduced)
-- **Notes:** Every `ImageLoaderThread` names its cache file by FL id only, whatever the requested width. A thumbnail loaded first (Joins Lab grid, result-dialog thumbnail, Lists preview, Browse thumbnails) is saved as the file the manuscript viewer then reads for its 2000 px image, so page 1 can show enlarged and blurry. Fix: key the file by FL id and width (or by URL). Fold into the desktop phase of the thumbnail prefetch plan (section 7). ✋ *By hand:* open a manuscript's thumbnail in the Joins Lab, then the same manuscript in the viewer, with an empty `images_cache/`.
-
-*Triage 2026-10-25:* still open. desktop/image_loader.py:66-68 names the cache file FL<id>_v2.jpg from the FL id alone, whatever the URL's width; thumbnails still come from /full/400, (metadata_manager.py:1631) and are loaded by ImageLoaderThread (result_dialog.py:4222, genizah_app.py:4902, join_workbench.py). No commit since 2026-10-21.
-
 ## GS-67
 
 **Quit still waits, at interpreter exit, for an NLI request in flight on the shared metadata executor** · P3 · Desktop app · ❌ Open · opened 2026-10-20
@@ -4471,3 +4456,112 @@ filter panel's controls, the criteria chips and the badge from `search_state`, a
 `_on_history_item_clicked` does for the fields it restores (it covers domains, authors, works,
 include mode, material, criteria and the text filters; the measurement fields would need the same).
 Found during the Codex review of gershuni/GenizahSearch-dev#50.
+
+## GS-302
+
+**Vernadsky and Budapest seminary records carry another library's code in libraries.csv** · P3 · Data and sidecars · ❌ Open · opened 2026-11-19
+
+Where: `libraries.csv` column 3 (`library_code`)
+
+Found while building the shelf tree (`scripts/build_shelfmark_tree.py`): 7 records whose catalogue
+form names the Vernadsky National Library of Ukraine are coded `CUL`, and 2 records of the Budapest
+rabbinical seminary ("The Jewish Theological Seminary - University of Jewish Studies", "BUD JTS")
+are coded `JTS`. The library filter and the library name shown for them are therefore wrong. The
+shelf tree is not misled (a record whose long form names another institution goes to "Other
+shelfmarks"; the build prints them), but the codes should be corrected at the source, with a code
+for each holding library.
+
+## GS-303
+
+**13 records in libraries.csv have no library code and no shelfmark** · P3 · Data and sidecars · ❌ Open · opened 2026-11-19
+
+Where: `libraries.csv` columns 2-3
+
+13 rows of `libraries.csv` have neither a call number nor a `library_code`. They cannot be found by
+shelfmark or library. The shelf tree places 11 of them by the library the catalogue's own notes
+name (`RECORD_LIBRARY` in `scripts/build_shelfmark_tree.py`, 2026-11-20: Oxford 1, the National
+Library of Russia 4, Manchester 1, Mosseri 2, a private collection in Jerusalem 1, the Academy of
+the Hebrew Language 1, Frankfurt 1) and shows them by their system number; the other 2 are under "Location
+unknown". The codes and call numbers should still be filled at the source, which would make that
+table unnecessary; one of the 13 is a typed list of Bodleian fragments, not a manuscript.
+
+## GS-304
+
+**A shelfmark opened in the first seconds after start can fail with "dictionary changed size during iteration"** · P3 · Desktop app · ❌ Open · opened 2026-11-20
+
+Where: `shared/metadata_manager.py::_iter_shelfmark_sources` (iterates `self.csv_bank` while the catalogue is still being loaded), reached from `MetadataManager.resolve_system_by_shelfmark` -> `_get_shelfmark_index`
+
+Seen while driving the desktop window for the shelf picker PR (gershuni/GenizahSearch-dev#68):
+`GenizahGUI.go_to("T-S AS 39.7")` called 4.7 s after `on_startup_finished`, while `libraries.csv`
+was still filling `csv_bank` on another thread, raised `RuntimeError: dictionary changed size
+during iteration` out of `browse_load`. The same call a few seconds later works. A reader who types
+a shelfmark in Browse or the Go to box right after the window opens can hit it; the error escapes
+the slot. Fix sketch: build the shelfmark index from a snapshot (`list(self.csv_bank.items())`), or
+wait for the catalogue's ready flag that `_check_shelfmark_completer_ready` already polls, and say
+"still loading" until then. Unrelated to the shelf picker; found by it.
+
+## GS-305
+
+**The discovery dialogs never offer the image of a linked document** · P3 · Accounts and community · ❌ Open · opened 2026-11-20
+
+Where: `web/pages/discoveries.py::create_new_discovery_dialog`, `open_edit_discovery_dialog` (`select_document`)
+
+Both dialogs build their "Image number" selector from `state.meta_mgr.get_browse_page(sys_id,
+p_num=1)`, but `state.meta_mgr` is a `MetadataManager` (`web/main.py`, `state.meta_mgr =
+MetadataManager(...)`), which has no `get_browse_page` (`shared/metadata_manager.py`; the method is
+on `web/services.py` and `shared/search_engine.py`). The `AttributeError` is swallowed by the
+surrounding `except Exception: pass`, so no image can be chosen and a new discovery's
+`page_number` is never set from the dialog. Found by Codex's pre-flight of picker PR 7 (web) and
+confirmed by grep. Fix sketch: ask the page count through the web service's `get_browse_page` off
+the event loop (it is blocking), then build the selector.
+
+## GS-306
+
+**The feed reads a discovery's document and additional shelfmarks from keys the web never writes** · P3 · Accounts and community · ⏳ Needs a check of the live `discoveries` table · opened 2026-11-20
+
+Where: `web/supabase_client.py::create_discovery`, `get_community_feed`
+
+`create_discovery` stores the linked document, its page and the additional shelfmarks as
+dictionaries in the `shelfmarks` JSONB array (the only such column in `supabase_setup.sql`), while
+`get_community_feed` reads top-level `document_id`, `shelfmark`, `page_number` and
+`additional_shelfmarks` and never unpacks `shelfmarks`; the edit dialog writes the top-level
+columns through `update_discovery`. Unless the live table has those columns filled by a trigger
+(not in any tracked SQL), a discovery shared on the web shows no linked document and no additional
+shelfmarks in the feed. Not checked against the live database. Fix sketch: in the feed, fall back
+to `shelfmarks[0]` and `shelfmarks[1:]` when the top-level keys are empty.
+
+## GS-307
+
+**The desktop Reading Desk shows a document's edition under every fragment, sometimes another document's** · P2 · Desktop app · ❌ Open · opened 2026-11-22
+
+Where: `genizah_app.py::_browse_rd_render_text`, `desktop/gui_threads.py::ReadingDeskWorker`
+
+The desktop desk asks for sources fragment by fragment (`get_all_sources_for_fragment`, which
+returns the sources of every PGP document a fragment belongs to) and shows, under each fragment,
+the first edition with text among them. Replayed on the local `pgp.db` (2026-11-22): a desk of
+PGP 712 (ENA 2740.3 + ENA 2805.2) shows edition 558 under both fragments; a desk of PGP 1702
+(T-S 13J16.11, T-S 13J22.21, T-S 8J22.14) shows edition 5171 under all three, and 5171 belongs to
+PGP 1246. The website fixed the same fault in v10.1.0 with its document mode
+(`web/pages/browse_desk_document.py`: the document's own edition once, Edition / Translation /
+By fragment), measured there on 548 documents shown repeated and 128 opening on another
+document's edition.
+
+Fix sketch: move `document_desk` and its rules from `web/pages/browse_desk_document.py` to
+`shared/`, and give the desktop desk the same text panel (a source selector over the document's
+own editions, translations apart, "By fragment" for each fragment's own transcriptions). The
+image views of GS-294 (one image at a time, puzzle images) are in; this is the text half.
+
+## GS-308
+
+**The scholarly-filter panel test fails now and then on a busy machine** · P3 · Build, CI and tests · ❌ Open · opened 2026-11-22
+
+Where: `tests/test_scholarly_transcription_filter.py::test_the_filters_panel_keeps_the_scholarly_filter` (`_count_line_after`, 15 s)
+
+The test waits up to 15 s for the results count line to change after Apply Filters, and fails with
+"Apply Filters: the count line stayed '1 of 3 Results (Has scholarly transcription)'". On 2026-11-22
+it failed in `scripts/run_local_tests.py` lane chunk 17 twice, and when run after
+`tests/test_single_word_page_only.py` or `tests/test_discovery_composition.py`, on `master-main`
+(85af603) as on a branch, and once on its own; it passed on other runs of the same commands. The same
+two files took 7 s on one run and 52 s on another, so the wait is starved rather than the filter
+broken (not shown). Look at what the earlier files leave running (search tasks, worker threads)
+before raising the wait.

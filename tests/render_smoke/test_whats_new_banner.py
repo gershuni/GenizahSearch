@@ -371,12 +371,12 @@ def test_an_unread_announcement_carries_a_dot():
 
 
 def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
-    """10.1.0's entry is gated on the catalogue text search being served, 10.0.0's on the
-    scholarly transcriptions being served to every reader, 9.16.0's on the letter-level
-    index, and so is each key: a reader who dismissed the content before gets the dot where
-    the new entry is there to read, and no dot where nothing new is shown."""
+    """11.0.0's entry is gated on the shelf tree being served, 10.1.0's on the catalogue text
+    search, 10.0.0's on the scholarly transcriptions being served to every reader, 9.16.0's on
+    the letter-level index, and so is each key: a reader who dismissed the content before gets
+    the dot where the new entry is there to read, and no dot where nothing new is shown."""
     from web.main import (WHATS_NEW_EARLIER_VERSION, WHATS_NEW_EARLIEST_VERSION,
-                          WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION)
+                          WHATS_NEW_OLDER_VERSION, WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION)
 
     def dot_after_dismissing(key):
         async def driver(user):
@@ -388,27 +388,38 @@ def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
             found.append(bool(_by_class(_elements(user), 'whats-new-dot')))
         return driver
 
+    editions_on = dict(side_effect=lambda editor: not editor)
     from datetime import date
     with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
           patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''}),
           patch('web.keyboard_shortcuts.served_dictionaries', return_value=dict(_EVERY_DICTIONARY))):
         found = []
-        with (patch('web.main.catalog_available', return_value=True),
-              patch('web.editions_assets.served_to', side_effect=lambda editor: not editor)):
+        with (patch('web.main.shelf_tree_available', return_value=True),
+              patch('web.main.catalog_available', return_value=True),
+              patch('web.editions_assets.served_to', **editions_on)):
             _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
             _run(dot_after_dismissing(WHATS_NEW_VERSION), passage_on=True)
         assert found == [True, False], found
         found = []
-        with (patch('web.main.catalog_available', return_value=False),
-              patch('web.editions_assets.served_to', side_effect=lambda editor: not editor)):
+        with (patch('web.main.shelf_tree_available', return_value=False),
+              patch('web.main.catalog_available', return_value=True),
+              patch('web.editions_assets.served_to', **editions_on)):
             _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=True)
             _run(dot_after_dismissing(WHATS_NEW_PREVIOUS_VERSION), passage_on=True)
         assert found == [True, False], found
         found = []
-        with (patch('web.main.catalog_available', return_value=False),
+        with (patch('web.main.shelf_tree_available', return_value=False),
+              patch('web.main.catalog_available', return_value=False),
+              patch('web.editions_assets.served_to', **editions_on)):
+            _run(dot_after_dismissing(WHATS_NEW_OLDER_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=True)
+        assert found == [True, False], found
+        found = []
+        with (patch('web.main.shelf_tree_available', return_value=False),
+              patch('web.main.catalog_available', return_value=False),
               patch('web.editions_assets.served_to', return_value=False)):
             _run(dot_after_dismissing(WHATS_NEW_EARLIEST_VERSION), passage_on=True)
-            _run(dot_after_dismissing(WHATS_NEW_EARLIER_VERSION), passage_on=True)
+            _run(dot_after_dismissing(WHATS_NEW_OLDER_VERSION), passage_on=True)
             _run(dot_after_dismissing(WHATS_NEW_EARLIEST_VERSION), passage_on=False)
         assert found == [True, False, False], found
 
@@ -416,10 +427,11 @@ def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
 _EVERY_DICTIONARY = {'blau': True, 'friedman': True, 'lane': True}
 
 
-def _key_with(*, catalogue=True, editions=True, dictionaries=True, passages=True):
+def _key_with(*, shelf=True, catalogue=True, editions=True, dictionaries=True, passages=True):
     from web.main import whats_new_content_key
     served = dict(_EVERY_DICTIONARY) if dictionaries else dict.fromkeys(_EVERY_DICTIONARY, False)
-    with (patch('web.main.catalog_available', return_value=catalogue),
+    with (patch('web.main.shelf_tree_available', return_value=shelf),
+          patch('web.main.catalog_available', return_value=catalogue),
           patch('web.editions_assets.served_to', side_effect=lambda editor: editions and not editor),
           patch('web.keyboard_shortcuts.served_dictionaries', return_value=served),
           patch('web.main.passage_available', return_value=passages)):
@@ -433,21 +445,28 @@ def test_the_key_names_every_older_line_that_is_not_shown():
     shown is now in the key; with all of them shown the keys are the plain ones, so readers
     who dismissed before this change are not shown the dot again for nothing."""
     from web.main import (WHATS_NEW_EARLIER_VERSION, WHATS_NEW_EARLIEST_VERSION,
-                          WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION)
+                          WHATS_NEW_OLDER_VERSION, WHATS_NEW_PREVIOUS_VERSION, WHATS_NEW_VERSION)
 
     assert _key_with() == WHATS_NEW_VERSION
     assert _key_with(editions=False) == WHATS_NEW_VERSION + '-no-editions'
+    assert _key_with(catalogue=False) == WHATS_NEW_VERSION + '-no-catalogue'
     assert _key_with(dictionaries=False, passages=False) == (
         WHATS_NEW_VERSION + '-no-dictionaries-no-passages')
-    # Before the catalogue is served (the code goes to the server first): as before.
-    assert _key_with(catalogue=False) == WHATS_NEW_PREVIOUS_VERSION
-    assert _key_with(catalogue=False, passages=False) == WHATS_NEW_PREVIOUS_VERSION + '-no-passages'
-    assert _key_with(catalogue=False, editions=False) == WHATS_NEW_EARLIER_VERSION
-    assert _key_with(catalogue=False, editions=False, dictionaries=False) == WHATS_NEW_EARLIER_VERSION
-    assert _key_with(catalogue=False, editions=False, passages=False) == WHATS_NEW_EARLIEST_VERSION
+    # Before the shelf tree is served (the code goes to the server first): as before.
+    assert _key_with(shelf=False) == WHATS_NEW_PREVIOUS_VERSION
+    assert _key_with(shelf=False, passages=False) == WHATS_NEW_PREVIOUS_VERSION + '-no-passages'
+    assert _key_with(shelf=False, catalogue=False) == WHATS_NEW_EARLIER_VERSION
+    assert _key_with(shelf=False, catalogue=False, passages=False) == (
+        WHATS_NEW_EARLIER_VERSION + '-no-passages')
+    assert _key_with(shelf=False, catalogue=False, editions=False) == WHATS_NEW_OLDER_VERSION
+    assert _key_with(shelf=False, catalogue=False, editions=False,
+                     dictionaries=False) == WHATS_NEW_OLDER_VERSION
+    assert _key_with(shelf=False, catalogue=False, editions=False,
+                     passages=False) == WHATS_NEW_EARLIEST_VERSION
     # Every state has its own key wherever the lines shown differ under the same newest line.
-    states = [dict(editions=e, dictionaries=d, passages=p)
-              for e in (True, False) for d in (True, False) for p in (True, False)]
+    states = [dict(catalogue=c, editions=e, dictionaries=d, passages=p)
+              for c in (True, False) for e in (True, False)
+              for d in (True, False) for p in (True, False)]
     assert len({_key_with(**s) for s in states}) == len(states)
 
 
@@ -470,6 +489,7 @@ def test_a_line_that_comes_back_lights_the_dot_again():
     with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
           patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''}),
           patch('web.keyboard_shortcuts.served_dictionaries', return_value=dict(_EVERY_DICTIONARY)),
+          patch('web.main.shelf_tree_available', return_value=True),
           patch('web.main.catalog_available', return_value=True)):
         with patch('web.editions_assets.served_to', return_value=False):
             from web.main import whats_new_content_key
@@ -480,6 +500,26 @@ def test_a_line_that_comes_back_lights_the_dot_again():
             _run(dot_after_dismissing(dismissed, found), passage_on=True)
     assert dismissed.endswith('-no-editions'), dismissed
     assert found == [False, True], found
+
+
+def test_the_shelf_line_is_shown_only_where_the_shelf_tree_is_served():
+    """The 11.0.0 line leads to the shelf button, which exists only where the shelf tree is
+    served; in Hebrew it is the owner's sentence, not the English."""
+    lines = {'en': "New: Pick from the shelf - choose manuscripts by library and collection",
+             'he': "חדש: בחירה מהמדף - בחרו כתבי יד לפי ספריות ואוספים"}
+
+    def driver_for(lang):
+        async def driver(user):
+            await user.open('/')
+            seen.append(lines[lang] in _texts(_elements(user)))
+        return driver
+
+    seen = []
+    for served in (True, False):
+        with patch('web.main.shelf_tree_available', return_value=served):
+            _run(driver_for('en'))
+            _run(driver_for('he'), lang='he')
+    assert seen == [True, True, False, False], seen
 
 
 def test_the_catalogue_line_is_shown_only_where_the_catalogue_is_served():
