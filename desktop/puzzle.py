@@ -757,6 +757,10 @@ class PuzzleCanvasWindow(QMainWindow):
     Singleton pattern: GenizahGUI.add_to_puzzle() reuses this window.
     """
 
+    #: The room a fragment added to the canvas is given before its image arrives: the canvas
+    #: images are 800 px wide, and 50 px apart.
+    _SLOT_WIDTH = 850
+
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -1161,9 +1165,19 @@ class PuzzleCanvasWindow(QMainWindow):
 
     # -- Public API --
 
+    def _take_place(self):
+        """The next free place on the canvas, taken now: several fragments added at once (the
+        Reading Desk's New Puzzle, Add all) would otherwise all start at the same x, as the
+        place advances only when an image arrives (_on_image_loaded keeps the larger of the
+        two)."""
+        x = self._next_x
+        self._next_x += self._SLOT_WIDTH
+        return x
+
     def add_fragment(self, sys_id, shelfmark, folio_label, fl_id,
-                     image_url='', external_provider='', page_index=-1):
-        """Add a fragment to the puzzle canvas. Starts async image load."""
+                     image_url='', external_provider='', page_index=-1, x=None):
+        """Add a fragment to the puzzle canvas. Starts async image load. ``x`` is a place
+        taken for it earlier (start_new_with); without it the next free place is taken."""
         item_key = (sys_id, folio_label)
 
         # Dedup: already loaded
@@ -1196,12 +1210,14 @@ class PuzzleCanvasWindow(QMainWindow):
                 threshold = 150.0
             elif s.startswith(('MS HEB.', 'MS. HEB.')):
                 skip_bg = True
+        if x is None:
+            x = self._take_place()
         puzzle_frag = PuzzleFragment(
             sys_id=sys_id,
             folio_label=folio_label,
             fl_id=fl_id,
             shelfmark=shelfmark,
-            x=self._next_x,
+            x=x,
             y=50.0,
             bg_removal_threshold=threshold,
             processed=not skip_bg,
@@ -1210,10 +1226,10 @@ class PuzzleCanvasWindow(QMainWindow):
             page_index=page_index,
         )
 
-        # Placeholder on canvas
+        # Placeholder on canvas, where the fragment will be
         placeholder = QGraphicsTextItem(f"{shelfmark}\n{tr('Loading...')}")
         placeholder.setDefaultTextColor(QColor(200, 200, 200))
-        placeholder.setPos(self._next_x, 50.0)
+        placeholder.setPos(x, 50.0)
         self.canvas_view.scene.addItem(placeholder)
         self._placeholder_items[item_key] = placeholder
 
@@ -1534,15 +1550,18 @@ class PuzzleCanvasWindow(QMainWindow):
 
         self.shelfmark_input.clear()
 
-    def _start_meta_resolve(self, sys_id, shelfmark):
+    def _start_meta_resolve(self, sys_id, shelfmark, x=None):
         """Resolve a manuscript's folios in the background, then add its first
         folio -- to the canvas this was asked on. The result carries the
         canvas generation, so if New or opening a join replaced the canvas
         meanwhile it adds nothing. The one place a metadata request that
-        adds a fragment is started (GenizahGUI.add_to_puzzle calls it too)."""
+        adds a fragment is started (GenizahGUI.add_to_puzzle calls it too).
+        ``x``, when given, is the place already taken for the fragment, so
+        that fragments asked for together keep their order whatever order
+        their lookups finish in (start_new_with)."""
         gen = self._canvas_gen
         thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
-        thread.meta_ready.connect(partial(self._on_meta_resolved, gen))
+        thread.meta_ready.connect(partial(self._on_meta_resolved, gen, x=x))
         thread.meta_failed.connect(partial(self._on_meta_failed, gen))
         self._meta_threads.append(thread)
         thread.start()
@@ -1700,8 +1719,9 @@ class PuzzleCanvasWindow(QMainWindow):
         btn_close.clicked.connect(dlg.close)
         dlg.show()
 
-    def _on_meta_resolved(self, gen, sys_id, shelfmark, images_nli):
-        """Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio."""
+    def _on_meta_resolved(self, gen, sys_id, shelfmark, images_nli, x=None):
+        """Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio (at
+        ``x``, the place taken for it when it was asked for, if one was)."""
         if sip.isdeleted(self):
             return
         if gen != self._canvas_gen:
@@ -1712,7 +1732,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''),
                           image_url=first.get('image_url', ''),
                           external_provider=first.get('external_provider', ''),
-                          page_index=first.get('page_index', -1))
+                          page_index=first.get('page_index', -1), x=x)
         self.statusBar().showMessage(
             tr("Added {} ({} folios)").format(shelfmark, len(images_nli)), 3000
         )
@@ -1806,8 +1826,9 @@ class PuzzleCanvasWindow(QMainWindow):
         # canvas's: _clear_canvas empties them)
         self._shelf_landed(item_key[0], self._canvas_gen)
 
-        # Advance placement position based on actual pixmap width
-        self._next_x = puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50
+        # Advance placement position based on actual pixmap width (never back over a place
+        # already given to a fragment added after this one)
+        self._next_x = max(self._next_x, puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50)
 
         # Update fragment dropdown
         self._refresh_fragment_combo()
@@ -2894,6 +2915,24 @@ class PuzzleCanvasWindow(QMainWindow):
         """Clear canvas to a fresh scratch pad."""
         if not self._confirm_leave_current(tr('Save current puzzle before starting new?')):
             return
+        self._start_new()
+
+    def start_new_with(self, fragments):
+        """A new puzzle of ``fragments`` ((sys_id, shelfmark) pairs), each added at its first
+        folio as its folios are resolved -- the Reading Desk's "New Puzzle". Asks first about
+        the puzzle on the canvas, as New does; nothing changes when the reader cancels or the
+        save fails. Returns whether the new puzzle was started."""
+        if not self._confirm_leave_current(tr('Save current puzzle before starting new?')):
+            return False
+        self._start_new()
+        for sys_id, shelfmark in fragments:
+            if sys_id:
+                # Its place is taken now, in the desk's order: the lookups finish in any order.
+                self._start_meta_resolve(sys_id, shelfmark or '', x=self._take_place())
+        return True
+
+    def _start_new(self):
+        """The canvas emptied to a fresh, unsaved puzzle."""
         self._clear_canvas()
         self._current_doc_id = None
         self._mark_saved()

@@ -27,6 +27,10 @@ class ReadingDeskEntry:
     # sources: PGP transcription sources for this fragment
     pgp_doc: Optional[Dict[str, Any]] = None
     sequence_order: int = 0
+    # The text the reader chose for this fragment: '' = the desk's default (an edition, else the
+    # first source with text, else the automatic transcription), 'v08' = the automatic
+    # transcription, else a source's key (desktop: genizah_app.py::_browse_rd_source_key).
+    chosen: str = ''
 
 
 @dataclass
@@ -35,3 +39,9 @@ class ReadingDeskState:
     entries: List[ReadingDeskEntry] = field(default_factory=list)
     source_description: str = ''
     pgpid: Optional[int] = None
+    # The image side's choices, kept while the desk is open (shared/reading_desk_views.py):
+    # the view ('' = the default), the image on show in one at a time (its key), and the
+    # puzzle images on show (ids one per line; '' = the default, shared/reading_desk_puzzles.py).
+    image_view: str = ''
+    image_shown: str = ''
+    puzzles_shown: str = ''

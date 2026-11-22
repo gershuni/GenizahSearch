@@ -1952,6 +1952,8 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 
 ## desktop/puzzle.py
 
+- **Method** `PuzzleCanvasWindow.start_new_with` — the Reading Desk's "New Puzzle": after the window's own question about the canvas, a new puzzle with each desk fragment added at its first folio; False when cancelled or the save fails (2026-11-22)
+
 - **Function** `_label_buttons` (Line 43)
 - **Function** `_ask` (Line 50) — QMessageBox.question with translated button labels.
 - **Function** `_notify` (Line 71) — QMessageBox.information/.warning (`kind` is 'information' or
@@ -2201,6 +2203,52 @@ The Reading Desk's third image view, "Puzzle images" (2026-11-18; several at onc
 - **Function** `own_picture_js` — the browser asks `POST /api/puzzle_export` for the picture of the visitor's own join and keeps it for the page's life
 - **Function** `shown_joins` — the puzzles on show: the reader's choice (`KEY_JOIN_SHOWN`, ids one per line; `NONE_SHOWN` when cleared), in the order found, else the first `SHOWN_FIRST` (4)
 - **Function** `render_join_view` — the lookup off the event loop, then the puzzles shown one under another, each with its own viewer (`rd-viewer-join-<n>`), image toolbar and "Open in Puzzle"; a multiple chooser when there are several, "New Puzzle" to arrange another, or "Arrange in Puzzle" when there is none
+
+## shared/reading_desk_views.py
+
+The Reading Desk's three image views, the rules for both apps (2026-11-22, GS-294; the web desk keeps its own copies in `web/pages/browse_desk_images.py` until its puzzle-images change lands). Tests: `tests/test_reading_desk_views.py`.
+
+- **Function** `image_view` — the reader's view, else one at a time on a document's desk and all images on any other; the puzzle images only while offered
+- **Function** `join_is_offered` — the puzzle images are offered on a desk of two or more fragments
+- **Function** `is_document_desk` — the desk was opened for a PGP document, every fragment on it is the document's, and the document has an edition or translation with text (the web's document-mode rule)
+- **Function** `page_label` — Recto/Verso for a fragment of one leaf, a number beyond that (with the caller's `tr`)
+- **Function** `image_key` / `shown_image` — an image's key; the image on show in one at a time (the reader's, else the fragment they came from, else the first)
+- **Function** `image_fl_id` / `text_page_for_image` — the NLI FL id of an image; the text page shown with it, found by that id only, never by position (None: the fragment's whole text)
+- **Function** `move_entry` — the desk's fragments with one moved up or down (None at either end); dicts or objects with `sys_id`
+
+## shared/reading_desk_puzzles.py
+
+The Reading Desk's puzzle images, the rules for both apps (2026-11-22, GS-294): which saved puzzles hold the desk's fragments, best first, and which are on show. Tests: `tests/test_reading_desk_puzzles_shared.py`.
+
+- **Function** `own_joins` / `published_joins` / `rank_joins` / `find_joins` — BLOCKING; the reader's own saved puzzles (any object with `list_documents_for_fragment` and `load_document`) and the published ones holding at least two of the desk's fragments, ranked most fragments first, own before published, newest first
+- **Function** `shown_joins` / `choice_of` — the puzzles on show (the reader's choice, ids one per line, else the first `SHOWN_FIRST` (4); `NONE_SHOWN` a cleared list; a lone puzzle always); the stored choice for the ones ticked
+- **Function** `join_label` — the puzzle's name and whose it is
+- **Function** `join_fragments` — an own puzzle's fragments as `PuzzleFragment`s for the composer (an unreadable row is logged, not dropped in silence)
+
+## desktop/reading_desk_images.py
+
+The desktop Reading Desk's image side (2026-11-22, GS-294): the view switcher, one image at a time beside a strip of thumbnails, all images. The host (`genizah_app.py`, `_browse_rd_*`) hands it the desk's state and image lists. Tests: `tests/test_desktop_reading_desk_qt.py`.
+
+- **Function** `fragment_image_list` — a fragment's images from its metadata cache entry (the library's own when they number as NLI's, else NLI's; else its FL id)
+- **Function** `desk_images` / `desk_view` / `desk_shown_image` — every image of every fragment (key, label, address, FL id); the view; the image on show, one rule for both sides
+- **Function** `bounded_image` — an image kept no larger than `IMAGE_MAX_SIDE` on its long side
+- **Class** `ImageAdjustButton` — brightness, contrast, gamma and invert behind one button, for one viewer
+- **Function** `image_controls` / `reset_view` — one row: zoom, rotate, the adjustments, reset view; the first label (the name) gives way in a narrow pane
+- **Function** `move_buttons` — ▲ ▼ for a fragment, none on a desk of one, disabled at the ends
+- **Class** `ReadingDeskImagePane` — one frame for the three views (`head_cell` controls over `main_cell` the image(s); the switcher over `side_cell`, the thumbnails or the puzzle list); signals `image_chosen`, `view_changed`, `navigate_requested`, `remove_requested`, `move_requested`, `arrange_requested`, `open_puzzle_requested`; `set_desk` redraws, `stack_scroll_bar` (all images only) for the text side's scroll sync, `shutdown` retires every loader; thumbnails load three at a time; the puzzles found are kept until the view is chosen again
+
+The host's side (`genizah_app.py`): `_browse_rd_place_image_pane` (stretch and half the room; the sizes before the desk kept), `_browse_rd_render_text` (one image on show: its fragment, no fragment line), `_browse_rd_entry_text` / `_browse_rd_source_options` / `_browse_rd_choose_text` (a fragment's chosen text, `ReadingDeskEntry.chosen`), `_browse_rd_sync_version_combo` / `_browse_rd_restore_version_combo` (the "Version" chooser on the desk), `_browse_rd_move_entry`.
+
+## desktop/reading_desk_puzzles.py
+
+The desktop Reading Desk's puzzle images (2026-11-22, GS-294): several puzzles one under another, a "Puzzles shown" chooser, "New Puzzle" and "Open in Puzzle". Tests: `tests/test_desktop_reading_desk_qt.py`.
+
+- **Function** `own_snapshot` — the reader's own saved puzzles read on the UI thread (joins.db connections are bound to their thread)
+- **Function** `public_client` — a Supabase client of the worker's own, public reads only
+- **Class** `PuzzleLookupThread` — the published puzzles, ranked with the own snapshot
+- **Class** `PuzzlePictureThread` — an own puzzle's picture composed by `shared/puzzle_export.py`, with the number of fragments left out for want of an image
+- **Class** `PublishedPuzzleThread` — a published puzzle's record, fetched before the host copies it into the reader's own puzzles ("Open in Puzzle")
+- **Class** `PuzzleImagesView` — the image column; `head` ("New Puzzle") and `side` (every puzzle found, its picture and a check box) for the pane's other cells; `begin()` looks for the puzzles once the host has connected `found`; one picture prepared at a time, each kept for the session (`_PICTURES`, six)
 
 ## web/pages/browse_enrichment.py
 

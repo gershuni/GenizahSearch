@@ -6962,3 +6962,14 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     "Choose {name}": "בחירת {name}",
 })
+
+# The desktop Reading Desk's image side (desktop/reading_desk_images.py, reading_desk_puzzles.py;
+# GS-294). Its puzzle and move up / down strings are the website's, in the Reading Desk block above.
+TRANSLATIONS.update({
+    # The desk's text pane (genizah_app.py::_browse_rd_render_text): a fragment's line
+    "Change version": "שנה גרסה",
+    "fragment": "קטע",
+    # The desktop composes a puzzle's picture itself, and says when fragments were left out of it.
+    "Some fragments' images could not be loaded: {missing} of {total}.":
+        "חלק מתמונות הקטעים לא נטענו: {missing} מתוך {total}.",
+})

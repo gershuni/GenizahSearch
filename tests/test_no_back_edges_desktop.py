@@ -39,6 +39,8 @@ DESKTOP_MODULES = [
     "desktop/pdf_image_controller.py",
     "desktop/pdf_page_renderer.py",
     "desktop/puzzle.py",
+    "desktop/reading_desk_images.py",    # the Reading Desk's image side, three views (GS-294)
+    "desktop/reading_desk_puzzles.py",   # the Reading Desk's puzzle images (GS-294)
     "desktop/result_dialog.py",
     "desktop/settings_dialogs.py",
     "desktop/telemetry.py",

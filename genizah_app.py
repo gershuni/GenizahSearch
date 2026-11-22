@@ -4334,6 +4334,13 @@ class GenizahGUI(QMainWindow):
 
     def _browse_change_version(self, index):
         """Change between text versions."""
+        if getattr(self, 'browse_reading_desk_active', False):
+            # On the desk the chooser holds the shown fragment's texts; the browsed page's own
+            # versions would replace the desk's text with that page's.
+            data = self.browse_version_combo.currentData() if hasattr(self, 'browse_version_combo') else None
+            if data and data.get('desk') and data.get('sys_id'):
+                self._browse_rd_choose_text(data['sys_id'], data.get('key'))
+            return
         if not hasattr(self, 'current_browse_sid') or not self.current_browse_sid:
             return
         if not hasattr(self, 'browse_version_combo'):
@@ -4839,6 +4846,10 @@ class GenizahGUI(QMainWindow):
     def _check_document_community_status(self):
         """Check if document has comments and load available versions."""
         if not self.current_browse_sid or not self.corrections_client:
+            return
+        if getattr(self, 'browse_reading_desk_active', False):
+            # The Reading Desk owns the text and the "Version" chooser (and the text on screen
+            # is not this page's). Checked again when the desk is left (_browse_exit_reading_desk).
             return
 
         doc_id = self.current_browse_sid
@@ -8511,11 +8522,15 @@ class GenizahGUI(QMainWindow):
         self.browse_reading_desk_state = ReadingDeskState()
         self.browse_reading_desk_pgpid = None
         self._browse_rd_worker = None
-        self._browse_rd_image_widgets = []  # list of (sys_id, ZoomableScrollArea, ImageLoaderThread)
-        self._browse_rd_image_scroll = None  # QScrollArea for stacked images
+        # The desk's image side (desktop/reading_desk_images.py::ReadingDeskImagePane): one
+        # image at a time, all images, or puzzle images. Added to browse_splitter on entry.
+        self._browse_rd_image_scroll = None
+        self._browse_rd_document = None  # (pgpid, sys_ids, is a document's desk), see _browse_rd_is_document
         self._browse_rd_syncing = False  # prevents infinite scroll sync loop
         self._rd_text_sync_handler = None  # stored ref for targeted disconnect
         self._rd_image_sync_handler = None  # stored ref for targeted disconnect
+        self._rd_sync_image_bar = None  # the scroll bar the image handler is connected to
+        self._browse_rd_fork_worker = None  # PublishedPuzzleThread of "Open in Puzzle"
         self._browse_rd_enrich_threads = {}  # sys_id -> EnrichMetadataThread
 
         # Keys of this tab, as in the Manuscript Viewer (owner, 2026-10-30):
@@ -9510,6 +9525,10 @@ class GenizahGUI(QMainWindow):
         # Refresh joins dropdown now that PGP data is available
         self._update_joins_dropdown()
 
+        if getattr(self, 'browse_reading_desk_active', False):
+            # The Reading Desk owns the text and the "Version" chooser; this page's sources are
+            # fetched again when the desk is left.
+            return
         if not sources:
             return
 
@@ -10726,12 +10745,18 @@ class GenizahGUI(QMainWindow):
             self.browse_rd_shelf_input.setText(last_shelf)
             self.browse_rd_shelf_input.selectAll()
 
-        # Create image scroll area ONCE (will be repopulated on each render)
+        # The image side, made ONCE per desk (redrawn on each render)
         if self._browse_rd_image_scroll is None:
-            self._browse_rd_image_scroll = QScrollArea()
-            self._browse_rd_image_scroll.setWidgetResizable(True)
-            self._browse_rd_image_scroll.setStyleSheet("background: #1a1a2e;")
-            self.browse_splitter.addWidget(self._browse_rd_image_scroll)
+            from desktop.reading_desk_images import ReadingDeskImagePane
+            pane = ReadingDeskImagePane()
+            pane.image_chosen.connect(self._browse_rd_render_text)
+            pane.view_changed.connect(self._browse_rd_on_view_changed)
+            pane.navigate_requested.connect(self._browse_rd_navigate)
+            pane.remove_requested.connect(self._browse_rd_remove_entry)
+            pane.move_requested.connect(self._browse_rd_move_entry)
+            pane.arrange_requested.connect(self._browse_rd_arrange_in_puzzle)
+            pane.open_puzzle_requested.connect(self._browse_rd_open_puzzle)
+            self._browse_rd_place_image_pane(pane)
 
         # Initial render with V0.8 text
         self._browse_rd_render()
@@ -10751,6 +10776,31 @@ class GenizahGUI(QMainWindow):
         for sid in sys_ids:
             vol = current_vol if sid == (self.current_browse_sid or '') else None
             self._browse_rd_enrich_entry(sid, volume_ie=vol)
+
+    def _browse_rd_place_image_pane(self, pane):
+        """The desk's image side into the browse splitter, in the normal viewer's place.
+
+        It stretches as the text does: with no stretch of its own the splitter gave every
+        spare pixel to the text and held the image side at its minimum width, which differs
+        from one image view to the next, so the divider jumped at each change of view. It starts
+        with half of the room the text and the viewer had; the sizes before the desk come back
+        when it is left (``_browse_rd_restore_normal_view``)."""
+        splitter = self.browse_splitter
+        self._browse_rd_sizes_before = splitter.sizes()
+        self.browse_viewer.setVisible(False)
+        splitter.addWidget(pane)
+        self._browse_rd_image_scroll = pane
+        index = splitter.indexOf(pane)
+        splitter.setStretchFactor(index, 1)
+        sizes = splitter.sizes()
+        lists = sizes[0] if self.browse_lists_panel.isVisible() else 0
+        room = max(0, sum(self._browse_rd_sizes_before) - lists)
+        text_index = splitter.indexOf(self.browse_text.parentWidget()) if self.browse_text.parentWidget() else 1
+        new = [0] * len(sizes)
+        new[0] = lists
+        new[text_index] = room - room // 2
+        new[index] = room // 2
+        splitter.setSizes(new)
 
     def _browse_rd_enrich_entry(self, sys_id, volume_ie=None):
         """Ensure meta_mgr.nli_cache[sys_id] has image metadata for the reading desk.
@@ -10841,6 +10891,9 @@ class GenizahGUI(QMainWindow):
 
         # Stop listening to the source workers; each is kept until its thread ends
         self._browse_rd_retire_sources()
+        _retire_worker(self._browse_rd_fork_worker, 'fetched')
+        self._browse_rd_fork_worker = None
+        self._browse_rd_document = None
 
         # Disconnect callbacks and then wait/terminate any pending enrichment
         # threads so a stale re-render can't fire into a torn-down viewer and
@@ -10860,11 +10913,9 @@ class GenizahGUI(QMainWindow):
                     t.wait()
         self._browse_rd_enrich_threads = {}
 
-        # Clean up image widgets
-        self._browse_rd_image_widgets = []
-
         # Restore normal view
         self._browse_rd_restore_normal_view()
+        self._browse_rd_release_version_combo()
 
         # Hide reading desk toolbar
         self.browse_rd_toolbar.hide()
@@ -10875,9 +10926,12 @@ class GenizahGUI(QMainWindow):
         self.combo_browse_page.setEnabled(True)
         self.btn_b_all.setEnabled(True)
 
-        # Reload current page normally
+        # Reload current page normally, with its own versions, comments and sources (the desk
+        # held the chooser, and the browsed manuscript may have changed meanwhile)
         if self.current_browse_sid:
             self.browse_load_page()
+            self._check_document_community_status()
+            self._browse_refresh_pgp_for_page()
 
     def _browse_add_to_view(self):
         """Handle 'Add to View' button click -- enter reading desk or add a manuscript.
@@ -11555,18 +11609,54 @@ class GenizahGUI(QMainWindow):
             logger.debug("Failed to open PGP joins in reading desk: %s", e)
 
     def _browse_rd_render(self):
-        """Render reading desk: stacked texts in text pane, stacked images in viewer pane.
+        """Render reading desk: the texts in the text pane, the images in the image pane
+        (desktop/reading_desk_images.py: one at a time, all images, or puzzle images)."""
+        if not self.browse_reading_desk_state.entries:
+            return
+        self._browse_rd_render_text()
+        self._browse_rd_render_images(text_too=False)
 
-        This is the key v3 method that produces the dual-pane synchronized reading desk.
-        """
+    def _browse_rd_image_lists(self):
+        """sys_id -> the images of each fragment on the desk (from the metadata cache)."""
+        from desktop.reading_desk_images import fragment_image_list
+        return {e.sys_id: fragment_image_list(self.meta_mgr.nli_cache.get(e.sys_id, {}))
+                for e in self.browse_reading_desk_state.entries}
+
+    def _browse_rd_is_document(self):
+        """The desk shows a PGP document (shared/reading_desk_views.py::is_document_desk),
+        asked of the sidecar once per set of fragments."""
+        state = self.browse_reading_desk_state
+        sys_ids = tuple(e.sys_id for e in state.entries)
+        cached = self._browse_rd_document
+        if cached is None or cached[0] != state.pgpid or cached[1] != sys_ids:
+            from shared.reading_desk_views import is_document_desk
+            cached = (state.pgpid, sys_ids, is_document_desk(state.pgpid, sys_ids))
+            self._browse_rd_document = cached
+        return cached[2]
+
+    def _browse_rd_shown_image(self):
+        """The image on show in "One at a time" (None in the other views): the text side
+        shows its fragment alone."""
+        from desktop.reading_desk_images import desk_shown_image
+        return desk_shown_image(self.browse_reading_desk_state, self._browse_rd_image_lists(),
+                                self._browse_rd_is_document(), self.current_browse_sid or '')
+
+    def _browse_rd_render_text(self):
+        """The text pane: every fragment's text, one under another -- or, with one image on
+        show, that image's fragment alone, and of its automatic transcription that image's
+        page alone (shared/reading_desk_views.py::text_page_for_image). A PGP or FGP source is
+        one text for the fragment and is shown whole."""
+        import html as _html_mod
+        from shared.reading_desk_views import text_page_for_image
         state = self.browse_reading_desk_state
         if not state.entries:
             return
+        shown = self._browse_rd_shown_image()
 
         # Update toolbar count label
         count = len(state.entries)
         self.browse_rd_count_label.setText(
-            f" ({count} fragment{'s' if count != 1 else ''})"
+            f" ({count} {tr('fragment') if count == 1 else tr('fragments')})"
         )
 
         # === LEFT PANE: Stacked Texts in browse_text ===
@@ -11579,68 +11669,58 @@ class GenizahGUI(QMainWindow):
         html_parts.append(
             "<div style='background: #2c3e50; color: white; padding: 8px 12px; "
             "margin-bottom: 10px; border-radius: 4px;'>"
-            "<b>Reading Desk</b>"
+            f"<b>{tr('Reading Desk')}</b>"
         )
         if state.pgpid:
             html_parts.append(f" &mdash; PGP #{state.pgpid}")
         html_parts.append(
-            f" ({len(state.entries)} fragment{'s' if len(state.entries) != 1 else ''})"
+            f" ({len(state.entries)} {tr('fragment') if len(state.entries) == 1 else tr('fragments')})"
             "</div>"
         )
 
         for idx, entry in enumerate(state.entries):
+            if shown is not None and idx != shown['frag_idx']:
+                continue  # one image on show: its fragment's text alone
             sid = entry.sys_id
             shelfmark = entry.shelfmark
 
-            # Fragment header (clickable to navigate to single view)
-            is_current = (sid == self.current_browse_sid)
-            current_badge = " <span style='background: #27ae60; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px;'>Current</span>" if is_current else ""
-            html_parts.append(
-                f"<div id='rd-text-frag-{idx}' style='background: #ecf0f1; padding: 6px 10px; "
-                f"margin-top: {'0' if idx == 0 else '20'}px; border-bottom: 2px solid #3498db;'>"
-                f"<a href='genizah://rd-navigate/{sid}' style='color: #2980b9; text-decoration: none; font-weight: bold;'>"
-                f"{shelfmark}</a>{current_badge}"
-                f" <a href='genizah://rd-remove/{sid}' style='color: #e74c3c; text-decoration: none; font-size: 11px; margin-left: 10px;'>[remove]</a>"
-            )
-
-            # Version selector link
-            if entry.sources:
+            # Fragment header (clickable to navigate to single view). With one image on show
+            # there is none: the fragment's name and its remove are over the image, and its
+            # version is the "Version" chooser above the text (_browse_rd_sync_version_combo).
+            if shown is None:
+                is_current = (sid == self.current_browse_sid)
+                current_badge = f" <span style='background: #27ae60; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px;'>{_html_mod.escape(tr('Current'))}</span>" if is_current else ""
                 html_parts.append(
-                    f" <a href='genizah://rd-version/{sid}/{idx}' style='color: #8e44ad; text-decoration: none; font-size: 11px; margin-left: 10px;'>[change version]</a>"
+                    f"<div id='rd-text-frag-{idx}' style='background: #ecf0f1; padding: 6px 10px; "
+                    f"margin-top: {'0' if idx == 0 else '20'}px; border-bottom: 2px solid #3498db;'>"
+                    f"<a href='genizah://rd-navigate/{sid}' style='color: #2980b9; text-decoration: none; font-weight: bold;'>"
+                    f"{shelfmark}</a>{current_badge}"
+                    f" <a href='genizah://rd-remove/{sid}' style='color: #e74c3c; text-decoration: none; font-size: 11px; margin-left: 10px;'>[{_html_mod.escape(tr('Remove'))}]</a>"
                 )
 
-            html_parts.append("</div>")
+                # Version selector link
+                if entry.sources:
+                    html_parts.append(
+                        f" <a href='genizah://rd-version/{sid}/{idx}' style='color: #8e44ad; text-decoration: none; font-size: 11px; margin-left: 10px;'>[{_html_mod.escape(tr('Change version'))}]</a>"
+                    )
 
-            # Determine text to show: prefer PGP edition, else V0.8
-            display_text = ""
-            text_direction = "rtl"
+                html_parts.append("</div>")
 
-            if entry.sources:
-                # Find first edition
-                for src in entry.sources:
-                    if 'Edition' in (src.get('doc_relation') or '') and src.get('content'):
-                        display_text = src['content']
-                        break
-                # If no edition, try first translation
-                if not display_text:
-                    for src in entry.sources:
-                        if src.get('content'):
-                            display_text = src['content']
-                            lang = src.get('language', '')
-                            if lang == 'English':
-                                text_direction = 'ltr'
-                            break
+            # The text to show: the reader's choice, else an edition, else V0.8
+            display_text, text_direction, _key = self._browse_rd_entry_text(entry)
 
             # Fallback to V0.8 text from pages — Phase 999.4: emit ONE
             # `<div>` (and ONE raw_text_parts entry) per page so the
             # per-page block matcher restarts numbering at each page rather
             # than at each fragment. PGP edition path keeps its single
             # `<div>` because there is no internal page concept.
-            page_texts_v08 = (
-                [p.get('text', '') for p in entry.pages if p.get('text')]
-                if (not display_text and entry.pages)
-                else []
-            )
+            text_pages = [p for p in entry.pages if p.get('text')] if (not display_text and entry.pages) else []
+            # One image on show: its page alone (none, when that image has no text page),
+            # never every page of the fragment together.
+            shown_page = text_page_for_image(shown, text_pages) if (shown is not None and text_pages) else None
+            if shown is not None and text_pages:
+                text_pages = [text_pages[shown_page]] if shown_page is not None else []
+            page_texts_v08 = [p.get('text', '') for p in text_pages]
 
             def _emit_content_div(text_body):
                 # Escaped: a PGP edition's `<...>` added letters would vanish.
@@ -11655,6 +11735,11 @@ class GenizahGUI(QMainWindow):
             if display_text:
                 _emit_content_div(display_text)
             elif page_texts_v08:
+                if shown_page is not None:
+                    html_parts.append(
+                        "<div style='padding: 2px 10px; color: #6c757d; font-size: 11px;'>"
+                        f"{_html_mod.escape(shown.get('label') or '')}</div>"
+                    )
                 for page_idx, page_text in enumerate(page_texts_v08):
                     if page_idx > 0:
                         # Visible page separator inside the fragment so the user
@@ -11663,13 +11748,13 @@ class GenizahGUI(QMainWindow):
                             "<div style='margin: 12px 0; padding: 4px 10px; "
                             "background: #f8f9fa; color: #6c757d; font-size: 11px; "
                             "border-top: 1px dashed #ced4da;'>"
-                            f"page {page_idx + 1}</div>"
+                            f"{_html_mod.escape(tr('Page'))} {page_idx + 1}</div>"
                         )
                     _emit_content_div(page_text)
             else:
                 html_parts.append(
                     "<div style='padding: 10px; color: #95a5a6; font-style: italic;'>"
-                    "No text available</div>"
+                    f"{_html_mod.escape(tr('No text available'))}</div>"
                 )
 
         full_html = "\n".join(html_parts)
@@ -11681,12 +11766,156 @@ class GenizahGUI(QMainWindow):
         apply_line_numbered_text(
             self.browse_text, full_html, pages=raw_text_parts, is_html=True,
         )
+        self._browse_rd_sync_version_combo(shown)
 
-        # === RIGHT PANE: Stacked Images in viewer pane ===
-        self._browse_rd_render_images()
+    @staticmethod
+    def _browse_rd_source_key(src, position):
+        """A source's key for the reader's choice (``ReadingDeskEntry.chosen``): its
+        provider and id (PGP and FGP ids may collide), else its place in the list."""
+        from shared.fgp_service import namespaced_source_id
+        return namespaced_source_id(src) or f"#{position}"
 
-    def _browse_rd_render_images(self):
-        """Render stacked images in the viewer pane (right side of browse splitter)."""
+    def _browse_rd_source_options(self, entry):
+        """(label, key) for each text of a fragment that has one: its sources, then the
+        automatic transcription (key 'v08')."""
+        from shared.fgp_service import source_provider
+        options = []
+        for position, src in enumerate(entry.sources or []):
+            if not (src.get('content') or '').strip():
+                continue
+            relation = src.get('doc_relation', '') or ''
+            scholar = src.get('source_scholar', 'Unknown')
+            language = src.get('language', '')
+            if 'Edition' in relation:
+                label = f"{tr('Edition')}: {scholar}"
+            elif 'Translation' in relation:
+                label = (f"{tr('Translation')} ({language}): {scholar}" if language
+                         else f"{tr('Translation')}: {scholar}")
+            else:
+                label = f"{relation}: {scholar}"
+            if source_provider(src) == 'fgp':
+                label = f"FGP {label}"
+            options.append((label, self._browse_rd_source_key(src, position)))
+        options.append(("V0.8 (HTR)", 'v08'))
+        return options
+
+    def _browse_rd_entry_text(self, entry):
+        """(text, direction, key) the desk shows for a fragment: the reader's choice, else its
+        first edition, else its first source with text; ('', 'rtl', 'v08') for the automatic
+        transcription, shown page by page."""
+        def direction(src):
+            return 'ltr' if src.get('language', '') == 'English' else 'rtl'
+
+        sources = entry.sources or []
+        chosen = getattr(entry, 'chosen', '') or ''
+        if chosen == 'v08':
+            return '', 'rtl', 'v08'
+        if chosen:
+            for position, src in enumerate(sources):
+                if self._browse_rd_source_key(src, position) == chosen and src.get('content'):
+                    return src['content'], direction(src), chosen
+        for position, src in enumerate(sources):
+            if 'Edition' in (src.get('doc_relation') or '') and src.get('content'):
+                return src['content'], 'rtl', self._browse_rd_source_key(src, position)
+        for position, src in enumerate(sources):
+            if src.get('content'):
+                return src['content'], direction(src), self._browse_rd_source_key(src, position)
+        return '', 'rtl', 'v08'
+
+    def _browse_rd_sync_version_combo(self, shown):
+        """The "Version" chooser above the text, on the desk: with one image on show, the texts
+        of its fragment (choosing one shows it, _browse_change_version); in the other views it
+        is off, each fragment's [change version] choosing its own."""
+        combo = getattr(self, 'browse_version_combo', None)
+        if combo is None:
+            return
+        state = self.browse_reading_desk_state
+        entry = state.entries[shown['frag_idx']] if shown is not None and shown['frag_idx'] < len(state.entries) else None
+        combo.blockSignals(True)
+        combo.clear()
+        if entry is None:
+            combo.addItem("V0.8", {"source": "original", "desk": True, "key": "v08"})
+            combo.setEnabled(False)
+        else:
+            _text, _direction, current = self._browse_rd_entry_text(entry)
+            for label, key in self._browse_rd_source_options(entry):
+                combo.addItem(label, self._browse_rd_version_data(entry, key))
+                if key == current:
+                    combo.setCurrentIndex(combo.count() - 1)
+            combo.setEnabled(combo.count() > 1)
+        combo.blockSignals(False)
+
+    def _browse_rd_version_data(self, entry, key):
+        """A desk chooser item's data: the fragment and its text's key (``desk``, ``sys_id``,
+        ``key``), in the browse chooser's own vocabulary as well, so that whatever reads the
+        chosen item -- the Cite bar's credit (_credit_version_info) -- credits the right
+        provider rather than falling through to the automatic transcription's."""
+        from genizah_core import CURRENT_LANG as _lang
+        from shared.fgp_service import pick_fgp_credit, source_provider, source_relation_kind
+        data = {"source": "original", "desk": True, "sys_id": entry.sys_id, "key": key}
+        for position, src in enumerate(entry.sources or []):
+            if key == 'v08' or self._browse_rd_source_key(src, position) != key:
+                continue
+            translation = source_relation_kind(src) == 'translation'
+            fgp = source_provider(src) == 'fgp'
+            data.update({
+                "source": (("fgp_translation" if translation else "fgp_edition") if fgp
+                           else ("pgp_translation" if translation else "pgp_edition")),
+                "content": src.get('content', ''),
+                "scholar": src.get('source_scholar', 'FGP' if fgp else 'Unknown'),
+                "language": src.get('language') or '',
+                "attribution": src.get('attribution'),
+                "source_credit": pick_fgp_credit(src, _lang) if fgp else None,
+                "source_id": src.get('id'),
+                "pgpid": src.get('pgpid'),
+            })
+            break
+        return data
+
+    def _browse_rd_release_version_combo(self):
+        """The "Version" chooser given back to Browse when the desk is left: none of the desk's
+        entries stay in it. The page then shown fills it again with its own versions
+        (_check_document_community_status, _browse_refresh_pgp_for_page)."""
+        combo = getattr(self, 'browse_version_combo', None)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("V0.8", {"source": "original"})
+        combo.setEnabled(False)
+        combo.blockSignals(False)
+
+    def _browse_rd_choose_text(self, sys_id, key):
+        """The reader chose a fragment's text (the "Version" chooser or [change version])."""
+        for entry in self.browse_reading_desk_state.entries:
+            if entry.sys_id == sys_id:
+                entry.chosen = key or ''
+                self._browse_rd_render_text()
+                return
+
+    def _browse_rd_move_entry(self, sys_id, delta):
+        """A fragment up (-1) or down (+1) on the desk: its images, its text and the order the
+        Puzzle takes follow (shared/reading_desk_views.py::move_entry)."""
+        from shared.reading_desk_views import move_entry
+        state = self.browse_reading_desk_state
+        moved = move_entry(state.entries, sys_id, delta)
+        if moved is None:
+            return
+        # The image on show stays on show: kept by its key, since the one shown when none was
+        # chosen is found by position.
+        shown = self._browse_rd_shown_image()
+        if shown is not None:
+            state.image_shown = shown['key']
+        for order, entry in enumerate(moved, start=1):
+            entry.sequence_order = order  # adding a fragment sorts the desk by this order
+        state.entries = moved
+        self._browse_rd_render()
+
+    def _browse_rd_render_images(self, text_too=True):
+        """Redraw the image pane (right side of browse splitter) for the desk. In "One at a
+        time" the text side is redrawn too (``text_too``): an image list that has arrived
+        may change the image on show, and its text follows it."""
+        from shared.reading_desk_views import VIEW_ONE
         state = self.browse_reading_desk_state
 
         # Hide normal viewer
@@ -11699,130 +11928,79 @@ class GenizahGUI(QMainWindow):
         # Disconnect existing sync handlers before re-render
         self._browse_rd_disconnect_sync()
 
-        # Clear existing content by replacing the container widget
-        # QScrollArea.setWidget() with a new widget causes the old one to be cleaned up
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(5)
+        pane = self._browse_rd_image_scroll
+        pane.set_desk(state, self._browse_rd_image_lists(), current_sys_id=self.current_browse_sid or '',
+                      document_desk=self._browse_rd_is_document())
+        pane.setVisible(True)
+        if text_too and pane.current_view() == VIEW_ONE:
+            self._browse_rd_render_text()
 
-        self._browse_rd_image_widgets = []
-
-        for idx, entry in enumerate(state.entries):
-            sid = entry.sys_id
-            meta = self.meta_mgr.nli_cache.get(sid, {})
-
-            # Fragment header label
-            header = QLabel(f"  {entry.shelfmark}")
-            header.setStyleSheet(
-                "background: #34495e; color: white; padding: 6px 10px; "
-                "font-weight: bold; font-size: 13px;"
-            )
-            header.setObjectName(f"rd-img-frag-{idx}")
-            container_layout.addWidget(header)
-
-            # Get image URLs
-            # 260419-cfx follow-up: prefer NLI when external count mismatches
-            images_nli = meta.get('images_nli', [])
-            images_ext = meta.get('images_ext', [])
-            if images_ext and images_nli and len(images_ext) != len(images_nli):
-                image_list = images_nli
-            else:
-                image_list = images_ext if images_ext else images_nli
-
-            if not image_list:
-                # Try FL ID fallback
-                fl_ids = meta.get('fl_ids', [])
-                if isinstance(fl_ids, str):
-                    fl_ids = [fl_ids]
-                for fl in fl_ids or []:
-                    digits = re.sub(r"\D", "", str(fl or ""))
-                    if digits:
-                        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/2000,/0/default.jpg"
-                        image_list = [{'label': f"FL{digits}", 'url': fallback_url}]
-                        break
-
-            if not image_list:
-                no_img = QLabel(tr("No images available"))
-                no_img.setStyleSheet("color: #95a5a6; padding: 20px; font-style: italic;")
-                no_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                container_layout.addWidget(no_img)
-                continue
-
-            # Create a ZoomableScrollArea + controls for each image page
-            for img_idx, img_data in enumerate(image_list):
-                base_url = img_data.get('url', '')
-                label_text = img_data.get('label', f"Page {img_idx + 1}")
-
-                # Controls row: zoom/rotate per image
-                controls = QWidget()
-                controls_layout = QHBoxLayout(controls)
-                controls_layout.setContentsMargins(4, 2, 4, 2)
-                controls_layout.setSpacing(4)
-
-                img_label = QLabel(f"  {label_text}")
-                img_label.setStyleSheet("color: #bdc3c7; font-size: 11px;")
-                controls_layout.addWidget(img_label)
-                controls_layout.addStretch()
-
-                viewer = ZoomableScrollArea()
-                viewer.setMinimumHeight(400)
-                viewer.setMaximumHeight(600)
-
-                btn_zoom_out = QPushButton("-")
-                btn_zoom_out.setFixedWidth(28)
-                btn_zoom_out.setStyleSheet("color: white; background: #555;")
-                btn_zoom_out.clicked.connect(viewer.zoom_out)
-                controls_layout.addWidget(btn_zoom_out)
-
-                btn_zoom_in = QPushButton("+")
-                btn_zoom_in.setFixedWidth(28)
-                btn_zoom_in.setStyleSheet("color: white; background: #555;")
-                btn_zoom_in.clicked.connect(viewer.zoom_in)
-                controls_layout.addWidget(btn_zoom_in)
-
-                btn_rot_left = QPushButton("\u21BA")  # ↺
-                btn_rot_left.setFixedWidth(28)
-                btn_rot_left.setStyleSheet("color: white; background: #555;")
-                btn_rot_left.setToolTip(tr("Rotate Left 90"))
-                btn_rot_left.clicked.connect(lambda checked, v=viewer: v.rotate_view(-90))
-                controls_layout.addWidget(btn_rot_left)
-
-                btn_rot_right = QPushButton("\u21BB")  # ↻
-                btn_rot_right.setFixedWidth(28)
-                btn_rot_right.setStyleSheet("color: white; background: #555;")
-                btn_rot_right.setToolTip(tr("Rotate Right 90"))
-                btn_rot_right.clicked.connect(lambda checked, v=viewer: v.rotate_view(90))
-                controls_layout.addWidget(btn_rot_right)
-
-                container_layout.addWidget(controls)
-                container_layout.addWidget(viewer)
-
-                # Load image
-                viewer.set_status_message(tr("Loading..."))
-                final_url = base_url
-                if final_url and not final_url.endswith('.jpg'):
-                    final_url = f"{final_url}/full/2000,/0/default.jpg"
-
-                loader = ImageLoaderThread(final_url)
-                loader.image_loaded.connect(
-                    lambda img, v=viewer: v.set_image(QPixmap.fromImage(img))
-                )
-                loader.load_failed.connect(
-                    lambda v=viewer: v.set_status_message(tr("No Image"))
-                )
-                loader.start()
-
-                self._browse_rd_image_widgets.append((sid, viewer, loader))
-
-        container_layout.addStretch()
-        self._browse_rd_image_scroll.setWidget(container)
-        self._browse_rd_image_scroll.setVisible(True)
-
-        # Set up synchronized scrolling between text and image panes
+        # Set up synchronized scrolling between text and image panes (all images only)
         self._browse_rd_setup_sync_scroll()
         # Re-establish sync after images finish loading (scroll maximums change)
         QTimer.singleShot(500, self._browse_rd_setup_sync_scroll)
+
+    def _browse_rd_on_view_changed(self):
+        """The reader chose another image view: the text side follows it."""
+        self._browse_rd_render_text()
+        self._browse_rd_setup_sync_scroll()
+        QTimer.singleShot(500, self._browse_rd_setup_sync_scroll)
+
+    def _browse_rd_navigate(self, sys_id):
+        """A fragment's name in the image pane: leave the desk and open it."""
+        self._on_browse_link_clicked(QUrl(f"genizah://rd-navigate/{sys_id}"))
+
+    def _browse_rd_arrange_in_puzzle(self):
+        """The desk's fragments to a new puzzle (after the Puzzle's own save question)."""
+        fragments = [(e.sys_id, e.shelfmark) for e in self.browse_reading_desk_state.entries if e.sys_id]
+        if not fragments:
+            return
+        # A published puzzle still being fetched would replace the new puzzle when it arrives.
+        _retire_worker(self._browse_rd_fork_worker, 'fetched')
+        self._browse_rd_fork_worker = None
+        self._open_puzzle_window()
+        if self._puzzle_window is not None:
+            self._puzzle_window.start_new_with(fragments)
+
+    def _browse_rd_open_puzzle(self, join):
+        """A puzzle shown on the desk, opened in the Puzzle. A published one is copied into
+        the reader's own puzzles first, as every desktop "Open in Puzzle" does: its record is
+        fetched off the UI thread, then saved here, on the thread that owns joins.db."""
+        # The last puzzle asked for wins: one still being fetched is let go.
+        _retire_worker(self._browse_rd_fork_worker, 'fetched')
+        self._browse_rd_fork_worker = None
+        if join.get('kind') == 'own':
+            self._open_puzzle_window()
+            if self._puzzle_window is not None:
+                self._puzzle_window._load_document(join['id'])
+            return
+        from desktop.reading_desk_puzzles import PublishedPuzzleThread
+        _retire_worker(self._browse_rd_fork_worker, 'fetched')
+        worker = PublishedPuzzleThread(join['id'])
+        worker.fetched.connect(self._browse_rd_open_published_puzzle)
+        self._browse_rd_fork_worker = worker
+        worker.start()
+
+    def _browse_rd_open_published_puzzle(self, detail):
+        # The worker is still finishing: kept until its thread has, not dropped.
+        _keep_until_finished(self._browse_rd_fork_worker)
+        self._browse_rd_fork_worker = None
+        if not detail:
+            QMessageBox.warning(self, tr("Error"), tr("Could not fork join"))
+            return
+        import uuid
+        from shared.puzzle_publish_service import document_from_published_detail
+        from shared.puzzle_service import get_puzzle_service
+        doc = document_from_published_detail(detail, new_id=str(uuid.uuid4()), title_prefix='Fork of: ')
+        # Its copy is saved first; when that fails (no joins.db, a write error) nothing is
+        # opened: a copy that was never saved cannot be loaded.
+        new_id = get_puzzle_service().save_document(doc)
+        if not new_id:
+            QMessageBox.warning(self, tr("Error"), tr("Could not fork join"))
+            return
+        self._open_puzzle_window()
+        if self._puzzle_window is not None:
+            self._puzzle_window._load_document(new_id)
 
     def _browse_rd_disconnect_sync(self):
         """Disconnect sync scroll handlers without affecting other signal connections."""
@@ -11834,23 +12012,28 @@ class GenizahGUI(QMainWindow):
             self._rd_text_sync_handler = None
 
         if self._rd_image_sync_handler is not None:
+            bar = self._rd_sync_image_bar
             try:
-                if self._browse_rd_image_scroll:
-                    self._browse_rd_image_scroll.verticalScrollBar().valueChanged.disconnect(self._rd_image_sync_handler)
+                if bar is not None and not sip.isdeleted(bar):
+                    bar.valueChanged.disconnect(self._rd_image_sync_handler)
             except (TypeError, RuntimeError):
                 pass
             self._rd_image_sync_handler = None
+        self._rd_sync_image_bar = None
 
     def _browse_rd_setup_sync_scroll(self):
-        """Set up proportional scroll synchronization between text and image panes."""
-        if not self._browse_rd_image_scroll:
-            return
-
-        text_bar = self.browse_text.verticalScrollBar()
-        image_bar = self._browse_rd_image_scroll.verticalScrollBar()
-
+        """Set up proportional scroll synchronization between the text pane and the
+        all-images stack. In the other image views there is no stack and nothing is bound
+        (this also runs from a delayed timer, which may fire after the view has changed)."""
         # Disconnect only OUR sync handlers (not all valueChanged connections)
         self._browse_rd_disconnect_sync()
+        pane = self._browse_rd_image_scroll
+        if not self.browse_reading_desk_active or pane is None or sip.isdeleted(pane):
+            return
+        image_bar = pane.stack_scroll_bar()
+        if image_bar is None:
+            return
+        text_bar = self.browse_text.verticalScrollBar()
 
         def sync_text_to_image(value):
             if self._browse_rd_syncing:
@@ -11886,6 +12069,7 @@ class GenizahGUI(QMainWindow):
         self._rd_text_sync_handler = sync_text_to_image
         self._rd_image_sync_handler = sync_image_to_text
 
+        self._rd_sync_image_bar = image_bar
         text_bar.valueChanged.connect(self._rd_text_sync_handler)
         image_bar.valueChanged.connect(self._rd_image_sync_handler)
 
@@ -11893,13 +12077,19 @@ class GenizahGUI(QMainWindow):
         """Hide reading desk image scroll and restore normal viewer."""
         if self._browse_rd_image_scroll is not None:
             self._browse_rd_disconnect_sync()
+            # Its image loaders let go before it goes (a running QThread must not be freed)
+            self._browse_rd_image_scroll.shutdown()
             # Remove from splitter and destroy
             self._browse_rd_image_scroll.setParent(None)
             self._browse_rd_image_scroll.deleteLater()
             self._browse_rd_image_scroll = None
 
-        # Show normal viewer
+        # Show normal viewer, the divider where it was before the desk
         self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+        before = getattr(self, '_browse_rd_sizes_before', None)
+        if before and len(before) == self.browse_splitter.count():
+            self.browse_splitter.setSizes(before)
+        self._browse_rd_sizes_before = None
 
     def _browse_rd_remove_entry(self, sys_id):
         """Remove a fragment entry from the reading desk and re-render or exit."""
@@ -11925,48 +12115,23 @@ class GenizahGUI(QMainWindow):
             )
             return
 
-        # Build options list
-        options = []
-        for src in entry.sources:
-            relation = src.get('doc_relation', '')
-            scholar = src.get('source_scholar', 'Unknown')
-            language = src.get('language', '')
-            if 'Edition' in relation:
-                label = f"Edition: {scholar}"
-            elif 'Translation' in relation:
-                label = f"Translation ({language}): {scholar}" if language else f"Translation: {scholar}"
-            else:
-                label = f"{relation}: {scholar}"
-            options.append(label)
-
-        # Add V0.8 fallback
-        options.append("V0.8 (HTR)")
-
+        # The fragment's texts, the one shown first chosen. The choice is kept on the entry
+        # (``chosen``): the sources stay, so V0.8 can be left again, and a translation chosen
+        # beside an edition is shown (the sources used to be reordered, and the first edition
+        # won over the choice).
+        options = self._browse_rd_source_options(entry)
+        labels = [label for label, _key in options]
+        _text, _direction, current = self._browse_rd_entry_text(entry)
+        current_index = next((i for i, (_label, key) in enumerate(options) if key == current), 0)
         choice, ok = QInputDialog.getItem(
             self,
             tr("Select Version"),
             tr("Choose a text version for {}:").format(entry.shelfmark),
-            options, 0, False
+            labels, current_index, False
         )
-        if not ok:
+        if not ok or choice not in labels:
             return
-
-        selected_idx = options.index(choice) if choice in options else -1
-        if selected_idx < 0:
-            return
-
-        # Update the entry's displayed text
-        if selected_idx < len(entry.sources):
-            # Selected a PGP source -- reorder sources so selected is first
-            selected_src = entry.sources[selected_idx]
-            entry.sources.remove(selected_src)
-            entry.sources.insert(0, selected_src)
-        else:
-            # V0.8 selected -- clear sources so fallback text is used
-            entry.sources = []
-
-        # Re-render
-        self._browse_rd_render()
+        self._browse_rd_choose_text(entry.sys_id, options[labels.index(choice)][1])
 
     def toggle_browse_view_all(self, checked):
         # Phase 96 polish (Item 2): LOCAL files use _toggle_local_browse_view_mode;

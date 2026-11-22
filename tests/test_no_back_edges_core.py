@@ -156,6 +156,8 @@ EXTRACTED_MODULES = [
     "shared/puzzle_publish_service.py",
     "shared/puzzle_service.py",
     "shared/reading_desk_model.py",
+    "shared/reading_desk_puzzles.py",   # the desk's puzzle images: which puzzles, which shown (GS-294)
+    "shared/reading_desk_views.py",     # the desk's three image views (GS-294)
     "shared/refinement.py",
     "shared/research_limits.py",
     "shared/research_worker.py",
