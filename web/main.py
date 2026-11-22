@@ -737,6 +737,8 @@ from web.citation_chip import render_citation_chip
 from web.home_query import catalogue_has_shelfmark, home_query_target  # the header's go-to box routes as the homepage box does
 from web.catalog_assets import catalog_available  # and offers % where the catalogue search is served
 from web import hebrew_keyboard  # the on-screen keys in the header's box (and the script for every page's boxes)
+from web.components.shelf_pick import browse_url_for_pick, shelf_pick_button  # the header's shelf button
+from web.reading_desk_handoff import choice_limit as desk_choice_limit, open_in_reading_desk  # ... and its several
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
     load_atlas_state,
@@ -1969,6 +1971,18 @@ def create_layout():
                 # 2026-11-16): its keys open over the page under the box.
                 hebrew_keyboard.attach(header_box, hebrew_keyboard.HEADER_FIELD, tr,
                                        floating=True, dark=True)
+                # Pick from the shelf beside the box (owner, 2026-11-21): on every page, with the
+                # field (a phone sees it once the search is opened). The pick opens in Browse at the
+                # place it was picked at, as the home page's does; Add to List and Add to Puzzle
+                # beside Open (handoff DX22). Browse's picker: "Open more than one" opens the ticked
+                # ones in Browse's Reading Desk (web/reading_desk_handoff.py), the same kept choice.
+                shelf_pick_button(lambda selection: ui.navigate.to(browse_url_for_pick(selection)),
+                                  label='', props='flat round dense text-color=white',
+                                  confirm_label=tr('Open'), add_to=True, lists_mgr=lambda: state.lists_mgr,
+                                  switch_label=tr('Open more than one'), purpose='reading_desk',
+                                  on_several=open_in_reading_desk,
+                                  several_label=tr('Open them in the Reading Desk'), limit=desk_choice_limit,
+                                  testid='header-shelf-pick')
                 ui.button(icon='close').props(
                     f'flat round dense text-color=white aria-label="{tr("Close")}"'
                 ).classes('header-search-close').on('click', js_handler=_HEADER_SEARCH_CLOSE_JS)
@@ -2958,7 +2972,7 @@ def parallels_page_route(text: str = None):
 @ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None, computed: str = None,
                       version: str = None, span: str = None, fp: str = None,
-                      cq: str = None, cnear: str = None, ctr: str = None):
+                      cq: str = None, cnear: str = None, ctr: str = None, place: str = None, desk: str = None):
     # R2-1 discovery-review iframe: ?embed=1 renders a bare viewer (no nav shell,
     # no snapshot write, no current_page write) so it can be framed inside the
     # standalone discovery-review deck without stomping normal browse state.
@@ -3085,7 +3099,9 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
                              if (cq or '').strip() and not _embed else None)
         create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed, open_computed=_open_computed,
                            initial_version=version, initial_span=span, initial_fp=fp,
-                           catalogue_search=_catalogue_search)
+                           catalogue_search=_catalogue_search, initial_placement=place,
+                           # several from the header's or the home page's shelf picker (web/reading_desk_handoff.py)
+                           desk_from_shelf=(desk or '') == 'shelf' and not _embed)
 
 @ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
 def joins_lab_page_route(

@@ -26,9 +26,15 @@ from web.analytics import posthog_capture
 from web.home_query import catalogue_has_shelfmark, home_query_target
 from web.catalog_assets import catalog_available
 from web import hebrew_keyboard
+from web.components.shelf_pick import browse_url_for_pick, shelf_pick_button
+from web.reading_desk_handoff import choice_limit as desk_choice_limit, open_in_reading_desk
 
 logger = logging.getLogger(__name__)
 
+
+def _open_picked_in_browse(selection: dict) -> None:
+    """A manuscript picked from the shelf on the home page opens in Browse at its place."""
+    ui.navigate.to(browse_url_for_pick(selection))
 
 def create_page():
     """Create the research dashboard home page."""
@@ -183,6 +189,17 @@ def create_page():
                 _hk_panel = hebrew_keyboard.attach(hero_search, hebrew_keyboard.HOME_FIELD, tr)[1]
                 _hk_panel.style('max-width: 600px;')
 
+            # Pick from the shelf (shelf tree picker, DX10): for a reader who knows the collection
+            # but not the number. The pick opens in Browse at the place it was picked at; Add to List
+            # and Add to Puzzle beside Open (handoff DX22). Browse's picker: "Open more than one" opens
+            # the ticked ones in Browse's Reading Desk (web/reading_desk_handoff.py), the same kept choice.
+            with ui.row().classes('w-full justify-center'):
+                shelf_pick_button(_open_picked_in_browse, props='flat dense no-caps color=primary',
+                                  confirm_label=tr('Open'), add_to=True, lists_mgr=lambda: state.lists_mgr,
+                                  switch_label=tr('Open more than one'), purpose='reading_desk',
+                                  on_several=open_in_reading_desk,
+                                  several_label=tr('Open them in the Reading Desk'), limit=desk_choice_limit,
+                                  testid='home-shelf-pick')
             # A first-class escape hatch for the many visitors who arrive
             # curious about the Genizah but without a query in mind.  This is
             # a native anchor (rather than a click-only card), so it keeps the

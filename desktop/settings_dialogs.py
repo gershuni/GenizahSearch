@@ -1473,7 +1473,7 @@ class SettingsDialog(QDialog):
         sources.append(("FJMS Catalog", fjms_ver))
         try:
             from shared.nli_crossref_service import get_nli_crossref_service
-            nli_svc = get_nli_crossref_service()
+            nli_svc = get_nli_crossref_service(thread_safe=True)   # one per process: as the window asks it
             nli_ver = nli_svc.get_version() if nli_svc.is_available() else None
         except Exception:
             nli_ver = None  # Version query failed; show None in About dialog

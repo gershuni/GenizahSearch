@@ -17,9 +17,19 @@ from nicegui import ui, run
 from web.translations import tr, is_rtl
 from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
+from web.components.shelf_pick import shelf_pick_button
 from web.supabase_client import create_comment, get_user_client
 from web.state import state
 from typing import Optional, Callable
+
+
+def insert_shelfmark_mention(textarea, shelfmark: str, sys_id: str) -> None:
+    """Add a shelfmark reference, ``[[shelfmark:<shelfmark>|id:<sys_id>]]``, after what the comment
+    already says. The one insertion every way of naming a manuscript uses (Recent Activity, My
+    Lists, Pick from the shelf); it never submits the comment."""
+    mention = f"[[shelfmark:{shelfmark}|id:{sys_id}]]"
+    current = textarea.value or ''
+    textarea.value = current + ' ' + mention + ' '
 
 
 def create_comment_dialog(
@@ -108,10 +118,7 @@ def create_comment_dialog(
 
                                                 def make_add(sm=item_shelfmark, did=doc_id):
                                                     def add():
-                                                        # Insert mention at cursor
-                                                        mention = f"[[shelfmark:{sm}|id:{did}]]"
-                                                        current = comment_text.value or ''
-                                                        comment_text.value = current + ' ' + mention + ' '
+                                                        insert_shelfmark_mention(comment_text, sm, did)
                                                         picker_dialog.close()
                                                     return add
 
@@ -160,9 +167,7 @@ def create_comment_dialog(
 
                                                                     def make_add(sm=item_shelfmark, did=doc_id):
                                                                         def add():
-                                                                            mention = f"[[shelfmark:{sm}|id:{did}]]"
-                                                                            current = comment_text.value or ''
-                                                                            comment_text.value = current + ' ' + mention + ' '
+                                                                            insert_shelfmark_mention(comment_text, sm, did)
                                                                             picker_dialog.close()
                                                                         return add
 
@@ -189,8 +194,14 @@ def create_comment_dialog(
 
                 picker_dialog.open()
 
-            with ui.row().classes('w-full'):
+            with ui.row().classes('w-full gap-2'):
                 ui.button(tr('Add shelfmark reference'), icon='link', on_click=show_shelfmark_picker).props('flat dense size=sm')
+                # Pick from the shelf (shelf tree picker plan §3.5, PR 7): the same insertion as the
+                # Recent Activity and My Lists paths; absent when the shelf tree is not served.
+                shelf_pick_button(
+                    lambda sel: insert_shelfmark_mention(comment_text, sel['shelfmark'], sel['sys_id']),
+                    start=document_id or None, props='flat dense size=sm no-caps',
+                    confirm_label=tr('Add shelfmark reference'), testid='comment-shelf-pick')
 
             # Private comment option
             private_check = ui.checkbox(tr('Private comment (only visible to me)'), value=False).classes('text-sm')

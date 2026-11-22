@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTabWidget,
     QGroupBox, QFrame, QMessageBox, QSpinBox, QDoubleSpinBox, QCheckBox, QScrollArea,
     QSplitter, QMenu, QListWidget, QListWidgetItem,
-    QCompleter, QInputDialog
+    QCompleter, QInputDialog, QApplication, QProgressDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QPalette
@@ -29,6 +29,7 @@ from desktop.corrections_client import (
     Correction, Comment, FeedItem, account_display_name,
 )
 from desktop.supabase_corrections_client import CHECK_EMAIL_MESSAGE
+from shared.shelfmark_tree_limits import JOIN_MAX_ITEMS, limit_for
 
 
 def safe_date_str(date_value, default: str = "") -> str:
@@ -2190,6 +2191,13 @@ class CreateDiscoveryDialog(QDialog):
         self.btn_add_shelfmark.clicked.connect(self._add_shelfmark_to_list)
         input_row.addWidget(self.btn_add_shelfmark)
 
+        # Pick from the shelf: added as a typed shelfmark is, with the page given here
+        from desktop.widgets.shelf_pick_button import ShelfPickButton
+        self.btn_shelf_pick = ShelfPickButton(
+            self, self._add_from_shelf,
+            start=lambda: self.shelfmark_input.text().strip() or self.document_id, act_label=tr("Add"))
+        input_row.addWidget(self.btn_shelf_pick)
+
         doc_group_layout.addLayout(input_row)
 
         # Shelfmarks list widget (for multiple shelfmarks)
@@ -2265,12 +2273,15 @@ class CreateDiscoveryDialog(QDialog):
         # Use shelfmarks list if populated, otherwise use input field
         shelfmark = None
         page_number = None
+        document_id = None
         additional_shelfmarks = None
 
         if self.shelfmarks_list:
-            # First shelfmark is the main one
+            # First shelfmark is the main one; its record goes with it, as the others' do (a
+            # shelfmark several records share names none of them alone)
             shelfmark = self.shelfmarks_list[0][0]
             page_number = self.shelfmarks_list[0][1] if self.shelfmarks_list[0][1] and self.shelfmarks_list[0][1] > 0 else None
+            document_id = self.shelfmarks_list[0][2] or None
 
             # Additional shelfmarks (if more than one)
             if len(self.shelfmarks_list) > 1:
@@ -2289,6 +2300,7 @@ class CreateDiscoveryDialog(QDialog):
             title=title,
             content=content,
             discovery_type=discovery_type,
+            document_id=document_id,
             shelfmark=shelfmark,
             page_number=page_number,
             is_anonymous=self.anonymous_check.isChecked(),
@@ -2387,6 +2399,14 @@ class CreateDiscoveryDialog(QDialog):
         self._add_shelfmark_entry(shelfmark, page, sys_id)
 
         # Clear inputs
+        self.shelfmark_input.clear()
+        self.page_input.setValue(0)
+
+    def _add_from_shelf(self, selection):
+        """The shelf picker's adapter: the pick is a reference as a typed shelfmark resolved to it
+        is, on the page given in the box; the boxes are cleared as after typing."""
+        self._add_shelfmark_entry(selection.get('shelfmark') or selection['sys_id'], self.page_input.value(),
+                                  selection['sys_id'])
         self.shelfmark_input.clear()
         self.page_input.setValue(0)
 
@@ -3277,6 +3297,9 @@ class CommunityHubWidget(QWidget):
 class JoinsDialog(QDialog):
     """Dialog for viewing and managing fragment joins with autocomplete support"""
 
+    # fragments B taken from the shelf at a time (a join is rarely more than 20): ticking stops there
+    JOIN_MAX = JOIN_MAX_ITEMS
+
     def __init__(
         self,
         parent=None,
@@ -3426,9 +3449,19 @@ class JoinsDialog(QDialog):
         self.frag_b_input.setPlaceholderText(tr("Start typing shelfmark..."))
         self._setup_completer(self.frag_b_input)
         self._selected_doc_id_b = None  # Store document_id when picked from list
-        # Clear stored doc_id when user types (need to resolve from shelfmark instead)
-        self.frag_b_input.textChanged.connect(lambda: setattr(self, '_selected_doc_id_b', None))
+        self._picked_b = []  # several fragments B chosen from the shelf: [(shelfmark, sys_id)]
+        # the several shown last and the box's text for them: the box reading that text again (an
+        # Undo) takes them back; every shelfmark ever shown as several, to refuse what is left of a
+        # list typed over
+        self._several_text, self._several_picks, self._several_known = '', [], set()
+        # Clear stored doc_id(s) when user types (need to resolve from shelfmark instead)
+        self.frag_b_input.textChanged.connect(self._frag_b_edited)
         frag_b_layout.addWidget(self.frag_b_input, 1)
+
+        # Pick from the shelf, one or several (a join holds any number of fragments): each is
+        # fragment B by its record, as the list's pick (text, then the id)
+        from desktop.widgets.shelf_pick_button import ShelfPickButton
+        self.btn_frag_b_shelf = ShelfPickButton(self, on_several=self._fragments_b_from_shelf)
 
         # "From List" button
         if self.lists_mgr:
@@ -3444,6 +3477,7 @@ class JoinsDialog(QDialog):
         self.btn_vs_pick.setToolTip(tr("find joins in joins lab"))
         self.btn_vs_pick.clicked.connect(self._show_vs_picker)
         frag_b_layout.addWidget(self.btn_vs_pick)
+        frag_b_layout.addWidget(self.btn_frag_b_shelf)
 
         frag_b_widget = QWidget()
         frag_b_widget.setLayout(frag_b_layout)
@@ -4505,14 +4539,29 @@ class JoinsDialog(QDialog):
 
     def create_new_join(self):
         """Create a new join between fragments"""
+        picked = list(getattr(self, '_picked_b', None) or ())
+        if len(picked) > 1:                        # several chosen from the shelf: one join to each
+            self._create_several_joins(picked)
+            return
         frag_a = self.frag_a_input.text().strip()
         frag_b = self.frag_b_input.text().strip()
 
         if not frag_a or not frag_b:
             QMessageBox.warning(self, tr("Error"), tr("Please enter both fragment shelfmarks"))
             return
+        # several shown ("a; b"), then typed over: not one shelfmark. Known by the shelfmarks in it
+        # (one shown as several in this dialog), not by the separator: a typed catalogue form with
+        # "; " in it names none of them and is resolved as before
+        known = getattr(self, '_several_known', None) or ()
+        if ';' in frag_b and any(part.strip().upper() in known for part in frag_b.split(';')):
+            QMessageBox.warning(self, tr("Error"), tr("Please select a fragment"))
+            return
 
-        if frag_a.upper() == frag_b.upper():
+        # A fragment joined to itself: by its record when fragment B was chosen as one (two
+        # records can share a shelfmark: "Ms. 1358"), else by the shelfmark typed
+        picked_b = getattr(self, '_selected_doc_id_b', None)
+        if (str(picked_b) == str(self.document_id)) if (picked_b and self.document_id) \
+                else frag_a.upper() == frag_b.upper():
             QMessageBox.warning(self, tr("Error"), tr("Cannot join a fragment to itself"))
             return
 
@@ -4589,14 +4638,33 @@ class JoinsDialog(QDialog):
         self._finish_create_join(frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b)
 
     def _finish_create_join(self, frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b):
-        # Try to create via API first
-        join, msg = self.client.create_join(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
-        if join:
+        outcome, msg = self._create_one_join(frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b)
+        if outcome == 'created':
             QMessageBox.information(self, tr("Success"), tr("Join created successfully"))
             self.frag_b_input.clear()
             self.notes_input.clear()
+            # Reload to show the new join
+            self.load_joins()
+        elif outcome == 'offline':
+            QMessageBox.information(
+                self, tr("Saved Offline"),
+                tr("Join saved locally. Will sync when connection is restored.")
+            )
+            self.frag_b_input.clear()
+            self.notes_input.clear()
+            self.load_joins()
+        else:
+            QMessageBox.critical(self, tr("Error"), tr("Failed to create join: {}").format(msg))
+
+    def _create_one_join(self, frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b):
+        """One join from fragment A to fragment B: online, added to the local cache at once; on a
+        connection failure queued in the JoinsManager to sync later. Answers ``('created' |
+        'offline' | None, message)``; the caller says what happened (one join, or several)."""
+        # Try to create via API first
+        join, msg = self.client.create_join(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
+        if join:
             # Immediately add to local cache (faster than full sync)
-            if self.joins_mgr and join:
+            if self.joins_mgr:
                 join_data = {
                     'id': join.id,
                     'fragment_a': join.fragment_a,
@@ -4612,21 +4680,78 @@ class JoinsDialog(QDialog):
                 self.joins_mgr.data['joins'][join.id] = join_data
                 self.joins_mgr._index_join(join_data)
                 self.joins_mgr.save()
-            # Reload to show the new join
-            self.load_joins()
+            return 'created', msg
+        # If online create failed but we have JoinsManager, queue for later
+        if self.joins_mgr and "connection" in (msg or '').lower():
+            self.joins_mgr.create_join_local(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
+            return 'offline', msg
+        return None, msg
+
+    def _create_several_joins(self, picks):
+        """Several fragments B chosen from the shelf: one join from fragment A to each, with the
+        relationship and notes given, then one summary (not one message per join). Those not
+        created stay in the box, so Create Join tries only them again; all made, the box and the
+        notes are cleared. A progress window shows each one (create_join waits for the server)."""
+        frag_a = self.frag_a_input.text().strip()
+        if not frag_a:
+            QMessageBox.warning(self, tr("Error"), tr("Please enter both fragment shelfmarks"))
+            return
+        rel_type = self.type_combo.currentData() or None
+        notes = self.notes_input.text().strip() or None
+        doc_id_a = self.document_id
+        made, offline, failed, first_error = 0, 0, [], None
+        progress = QProgressDialog('', tr("Cancel"), 0, len(picks), self)
+        progress.setWindowTitle(tr("Create Join"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        self.btn_create.setEnabled(False)
+        left = list(picks)
+        try:
+            while left:
+                shelfmark, sys_id = left[0]
+                progress.setValue(len(picks) - len(left))
+                progress.setLabelText(shelfmark)
+                QApplication.processEvents()
+                # after the events: a Cancel clicked during the last request is seen before the next
+                if progress.wasCanceled():
+                    break
+                try:
+                    outcome, msg = self._create_one_join(frag_a, shelfmark, rel_type, notes, doc_id_a, sys_id)
+                except Exception as exc:  # noqa: BLE001 -- one failure leaves the others to be made
+                    logger.exception("Join to %s not created", shelfmark)
+                    outcome, msg = None, str(exc)
+                left.pop(0)
+                if outcome == 'created':
+                    made += 1
+                elif outcome == 'offline':
+                    offline += 1
+                else:
+                    failed.append((shelfmark, sys_id))
+                    first_error = first_error or msg
+        finally:
+            progress.close()
+            progress.deleteLater()
+            self.btn_create.setEnabled(self.client.is_logged_in())
+        kept = failed + left                       # not made, or not tried (the progress cancelled)
+        lines = [tr("{n} joins created").format(n=made + offline)]
+        if offline:
+            lines.append(tr("Join saved locally. Will sync when connection is restored."))
+        if kept:
+            lines.append(tr("Not created: {}").format(", ".join(shelf for shelf, _sid in kept)))
+            self._show_fragments_b(kept)
         else:
-            # If online create failed but we have JoinsManager, queue for later
-            if self.joins_mgr and "connection" in msg.lower():
-                self.joins_mgr.create_join_local(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
-                QMessageBox.information(
-                    self, tr("Saved Offline"),
-                    tr("Join saved locally. Will sync when connection is restored.")
-                )
-                self.frag_b_input.clear()
-                self.notes_input.clear()
-                self.load_joins()
-            else:
-                QMessageBox.critical(self, tr("Error"), tr("Failed to create join: {}").format(msg))
+            self._several_text, self._several_picks = '', []   # made: an Undo never takes them back
+            self.frag_b_input.clear()
+            self.notes_input.clear()
+        if first_error:
+            lines.append(tr("Failed to create join: {}").format(first_error))
+        if made or offline:
+            self.load_joins()
+        if failed:
+            QMessageBox.warning(self, tr("Error"), "\n".join(lines))
+        else:
+            QMessageBox.information(self, tr("Success"), "\n".join(lines))
 
     def delete_selected_join(self):
         """Delete the selected join"""
@@ -4794,8 +4919,7 @@ class JoinsDialog(QDialog):
             if selected:
                 data = selected[0].data(Qt.ItemDataRole.UserRole)
                 # Store document_id for use when creating join
-                self._selected_doc_id_b = data.get('sys_id')
-                self.frag_b_input.setText(data.get('shelfmark', ''))
+                self._set_fragment_b(data.get('shelfmark', ''), data.get('sys_id'))
                 dialog.accept()
 
         btn_select.clicked.connect(do_select)
@@ -4830,8 +4954,80 @@ class JoinsDialog(QDialog):
     def _on_vs_pick(self, partner_sys_id, partner_shelfmark):
         # G-08: caller removed (no pick-back); retained one cycle (D-11) — removable next cleanup.
         """Callback when user picks a suggestion from VS dialog."""
-        self._selected_doc_id_b = partner_sys_id
-        self.frag_b_input.setText(partner_shelfmark)
+        self._set_fragment_b(partner_shelfmark, partner_sys_id)
+
+    def _set_fragment_b(self, shelfmark, sys_id):
+        """Fragment B chosen as a record (a list, the shelf): the text first, then the id, since
+        typing in the box -- and setting its text -- forgets the id. Set the other way round, the
+        join was made by the shelfmark alone and could name another record of the same shelfmark."""
+        self.frag_b_input.setText(shelfmark or '')
+        self._selected_doc_id_b = sys_id or None
+
+    def _frag_b_edited(self, text=''):
+        """The box changed (typed, or set by a pick that sets the record after it): the record(s)
+        chosen are forgotten, so a typed shelfmark is resolved again -- except that the box reading
+        the text of the several shown last again (an Undo) takes them back."""
+        self._selected_doc_id_b = None
+        several = getattr(self, '_several_picks', None)
+        self._picked_b = list(several) if several and text == self._several_text else []
+
+    def _show_fragments_b(self, picks):
+        """Fragment B as chosen from the shelf: one is the list's single pick (``_set_fragment_b``);
+        several show their shelfmarks in the box, the records kept beside it (text first, then the
+        records, as for one)."""
+        if len(picks) == 1:
+            self._several_text, self._several_picks = '', []
+            self._set_fragment_b(*picks[0])
+            return
+        text = "; ".join(shelf for shelf, _sid in picks)
+        self._several_known.update(shelf.strip().upper() for shelf, _sid in picks)
+        self._several_text, self._several_picks = text, list(picks)
+        self.frag_b_input.setText(text)
+        self._picked_b = list(picks)
+
+    def _frag_b_shelf_start(self):
+        """Where the picker opens: the last fragment chosen, else what is typed, else fragment A
+        (its neighbours on the shelf)."""
+        if self._picked_b:
+            return self._picked_b[-1][1]
+        return self.frag_b_input.text().strip() or self.document_id
+
+    def _fragments_b_from_shelf(self, service):
+        """The shelf button: the picker's multiple-choice mode (a join holds any number of
+        fragments). Kept only while the picker is open (no store)."""
+        import desktop.widgets.shelfmark_tree_picker as shelf_picker
+        shelf_picker.pick_several_from_shelf(
+            self, service, purpose='join', on_confirm=lambda entries, _label: self._take_fragments_b(entries),
+            start=self._frag_b_shelf_start(), title=tr("Pick from the shelf"),
+            confirm_label=tr("Add them to the join"), limit=limit_for('join'))
+
+    def _take_fragments_b(self, entries):
+        """The picker's confirm: the corpus manuscripts chosen, in the order chosen, without
+        fragment A itself or repeats, become fragment B (one, or several: Create Join then makes one
+        join to each). None left, or more than JOIN_MAX: a warning, nothing taken, the picker stays
+        open with the choice."""
+        from desktop.widgets.shelf_pick_button import corpus_pick
+        frag_a = self.frag_a_input.text().strip().upper()
+        picks: dict = {}
+        for entry in entries:
+            if not corpus_pick(entry):
+                continue
+            sid = str(entry['sys_id'])
+            shelfmark = entry.get('shelfmark') or sid
+            # fragment A by its record; without one, by its shelfmark (as Create Join decides)
+            if (sid == str(self.document_id)) if self.document_id else shelfmark.upper() == frag_a:
+                continue
+            picks.setdefault(sid, shelfmark)
+        on_top = QApplication.activeModalWidget() or self
+        if not picks:
+            QMessageBox.warning(on_top, tr("Error"), tr("Cannot join a fragment to itself"))
+            return ()
+        if len(picks) > self.JOIN_MAX:
+            QMessageBox.warning(on_top, tr("Error"),
+                                tr("A join takes at most {n} fragments at a time").format(n=self.JOIN_MAX))
+            return ()
+        self._show_fragments_b([(shelf, sid) for sid, shelf in picks.items()])
+        return None
 
     def on_fragment_double_click(self, item):
         """Navigate to fragment on double-click"""

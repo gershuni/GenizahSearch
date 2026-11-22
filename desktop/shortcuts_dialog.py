@@ -73,6 +73,7 @@ def shortcut_sections(hebrew: bool):
             ("Down", "In the search box: the search history (Enter runs a search, Delete removes it)"),
             ("Esc", "Stop a running search (Search, Composition Search)"),
             ("Ctrl+G / Ctrl+O", "Go to: open a manuscript by its shelfmark or system number"),
+            ("Ctrl+W", "Pick from the shelf"),
             ("Ctrl+8", "Fragment Puzzle"),
             ("Ctrl+9", "Joins Lab"),
             ("Ctrl+= / Ctrl+- / Ctrl+0", "Larger, smaller or normal text"),

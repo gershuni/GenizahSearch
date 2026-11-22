@@ -82,6 +82,15 @@ from desktop.widgets.side_nav import (
 )
 from desktop.go_to_dialog import GoToDialog
 from desktop.shortcuts_dialog import ShortcutsDialog, arrow_keys, key_label
+# Pick from the shelf, the place on the shelf, previous / next in shelf order (shelf tree plan PR 3).
+# The module, not its names: tests replace pick_from_shelf and shelf_tree_service on it.
+import desktop.widgets.shelfmark_tree_picker as shelf_picker
+from shared.shelfmark_tree_limits import (LIST_MAX_ITEMS, UNTRANSCRIBED_DESK_PAGES, SelectionLimit,
+                                          desk_pages_function, limit_for, refusal_message)
+from shared.shelfmark_tree_view import (crumbs as shelf_crumbs, display_name as shelf_display_name,
+                                        place_of as shelf_place_of, placement_request_is_spent,
+                                        position as shelf_position, step_from as shelf_step_from)
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 from shared.quick_open import quick_open_target
 from shared.keyboard_layout import layout_suggestion
 from desktop.widgets.line_number_text_edit import (
@@ -1910,6 +1919,9 @@ class GenizahGUI(QMainWindow):
         self.comp_excluded_sys_ids = set()
         self.comp_excluded_shelfmarks = set()
         self.comp_exclusion_sources: list = []
+        # What is chosen on the shelf and not applied yet, per purpose (shelf picker PR 4, D12):
+        # kept in the session file until applied or cleared.
+        self._shelf_selections = shelf_picker.SelectionStore(on_change=self._schedule_session_save)
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
@@ -2324,6 +2336,12 @@ class GenizahGUI(QMainWindow):
             threading.Thread(target=self._prewarm_shelfmark_search, args=(meta_mgr,),
                              daemon=True, name="prewarm-shelfmark-search").start()
 
+            # The shelf tree (Pick from the shelf, the place on the shelf, previous / next in shelf
+            # order): opened and checked off the UI thread; its button shows once it is served.
+            self._shelf_tree_opener = shelf_picker.ShelfTreeOpener(self)
+            self._shelf_tree_opener.opened.connect(self._on_shelf_tree_opened)
+            self._shelf_tree_opener.start()
+
             # Show What's New bar until its content has been dismissed
             cfg = load_app_config()
             self._maybe_show_whats_new(cfg)
@@ -2732,7 +2750,8 @@ class GenizahGUI(QMainWindow):
                            ("Ctrl+R", self._focus_section_results),
                            ("Ctrl+/", self.open_shortcuts),
                            ("Ctrl+8", self._open_puzzle_window),
-                           ("Ctrl+9", self.open_join_workbench)):
+                           ("Ctrl+9", self.open_join_workbench),
+                           ("Ctrl+W", self._open_shelf_anywhere)):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.activated.connect(slot)
             self._section_shortcuts.append(shortcut)
@@ -2748,6 +2767,7 @@ class GenizahGUI(QMainWindow):
                 ('R', Qt.KeyboardModifier.ControlModifier): self._focus_section_results,
                 ('/', Qt.KeyboardModifier.ControlModifier): self.open_shortcuts,
                 (',', Qt.KeyboardModifier.ControlModifier): self._open_settings_dialog,
+                ('W', Qt.KeyboardModifier.ControlModifier): self._open_shelf_anywhere,
             })
             QApplication.instance().installEventFilter(self._layout_shortcuts)
 
@@ -7810,7 +7830,18 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50)
         self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
-        
+
+        # Pick from the shelf (shelf tree picker plan D1, §3.4): beside Go. Shown only once the
+        # shelf tree is open and checked (_on_shelf_tree_opened); absent without the file.
+        self.btn_browse_shelf = QPushButton(f"\U0001F4DA {tr('Pick from the shelf')}")
+        self.btn_browse_shelf.setToolTip(f"{tr('Pick from the shelf')} ({key_label('Ctrl+W', CURRENT_LANG == 'he')})")
+        self.btn_browse_shelf.setAccessibleName(tr("Pick from the shelf"))
+        self.btn_browse_shelf.setVisible(False)
+        self.btn_browse_shelf.clicked.connect(lambda: self.open_shelf_picker(self._browse_shelf_start()))
+        self._browse_shelf_want = None   # (sys_id, placement id) asked for by a pick or a step
+        self._browse_shelf_for = None    # the manuscript whose place is read ...
+        self._browse_shelf = None        # ... and that place: leaf, crumbs, position, prev, next
+
         self.browse_sys_input.returnPressed.connect(self.browse_load)
         self.browse_shelf_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
@@ -7881,6 +7912,7 @@ class GenizahGUI(QMainWindow):
         row1.addSpacing(10)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
+        row1.addWidget(self.btn_browse_shelf)
 
         # Add to View button for reading desk (immediately after Go for discoverability)
         self.btn_b_add_to_view = QPushButton(f"👁️ {tr('Add to View')}")
@@ -7888,6 +7920,8 @@ class GenizahGUI(QMainWindow):
         self.btn_b_add_to_view.setEnabled(False)
         self.btn_b_add_to_view.clicked.connect(self._browse_add_to_view)
         row1.addWidget(self.btn_b_add_to_view)
+        # (Several to the Reading Desk is the switch in the header of Browse's own shelf picker,
+        # open_shelf_picker: one shelf button, DX16.)
 
         # Add to Puzzle button (Fragment Puzzle canvas) - defined here, added to ext_info_row below
         self.btn_b_add_to_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
@@ -7925,6 +7959,19 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setStyleSheet("font-size: 12px;")
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
+
+        # The place on the shelf (shelf tree picker plan §3.4): library › collection › volume, each
+        # opening the picker there, and the position ("7 of 279"). Hidden without a place.
+        self.browse_shelf_place = QLabel()
+        self.browse_shelf_place.setStyleSheet("font-size: 12px;")
+        self.browse_shelf_place.setTextFormat(Qt.TextFormat.RichText)
+        self.browse_shelf_place.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        self.browse_shelf_place.setAccessibleName(tr("Place on the shelf"))
+        self.browse_shelf_place.setToolTip(tr("Pick from the shelf"))
+        self.browse_shelf_place.linkActivated.connect(self._on_browse_shelf_link)
+        self.browse_shelf_place.setVisible(False)
+        top_layout.addWidget(self.browse_shelf_place)
 
         # Where a catalogue search found the manuscript, when Browse was opened from one of its
         # results (_update_browse_found): its matching catalogue records, a few lines, scrolling.
@@ -8364,6 +8411,15 @@ class GenizahGUI(QMainWindow):
         btn_rd_add.clicked.connect(self._browse_rd_add_by_shelfmark)
         rd_toolbar_layout.addWidget(btn_rd_add)
 
+        # Pick from the shelf (shelf tree picker, desktop hosts): the pick is added as a typed
+        # shelfmark is, through _browse_rd_add_resolved; absent without the shelf tree.
+        # Several at once (the web's desk toolbar does the same): ticking one shelfmark adds one.
+        from desktop.widgets.shelf_pick_button import ShelfPickButton
+        self.btn_rd_shelf = ShelfPickButton(self.browse_rd_toolbar, self._browse_rd_add_from_shelf,
+                                            start=self._browse_rd_shelf_start,
+                                            on_several=self._browse_rd_pick_several)
+        rd_toolbar_layout.addWidget(self.btn_rd_shelf)
+
         rd_toolbar_layout.addSpacing(6)
 
         btn_rd_add_from_list = QPushButton(tr("Add from List"))
@@ -8468,6 +8524,7 @@ class GenizahGUI(QMainWindow):
         # presses its button, so a disabled one does nothing.
         nxt, prev = arrow_keys(CURRENT_LANG == 'he')
         self._browse_keys = []
+        self._browse_key_labels = {}
         for keys, button, tip in (
                 ("Ctrl+PgDown", self.btn_b_next, tr("Next image")),
                 ("Ctrl+PgUp", self.btn_b_prev, tr("Previous image")),
@@ -8477,7 +8534,12 @@ class GenizahGUI(QMainWindow):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(button.click)
             self._browse_keys.append(shortcut)
-            button.setToolTip(f"{tip} ({key_label(keys, CURRENT_LANG == 'he')})")
+            self._browse_key_labels[button] = key_label(keys, CURRENT_LANG == 'he')
+            button.setToolTip(f"{tip} ({self._browse_key_labels[button]})")
+        # Previous / next manuscript say where they lead, as they will decide it: the Oxford Part,
+        # else the shelf, else the transcription file's order (shelf tree picker plan §10.5).
+        self._browse_ms_tips = [shelf_picker.LiveToolTip(self.btn_prev_ms, lambda: self._browse_ms_tooltip(-1)),
+                                shelf_picker.LiveToolTip(self.btn_next_ms, lambda: self._browse_ms_tooltip(1))]
 
         return panel
 
@@ -8846,7 +8908,10 @@ class GenizahGUI(QMainWindow):
         _nli_svc = getattr(self, '_nli_crossref_service', None)
         if _nli_svc is None:
             try:
-                _nli_svc = get_nli_crossref_service(thread_safe=False)
+                # thread-safe: the service is one per process, and the first to ask makes it; the shelf
+                # picker's details read it off the UI thread (a single-thread connection there failed
+                # every library viewer link: CUDL, Manchester)
+                _nli_svc = get_nli_crossref_service(thread_safe=True)
                 self._nli_crossref_service = _nli_svc
             except Exception:
                 _nli_svc = None
@@ -10614,8 +10679,8 @@ class GenizahGUI(QMainWindow):
                 if not shelfmark or shelfmark == "Unknown":
                     shelfmark = sid
 
-            # Get pages from searcher
-            pages = self.searcher.get_full_manuscript(sid)
+            # Get pages from searcher (read already when a confirm from the shelf brings it)
+            pages = self._browse_rd_full_manuscript(sid)
             page_list = []
             if pages:
                 for p in pages:
@@ -10674,18 +10739,7 @@ class GenizahGUI(QMainWindow):
         # Launch background worker to fetch PGP sources
         sys_ids = [e.sys_id for e in state.entries]
         if sys_ids:
-            if self._browse_rd_worker is not None:
-                try:
-                    self._browse_rd_worker.finished.disconnect()
-                    self._browse_rd_worker.error.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
-            self._browse_rd_worker = ReadingDeskWorker(sys_ids)
-            self._browse_rd_worker.finished.connect(self._browse_rd_on_sources_loaded)
-            self._browse_rd_worker.error.connect(
-                lambda msg: logger.debug("ReadingDeskWorker error: %s", msg)
-            )
-            self._browse_rd_worker.start()
+            self._browse_rd_load_sources(sys_ids)
 
         # Kick off metadata enrichment for any fragments not yet in nli_cache —
         # reading desk image rendering reads from meta_mgr.nli_cache[sid]. Without
@@ -10712,17 +10766,9 @@ class GenizahGUI(QMainWindow):
         """
         if not sys_id:
             return
-        meta = self.meta_mgr.nli_cache.get(sys_id, {})
-        from shared.codicological import bodleian_cache_needs_refresh
-        from shared.cudl_identity import entry_decision_stale
-        from shared.nli_crossref_service import katz_cache_needs_refresh
-        # An entry cached before the record's current Cambridge decision may hold
-        # another item's images (shared/cudl_identity.py): enrich it again. The
-        # decision checked is this entry's own, not a re-read of the cache.
-        if ((meta.get('images_nli') or meta.get('images_ext'))
-                and not entry_decision_stale(self.meta_mgr, meta)
-                and not katz_cache_needs_refresh(sys_id, meta)
-                and not bodleian_cache_needs_refresh(self.meta_mgr, sys_id, meta)):
+        # Image lists held and current: nothing to fetch (the same test the shelf's confirm
+        # makes before the desk's room is counted, _browse_rd_images_known).
+        if self._browse_rd_images_known(sys_id):
             return
 
         # Initialise the tracking dict lazily — create_browse_tab also does this
@@ -10793,14 +10839,8 @@ class GenizahGUI(QMainWindow):
         self.browse_reading_desk_state = ReadingDeskState()
         self.browse_reading_desk_pgpid = None
 
-        # Stop worker if running
-        if self._browse_rd_worker is not None:
-            try:
-                self._browse_rd_worker.finished.disconnect()
-                self._browse_rd_worker.error.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._browse_rd_worker = None
+        # Stop listening to the source workers; each is kept until its thread ends
+        self._browse_rd_retire_sources()
 
         # Disconnect callbacks and then wait/terminate any pending enrichment
         # threads so a stale re-render can't fire into a torn-down viewer and
@@ -10995,19 +11035,9 @@ class GenizahGUI(QMainWindow):
         state.entries.append(entry)
         state.entries.sort(key=lambda e: e.sequence_order)
 
-        # Launch ReadingDeskWorker for the new entry's PGP sources
-        if self._browse_rd_worker is not None:
-            try:
-                self._browse_rd_worker.finished.disconnect()
-                self._browse_rd_worker.error.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-        self._browse_rd_worker = ReadingDeskWorker([sys_id])
-        self._browse_rd_worker.finished.connect(self._browse_rd_on_sources_loaded)
-        self._browse_rd_worker.error.connect(
-            lambda msg: logger.debug("ReadingDeskWorker error: %s", msg)
-        )
-        self._browse_rd_worker.start()
+        # Load the new entry's PGP sources; a worker still loading earlier entries goes on (its
+        # results still land: _browse_rd_load_sources)
+        self._browse_rd_load_sources([sys_id])
 
         # Ensure image metadata is populated so the viewer pane can render
         # images for manuscripts that haven't been browsed yet this session.
@@ -11059,12 +11089,355 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Not Found"), tr("Shelfmark not found: {}").format(text))
             return
 
+        self._browse_rd_add_resolved(sid, text)
+
+    def _browse_rd_add_resolved(self, sid, text):
+        """Add a resolved manuscript to the reading desk, as the toolbar's box does: the typed
+        shelfmark and a pick from the shelf both end here."""
         shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
         if not shelfmark or shelfmark == "Unknown":
             shelfmark = text
 
         self._browse_rd_add_entry(sid, shelfmark)
         self.browse_rd_shelf_input.clear()
+
+    def _browse_rd_shelf_start(self):
+        """Where the desk's picker opens: what the reader typed in the desk's box, else the place
+        of the manuscript Browse shows (the box is filled with its shelfmark when the desk opens,
+        a text the picker cannot start from: "CUL T-S AS 39.7")."""
+        box = self.browse_rd_shelf_input
+        typed = box.text().strip() if box.isModified() else ''
+        # then the last manuscript added to the desk from the shelf (the web's memory), then the
+        # place of the manuscript Browse shows
+        return typed or getattr(self, '_browse_rd_shelf_last', None) or self._browse_shelf_start(typed=False)
+
+    def _browse_rd_add_from_shelf(self, selection):
+        """The shelf picker's adapter for the reading desk (``{sys_id, shelfmark, placement_id}``)."""
+        self._browse_rd_shelf_last = selection.get('placement_id') or selection['sys_id']
+        self._browse_rd_add_resolved(selection['sys_id'], selection.get('shelfmark') or selection['sys_id'])
+
+    # -- Several to the Reading Desk (shelf tree picker, several at once; the web's #71) ------------
+
+    def _browse_rd_base_ids(self):
+        """What the desk holds, for its limit: its manuscripts when it is open, else the one Browse
+        shows (a new desk begins with it)."""
+        if self.browse_reading_desk_active:
+            return [e.sys_id for e in self.browse_reading_desk_state.entries]
+        current = getattr(self, 'current_browse_sid', None)
+        return [current] if current else []
+
+    def _browse_rd_limit(self):
+        """The Reading Desk's limit (owner, 2026-11-21; ``shared/shelfmark_tree_limits.py``): 30
+        manuscripts and 1,000 pages with what it holds, a manuscript's pages the index's, else 2."""
+        page_count = getattr(getattr(self, 'searcher', None), 'page_count', None) or (lambda _sid: 0)
+        return limit_for('reading_desk', desk_pages_function(page_count, self._browse_rd_images_drawn),
+                         self._browse_rd_base_ids)
+
+    def _browse_rd_images_drawn(self, sys_id):
+        """How many images the desktop desk draws for a manuscript (``_browse_rd_render_images``):
+        every image its metadata lists, else one FL image; not known yet, the web's two. The desk's
+        page limit counts a manuscript at least this much (``desk_pages_function``'s fallback)."""
+        meta = (getattr(getattr(self, 'meta_mgr', None), 'nli_cache', None) or {}).get(sys_id) or {}
+        nli, ext = meta.get('images_nli') or [], meta.get('images_ext') or []
+        images = nli if (ext and nli and len(ext) != len(nli)) else (ext or nli)
+        if images:
+            return len(images)
+        fl_ids = meta.get('fl_ids') or []
+        if isinstance(fl_ids, str):
+            fl_ids = [fl_ids]
+        if any(re.sub(r"\D", "", str(fl or "")) for fl in fl_ids):
+            return 1
+        return UNTRANSCRIBED_DESK_PAGES
+
+    def _browse_rd_pick_several(self, service):
+        """The desk toolbar's shelf button: the picker in its multiple-choice mode (purpose
+        'reading_desk', kept in the session file until added; Browse's own picker reaches the same
+        choice through its switch, ``open_shelf_picker``). A desk is drawn around a page: with no
+        desk and no manuscript open the picker does not open."""
+        if not self.browse_reading_desk_active and not self.current_browse_sid:
+            QMessageBox.information(self, tr("Reading Desk"), tr("Please load a manuscript first"))
+            return
+        shelf_picker.pick_several_from_shelf(
+            self, service, purpose='reading_desk', on_confirm=self._browse_rd_take_from_shelf,
+            store=getattr(self, '_shelf_selections', None), start=self._browse_rd_shelf_start(),
+            title=tr("Pick several from the shelf for the Reading Desk"),
+            confirm_label=tr("Add them all to the Reading Desk"),
+            lists_mgr=getattr(self, 'lists_mgr', None), on_list_saved=self._lists_after_shelf_save,
+            limit=self._browse_rd_limit())
+
+    def _lists_after_shelf_save(self):
+        """What the lists panel does after a list was added (as "New List..." does)."""
+        self.lists_refresh_all()
+        self._lists_auto_sync()
+
+    #: Manuscripts a list takes from the shelf at once (owner): ticking stops there; one insert.
+    LIST_SHELF_MAX = LIST_MAX_ITEMS
+
+    def _lists_pick_from_shelf(self, service):
+        """Add from the shelf (D8): the picker in its multiple-choice mode (purpose 'lists', kept in
+        the session file until added) for the list shown; never the recent list."""
+        list_id = self.lists_current_list_id
+        if not self.lists_mgr or list_id == 'recent':
+            return
+        name = (self.lists_mgr.data.get('lists', {}).get(list_id) or {}).get('name') or ''
+        shelf_picker.pick_several_from_shelf(
+            self, service, purpose='lists',
+            on_confirm=lambda entries, _label, lid=list_id: self._lists_take_from_shelf(entries, lid),
+            store=getattr(self, '_shelf_selections', None),
+            title=f"{tr('Add from the shelf')}: {name}" if name else tr('Add from the shelf'),
+            confirm_label=tr("Add them to this list"), limit=SelectionLimit(max_items=self.LIST_SHELF_MAX))
+
+    def _lists_take_from_shelf(self, entries, list_id):
+        """The picker's confirm for a list: at most LIST_SHELF_MAX, in one bulk add into the list
+        the picker was opened for; one already in it is taken but not added again (add_items_bulk
+        does not repeat it). A save that did not reach lists.pkl takes nothing: the choice stays.
+        Answers the ids taken."""
+        from desktop.widgets.shelf_pick_button import corpus_pick
+        ids = SelectionLimit(max_items=self.LIST_SHELF_MAX).take(
+            list(dict.fromkeys(e['sys_id'] for e in entries if corpus_pick(e))))
+        target = self.lists_mgr.data.get('lists', {}).get(list_id) if self.lists_mgr is not None else None
+        if not ids or not isinstance(target, dict) or target.get('deleted_at'):
+            return []                          # the list is gone, or in the trash (delete_list keeps its id)
+        new = []
+        try:
+            # a manuscript the list holds already -- as itself or as one of its pages or images, whose
+            # item keys differ (Codex) -- is taken but not added again
+            held = {it.get('sys_id') for it in self.lists_mgr.get_items_in_list(list_id)}
+            new = [sid for sid in ids if sid not in held]
+            added = self.lists_mgr.add_items_bulk(new, list_id, source='shelf') if new else 0
+            retried = not new and self.lists_mgr.saves_failing()
+            if retried:
+                self.lists_mgr.save()          # a retry: what an earlier try added is in memory only
+        except Exception:  # noqa: BLE001 -- nothing taken; the choice stays
+            logger.exception("Add from the shelf: the list could not be saved")
+            if new:
+                self.lists_mgr.withdraw_from_list(new, list_id)     # what got in before it failed
+            self.status_label.setText(tr('The list could not be saved.'))
+            return []
+        if self.lists_mgr.saves_failing():
+            # not written: no upload of a change that is in memory only (Codex #74), and what this
+            # try put in the list is taken out again, so a retry writes only what is chosen by then
+            # (the list's own entries from before stay)
+            if new:
+                self.lists_mgr.withdraw_from_list(new, list_id)
+            self.status_label.setText(tr('The list could not be saved.'))
+            return []
+        if new or retried:
+            # a saved change to the lists asks for an upload, as every other list edit does, whatever
+            # happens to the panel's refresh below (tests/test_lists_sync_off_ui_thread.py)
+            self._lists_auto_sync()
+        self.status_label.setText(tr("{n} added to the list").format(n=added))
+        try:
+            self.lists_refresh_all()
+        except Exception as exc:  # noqa: BLE001 -- the list is saved; the panel catches up later
+            logger.warning("Add from the shelf: the lists panel was not refreshed: %s", exc)
+        return ids
+
+    def _browse_rd_take_from_shelf(self, entries, _label, opened=0):
+        """The picker's confirm for the desk: a manuscript already on it is taken; of the others, what
+        fits the desk's limit with what it holds (``_browse_rd_limit().take``: 30 manuscripts, 1,000
+        pages) is added in the order chosen, as one batch (one source worker, one render), a progress
+        window over the picker while their pages load; the rest stay chosen, and the status says which
+        limit stopped them. Without a desk, one is started with the manuscript shown, as Add to View
+        does. ``opened``: new manuscripts this confirm opened already (Browse's switch opens the first
+        in Browse): counted in the message. Answers the ids taken."""
+        from desktop.widgets.shelf_pick_button import corpus_pick
+        picks = [(e['sys_id'], e.get('shelfmark') or e['sys_id']) for e in entries if corpus_pick(e)]
+        if not self.browse_reading_desk_active:
+            current = self.current_browse_sid
+            if not current:
+                return []
+            on_desk = {current}
+        else:
+            on_desk = {e.sys_id for e in self.browse_reading_desk_state.entries}
+        shelf_of = dict(picks)
+        order = list(shelf_of)                      # distinct, in the order chosen
+        limit = self._browse_rd_limit()
+        fits = set(limit.take(order))
+        taken = [sid for sid in order if sid in on_desk]
+        new = [(sid, shelf_of[sid]) for sid in order if sid in fits and sid not in on_desk]
+        left = [sid for sid in order if sid not in on_desk and sid not in fits]
+        # every page is read before the desk changes: a progress window pumps events, and nothing may
+        # find a desk half made meanwhile (Codex pre-flight)
+        was_active = self.browse_reading_desk_active
+        self._browse_rd_preloaded = self._browse_rd_preload(
+            [sid for sid, _s in new] + ([] if self.browse_reading_desk_active else [current]))
+        # room again, right before the desk changes: what it holds may have changed while the pages
+        # loaded (the web's check before inserting); a desk opened or closed meanwhile takes nothing
+        if self.browse_reading_desk_active != was_active or (
+                not was_active and self.current_browse_sid != current):
+            self._browse_rd_preloaded = None
+            return []
+        if new:
+            still = set(self._browse_rd_limit().take(order))
+            left += [sid for sid, _s in new if sid not in still]
+            new = [(sid, s) for sid, s in new if sid in still]
+            fits &= still | set(on_desk)
+        try:
+            if not self.browse_reading_desk_active:
+                shelf, _ = self.meta_mgr.get_meta_for_id(current)
+                if not shelf or shelf == "Unknown":
+                    shelf = current
+                self._browse_enter_reading_desk(
+                    [{'sys_id': current, 'shelfmark': shelf, 'sequence_order': 0}]
+                    + [{'sys_id': sid, 'shelfmark': s, 'sequence_order': i + 1} for i, (sid, s) in enumerate(new)])
+                added = [sid for sid, _s in new]
+            else:
+                added = self._browse_rd_add_entries(new)
+        finally:
+            self._browse_rd_preloaded = None
+        taken += added
+        last = added[-1] if added else (taken[-1] if taken else None)
+        if last is not None:                       # the next opening starts at the last one added
+            placement = next((e.get('placement_id') for e in entries if e.get('sys_id') == last), None)
+            self._browse_rd_shelf_last = placement or last
+        message = tr("{n} added to the Reading Desk").format(n=len(added) + opened)
+        if left:                                   # the limit stopped them: say which
+            held = [sid for sid in order if sid in fits]
+            refusal = limit.refusal(held, held + [left[0]])
+            if refusal is not None:
+                message += " · " + refusal_message(refusal, tr)
+        self.status_label.setText(message)
+        return taken
+
+    def _browse_rd_preload(self, sys_ids):
+        """The pages of manuscripts about to join the desk, read now (``get_full_manuscript`` is
+        synchronous: a whole manuscript each), and the image lists of those whose images are not
+        known yet (``enrich_metadata``, a few at a time off the UI thread): the desk draws every image,
+        so the room checked after this counts them, not the two a manuscript not yet fetched is
+        counted as (Codex #84); the desk would fetch the same right after the add. A progress window
+        over the picker when there are several. Nothing of the desk is touched here."""
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        enrich = getattr(meta_mgr, 'enrich_metadata', None)
+        unknown = [sid for sid in sys_ids if enrich is not None and not self._browse_rd_images_known(sid)]
+        steps = len(sys_ids) + len(unknown)
+        pages, progress = {}, None
+        if steps > 1:
+            progress = QProgressDialog(tr("Loading..."), None, 0, steps,
+                                       QApplication.activeModalWidget() or self)
+            progress.setWindowTitle(tr("Reading Desk"))
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+        try:
+            if unknown:
+                self._browse_rd_fetch_images(enrich, unknown, progress)
+            for i, sid in enumerate(sys_ids):
+                pages[sid] = self.searcher.get_full_manuscript(sid)
+                if progress is not None:
+                    progress.setValue(len(unknown) + i + 1)
+        finally:
+            if progress is not None:
+                progress.close()
+                progress.deleteLater()
+        return pages
+
+    def _browse_rd_images_known(self, sys_id):
+        """Whether the catalogue holds a manuscript's image lists, and they are current: what
+        _browse_rd_enrich_entry asks before fetching them. An entry cached before the record's
+        current Cambridge decision may hold another item's images (shared/cudl_identity.py), and a
+        Katz or Oxford entry may be due a refresh: the desk fetches those again right after the
+        add, so they count as not known here (Codex #84), and the list the limit counts is the new
+        one. The decision checked is this entry's own, not a re-read of the cache."""
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        meta = (getattr(meta_mgr, 'nli_cache', None) or {}).get(sys_id) or {}
+        if not (meta.get('images_nli') or meta.get('images_ext')):
+            return False
+        from shared.codicological import bodleian_cache_needs_refresh
+        from shared.cudl_identity import entry_decision_stale
+        from shared.nli_crossref_service import katz_cache_needs_refresh
+        return not (entry_decision_stale(meta_mgr, meta) or katz_cache_needs_refresh(sys_id, meta)
+                    or bodleian_cache_needs_refresh(meta_mgr, sys_id, meta))
+
+    def _browse_rd_fetch_images(self, enrich, sys_ids, progress=None):
+        """``enrich_metadata`` for each, four at a time off the UI thread (what EnrichMetadataThread
+        runs), waiting with the events going on; a failure leaves that one counted as before."""
+        from concurrent.futures import ThreadPoolExecutor
+        from genizah_core import resolve_volume_suffix
+
+        def one(sid):
+            try:
+                enrich(sid, suffix=resolve_volume_suffix(sid, None) or 1)
+            except Exception as exc:  # noqa: BLE001 -- counted as the desk counts an unknown one
+                logger.debug("Reading Desk: images of %s not fetched: %s", sid, exc)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(one, sid) for sid in sys_ids]
+            while True:
+                done = sum(f.done() for f in futures)
+                if progress is not None:
+                    progress.setValue(done)
+                if done == len(futures):
+                    break
+                QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+                time.sleep(0.02)
+
+    def _browse_rd_full_manuscript(self, sys_id):
+        """A manuscript's pages for the desk: read already by a confirm from the shelf, else now."""
+        preloaded = getattr(self, '_browse_rd_preloaded', None)
+        if preloaded and sys_id in preloaded:
+            return preloaded.pop(sys_id)
+        return self.searcher.get_full_manuscript(sys_id)
+
+    def _browse_rd_load_sources(self, sys_ids):
+        """Load the PGP sources of desk entries in the background. A worker started earlier is not
+        disconnected (that dropped its results: each add used to replace the one before it): every
+        worker stays connected until its results are in, and is held until its thread has ended
+        (_keep_until_finished, on QThread.finished). The desk's exit retires them all."""
+        workers = [w for w in (getattr(self, '_browse_rd_source_workers', None) or []) if not w.isFinished()]
+        worker = ReadingDeskWorker(list(sys_ids))
+        worker.sources_ready.connect(self._browse_rd_on_sources_loaded)
+        worker.error.connect(lambda msg: logger.debug("ReadingDeskWorker error: %s", msg))
+        workers.append(worker)
+        self._browse_rd_source_workers = workers
+        self._browse_rd_worker = worker
+        _keep_until_finished(worker)
+        worker.start()
+        return worker
+
+    def _browse_rd_retire_sources(self):
+        """The desk closes: no worker's results reach it any more; each is kept until it ends."""
+        for worker in getattr(self, '_browse_rd_source_workers', None) or []:
+            _retire_worker(worker, 'sources_ready', 'error')
+        self._browse_rd_source_workers = []
+        self._browse_rd_worker = None
+
+    def _browse_rd_page_list(self, sys_id):
+        """A manuscript's pages as the desk keeps them (what _browse_rd_add_entry builds)."""
+        pages = self._browse_rd_full_manuscript(sys_id)
+        return [{'p_num': p.get('p_num', 1), 'text': p.get('text', ''), 'full_header': p.get('full_header', ''),
+                 'fl_id': p.get('fl_id', '')} for p in (pages or [])]
+
+    def _browse_rd_add_entries(self, items):
+        """Several manuscripts onto the open desk at once, ``[(sys_id, shelfmark), ...]``: their
+        entries are added, ONE ReadingDeskWorker loads their sources, each gets its image metadata,
+        and the desk is drawn ONCE. Repeated single adds (_browse_rd_add_entry) would each disconnect
+        the worker before them, losing its sources: a worker still loading is retired here (not
+        cancelled, kept until it ends) and its manuscripts are loaded again by the new one. Answers the
+        sys_ids added (those already on the desk are not)."""
+        if not self.browse_reading_desk_active:
+            return []
+        state = self.browse_reading_desk_state
+        on_desk = {e.sys_id for e in state.entries}
+        order = max((e.sequence_order for e in state.entries), default=0)
+        added = []
+        for sid, shelfmark in items:
+            if not sid or sid in on_desk:
+                continue
+            order += 1
+            state.entries.append(ReadingDeskEntry(sys_id=sid, shelfmark=shelfmark,
+                                                  pages=self._browse_rd_page_list(sid), sequence_order=order))
+            on_desk.add(sid)
+            added.append(sid)
+        if not added:
+            return []
+        state.entries.sort(key=lambda e: e.sequence_order)
+        self._browse_rd_load_sources(added)
+        current = self.current_browse_sid or ''
+        for sid in added:
+            vol = getattr(self, 'current_browse_volume_ie', None) if sid == current else None
+            self._browse_rd_enrich_entry(sid, volume_ie=vol)
+        self._browse_rd_render()
+        return added
 
     def _browse_rd_add_from_list(self):
         """Show the browse lists panel so items can be added to reading desk."""
@@ -13628,6 +14001,13 @@ class GenizahGUI(QMainWindow):
 
         action_bar.addStretch()
 
+        # Add from the shelf (D8; shelf tree picker, several at once): into the list shown, not into
+        # the recent list; absent without the shelf tree.
+        from desktop.widgets.shelf_pick_button import ShelfPickButton
+        self.btn_lists_shelf = ShelfPickButton(None, text=f"\U0001F4DA {tr('Add from the shelf')}",
+                                               on_several=self._lists_pick_from_shelf)
+        action_bar.addWidget(self.btn_lists_shelf)
+
         btn_export = QPushButton(tr("Export List..."))
         btn_export.clicked.connect(self.lists_export_current_list)
         action_bar.addWidget(btn_export)
@@ -13996,6 +14376,8 @@ class GenizahGUI(QMainWindow):
             is_default = current_list.get('is_default', False)
             self.btn_edit_list.setEnabled(not is_system)
             self.btn_delete_list.setEnabled(not is_system and not is_default)
+        if getattr(self, 'btn_lists_shelf', None) is not None:
+            self.btn_lists_shelf.setEnabled(self.lists_current_list_id != 'recent')
 
         # The "Recently Viewed" system list must preserve view-time ordering
         # (most-recent first) and collapse true duplicates — never re-sort it by
@@ -16599,14 +16981,14 @@ class GenizahGUI(QMainWindow):
         frag_a = join_data.get('fragment_a', '')
         doc_id_a = join_data.get('document_id_a')
         if frag_a:
-            action_a = menu.addAction(f"📄 {tr('Open')} {frag_a}")
+            action_a = menu.addAction(f"📄 {tr('Open {name}').format(name=frag_a)}")
             action_a.triggered.connect(lambda: self._open_join_fragment(frag_a, doc_id_a))
 
         # Open Fragment B
         frag_b = join_data.get('fragment_b', '')
         doc_id_b = join_data.get('document_id_b')
         if frag_b:
-            action_b = menu.addAction(f"📄 {tr('Open')} {frag_b}")
+            action_b = menu.addAction(f"📄 {tr('Open {name}').format(name=frag_b)}")
             action_b.triggered.connect(lambda: self._open_join_fragment(frag_b, doc_id_b))
 
         menu.addSeparator()
@@ -17031,7 +17413,10 @@ class GenizahGUI(QMainWindow):
         the recent manuscript chosen in it."""
         startup_tips.mark_used('go_to')  # its startup tip is no longer needed
         dlg = GoToDialog(self, completer=getattr(self, 'shelf_completer', None),
-                         recent=self._go_to_recent_items())
+                         recent=self._go_to_recent_items(),
+                         shelf_service=shelf_picker.shelf_tree_service(),
+                         shelf_start=self._browse_shelf_start(typed=False),
+                         shelf_options=self._shelf_picker_options())
         try:
             accepted = dlg.exec()
             kind, value = dlg.choice()
@@ -17041,6 +17426,12 @@ class GenizahGUI(QMainWindow):
             return
         if kind == 'recent':
             self._open_recent_item(value)
+        elif kind == 'shelf':
+            self._browse_open_shelf_pick(value)
+        elif kind == 'puzzle':                     # Add to Puzzle in its picker: both closed
+            self._shelf_add_to_puzzle(value)
+        elif kind == 'opened':                     # several, opened by the picker's own confirm
+            pass
         else:
             self.go_to(value)
 
@@ -17127,6 +17518,11 @@ class GenizahGUI(QMainWindow):
                 self._go_to_word_mode()
                 self.toggle_search()
             return kind
+        return self._browse_open_field(kind, value)
+
+    def _browse_open_field(self, kind, value):
+        """Open in Browse what one field names: Go to's text, or the shelf picker's pick as its
+        system number (``_browse_open_shelf_pick``). Returns ``kind``."""
         # Only the one field: browse_load also reads the other two, and a
         # number left over in one of them would compete with this one.
         fields = {'sys_id': (self.browse_sys_input, "sys"),
@@ -18160,6 +18556,11 @@ class GenizahGUI(QMainWindow):
         tab is in front -- which happens on the ordinary path of opening a
         result and switching to Browse.
         """
+        # The place on the shelf follows the document too: every path that changes the manuscript
+        # shown comes through here (the Browse inputs, the Part loads and walk, page crossing, LOCAL).
+        sync_shelf = getattr(self, '_sync_browse_shelf_place', None)
+        if sync_shelf is not None:
+            sync_shelf()
         sid = getattr(self, 'current_browse_sid', None)
         for _web in (getattr(self, 'btn_b_open_web', None), getattr(self, 'btn_b_copy_web', None)):
             if _web is not None:
@@ -30828,6 +31229,10 @@ class GenizahGUI(QMainWindow):
             lists_mgr=getattr(self, 'lists_mgr', None),
             shelf_map=getattr(self, '_shelf_to_sys', None),
             exclusion_sources=self._excl_get(surface, 'sources'),
+            # "From the shelf" (picker PR 4): each surface keeps its own pending choice
+            purpose='search_exclude' if surface == 'search' else 'composition_exclude',
+            shelf_service=shelf_picker.shelf_tree_service(),
+            shelf_store=getattr(self, '_shelf_selections', None),
         )
         if dlg.exec():
             new_sources = dlg.get_exclusion_sources()
@@ -34133,6 +34538,355 @@ class GenizahGUI(QMainWindow):
             self.current_browse_part_folio_idx = 0
         return part_id
 
+    # -- The shelf (shelf tree picker plan PR 3: §3.4, D6, §10.4, §10.5, §10.11) -----------------
+    # The web's counterparts: web/pages/browse.py (navigate_shelfmark, _load_shelf_place,
+    # _shelf_start, open_shelf_picker_at). The tree holds corpus manuscripts only: nothing here ever
+    # reaches a LOCAL ("97") manuscript, whose paths stay as they are.
+
+    def _on_shelf_tree_opened(self, _ok=False):
+        """The shelf tree has been opened and checked (or refused): the button and the place on the
+        shelf follow what it answers."""
+        offered = shelf_picker.shelf_tree_service() is not None
+        self.btn_browse_shelf.setVisible(offered)
+        # the chips name a manuscript's library by its own code (#80's code_of); the tooltips carry
+        # its title and the details pane reads the catalogue and the text index
+        shelf_picker.library_code_of = self._shelf_library_code
+        shelf_picker.title_of = self._shelf_title
+        shelf_picker.catalogue = getattr(self, 'meta_mgr', None)
+        shelf_picker.page_count_of = self._shelf_page_count
+        shelf_picker.page_texts_of = self._shelf_page_texts
+        shelf_picker.community = getattr(self, 'corrections_client', None)
+        # the rows' signs (PGP, scholarly transcription, joins): read off the UI thread by the first
+        # picker that opens, once a process
+        from shared.shelfmark_tree_signs import shelf_signs
+        shelf_picker.signs = shelf_signs()
+        from desktop.widgets.shelf_pick_button import tree_state
+        tree_state().changed.emit()              # the hosts' buttons built before the tree opened
+        self._browse_shelf_for = None            # read the place again, now that there is a tree
+        self._browse_shelf = None
+        self._sync_browse_shelf_place()
+
+    def _shelf_title(self, sid):
+        """A manuscript's title from the catalogue (libraries.csv), for a shelfmark's tooltip; read
+        off the UI thread, so it only reads."""
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        row = (getattr(meta_mgr, 'csv_bank', None) or {}).get(sid) if meta_mgr is not None else None
+        return (row or {}).get('title') or ''
+
+    def _shelf_page_count(self, sid):
+        """The pages the text index holds of a manuscript, for the details pane."""
+        page_count = getattr(getattr(self, 'searcher', None), 'page_count', None)
+        return page_count(sid) if page_count is not None else 0
+
+    def _shelf_page_texts(self, sid):
+        """The text index's first pages of a manuscript, for the details pane's preview."""
+        page_texts = getattr(getattr(self, 'searcher', None), 'page_texts', None)
+        return page_texts(sid) if page_texts is not None else ()
+
+    def _open_shelf_anywhere(self):
+        """Ctrl+W, from any section: the shelf, at the manuscript Browse shows (DX28)."""
+        if shelf_picker.shelf_tree_service() is None:
+            return
+        self.open_shelf_picker(self._browse_shelf_start())
+
+    def _shelf_library_code(self, sid):
+        """A manuscript's own library code (``libraries.csv``), for the shelf picker's chips; read off
+        the UI thread, so it only reads (the catalogue's dict)."""
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        return meta_mgr.get_library_for_id(sid) if meta_mgr is not None else ''
+
+    def _shelf_place_sid(self, sid):
+        """``sid`` when the shelf can hold it (a corpus manuscript), else None."""
+        sid = str(sid or '')
+        return sid if CORPUS_SYS_ID_RE.fullmatch(sid) else None
+
+    def _sync_browse_shelf_place(self):
+        """The place on the shelf of the manuscript Browse shows: read once per manuscript (a few
+        milliseconds), by the placement a pick or a step asked for when there is one (a manuscript
+        may sit at two places), and kept while the manuscript stays the same. Hidden for LOCAL and
+        when the shelf tree is not offered."""
+        label = getattr(self, 'browse_shelf_place', None)
+        if label is None:
+            return
+        sid = self._shelf_place_sid(getattr(self, 'current_browse_sid', None))
+        want = getattr(self, '_browse_shelf_want', None)
+        if placement_request_is_spent(want, getattr(self, 'current_browse_sid', None)):
+            self._browse_shelf_want = want = None   # asked for a manuscript that was not opened
+        service = shelf_picker.shelf_tree_service()
+        if service is None or sid is None:
+            label.setVisible(False)
+            return
+        asked = want[1] if want and want[0] == sid else None
+        shown = self._browse_shelf if self._browse_shelf_for == sid else None
+        if self._browse_shelf_for != sid or (asked and (shown is None or shown['leaf'].id != asked)):
+            lang = 'he' if CURRENT_LANG == 'he' else 'en'
+            shown = None
+            try:
+                place = shelf_place_of(service, sid, asked)
+                if place is not None:
+                    prev_leaf, next_leaf = service.neighbours(place.leaf.id)
+                    shown = {'leaf': place.leaf, 'position': shelf_position(service, place.leaf),
+                             'crumbs': [(n.id, shelf_display_name(n, lang)) for n in shelf_crumbs(place)],
+                             'prev': prev_leaf, 'next': next_leaf}
+            except Exception as exc:  # noqa: BLE001 -- the shelf is an aid: never stop Browse
+                logger.warning("Shelf place for %s not read: %s", sid, exc)
+            self._browse_shelf_for, self._browse_shelf = sid, shown
+        if want and want[0] == sid:
+            # Served: a later arrival at this manuscript by search, not by the shelf, keeps the
+            # placement shown, and another manuscript gets its own first place.
+            self._browse_shelf_want = None
+        self._draw_browse_shelf_place(shown)
+
+    def _draw_browse_shelf_place(self, shown):
+        label = self.browse_shelf_place
+        if not shown or not shown['crumbs']:
+            label.clear()
+            label.setVisible(False)
+            return
+        import html as _html
+        rtl = CURRENT_LANG == 'he'
+        # Each name in its own direction, and every separator held to the line's: in Hebrew,
+        # "T-S AS › T-S AS 1-50" would otherwise run together left to right, in reverse order.
+        # (Between right-to-left marks "›" is drawn mirrored, pointing on to the volume.)
+        mark = '\u200f' if rtl else '\u200e'
+        parts = [f'<a href="node:{_html.escape(nid, quote=True)}">'
+                 f'{_html.escape(shelf_picker.own_direction(name, rtl))}</a>' for nid, name in shown['crumbs']]
+        text = f"{mark} › {mark}".join(parts)
+        if shown['position'] is not None:
+            text += f"{mark} · {mark}" + _html.escape(tr('{index} of {total}').format(
+                index=f"{shown['position'].index:,}", total=f"{shown['position'].total:,}"))
+        label.setText(text)
+        label.setVisible(True)
+
+    def _on_browse_shelf_link(self, href):
+        """A level of the place on the shelf: the picker, opened there."""
+        if href.startswith('node:'):
+            self.open_shelf_picker(href[len('node:'):])
+
+    def _browse_shelf_start(self, typed=True):
+        """Where the picker opens: the placement shown (a manuscript may sit at two places), else
+        the manuscript, else (from Browse) what is typed in the shelfmark box."""
+        sid = self._shelf_place_sid(getattr(self, 'current_browse_sid', None))
+        if sid is not None and self._browse_shelf_for == sid and self._browse_shelf:
+            return self._browse_shelf['leaf'].id
+        if sid is not None:
+            return sid
+        box = getattr(self, 'browse_shelf_input', None)
+        text = box.text().strip() if typed and box is not None else ''
+        return text or None
+
+    def open_shelf_picker(self, start=None):
+        """Pick from the shelf; the pick opens in Browse. Returns the pick, or None. The header's
+        switch "Open more than one" (DX16; off at every opening) turns the picker into its
+        multiple-choice mode at the same place, the Reading Desk's kept choice: its confirm is
+        ``_browse_open_several_from_shelf``."""
+        service = shelf_picker.shelf_tree_service()
+        if service is None:
+            return None
+        outcome = shelf_picker.pick_from_shelf_or_several(self, service, start=start, **self._shelf_picker_options())
+        return self._shelf_outcome(outcome)
+
+    def _shelf_picker_options(self):
+        """The picker that opens manuscripts, the same from Browse, Ctrl+W and Go to: a click chooses
+        and "Open" opens; the switch "Open more than one" (DX16) ticks several and opens them in the
+        Reading Desk (the desk's kept choice); Add to List and Add to Puzzle (DX22). The keywords of
+        ``pick_from_shelf_or_several``."""
+        return dict(switch_label=tr("Open more than one"), purpose='reading_desk',
+                    on_confirm=self._browse_open_several_from_shelf, store=getattr(self, '_shelf_selections', None),
+                    confirm_label=tr("Open them in the Reading Desk"), lists_mgr=getattr(self, 'lists_mgr', None),
+                    on_list_saved=self._lists_after_shelf_save, limit=self._shelf_choice_limit(),
+                    act_label=tr("Open"), actions=self._shelf_open_actions())
+
+    def _shelf_choice_limit(self):
+        """What may be ticked in the picker that opens manuscripts: the choice alone, 30 manuscripts
+        and 1,000 pages, nothing held counted. Each of its buttons applies its own room when pressed:
+        the desk's (``_browse_rd_take_from_shelf``), the list's and the Puzzle's."""
+        page_count = getattr(getattr(self, 'searcher', None), 'page_count', None) or (lambda _sid: 0)
+        return limit_for('reading_desk', desk_pages_function(page_count, self._browse_rd_images_drawn))
+
+    def _shelf_open_actions(self):
+        """The picker's buttons beside "Open" where it opens manuscripts (Browse, Ctrl+W, Go to; DX22):
+        Add to List (the picker stays open) and Add to Puzzle (it closes; the outcome is acted on)."""
+        actions = []
+        if getattr(self, 'lists_mgr', None) is not None:
+            actions.append(shelf_picker.ShelfAction('list', tr("Add to List"), keep_open=True,
+                                                    handler=self._shelf_add_to_list))
+        actions.append(shelf_picker.ShelfAction('puzzle', tr("Add to Puzzle")))
+        return actions
+
+    def _shelf_outcome(self, outcome):
+        """What the opening picker answered: open the shelfmark in Browse, or add them to the Puzzle.
+        Returns the selection opened, or None."""
+        if not outcome:
+            return None
+        kind, value = outcome
+        if kind == 'open':
+            self._browse_open_shelf_pick(value)
+            return value
+        if kind == 'puzzle':
+            self._shelf_add_to_puzzle(value)
+        return None
+
+    def _shelf_add_to_list(self, entries, dialog=None):
+        """Add to List from the picker: the app's list menu over it, what the list's limit lets in
+        (2,000 at a time); the picker stays open. Answers what the picker's note says (the limit that
+        kept some out), or None."""
+        from desktop.widgets.shelf_pick_button import corpus_pick
+        ids = list(dict.fromkeys(e['sys_id'] for e in entries if corpus_pick(e)))
+        limit = SelectionLimit(max_items=self.LIST_SHELF_MAX)
+        fits = limit.take(ids)
+        if fits:
+            anchor = (getattr(dialog, 'action_buttons', None) or {}).get('list')
+            self.show_add_to_list_menu([{'sys_id': sid} for sid in fits], source='shelf', anchor_widget=anchor)
+        if len(fits) < len(ids):
+            refusal = limit.refusal(fits, fits + [ids[len(fits)]])
+            return refusal_message(refusal, tr) if refusal is not None else None
+        return None
+
+    def _shelf_add_to_puzzle(self, entries):
+        """Add to Puzzle from the picker (it has closed): the Puzzle opens and takes what its canvas has
+        room for, as its own shelf button does."""
+        service = shelf_picker.shelf_tree_service()
+        if service is None or not entries:
+            return
+        self._open_puzzle_window()
+        window = self._puzzle_window
+        if window is not None and not window.take_entries_from_shelf(entries, service):
+            # queued behind a batch still loading: taken when it has landed
+            self.status_label.setText(tr("Resolving images..."))
+
+    def _browse_open_several_from_shelf(self, entries, label):
+        """The confirm of Browse's picker with the switch on (DX16). A desk is open, or a manuscript
+        is shown: the desk's own path (``_browse_rd_take_from_shelf``: added to the desk, or a desk
+        started with the manuscript shown). Nothing shown and no desk: the first opens in Browse and
+        the rest join it on the desk; only one: it just opens. The desk's limit counts the first with
+        the rest (it is what the desk holds once it opens); what was not taken stays chosen. Answers the
+        ids taken. Whatever opened is shown: Browse comes to the front, as a single pick brings it (the
+        picker may be opened from any section, Ctrl+W)."""
+        if self.browse_reading_desk_active or self.current_browse_sid:
+            taken = self._browse_rd_take_from_shelf(entries, label)
+            if taken:                              # on the desk, in Browse
+                self._set_active_tab(self.browse_tab)
+            return taken
+        from desktop.widgets.shelf_pick_button import corpus_pick
+        picks = list({e['sys_id']: e for e in entries if corpus_pick(e)}.values())
+        if not picks:
+            return []
+        first = picks[0]
+        # the first opens only when the desk could hold it (a restored choice may not: the picker says
+        # why it stays)
+        if first['sys_id'] not in self._browse_rd_limit().take([first['sys_id']]):
+            return []
+        self._browse_open_shelf_pick(first)
+        if self.current_browse_sid != self._shelf_place_sid(first['sys_id']):
+            return []                              # not opened: all stay chosen
+        if len(picks) == 1:
+            return [first['sys_id']]
+        return [first['sys_id']] + list(self._browse_rd_take_from_shelf(picks[1:], label, opened=1))
+
+    def _browse_open_shelf_pick(self, selection):
+        """The picker's adapter (plan §10.4): ``{sys_id, shelfmark, placement_id}`` opens through the
+        path a typed system number takes in Go to (``_browse_open_field``: the fields, the Oxford
+        Part check, the Reading Desk), with the placement asked for kept for the place on the shelf."""
+        sid = self._shelf_place_sid((selection or {}).get('sys_id'))
+        if sid is None:
+            return None
+        self._browse_shelf_want = (sid, selection.get('placement_id'))
+        return self._browse_open_field('sys_id', sid)
+
+    def _browse_shelf_step(self, sid):
+        """(previous, next) on the shelf from the manuscript Browse shows, by the placement shown,
+        else the one asked for, else its first (``step_from``, as the web's second step while the
+        first loads); None when the shelf tree is not offered or the manuscript has no place: then
+        the transcription file's order serves, as before."""
+        sid = self._shelf_place_sid(sid)
+        service = shelf_picker.shelf_tree_service()
+        if service is None or sid is None:
+            return None
+        shown = self._browse_shelf if self._browse_shelf_for == sid else None
+        want = (sid, shown['leaf'].id) if shown else getattr(self, '_browse_shelf_want', None)
+        try:
+            return shelf_step_from(service, sid, want)
+        except Exception as exc:  # noqa: BLE001 -- the file order still serves
+            logger.warning("Shelf step from %s failed: %s", sid, exc)
+            return None
+
+    def _browse_in_part(self):
+        """An Oxford Part is open: previous / next and page crossing walk its folios and Parts."""
+        return bool(getattr(self, 'current_browse_part_id', None) and getattr(self, 'current_browse_part_folios', None))
+
+    def _browse_ms_tooltip(self, direction):
+        """What previous / next manuscript will do, as ``navigate_manuscript`` decides it, with
+        its key."""
+        tip = tr("Next Manuscript (File Order)") if direction > 0 else tr("Previous Manuscript (File Order)")
+        if self._browse_in_part():
+            tip = tr("Next manuscript") if direction > 0 else tr("Previous manuscript")
+        else:
+            step = self._browse_shelf_step(getattr(self, 'current_browse_sid', None))
+            if step is not None:
+                target = step[1] if direction > 0 else step[0]
+                if target is None:
+                    tip = tr("At the end of the shelf") if direction > 0 else tr("At the start of the shelf")
+                elif direction > 0:
+                    tip = tr("Next on the shelf: {shelfmark}").format(shelfmark=target.shelfmark)
+                else:
+                    tip = tr("Previous on the shelf: {shelfmark}").format(shelfmark=target.shelfmark)
+        button = self.btn_next_ms if direction > 0 else self.btn_prev_ms
+        keys = getattr(self, '_browse_key_labels', {}).get(button)
+        return f"{tip} ({keys})" if keys else tip
+
+    _STAYED = object()   # page crossing: the reader was told why nothing moved
+
+    def _browse_endpoint_page(self, sid, direction):
+        """The page a crossing lands on: the first going forward, the last going back (by the page
+        count, never ``absolute_index=-1``, which the engine reads as the first), inside the NLI
+        volume that page is in, so a manuscript of several volumes is counted as its volume is."""
+        get = self.searcher.get_browse_page
+        page = get(sid, p_num=None, next_prev=0, absolute_index=0, allow_cross=False, volume_ie=None)
+        if not page:
+            return page
+        if direction < 0 and (page.get('total_pages') or 0) > 1:
+            page = get(sid, p_num=None, next_prev=0, absolute_index=page['total_pages'] - 1,
+                       allow_cross=False, volume_ie=None) or page
+        ie = page.get('volume_ie')
+        if ie and not page.get('metadata_only'):
+            from genizah_core import get_volumes_for_sys_id
+            if len(get_volumes_for_sys_id(sid)) > 1:
+                within = get(sid, p_num=None, next_prev=0, absolute_index=0, allow_cross=False, volume_ie=ie)
+                if within and direction < 0 and (within.get('total_pages') or 0) > 1:
+                    within = get(sid, p_num=None, next_prev=0, absolute_index=within['total_pages'] - 1,
+                                 allow_cross=False, volume_ie=ie) or within
+                page = within or page
+        return page
+
+    def _browse_cross(self, d, p_arg, idx_arg):
+        """Paging past a manuscript's first or last page (plan §10.11): an open Oxford Part's next
+        folio or Part, else the next on the shelf, else (no shelf tree, or no place) the
+        transcription file's order as before. Returns the page to show, None, or ``_STAYED``."""
+        current = self.current_browse_sid
+        if self._browse_in_part():
+            folios = self.current_browse_part_folios
+            at = self.current_browse_part_folio_idx + d
+            if 0 <= at < len(folios):
+                return self._browse_endpoint_page(folios[at], d)
+            adjacent = self.meta_mgr.codico_mgr.get_adjacent_part(self.current_browse_part_id, d)
+            folios = self.meta_mgr.get_folios_for_part(adjacent) if adjacent else []
+            if not folios:
+                QMessageBox.information(self, tr("Nav"), tr("End of Parts in this volume."))
+                return self._STAYED
+            return self._browse_endpoint_page(folios[0] if d > 0 else folios[-1], d)
+        step = self._browse_shelf_step(current)
+        if step is not None:
+            target = step[1] if d > 0 else step[0]
+            if target is None:
+                QMessageBox.information(self, tr("Nav"), tr("At the end of the shelf") if d > 0
+                                        else tr("At the start of the shelf"))
+                return self._STAYED
+            self._browse_shelf_want = (target.sys_id, target.id)
+            return self._browse_endpoint_page(target.sys_id, d)
+        return self.searcher.get_browse_page(current, p_num=p_arg, next_prev=d, absolute_index=idx_arg,
+                                             allow_cross=True, volume_ie=self.current_browse_volume_ie)
+
     def browse_load(self):
         if not self.searcher: return
         # Phase 96 NEW-2: hide LOCAL-only controls when loading a Genizah manuscript.
@@ -34267,9 +35021,11 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Error"), msg)
             return
 
-        # If this folio belongs to an Oxford Part, load the Part context directly
+        # If this folio belongs to an Oxford Part, load the Part context directly -- unless the
+        # reading desk is open: then the folio is added to the desk below, as any other manuscript
+        # is (the Part view would replace the desk's page and add nothing).
         part_for_sid = self.meta_mgr.get_part_for_folio(sid)
-        if part_for_sid:
+        if part_for_sid and not self.browse_reading_desk_active:
             self._browse_load_part(part_for_sid, target_folio=sid)
             return
 
@@ -34454,14 +35210,22 @@ class GenizahGUI(QMainWindow):
             try: p_arg = int(self.current_browse_p)
             except (ValueError, TypeError): p_arg = 0
 
+        # This manuscript's own page first; past its first or last page the next manuscript is
+        # chosen here (_browse_cross: the Oxford Part, the shelf, else the file order as before).
+        # A manuscript without transcription pages pages through its images as before and does
+        # not cross (its page number moves and the renderer holds it to the images it has).
         page_data = self.searcher.get_browse_page(
             self.current_browse_sid,
             p_num=p_arg,
             next_prev=d,
             absolute_index=idx_arg,
-            allow_cross=True,
+            allow_cross=False,
             volume_ie=self.current_browse_volume_ie
         )
+        if page_data is None and d:
+            page_data = self._browse_cross(d, p_arg, idx_arg)
+            if page_data is self._STAYED:
+                return
 
         if not page_data:
             QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
@@ -36585,6 +37349,12 @@ class GenizahGUI(QMainWindow):
 
         self._local_browse_view_mode = state.get('local_browse_view_mode', 'per_page')
 
+        # Shelf picker PR 4 (D12): a choice made on the shelf and not applied yet stays until it is
+        # applied or cleared, whatever the restore mode (a broken value is an empty choice).
+        shelf_store = getattr(self, '_shelf_selections', None)
+        if shelf_store is not None:
+            shelf_store.load_state(state.get('shelf_selections') if isinstance(state, dict) else None)
+
         saved_scope = reg.get('search_corpus_scope', 'genizah')
         if saved_scope not in {'genizah', 'local', 'all'}:
             logger.warning(
@@ -36794,6 +37564,10 @@ class GenizahGUI(QMainWindow):
                 # D20 criteria; the old 'post_measurement_filters' are not restored (R2).
                 'post_criteria': getattr(self, '_post_criteria', {}),
                 'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
+                # Shelf picker PR 4 (D12): what is chosen on the shelf and not applied yet, per purpose.
+                # Top level, read back on the persistent-preferences path (as the exclusions are).
+                'shelf_selections': (self._shelf_selections.to_state()
+                                     if getattr(self, '_shelf_selections', None) is not None else {}),
                 # Phase 96 D-F1: per-file LOCAL opt-out paths (cross-surface, single source of truth).
                 # Top-level placement — DIFFERENT from Phase 95's local_filter (nested in regular_search).
                 # Reason: opt-out is cross-surface (Search + Composition + Parallels), not per-surface.
@@ -38072,7 +38846,9 @@ class GenizahGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
     def navigate_manuscript(self, direction):
-        """Navigate to prev/next manuscript by file order, crossing Part boundaries."""
+        """Navigate to prev/next manuscript: inside an Oxford Part its folios and Parts; otherwise
+        on the shelf (shelf tree picker plan D6) when the manuscript has a place there, else in the
+        transcription file's order as before."""
         current = self.current_browse_sid
         if not current:
             return
@@ -38113,8 +38889,20 @@ class GenizahGUI(QMainWindow):
                     QMessageBox.information(self, tr("Nav"), tr("End of Parts in this volume."))
                     return
 
-        # Standard file order navigation
-        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        # On the shelf (plan §10.5): the neighbour of the placement shown. Its end is told, not
+        # crossed; a manuscript without a place, or no shelf tree, keeps the file order.
+        step = self._browse_shelf_step(current)
+        if step is not None:
+            target = step[1] if direction > 0 else step[0]
+            if target is None:
+                QMessageBox.information(self, tr("Nav"), tr("At the end of the shelf") if direction > 0
+                                        else tr("At the start of the shelf"))
+                return
+            self._browse_shelf_want = (target.sys_id, target.id)
+            new_sid = target.sys_id
+        else:
+            # Standard file order navigation
+            new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
         if new_sid:
             # Check if new folio belongs to a Part
             new_part = self.meta_mgr.get_part_for_folio(new_sid)

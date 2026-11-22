@@ -6422,6 +6422,29 @@ class SearchEngine:
             LOGGER.warning("Failed to retrieve full text for header %s: %s", full_header, e)
         return None
 
+    def page_count(self, sys_id) -> int:
+        """How many pages the index holds of a manuscript (0 when none, or no browse map), from the
+        browse map alone: no text is read. The Reading Desk's page limit counts with it
+        (``shared/shelfmark_tree_limits.py::desk_pages_function``)."""
+        browse_map = self._load_browse_map()
+        if not browse_map or not sys_id:
+            return 0
+        return len(browse_map.get(sys_id) or ())
+
+    def page_texts(self, sys_id, limit: Optional[int] = None):
+        """The texts of a manuscript's pages in the index (the first ``limit``; None: all), in the
+        browse map's order (Browse's: volume by volume, each in page order, ``dedupe_browse_map``; a
+        second volume's numbering starts again, so its pages are never sorted in among the first's),
+        read one at a time as they are asked for. The shelf picker's details read them all, to count
+        the pages with text (``shared/shelfmark_tree_details.py::read_pages``; half a millisecond a
+        page, a tenth of a second for the longest manuscript). Nothing when the index has none."""
+        browse_map = self._load_browse_map()
+        if not browse_map or not sys_id:
+            return
+        pages = list(browse_map.get(sys_id) or ())
+        for p in (pages if limit is None else pages[:max(0, limit)]):
+            yield self.get_full_text_by_id(p['uid']) or ''
+
     def get_full_manuscript(self, sys_id):
         """Fetch ALL pages for a system ID, sorted by page number."""
         browse_map = self._load_browse_map()

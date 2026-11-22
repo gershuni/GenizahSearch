@@ -10,9 +10,12 @@ import asyncio
 import logging
 from nicegui import run, ui
 from web.translations import tr, is_rtl
+from web.components.shelf_pick import shelf_pick_button
+from shared.shelfmark_tree_limits import limit_for
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState
-from web.supabase_client import get_fragment_joins, create_fragment_join, delete_fragment_join
+from web.supabase_client import (get_fragment_joins, create_fragment_join, create_fragment_joins,
+                                 delete_fragment_join)
 # Every Supabase read left in this module is a PUBLIC read (published puzzle
 # joins, profiles) that runs in a worker thread, so it goes through the
 # anonymous short-timeout read client. The local name stays `get_client`
@@ -32,6 +35,11 @@ _joins_cache_lock = threading.Lock()
 # Cache TTL (configurable via environment variable, default 30 seconds)
 import os
 _CACHE_TTL = int(os.environ.get('JOINS_CACHE_TTL', '30'))
+
+# The most fragments the add-join form takes from the shelf at a time. A join may hold many fragments
+# (10, sometimes 20): each is joined to this one. More than this is almost surely a whole volume
+# ticked by mistake, so nothing is taken and the picker stays open (shelf tree picker, DX15).
+JOIN_SHELF_MAX = 30
 
 
 def _resolve_shelfmark_to_sys_id(member_shelfmark: str) -> Optional[str]:
@@ -1168,8 +1176,12 @@ def show_add_join_form(
 
     dialog = ui.dialog()
 
-    # State to track selected fragment
-    selected_fragment = {'shelfmark': None, 'sys_id': None}
+    # State to track selected fragment, or several ((shelfmark, sys_id), in the order chosen): a join
+    # may hold many fragments, each joined to this one. The relationship and notes typed are kept when
+    # the selection changes.
+    selected_fragment = {'shelfmark': None, 'sys_id': None, 'several': []}
+    form_values = {'relationship': '', 'notes': ''}
+    submitting = {'on': False}
 
     with dialog, ui.card().classes('w-[500px] p-0'):
         # Header
@@ -1186,11 +1198,61 @@ def show_add_join_form(
             # Target fragment selection - show either picker or selected fragment
             selection_container = ui.column().classes('w-full')
 
+            def choose_fragment(shelfmark, sys_id):
+                """Fragment B chosen: from the recent items, a list, the visual suggestions or the
+                shelf, the one way the form takes it (both fields, then the selected view)."""
+                selected_fragment['shelfmark'] = shelfmark
+                selected_fragment['sys_id'] = sys_id
+                selected_fragment['several'] = []
+                show_selected()
+
+            def choose_several(picks):
+                """Fragments chosen from the shelf, ``(shelfmark, sys_id)`` each: one is fragment B as
+                before; several are each joined to this fragment."""
+                if len(picks) == 1:
+                    choose_fragment(*picks[0])
+                    return
+                selected_fragment['shelfmark'] = None
+                selected_fragment['sys_id'] = None
+                selected_fragment['several'] = list(picks)
+                show_selected()
+
+            def shelf_confirmed(entries, _label):
+                """Fragments picked from the shelf, one or several (shelf tree picker, DX15: a join may
+                hold many). This fragment itself and repeats are left out. More than JOIN_SHELF_MAX:
+                nothing is taken and the picker stays open."""
+                if not dialog.value:
+                    return []  # the form was closed while the picker was open: all stay chosen
+                picks, seen, itself = [], set(), False
+                for entry in entries:
+                    sid = entry['sys_id']
+                    if document_id and sid == document_id:
+                        itself = True
+                        continue
+                    if sid in seen:
+                        continue
+                    seen.add(sid)
+                    picks.append((entry.get('shelfmark') or sid, sid))
+                if len(picks) > JOIN_SHELF_MAX:
+                    ui.notify(tr('A join takes at most {n} fragments at a time').format(n=JOIN_SHELF_MAX),
+                              type='warning')
+                    return []
+                if itself:
+                    ui.notify(tr('That is this fragment itself'), type='warning')
+                if picks:
+                    choose_several(picks)
+                return None
+
             def show_picker():
                 """Show the fragment picker."""
                 selection_container.clear()
                 with selection_container:
                     ui.label(tr('Select fragment to join:')).classes('text-sm font-medium text-gray-700 mb-2')
+                    # Pick from the shelf, one or several: opens at this fragment's own place, where
+                    # its neighbours are.
+                    shelf_pick_button(shelf_confirmed, start=document_id or None, multi=True, purpose='join',
+                                      confirm_label=tr('Add them to the join'), limit=lambda: limit_for('join'),
+                                      props='flat dense no-caps color=green', testid='join-shelf-pick')
 
                     # Tabs for Recent Activity, Lists, and Visual Suggestions
                     with ui.tabs().classes('w-full') as tabs:
@@ -1235,9 +1297,7 @@ def show_add_join_form(
 
                                                     def make_select(sm=item_shelfmark, sid=item_sys_id):
                                                         def select():
-                                                            selected_fragment['shelfmark'] = sm
-                                                            selected_fragment['sys_id'] = sid
-                                                            show_selected()
+                                                            choose_fragment(sm, sid)
                                                         return select
 
                                                     with ui.card().classes('w-full p-2 cursor-pointer hover:bg-green-50 border').on('click', make_select()):
@@ -1300,9 +1360,7 @@ def show_add_join_form(
 
                                                                         def make_select(sm=item_shelfmark, sid=item_sys_id):
                                                                             def select():
-                                                                                selected_fragment['shelfmark'] = sm
-                                                                                selected_fragment['sys_id'] = sid
-                                                                                show_selected()
+                                                                                choose_fragment(sm, sid)
                                                                             return select
 
                                                                         with ui.card().classes('w-full p-2 cursor-pointer hover:bg-green-50 border').on('click', make_select()):
@@ -1356,9 +1414,7 @@ def show_add_join_form(
 
                                                 def make_vs_select(sm=s_shelf, sid=s_id):
                                                     def select():
-                                                        selected_fragment['shelfmark'] = sm
-                                                        selected_fragment['sys_id'] = sid
-                                                        show_selected()
+                                                        choose_fragment(sm, sid)
                                                     return select
 
                                                 with ui.card().classes('w-full p-2 cursor-pointer hover:bg-orange-50 border').on('click', make_vs_select()):
@@ -1370,18 +1426,46 @@ def show_add_join_form(
 
                             load_vs_suggestions()
 
+            def drop_one(sys_id):
+                """One of several taken out of the join: one left is fragment B, none the picker."""
+                rest = [p for p in selected_fragment['several'] if p[1] != sys_id]
+                if rest:
+                    choose_several(rest)
+                else:
+                    selected_fragment['several'] = []
+                    show_picker()
+
             def show_selected():
-                """Show the selected fragment and relationship options."""
+                """Show the selected fragment (or fragments) and relationship options."""
+                several = selected_fragment['several']
                 selection_container.clear()
                 with selection_container:
-                    # Selected fragment display
-                    ui.label(tr('Selected fragment:')).classes('text-sm font-medium text-gray-700')
-                    with ui.card().classes('w-full p-3 bg-green-50 border-green-300 border mb-4'):
-                        with ui.row().classes('items-center justify-between w-full'):
-                            with ui.row().classes('items-center gap-2'):
-                                ui.icon('link').classes('text-green-600')
-                                ui.label(selected_fragment['shelfmark']).classes('font-bold text-green-700')
-                            ui.button(icon='close', on_click=show_picker).props('flat round size=xs').tooltip(tr('Change selection'))
+                    if several:
+                        # Several, each to be joined to this fragment
+                        ui.label(tr('Selected fragments:')).classes('text-sm font-medium text-gray-700')
+                        with ui.card().classes('w-full p-3 bg-green-50 border-green-300 border mb-4').props(
+                                'data-testid="join-several"'):
+                            # a plain scrolling column: a scroll area sized by max-height alone may
+                            # draw at no height
+                            with ui.column().classes('w-full gap-1 no-wrap').style(
+                                    'max-height: 180px; overflow-y: auto;'):
+                                for shelfmark, sys_id in several:
+                                    with ui.row().classes('items-center justify-between w-full no-wrap'):
+                                        with ui.row().classes('items-center gap-2 no-wrap'):
+                                            ui.icon('link').classes('text-green-600')
+                                            ui.label(shelfmark).classes('font-bold text-green-700')
+                                        ui.button(icon='close', on_click=lambda s=sys_id: drop_one(s)).props(
+                                            'flat round size=xs').tooltip(tr('Remove'))
+                            ui.button(tr('Change selection'), on_click=show_picker).props('flat dense no-caps size=sm')
+                    else:
+                        # Selected fragment display
+                        ui.label(tr('Selected fragment:')).classes('text-sm font-medium text-gray-700')
+                        with ui.card().classes('w-full p-3 bg-green-50 border-green-300 border mb-4'):
+                            with ui.row().classes('items-center justify-between w-full'):
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.icon('link').classes('text-green-600')
+                                    ui.label(selected_fragment['shelfmark']).classes('font-bold text-green-700')
+                                ui.button(icon='close', on_click=show_picker).props('flat round size=xs').tooltip(tr('Change selection'))
 
                     # Relationship type
                     ui.label(tr('Relationship (optional)')).classes('text-sm font-medium text-gray-700 mb-1')
@@ -1392,13 +1476,16 @@ def show_add_join_form(
                     }
                     relationship_select = ui.radio(
                         relationship_options,
-                        value=''
+                        value=form_values['relationship'],
+                        on_change=lambda e: form_values.update(relationship=e.value or ''),
                     ).props('dense')
 
                     # Notes (optional)
                     notes_input = ui.textarea(
                         label=tr('Notes (optional)'),
-                        placeholder=tr('Add notes about this join...')
+                        placeholder=tr('Add notes about this join...'),
+                        value=form_values['notes'],
+                        on_change=lambda e: form_values.update(notes=e.value or ''),
                     ).classes('w-full mt-2').props('outlined rows=2')
 
                     # Error message
@@ -1409,10 +1496,14 @@ def show_add_join_form(
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
                         def submit_join():
-                            """Submit the new join."""
+                            """Submit the new join: this fragment joined to fragment B, or to each of
+                            several (one insert, so all are made or none)."""
+                            if submitting['on']:
+                                return  # a second click after the joins were made
                             target = selected_fragment['shelfmark']
+                            several = selected_fragment['several']
 
-                            if not target:
+                            if not target and not several:
                                 error_label.text = tr('Please select a fragment')
                                 error_label.classes('visible', remove='hidden')
                                 return
@@ -1424,23 +1515,37 @@ def show_add_join_form(
                                 error_label.classes('visible', remove='hidden')
                                 return
 
-                            # Submit to Supabase
-                            result = create_fragment_join(
-                                user_id=user_id,
-                                fragment_a_sys_id=document_id or '',
-                                fragment_a_shelfmark=current_shelfmark,
-                                fragment_b_sys_id=selected_fragment.get('sys_id', ''),
-                                fragment_b_shelfmark=target,
-                                join_type=relationship_select.value if relationship_select.value else 'uncertain',
-                                notes=notes_input.value.strip() if notes_input.value else ''
-                            )
+                            join_type = relationship_select.value if relationship_select.value else 'uncertain'
+                            notes = notes_input.value.strip() if notes_input.value else ''
+                            # Submit to Supabase (neither call raises: a failure is {'error': ...})
+                            if several:
+                                result = create_fragment_joins(
+                                    user_id=user_id,
+                                    fragment_a_sys_id=document_id or '',
+                                    fragment_a_shelfmark=current_shelfmark,
+                                    fragments_b=[(sys_id, shelfmark) for shelfmark, sys_id in several],
+                                    join_type=join_type,
+                                    notes=notes,
+                                )
+                            else:
+                                result = create_fragment_join(
+                                    user_id=user_id,
+                                    fragment_a_sys_id=document_id or '',
+                                    fragment_a_shelfmark=current_shelfmark,
+                                    fragment_b_sys_id=selected_fragment.get('sys_id', ''),
+                                    fragment_b_shelfmark=target,
+                                    join_type=join_type,
+                                    notes=notes
+                                )
 
                             if "error" in result:
                                 error_msg = result.get("error", "Error creating join")
                                 error_label.text = error_msg
                                 error_label.classes('visible', remove='hidden')
                             else:
-                                ui.notify(tr('Join created'), type='positive')
+                                submitting['on'] = True  # made: a second click makes no copy
+                                ui.notify(tr('{n} joins created').format(n=len(several)) if several
+                                          else tr('Join created'), type='positive')
                                 # Clear entire cache to ensure fresh data for all connected fragments
                                 invalidate_joins_cache(clear_all=True)
                                 dialog.close()
@@ -1455,9 +1560,7 @@ def show_add_join_form(
 
             # If prefill provided, go straight to selected state
             if prefill_shelfmark:
-                selected_fragment['shelfmark'] = prefill_shelfmark
-                selected_fragment['sys_id'] = prefill_sys_id or ''
-                show_selected()
+                choose_fragment(prefill_shelfmark, prefill_sys_id or '')
             else:
                 show_picker()
 

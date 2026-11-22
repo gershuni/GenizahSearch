@@ -34,13 +34,27 @@ if os.environ.get("GENIZAH_SKIP_SIDECAR_CHECK") != "1":
             "(build it with python scripts/build_catalog_text_sidecar.py). "
             "Set GENIZAH_SKIP_SIDECAR_CHECK=1 only if you know what will ship."
         )
+    # The shelf tree ("Pick from the shelf", the place on the shelf, previous / next in shelf
+    # order; shelf tree picker plan section 10.6), checked here for the same reason: a copy the
+    # reader refuses would ship a Browse without them. Its gate reads the whole file (seconds).
+    _shelf = subprocess.run(
+        [sys.executable, os.path.join("scripts", "verify_shelfmark_tree_sidecar.py"),
+         "--db", os.path.join("shelfmark_tree_data", "shelfmark_tree.db"), "--leaves-from-meta"],
+        cwd=os.path.abspath(os.getcwd()),
+    )
+    if _shelf.returncode != 0:
+        raise SystemExit(
+            "GenizahSearchPro.spec: refusing to build -- see the shelf tree check above "
+            "(build it with python scripts/build_shelfmark_tree.py). "
+            "Set GENIZAH_SKIP_SIDECAR_CHECK=1 only if you know what will ship."
+        )
 
 # WR-05: hebrew_sample.pdf (6.3 MB) was shipped in every production installer
 # even though it is only used by tests/test_local_pyinstaller_smoke.py
 # (@pytest.mark.packaging — release CI only).  Removed from production datas;
 # the packaging smoke test is responsible for adding the fixture to its own
 # on-the-fly build when needed.
-datas = [('icon.ico', '.'), ('Help.html', '.'), ('oxford_full_db.json', '.'), ('libraries.csv', '.'), ('ie_volume_map.json', '.'), ('bodleian_master_index.csv', '.'), ('shared_export_utils.py', '.'), ('shared\\export_utils.py', 'shared'), ('shared', 'shared'), ('libraries_translations.db', '.'), ('fist_data\\fjms_enrichment.db', 'fist_data'), ('fist_data\\visual_similarity.db', 'fist_data'), ('fist_data\\vs_manifest.txt', 'fist_data'), ('nli_data\\nli_crossref.db', 'nli_data'), ('pgp_data\\pgp.db', 'pgp_data'), ('fgp_data\\fgp_transcriptions.db', 'fgp_data'), ('catalog_data\\catalog_text.db', 'catalog_data')]
+datas = [('icon.ico', '.'), ('Help.html', '.'), ('oxford_full_db.json', '.'), ('libraries.csv', '.'), ('ie_volume_map.json', '.'), ('bodleian_master_index.csv', '.'), ('shared_export_utils.py', '.'), ('shared\\export_utils.py', 'shared'), ('shared', 'shared'), ('libraries_translations.db', '.'), ('fist_data\\fjms_enrichment.db', 'fist_data'), ('fist_data\\visual_similarity.db', 'fist_data'), ('fist_data\\vs_manifest.txt', 'fist_data'), ('nli_data\\nli_crossref.db', 'nli_data'), ('pgp_data\\pgp.db', 'pgp_data'), ('fgp_data\\fgp_transcriptions.db', 'fgp_data'), ('catalog_data\\catalog_text.db', 'catalog_data'), ('shelfmark_tree_data\\shelfmark_tree.db', 'shelfmark_tree_data')]
 binaries = []
 hiddenimports = ['tantivy', 'numpy', 'PIL', 'fitz', 'pymupdf', 'openpyxl', 'defusedxml']
 tmp_ret = collect_all('tantivy')

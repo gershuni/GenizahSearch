@@ -204,6 +204,9 @@ TRANSLATIONS = {
     "Load Text File": "טען קובץ טקסט",
     "Exclude Manuscripts": "החרג כתבי יד",
     "Enter system IDs or shelfmarks to exclude (one per line). Matching values are filled automatically.": "הכנס מספרי מערכת או מספרי מדף להחרגה (אחד בשורה). הערכים המקבילים ימולאו אוטומטית.",
+    # Exclude from the shelf on the desktop (shelf tree picker PR 4; 2026-11-20, awaiting the owner's
+    # approval); the rest are the web's keys of PR 4
+    "The list could not be saved.": "לא ניתן היה לשמור את הרשימה.",
     "System IDs": "מספרי מערכת",
     "Shelfmarks": "מספרי מדף",
     "Filter Text": "סנן טקסט",
@@ -1369,7 +1372,8 @@ TRANSLATIONS = {
     "Document ID: {}": "מזהה מסמך: {}",
     "Author": "מחבר",
     "Type:": "סוג:",
-    "Open": "פתח את",
+    "Open": "פתח",
+    "Open {name}": "פתח את {name}",
     "Refresh joins": "רענן צירופים",
     "Login to see your joins": "התחבר כדי לצפות בצירופים שלך",
     "No joins yet": "אין צירופים עדיין",
@@ -1859,6 +1863,9 @@ TRANSLATIONS = {
     "Select a document:": "בחר מסמך:",
     "Create new list": "צור רשימה חדשה",
     "Create List": "צור רשימה",
+    "Add from the shelf": "הוספה מהמדף",
+    "Add them to this list": "הוסף אותם לרשימה זו",
+    "{n} added to the list": "{n} נוספו לרשימה",
     "Create and Add": "צור והוסף",
     "Failed to create list": "יצירת הרשימה נכשלה",
     "Failed to add item": "הוספת הפריט נכשלה",
@@ -2245,6 +2252,11 @@ TRANSLATIONS = {
     "Add notes about this join...": "הוסף הערות על צירוף זה...",
     "Please enter a shelfmark": "אנא הזן מספר מדף",
     "Join created": "הצירוף נוצר",
+    # A join from several fragments picked on the shelf (shelf tree picker, DX15)
+    "Add them to the join": "הוסף אותם לצירוף",
+    "A join takes at most {n} fragments at a time": "לכל היותר {n} קטעים בצירוף אחד בכל פעם",
+    "{n} joins created": "{n} צירופים נוצרו",
+    "Selected fragments:": "קטעים שנבחרו:",
     "joined fragments": "קטעים מצורפים",
     "No joins": "אין צירופים",
     "View cluster": "הצג אשכול",
@@ -2400,6 +2412,7 @@ TRANSLATIONS = {
     "This action cannot be undone.": "פעולה זו אינה ניתנת לביטול.",
     "Failed to delete join": "מחיקת הצירוף נכשלה",
     "Select fragment to join:": "בחר קטע לצירוף:",
+    "That is this fragment itself": "זהו הקטע עצמו",
     "Selected fragment:": "קטע נבחר:",
     "Notes (optional)": "הערות (אופציונלי)",
     "direct": "ישיר",
@@ -3287,6 +3300,7 @@ TRANSLATIONS = {
     "You signed in or out since this page opened. Reload the page to continue.": "התחברת או התנתקת מאז שהדף נפתח. נא לטעון את הדף מחדש כדי להמשיך.",
     "Export failed": "הייצוא נכשל",
     "Add fragment": "הוסף קטע",
+    "Add them to the puzzle": "הוסף אותם לפאזל",
     "Delete selected fragment": "מחק קטע נבחר",
     "Crop — drag edges to trim": "חיתוך — גרור קצוות לחיתוך",
     "Cycle background: dark gray / black / white / checkerboard / light table / grid": "החלף רקע: אפור כהה / שחור / לבן / משבצות / שולחן אור / רשת",
@@ -3730,6 +3744,14 @@ TRANSLATIONS.update({
     "Add current manuscript to Reading Desk": "הוסף את כתב היד הנוכחי לשולחן העיון",
     "Add to Desk": "הוסף לשולחן",
     "Add to Reading Desk": "הוסף לשולחן העיון",
+    "Add them all to the Reading Desk": "הוסף את כולם לשולחן העיון",
+    # Browse's shelf picker, its switch for several at once (handoff DX16)
+    "Open more than one": "פתיחת כמה כתבי יד",
+    "Open them in the Reading Desk": "פתח אותם בשולחן העיון",
+    "Several to the Reading Desk": "כמה לשולחן העיון",
+    "Pick several from the shelf for the Reading Desk": "בחירת כמה כתבי יד מהמדף לשולחן העיון",
+    "{n} added to the Reading Desk": "{n} נוספו לשולחן העיון",
+    "At most {n} are added at a time": "לכל היותר {n} נוספים בכל פעם",
     "Add to View": "הוסף לתצוגה",
     "Already in Reading Desk": "כבר בשולחן העיון",
     "All items already in Reading Desk": "כל הפריטים כבר בשולחן העיון",
@@ -6854,4 +6876,89 @@ TRANSLATIONS.update({
     "Next on the shelf: {shelfmark}": "הבא על המדף: {shelfmark}",
     "Shown inside {place}": "מוצג בתוך {place}",
     "Part: {part}": "חלק: {part}",
+})
+# The shelf picker's limits when ticking (owner, 2026-11-21; shared/shelfmark_tree_limits.py).
+TRANSLATIONS.update({
+    "Up to {n} manuscripts here": "עד {n} כתבי יד כאן",
+    "Up to {n} fragments here": "עד {n} קטעים כאן",
+    "The Reading Desk holds up to {n} pages; these would make {total}": "שולחן העיון מכיל עד {n} עמודים; אלה יגיעו ל־{total}",
+    "Too many to choose here (up to {n})": "יותר מדי לבחירה כאן (עד {n})",
+})
+# The Reading Desk loading several from the shelf (owner, 2026-11-21).
+TRANSLATIONS.update({
+    "Loading {n} manuscripts...": "טוען {n} כתבי יד...",
+})
+# Pick from the shelf, several at once (shelf tree picker, PR 4; 2026-11-20, awaiting the owner's approval).
+TRANSLATIONS.update({
+    "Save as a list": "שמירה כרשימה",
+    "+{n} more": "ועוד {n}",
+    "Tick shelfmarks, or a whole volume, to choose them.": "סמנו סימני מדף, או כרך שלם, כדי לבחור אותם.",
+    "{n} manuscripts chosen": "{n} כתבי יד מסומנים",
+    "Select all in {name}": "בחירת הכל ב־{name}",
+    "Choose all of it": "בחירת הכל",
+    "You signed in or out in another tab. Open the shelf again.": "נכנסתם לחשבון או יצאתם ממנו בלשונית אחרת. פתחו את המדף מחדש.",
+    "Your choice could not be kept in this browser; it stays while this window is open.": "לא ניתן לשמור את הבחירה בדפדפן זה; היא נשמרת כל עוד החלון פתוח.",
+    "The choice could not be applied. It is kept; try again.": "לא ניתן היה להחיל את הבחירה. היא נשמרה; נסו שוב.",
+    "{n} are still chosen": "{n} עדיין מסומנים",
+    "List name": "שם הרשימה",
+    "The list was made, but not everything was added to it. Try again to add the rest.": "הרשימה נוצרה, אך לא הכל נוסף אליה. נסו שוב כדי להוסיף את השאר.",
+    "Saved as a list: {name}": "נשמר כרשימה: {name}",
+    "From the shelf": "מהמדף",
+    "Exclude manuscripts from the shelf": "החרגת כתבי יד מהמדף",
+    "Exclude them": "החרגה",
+    "Choose whole volumes or single shelfmarks, library by library": "בחירת כרכים שלמים או סימני מדף בודדים, ספרייה אחר ספרייה",
+})
+# Several at once from the shelf on the desktop: the Reading Desk, the Puzzle and a list (shelf tree
+# picker, the desktop half of #71; the web's keys and Hebrew, word for word; 2026-11-20, awaiting
+# the owner's approval)
+TRANSLATIONS.update({
+    "Add from the shelf": "הוספה מהמדף",
+    "Add them to this list": "הוסף אותם לרשימה זו",
+    "{n} added to the list": "{n} נוספו לרשימה",
+    "Add them to the puzzle": "הוסף אותם לפאזל",
+    "Add them all to the Reading Desk": "הוסף את כולם לשולחן העיון",
+    "Several to the Reading Desk": "כמה לשולחן העיון",
+    "Pick several from the shelf for the Reading Desk": "בחירת כמה כתבי יד מהמדף לשולחן העיון",
+    "{n} added to the Reading Desk": "{n} נוספו לשולחן העיון",
+    "At most {n} are added at a time": "לכל היותר {n} נוספים בכל פעם",
+})
+# Browse's one shelf button (DX16): the switch in its picker's header to several, opened in the
+# Reading Desk (the web's keys and Hebrew, word for word; 2026-11-21, awaiting the owner's approval)
+TRANSLATIONS.update({
+    "Open more than one": "פתיחת כמה כתבי יד",
+    "Open them in the Reading Desk": "פתח אותם בשולחן העיון",
+})
+# A join from the shelf, several fragments at once: the Joins dialog's fragment B (shelf tree
+# picker; a join holds any number of fragments; the web's keys and Hebrew, word for word;
+# 2026-11-21, awaiting the owner's approval)
+TRANSLATIONS.update({
+    "Add them to the join": "הוסף אותם לצירוף",
+    "A join takes at most {n} fragments at a time": "לכל היותר {n} קטעים בצירוף אחד בכל פעם",
+    "{n} joins created": "{n} צירופים נוצרו",
+    "Not created: {}": "לא נוצרו: {}",
+})
+# The shelf picker, round 3 (2026-11-21): a click chooses and a button opens, whole
+# nodes only by "Select all", and the pane that shows the shelfmark clicked last (both apps)
+TRANSLATIONS.update({
+    "Tick shelfmarks to choose them.": "סמנו סימני מדף כדי לבחור אותם.",
+    "Choose a shelfmark to see it here": "בחרו מספר מדף כדי לראות אותו כאן",
+    "Other shelfmarks": "מספרי מדף נוספים",
+})
+# The shelf picker, round 4 (2026-11-22): the pane's labelled fields and its text box, the joins
+# and links blocks, and the signs on the rows (both apps; awaiting the owner's approval)
+TRANSLATIONS.update({
+    "With text": "עם טקסט",
+    "Pages with text": "עמודים עם טקסט",
+    "Bibliography entries": "פריטי ביבליוגרפיה",
+    "Page {n}": "עמוד {n}",
+    "Links": "קישורים",
+    "Scholarly transcription": "תעתיק מדעי",
+})
+# The shelf picker, round 3, web: the Puzzle takes what fits its canvas from a hand-off
+TRANSLATIONS.update({
+    "The puzzle holds up to {n} fragments. Not added: {m}": "הפאזל מכיל עד {n} קטעים. לא נוספו: {m}",
+})
+# The shelf picker, round 4, web: the pane's text box, page by page, and a join's box
+TRANSLATIONS.update({
+    "Choose {name}": "בחירת {name}",
 })

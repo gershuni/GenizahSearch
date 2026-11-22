@@ -1,5 +1,6 @@
 import pytest
 
+from shared.exclusion_service import ExclusionSource
 from web.search_bootstrap import resolve_search_bootstrap
 
 
@@ -660,9 +661,10 @@ def _display_filter_saves(tree):
 
 
 def test_every_display_filter_save_also_updates_the_run():
-    # search.py: PGP, library, printed, five manuscript-exclusion changes, and
-    # Reset filters' printed, PGP and library.
-    for module, expected in (('web/pages/search.py', 11), ('web/pages/search_results.py', 2)):
+    # search.py: PGP, library, printed, three manuscript-exclusion changes (remove one, clear
+    # all, and _add_exclusion_sources, the one add path of Paste, List, File and the shelf since
+    # PR 4), and Reset filters' printed, PGP and library.
+    for module, expected in (('web/pages/search.py', 9), ('web/pages/search_results.py', 2)):
         saved, followed = _display_filter_saves(_module_tree(module))
         assert saved == expected, f'{module}: {saved} saves; update this test'
         assert followed == saved, module
@@ -739,6 +741,10 @@ def test_applying_a_runs_filters_resets_the_fields_it_lacks():
     assert page.filter_authors == ['kept']
 
 
+# a real source: a restored snapshot gives the page ExclusionSource objects, never other values (PR 4)
+_A_SOURCE = ExclusionSource('a source', 'list', '7', {'990000000010205171'})
+
+
 def _page_with_a_run(ss, rows=1000 + 5):
     page = ss.SearchUIState()
     page.results = [{'display': {'id': f'99{i:07d}'}} for i in range(rows)]
@@ -747,7 +753,7 @@ def _page_with_a_run(ss, rows=1000 + 5):
     page.library_mode, page.library_filter = 'show_only', ['CUL', 'JTS']
     page.word_search_excluded_ids = {'990002'}
     page.printed_filter = 'hide_printed'
-    page.exclusion_sources = ['a source']
+    page.exclusion_sources = [_A_SOURCE]
     return page
 
 
@@ -766,7 +772,7 @@ def test_a_run_keeps_a_thousand_rows_and_its_display_filters(runs):
     assert (back.library_mode, back.library_filter) == ('show_only', ['CUL', 'JTS'])
     assert back.word_search_excluded_ids == {'990002'}
     assert back.printed_filter == 'hide_printed'
-    assert back.exclusion_sources == ['a source']
+    assert back.exclusion_sources == [_A_SOURCE]
     assert back.last_run['url_stamp'] == _CODE
 
 
@@ -860,7 +866,7 @@ def test_a_rejoining_page_takes_the_runs_starting_state(runs):
     ss.apply_run_start_snapshot(back, run.snapshot)
     assert back.results == []
     assert back.pgp_filter == 'only_pgp' and back.printed_filter == 'hide_printed'
-    assert back.exclusion_sources == ['a source']
+    assert back.exclusion_sources == [_A_SOURCE]
     assert back.last_run['url_stamp'] == _CODE and back.last_run['page_mode'] == 'exact'
 
 

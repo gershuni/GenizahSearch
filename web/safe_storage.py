@@ -94,6 +94,22 @@ def safe_user_pop(key: str, default: Any = None) -> Any:
         return default
 
 
+def safe_user_remove(key: str) -> bool:
+    """Remove ``app.storage.user[key]``; True when the key is gone afterwards (removed, or never
+    there), False when the storage refused. ``safe_user_pop`` cannot tell those apart -- it answers
+    its default for an absent key and for a failure alike -- so a caller that must know the value
+    is gone (a cleared choice that must not come back on reopen) uses this."""
+    try:
+        app.storage.user.pop(key, None)
+        return True
+    except AssertionError as e:
+        logger.debug("safe_user_remove(%r): session storage unavailable: %s", key, e)
+        return False
+    except Exception as e:
+        logger.warning("safe_user_remove(%r) unexpected failure: %s", key, e, exc_info=False)
+        return False
+
+
 def _is_valid_uuid(value: Any) -> bool:
     """Return True iff `value` is a 32-char lowercase-hex string matching uuid4().hex shape.
 

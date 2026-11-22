@@ -39,6 +39,7 @@ Tier 2 (release-gated, EXE required):
 import os
 import pathlib
 import subprocess
+import sys
 
 import pytest
 
@@ -249,3 +250,31 @@ def test_packaged_exe_self_test_imports():
     assert b"IMPORTS_OK" in result.stdout, (
         f"--self-test-imports did not print IMPORTS_OK. stdout={result.stdout!r} stderr={result.stderr!r}"
     )
+
+
+def test_packaged_bundle_carries_the_shelf_tree():
+    """Tier 2: the bundle carries the shelf tree, and it is one the reader serves (shelf tree picker
+    plan section 10.6: "Pick from the shelf" and the place on the shelf need it).
+
+    The BUNDLED file is opened by its own path. ``default_sidecar_path()`` looks in the user's
+    ``%LOCALAPPDATA%`` first, so asking the service for its default would find the developer's own
+    copy and prove nothing about what ships.
+    """
+    exe_path = _require_exe()
+    internal = exe_path.parent / "_internal"
+    bundled = internal / "shelfmark_tree_data" / "shelfmark_tree.db"
+    assert bundled.is_file(), f"{bundled} is missing: GenizahSearchPro.spec datas must carry the shelf tree"
+    from shared.shelfmark_tree_service import ShelfmarkTreeService
+    service = ShelfmarkTreeService(str(bundled))
+    try:
+        assert service.is_ready(), service.unavailable_reason
+        assert service.children(None), "the bundled tree has no libraries"
+    finally:
+        service.close()
+    libraries = internal / "libraries.csv"
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "verify_shelfmark_tree_sidecar.py"), "--db", str(bundled),
+         "--leaves-from-meta"] + (["--libraries", str(libraries)] if libraries.is_file() else []),
+        capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+

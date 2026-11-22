@@ -20,7 +20,7 @@ import threading
 import time
 import weakref as _weakref_memo
 from contextvars import ContextVar
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from supabase import create_client, Client
 from supabase_auth.errors import AuthApiError
 from shared.supabase_provider import get_url, get_anon_key
@@ -1292,6 +1292,29 @@ def empty_trash(user_id: str, *, client=None) -> Dict:
 # LIST ITEMS OPERATIONS
 # ============================================================================
 
+def get_list_item_sys_ids(list_id: int, *, client=None, page_size: int = 1000) -> Optional[set]:
+    """Every ``sys_id`` one list holds, read page by page (one response is capped), or None when a
+    read failed: the caller must never take a failed read for an empty list (the shelf picker's
+    "Add from the shelf" skips what a list holds, and ``list_items`` has no unique key).
+    `client`: see `get_list_items`."""
+    try:
+        if client is None:
+            client = get_user_client()
+        found: set = set()
+        start = 0
+        while True:
+            response = (client.table('list_items').select('id,sys_id').eq('list_id', list_id)
+                        .order('id').range(start, start + page_size - 1).execute())
+            rows = response.data or []
+            found.update(str(row['sys_id']) for row in rows if row.get('sys_id'))
+            if len(rows) < page_size:
+                return found
+            start += page_size
+    except Exception as e:
+        logger.error(f"Error reading the manuscripts of list {list_id}: {e}")
+        return None
+
+
 def get_list_items(list_id: int, *, client=None) -> List[Dict]:
     """Get all items in a list.
 
@@ -1913,6 +1936,30 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
         return []
 
 
+def _fragment_join_row(user_id: str, fragment_a_sys_id: str, fragment_a_shelfmark: str,
+                       fragment_b_sys_id: str, fragment_b_shelfmark: str, join_type: str,
+                       confidence: str, notes: str, evidence: str) -> Dict:
+    """One ``fragment_joins`` row as the form gives it."""
+    # Map UI join type values to DB CHECK constraint values
+    # DB allows: 'physical', 'content', 'uncertain'
+    join_type_map = {
+        'physical_join': 'physical',
+        'same_composition': 'content',
+    }
+    db_join_type = join_type_map.get(join_type, join_type) or 'uncertain'
+    return {
+        'user_id': user_id,
+        'fragment_a_sys_id': fragment_a_sys_id,
+        'fragment_a_shelfmark': fragment_a_shelfmark,
+        'fragment_b_sys_id': fragment_b_sys_id,
+        'fragment_b_shelfmark': fragment_b_shelfmark,
+        'join_type': db_join_type,
+        'confidence': confidence,
+        'notes': notes,
+        'evidence': evidence
+    }
+
+
 def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfmark: str,
                          fragment_b_sys_id: str, fragment_b_shelfmark: str,
                          join_type: str = 'uncertain', confidence: str = 'possible',
@@ -1920,28 +1967,34 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
     """Create a new fragment join."""
     try:
         client = get_user_client()
-        # Map UI join type values to DB CHECK constraint values
-        # DB allows: 'physical', 'content', 'uncertain'
-        join_type_map = {
-            'physical_join': 'physical',
-            'same_composition': 'content',
-        }
-        db_join_type = join_type_map.get(join_type, join_type) or 'uncertain'
-        data = {
-            'user_id': user_id,
-            'fragment_a_sys_id': fragment_a_sys_id,
-            'fragment_a_shelfmark': fragment_a_shelfmark,
-            'fragment_b_sys_id': fragment_b_sys_id,
-            'fragment_b_shelfmark': fragment_b_shelfmark,
-            'join_type': db_join_type,
-            'confidence': confidence,
-            'notes': notes,
-            'evidence': evidence
-        }
+        data = _fragment_join_row(user_id, fragment_a_sys_id, fragment_a_shelfmark, fragment_b_sys_id,
+                                  fragment_b_shelfmark, join_type, confidence, notes, evidence)
         response = client.table('fragment_joins').insert(data).execute()
         if response.data:
             return {'success': True, 'join': response.data[0]}
         return {'error': 'Failed to create join'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def create_fragment_joins(user_id: str, fragment_a_sys_id: str, fragment_a_shelfmark: str,
+                          fragments_b: List[Tuple[str, str]], join_type: str = 'uncertain',
+                          confidence: str = 'possible', notes: str = '', evidence: str = '') -> Dict:
+    """Join one fragment to several (a join of many fragments is this fragment joined to each).
+
+    ``fragments_b``: ``(sys_id, shelfmark)`` pairs. One insert of all the rows, so either every
+    join is made or none is: ``{'success': True, 'joins': [...]}`` or ``{'error': ...}``."""
+    if not fragments_b:
+        return {'error': 'No fragments to join'}
+    try:
+        client = get_user_client()
+        rows = [_fragment_join_row(user_id, fragment_a_sys_id, fragment_a_shelfmark, sys_id, shelfmark,
+                                   join_type, confidence, notes, evidence)
+                for sys_id, shelfmark in fragments_b]
+        response = client.table('fragment_joins').insert(rows).execute()
+        if response.data and len(response.data) == len(rows):
+            return {'success': True, 'joins': response.data}
+        return {'error': 'Failed to create joins'}
     except Exception as e:
         return {'error': str(e)}
 

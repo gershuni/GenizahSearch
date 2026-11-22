@@ -133,7 +133,10 @@ GenizahSearch/
 Gitignored on every checkout, provisioned by hand: the transcription corpus
 (`Transcriptions.txt`), the Tantivy indexes under `Genizah_Index/`, and the SQLite sidecars
 (`pgp_data/pgp.db`, `fist_data/fjms_enrichment.db`, `nli_data/nli_crossref.db`,
-`fgp_data/fgp_transcriptions.db`, `libraries_translations.db`). See DATA_LIFECYCLE for each.
+`fgp_data/fgp_transcriptions.db`, `libraries_translations.db`, `catalog_data/catalog_text.db`,
+`shelfmark_tree_data/shelfmark_tree.db`). See DATA_LIFECYCLE for each. The desktop installer
+carries the sidecars `GenizahSearchPro.spec` lists; `build_app.bat` stops early when one is
+missing, and the spec runs the catalogue's and the shelf tree's gates before bundling.
 
 ---
 

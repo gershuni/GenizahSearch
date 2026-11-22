@@ -419,3 +419,133 @@ def test_a_crop_is_kept_with_the_tabs_canvas(offline, canvas_scripts, monkeypatc
         assert 'var cropRight = 0;' in applied and 'var centerX = 321;' in applied, applied
 
     _run(driver)
+
+
+def test_the_shelfs_handoff_joins_the_canvas_up_to_its_room(offline, canvas_scripts, monkeypatch):
+    """The shelf picker's Add to Puzzle (shelf picker handoff, DX22): its fragments join the canvas
+    the tab has, without the join's question, up to the Puzzle's 30 with what the canvas holds; how
+    many were left out is said."""
+    import web.pages.puzzle as puzzle_page
+    from web.joins_lab_storage import PUZZLE_STAGING_SOURCE_SHELF, stage_fragments_for_puzzle
+    monkeypatch.setattr(puzzle_page, '_resolve_folios', lambda sys_id: [{'fl_id': 'FL-' + sys_id[-4:], 'label': '1r'}])
+    monkeypatch.setattr(puzzle_page, 'PUZZLE_CONFIRM_WAIT', 0.5)   # no image answers here: full is full
+    ids = [f'99000000001{n:04d}' for n in range(30)]
+
+    async def driver(user):
+        canvas = Canvas(user)
+        canvas.scripts = canvas_scripts
+        await user.open('/puzzle')
+        with user._client:
+            from web.saved_joins import owner_key
+            app.storage.tab['puzzle_owner'] = owner_key()
+            app.storage.tab['puzzle_fragments'] = {K1: _meta(K1)}      # one on the canvas already
+            assert stage_fragments_for_puzzle(ids, source=PUZZLE_STAGING_SOURCE_SHELF) == 30
+        canvas.scripts.clear()
+        await user.open('/puzzle')
+        await _until(lambda: len([k for k in canvas.added if k != K1]) == 29, timeout=30.0)
+        await asyncio.sleep(1.0)
+        assert [k for k in canvas.added if k != K1] == [f'{s},1r' for s in ids[:29]]
+        assert K1 in canvas.added
+        notes = [str(m) for m in user.notify.messages]          # the harness's ui.notify
+        assert any('Not added: 1' in n for n in notes), notes
+        await user.should_not_see('There is an unsaved puzzle on screen.')
+
+    _run(driver)
+
+
+def test_a_fragment_already_on_the_canvas_takes_no_room_from_the_handoff(offline, canvas_scripts, monkeypatch):
+    """Codex on the round-3 web PR: a canvas of 29 handed [A, X, Y] where A's first folio is already
+    on it. A is drawn again in its place, free; X takes the last place; Y is left out and said."""
+    import web.pages.puzzle as puzzle_page
+    from web.joins_lab_storage import PUZZLE_STAGING_SOURCE_SHELF, stage_fragments_for_puzzle
+    monkeypatch.setattr(puzzle_page, '_resolve_folios', lambda sys_id: [{'fl_id': 'FL-' + sys_id[-4:], 'label': '1r'}])
+    monkeypatch.setattr(puzzle_page, 'PUZZLE_CONFIRM_WAIT', 0.5)   # no image answers here: full is full
+    held = {K1: _meta(K1)}
+    for n in range(28):
+        key = f'99000000002{n:04d},1r'
+        held[key] = _meta(key)
+    a = K1.split(',')[0]
+    x, y = '990000000003001', '990000000003002'
+
+    async def driver(user):
+        canvas = Canvas(user)
+        canvas.scripts = canvas_scripts
+        await user.open('/puzzle')
+        with user._client:
+            from web.saved_joins import owner_key
+            app.storage.tab['puzzle_owner'] = owner_key()
+            app.storage.tab['puzzle_fragments'] = dict(held)            # 29 on the canvas
+            assert stage_fragments_for_puzzle([a, x, y], source=PUZZLE_STAGING_SOURCE_SHELF) == 3
+        canvas.scripts.clear()
+        await user.open('/puzzle')
+        await _until(lambda: f'{x},1r' in canvas.added, timeout=30.0)
+        await _until(lambda: any('Not added: 1' in str(m) for m in user.notify.messages), timeout=10.0)
+        assert f'{y},1r' not in canvas.added
+        assert canvas.added.count(K1) >= 2                               # restored, then drawn again
+
+    _run(driver)
+
+
+def test_a_fragment_without_an_image_leaves_its_place_to_the_next(offline, canvas_scripts, monkeypatch):
+    """Codex on #88: a canvas of 29 handed [N, X] where N has no image: X takes the place N left
+    (the hand-off was cut to the room before any lookup, and X was never tried)."""
+    import web.pages.puzzle as puzzle_page
+    from web.joins_lab_storage import PUZZLE_STAGING_SOURCE_SHELF, stage_fragments_for_puzzle
+    none, x = '990000000004001', '990000000004002'
+    monkeypatch.setattr(puzzle_page, '_resolve_folios',
+                        lambda sys_id: [] if sys_id == none else [{'fl_id': 'FL-' + sys_id[-4:], 'label': '1r'}])
+    held = {K1: _meta(K1)}
+    for n in range(28):
+        key = f'99000000002{n:04d},1r'
+        held[key] = _meta(key)
+
+    async def driver(user):
+        canvas = Canvas(user)
+        canvas.scripts = canvas_scripts
+        await user.open('/puzzle')
+        with user._client:
+            from web.saved_joins import owner_key
+            app.storage.tab['puzzle_owner'] = owner_key()
+            app.storage.tab['puzzle_fragments'] = dict(held)            # 29 on the canvas
+            assert stage_fragments_for_puzzle([none, x], source=PUZZLE_STAGING_SOURCE_SHELF) == 2
+        canvas.scripts.clear()
+        await user.open('/puzzle')
+        await _until(lambda: f'{x},1r' in canvas.added, timeout=30.0)
+        await asyncio.sleep(0.5)
+        assert not any('Not added' in str(m) for m in user.notify.messages)
+
+    _run(driver)
+
+
+def test_an_image_that_fails_while_the_canvas_is_full_frees_its_place(offline, canvas_scripts, monkeypatch):
+    """Codex on #88: a canvas of 29 handed [A, B]; A takes the last place, but its image fails. B
+    waits for A's answer instead of being turned away, and takes the place A left."""
+    import web.pages.puzzle as puzzle_page
+    from web.joins_lab_storage import PUZZLE_STAGING_SOURCE_SHELF, stage_fragments_for_puzzle
+    monkeypatch.setattr(puzzle_page, '_resolve_folios', lambda sys_id: [{'fl_id': 'FL-' + sys_id[-4:], 'label': '1r'}])
+    monkeypatch.setattr(puzzle_page, 'PUZZLE_CONFIRM_WAIT', 10.0)
+    held = {K1: _meta(K1)}
+    for n in range(28):
+        key = f'99000000002{n:04d},1r'
+        held[key] = _meta(key)
+    a, b = '990000000005001', '990000000005002'
+
+    async def driver(user):
+        canvas = Canvas(user)
+        canvas.scripts = canvas_scripts
+        await user.open('/puzzle')
+        with user._client:
+            from web.saved_joins import owner_key
+            app.storage.tab['puzzle_owner'] = owner_key()
+            app.storage.tab['puzzle_fragments'] = dict(held)            # 29 on the canvas
+            assert stage_fragments_for_puzzle([a, b], source=PUZZLE_STAGING_SOURCE_SHELF) == 2
+        canvas.scripts.clear()
+        await user.open('/puzzle')
+        await _until(lambda: f'{a},1r' in canvas.added, timeout=30.0)
+        await asyncio.sleep(0.3)
+        assert f'{b},1r' not in canvas.added                            # waiting: the canvas is full
+        _fire(user, 'puzzle-add-result', {'key': f'{a},1r', 'success': False})
+        await _until(lambda: f'{b},1r' in canvas.added, timeout=10.0)
+        assert not any('Not added' in str(m) for m in user.notify.messages)
+
+    _run(driver)

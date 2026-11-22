@@ -30,6 +30,14 @@ if not exist catalog_data\catalog_text.db (
     exit /b 1
 )
 
+REM The shelf tree (Pick from the shelf; shelf tree picker plan section 10.6): the installer
+REM carries it. Built by scripts\build_shelfmark_tree.py from the FGP dump and libraries.csv;
+REM its gate runs inside GenizahSearchPro.spec. This only says early that the file is missing.
+if not exist shelfmark_tree_data\shelfmark_tree.db (
+    echo shelfmark_tree_data\shelfmark_tree.db is missing: run python scripts\build_shelfmark_tree.py first.
+    exit /b 1
+)
+
 REM Build from the CHECKED-IN spec, never from command-line flags.
 REM Command-line PyInstaller regenerates GenizahSearchPro.spec on every run and
 REM strips the maintained collect_all() calls for pymupdf / zstandard / lxml plus

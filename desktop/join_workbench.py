@@ -5927,6 +5927,12 @@ if _QT_AVAILABLE:
             self.btn_coldstart_pick.setAccessibleName(tr("Pick from personal list"))
             self.btn_coldstart_pick.clicked.connect(self._pick_from_list)
             coldstart_row.addWidget(self.btn_coldstart_pick)
+            # Pick from the shelf: the pick becomes the anchor as a typed shelfmark does
+            from desktop.widgets.shelf_pick_button import ShelfPickButton
+            self.btn_coldstart_shelf = ShelfPickButton(
+                pane, self._cold_start_from_shelf,
+                start=lambda: self.coldstart_input.text().strip() or self._anchor_sid)
+            coldstart_row.addWidget(self.btn_coldstart_shelf)
             layout.addLayout(coldstart_row)
 
             # 2. (Phase 108) candidate-hunt surface — JoinCandidatePane (Plan 03).
@@ -7202,14 +7208,26 @@ if _QT_AVAILABLE:
             btn_select.clicked.connect(do_select)
 
             if dialog.exec() and picked.get("sys_id"):
-                self.set_anchor({
-                    "display": {
-                        "id": picked["sys_id"],
-                        "shelfmark": picked.get("shelfmark", ""),
-                        "img": 1,
-                    },
-                    "uid": f"{picked['sys_id']}_P001",
-                })
+                self.set_anchor(self._anchor_from(picked["sys_id"], picked.get("shelfmark", "")))
+
+        @staticmethod
+        def _anchor_from(sid, shelf):
+            """The anchor a chosen manuscript makes: its first page (the typed, list and shelf
+            paths alike)."""
+            return {"display": {"id": sid, "shelfmark": shelf, "img": 1}, "uid": f"{sid}_P001"}
+
+        def _cold_start_from_shelf(self, selection):
+            """The shelf picker's adapter: the pick becomes the anchor as a typed shelfmark that
+            resolved to it does (the catalogue's shelfmark, else the pick's)."""
+            sid = selection["sys_id"]
+            shelf = selection.get("shelfmark") or sid
+            try:
+                s, _ = self.meta_mgr.get_meta_for_id(sid) or (shelf, "")
+                if s and s != "Unknown":
+                    shelf = s
+            except Exception:
+                pass
+            self.set_anchor(self._anchor_from(sid, shelf))
 
         def _cold_start_open(self):
             """Resolve a shelfmark string and set it as the anchor.
@@ -7254,7 +7272,4 @@ if _QT_AVAILABLE:
             except Exception:
                 pass
 
-            self.set_anchor({
-                "display": {"id": sid, "shelfmark": shelf, "img": 1},
-                "uid": f"{sid}_P001",
-            })
+            self.set_anchor(self._anchor_from(sid, shelf))

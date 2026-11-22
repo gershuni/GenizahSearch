@@ -47,6 +47,9 @@ Earlier releases: [CHANGELOG.md](CHANGELOG.md).
   save as PDF**
 - **Oxford Bodleian** support with Neubauer catalog integration, and an honest notice with a
   Bodleian link when no image can be fetched
+- **Pick from the shelf**: find a fragment by library, collection, volume and shelfmark, as on the
+  FGP site, with counts and a filter in every column; Browse shows the manuscript's place on the
+  shelf, and previous / next follow the shelf
 - **Editions side by side**: MiDRASH transcription, Princeton Geniza Project and Friedberg
   editions, translations and community corrections, each credited to whoever made it, with a
   **Cite this page** button and prominent PGP links

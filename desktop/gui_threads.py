@@ -1887,7 +1887,10 @@ class ReadingDeskWorker(QThread):
     Fetches all PGP sources and document metadata for a list of sys_ids
     in a background thread, preventing UI freeze when entering reading desk mode.
     """
-    finished = pyqtSignal(list)  # list of (sys_id, sources, pgp_doc)
+    # The results, (sys_id, sources, pgp_doc) each. Not named `finished`: that shadowed
+    # QThread.finished, so _keep_until_finished let a worker go when its results were sent, before
+    # its thread had ended (Codex, the desktop several-at-once hosts).
+    sources_ready = pyqtSignal(list)
     error = pyqtSignal(str)
 
     def __init__(self, sys_ids: list, parent=None):
@@ -1912,7 +1915,7 @@ class ReadingDeskWorker(QThread):
                 except Exception as e:
                     logger.error("ReadingDeskWorker: error loading %s: %s", sys_id, e)
                     results.append((sys_id, [], {}))
-            self.finished.emit(results)
+            self.sources_ready.emit(results)
         except Exception as e:
             self.error.emit(str(e))
 

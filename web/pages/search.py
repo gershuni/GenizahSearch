@@ -72,8 +72,10 @@ from web.search_bootstrap import address_variant_level
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids, catalog_fallback,
-    serialize_sources, deserialize_sources,
+    serialize_sources, deserialize_sources, shelf_exclusion_source,
 )
+from web.components.shelfmark_tree_picker import open_shelf_picker
+from web.shelfmark_tree_assets import shelf_tree_service
 from web.document_service import (
     get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
     get_fragments_by_tag, get_all_distinct_tags,
@@ -4933,8 +4935,40 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _apply_manuscript_exclusions()
         _update_exclude_btn()
 
+    def _add_exclusion_sources(sources):
+        """One way in for every exclusion -- the Paste, List and File tabs and the shelf (picker PR 4):
+        the sources are added, kept for the session and for the run (Back restores them), then
+        applied and shown once."""
+        search_state.exclusion_sources.extend(sources)
+        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+        save_post_filters_with_run(search_state)
+        _apply_manuscript_exclusions()
+        _update_exclude_btn()
+
+    def _exclude_from_shelf():
+        """Exclude manuscripts chosen on the shelf: whole volumes or single shelfmarks, from any
+        library (plan §10.13). The picker's ids are applied as they are -- the shown shelfmarks are
+        never resolved again."""
+        tree = shelf_tree_service()
+        if tree is None:
+            return
+
+        def _take(entries, label):
+            ids = {e['sys_id'] for e in entries if e.get('sys_id')}
+            if not ids:
+                return []
+            _add_exclusion_sources([shelf_exclusion_source(ids, f"{tr('From the shelf')}: {label}")])
+            ui.notify(f"{tr('Excluded')}: {len(ids):,}", type='positive')
+            return None
+
+        # a whole collection is what an exclusion is for: the node boxes stay here (handoff DX23)
+        open_shelf_picker(_page_client.layout, tree, title=tr('Exclude manuscripts from the shelf'),
+                          mode='multi', purpose='search_exclude', on_confirm=_take,
+                          confirm_label=tr('Exclude them'), lists_mgr=state.lists_mgr, node_boxes=True)
+
     async def _show_exclusion_dialog():
-        """Show the exclusion picker dialog with List and File tabs (Phase 56)."""
+        """Show the exclusion picker dialog with List and File tabs (Phase 56), and "Pick from the
+        shelf" when the website serves the shelf tree (picker PR 4)."""
         with ui.dialog().props('maximized=false') as dlg, ui.card().classes('w-full max-w-xl').style('background: var(--bg-secondary);'):
             with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
                 'background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);'
@@ -4976,6 +5010,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'flat dense no-caps color=red size=sm'
                     ).classes('self-end')
                 ui.separator()
+
+            if shelf_tree_service() is not None:
+                def _to_shelf():
+                    dlg.close()
+                    _exclude_from_shelf()
+                with ui.row().classes('w-full px-4 pt-3'):
+                    ui.button(tr('Pick from the shelf'), icon='account_tree', on_click=_to_shelf).props(
+                        'outline no-caps color=red-9 data-testid="exclude-from-shelf"').tooltip(
+                        tr('Choose whole volumes or single shelfmarks, library by library'))
 
             with ui.tabs().classes('w-full') as tabs:
                 tab_paste = ui.tab(tr('Paste Shelfmarks'), icon='content_paste')
@@ -5025,12 +5068,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             unresolved=unresolved,
                             resolved_entries=entries,
                         )
-                        search_state.exclusion_sources.append(source)
-                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
-                        save_post_filters_with_run(search_state)
                         dlg.close()
-                        _apply_manuscript_exclusions()
-                        _update_exclude_btn()
+                        _add_exclusion_sources([source])
                         ui.notify(f"{n_found}/{len(lines)} {tr('resolved')}", type='positive')
 
                     ui.button(tr('Apply'), icon='check', on_click=_apply_paste_exclusion).props(
@@ -5125,28 +5164,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 _excl_item_cbs[list_id].append(item_cb)
 
                             async def _apply_list_exclusion():
-                                any_selected = False
+                                chosen = []
                                 for lid, sids_map in _excl_selections.items():
                                     selected_sids = {sid for sid, checked in sids_map.items() if checked}
                                     if not selected_sids:
                                         continue
-                                    any_selected = True
                                     list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
-                                    search_state.exclusion_sources.append(ExclusionSource(
+                                    chosen.append(ExclusionSource(
                                         label=list_name,
                                         source_type='list',
                                         source_id=lid,
                                         sys_ids=selected_sids,
                                         unresolved=[],
                                     ))
-                                if not any_selected:
+                                if not chosen:
                                     ui.notify(tr('Select a list first'), type='warning')
                                     return
-                                persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
-                                save_post_filters_with_run(search_state)
                                 dlg.close()
-                                _apply_manuscript_exclusions()
-                                _update_exclude_btn()
+                                _add_exclusion_sources(chosen)
 
                             ui.button(tr('Apply'), icon='check', on_click=_apply_list_exclusion).props(
                                 'color=red no-caps'
@@ -5243,12 +5278,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             unresolved=file_source_ref['unresolved'] or [],
                             resolved_entries=file_source_ref['entries'] or [],
                         )
-                        search_state.exclusion_sources.append(source)
-                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
-                        save_post_filters_with_run(search_state)
                         dlg.close()
-                        _apply_manuscript_exclusions()
-                        _update_exclude_btn()
+                        _add_exclusion_sources([source])
 
                     ui.button(tr('Apply'), icon='check', on_click=_apply_file_exclusion).props(
                         'color=red no-caps'

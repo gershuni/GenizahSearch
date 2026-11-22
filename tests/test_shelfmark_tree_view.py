@@ -167,3 +167,25 @@ def test_the_picker_shows_one_level_at_a_time_before_its_columns_overflow():
     widest = least(".stp-col.stp-libs") + 2 * least(".stp-col") + least(".stp-leaves") + 3 * gap + 2 * pad
     breakpoint = int(re.search(r"@media \(max-width: (\d+)px\)", _CSS).group(1))
     assert breakpoint * card >= widest, (breakpoint, widest)
+
+
+def test_the_picker_columns_are_shared_and_pure(svc):
+    # PR 3a: both apps draw the columns shared.shelfmark_tree_columns computes; it imports no UI
+    # toolkit and no app, so the desktop widget cannot fork the web dialog's behaviour.
+    import ast
+    import pathlib
+
+    from shared import shelfmark_tree_columns as cols
+    from web.components import shelfmark_tree_picker as web_picker
+    tree = ast.parse(pathlib.Path(cols.__file__).read_text(encoding="utf-8"))
+    names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    names |= {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    assert not {m.split(".")[0] for m in names} & {"nicegui", "PyQt6", "web", "desktop", "genizah_app"}
+    assert web_picker.load_view is cols.load_view and web_picker.settle is cols.settle
+    labels = {"library": "Library", "others": "Others", "in": "in {place}", "part": "Part: {part}"}
+    root = cols.load_view(svc, (), {}, {}, "en", labels)
+    assert root["columns"][0]["libs"] and root["leaves"] is None and root["crumbs"] == []
+    path = ("lib:1", "col:10")
+    view = cols.load_view(svc, path, {}, {}, "en", labels)
+    assert [c["parent"] for c in view["columns"]][:2] == [None, "lib:1"]
+    assert [i for i, _nid, _name in view["crumbs"]] == [0, 1]

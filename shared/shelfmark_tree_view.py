@@ -15,6 +15,13 @@ from shared.shelfmark_tree_service import Placement, ShelfLeaf, ShelfmarkTreeSer
 #: Leaves a picker loads at a time.
 PAGE_SIZE = 300
 
+#: Between the names of a place on the shelf on the web (Browse, the picker's breadcrumb). The same
+#: character in both languages: it is a mirrored character, so the browser draws it as its mirror image
+#: in right-to-left text and it points the way the names are read; writing the other one for Hebrew
+#: draws it backwards. Not the desktop's: a QLabel holding only the arrow takes no direction from it and
+#: draws it as written, so the desktop writes each language's own arrow.
+CRUMB_SEP = "›"
+
 
 def display_name(node: ShelfNode, lang: str = "en") -> str:
     """A node's name in the visitor's language: the Hebrew name where the tree has one."""

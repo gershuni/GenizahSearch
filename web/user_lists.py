@@ -29,7 +29,8 @@ from web.auth_state import GlobalAuthState
 from web.supabase_client import (
     get_user_client, get_user_lists, create_list as sb_create_list,
     update_list as sb_update_list, delete_list as sb_delete_list,
-    get_list_items, add_list_item, add_list_items, update_list_item, delete_list_item,
+    get_list_items, get_list_item_sys_ids, add_list_item, add_list_items, update_list_item,
+    delete_list_item,
     get_recent_items, add_recent_item, get_projects, create_project as sb_create_project,
     update_project as sb_update_project, delete_project as sb_delete_project
 )
@@ -594,6 +595,21 @@ class UserListsManager:
             self.invalidate_cache()
             return int(result.get('added') or 0)
         return 0
+
+    async def sys_ids_in_list(self, list_id: str) -> Optional[set]:
+        """The sys_ids one list holds, read whole off the loop; None when it could not be read
+        (signed out, a bad id, a failed read). The client is built here, on the loop."""
+        authed, user_id, client = self._worker_context()
+        if not authed:
+            return None
+
+        def _read():
+            list_id_int = self._resolve_list_id(list_id, user_id, client=client)
+            if list_id_int is None:
+                return None
+            return get_list_item_sys_ids(list_id_int, client=client)
+
+        return await run.io_bound(_read)
 
     async def remove_item_from_list(self, item_id: str, list_id: str) -> bool:
         """Remove an item from a list."""

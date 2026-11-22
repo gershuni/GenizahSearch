@@ -675,6 +675,18 @@ class GenizahService:
             logger.error("Get full manuscript error: %s", e)
             return []
 
+    def page_count(self, sys_id: str) -> int:
+        """How many pages the index holds of a manuscript (0: none), from the browse map alone: the
+        Reading Desk's page limit (``shared/shelfmark_tree_limits.py::desk_pages_function``). Blocking
+        the first time the map is read: call it off the loop."""
+        if not self.is_ready:
+            return 0
+        try:
+            return int(state.searcher.page_count(sys_id))
+        except Exception as e:
+            logger.debug("page count of %s not read: %s", sys_id, e)
+            return 0
+
     def get_adjacent_shelfmark(self, sys_id: str, direction: int) -> Optional[str]:
         """Get next/prev shelfmark based on file order in Transcriptions.txt.
 

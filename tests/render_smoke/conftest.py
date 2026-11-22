@@ -336,3 +336,64 @@ def joins_lab_smoke_runner():
             joins_lab_smoke_runner(driver)
     """
     return run_joins_lab_smoke
+
+
+def _io_pool_idle() -> bool:
+    """NiceGUI's ``run.io_bound`` pool has nothing queued and no worker busy (its idle semaphore
+    counts the idle workers)."""
+    from nicegui import run as nicegui_run
+    pool = nicegui_run.thread_pool
+    idle = getattr(pool, '_idle_semaphore', None)
+    if idle is None:
+        return True
+    return pool._work_queue.empty() and idle._value >= len(pool._threads)
+
+
+@pytest.fixture(autouse=True)
+def _shelf_tree_closed_after_its_reads(monkeypatch):
+    """A test closes its shelf tree when it ends, while a picker it opened may still be reading the
+    tree off the loop (the details pane reads after the columns are drawn): closing a shared SQLite
+    connection under a running query brings the whole test process down (Windows access violation).
+    The tree waits for those reads first (at most a few seconds). The website never closes its tree."""
+    import time
+
+    from shared.shelfmark_tree_service import ShelfmarkTreeService
+    real_close = ShelfmarkTreeService.close
+
+    def close_after_reads(self):
+        deadline = time.monotonic() + 5.0
+        while not _io_pool_idle() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        real_close(self)
+
+    monkeypatch.setattr(ShelfmarkTreeService, 'close', close_after_reads)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _shelf_picker_pane_reads_no_network(monkeypatch):
+    """The shelf picker's pane reads the community database (joins, public comments) last, over
+    the network; render tests answer for it with nothing unless a test gives its own answer."""
+    from web.components import shelfmark_tree_picker as picker
+    monkeypatch.setattr(picker, '_community', lambda sys_id: ([], None))
+    yield
+
+
+class _NoSigns:
+    """The rows' signs, never loaded: a render test reads no sidecar for them unless it gives its own."""
+    ready = False
+
+    def load(self):
+        return None
+
+    def of(self, sys_id):
+        return ()
+
+
+@pytest.fixture(autouse=True)
+def _shelf_picker_rows_read_no_signs(monkeypatch):
+    """The shelf picker reads its rows' signs (PGP, the editions, the joins) once for the server, from
+    the sidecars; render tests draw the rows without them unless a test gives its own."""
+    from web.components import shelfmark_tree_picker as picker
+    monkeypatch.setattr(picker, 'shelf_signs', lambda: _NoSigns())
+    yield

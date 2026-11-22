@@ -38,8 +38,9 @@ def test_a_join_is_left_once_each_in_order(stored):
 def test_no_more_is_left_than_the_puzzle_page_takes(stored):
     left = storage.stage_fragments_for_puzzle([str(n) for n in range(40)])
 
-    assert left == storage.PUZZLE_STAGING_MAX == 21
-    assert stored['puzzle_staging']['fragments'] == [str(n) for n in range(21)]
+    # the Puzzle's limit on both sides of the hand-off (the shelf picker's Add to Puzzle hands over 30)
+    assert left == storage.PUZZLE_STAGING_MAX == 30
+    assert stored['puzzle_staging']['fragments'] == [str(n) for n in range(30)]
 
 
 def test_a_write_the_storage_refuses_is_reported_as_nothing_left(monkeypatch):
@@ -99,17 +100,18 @@ def test_the_whole_join_is_tied_to_the_canvas_it_was_opened_for():
     calls = [node for node in ast.walk(bulk) if isinstance(node, ast.Call)
              and getattr(node.func, 'id', '') == '_add_fragment_by_sys_id']
     assert len(calls) == 1
-    assert [kw.arg for kw in calls[0].keywords] == ['still_wanted']
+    # and with the canvas's room, asked once the fragment's key is known (a key already there is free)
+    assert [kw.arg for kw in calls[0].keywords] == ['still_wanted', 'room_for']
 
 
 def test_every_add_that_waits_for_a_folio_lookup_is_tied_to_its_canvas():
     """The shelfmark box, the picker, Add from List (two buttons), Known Joins, the
-    join handoff and ``?add=``: each waits on a lookup during which another draft
-    can be opened, so each must carry the canvas check."""
+    join handoff, ``?add=`` and Pick from the shelf: each waits on a lookup during which
+    another draft can be opened, so each must carry the canvas check."""
     tree = ast.parse((ROOT / 'web' / 'pages' / 'puzzle.py').read_text(encoding='utf-8'))
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
              and getattr(node.func, 'id', '') == '_add_fragment_by_sys_id']
-    assert len(calls) == 6
+    assert len(calls) == 7
     unguarded = [call.lineno for call in calls if 'still_wanted' not in [kw.arg for kw in call.keywords]]
     assert unguarded == []
 
@@ -138,13 +140,16 @@ def test_every_add_that_waits_for_a_folio_lookup_is_tied_to_its_canvas():
 
 
 def test_the_puzzle_page_reads_the_cap_and_the_source_this_module_writes():
-    """The two halves agree: the page's slice is the cap, and it knows the source name."""
+    """The two halves agree: the page cuts at the Puzzle's limit, the one this module writes up to
+    (both ``shared.shelfmark_tree_limits.PUZZLE_MAX_ITEMS``), and it knows the source name."""
+    from shared.shelfmark_tree_limits import PUZZLE_MAX_ITEMS
     tree = ast.parse((ROOT / 'web' / 'pages' / 'puzzle.py').read_text(encoding='utf-8'))
-    slices = [node.slice.upper.value for node in ast.walk(tree)
+    uppers = [node.slice.upper for node in ast.walk(tree)
               if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
               and isinstance(node.value, ast.Call) and getattr(node.value.func, 'id', '') == 'list'
-              and isinstance(node.slice.upper, ast.Constant)]
-    assert storage.PUZZLE_STAGING_MAX in slices
+              and node.slice.upper is not None]
+    assert any(isinstance(u, ast.Name) and u.id == 'PUZZLE_MAX_ITEMS' for u in uppers)
+    assert storage.PUZZLE_STAGING_MAX == PUZZLE_MAX_ITEMS
     compared = {node.comparators[0].value for node in ast.walk(tree)
                 if isinstance(node, ast.Compare) and isinstance(node.comparators[0], ast.Constant)}
     assert storage.PUZZLE_STAGING_SOURCE_JOIN in compared

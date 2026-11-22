@@ -1571,6 +1571,39 @@ class ListsManager:
         self.save()
         return True
 
+    def withdraw_from_list(self, item_ids, list_id):
+        """Undo an add whose save did not reach lists.pkl: take ``item_ids`` out of ``list_id`` again,
+        with the bookkeeping a removal has (remove_item_from_list), an entry left in no list dropped
+        -- and without saving, so the store is as it was before that add and the file it never
+        reached is not touched. A retry then writes only what is chosen by then (the shelf picker's
+        hosts; Codex PR #74). Answers how many were taken out."""
+        taken = 0
+        for item_id in item_ids:
+            item = self.data['items'].get(item_id)
+            if not isinstance(item, dict) or list_id not in item.get('lists', []):
+                continue
+            item['lists'].remove(list_id)
+            self._book('_queue_cloud_delete', item_id, list_id)
+            if not item['lists']:
+                self._book('_forget_item', item_id)
+                del self.data['items'][item_id]
+            taken += 1
+        return taken
+
+    def discard_list(self, list_id):
+        """Drop a list whose creation was never written (create_list's save failed), and what it holds,
+        without saving: the store is as it was before. Not for a list on disk (delete_list), nor
+        for a system or default list."""
+        lst = self.data['lists'].get(list_id)
+        if not isinstance(lst, dict) or lst.get('is_default') or lst.get('is_system'):
+            return False
+        held = [iid for iid, it in self.data['items'].items() if list_id in (it.get('lists') or [])]
+        self.withdraw_from_list(held, list_id)
+        del self.data['lists'][list_id]
+        if list_id in self.data.get('lists_order', []):
+            self.data['lists_order'].remove(list_id)
+        return True
+
     def remove_item_from_list(self, item_id, list_id):
         """Remove an item from a specific list."""
         if item_id not in self.data['items']:

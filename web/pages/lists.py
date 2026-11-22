@@ -25,6 +25,8 @@ from web.components.project_tree import create_project_tree
 # Every write callback on this page goes through this runner (sign-in re-checked, awaited,
 # failure toasted); tests/test_lists_page_write_callbacks.py pins it.
 from web.components.lists_write import run_lists_write as _run_lists_write
+from web.components.shelf_pick import shelf_pick_button
+from shared.shelfmark_tree_limits import limit_for
 from web.auth_state import GlobalAuthState, create_login_dialog
 from genizah_core import get_library_display
 from typing import Optional, Dict
@@ -35,6 +37,11 @@ logger = logging.getLogger(__name__)
 # Phase 92.2 D-FANOUT-01 + Reviews MUST-FIX 1: sentinel distinguishes
 # 'caller did not pass counts' from 'counts intentionally None (legacy fallback)'.
 _COUNTS_UNSET = object()
+
+
+#: Manuscripts one confirm of the shelf picker adds to a list (D8): one insert, and a whole
+#: collection can be thousands; the rest stay chosen for the next.
+LIST_ADD_MAX = 2000
 
 
 def _page_text(page) -> str:
@@ -719,6 +726,17 @@ def create_lists_page():
 
                 # Export button
                 with ui.row().classes('gap-2'):
+                    # Add from the shelf (D8, plan §10.13): several at once, into the list shown.
+                    # Not on the recent list, which the site fills by itself.
+                    if not (hasattr(lists_mgr, '_is_recent_list') and lists_mgr._is_recent_list(list_id)):
+                        _from_shelf = shelf_pick_button(
+                            on_open=lambda lid=list_id, mgr=lists_mgr: _shelf_add_to_list(lid, mgr),
+                            multi=True, purpose='lists', label=tr('Add from the shelf'),
+                            confirm_label=tr('Add them to this list'), props='flat no-caps',
+                            limit=lambda: limit_for('lists'),
+                            testid='lists-shelf-pick')
+                        if _from_shelf is not None:
+                            _from_shelf.classes('text-primary')
                     ui.button(
                         tr('Export'),
                         icon='download',
@@ -942,6 +960,40 @@ def create_lists_page():
                                     on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container,
                                                                list_item_preview_page(page))
                                 ).props('flat dense size=sm').style('color: var(--text-tertiary);')
+
+    def _shelf_add_to_list(list_id: str, lists_mgr):
+        """For one opening of the shelf picker on a list: its confirm adds what is chosen to that
+        list (D8), at most LIST_ADD_MAX at a time. One already in the list counts as taken (the
+        list would otherwise hold it twice: ``list_items`` has no unique key). Answers the ids
+        taken; the rest, and everything when the write fails, stay chosen."""
+        async def _take(entries, _label):
+            if not lists_mgr:
+                return []
+            try:
+                present = await lists_mgr.sys_ids_in_list(str(list_id))
+            except Exception as read_err:
+                logger.warning("Add from the shelf: the list %s was not read: %s", list_id, read_err)
+                present = None
+            if present is None:                 # not read whole: adding could put one in twice
+                ui.notify(tr('The change could not be saved. Check your connection and try again.'),
+                          type='negative')
+                return []
+            taken = [e['sys_id'] for e in entries if e['sys_id'] in present]
+            new = list(dict.fromkeys(e['sys_id'] for e in entries if e['sys_id'] not in present))
+            batch = new[:LIST_ADD_MAX]
+            if batch:
+                added = await _run_lists_write(lambda: lists_mgr.add_items(batch, str(list_id)))
+                if not added:
+                    return taken                # not added: they stay chosen (the reader was told)
+                ui.notify(tr('{n} added to the list').format(n=f"{int(added):,}"), type='positive')
+            if len(new) > LIST_ADD_MAX:
+                ui.notify(tr('At most {n} are added at a time').format(n=f"{LIST_ADD_MAX:,}"), type='info')
+            try:
+                await async_refresh_ui()        # the view; what was added is added either way
+            except Exception as refresh_err:
+                logger.warning("Add from the shelf: the list view was not refreshed: %s", refresh_err)
+            return taken + batch
+        return _take
 
     async def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""

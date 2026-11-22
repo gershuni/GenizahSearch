@@ -12,15 +12,26 @@ loaded). Under it, the
 manuscripts opened last (owner, 2026-10-25), so going back to one is
 Ctrl+G, Down, Enter; typing narrows that list, and what is highlighted in it
 is what opens.
+
+At the end of the box, the shelf's icon button (DX10, DX27; also Ctrl+W) when the shelf tree is
+offered: the picker opens on top, at what is typed or else at the manuscript Browse shows, the same
+picker as Browse's (``shelf_options``: the window's keywords for it). "Open" in it closes the box with
+``choice() == ('shelf', {sys_id, shelfmark, placement_id})``; "Add to Puzzle" with
+``('puzzle', entries)`` (the window acts on both); "Add to List" leaves both open (DX22). Its switch
+"Open more than one" ticks several, and its confirm opens them (the window's own ``on_confirm``):
+once it has opened any, the box closes too, with ``('opened', sys_ids)``.
 """
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCompleter, QDialog, QDialogButtonBox, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QVBoxLayout,
+    QAbstractItemView, QCompleter, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QToolButton, QVBoxLayout,
 )
 
+import genizah_core
+from desktop.shortcuts_dialog import key_label
 from genizah_core import tr
 
 RECENT_SHOWN = 10
@@ -29,13 +40,23 @@ RECENT_SHOWN = 10
 class GoToDialog(QDialog):
     """Asks for one line, or one of the recent manuscripts.
 
-    ``choice()`` is ``('recent', payload)`` when a recent manuscript was
-    highlighted on accepting, else ``('text', text)``; ``text()`` is what was
-    typed.
+    ``choice()`` is ``('shelf', selection)`` after a pick from the shelf,
+    ``('recent', payload)`` when a recent manuscript was highlighted on
+    accepting, else ``('text', text)``; ``text()`` is what was typed.
+    ``shelf_service``: the shelf tree when it is offered (else no shelf button);
+    ``shelf_start``: where the picker opens when nothing is typed; ``shelf_options``: the keywords of
+    ``pick_from_shelf_or_several`` (the window's, ``_shelf_picker_options``); ``shelf_actions``: its
+    ``actions`` alone, where no options are given.
     """
 
-    def __init__(self, parent=None, completer=None, recent=()):
+    def __init__(self, parent=None, completer=None, recent=(), shelf_service=None, shelf_start=None,
+                 shelf_actions=None, shelf_options=None):
         super().__init__(parent)
+        self._shelf_service = shelf_service
+        self._shelf_start = shelf_start
+        self._shelf_actions = shelf_actions
+        self._shelf_options = dict(shelf_options or {})
+        self._shelf_choice = None
         self.setWindowTitle(tr("Go to"))
         self.setMinimumWidth(420)
         layout = QVBoxLayout(self)
@@ -48,7 +69,23 @@ class GoToDialog(QDialog):
         self.input.setClearButtonEnabled(True)
         if completer is not None:
             self.input.setCompleter(self._own_completer(completer))
-        layout.addWidget(self.input)
+        # the shelf: an icon button at the end of the box (DX27), and its key, Ctrl+W, here too
+        self.shelf_button = None
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.input, 1)
+        if shelf_service is not None:
+            self.shelf_button = QToolButton(self)
+            self.shelf_button.setText("\U0001F4DA")
+            self.shelf_button.setAutoRaise(True)
+            tip = f"{tr('Pick from the shelf')} ({key_label('Ctrl+W', genizah_core.CURRENT_LANG == 'he')})"
+            self.shelf_button.setToolTip(tip)
+            self.shelf_button.setAccessibleName(tr("Pick from the shelf"))
+            self.shelf_button.clicked.connect(self._pick_from_shelf)
+            row.addWidget(self.shelf_button)
+            shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+            shortcut.activated.connect(self._pick_from_shelf)
+        layout.addLayout(row)
 
         # (label, payload) pairs, most recent first.
         self._recent = list(recent)[:RECENT_SHOWN]
@@ -84,10 +121,43 @@ class GoToDialog(QDialog):
         return self.input.text().strip()
 
     def choice(self):
+        if self._shelf_choice is not None:         # ('shelf', selection), ('puzzle', entries), ('opened', ids)
+            return self._shelf_choice
         item = self._highlighted()
         if item is not None:
             return ('recent', item.data(Qt.ItemDataRole.UserRole))
         return ('text', self.text())
+
+    def _pick_from_shelf(self):
+        """The shelf picker on top of this box, at what is typed, else at the manuscript Browse
+        shows; a pick closes the box."""
+        import desktop.widgets.shelfmark_tree_picker as shelf_picker
+        if self._shelf_service is None:
+            return
+        options = dict(self._shelf_options)
+        options.setdefault('act_label', tr("Open"))
+        if self._shelf_actions is not None:
+            options.setdefault('actions', self._shelf_actions)
+        opened = []                                # what the multiple choice's confirm opened
+        host = options.get('on_confirm')
+        if host is not None:
+            def on_confirm(entries, label):
+                taken = host(entries, label)
+                if taken is None:                  # all of them
+                    opened.extend(e['sys_id'] for e in entries)
+                elif taken is not shelf_picker.STAGED:
+                    opened.extend(taken or ())
+                return taken
+            options['on_confirm'] = on_confirm
+        outcome = shelf_picker.pick_from_shelf_or_several(
+            self, self._shelf_service, start=self.text() or self._shelf_start, **options)
+        if outcome:
+            kind, value = outcome
+            self._shelf_choice = ('shelf', value) if kind == 'open' else (kind, value)
+            self.accept()
+        elif opened:                               # several opened: the box has done its work
+            self._shelf_choice = ('opened', list(dict.fromkeys(opened)))
+            self.accept()
 
     def _highlighted(self):
         for item in self.recent_list.selectedItems():

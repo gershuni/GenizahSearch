@@ -92,6 +92,11 @@ EXTRACTED_MODULES = [
     "shared/near_spellings.py",          # catalogue near spellings, PR 2, 2026-11-18
     "shared/shelfmark_tree_service.py",  # shelf tree sidecar reader, PR 1, 2026-11-19
     "shared/shelfmark_tree_view.py",     # shelf tree names, starts, places for both apps, PR 2, 2026-11-19
+    "shared/shelfmark_tree_columns.py",  # the picker columns both apps draw, PR 3a, 2026-11-20
+    "shared/shelfmark_tree_selection.py",  # the picker's multiple choice, both apps, PR 4, 2026-11-20
+    "shared/shelfmark_tree_limits.py",   # the picker's limits and chip names, both apps, 2026-11-21
+    "shared/shelfmark_tree_details.py",  # the picker's details pane, both apps, round 3, 2026-11-21
+    "shared/shelfmark_tree_signs.py",    # the signs on the picker's rows, both apps, round 4, 2026-11-22
     "shared/edition_search_text.py",     # editions search: an edition's search text, PR 1, 2026-11-15
     "shared/editions_indexer.py",        # editions search: the editions index builder, PR 1, 2026-11-15
     "shared/editions_search.py",         # editions search: switch, source choice, grouping, PR 2, 2026-11-15

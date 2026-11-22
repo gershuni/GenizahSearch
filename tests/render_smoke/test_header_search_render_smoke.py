@@ -153,3 +153,41 @@ def test_the_homepage_box_asks_the_catalogue_too(monkeypatch):
         assert calls == [('/browse?shelfmark=Mingana%209',)]
 
     _run_home_smoke(driver, lang='en')
+
+
+def test_the_header_has_the_shelf_picker_beside_the_box(monkeypatch):
+    """Pick from the shelf beside the header's box (owner, 2026-11-21): the pick opens in Browse at
+    its place, as the home page's does; absent while the tree is not served."""
+    from tests.render_smoke import test_shelf_pick_hosts_render_smoke as hosts
+    from web.components import shelf_pick
+    stand_in = hosts.Picker()
+    monkeypatch.setattr(shelf_pick, 'open_shelf_picker', stand_in)
+    monkeypatch.setattr(shelf_pick, 'shelf_tree_service', lambda: hosts.TREE)
+
+    async def driver(user):
+        await user.open('/about')
+        [button] = hosts._by_testid(user, 'header-shelf-pick')
+        assert button.props.get('aria-label') == 'Pick from the shelf'
+        hosts._click(user, button)
+        # the pick opens the manuscript: "Open", Add to List and Add to Puzzle beside it (DX21, DX22)
+        assert (stand_in.opened[-1]['pick_label'], stand_in.opened[-1]['add_to']) == ('Open', True)
+        with patch('nicegui.ui.navigate.to') as nav_mock:
+            await stand_in.pick(user)
+        assert nav_mock.call_args[0][0] == shelf_pick.browse_url_for_pick(
+            {'sys_id': hosts.PICKED_SID, 'shelfmark': 'T-S 99.1', 'placement_id': hosts.PLACEMENT})
+        # Browse's picker: "Open more than one" opens the ticked ones in Browse's Reading Desk
+        await hosts._opens_several_in_the_desk(user, stand_in.opened[-1])
+
+    _run_home_smoke(driver, lang='en')
+
+
+def test_the_header_has_no_shelf_picker_without_the_tree(monkeypatch):
+    from tests.render_smoke import test_shelf_pick_hosts_render_smoke as hosts
+    from web.components import shelf_pick
+    monkeypatch.setattr(shelf_pick, 'shelf_tree_service', lambda: None)
+
+    async def driver(user):
+        await user.open('/about')
+        assert hosts._by_testid(user, 'header-shelf-pick') == []
+
+    _run_home_smoke(driver, lang='en')

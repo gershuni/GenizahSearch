@@ -26,6 +26,7 @@ from shared.fgp_service import (
     number_repeated_labels, source_provider, source_relation_kind,
 )
 from shared.transcription_credits import resolve_transcription_credit
+from shared.shelfmark_tree_limits import desk_pages_function, limit_for, refusal_message
 from shared.export_utils import GENIZAHSEARCH_URL
 from shared.blau_service import get_blau_service
 from shared.arabic_service import get_arabic_service
@@ -35,6 +36,15 @@ from web.analytics import posthog_capture
 from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
 
 logger = logging.getLogger(__name__)
+
+#: Manuscripts one confirm of the shelf picker adds to the Reading Desk (handoff DX5): each loads
+#: a whole manuscript; the rest stay chosen for the next.
+
+
+def _lists_mgr_now():
+    """The reader's lists manager, made per access (the picker's "Save as a list")."""
+    from web.state import state as app_state
+    return app_state.lists_mgr
 
 
 def _merge_fgp_sources(sys_id: str, pgp_sources):
@@ -79,8 +89,11 @@ from web.components.typography import h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
 from web.components.shelfmark_tree_picker import open_shelf_picker
+from web.client_guard import client_gone
+from web.components.shelf_pick import corpus_selection, is_placement_id, shelf_pick_button
+from web.reading_desk_handoff import take_reading_desk_handoff  # several from the header's or home's picker
 from web.shelfmark_tree_assets import shelf_tree_service
-from shared.shelfmark_tree_view import (crumbs as shelf_crumbs, display_name as shelf_display_name,
+from shared.shelfmark_tree_view import (CRUMB_SEP, crumbs as shelf_crumbs, display_name as shelf_display_name,
                                         place_of as shelf_place_of, placement_request_is_spent,
                                         position as shelf_position, step_from as shelf_step_from)
 from web import io_bound_result
@@ -849,8 +862,14 @@ def _recents_lock_for(user_id: str) -> asyncio.Lock:
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False,
                        initial_version: Optional[str] = None, initial_span: Optional[str] = None,
-                       initial_fp: Optional[str] = None, catalogue_search: Optional[dict] = None):
+                       initial_fp: Optional[str] = None, catalogue_search: Optional[dict] = None,
+                       initial_placement: Optional[str] = None, desk_from_shelf: bool = False):
     """Create the professional manuscript viewer page UI.
+
+    desk_from_shelf (``desk=shelf``): several ticked in the header's or the home page's shelf picker
+    with "Open more than one" (web/reading_desk_handoff.py). The list kept for this page, when it
+    begins with ``initial_sys_id``, is opened as Browse's own picker opens it (``_browse_open_chosen``:
+    the first here, the others in a desk begun with it), not the desk kept from before.
 
     catalogue_search ({'query', 'near_spellings', 'include_translations'}): Browse opened from a
     catalogue search's result (web/components/catalog_found.py); the manuscript it opened shows
@@ -1007,7 +1026,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # The manuscript's place on the shelf (_load_shelf_place): {'sys_id', 'info'}, and 'want', the
     # (sys_id, placement id) the reader arrived by from the shelf, for a manuscript with two places.
     shelf_info: dict = {}
-
+    if initial_sys_id and is_placement_id(initial_placement):
+        # Opened from a pick elsewhere (the home page's "Pick from the shelf", ?place=): the place
+        # it was picked at, for a manuscript with two (place_of uses it only if it is one of them).
+        shelf_info['want'] = (initial_sys_id, initial_placement)
     if initial_sys_id:
         state.sys_id = initial_sys_id
     if initial_volume_ie:
@@ -1086,6 +1108,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             params['volume_ie'] = state.volume_ie
         if _url_state['highlight']:
             params['highlight'] = _url_state['highlight']
+        on_shelf = shelf_info.get('info') if shelf_info.get('sys_id') == state.sys_id else None
+        if on_shelf and on_shelf.get('chosen'):
+            params['place'] = on_shelf['leaf'].id   # checked: one of this manuscript's places
         if state.edition_target and on_target_folio(state, page):
             # A scholarly transcription's hit stays in the address on the folio it arrived for,
             # so a reload opens the same edition with the same mark; on any other folio it is
@@ -1648,9 +1673,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if place is None:
                     return None
                 prev_leaf, next_leaf = tree.neighbours(place.leaf.id)
+                # A place other than the manuscript's first is the reader's choice (a pick, a
+                # step along a catalogue list): the address keeps it, so a reload or a shared
+                # link opens at it again (Codex pre-flight of the web host PR).
+                first = shelf_place_of(tree, sys_id) if placement_id else place
                 return {'crumbs': [(n.id, shelf_display_name(n, lang)) for n in shelf_crumbs(place)],
                         'leaf': place.leaf, 'position': shelf_position(tree, place.leaf),
-                        'prev': prev_leaf, 'next': next_leaf}
+                        'prev': prev_leaf, 'next': next_leaf,
+                        'chosen': first is not None and first.leaf.id != place.leaf.id}
             try:
                 info = await run.io_bound(_compute)
             except Exception as shelf_err:  # the shelf is an aid: never stop the page
@@ -1673,7 +1703,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         return state.sys_id or (getattr(slider_refs.get('search_input'), 'value', '') or '').strip() or None
 
     def open_shelf_picker_at(start: Optional[str]):
-        """Pick from the shelf; the chosen manuscript opens here."""
+        """Pick from the shelf; the chosen manuscript opens here. The picker's switch "Open more
+        than one" (handoff DX16, off at every opening) turns the same dialog into the multiple
+        choice, which opens what is ticked in the Reading Desk (``_browse_open_chosen``), and back."""
         tree = shelf_tree_service()
         if tree is None:
             return
@@ -1681,7 +1713,55 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         async def _picked(selection: dict):
             shelf_info['want'] = (selection['sys_id'], selection['placement_id'])
             await _open_other_manuscript(selection['sys_id'])
-        open_shelf_picker(_page_client.layout, tree, _picked, start=start)
+        opened_on = state.reading_desk_entries if state.view_joined else None
+        # A click selects, Open opens; Add to List and Add to Puzzle beside it, in both modes (DX21,
+        # DX22). A tick is limited by the choice alone: the desk's room is applied when "Open them in
+        # the Reading Desk" is pressed (_desk_add_chosen), the list's and the Puzzle's at theirs.
+        open_shelf_picker(_page_client.layout, tree, _picked, start=start, purpose='reading_desk',
+                          on_confirm=lambda entries, _label: _browse_open_chosen(entries, opened_on),
+                          confirm_label=tr('Open them in the Reading Desk'), lists_mgr=_lists_mgr_now(),
+                          switch_label=tr('Open more than one'), limit=_choice_limit(),
+                          pick_label=tr('Open'), add_to=True)
+
+    def _desk_base_ids():
+        """What a Reading Desk confirm adds to: the desk's manuscripts, or the one shown, which a new
+        desk begins with (nothing when nothing is shown: the first ticked opens)."""
+        if state.view_joined:
+            return [e.get('sys_id') for e in state.reading_desk_entries]
+        return [state.sys_id] if (state.sys_id and state.current_page) else []
+
+    def _choice_limit():
+        """Browse's picker: what may be ticked at all (30 manuscripts, 1,000 pages as the desk draws
+        them), whatever the desk holds (handoff, round 3): each of its buttons applies its own room."""
+        return limit_for('reading_desk', pages_of=desk_pages_function(service.page_count))
+
+    def _desk_limit():
+        """The Reading Desk's limit when ticking and when adding (owner, 2026-11-21): 30 manuscripts
+        and 1,000 pages, counting what the desk holds; pages as the desk draws them."""
+        return limit_for('reading_desk', pages_of=desk_pages_function(service.page_count),
+                         base_ids=_desk_base_ids)
+
+    async def _browse_open_chosen(entries: list, opened_on) -> list:
+        """Browse's picker with "Open more than one" on: what is ticked opens in the Reading Desk.
+        A desk open: added to it; a manuscript shown: a desk begins with it (both through
+        ``_desk_add_chosen``: what fits the desk's limit, the rest stay ticked). Nothing shown: the
+        first ticked opens here, and the others begin a desk with it, the first counted in the limit
+        (it is the manuscript shown by then); one alone just opens. Answers the ids taken."""
+        chosen = [c for c in (corpus_selection(e) for e in entries) if c is not None]
+        if not chosen or client_gone(_page_client.layout):
+            return []
+        if opened_on is not None and (not state.view_joined or state.reading_desk_entries is not opened_on):
+            return []                               # the desk it was opened over was left: all stay ticked
+        if state.view_joined or (state.sys_id and state.current_page):
+            return await _desk_add_chosen(chosen, opened_on)
+        first, rest = chosen[0], chosen[1:]
+        shelf_info['want'] = (first['sys_id'], first['placement_id'])
+        await _open_other_manuscript(first['sys_id'])
+        if state.sys_id != first['sys_id'] or not state.current_page:
+            return []                               # it did not open: all stay ticked
+        if not rest:
+            return [first['sys_id']]
+        return [first['sys_id']] + await _desk_add_chosen(rest, None)
 
     async def toggle_view_all():
         """Toggle between single page and full manuscript view."""
@@ -1811,13 +1891,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             enter_joined_view(frag_info, pgpid=None)
             _persist_reading_desk_state()
 
-    def _add_sys_id_to_reading_desk(sys_id: str, shelfmark: str):
-        """Internal helper: add a fragment by sys_id/shelfmark to the active reading desk."""
-        existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
-        if sys_id in existing_sids:
-            ui.notify(tr('Already in Reading Desk'), type='info')
-            return
-
+    def _desk_entry(sys_id: str, shelfmark: str) -> dict:
+        """A desk entry: the manuscript's pages and its sources. Blocking (the shelf picker's
+        batch runs it off the loop)."""
         from shared.document_service import get_all_sources_for_fragment as rd_get_sources, get_document_for_fragment as rd_get_doc
         pages = service.get_full_manuscript(sys_id)
         sources = []
@@ -1827,16 +1903,125 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             pgp_doc = rd_get_doc(sys_id)
         except Exception:
             pass  # Shelfmark lookup failed; use fallback identifier
-        state.reading_desk_entries.append({
+        return {
             'sys_id': sys_id,
             'shelfmark': shelfmark,
             'pages': pages or [],
             'sources': sources,
             'pgp_doc': pgp_doc or {}
-        })
-        _persist_reading_desk_state()
-        update_content()
-        ui.notify(f'{shelfmark} {tr("added to Reading Desk")}', type='positive')
+        }
+
+    def _add_sys_id_to_reading_desk(sys_id: str, shelfmark: str, *, entry: Optional[dict] = None,
+                                    quiet: bool = False) -> bool:
+        """Internal helper: add a fragment by sys_id/shelfmark to the active reading desk. True when
+        it was added. ``entry``: loaded already (``_desk_entry``); ``quiet``: one of a batch, whose
+        caller saves, draws and tells the reader once."""
+        existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+        if sys_id in existing_sids:
+            if not quiet:
+                ui.notify(tr('Already in Reading Desk'), type='info')
+            return False
+        state.reading_desk_entries.append(entry if entry is not None else _desk_entry(sys_id, shelfmark))
+        if not quiet:
+            _persist_reading_desk_state()
+            update_content()
+            ui.notify(f'{shelfmark} {tr("added to Reading Desk")}', type='positive')
+        return True
+
+    async def _desk_add_chosen(entries: list, opened_on) -> list:
+        """The shelf picker's "Add them all to the Reading Desk" (plan §10.13, handoff DX5).
+
+        Each manuscript goes through ``_add_sys_id_to_reading_desk``, as one typed in the box: the
+        pages are loaded off the loop for the whole batch, then added, saved and drawn once. What
+        fits the desk's limit (``_desk_limit``: 30 manuscripts and 1,000 pages with what it holds;
+        owner, 2026-11-21) is added, in the order chosen; one on the desk already counts as taken
+        (the desk holds it once), and one that fails to load leaves its room to the next. Answers
+        the ids taken; the rest stay chosen. ``opened_on``: the
+        desk that was open when the picker was (None: none was, and this starts one with the
+        manuscript shown, as "Add to Reading Desk" does: a desk is drawn around a page, so none is
+        started without one); left or replaced meanwhile, nothing is taken. A desk is begun only for
+        something that fits: with none (the manuscript shown is already past the pages), none is
+        begun and the reader is told the limit (Codex on #82)."""
+        if opened_on is not None and (not state.view_joined or state.reading_desk_entries is not opened_on):
+            return []
+        if not state.view_joined and (not state.sys_id or not state.current_page):
+            ui.notify(tr('Please load a manuscript first'), type='warning')
+            return []
+        was_desk = state.reading_desk_entries if state.view_joined else None
+        shown = state.sys_id
+        present = {e.get('sys_id') for e in was_desk} if was_desk is not None else {shown}
+        taken = [e['sys_id'] for e in entries if e['sys_id'] in present]
+        new = [e for e in entries if e['sys_id'] not in present]
+        limit = _desk_limit()
+        new_ids = [e['sys_id'] for e in new]
+        fits = set(await run.io_bound(limit.take, new_ids)) if new_ids else set()
+        batch = [e for e in new if e['sys_id'] in fits]
+        over = None
+        if len(batch) < len(new):                # the first that did not fit says which limit
+            over = await run.io_bound(limit.refusal, fits, fits | {new[len(batch)]['sys_id']})
+        if was_desk is not None and (not state.view_joined or state.reading_desk_entries is not was_desk):
+            return []                           # the desk was left or replaced while counting
+        if was_desk is None and (state.view_joined or state.sys_id != shown or not state.current_page):
+            return []                           # a desk was opened, or another manuscript, meanwhile
+        if not batch:
+            if over is not None:
+                ui.notify(refusal_message(over, tr), type='info')
+            return taken                        # nothing fits: no desk begun for nothing
+        if was_desk is None:
+            enter_joined_view([{'shelfmark': state.current_page.shelfmark or f"ID: {state.sys_id}",
+                                'document_id': state.sys_id}], pgpid=None, draw=False)
+        desk = state.reading_desk_entries
+        if len(batch) > 1:
+            ui.notify(tr('Loading {n} manuscripts...').format(n=len(batch)), type='ongoing', timeout=3000)
+
+        def _load():
+            """In the order chosen while each fits with those loaded before it: one that fails to
+            load is left chosen and the next takes its room (Codex on #88), up to the first that
+            does not fit, which says which limit."""
+            loaded, out = [], None
+            for e in new:
+                ids = [x['sys_id'] for x, _entry in loaded] + [e['sys_id']]
+                if e['sys_id'] not in limit.take(ids):
+                    before = set(ids[:-1])
+                    out = limit.refusal(before, before | {e['sys_id']})
+                    break
+                try:
+                    loaded.append((e, _desk_entry(e['sys_id'], e['shelfmark'])))
+                except Exception as load_err:   # left chosen, for another try
+                    logger.warning("Reading Desk: %s not loaded: %s", e['sys_id'], load_err)
+            return loaded, out
+
+        loaded, over = await run.io_bound(_load)
+        if not state.view_joined or state.reading_desk_entries is not desk:
+            return []                           # the desk was left or replaced while loading
+        # Counted again as the desk is now, with no wait before the adds (Codex on #82): another
+        # confirm may have filled it while these loaded; what no longer fits stays ticked.
+        room = set(limit.take([e['sys_id'] for e, _entry in loaded]))
+        if len(room) < len(loaded) and over is None:
+            first_out = next(e['sys_id'] for e, _entry in loaded if e['sys_id'] not in room)
+            over = limit.refusal(room, room | {first_out})
+        added = [e['sys_id'] for e, entry in loaded
+                 if e['sys_id'] in room
+                 and _add_sys_id_to_reading_desk(e['sys_id'], e['shelfmark'], entry=entry, quiet=True)]
+        try:                                    # what is on the desk is added, whatever the drawing does
+            _persist_reading_desk_state()
+            update_content()
+        except Exception as draw_err:
+            logger.warning("Reading Desk: drawn after adding from the shelf with an error: %s", draw_err)
+        if added:
+            ui.notify(tr('{n} added to the Reading Desk').format(n=len(added)), type='positive')
+        if over is not None:
+            ui.notify(refusal_message(over, tr), type='info')
+        return taken + added
+
+    def _desk_shelf_handler():
+        """For one opening of the picker: the desk open then is the one it adds to. With no desk
+        and no manuscript shown, the picker does not open (as "Add to Reading Desk")."""
+        if not state.view_joined and (not state.sys_id or not state.current_page):
+            ui.notify(tr('Please load a manuscript first'), type='warning')
+            return None
+        opened_on = state.reading_desk_entries if state.view_joined else None
+        return lambda entries, _label: _desk_add_chosen(entries, opened_on)
 
     def _persist_reading_desk_state():
         """Save reading desk state via Phase 74 snapshot helper.
@@ -2740,7 +2925,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             'w-full flex flex-wrap items-center justify-center gap-1 text-sm mt-1 browse-shelf-place'):
                         for _i, (_nid, _name) in enumerate(_on_shelf['crumbs']):
                             if _i:
-                                ui.label('‹' if is_rtl() else '›').style('color: #d1fae5 !important;')
+                                ui.label(CRUMB_SEP).style('color: #d1fae5 !important;')
                             _open_here = (lambda _e=None, n=_nid: open_shelf_picker_at(n))
                             ui.link(_name).on('click', _open_here).on('keydown.enter', _open_here).on(
                                 'keydown.space.prevent', _open_here).props(
@@ -3953,6 +4138,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_click=rd_toolbar_add
                         ).props('dense color=green')
 
+                        # Pick from the shelf (shelf tree picker, PR 5 and its multiple choice):
+                        # several at once, each through the box's add, to the desk that was open
+                        # when the picker was (_desk_add_chosen). What is ticked is kept until added.
+                        shelf_pick_button(on_open=_desk_shelf_handler, start=_shelf_start, multi=True,
+                                          purpose='reading_desk',
+                                          confirm_label=tr('Add them all to the Reading Desk'),
+                                          lists_mgr=_lists_mgr_now, limit=_desk_limit,
+                                          props='flat dense no-caps color=green', testid='rd-shelf-pick')
                         # Separator
                         ui.separator().props('vertical').classes('h-6')
 
@@ -5948,6 +6141,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         icon='shelves',
                         on_click=lambda: open_shelf_picker_at(_shelf_start()),
                     ).props(f'outline color=green no-caps aria-label="{tr("Pick from the shelf")}" data-testid="shelf-picker-open"').classes('browse-icon-collapse')
+                    # Several at once for the Reading Desk: the picker's own switch "Open more than
+                    # one" (handoff DX16), not a second button.
 
             # Error notice area (below search bar)
             search_error_container = ui.row().classes('w-full mt-2 items-center')
@@ -6000,7 +6195,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         )
 
         action = bootstrap['action']
-        if action == 'fl_id':
+        # Several from the header's or the home page's shelf picker: the list kept for this page,
+        # opened as this page's own picker opens it (a new desk, not the one kept from before).
+        handed = take_reading_desk_handoff(initial_sys_id) if desk_from_shelf and not embedded else []
+        if handed:
+            clear_browse_snapshot(keep_position=True)
+            state.is_loading = True
+            update_content()
+            # Cat-2: deferred init - container must mount before async load.
+            asyncio.ensure_future(_browse_open_chosen(handed, None))
+        elif action == 'fl_id':
             state.is_loading = True
             update_content()  # Show spinner synchronously before async kicks in
             # Cat-2: deferred to next event loop tick to allow spinner to render before load.

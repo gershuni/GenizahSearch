@@ -509,7 +509,7 @@ def test_volumes_grouped_by_fgp_ranges_prefix_and_number(tmp_path, monkeypatch):
 
 
 def test_a_filtered_column_offers_the_matches_past_its_first_page(tmp_path, monkeypatch):
-    from web.components import shelfmark_tree_picker as picker
+    from shared import shelfmark_tree_columns as picker
     monkeypatch.setattr(picker, "NODE_ROWS", 1)
     monkeypatch.setattr(picker, "MAX_PAGE", 1)             # pages are asked for one by one
     db, _libraries, _meta = build_fixture(tmp_path)
@@ -522,14 +522,14 @@ def test_a_filtered_column_offers_the_matches_past_its_first_page(tmp_path, monk
         assert nodes > 1 and s.search_nodes("col:10", "T-S AS", limit=1, offset=1)[0].name_en
 
         def column(text, shown):
-            view = picker._load_view(s, path, {"n:col:10": text}, shown, "en", labels)
+            view = picker.load_view(s, path, {"n:col:10": text}, shown, "en", labels)
             return next(c for c in view["columns"] if c["parent"] == "col:10")
 
         first = column("T-S AS", {})
         assert len(first["rows"]) == 1 and first["more"] == nodes - 1
         # a match opens at its own place: the path holds each level once
         row = first["rows"][0]
-        assert row["go"] == tuple(a.id for a in s.ancestors(row["id"])) + picker._passed_through(s, row["id"])[1:]
+        assert row["go"] == tuple(a.id for a in s.ancestors(row["id"])) + picker.passed_through(s, row["id"])[1:]
         assert len(column("T-S AS", {"n:col:10": nodes})["rows"]) == nodes
         with_number = column("T-S AS 2", {})
         assert with_number["more"] == (s.count_nodes("col:10", "T-S AS 2") - 1) + (leaves - 1)
@@ -678,7 +678,7 @@ def test_cohere_places_rewrites_and_holds_back(monkeypatch):
 def test_a_filtered_match_of_one_child_opens_below_it(tmp_path, monkeypatch):
     # PR review: a match with one child and no shelfmarks of its own is no choice; like a click on it,
     # it opens below (its child column is not drawn, so the path must not end at it).
-    from web.components import shelfmark_tree_picker as picker
+    from shared import shelfmark_tree_columns as picker
     monkeypatch.setattr(builder, "PREFIX_GROUP_MIN", 1)
     monkeypatch.setattr(builder, "FGP_RANGES", {10: (("T-S AS 1-5", 1, 5),)})
     db, _libraries, _meta = build_fixture(tmp_path)
@@ -694,7 +694,7 @@ def test_a_filtered_match_of_one_child_opens_below_it(tmp_path, monkeypatch):
         lone, parent = row
         labels = {"library": "Library", "others": "Others", "in": "in {place}"}
         at = tuple(a.id for a in s.ancestors(parent))
-        view = picker._load_view(s, at, {f"n:{parent}": s.node(lone).name_en}, {}, "en", labels)
+        view = picker.load_view(s, at, {f"n:{parent}": s.node(lone).name_en}, {}, "en", labels)
         hit = next(r for c in view["columns"] if c["parent"] == parent for r in c["rows"] if r.get("id") == lone)
         assert hit["go"][-2:] == (lone, s.children(lone)[0].id)
     finally:
@@ -803,7 +803,7 @@ def test_the_csv_places_a_code_librarys_shelfmarks_and_an_alias_in_a_collections
 
 def test_a_path_never_ends_at_a_level_that_is_no_choice(svc):
     # PR review: Strasbourg (lib:2) holds one collection and no shelfmarks of its own
-    from web.components.shelfmark_tree_picker import _settle
+    from shared.shelfmark_tree_columns import settle as _settle
     assert _settle(svc, ("lib:2",), ("lib:2", "col:20")) == ()            # back: past it
     assert _settle(svc, ("lib:2",), ()) == ("lib:2", "col:20")            # forward: below it
     assert _settle(svc, ("lib:1",), ("lib:1", "col:10")) == ("lib:1",)    # a real level stays
@@ -1255,7 +1255,7 @@ def test_a_volumes_number_and_letter_and_a_number_after_a_word():
 def test_the_oxford_part_is_called_a_part_in_the_tooltip():
     from types import SimpleNamespace
 
-    from web.components.shelfmark_tree_picker import _hint, _part
+    from shared.shelfmark_tree_columns import hint as _hint, part_text as _part
     labels = {"part": "Part: {part}"}
     leaf = SimpleNamespace(aliases="Ms. heb. a. 1.5 | The Bodleian Libraries, University of Oxford Ms. heb. a. 1.5",
                            label="MS heb. a.1/5", shelfmark="MS heb. a.1/5", part="MS. Heb. a. 1/2")

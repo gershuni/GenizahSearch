@@ -92,6 +92,7 @@ from web.components.candidate_grid import (
     normalize_card_size, open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
+from web.components.shelf_pick import shelf_pick_button
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
 from web.components.joins_builder import create_joins_builder
 from web.components.joins_panel import fetch_connected_fragments
@@ -1544,6 +1545,11 @@ def create_joins_lab_page(
                     tr('Sign in to access your saved research lists')
                 )
 
+                # Pick from the shelf (shelf tree picker, PR 6): the anchor is set as Load Anchor
+                # sets it, by its sys_id (not looked up again). Not unelevated: Load Anchor is.
+                shelf_pick_button(lambda selection: load_anchor(selection['sys_id']),
+                                  props='flat no-caps', confirm_label=tr('Load Anchor'),
+                                  testid='joins-lab-shelf-pick')
         # Builder + search area (hidden until anchor loaded)
         builder_area = ui.column().classes('w-full gap-3')
         builder_area.set_visibility(False)

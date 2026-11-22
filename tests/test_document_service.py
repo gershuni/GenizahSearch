@@ -274,6 +274,11 @@ class TestGetDocumentForFragment:
             result = svc.get_document_for_fragment('SYS001', page_num=2)
             assert result is not None
             assert result['pgpid'] == 200
+
+            # both documents of the fragment, each once (the details pane's joins read every one)
+            assert svc.get_document_ids_for_fragment('SYS001') == [100, 200]
+            assert svc.get_document_ids_for_fragment('NONE') == []
+            assert svc.get_document_ids_for_fragment('') == []
         finally:
             svc.close()
 
@@ -511,6 +516,10 @@ class TestBatchLookup:
         result = pgp_service.get_sys_ids_with_transcriptions([])
         assert result == set()
 
+    def test_get_all_joined_sys_ids(self, pgp_service):
+        """The fragments of documents of several fragments; a one-fragment document is no join."""
+        assert pgp_service.get_all_joined_sys_ids() == {'003072766', '003072767', '003072768'}
+
 
 # ── TestSourceQueries ─────────────────────────────────────────────
 
@@ -639,6 +648,8 @@ class TestServiceUnavailable:
 
         # All methods should degrade gracefully
         assert svc.get_document_for_fragment('003072766') is None
+        assert svc.get_document_ids_for_fragment('003072766') == []
+        assert svc.get_all_joined_sys_ids() == set()
         assert svc.get_fragments_for_document(1234) == []
         assert svc.get_transcription_for_document(1234) is None
         assert svc.get_document_metadata(1234) is None

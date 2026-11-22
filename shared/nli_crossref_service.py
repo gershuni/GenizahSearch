@@ -1113,10 +1113,15 @@ _default_service: Optional[NliCrossrefService] = None
 
 
 def get_nli_crossref_service(thread_safe: bool = False) -> NliCrossrefService:
-    """Get or create the default NliCrossrefService singleton."""
+    """Get or create the default NliCrossrefService singleton.
+
+    The one instance is shared by every caller, so it is always the thread-safe kind (a connection
+    per thread), whatever ``thread_safe`` the first caller passed: a one-thread instance made first
+    -- the desktop window asked for one -- left every later caller on another thread (the shelf
+    picker's details) with no library link. ``thread_safe`` is kept for the callers."""
     global _default_service
     if _default_service is None:
-        _default_service = NliCrossrefService(thread_safe=thread_safe)
+        _default_service = NliCrossrefService(thread_safe=True)
     return _default_service
 
 

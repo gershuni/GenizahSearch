@@ -784,6 +784,20 @@ class PuzzleCanvasWindow(QMainWindow):
         # _clear_canvas bumps it, so a result for a replaced canvas is
         # dropped. Never reset.
         self._canvas_gen = 0
+        # Fragments sent from the shelf's several-at-once picker and not on the canvas yet:
+        # {sys_id: (canvas generation, store, service, sent at)} (_take_from_shelf).
+        self._shelf_waiting = {}
+        # a batch the main window handed over while an earlier one was still loading: (entries,
+        # service, canvas generation), taken once that one has landed or its wait has run out, and only
+        # on the canvas it was handed to (Codex #87): a new puzzle or another join opened drops it
+        self._shelf_queued = None
+        self._shelf_keep = frozenset()
+        self._shelf_already = None      # (ids already on the canvas, store, service): taken at on_staged
+        self._shelf_cursor = None       # where the next fragment the shelf sent is placed
+        # where the shelf picker opens next: the last fragment added from it (its placement, else its
+        # sys_id), for the life of the Puzzle (the box it would start from is cleared after an add;
+        # the web's shelf_pick memory does the same)
+        self._shelf_last = None
         # The last Delete, for Ctrl+Z (one level): [(key, item, reload loader
         # arguments or None)]. Cleared with the canvas.
         self._undo_delete = None
@@ -843,6 +857,14 @@ class PuzzleCanvasWindow(QMainWindow):
         self.btn_add.setToolTip(tr("Add fragment"))
         self.btn_add.clicked.connect(self._on_add_shelfmark)
         row1.addWidget(self.btn_add)
+
+        # Pick from the shelf, several at once (the web's toolbar icon does the same): each is added
+        # as a typed shelfmark is (_add_resolved_shelfmark); ticking one adds one
+        from desktop.widgets.shelf_pick_button import ShelfPickButton
+        self.btn_shelf = ShelfPickButton(self, self._add_from_shelf,
+                                         start=lambda: self.shelfmark_input.text().strip() or self._shelf_last,
+                                         on_several=self._add_several_from_shelf)
+        row1.addWidget(self.btn_shelf)
 
         # Add from personal list
         btn_from_list = QPushButton("\U0001f4cb")
@@ -1299,6 +1321,166 @@ class PuzzleCanvasWindow(QMainWindow):
     def _set_shelfmark_lookup_busy(self, busy):
         self.shelfmark_input.setEnabled(not busy)
         self.btn_add.setEnabled(not busy)
+        if getattr(self, 'btn_shelf', None) is not None:
+            self.btn_shelf.setEnabled(not busy)
+
+    def _add_from_shelf(self, selection):
+        """The shelf picker's adapter: the pick goes where a typed shelfmark resolved to one
+        record goes."""
+        self._shelf_last = selection.get('placement_id') or selection['sys_id']
+        self._add_resolved_shelfmark(selection['sys_id'], selection.get('shelfmark') or selection['sys_id'])
+
+    # -- Several from the shelf (shelf tree picker, several at once; the web's #71) --
+
+    def _shelf_limit(self):
+        """The Puzzle's limit (owner, 2026-11-21): 30 fragments with those on the canvas. Counted in
+        fragments, not manuscripts (two folios of one manuscript are two; #80's ``base_items``): those
+        on the canvas, those whose images are loading, and those sent from the shelf not yet there."""
+        from shared.shelfmark_tree_limits import limit_for
+
+        def held() -> int:
+            items = set(self._fragment_items) | set(self._pending_req)
+            placed = {key[0] for key in items}
+            return len(items) + len([sid for sid in self._shelf_waiting if sid not in placed])
+        return limit_for('puzzle', base_items=held)
+
+    #: Seconds a fragment sent from the shelf is waited for. One not on the canvas by then stays
+    #: chosen, and the picker opens again (the web's PUZZLE_CONFIRM_WAIT, kept on the safe side).
+    SHELF_WAIT_S = 30
+
+    def _shelf_ready(self) -> bool:
+        """Before a batch from the shelf: waits that belong to a replaced canvas, or have run out, are
+        dropped; False while fragments sent earlier are still loading (no batch over another)."""
+        import time
+        now = time.monotonic()
+        # a wait belongs to the canvas it was sent to: New or another join opened ends it (Codex #74)
+        self._shelf_waiting = {s: w for s, w in self._shelf_waiting.items()
+                               if w[0] == self._canvas_gen and now - w[3] < self.SHELF_WAIT_S}
+        if self._shelf_waiting:
+            self.statusBar().showMessage(tr("Resolving images..."), 3000)
+            return False
+        return True
+
+    def take_entries_from_shelf(self, entries, service) -> bool:
+        """The main window's hand-off (the picker that opens manuscripts, "Add to Puzzle", DX22): the
+        same preparation as the toolbar's own button, then what the canvas has room for
+        (``_take_from_shelf``, no kept choice). While an earlier batch is still loading, these wait
+        for it (the picker has closed: never dropped) and are taken when it has landed, or when its
+        wait has run out. Answers True when taken now, False when queued."""
+        if not self._shelf_ready():
+            queued = self._shelf_queued
+            earlier = list(queued[0]) if queued and queued[2] == self._canvas_gen else []
+            self._shelf_queued = (earlier + list(entries), service, self._canvas_gen)
+            # its wait may never be answered (a load that hangs): the queue is tried again by then
+            QTimer.singleShot(int(self.SHELF_WAIT_S * 1000) + 500, self._take_queued)
+            return False
+        self._take_from_shelf(entries, service, None)
+        return True
+
+    def _take_queued(self) -> None:
+        """The batch queued behind a loading one: taken now, or queued again if it still loads."""
+        if sip.isdeleted(self) or not self._shelf_queued:
+            return
+        (entries, service, gen), self._shelf_queued = self._shelf_queued, None
+        if gen != self._canvas_gen:              # handed to a canvas replaced since: not this one's
+            return
+        self.take_entries_from_shelf(entries, service)
+
+    def _add_several_from_shelf(self, service):
+        """The toolbar's shelf button: the picker in its multiple-choice mode (purpose 'puzzle', kept
+        in the session file until on the canvas). Not while fragments it sent are still loading: a
+        picker open meanwhile would keep the choice as it was before they landed."""
+        import desktop.widgets.shelfmark_tree_picker as shelf_picker
+        if not self._shelf_ready():
+            return
+        store = getattr(self.app, '_shelf_selections', None)
+        shelf_picker.pick_several_from_shelf(
+            self, service, purpose='puzzle', on_confirm=lambda entries, _label: self._take_from_shelf(
+                entries, service, store),
+            store=store, start=self.shelfmark_input.text().strip() or self._shelf_last,
+            title=tr("Pick from the shelf"), confirm_label=tr("Add them to the puzzle"),
+            lists_mgr=getattr(self.app, 'lists_mgr', None),
+            on_list_saved=getattr(self.app, '_lists_after_shelf_save', None),
+            on_staged=self._shelf_chosen_again, limit=self._shelf_limit())
+
+    def _take_from_shelf(self, entries, service, store):
+        """The picker's confirm: a fragment already on the canvas is taken at once; of the others, what
+        fits the limit with the canvas (``_shelf_limit``: 30) is added as a typed shelfmark is
+        (_add_resolved_shelfmark), in the order chosen, each leaving the kept
+        choice only when its image is on this canvas (_shelf_landed). One whose image fails, or sent
+        to a canvas replaced meanwhile, stays chosen. The picker closes (``STAGED``)."""
+        import time
+
+        import desktop.widgets.shelfmark_tree_picker as shelf_picker
+        from desktop.widgets.shelf_pick_button import corpus_pick
+        picks = list(dict((e['sys_id'], e.get('shelfmark') or e['sys_id']) for e in entries
+                          if corpus_pick(e)).items())
+        on_canvas = {key[0] for key in self._fragment_items}
+        already = [sid for sid, _shelf in picks if sid in on_canvas]
+        limit = self._shelf_limit()
+        fits = limit.take([sid for sid, _shelf in picks if sid not in on_canvas])
+        send = [(sid, shelf) for sid, shelf in picks if sid in set(fits) and sid not in on_canvas]
+        last = send[-1][0] if send else (already[-1] if already else None)
+        if last is not None:                       # the next opening starts at the last one added
+            placement = next((e.get('placement_id') for e in entries if e.get('sys_id') == last), None)
+            self._shelf_last = placement or last
+        self._shelf_keep = frozenset()
+        # those already on the canvas are taken once the picker has said what was chosen again
+        # meanwhile (_shelf_chosen_again), which stays chosen
+        self._shelf_already = (already, store, service) if already and store is not None else None
+        # the fragments sent are placed side by side as they land, not all at one spot
+        self._shelf_cursor = self._next_x
+        gen, now = self._canvas_gen, time.monotonic()
+        for sid, shelf in send:
+            self._shelf_waiting[sid] = (gen, store, service, now)
+            self._add_resolved_shelfmark(sid, shelf)
+        left = [sid for sid, _shelf in picks if sid not in on_canvas and sid not in set(fits)]
+        message = tr("Resolving images...")
+        if left:                                   # the limit stopped them: say so
+            from shared.shelfmark_tree_limits import refusal_message
+            refusal = limit.refusal(fits, list(fits) + [left[0]])
+            if refusal is not None:
+                message += " " + refusal_message(refusal, tr)
+        self.statusBar().showMessage(message, 5000)
+        return shelf_picker.STAGED
+
+    def _shelf_chosen_again(self, ids):
+        """Chosen again while the picker's confirm was under way: those stay chosen (when they land,
+        and now for those already on the canvas, which are taken here)."""
+        self._shelf_keep = frozenset(ids)
+        already, self._shelf_already = self._shelf_already, None
+        if already is not None:
+            ids_on_canvas, store, service = already
+            taken = [sid for sid in ids_on_canvas if sid not in self._shelf_keep]
+            if taken:
+                store.consume('puzzle', taken, service)
+
+    def _shelf_wait(self, sys_id, gen):
+        """The wait a callback of canvas ``gen`` may answer: only one sent to that canvas, and only
+        while it is the canvas shown. A callback of a replaced canvas never touches the waits of the
+        one shown now, though the same manuscript was sent to both (Codex #74)."""
+        waiting = self._shelf_waiting.get(sys_id)
+        if waiting is None or waiting[0] != gen or gen != self._canvas_gen:
+            return None
+        popped = self._shelf_waiting.pop(sys_id)
+        if not self._shelf_waiting and self._shelf_queued:      # the batch done: the one queued behind it
+            QTimer.singleShot(0, self._take_queued)
+        return popped
+
+    def _shelf_landed(self, sys_id, gen):
+        """A fragment's image is on canvas ``gen``: if the shelf sent it to that canvas, it leaves the
+        kept choice."""
+        waiting = self._shelf_wait(sys_id, gen)
+        if waiting is None:
+            return
+        _gen, store, service, _sent = waiting
+        if store is None or sys_id in self._shelf_keep:
+            return
+        store.consume('puzzle', [sys_id], service)
+
+    def _shelf_failed(self, sys_id, gen):
+        """A fragment the shelf sent to canvas ``gen`` did not reach it: it stays chosen."""
+        self._shelf_wait(sys_id, gen)
 
     def _on_shelfmark_resolved(self, gen, text, result):
         """Worker answer: one record adds it, several open the picker, none says so."""
@@ -1336,11 +1518,15 @@ class PuzzleCanvasWindow(QMainWindow):
         if not shelfmark or shelfmark == "Unknown":
             shelfmark = text
 
-        # Check cached folio list
+        # Check cached folio list. An external image keeps its address, provider and page, as
+        # GenizahGUI.add_to_puzzle passes them (a folio without an FL id is loaded by them).
         if sys_id in self._folio_lists and self._folio_lists[sys_id]:
             images = self._folio_lists[sys_id]
             first = images[0]
-            self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''))
+            self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''),
+                              image_url=first.get('image_url', ''),
+                              external_provider=first.get('external_provider', ''),
+                              page_index=first.get('page_index', -1))
         else:
             # Async fl_id resolution via PuzzleMetaLoaderThread
             self.statusBar().showMessage(tr("Resolving images..."), 5000)
@@ -1538,6 +1724,7 @@ class PuzzleCanvasWindow(QMainWindow):
         if gen != self._canvas_gen:
             logger.debug("Puzzle: dropped a folio lookup failure of %s for a replaced canvas", sys_id)
             return
+        self._shelf_failed(sys_id, gen)            # only now: a stale failure leaves today's waits alone
         self.statusBar().showMessage(
             tr("Failed to resolve images: {}").format(error), 5000
         )
@@ -1579,6 +1766,24 @@ class PuzzleCanvasWindow(QMainWindow):
         img = QImage()
         img.loadFromData(image_bytes)
         pixmap = QPixmap.fromImage(img)
+        if pixmap.isNull():                        # bytes that are not an image: a failed load
+            self._image_not_placed(item_key, "not an image")
+            return
+
+        # sent from the shelf with others: placed after the one that landed before it
+        wait = self._shelf_waiting.get(item_key[0])
+        shelf_sent = wait is not None and wait[0] == self._canvas_gen and self._shelf_cursor is not None
+        if wait is not None and wait[0] == self._canvas_gen:
+            from shared.shelfmark_tree_limits import PUZZLE_MAX_ITEMS, Refusal, refusal_message
+            if len(self._fragment_items) >= PUZZLE_MAX_ITEMS:
+                # room again, right before it is placed: the canvas filled while it loaded (fragments
+                # added by hand meanwhile); not placed, it stays chosen (the web's check)
+                self._image_not_placed(item_key, '', message=refusal_message(
+                    Refusal('fragments', PUZZLE_MAX_ITEMS, len(self._fragment_items) + 1), tr))
+                return
+        if shelf_sent:
+            puzzle_frag.x = self._shelf_cursor
+            self._shelf_cursor = puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50
 
         item = PuzzleFragmentItem(puzzle_frag, pixmap)
 
@@ -1597,6 +1802,9 @@ class PuzzleCanvasWindow(QMainWindow):
         self._fragment_items[item_key] = item
         self._unplaced.pop(item_key, None)
         self._failed_keys.discard(item_key)
+        # sent from the shelf: now it is on the canvas (a request that passed _take_request is this
+        # canvas's: _clear_canvas empties them)
+        self._shelf_landed(item_key[0], self._canvas_gen)
 
         # Advance placement position based on actual pixmap width
         self._next_x = puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50
@@ -1638,6 +1846,14 @@ class PuzzleCanvasWindow(QMainWindow):
             return
         if not self._take_request(item_key, req):
             return  # stale: see _pending_req
+        self._image_not_placed(item_key, error)
+
+    def _image_not_placed(self, item_key, error, message=None):
+        """A new fragment's image did not arrive, or arrived as bytes that are not an image (a null
+        pixmap, Codex #74): nothing is put on the canvas. A fragment of the open join stays in the
+        join (_unplaced); one sent from the shelf stays chosen. Called only for a request that
+        passed _take_request, which _clear_canvas empties: it is this canvas's."""
+        self._shelf_failed(item_key[0], self._canvas_gen)
         placeholder = self._placeholder_items.pop(item_key, None)
         if placeholder and placeholder.scene():
             self.canvas_view.scene.removeItem(placeholder)
@@ -1646,7 +1862,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._failed_keys.add(item_key)
             self._update_fragments_label()   # it stays in the join: name it
         self.statusBar().showMessage(
-            tr("Failed to load image: {}").format(error), 5000
+            message or tr("Failed to load image: {}").format(error), 5000
         )
         self._load_step_done(item_key)
 
@@ -2708,6 +2924,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self._load_waiting.clear()
         self._loading_document = False
         self._load_summary = ''
+        self._shelf_queued = None                # a batch queued for the old canvas is not the new one's
         self._canvas_gen += 1
         self._folio_lists.clear()
         self._next_x = 50.0

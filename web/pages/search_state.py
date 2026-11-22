@@ -536,13 +536,31 @@ def start_search_run(state: 'SearchUIState', stamp: str) -> 'search_runs.SearchR
                                  scoped=bool(state._refine_mode or state.vs_restrict_sys_ids))
 
 
+def exclusion_sources_of(value) -> list:
+    """Exclusion sources as ``ExclusionSource`` objects, whatever a snapshot kept: the objects
+    themselves (a run's snapshot, in memory) or their serialized dicts (user storage). Until
+    2026-11-20 the user-storage path put the stored dicts on the page as they were, and the page
+    failed (500) reading ``.sys_ids`` from them on the next load after any exclusion (found with
+    the shelf picker's Exclude, PR 4)."""
+    from shared.exclusion_service import ExclusionSource, deserialize_sources
+    if not isinstance(value, (list, tuple)):
+        return []
+    out = []
+    for item in value:
+        if isinstance(item, ExclusionSource):
+            out.append(item)
+        elif hasattr(item, 'keys'):
+            out.extend(deserialize_sources([dict(item)]))
+    return out
+
+
 def apply_run_start_snapshot(state: 'SearchUIState', raw: dict) -> None:
     """What a page showed with a search when it started (a run still running): its
     display filters, exclusions and the run itself. Its rows come when it ends."""
     state.printed_filter = raw.get('printed_filter', 'all')
     _de = raw.get('domain_exclusions')
     state.domain_exclusions = set(_de) if _de else set()
-    state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.exclusion_sources = exclusion_sources_of(raw.get('search_exclusion_sources'))
     state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
     state.last_run = _settings_or_none(raw.get('last_run'))
     restore_post_filters(state, raw)
@@ -565,7 +583,7 @@ def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] 
         state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
     except Exception:
         state.refinement_chain = []
-    state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.exclusion_sources = exclusion_sources_of(raw.get('search_exclusion_sources'))
     state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
     state.last_run = _settings_or_none(raw.get('last_run'))
     warning = raw.get('responsa_warning')
@@ -732,8 +750,8 @@ def restore_search_snapshot(state: 'SearchUIState', stamp: Optional[str] = None)
             state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
         except Exception:
             state.refinement_chain = []
-        # exclusion sources (list[dict])
-        state.exclusion_sources = safe_user_get('search_exclusion_sources', []) or []
+        # exclusion sources (stored as dicts, restored as ExclusionSource)
+        state.exclusion_sources = exclusion_sources_of(safe_user_get('search_exclusion_sources', []))
         # the variant settings the shown results were searched with (step 0 of a refinement)
         state.last_variant_settings = _settings_or_none(safe_user_get('search_last_variant_settings', None))
         # the search they came from, exactly as it ran (a completion runs it again)
@@ -780,7 +798,8 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
             ])
         except Exception:
             safe_user_set('search_refinement_chain', [])
-        safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
+        from shared.exclusion_service import serialize_sources
+        safe_user_set('search_exclusion_sources', serialize_sources(exclusion_sources_of(state.exclusion_sources)))
         safe_user_set('search_last_variant_settings', state.last_variant_settings)
         safe_user_set('search_last_run', state.last_run)
     except Exception:

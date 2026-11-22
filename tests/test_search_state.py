@@ -399,3 +399,37 @@ def test_a_restored_search_keeps_its_skipped_editions_note(path, skipped):
         ss.restore_search_snapshot(restored, 'code')
         search_runs.clear()
     assert restored.editions_skipped is skipped
+
+
+def test_stored_exclusions_come_back_as_sources_not_dicts():
+    """A reload after any exclusion: user storage holds the serialized dicts, and the page reads
+    ``.sys_ids`` from what restore_search_snapshot gives it (a 500 until 2026-11-20, found with
+    the shelf picker's Exclude, PR 4). Persisting writes dicts, restoring gives ExclusionSource."""
+    from shared.exclusion_service import ExclusionSource, shelf_exclusion_source
+    storage = {'search_snapshot_schema_version': 1}
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
+        mock_app.storage.user = storage
+        mock_app.storage.tab = {}
+        mock_safe_app.storage.user = storage
+        from web.pages.search_state import (SearchUIState, apply_run_start_snapshot, persist_search_snapshot,
+                                            restore_search_snapshot)
+
+        state = SearchUIState()
+        state.exclusion_sources = [shelf_exclusion_source({'990000000010205171'}, 'From the shelf: T-S AS 2'),
+                                   ExclusionSource('Pasted', 'file', 'paste', {'990000000020205171'})]
+        persist_search_snapshot(state)
+        assert all(isinstance(d, dict) for d in storage['search_exclusion_sources'])
+
+        back = SearchUIState()
+        restore_search_snapshot(back)
+        assert [type(s) for s in back.exclusion_sources] == [ExclusionSource, ExclusionSource]
+        assert [s.source_type for s in back.exclusion_sources] == ['shelf', 'file']
+        assert sum(len(s.sys_ids) for s in back.exclusion_sources) == 2
+
+        # a run's snapshot may hold either form
+        run = SearchUIState()
+        apply_run_start_snapshot(run, {'search_exclusion_sources': storage['search_exclusion_sources']})
+        assert [s.label for s in run.exclusion_sources] == ['From the shelf: T-S AS 2', 'Pasted']
+        apply_run_start_snapshot(run, {'search_exclusion_sources': state.exclusion_sources})
+        assert run.exclusion_sources == state.exclusion_sources

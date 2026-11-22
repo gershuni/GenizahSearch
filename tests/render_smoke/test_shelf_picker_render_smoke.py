@@ -31,9 +31,30 @@ def _picker_page(start: str = ''):
     open_shelf_picker(container, SERVICE['svc'], PICKED.append, start=start or None)
 
 
+CONFIRMED: list = []
+
+
+async def _confirm_switch(entries, label):
+    CONFIRMED.append([e['sys_id'] for e in entries])
+    return None
+
+
+@ui.page('/_test/shelf-picker-switch')
+def _picker_switch_page(start: str = ''):
+    from web.components.shelfmark_tree_picker import open_shelf_picker
+    container = ui.column()
+    open_shelf_picker(container, SERVICE['svc'], PICKED.append, start=start or None, purpose='test_switch',
+                      on_confirm=_confirm_switch, confirm_label='Open them', switch_label='Open more than one')
+
+
 def _rows(user, attr):
     with user.client:
         return [e for e in user.client.elements.values() if attr in e.props]
+
+
+def _confirm_button(user):
+    """The foot's button: in the single choice it picks the selected shelfmark (handoff DX21)."""
+    return next(e for e in _rows(user, 'data-testid') if e.props['data-testid'] == 'shelf-picker-confirm')
 
 
 async def _until(predicate, timeout=5.0):
@@ -70,9 +91,15 @@ def test_the_picker_opens_at_a_manuscript_navigates_and_picks(tmp_path):
             seen['after_library'] = {e.props['data-node'] for e in _rows(user, 'data-node')}
             seen['stras_leaves'] = sorted(e.props['data-sys-id'] for e in _rows(user, 'data-leaf'))
 
-            # a shelfmark: picked, and the dialog closes
+            # a shelfmark: a click selects it (shown chosen, nothing picked yet); the button picks it
+            # and the dialog closes (handoff DX21)
             target = next(e for e in _rows(user, 'data-leaf') if e.props['data-sys-id'] == SYS['stras'][2])
             UserInteraction(user, {target}, None).click()
+            assert await _until(lambda: target.props.get('aria-selected') == 'true')
+            await asyncio.sleep(0.1)
+            seen['picked_on_click'] = list(PICKED)
+            seen['selected_class'] = 'stp-on' in target.classes
+            UserInteraction(user, {_confirm_button(user)}, None).click()
             assert await _until(lambda: PICKED)
             with user.client:
                 seen['open_dialogs'] = [d for d in user.client.elements.values()
@@ -87,9 +114,239 @@ def test_the_picker_opens_at_a_manuscript_navigates_and_picks(tmp_path):
     assert seen['marked'] == [SYS['as2'][6]]
     assert 'vol:100' not in seen['after_library']                    # CUL's columns are gone
     assert SYS['stras'][0] in seen['stras_leaves']                    # one collection: passed through
+    assert seen['picked_on_click'] == [] and seen['selected_class']
     assert len(PICKED) == 1 and PICKED[0]['sys_id'] == SYS['stras'][2] and PICKED[0]['shelfmark'] == 'Ms. 3'
     assert PICKED[0]['placement_id'].startswith('inv:')
     assert seen['open_dialogs'] == []
+
+
+def test_the_switch_changes_the_mode_in_the_same_dialog_at_the_same_place(tmp_path):
+    # Browse's "Open more than one" (handoff DX16; owner: the dialog stays, it does not close and
+    # open again): ticks and the confirm appear in place, and the single choice comes back
+    db, _libraries, _meta = build_fixture(tmp_path)
+    svc = ShelfmarkTreeService(str(db), thread_safe=True)   # the multiple choice counts off the loop
+    SERVICE['svc'] = svc
+    PICKED.clear()
+    CONFIRMED.clear()
+    seen = {}
+
+    def dialogs(user):
+        with user.client:
+            return [d for d in user.client.elements.values() if isinstance(d, ui.dialog)]
+
+    def checkboxes(user):
+        return [e for e in _rows(user, 'data-leaf') if e.props.get('role') == 'checkbox']
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-picker-switch?start={SYS["as2"][6]}')
+            await _connect(user)
+            assert await _until(lambda: _rows(user, 'data-leaf')), 'no shelfmark rendered'
+            [dialog] = dialogs(user)
+            [switch] = [e for e in _rows(user, 'data-testid') if e.props['data-testid'] == 'shelf-picker-switch']
+            seen['label'], seen['value'] = switch.text, switch.value
+            seen['ticks_before'] = len(checkboxes(user))
+            with user.client:
+                switch.value = True
+            assert await _until(lambda: checkboxes(user)), 'no tick boxes after the switch'
+            seen['same'] = dialogs(user) == [dialog] and dialog.value
+            seen['leaves_on'] = sorted(e.props['data-sys-id'] for e in checkboxes(user))
+            # tick one and confirm: the host's on_confirm, not on_pick
+            target = next(e for e in checkboxes(user) if e.props['data-sys-id'] == SYS['as2'][5])
+            UserInteraction(user, {target}, None).click()
+            [confirm] = [e for e in _rows(user, 'icon') if isinstance(e, ui.button) and e.text == 'Open them']
+            assert await _until(lambda: confirm.enabled)
+            UserInteraction(user, {confirm}, None).click()
+            assert await _until(lambda: CONFIRMED)
+            # the dialog closes once what was taken has left the choice (counted again off the loop)
+            seen['after_confirm_open'] = not await _until(lambda: not dialog.value)
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert (seen['label'], seen['value']) == ('Open more than one', False)
+    assert seen['ticks_before'] == 0                                  # single choice to begin with
+    assert seen['same'] is True                                       # one dialog, still open
+    assert SYS['as2'][6] in seen['leaves_on']                         # the same volume, now with boxes
+    assert CONFIRMED == [[SYS['as2'][5]]] and PICKED == []
+    assert seen['after_confirm_open'] is False                        # all taken: it closes
+
+
+def test_the_switch_back_is_the_single_choice_again(tmp_path):
+    db, _libraries, _meta = build_fixture(tmp_path)
+    svc = ShelfmarkTreeService(str(db), thread_safe=True)
+    SERVICE['svc'] = svc
+    PICKED.clear()
+    CONFIRMED.clear()
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-picker-switch?start={SYS["as2"][6]}')
+            await _connect(user)
+            assert await _until(lambda: _rows(user, 'data-leaf'))
+            [switch] = [e for e in _rows(user, 'data-testid') if e.props['data-testid'] == 'shelf-picker-switch']
+            with user.client:
+                switch.value = True
+            assert await _until(lambda: any(e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            with user.client:
+                switch.value = False
+            assert await _until(lambda: _rows(user, 'data-leaf') and not any(
+                e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            target = next(e for e in _rows(user, 'data-leaf') if e.props['data-sys-id'] == SYS['as2'][5])
+            UserInteraction(user, {target}, None).click()
+            assert await _until(lambda: target.props.get('aria-selected') == 'true')
+            UserInteraction(user, {_confirm_button(user)}, None).click()
+            assert await _until(lambda: PICKED)
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert [p['sys_id'] for p in PICKED] == [SYS['as2'][5]] and CONFIRMED == []
+
+
+def test_a_row_of_the_old_mode_does_nothing_while_the_new_one_is_drawn(tmp_path, monkeypatch):
+    # Codex on #77: switched on, a shelfmark drawn for the single choice and clicked before the
+    # redraw lands must not open it (and close the dialog); switched back, an old box must not tick
+    import threading
+    from web.components import shelfmark_tree_picker as picker
+    real = picker.load_view
+    hold = threading.Event()
+    gate = {'on': False}
+
+    def slow(*args):
+        if gate['on']:
+            hold.wait(5)
+        return real(*args)
+
+    monkeypatch.setattr(picker, 'load_view', slow)
+    db, _libraries, _meta = build_fixture(tmp_path)
+    svc = ShelfmarkTreeService(str(db), thread_safe=True)
+    SERVICE['svc'] = svc
+    PICKED.clear()
+    CONFIRMED.clear()
+    seen = {}
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-picker-switch?start={SYS["as2"][6]}')
+            await _connect(user)
+            assert await _until(lambda: _rows(user, 'data-leaf'))
+            [dialog] = [d for d in user.client.elements.values() if isinstance(d, ui.dialog)]
+            [switch] = [e for e in _rows(user, 'data-testid') if e.props['data-testid'] == 'shelf-picker-switch']
+            old_row = next(e for e in _rows(user, 'data-leaf') if e.props['data-sys-id'] == SYS['as2'][5])
+            gate['on'] = True
+            with user.client:
+                switch.value = True                  # the redraw waits in load_view
+            await asyncio.sleep(0.1)
+            UserInteraction(user, {old_row}, None).click()
+            await asyncio.sleep(0.2)
+            seen['picked_meanwhile'], seen['open_meanwhile'] = list(PICKED), dialog.value
+            hold.set()
+            assert await _until(lambda: any(e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            # and back: an old box clicked before the single choice is drawn ticks nothing
+            hold.clear()
+            old_box = next(e for e in _rows(user, 'data-leaf') if e.props['data-sys-id'] == SYS['as2'][5])
+            with user.client:
+                switch.value = False
+            await asyncio.sleep(0.1)
+            UserInteraction(user, {old_box}, None).click()
+            await asyncio.sleep(0.2)
+            hold.set()
+            assert await _until(lambda: _rows(user, 'data-leaf') and not any(
+                e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            gate['on'] = False
+            with user.client:
+                switch.value = True
+            assert await _until(lambda: any(e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            await asyncio.sleep(0.2)
+            seen['ticked'] = [e.props['data-sys-id'] for e in _rows(user, 'data-leaf')
+                              if e.props.get('aria-checked') == 'true']
+
+    try:
+        _run(go)
+    finally:
+        hold.set()
+        svc.close()
+    assert seen['picked_meanwhile'] == [] and seen['open_meanwhile'] is True
+    assert seen['ticked'] == []                                       # the old box ticked nothing
+
+
+def test_the_confirm_clicked_as_the_switch_goes_off_hands_over_nothing(tmp_path):
+    # Codex CLI round 2 on #77: the footer is hidden on the next update; a click that arrives first
+    # must not hand the host what is ticked once the switch is off
+    db, _libraries, _meta = build_fixture(tmp_path)
+    svc = ShelfmarkTreeService(str(db), thread_safe=True)
+    SERVICE['svc'] = svc
+    PICKED.clear()
+    CONFIRMED.clear()
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-picker-switch?start={SYS["as2"][6]}')
+            await _connect(user)
+            assert await _until(lambda: _rows(user, 'data-leaf'))
+            [switch] = [e for e in _rows(user, 'data-testid') if e.props['data-testid'] == 'shelf-picker-switch']
+            with user.client:
+                switch.value = True
+            assert await _until(lambda: any(e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            target = next(e for e in _rows(user, 'data-leaf') if e.props['data-sys-id'] == SYS['as2'][5])
+            UserInteraction(user, {target}, None).click()
+            [confirm] = [e for e in _rows(user, 'icon') if isinstance(e, ui.button) and e.text == 'Open them']
+            assert await _until(lambda: confirm.enabled)
+            with user.client:
+                switch.value = False
+            UserInteraction(user, {confirm}, None).click()
+            await asyncio.sleep(0.3)
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert CONFIRMED == [] and PICKED == []
+
+
+def test_a_switch_while_the_picker_opens_keeps_its_place(tmp_path, monkeypatch):
+    # Codex on #77: flipped while the dialog is still finding where it opens, the multiple choice
+    # opens there (not at the libraries, and nothing drawn first that the opening then replaces)
+    import threading
+    from web.components import shelfmark_tree_picker as picker
+    real = picker.start_at
+    hold = threading.Event()
+
+    def slow(*args):
+        hold.wait(5)
+        return real(*args)
+
+    monkeypatch.setattr(picker, 'start_at', slow)
+    db, _libraries, _meta = build_fixture(tmp_path)
+    svc = ShelfmarkTreeService(str(db), thread_safe=True)
+    SERVICE['svc'] = svc
+    seen = {}
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-picker-switch?start={SYS["as2"][6]}')
+            await _connect(user)
+            assert await _until(lambda: [e for e in _rows(user, 'data-testid')
+                                         if e.props['data-testid'] == 'shelf-picker-switch'])
+            [switch] = [e for e in _rows(user, 'data-testid') if e.props['data-testid'] == 'shelf-picker-switch']
+            with user.client:
+                switch.value = True
+            await asyncio.sleep(0.2)
+            seen['drawn_meanwhile'] = len(_rows(user, 'data-node'))
+            hold.set()
+            assert await _until(lambda: any(e.props.get('role') == 'checkbox' for e in _rows(user, 'data-leaf')))
+            seen['leaves'] = {e.props['data-sys-id'] for e in _rows(user, 'data-leaf')}
+
+    try:
+        _run(go)
+    finally:
+        hold.set()
+        svc.close()
+    assert seen['drawn_meanwhile'] == 0
+    assert SYS['as2'][6] in seen['leaves']                            # at the manuscript's volume
 
 
 def test_a_phone_keeps_the_volumes_of_a_collection_that_also_holds_shelfmarks(tmp_path):
@@ -161,14 +418,14 @@ def test_a_known_shelfmark_is_found_from_a_column_above_its_groups(tmp_path, mon
 def test_a_slow_older_filter_does_not_replace_a_newer_one(tmp_path, monkeypatch):
     # PR review: draws overlap; the broad filter finishing last must not win over the narrow one.
     from web.components import shelfmark_tree_picker as picker
-    real = picker._load_view
+    real = picker.load_view
 
     def slow_for_broad(service, path, filters, *rest):
         if 'T-S' in filters.values():
             time.sleep(0.6)
         return real(service, path, filters, *rest)
 
-    monkeypatch.setattr(picker, '_load_view', slow_for_broad)
+    monkeypatch.setattr(picker, 'load_view', slow_for_broad)
     db, _libraries, _meta = build_fixture(tmp_path)
     svc = ShelfmarkTreeService(str(db))
     SERVICE['svc'] = svc
@@ -203,14 +460,14 @@ def test_a_slow_older_filter_does_not_replace_a_newer_one(tmp_path, monkeypatch)
 def test_the_last_click_wins_over_a_slower_earlier_one(tmp_path, monkeypatch):
     # PR review: two rows clicked before the first lookup ends; the first must not win.
     from web.components import shelfmark_tree_picker as picker
-    real = picker._passed_through
+    real = picker.passed_through
 
     def slow_for_cul(service, node_id):
         if node_id == 'lib:1':
             time.sleep(0.6)
         return real(service, node_id)
 
-    monkeypatch.setattr(picker, '_passed_through', slow_for_cul)
+    monkeypatch.setattr(picker, 'passed_through', slow_for_cul)
     db, _libraries, _meta = build_fixture(tmp_path)
     svc = ShelfmarkTreeService(str(db))
     SERVICE['svc'] = svc
@@ -238,7 +495,8 @@ def test_the_last_click_wins_over_a_slower_earlier_one(tmp_path, monkeypatch):
 
 
 def test_the_keyboard_opens_a_level_and_picks(tmp_path):
-    # PR review: rows are divs with role=button; Enter and Space must act like a click.
+    # PR review: rows are divs with a role; Enter and Space must act like a click. A shelfmark (DX21):
+    # Space selects it, Enter on the selected one picks it.
     db, _libraries, _meta = build_fixture(tmp_path)
     svc = ShelfmarkTreeService(str(db))
     SERVICE['svc'] = svc
@@ -255,12 +513,17 @@ def test_the_keyboard_opens_a_level_and_picks(tmp_path):
             assert await _until(lambda: any(e.props.get('data-sys-id') == SYS['stras'][1] for e in _rows(user, 'data-leaf')))
             leaf = next(e for e in _rows(user, 'data-leaf') if e.props['data-sys-id'] == SYS['stras'][1])
             UserInteraction(user, {leaf}, None).trigger('keydown.space.prevent')
+            assert await _until(lambda: leaf.props.get('aria-selected') == 'true')
+            await asyncio.sleep(0.1)
+            seen['picked_on_space'] = list(PICKED)
+            UserInteraction(user, {leaf}, None).trigger('keydown.enter')
             seen['picked'] = await _until(lambda: PICKED)
 
     try:
         _run(go)
     finally:
         svc.close()
+    assert seen['picked_on_space'] == []
     assert seen['picked'] and PICKED[0]['sys_id'] == SYS['stras'][1]
 
 
@@ -278,7 +541,9 @@ def test_the_keyboard_reaches_the_breadcrumbs(tmp_path):
             await _connect(user)
             assert await _until(lambda: _rows(user, 'data-leaf'))
             with user.client:
-                crumbs = [e for e in user.client.elements.values() if isinstance(e, ui.link)]
+                # the breadcrumbs, not the details pane's links out (a new tab each, DX25)
+                crumbs = [e for e in user.client.elements.values()
+                          if isinstance(e, ui.link) and 'data-link' not in e.props]
             seen['focusable'] = [e.props.get('tabindex') == '0' for e in crumbs]
             home = next(e for e in crumbs if 'stp-crumb' in e.classes)
             UserInteraction(user, {home}, None).trigger('keydown.enter')
@@ -341,7 +606,7 @@ def test_two_filters_typed_together_both_draw_their_lists(tmp_path, monkeypatch)
     # PR review: a filter typed in one column while another column's load was under way kept its
     # text but not its list (the later load drew only its own column).
     from web.components import shelfmark_tree_picker as picker
-    real = picker._load_view
+    real = picker.load_view
     calls = {'n': 0}
 
     def slow(*args):
@@ -350,7 +615,7 @@ def test_two_filters_typed_together_both_draw_their_lists(tmp_path, monkeypatch)
             time.sleep(0.4)
         return real(*args)
 
-    monkeypatch.setattr(picker, '_load_view', slow)
+    monkeypatch.setattr(picker, 'load_view', slow)
     db, _libraries, _meta = build_fixture(tmp_path)
     svc = ShelfmarkTreeService(str(db), thread_safe=True)
     SERVICE['svc'] = svc

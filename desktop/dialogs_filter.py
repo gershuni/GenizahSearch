@@ -14,17 +14,35 @@ from PyQt6.QtGui import QColor, QFontMetrics
 from genizah_core import CURRENT_LANG, normalize_shelfmark, tr
 from desktop.gui_threads import FilterCountWorker
 from shared.exclusion_service import (
-    ExclusionSource, parse_csv_shelfmarks, resolve_shelfmarks,
+    ExclusionSource, parse_csv_shelfmarks, resolve_shelfmarks, shelf_exclusion_source,
 )
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 
 class ExcludeDialog(QDialog):
-    """Collect system IDs or shelfmarks that should be excluded from searches."""
-    def __init__(self, parent, existing_entries=None, lists_mgr=None, shelf_map=None, exclusion_sources=None):
+    """Collect system IDs or shelfmarks that should be excluded from searches.
+
+    "From the shelf" (shelf tree picker PR 4, desktop): whole volumes or single shelfmarks chosen in
+    the picker's multiple-choice mode (``purpose``: ``search_exclude`` / ``composition_exclude``,
+    kept in ``shelf_store`` until applied, D12). They are sources of their own (``source_type``
+    'shelf'), listed above the tabs, never written into the text editor: the editor's Apply reads the
+    shelfmark column again through the shelf map, which could add another record sharing a
+    shelfmark. The picker's ids are applied as they are. Apply returns them with the active tab's
+    sources; the pending choice they came from is consumed then, not before (a Cancel keeps it)."""
+    def __init__(self, parent, existing_entries=None, lists_mgr=None, shelf_map=None, exclusion_sources=None,
+                 *, purpose='', shelf_service=None, shelf_store=None):
         super().__init__(parent)
         self.setWindowTitle(tr("Exclude Manuscripts"))
         self.resize(600, 500)
         layout = QVBoxLayout()
+        self._purpose = purpose
+        self._shelf_service = shelf_service
+        self._shelf_store = shelf_store
+        # sources chosen on the shelf: those applied before (kept as they are) and the one the picker
+        # staged in this dialog (its ids leave the pending choice when Apply takes it)
+        self._shelf_sources = [s for s in (exclusion_sources or []) if s.source_type == 'shelf']
+        self._staged = None
+        self._chosen_again = frozenset()    # chosen again while the confirm was with this dialog: kept
 
         self._syncing = False
         self._shelf_to_sys = shelf_map
@@ -42,6 +60,28 @@ class ExcludeDialog(QDialog):
         self._resolved_ids: set = set()
         self._resolved_unresolved: list = []
         self._loaded_filename: str = ''
+
+        # From the shelf (picker PR 4): the button while the tree is served, and the shelf's sources
+        # (shown, and removable, even when it is not)
+        self._shelf_box = QWidget()
+        shelf_layout = QVBoxLayout(self._shelf_box)
+        shelf_layout.setContentsMargins(0, 0, 0, 0)
+        shelf_head = QHBoxLayout()
+        self._shelf_title = QLabel(tr("From the shelf"))
+        shelf_head.addWidget(self._shelf_title)
+        shelf_head.addStretch()
+        self.btn_shelf = None
+        if shelf_service is not None:
+            self.btn_shelf = QPushButton(tr("Pick from the shelf"))
+            self.btn_shelf.setToolTip(tr("Choose whole volumes or single shelfmarks, library by library"))
+            self.btn_shelf.setAutoDefault(False)
+            self.btn_shelf.clicked.connect(self._pick_from_shelf)
+            shelf_head.addWidget(self.btn_shelf)
+        shelf_layout.addLayout(shelf_head)
+        self._shelf_rows = QVBoxLayout()
+        shelf_layout.addLayout(self._shelf_rows)
+        layout.addWidget(self._shelf_box)
+        self._draw_shelf_sources()
 
         # Tabbed interface (Phase 56)
         from PyQt6.QtWidgets import QTabWidget, QTableWidget, QHeaderView, QListWidget, QListWidgetItem, QAbstractItemView
@@ -83,11 +123,15 @@ class ExcludeDialog(QDialog):
         grid.addWidget(self.title_text_area, 1, 2)
         tab1_layout.addLayout(grid)
 
-        # Populate editor from existing exclusion sources (remembers what was chosen)
+        # Populate editor from existing exclusion sources (remembers what was chosen). The shelf's
+        # sources stay apart (above); with sources given, the legacy raw entries -- which hold their
+        # ids too -- are not read.
         _initial_sys = []
         _initial_shelf = []
         if exclusion_sources:
             for src in exclusion_sources:
+                if src.source_type == 'shelf':
+                    continue
                 _initial_sys.extend(sorted(src.sys_ids))
         elif existing_entries:
             _init_sys, _init_shelf = self._split_existing_entries(existing_entries)
@@ -106,6 +150,10 @@ class ExcludeDialog(QDialog):
             self._sync_from_shelf()
         elif _initial_sys:
             self._set_titles(self._resolve_titles_from_sys(_initial_sys))
+        # A resolution report answers for the text it was made from: an edit afterwards (typed, loaded
+        # from a list or a file) makes it stale, and Apply then reads the editor again.
+        self.sys_text_area.textChanged.connect(self._forget_resolution)
+        self.shelf_text_area.textChanged.connect(self._forget_resolution)
 
         # Resolution report table (D-04)
         self._report_label = QLabel("")
@@ -180,7 +228,8 @@ class ExcludeDialog(QDialog):
         self.setLayout(layout)
 
     def _clear_all(self):
-        """Clear all entries from the editor and accept (removes all exclusions)."""
+        """Clear all entries from the editor and accept (removes all exclusions): the lists selected
+        in the From List tab and the shelf's sources too, which would otherwise come back on Apply."""
         self._syncing = True
         self.sys_text_area.clear()
         self.shelf_text_area.clear()
@@ -193,7 +242,101 @@ class ExcludeDialog(QDialog):
         self._resolved_unresolved = []
         self._report_table.setVisible(False)
         self._report_label.setText("")
+        if self._list_widget is not None:
+            self._list_widget.clearSelection()
+        self._shelf_sources = []
+        self._staged = None
+        self._draw_shelf_sources()
         self.accept()
+
+    def _forget_resolution(self):
+        """The editor's text changed: a resolution made before no longer answers for it."""
+        if not (self._resolved_ids or self._resolved_entries or self._resolved_unresolved):
+            return
+        self._resolved_entries = []
+        self._resolved_ids = set()
+        self._resolved_unresolved = []
+        report_table = getattr(self, '_report_table', None)
+        if report_table is not None:
+            report_table.setVisible(False)
+            self._report_label.setText("")
+
+    # -- from the shelf (picker PR 4) -------------------------------------------------------
+
+    def shelf_sources(self) -> list:
+        """The shelf's sources as Apply will return them: those applied before, then the one staged."""
+        return list(self._shelf_sources) + ([self._staged] if self._staged is not None else [])
+
+    def _draw_shelf_sources(self):
+        while self._shelf_rows.count():
+            item = self._shelf_rows.takeAt(0)
+            row = item.layout() if item is not None else None
+            if row is not None:
+                while row.count():
+                    part = row.takeAt(0)
+                    if part is not None and part.widget() is not None:
+                        part.widget().deleteLater()
+        sources = self.shelf_sources()
+        for source in sources:
+            row = QHBoxLayout()
+            label = QLabel(f"{source.label} ({len(source.sys_ids):,})")
+            label.setToolTip(source.label)
+            row.addWidget(label, 1)
+            remove = QPushButton(tr("Remove"))
+            remove.setAutoDefault(False)
+            remove.clicked.connect(lambda _checked=False, sid=source.source_id: self._remove_shelf_source(sid))
+            row.addWidget(remove)
+            self._shelf_rows.addLayout(row)
+        self._shelf_box.setVisible(self.btn_shelf is not None or bool(sources))
+
+    def _remove_shelf_source(self, source_id):
+        if self._staged is not None and self._staged.source_id == source_id:
+            self._staged = None                     # its choice stays pending (nothing applied)
+        self._shelf_sources = [s for s in self._shelf_sources if s.source_id != source_id]
+        self._draw_shelf_sources()
+
+    def _pick_from_shelf(self):
+        """Choose on the shelf. The picker's confirm stages one source here (the whole pending choice,
+        replacing what an earlier confirm in this dialog staged); Apply applies it."""
+        import desktop.widgets.shelfmark_tree_picker as shelf_picker
+        parent = self.parent()
+
+        def after_list_saved():
+            # what the desktop's own "New List..." does after adding (genizah_app add-to-list menu)
+            for name in ('lists_refresh_all', '_lists_auto_sync'):
+                refresh = getattr(parent, name, None)
+                if callable(refresh):
+                    refresh()
+
+        shelf_picker.pick_several_from_shelf(
+            self, self._shelf_service, purpose=self._purpose, on_confirm=self._take_from_shelf,
+            store=self._shelf_store, title=tr("Exclude manuscripts from the shelf"),
+            confirm_label=tr("Exclude them"), lists_mgr=self._lists_mgr, on_list_saved=after_list_saved,
+            on_staged=self._note_chosen_again, node_boxes=True)   # a whole collection excluded (DX23)
+
+    def _note_chosen_again(self, ids):
+        self._chosen_again = frozenset(ids)
+
+    def _take_from_shelf(self, entries, label):
+        """The picker's confirm: the ids as the picker gives them (corpus ids only), never resolved
+        again; the pending choice stays kept until Apply (``STAGED``)."""
+        import desktop.widgets.shelfmark_tree_picker as shelf_picker
+        ids = {e.get('sys_id') for e in entries if CORPUS_SYS_ID_RE.fullmatch(str(e.get('sys_id') or ''))}
+        if not ids:
+            return []
+        self._staged = shelf_exclusion_source(ids, f"{tr('From the shelf')}: {label}")
+        self._chosen_again = frozenset()
+        self._draw_shelf_sources()
+        return shelf_picker.STAGED
+
+    def done(self, result):
+        """Apply took the staged source: its ids leave the pending choice, except what was chosen
+        again while the picker's confirm was under way (that stays chosen). Any other close keeps it."""
+        if (result == QDialog.DialogCode.Accepted and self._staged is not None
+                and self._shelf_store is not None and self._purpose):
+            self._shelf_store.consume(self._purpose, self._staged.sys_ids - self._chosen_again,
+                                      self._shelf_service)
+        super().done(result)
 
     def _load_list_to_editor(self):
         """Load selected list items into the editor tab (sys_ids + shelfmarks)."""
@@ -347,6 +490,8 @@ class ExcludeDialog(QDialog):
                         unresolved=[],
                     ))
 
+        # the shelf's sources, on either tab: listed above the tabs, they are part of what Apply keeps
+        sources.extend(self.shelf_sources())
         return sources
 
     def eventFilter(self, obj, event):

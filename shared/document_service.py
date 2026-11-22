@@ -232,6 +232,23 @@ class PgpService:
             logger.error(f"Error getting document for fragment {sys_id}: {e}")
             return None
 
+    def get_document_ids_for_fragment(self, sys_id: str) -> List[int]:
+        """Every PGP document a fragment is linked to (a fragment may have one for its recto and one for
+        its verso), by id, each once. ``get_document_for_fragment`` chooses one of them; this lists all.
+        Returns an empty list if none, or on error."""
+        if not sys_id or not self._conn:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT document_id FROM document_fragments "
+                "WHERE sys_id = ? AND document_id IS NOT NULL ORDER BY document_id",
+                (sys_id,)
+            )
+            return [row[0] for row in cursor]
+        except Exception as e:
+            logger.error(f"Error getting documents for fragment {sys_id}: {e}")
+            return []
+
     def get_fragments_for_document(self, pgpid: int) -> List[Dict[str, Any]]:
         """
         Get all fragments for a PGP document, ordered by sequence.
@@ -557,6 +574,23 @@ class PgpService:
             return {row['sys_id'] for row in cursor if row['sys_id']}
         except Exception as e:
             logger.error(f"Error fetching all PGP-link sys_ids: {e}")
+            return set()
+
+    def get_all_joined_sys_ids(self) -> Set[str]:
+        """Every fragment of a PGP document of several fragments, corpus-wide: the joins PGP
+        knows, the fragments the shelf picker's details name PGP partners for (its join sign,
+        ``shared/shelfmark_tree_signs.py``). Empty without the sidecar or on error."""
+        if not self._conn:
+            return set()
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT sys_id FROM document_fragments WHERE document_id IN ("
+                "  SELECT document_id FROM document_fragments GROUP BY document_id"
+                "  HAVING COUNT(DISTINCT sys_id) > 1)"
+            )
+            return {row['sys_id'] for row in cursor if row['sys_id']}
+        except Exception as e:
+            logger.error(f"Error fetching PGP joined sys_ids: {e}")
             return set()
 
     def get_sys_ids_with_editions(self, sys_ids: Optional[List[str]] = None, *,
@@ -1222,6 +1256,12 @@ def get_document_for_fragment(sys_id: str, page_num: int = None) -> Optional[Dic
     return svc.get_document_for_fragment(sys_id, page_num)
 
 
+def get_document_ids_for_fragment(sys_id: str) -> List[int]:
+    """Every PGP document id a fragment is linked to, each once (``DocumentService.get_document_ids_for_fragment``)."""
+    svc = get_pgp_service()
+    return svc.get_document_ids_for_fragment(sys_id)
+
+
 def get_fragments_for_document(pgpid: int) -> List[Dict[str, Any]]:
     """
     Get all fragments for a PGP document, ordered by sequence.
@@ -1367,6 +1407,13 @@ def get_all_pgp_link_sys_ids() -> Set[str]:
     link-presence, corpus-wide, for the catalog browse PGP filter."""
     svc = get_pgp_service()
     return svc.get_all_pgp_link_sys_ids()
+
+
+def get_all_joined_sys_ids() -> Set[str]:
+    """Full-corpus set of the fragments of PGP documents of several fragments. See
+    :meth:`PGPDocumentService.get_all_joined_sys_ids`."""
+    svc = get_pgp_service()
+    return svc.get_all_joined_sys_ids()
 
 
 def get_pgp_page_urls_for_sys_ids(sys_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:

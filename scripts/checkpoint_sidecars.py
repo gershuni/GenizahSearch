@@ -15,6 +15,7 @@ SIDECARS = [
     "nli_data/nli_crossref.db",
     "fgp_data/fgp_transcriptions.db",
     "catalog_data/catalog_text.db",
+    "shelfmark_tree_data/shelfmark_tree.db",
 ]
 
 

@@ -77,6 +77,8 @@ DESKTOP_MODULES = [
     "desktop/widgets/filter_chip.py",   # removable filter chips, 2026-10-27
     # 2026-10-24: the side menu, the optional second menu layout.
     "desktop/widgets/side_nav.py",
+    "desktop/widgets/shelfmark_tree_picker.py",  # Pick from the shelf (shelf tree picker PR 3), 2026-11-20
+    "desktop/widgets/shelf_pick_button.py",  # the hosts' "Pick from the shelf" button, 2026-11-20
     "desktop/go_to_dialog.py",           # the Go to box (Ctrl+G), 2026-10-24
     "desktop/shortcuts_dialog.py",       # the keyboard shortcuts card (Ctrl+/), 2026-10-30
     "desktop/startup_tips.py",           # one tip at each start, 2026-10-25

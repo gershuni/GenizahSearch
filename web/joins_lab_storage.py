@@ -59,6 +59,7 @@ import dataclasses
 
 from typing import Any, Optional
 
+from shared.shelfmark_tree_limits import PUZZLE_MAX_ITEMS
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 
 # ---------------------------------------------------------------------------
@@ -349,8 +350,11 @@ def read_anchor() -> Optional[dict]:
     return read_joins_lab_state()
 
 
-PUZZLE_STAGING_MAX = 21  # what the puzzle page takes from one handoff (web/pages/puzzle.py)
+# What the puzzle page takes from one handoff (web/pages/puzzle.py): the Puzzle's limit, the same
+# number on both sides (a join may be 20 fragments; the shelf picker's Add to Puzzle hands over up to 30).
+PUZZLE_STAGING_MAX = PUZZLE_MAX_ITEMS
 PUZZLE_STAGING_SOURCE_JOIN = 'join'  # a whole join or document, opened as a puzzle of its own
+PUZZLE_STAGING_SOURCE_SHELF = 'shelf'  # the shelf picker's Add to Puzzle: added to the canvas the tab has
 
 
 def stage_fragments_for_puzzle(sys_ids, source: str = PUZZLE_STAGING_SOURCE_JOIN) -> int:

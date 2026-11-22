@@ -501,6 +501,23 @@ def test_get_join_group(service):
     assert "990001" not in alma_ids
 
 
+def test_get_all_joined_sys_ids(test_db):
+    """Every manuscript in a join group with another; a group of one is no join."""
+    import sqlite3
+    conn = sqlite3.connect(test_db)
+    conn.execute("INSERT INTO joins VALUES ('990009', 300, 'X', NULL, NULL)")
+    conn.commit()
+    conn.close()
+    svc = FjmsService(db_path=test_db)
+    try:
+        assert svc.get_all_joined_sys_ids() == {"990001", "990004", "990005", "990006"}
+    finally:
+        svc.close()
+    missing = FjmsService(db_path="nonexistent_path_that_does_not_exist.db")
+    assert missing.get_all_joined_sys_ids() == set()
+    missing.close()
+
+
 def test_get_join_group_has_correct_keys(service):
     """Each join group member dict has expected aggregated keys."""
     joins = service.get_join_group("990001")

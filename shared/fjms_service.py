@@ -3548,6 +3548,23 @@ class FjmsService:
             logger.error(f"FjmsService.get_join_group error for {sys_id}: {e}")
             return []
 
+    def get_all_joined_sys_ids(self) -> set:
+        """Every manuscript in a join group with another manuscript, corpus-wide: the
+        manuscripts ``get_join_group`` answers with partners for (the shelf picker's join
+        sign, ``shared/shelfmark_tree_signs.py``). Empty without the sidecar or on error."""
+        if self._conn is None:
+            return set()
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT AlmaId FROM joins WHERE JoinGroupId IN ("
+                "  SELECT JoinGroupId FROM joins GROUP BY JoinGroupId"
+                "  HAVING COUNT(DISTINCT AlmaId) > 1)"
+            )
+            return {str(row["AlmaId"]) for row in cursor if row["AlmaId"]}
+        except Exception as e:
+            logger.error(f"FjmsService.get_all_joined_sys_ids error: {e}")
+            return set()
+
     def get_catalog(self, sys_id: str) -> Optional[dict]:
         """
         Get catalog metadata for a manuscript (first record only).

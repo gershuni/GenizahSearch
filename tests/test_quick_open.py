@@ -97,6 +97,7 @@ class _Window:
     """The parts of GenizahGUI Go to, F1 and Ctrl+F use, with the real methods."""
 
     go_to = GenizahGUI.go_to
+    _browse_open_field = GenizahGUI._browse_open_field   # go_to's Browse half (the shelf picker's too)
     _catalogue_has_shelfmark = GenizahGUI._catalogue_has_shelfmark
     _go_to_word_mode = GenizahGUI._go_to_word_mode
     _GO_TO_WORD_MODES = GenizahGUI._GO_TO_WORD_MODES

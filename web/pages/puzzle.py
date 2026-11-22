@@ -14,6 +14,9 @@ import json
 
 from nicegui import ui, app, run
 from web import io_bound_result
+from web.client_guard import client_gone
+from web.components.shelf_pick import shelf_pick_button
+from shared.shelfmark_tree_limits import PUZZLE_MAX_ITEMS, limit_for, refusal_message
 from web.components.shelfmark_picker import items_from_options, open_shelfmark_picker
 from web.translations import tr, get_language
 from web.state import state
@@ -30,6 +33,12 @@ from shared.nli_circuit_breaker import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Fragments one confirm of the shelf picker adds to the canvas (handoff DX13, as DX5's
+#: Reading Desk): each is a folio lookup and an image; the rest stay chosen for the next.
+#: Seconds a confirm waits for the canvas to say each image drew (``puzzle-add-result``); one it
+#: has not answered for by then was sent, and counts as added.
+PUZZLE_CONFIRM_WAIT = 30.0
 
 # Fabric.js CDN (v6.4.3 stable)
 FABRIC_JS_CDN = '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js"></script>'
@@ -2595,7 +2604,7 @@ def _parse_puzzle_event_args(args):
 
 
 async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider,
-                                  still_wanted=None):
+                                  still_wanted=None, room_for=None):
     """Resolve a manuscript's folios and add the first folio image to the canvas.
 
     Fetches the NLI IIIF manifest to get FL IDs, determines the appropriate
@@ -2612,6 +2621,12 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         still_wanted: Optional callable asked after the folio lookup (which
             can take seconds): False means the canvas this fragment was meant
             for has been replaced meanwhile, and nothing is added.
+        room_for: Optional callable asked with the fragment's key once it is
+            known: False means the canvas has no room for it, and nothing is
+            added (a key already on the canvas is drawn again in its place).
+
+    Returns the fragment's key once its image is sent to the canvas (whose
+    ``puzzle-add-result`` then says whether it drew), else None.
     """
     folios = await run.io_bound(_resolve_folios, sys_id)
     if still_wanted is not None and not still_wanted():
@@ -2627,6 +2642,8 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
     external_provider = first.get('external_provider', '')
     page_index = first.get('page_index', 0)
     key = f"{sys_id},{folio_label}"
+    if room_for is not None and not room_for(key):
+        return
 
     threshold = 30.0
     is_cul = False
@@ -2690,6 +2707,7 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         'external_provider': external_provider,
         'page_index': page_index,
     }
+    return key
 
 
 def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
@@ -2762,6 +2780,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         'url_add_live': bool(initial_add),
         'url_doc_live': bool(initial_doc),
     }
+
+    # Fragment key -> futures a confirm of the shelf picker waits on: the canvas's
+    # puzzle-add-result says whether the image drew (on_puzzle_add_result resolves them).
+    add_waiters: dict = {}
 
     def _canvas_guard():
         """A check for an add that has to wait (a folio lookup can take seconds):
@@ -3807,6 +3829,87 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 'dense flat dark color=primary round size=sm'
             ).tooltip(tr('Add fragment'))
 
+            # Pick from the shelf (shelf tree picker, PR 5 and its multiple choice): several
+            # fragments at once, up to 30 on the canvas (owner, 2026-11-21: limited when ticking;
+            # shared/shelfmark_tree_limits.py; the rest stay chosen), bound to the canvas as it is
+            # when the picker is opened, as the typed box and the lists are. Each goes through the
+            # add the typed box uses.
+            def _canvas_fragments() -> int:
+                # the fragments on the canvas and on their way to it, each once: two folios of one
+                # manuscript are two fragments (Codex on #82)
+                return len(set(puzzle_meta) | set(pending_fragment_meta))
+
+            def _puzzle_limit():
+                return limit_for('puzzle', base_items=_canvas_fragments)
+
+            def _shelf_pick_for_this_canvas():
+                same_canvas = _canvas_guard()
+
+                def still_wanted():
+                    # the same canvas, in a tab still open (asked again after each folio lookup)
+                    return same_canvas() and not client_gone(puzzle_main)
+
+                async def _add_chosen(entries, _label):
+                    # Taken: what the canvas drew (its puzzle-add-result), or what it has not
+                    # answered for in PUZZLE_CONFIRM_WAIT (sent). Not taken, so still chosen: no
+                    # images, an image that failed, a canvas replaced meanwhile, an error.
+                    sent = []
+                    limit = _puzzle_limit()
+                    fits = set(limit.take([e['sys_id'] for e in entries]))
+                    batch = [e for e in entries if e['sys_id'] in fits]
+                    over = None
+                    if len(batch) < len(entries):
+                        over = limit.refusal(fits, fits | {entries[len(batch)]['sys_id']})
+                    for entry in batch:
+                        if not still_wanted():
+                            break  # another document was opened meanwhile: the rest stay chosen
+                        if not limit.take([entry['sys_id']]):
+                            # the canvas filled meanwhile (another confirm; Codex on #82): the rest stay
+                            over = over or limit.refusal(frozenset(), {entry['sys_id']})
+                            break
+
+                        def wanted_with_room(sid=entry['sys_id']):
+                            # asked again after the folio lookup, with no wait before the fragment is
+                            # recorded: a typed add may have filled the canvas meanwhile (Codex on #82)
+                            return still_wanted() and bool(limit.take([sid]))
+                        try:
+                            key = await _add_fragment_by_sys_id(
+                                entry['sys_id'], entry['shelfmark'], puzzle_meta,
+                                pending_fragment_meta, threshold_slider, still_wanted=wanted_with_room
+                            )
+                        except Exception as add_err:
+                            logger.warning("Puzzle: %s not added from the shelf: %s", entry['sys_id'], add_err)
+                            continue
+                        if not key and still_wanted() and not limit.take([entry['sys_id']]):
+                            over = over or limit.refusal(frozenset(), {entry['sys_id']})
+                            break                      # the canvas filled during the lookup: the rest stay
+                        if key and still_wanted():
+                            drew = asyncio.get_running_loop().create_future()
+                            add_waiters.setdefault(key, []).append(drew)
+                            sent.append((entry['sys_id'], key, drew))
+                    if sent:
+                        await asyncio.wait([drew for _s, _k, drew in sent], timeout=PUZZLE_CONFIRM_WAIT)
+                    for _sys_id, key, drew in sent:
+                        waiters = add_waiters.get(key)
+                        if waiters and drew in waiters:
+                            waiters.remove(drew)
+                            if not waiters:
+                                add_waiters.pop(key, None)
+                    if not still_wanted():
+                        # Another puzzle was opened or begun meanwhile: the canvas now shown holds
+                        # none of them, even those that drew on the one replaced. All stay chosen.
+                        return []
+                    taken = [sys_id for sys_id, _key, drew in sent if not drew.done() or drew.result()]
+                    if over is not None:
+                        ui.notify(refusal_message(over, tr), type='info')
+                    return taken
+                return _add_chosen
+
+            shelf_pick_button(on_open=_shelf_pick_for_this_canvas, label='', multi=True, purpose='puzzle',
+                              confirm_label=tr('Add them to the puzzle'),
+                              lists_mgr=lambda: state.lists_mgr, limit=_puzzle_limit,
+                              props='dense flat dark round size=sm', testid='puzzle-shelf-pick')
+
             async def on_add_from_list():
                 """Show dialog to pick a manuscript from personal lists."""
                 # For the canvas as it is when the dialog is asked for: what is
@@ -4465,6 +4568,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             key = payload.get('key')
             if not key:
                 return
+            for drew in add_waiters.pop(key, []):   # a confirm from the shelf waits for its answer
+                if not drew.done():
+                    drew.set_result(bool(payload.get('success')))
             pending = pending_fragment_meta.pop(key, None)
             loading_keys = doc_state['loading_keys']
             part_of_load = doc_state.get('loading') and key in loading_keys
@@ -5048,7 +5154,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     # (mirrors the existing single-fragment auto_add pattern at :3779-3911 — B2).
     bulk = safe_user_pop('puzzle_staging', None)
     if isinstance(bulk, dict) and bulk.get('schema_version') == 1 and bulk.get('fragments'):
-        bulk_fragments = list(bulk.get('fragments', []))[:21]  # anchor + max 20 (T-120-input)
+        # the Puzzle's limit, as the handoff writes it (web/joins_lab_storage.py::PUZZLE_STAGING_MAX)
+        bulk_fragments = list(bulk.get('fragments', []))[:PUZZLE_MAX_ITEMS]
 
         async def auto_add_bulk():
             """Deferred sequential bulk-add from puzzle_staging.
@@ -5116,10 +5223,60 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             # up, the rest are not added there: they would be auto-saved into
             # a draft that has nothing to do with this join.
 
+            # What fits the canvas's room (the Puzzle's limit, PUZZLE_MAX_ITEMS,
+            # with what it holds): the rest are not added, and the reader is
+            # told how many. Each fragment is charged once its key is known
+            # (room_for): one whose key is on the canvas is drawn again in its
+            # place, free. Every one handed over is tried in its order while
+            # there is room (one without an image leaves its place to the
+            # next); when the canvas looks full, the images still loading are
+            # waited for first (one that fails frees its place; Codex on #88),
+            # and then only a manuscript already on it is looked up (its
+            # fragment may be the one there).
+            def _on_canvas():
+                return set(puzzle_meta) | set(pending_fragment_meta)
+
+            async def _loading_answered():
+                keys = list(pending_fragment_meta)
+                if not keys:
+                    return
+                loop = asyncio.get_running_loop()
+                waits = []
+                for key in keys:
+                    drew = loop.create_future()
+                    add_waiters.setdefault(key, []).append(drew)
+                    waits.append((key, drew))
+                await asyncio.wait([drew for _key, drew in waits], timeout=PUZZLE_CONFIRM_WAIT)
+                for key, drew in waits:
+                    waiting = add_waiters.get(key)
+                    if waiting and drew in waiting:
+                        waiting.remove(drew)
+                        if not waiting:
+                            add_waiters.pop(key, None)
+
+            left_out = 0
+
+            def _room_for(key):
+                nonlocal left_out
+                held = _on_canvas()
+                if key in held or len(held) < PUZZLE_MAX_ITEMS:
+                    return True
+                left_out += 1
+                return False
+
             for sys_id in bulk_fragments:
                 if not _same_canvas():
                     return
                 if not sys_id:
+                    continue
+                held = _on_canvas()
+                if len(held) >= PUZZLE_MAX_ITEMS and not any(k.split(',', 1)[0] == sys_id for k in held):
+                    await _loading_answered()
+                    if not _same_canvas():
+                        return
+                    held = _on_canvas()
+                if len(held) >= PUZZLE_MAX_ITEMS and not any(k.split(',', 1)[0] == sys_id for k in held):
+                    left_out += 1                  # full: not looked up at all
                     continue
                 shelfmark = ''
                 try:
@@ -5131,8 +5288,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 await _add_fragment_by_sys_id(
                     sys_id, shelfmark, puzzle_meta,
                     pending_fragment_meta, threshold_slider,
-                    still_wanted=_same_canvas,
+                    still_wanted=_same_canvas, room_for=_room_for,
                 )
+            if left_out and _same_canvas():
+                ui.notify(tr('The puzzle holds up to {n} fragments. Not added: {m}').format(
+                    n=f"{PUZZLE_MAX_ITEMS:,}", m=f"{left_out:,}"), type='warning')
 
         # Schedule via the SAME _after_delay wrapper the single-add uses —
         # it re-enters the client context with ``with _puzzle_client:`` and

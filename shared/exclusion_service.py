@@ -12,6 +12,7 @@ Provides shared data models and logic for both web and desktop apps:
 import csv
 import io
 import logging
+import uuid
 from dataclasses import dataclass, field
 
 from shared.browse_map_utils import normalize_shelfmark
@@ -38,7 +39,7 @@ class ResolvedEntry:
 class ExclusionSource:
     """A single source of excluded manuscripts (file import or list selection)."""
     label: str
-    source_type: str  # 'list' or 'file'
+    source_type: str  # 'list', 'file' or 'shelf'
     source_id: str
     sys_ids: set = field(default_factory=set)
     unresolved: list = field(default_factory=list)
@@ -169,6 +170,14 @@ def catalog_fallback(meta_mgr):
         answers = meta_mgr.resolve_catalog_forms(lines)
         return {line: a['sys_id'] for line, a in answers.items() if a.get('sys_id')}
     return _fallback
+
+
+def shelf_exclusion_source(sys_ids, label: str) -> ExclusionSource:
+    """An exclusion chosen on the shelf (the shelf tree picker's multiple choice, PR 4): the picker's
+    ids as they are, never resolved again from shelfmarks; an id of its own, so removing it never
+    removes another source."""
+    return ExclusionSource(label=label, source_type='shelf', source_id=f"shelf:{uuid.uuid4().hex[:12]}",
+                           sys_ids=set(sys_ids), unresolved=[])
 
 
 def compute_excluded_ids(sources: list[ExclusionSource]) -> set[str]:

@@ -31,6 +31,7 @@ from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
 from web.components.translate_button import detect_language, translate_text
+from web.components.shelf_pick import shelf_pick_button
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,15 @@ def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
             pass  # Shelfmark lookup failed; use fallback identifier
 
     return doc_id or '', ''
+
+
+def picked_document(selection: dict) -> tuple:
+    """A shelf picker's choice as the document lists hand it to ``select_document``: ``(sys_id,
+    shelfmark, title, page)``. The shelfmark is the picker's (ours, D3); the title is looked up as
+    the list path does for an item that lacks one; the page is the first."""
+    sys_id = selection['sys_id']
+    _shelfmark, title = resolve_shelfmark(sys_id)
+    return sys_id, selection.get('shelfmark') or sys_id, title, 1
 
 
 def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
@@ -1475,7 +1485,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                     except Exception:
                                         selected_doc['page_number'] = None  # Initialization failed; feature degrades gracefully
 
-                                page_sel.on('update:model-value', on_page_change)
+                                page_sel.on_value_change(on_page_change)
                             selected_doc['page_number'] = int(initial_page)
                     except Exception:
                         pass  # Update failed; continue with current state
@@ -1595,6 +1605,11 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
             with ui.row().classes('w-full gap-2 mb-3'):
                 ui.button(tr('Recent Activity'), icon='history', on_click=fetch_recent).props('outlined dense')
                 ui.button(tr('My Lists'), icon='bookmark', on_click=show_lists_view).props('outlined dense')
+                # Pick from the shelf (shelf tree picker plan §3.5, PR 7): into the same
+                # select_document as the lists; absent when the shelf tree is not served.
+                shelf_pick_button(lambda sel: select_document(*picked_document(sel)),
+                                  start=lambda: selected_doc['sys_id'], props='outlined dense no-caps',
+                                  confirm_label=tr('Select'), testid='discovery-edit-shelf-pick')
 
             # Initialize: show current document info and page selector if applicable
             if selected_doc['sys_id']:
@@ -1622,7 +1637,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                     except Exception:
                                         selected_doc['page_number'] = None  # Initialization failed; feature degrades gracefully
 
-                                page_sel.on('update:model-value', on_page_change)
+                                page_sel.on_value_change(on_page_change)
                     except Exception:
                         pass  # Update failed; continue with current state
 
@@ -1924,23 +1939,33 @@ def create_new_discovery_dialog(on_success=None):
                     with ui.row().classes('w-full gap-2 mb-3'):
                         ui.button(tr('Recent Activity'), icon='history', on_click=fetch_recent).props('outlined dense')
                         ui.button(tr('My Lists'), icon='bookmark', on_click=show_lists_view).props('outlined dense')
+                        # Pick from the shelf (shelf tree picker plan §3.5, PR 7): into the same
+                        # select_document as the lists; absent when the shelf tree is not served.
+                        shelf_pick_button(lambda sel: select_document(*picked_document(sel)),
+                                          start=lambda: selected_doc['sys_id'], props='outlined dense no-caps',
+                                          confirm_label=tr('Select'), testid='discovery-shelf-pick')
 
                 # Additional Shelfmarks section
                 with ui.expansion(tr('Additional shelfmarks (optional)'), icon='library_books').classes('w-full'):
                     additional_shelfmarks_container = ui.column().classes('w-full gap-2')
 
-                    def add_additional_shelfmark():
-                        """Add an additional shelfmark entry."""
-                        new_entry = {'shelfmark': '', 'document_id': '', 'page_number': None}
+                    def add_additional_shelfmark(resolved: Optional[dict] = None):
+                        """Add an additional shelfmark entry: empty, to type, or ``resolved`` by the shelf
+                        picker, whose manuscript id is kept with it (§10.4) until its text is edited.
+                        Each control acts on its own entry, not on a list index that shifts when an
+                        earlier entry is removed."""
+                        new_entry = {'shelfmark': (resolved or {}).get('shelfmark') or '',
+                                     'document_id': (resolved or {}).get('sys_id') or '',
+                                     'page_number': None}
                         additional_shelfmarks_list.append(new_entry)
-                        idx = len(additional_shelfmarks_list) - 1
 
                         with additional_shelfmarks_container:
                             with ui.card().classes('w-full p-2').style('background: var(--surface-secondary);') as card:
                                 with ui.row().classes('w-full items-center gap-2'):
                                     shelfmark_input = ui.input(
                                         label=tr('Shelfmark'),
-                                        placeholder='T-S 13J1.1'
+                                        placeholder='T-S 13J1.1',
+                                        value=new_entry['shelfmark'],
                                     ).classes('flex-1').props('outlined dense')
 
                                     page_input = ui.number(
@@ -1948,25 +1973,38 @@ def create_new_discovery_dialog(on_success=None):
                                         min=1
                                     ).classes('w-20').props('outlined dense')
 
-                                    def remove_entry(i=idx, c=card):
-                                        if i < len(additional_shelfmarks_list):
-                                            additional_shelfmarks_list.pop(i)
+                                    def remove_entry(entry=new_entry, c=card):
+                                        for i, kept in enumerate(additional_shelfmarks_list):
+                                            if kept is entry:
+                                                del additional_shelfmarks_list[i]
+                                                break
                                         c.delete()
 
                                     ui.button(icon='close', on_click=remove_entry).props('flat round dense size=sm color=negative')
 
-                                def update_entry_shelfmark(e, i=idx):
-                                    if i < len(additional_shelfmarks_list):
-                                        additional_shelfmarks_list[i]['shelfmark'] = e.value
+                                picked_as = new_entry['shelfmark']
 
-                                def update_entry_page(e, i=idx):
-                                    if i < len(additional_shelfmarks_list):
-                                        additional_shelfmarks_list[i]['page_number'] = int(e.value) if e.value else None
+                                # on_value_change: a Quasar 'update:model-value' listener receives
+                                # GenericEventArguments, which has no .value, so the typed text was
+                                # never kept and a typed additional shelfmark was dropped on Share.
+                                def update_entry_shelfmark(e, entry=new_entry):
+                                    entry['shelfmark'] = (e.value or '').strip()
+                                    if entry['document_id'] and entry['shelfmark'] != picked_as:
+                                        entry['document_id'] = ''      # typed over: no longer the one picked
 
-                                shelfmark_input.on('update:model-value', update_entry_shelfmark)
-                                page_input.on('update:model-value', update_entry_page)
+                                def update_entry_page(e, entry=new_entry):
+                                    entry['page_number'] = int(e.value) if e.value else None
 
-                    ui.button(tr('Add shelfmark'), icon='add', on_click=add_additional_shelfmark).props('outlined dense').classes('mt-2')
+                                shelfmark_input.on_value_change(update_entry_shelfmark)
+                                page_input.on_value_change(update_entry_page)
+
+                    with ui.row().classes('w-full gap-2 mt-2'):
+                        ui.button(tr('Add shelfmark'), icon='add', on_click=lambda: add_additional_shelfmark()).props('outlined dense')
+                        # Pick from the shelf (shelf tree picker plan §3.5, PR 7): an entry that keeps
+                        # the manuscript's id; absent when the shelf tree is not served.
+                        shelf_pick_button(add_additional_shelfmark, props='outlined dense no-caps',
+                                          confirm_label=tr('Add shelfmark'),
+                                          testid='discovery-additional-shelf-pick')
 
                 # Anonymous option
                 anonymous_check = ui.checkbox(tr('Post anonymously'), value=False).classes('text-sm')

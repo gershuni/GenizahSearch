@@ -23,6 +23,7 @@ import os
 import re
 import sqlite3
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -38,6 +39,8 @@ SIDECAR_FILENAME = "shelfmark_tree.db"
 REQUIRED_TABLES = ("meta", "node", "leaf", "library_code", "node_alias", "shortcut")
 #: The most leaves one ``leaves`` call returns.
 MAX_PAGE = 1000
+#: Nodes whose manuscripts ``members_under`` keeps (a picker recounts its chosen nodes on every change).
+_MEMBERS_KEPT = 32
 
 _NODE_COLUMNS = ("id, parent_id, kind, level, name_en, name_he, short, private, sort_key, lo, hi, "
                  "manuscripts, direct_leaves, child_nodes")
@@ -128,6 +131,8 @@ class ShelfmarkTreeService:
         self._meta: dict[str, str] = {}
         self._names: Optional[list[tuple[tuple, ShelfNode]]] = None
         self._names_lock = threading.Lock()
+        self._members: OrderedDict = OrderedDict()
+        self._members_lock = threading.Lock()
         self.unavailable_reason = "not opened"
         self._db_path = db_path or default_sidecar_path()
         if not os.path.isfile(self._db_path):
@@ -178,6 +183,8 @@ class ShelfmarkTreeService:
             except Exception:
                 pass
         self._conn = None
+        with self._members_lock:
+            self._members.clear()
         self.unavailable_reason = "closed"
 
     def _rows(self, sql: str, args: tuple = ()) -> list:
@@ -363,10 +370,73 @@ class ShelfmarkTreeService:
                           (node.lo, node.hi))
         return list(dict.fromkeys(r[0] for r in rows))
 
+    def leaves_under(self, node_id: str, direct: bool = False) -> list[ShelfLeaf]:
+        """Each manuscript under a node once, by its first place there in shelf order, with
+        ``sys_ids_under``'s order and its policy for a catalogue's list: a node holding places on the
+        shelf leaves the list's copies out, a node inside the list keeps them. ``direct``: only the
+        node's own shelfmarks (a collection that also holds volumes). What a whole-node choice of the
+        picker resolves to (plan §10.13); never a manuscript's first place elsewhere (``path_of``)."""
+        node = self.node(node_id)
+        if node is None:
+            return []
+        if direct:
+            rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE node_id = ? ORDER BY pos", (node.id,))
+        else:
+            rows = self._rows(f"SELECT {_LEAF_COLUMNS} FROM leaf WHERE pos BETWEEN ? AND ?{self._shelf_only(node)} "
+                              "ORDER BY pos", (node.lo, node.hi))
+        seen: set[str] = set()
+        out = []
+        for leaf in map(_leaf, rows):
+            if leaf.sys_id not in seen:
+                seen.add(leaf.sys_id)
+                out.append(leaf)
+        return out
+
+    def members_under(self, node_id: str, direct: bool = False, keep: bool = True) -> frozenset:
+        """The manuscripts ``leaves_under`` answers, as a set; kept for the last few nodes asked
+        (a picker counts its chosen nodes again on every change). ``keep=False``: read, and not
+        kept unless it already was (a picker's drawn rows, read once each)."""
+        key = (node_id, bool(direct))
+        with self._members_lock:
+            hit = self._members.get(key)
+            if hit is not None:
+                self._members.move_to_end(key)
+                return hit
+        node = self.node(node_id)
+        if node is None:
+            return frozenset()
+        if direct:
+            rows = self._rows("SELECT sys_id FROM leaf WHERE node_id = ?", (node.id,))
+        else:
+            rows = self._rows(f"SELECT sys_id FROM leaf WHERE pos BETWEEN ? AND ?{self._shelf_only(node)}",
+                              (node.lo, node.hi))
+        found = frozenset(r[0] for r in rows)
+        if keep and self._conn is not None:
+            with self._members_lock:
+                self._members[key] = found
+                while len(self._members) > _MEMBERS_KEPT:
+                    self._members.popitem(last=False)
+        return found
+
     def libraries_of_code(self, code: str) -> list[str]:
         """The library node ids a ``library_code`` is tied to."""
         return [r[0] for r in self._rows("SELECT node_id FROM library_code WHERE code = ? ORDER BY node_id",
                                          (code,))]
+
+    def codes_of_library(self, node_id: str) -> list[str]:
+        """The ``library_code`` values tied to a library node ("CUL", "Mosseri", "Westminster"), A-Z;
+        the chips name a library by one of them (``shared/shelfmark_tree_limits.py::library_code``)."""
+        return [r[0] for r in self._rows("SELECT code FROM library_code WHERE node_id = ? ORDER BY code",
+                                         (node_id,)) if r[0]]
+
+    def library_codes(self) -> dict[str, tuple[str, ...]]:
+        """Every library node's ``library_code`` values, A-Z, in one query: the library column's
+        filter finds a library by them ("RNL", "CUL", "BL")."""
+        out: dict[str, list[str]] = {}
+        for node_id, code in self._rows("SELECT node_id, code FROM library_code ORDER BY node_id, code"):
+            if code:
+                out.setdefault(node_id, []).append(code)
+        return {k: tuple(v) for k, v in out.items()}
 
     def locate(self, text: str, library: Optional[str] = None) -> Located:
         """The collection or volume whose name covers most of the typed text, token by token
