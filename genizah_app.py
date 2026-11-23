@@ -8579,6 +8579,7 @@ class GenizahGUI(QMainWindow):
         # The desk's image side (desktop/reading_desk_images.py::ReadingDeskImagePane): one
         # image at a time, all images, or puzzle images. Added to browse_splitter on entry.
         self._browse_rd_image_scroll = None
+        self._browse_rd_image_toggle_before = None  # Browse's image toggle while the desk is open
         self._browse_rd_document = None  # (pgpid, sys_ids, is a document's desk), see _browse_rd_is_document
         self._browse_rd_syncing = False  # prevents infinite scroll sync loop
         self._rd_text_sync_handler = None  # stored ref for targeted disconnect
@@ -11035,9 +11036,14 @@ class GenizahGUI(QMainWindow):
         spare pixel to the text and held the image side at its minimum width, which differs
         from one image view to the next, so the divider jumped at each change of view. It starts
         with half of the room the text and the viewer had; the sizes before the desk come back
-        when it is left (``_browse_rd_restore_normal_view``)."""
+        when it is left (``_browse_rd_restore_normal_view``), and so does the image toggle: the
+        desk opens with its images on show, and the toggle hides and shows them
+        (``_browse_show_image_side``)."""
         splitter = self.browse_splitter
         self._browse_rd_sizes_before = splitter.sizes()
+        self._browse_rd_image_toggle_before = self.btn_b_toggle_img.isChecked()
+        self.btn_b_toggle_img.setChecked(True)
+        self.btn_b_toggle_img.setEnabled(True)
         self.browse_viewer.setVisible(False)
         splitter.addWidget(pane)
         self._browse_rd_image_scroll = pane
@@ -12189,7 +12195,7 @@ class GenizahGUI(QMainWindow):
         pane = self._browse_rd_image_scroll
         pane.set_desk(state, self._browse_rd_image_lists(), current_sys_id=self.current_browse_sid or '',
                       document_desk=self._browse_rd_is_document())
-        pane.setVisible(True)
+        pane.setVisible(self.btn_b_toggle_img.isChecked())  # hidden by the image toggle stays hidden
         if text_too and pane.current_view() == VIEW_ONE:
             self._browse_rd_render_text()
 
@@ -12342,7 +12348,13 @@ class GenizahGUI(QMainWindow):
             self._browse_rd_image_scroll.deleteLater()
             self._browse_rd_image_scroll = None
 
-        # Show normal viewer, the divider where it was before the desk
+        # The image toggle as Browse had it (the desk opened with its images on show), on while
+        # a manuscript is browsed; then the normal viewer, the divider where it was before the desk
+        toggle_before = getattr(self, '_browse_rd_image_toggle_before', None)
+        if toggle_before is not None:
+            self.btn_b_toggle_img.setChecked(toggle_before)
+        self._browse_rd_image_toggle_before = None
+        self.btn_b_toggle_img.setEnabled(bool(self.current_browse_sid))
         self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
         before = getattr(self, '_browse_rd_sizes_before', None)
         if before and len(before) == self.browse_splitter.count():
@@ -12558,8 +12570,19 @@ class GenizahGUI(QMainWindow):
             self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
     def toggle_browse_image(self):
-        visible = self.btn_b_toggle_img.isChecked()
-        self.browse_viewer.setVisible(visible)
+        self._browse_show_image_side()
+
+    def _browse_show_image_side(self):
+        """The image side the image toggle asks for. While the Reading Desk is open it is the
+        desk's (its three views are one pane), and Browse's own viewer stays hidden: the toggle
+        used to show that viewer beside the desk's images, two image panes (2026-11-22)."""
+        shown = self.btn_b_toggle_img.isChecked()
+        pane = self._browse_rd_image_scroll
+        if self.browse_reading_desk_active and pane is not None:
+            self.browse_viewer.setVisible(False)
+            pane.setVisible(shown)
+        else:
+            self.browse_viewer.setVisible(shown)
 
     def _set_browse_image_pane_visible(self, visible: bool):
         """Phase 95 D-27 helper — programmatic equivalent of toggle_browse_image.
@@ -12567,7 +12590,12 @@ class GenizahGUI(QMainWindow):
         Keeps the toolbar toggle button state in sync with the pane visibility.
         Used by LOCAL hits which always render text-only (no image).
         I15 RESOLVED: wraps the existing browse_viewer.setVisible + btn_b_toggle_img pattern.
+        While the Reading Desk is open this is Browse's own viewer's state, given back when
+        the desk is left (_browse_rd_restore_normal_view): the desk's images stay as they are.
         """
+        if getattr(self, 'browse_reading_desk_active', False) and getattr(self, '_browse_rd_image_scroll', None):
+            self._browse_rd_image_toggle_before = visible
+            return
         if hasattr(self, 'btn_b_toggle_img'):
             self.btn_b_toggle_img.setChecked(visible)
         if hasattr(self, 'browse_viewer'):
@@ -35464,10 +35492,11 @@ class GenizahGUI(QMainWindow):
             img = page_data.get('p_num') if page_data else None
             self.lists_mgr.add_to_recent(sid, fl_id=fl_id, img=img)
 
-        # Disable controls until loaded
+        # Disable controls until loaded (the image toggle stays with an open desk: it hides and
+        # shows the desk's images, which are there already)
         self.btn_b_catalog.setEnabled(False)
         self.btn_b_save.setEnabled(False)
-        self.btn_b_toggle_img.setEnabled(False)
+        self.btn_b_toggle_img.setEnabled(self.browse_reading_desk_active)
 
         # Trigger Unified Enrichment (Meta + Images)
         self._start_browse_enrichment(sid, is_part=False)
@@ -35752,7 +35781,7 @@ class GenizahGUI(QMainWindow):
             self.btn_b_all.setChecked(False)
             self.btn_b_all.blockSignals(False)
             self.btn_b_toggle_img.setEnabled(True)
-            self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+            self._browse_show_image_side()  # an open desk keeps Browse's viewer hidden
 
         # Enable core buttons immediately when content is available
         self.btn_find_parallels.setEnabled(True)

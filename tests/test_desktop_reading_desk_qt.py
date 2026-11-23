@@ -163,7 +163,7 @@ def test_the_divider_stays_where_it_is_when_the_view_changes():
     splitter.show()
     APP.processEvents()
     host = SimpleNamespace(browse_splitter=splitter, browse_viewer=viewer, browse_lists_panel=panel,
-                           browse_text=text, _browse_rd_image_scroll=None)
+                           browse_text=text, _browse_rd_image_scroll=None, btn_b_toggle_img=QPushButton())
     pane = rdi.ReadingDeskImagePane(puzzle_options={'own_lookup': lambda ids: [_own('a'), _own('b')],
                                                     'client_factory': lambda: None})
     gui._browse_rd_place_image_pane(host, pane)
@@ -185,6 +185,138 @@ def test_the_divider_stays_where_it_is_when_the_view_changes():
     APP.processEvents()
     assert splitter.sizes()[3] - before[3] > 80, splitter.sizes()
     splitter.hide()
+
+
+# -- the image toggle (show / hide image) with the desk open --------------------------
+
+def _browse(toggle_on=True, sys_id='990001'):
+    """Browse as the app builds it: the lists, the text and Browse's own viewer in the splitter,
+    and the image toggle wired to the host's own method. ``toggle_on`` is Browse's image on show."""
+    import genizah_app
+    from PyQt6.QtWidgets import QSplitter
+    gui = genizah_app.GenizahGUI
+    splitter = QSplitter()
+    panel, text_box, viewer = QWidget(), QWidget(), QWidget()
+    text = QTextEdit(text_box)
+    for w in (panel, text_box, viewer):
+        splitter.addWidget(w)
+    panel.setVisible(False)
+    viewer.setVisible(toggle_on)
+    toggle = QPushButton()
+    toggle.setCheckable(True)
+    toggle.setChecked(toggle_on)
+    toggle.setEnabled(bool(sys_id))
+    _KEEP.extend([splitter, toggle])
+    splitter.resize(1150, 700)
+    splitter.show()
+    APP.processEvents()
+    host = SimpleNamespace(
+        browse_splitter=splitter, browse_viewer=viewer, browse_lists_panel=panel, browse_text=text,
+        btn_b_toggle_img=toggle, current_browse_sid=sys_id, browse_reading_desk_active=False,
+        _browse_rd_image_scroll=None, _rd_text_sync_handler=None, _rd_image_sync_handler=None,
+        _rd_sync_image_bar=None)
+    for name in ('toggle_browse_image', '_browse_show_image_side', '_set_browse_image_pane_visible',
+                 '_browse_rd_disconnect_sync'):
+        setattr(host, name, (lambda n: lambda *a: getattr(gui, n)(host, *a))(name))
+    toggle.clicked.connect(lambda _checked: host.toggle_browse_image())  # the app: clicked -> toggle_browse_image
+    return gui, host
+
+
+def _open_desk(gui, host):
+    """The desk's image side placed as _browse_enter_reading_desk places it."""
+    state, lists = _desk(2)
+    pane = rdi.ReadingDeskImagePane(puzzle_options={'own_lookup': lambda ids: [_own('a'), _own('b')],
+                                                    'client_factory': lambda: None})
+    host.browse_reading_desk_active = True
+    gui._browse_rd_place_image_pane(host, pane)
+    pane.set_desk(state, lists)
+    APP.processEvents()
+    return pane, state, lists
+
+
+def _leave_desk(gui, host):
+    host.browse_reading_desk_active = False
+    gui._browse_rd_restore_normal_view(host)
+    APP.processEvents()
+
+
+def test_the_image_toggle_hides_and_shows_the_desks_images_in_every_view():
+    """It used to show Browse's own viewer beside the desk's images: two image panes (owner,
+    2026-11-22)."""
+    gui, host = _browse()
+    pane, _state, _lists = _open_desk(gui, host)
+    toggle, viewer = host.btn_b_toggle_img, host.browse_viewer
+    assert pane.isVisible() and not viewer.isVisible()
+    assert toggle.isChecked() and toggle.isEnabled()
+    for view in ('one', 'all', 'join'):
+        pane.view_buttons[view].click()
+        APP.processEvents()
+        toggle.click()
+        APP.processEvents()
+        assert not pane.isVisible() and not viewer.isVisible(), view
+        toggle.click()
+        APP.processEvents()
+        assert pane.isVisible() and not viewer.isVisible(), view
+        assert pane.current_view() == view
+    _leave_desk(gui, host)
+    host.browse_splitter.hide()
+
+
+def test_a_redraw_keeps_the_desks_images_hidden():
+    gui, host = _browse()
+    pane, state, lists = _open_desk(gui, host)
+    host.btn_b_toggle_img.click()
+    host.browse_reading_desk_state = state
+    host._browse_rd_image_lists = lambda: lists
+    host._browse_rd_is_document = lambda: False
+    host._browse_rd_setup_sync_scroll = lambda: None
+    gui._browse_rd_render_images(host, False)  # as an image list arriving redraws it
+    APP.processEvents()
+    assert not pane.isVisible() and not host.browse_viewer.isVisible()
+    _leave_desk(gui, host)
+    host.browse_splitter.hide()
+
+
+@pytest.mark.parametrize('toggle_on', [True, False])
+def test_the_desk_opens_with_its_images_and_gives_browse_its_toggle_back(toggle_on):
+    gui, host = _browse(toggle_on=toggle_on)
+    pane, _state, _lists = _open_desk(gui, host)
+    toggle, viewer = host.btn_b_toggle_img, host.browse_viewer
+    assert pane.isVisible() and toggle.isChecked()
+    toggle.click()  # the desk's images hidden
+    APP.processEvents()
+    _leave_desk(gui, host)
+    assert toggle.isChecked() == toggle_on and viewer.isVisible() == toggle_on
+    assert toggle.isEnabled()
+    host.browse_splitter.hide()
+
+
+def test_with_nothing_browsed_the_toggle_serves_the_desk_and_is_off_after_it():
+    gui, host = _browse(sys_id='')
+    assert not host.btn_b_toggle_img.isEnabled()
+    pane, _state, _lists = _open_desk(gui, host)
+    assert host.btn_b_toggle_img.isEnabled()
+    host.btn_b_toggle_img.click()
+    APP.processEvents()
+    assert not pane.isVisible() and not host.browse_viewer.isVisible()
+    _leave_desk(gui, host)
+    assert not host.btn_b_toggle_img.isEnabled()
+    host.browse_splitter.hide()
+
+
+def test_opening_a_manuscript_with_the_desk_open_shows_no_second_image_pane():
+    """A result opened while the desk is open goes to the desk; Browse's "show the image" is
+    kept for after the desk, and the desk's images stay as the reader left them."""
+    gui, host = _browse(toggle_on=False)
+    pane, _state, _lists = _open_desk(gui, host)
+    host.btn_b_toggle_img.click()  # the desk's images hidden
+    host._set_browse_image_pane_visible(True)
+    APP.processEvents()
+    assert not host.browse_viewer.isVisible() and not pane.isVisible()
+    assert not host.btn_b_toggle_img.isChecked()
+    _leave_desk(gui, host)
+    assert host.btn_b_toggle_img.isChecked() and host.browse_viewer.isVisible()
+    host.browse_splitter.hide()
 
 
 def test_in_all_images_a_thumbnail_scrolls_to_its_image():
