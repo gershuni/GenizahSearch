@@ -1726,6 +1726,7 @@ TRANSLATIONS = {
     "Search for Parallels": "חפש מקבילות",
     "Full Manuscript View": "תצוגת כתב יד מלא",
     "Back to Page View": "חזרה לתצוגת עמוד",
+    "Back to the Reading Desk ({n})": "חזרה לשולחן העיון ({n})",
     "No more manuscripts": "אין עוד כתבי יד",
     "At first manuscript": "בכתב היד הראשון",
     "Could not load full manuscript": "לא ניתן לטעון את כתב היד המלא",

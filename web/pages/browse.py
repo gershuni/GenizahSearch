@@ -101,6 +101,7 @@ from shared.shelfmark_tree_view import (CRUMB_SEP, crumbs as shelf_crumbs, displ
 from web import io_bound_result
 from web.pages.browse_state import (
     BrowseState, page_has_reading_view, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
+    keep_desk_to_return, desk_to_return, forget_desk_to_return,
     clamp_zoom, zoom_percent, normalize_rotation, clamp_rotation, ROTATION_MIN, ROTATION_MAX,
 )
 from web.browse_bootstrap import resolve_browse_bootstrap
@@ -114,6 +115,8 @@ from web.pages.browse_desk_document import (
 )
 from web.pages.browse_desk_images import (
     IMAGES_CSS as _RD_IMAGES_CSS, KEY_IMAGE_SHOWN as DESK_KEY_IMAGE_SHOWN, move_buttons as desk_move_buttons,
+    KEY_PHONE_PANE as DESK_KEY_PHONE_PANE, PHONE_CSS as _RD_PHONE_CSS, phone_pane as desk_phone_pane,
+    PANE_SWITCH_JS as _RD_PANE_SWITCH_JS, TO_THE_TOP_JS as _TO_THE_TOP_JS,
     move_entry as desk_move_entry,
     page_label as desk_page_label, render_image_pane, shown_text_image,
 )
@@ -1987,6 +1990,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             })
         state.reading_desk_entries = entries
         state.reading_desk_selected_sources = dict(selected_sources or {})
+        # This desk, built, takes the place of one left to come back to: not before (a desk that failed to
+        # open leaves the kept one), and never in an embedded viewer, which keeps none (Codex #109).
+        if not embedded:
+            forget_desk_to_return(state)
         _persist_reading_desk_state()
         if draw:
             update_content()
@@ -2203,8 +2210,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """
         persist_browse_snapshot(state, state.current_page)
 
-    def _restore_reading_desk_state():
-        """Restore reading desk state from session storage after language switch."""
+    def _restore_reading_desk_state(saved=None):
+        """Restore reading desk state from session storage after language switch, or ``saved`` (the desk
+        left for one of its fragments, ``desk_to_return``)."""
         # M3 audit: Class B wrapper — the try/except covers multi-step logic
         # (dict access on saved.get('entries'), enter_joined_view() call,
         # source preference restoration). The storage call moves to
@@ -2212,7 +2220,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # but the outer wrapper is PRESERVED because it catches AttributeError,
         # KeyError, TypeError from downstream logic.
         try:
-            saved = safe_user_get('reading_desk_state')
+            if saved is None:
+                saved = safe_user_get('reading_desk_state')
             logger.info(f"[ReadingDesk] Attempting restore, saved state: {bool(saved)}")
             if saved and saved.get('entries'):
                 frag_info = saved['entries']
@@ -2833,6 +2842,49 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         content_container.clear()
 
         with content_container:
+            # The desk left for one of its fragments, to go back to (owner, 2026-11-23: a click on a shelfmark
+            # in the desk left no way back). It comes back as it was left, around the page on screen. First, so
+            # a shelfmark that found nothing (the error and the welcome below) still has it (Codex #109). Never in
+            # an embedded viewer: it neither reads nor restores the reader's Browse state (Codex #109).
+            _desk_left = desk_to_return(state) if not (state.view_joined or embedded) else None
+            if _desk_left:
+                async def _back_to_desk():
+                    # Read, not taken: the desk forgets it once it is built again (Codex #109). One that does
+                    # not come back leaves the page as it was, the desk still kept and its way back too.
+                    # In the page's own context: this button is drawn away on the way (ui calls in its
+                    # context raise once it is gone).
+                    saved = desk_to_return(state)
+                    if not saved:
+                        return
+                    with _page_client.layout:
+                        if not _restore_reading_desk_state(saved):
+                            exit_joined_view()
+                            ui.notify(tr('The choice could not be applied. It is kept; try again.'),
+                                      type='negative')
+                            return
+                        if state.current_page is None:
+                            # No page to draw the desk around (the shelfmark clicked found nothing): its
+                            # first fragment's, as a blank /browse with a saved desk (Codex #109).
+                            first = next((e.get('sys_id') for e in state.reading_desk_entries
+                                          if e.get('sys_id')), None)
+                            if first:
+                                state.sys_id, state.error, state.is_loading = first, None, True
+                                update_content()
+                                await load_page(p_num=1, _ux_nav=True)
+                                if state.current_page is None:
+                                    # No page came either: the desk is kept again, and its way back (the
+                                    # desk had forgotten it when it was rebuilt; Codex #109).
+                                    keep_desk_to_return(state)
+                                    exit_joined_view()
+                                    ui.notify(tr('The choice could not be applied. It is kept; try again.'),
+                                              type='negative')
+
+                with ui.row().classes('w-full print-hide browse-desk-return').style('margin-bottom: 8px;'):
+                    ui.button(
+                        tr('Back to the Reading Desk ({n})').format(n=len(_desk_left['entries'])),
+                        icon='auto_stories', on_click=_back_to_desk,
+                    ).props('outline no-caps dense color=green-8 padding="4px 12px" data-testid="desk-return"')
+
             if state.error and not state.current_page:
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
@@ -3980,8 +4032,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 rd_view = document_view(rd_document, state.reading_desk_selected_sources)
 
                 async def rd_navigate_to_fragment(target_sm):
-                    """Exit reading desk and navigate to a specific fragment."""
+                    """Exit reading desk and navigate to a specific fragment. The desk is kept to come back
+                    to: Browse offers "Back to the Reading Desk" (owner, 2026-11-23)."""
+                    if not embedded:  # an embedded viewer keeps nothing of the reader's Browse state
+                        keep_desk_to_return(state)
                     exit_joined_view()
+                    # To the top, where the way back is, above the manuscript's card (owner, 2026-11-23: on a
+                    # phone the page stayed scrolled where the desk had been, the button out of sight above).
+                    # Through the page: the name clicked was in the desk just drawn away, and ui.run_javascript
+                    # in its context raised, which stopped the search.
+                    _page_client.run_javascript(_TO_THE_TOP_JS)
                     state.shelfmark_query = target_sm
                     await search_shelfmark()
 
@@ -4249,27 +4309,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     tr('The change could not be saved. Check your connection and try again.'),
                                     type='warning')
 
+                        # a phone: their icons, each named (browse-icon-collapse; owner, 2026-11-23)
                         with ui.row().classes('items-center gap-2'):
                             if WEB_PUZZLE_ENABLED and len(state.reading_desk_entries) > 1:
                                 ui.button(
                                     tr('Open in Puzzle'), icon='extension',
                                     on_click=open_desk_in_puzzle
-                                ).props('flat dense text-color=white')
+                                ).props(f'flat dense text-color=white aria-label="{tr("Open in Puzzle")}"').classes(
+                                    'browse-icon-collapse')
                             ui.button(
                                 tr('Back to Page View'),
                                 icon='arrow_forward' if is_rtl() else 'arrow_back',
                                 on_click=exit_joined_view
-                            ).props('flat dense text-color=white')
+                            ).props(f'flat dense text-color=white aria-label="{tr("Back to Page View")}"').classes(
+                                'browse-icon-collapse')
 
                 # === Reading Desk Toolbar ===
                 with ui.card().classes('w-full mb-2 p-2').style(
                     'background: var(--bg-tertiary, #f3f4f6); border: 1px solid var(--border-light, #e5e7eb);'
                 ):
-                    with ui.row().classes('w-full items-center gap-3'):
+                    # a phone: the box on a line of its own, the buttons their icons under it
+                    with ui.row().classes('w-full items-center gap-3 rd-toolbar-row'):
                         # Shelfmark input for adding manuscripts
                         rd_shelfmark_input = ui.input(
                             placeholder=tr('Add by shelfmark...'),
-                        ).props('dense outlined clearable color=green').classes('flex-1').style('max-width: 300px;')
+                        ).props('dense outlined clearable color=green').classes('flex-1 rd-add-box').style('max-width: 300px;')
 
                         async def rd_toolbar_add():
                             # Awaited: toolbar_add_by_shelfmark is async (Enter and Add both
@@ -4286,45 +4350,71 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.button(
                             tr('Add'), icon='add',
                             on_click=rd_toolbar_add
-                        ).props('dense color=green')
+                        ).props(f'dense color=green aria-label="{tr("Add")}"').classes('browse-icon-collapse')
 
                         # Pick from the shelf (shelf tree picker, PR 5 and its multiple choice):
                         # several at once, each through the box's add, to the desk that was open
                         # when the picker was (_desk_add_chosen). What is ticked is kept until added.
-                        shelf_pick_button(on_open=_desk_shelf_handler, start=_shelf_start, multi=True,
+                        rd_shelf_btn = shelf_pick_button(on_open=_desk_shelf_handler, start=_shelf_start, multi=True,
                                           purpose='reading_desk',
                                           confirm_label=tr('Add them all to the Reading Desk'),
                                           lists_mgr=_lists_mgr_now, limit=_desk_limit,
                                           props='flat dense no-caps color=green', testid='rd-shelf-pick')
+                        if rd_shelf_btn is not None:            # None: no shelf tree served
+                            rd_shelf_btn.classes('browse-icon-collapse')
                         # Separator
-                        ui.separator().props('vertical').classes('h-6')
+                        ui.separator().props('vertical').classes('h-6 rd-wide-only')
 
                         # Add from List button
                         ui.button(
                             tr('Add from List'), icon='playlist_add',
                             on_click=show_add_from_list_dialog
-                        ).props('flat dense color=green')
+                        ).props(f'flat dense color=green aria-label="{tr("Add from List")}"').classes('browse-icon-collapse')
 
                         ui.element('div').classes('flex-grow')
 
-                        # Fragment count
+                        # Fragment count (a phone has it in the header's badge only)
                         ui.label(
                             f'{len(state.reading_desk_entries)} {tr("fragments")}'
-                        ).classes('text-sm').style('color: var(--text-secondary);')
+                        ).classes('text-sm rd-wide-only').style('color: var(--text-secondary);')
 
                 # Two-panel flex row (same pattern as single-page view)
-                ui.html(f'<style>{_RD_DOCUMENT_CSS}{_RD_IMAGES_CSS}</style>', sanitize=False)
+                ui.html(f'<style>{_RD_DOCUMENT_CSS}{_RD_IMAGES_CSS}{_RD_PHONE_CSS}</style>', sanitize=False)
                 # The catalogue (app_state), not the page's BrowseState: that has no meta_mgr,
                 # so the desk never learned a fragment's library and a Bodleian fragment
                 # named as PGP names it ("Bodl. MS heb. ...") was asked of NLI, which has
                 # no image of it.
                 rd_library_for = app_state.meta_mgr.get_library_for_id if getattr(app_state, 'meta_mgr', None) else None
                 rd_text = {}  # 'draw': redraws the text side alone (set below)
+                # A phone: Image | Text, one pane at a time (owner, 2026-11-23). The switch moves a class
+                # on the panels, nothing is drawn again; the choice is kept with the desk's others.
+                rd_phone = {'panels': None}
+
+                def rd_on_phone_pane(e):
+                    state.reading_desk_selected_sources[DESK_KEY_PHONE_PANE] = e.value
+                    _persist_reading_desk_state()
+                    panels = rd_phone['panels']
+                    if panels is not None and not panels.is_deleted:
+                        if e.value == 'text':
+                            panels.classes(add='rd-show-text')
+                        else:
+                            panels.classes(remove='rd-show-text')
+
+                rd_pane_now = desk_phone_pane(state.reading_desk_selected_sources)
+                with ui.row().classes('w-full justify-center rd-phone-only rd-pane-switch'):
+                    ui.toggle({'image': tr('Image'), 'text': tr('Text')}, value=rd_pane_now,
+                              on_change=rd_on_phone_pane).props(
+                        'no-caps unelevated spread color=white text-color=green-9 toggle-color=green-7 '
+                        'toggle-text-color=white data-testid="rd-phone-pane"'
+                    ).classes('w-full').style('border: 1px solid #15803d; border-radius: 6px; overflow: hidden;'
+                    ).on('update:model-value', js_handler=_RD_PANE_SWITCH_JS)
                 with ui.element('div').classes(
                     'reading-desk-panels' + (' rd-document-mode' if rd_view is not None else '')
+                    + (' rd-show-text' if rd_pane_now == 'text' else '')
                 ).style(
                     'display: flex; flex-direction: row; gap: 16px; min-height: 70vh; width: 100%;'
-                ):
+                ) as rd_panels:
+                    rd_phone['panels'] = rd_panels
 
                     # === Image side (web/pages/browse_desk_images.py): one image at a time
                     # beside a filmstrip, or all images in one stack ===
@@ -4345,7 +4435,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         )
 
                     # === RIGHT PANE: Text Stack ===
-                    rd_text_card = ui.card().style('flex: 1 1 auto; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;')
+                    rd_text_card = ui.card().classes('rd-text-card').style('flex: 1 1 auto; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;')
 
                     def rd_draw_text():
                         # With one image on show and one text per fragment, the text side is

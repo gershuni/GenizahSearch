@@ -42,6 +42,15 @@ VIEW_JOIN = 'join'
 # Keys in ``state.reading_desk_selected_sources`` (beside the text side's; strings only).
 KEY_IMAGE_VIEW = '__image_view__'
 KEY_IMAGE_SHOWN = '__image_shown__'
+# On a phone the desk shows one pane at a time (owner, 2026-11-23): 'image' or 'text', the reader's.
+KEY_PHONE_PANE = '__phone_pane__'
+PHONE_PANES = ('image', 'text')
+
+
+def phone_pane(selected: Optional[Dict[str, Any]]) -> str:
+    """The pane a phone shows: the reader's choice, else the images."""
+    wanted = (selected or {}).get(KEY_PHONE_PANE)
+    return wanted if wanted in PHONE_PANES else 'image'
 
 _THUMB_WIDTH = 240  # px asked of the image routes for a filmstrip thumbnail
 _BODL_PREFIX = re.compile(r'^\s*Bodl\.\s*', re.IGNORECASE)
@@ -403,16 +412,74 @@ IMAGES_CSS = '''
 }
 .rd-thumb {
     width: 68px; padding: 2px; border: 2px solid transparent; border-radius: 6px; background: #1a1a1a;
-    cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    cursor: pointer; display: flex; flex-direction: column; align-items: stretch; text-align: center; gap: 2px;
 }
+/* stretched, not centred: the image's wrapper (a NiceGUI html element) shrank to its content and the image's
+   100% width was of nothing, so a thumbnail was its label alone, or a sliver (measured 2026-11-23: 0x0) */
 .rd-thumb img { width: 100%; height: 72px; object-fit: contain; display: block; }
 .rd-thumb-label { font-size: 0.68rem; line-height: 1.1; color: #e5e7eb; }
 .rd-thumb:hover { border-color: #86efac; }
 .rd-thumb.rd-thumb-on { border-color: #16a34a; }
 .rd-thumb:focus-visible { outline: 2px solid #16a34a; outline-offset: 2px; }
+/* A narrow screen: the strip above the image, sideways. Its thumbnails are squares, about two and a half to
+   the strip's width, up to 180px (owner, 2026-11-23: two or three bigger squares, scrolled sideways; they
+   were 68px slivers, a dozen and more to the line). */
 @media (max-width: 900px) {
-    .rd-image-one { flex-direction: column !important; }
-    .rd-filmstrip { flex: 0 0 auto !important; height: 112px !important; width: 100%; }
-    .rd-filmstrip .q-scrollarea__content { flex-direction: row !important; flex-wrap: nowrap; align-items: flex-end; }
+    .rd-image-one { flex-direction: column !important; --rd-square: min(calc((100vw - 48px) / 2.5), 180px); }
+    .rd-filmstrip { flex: 0 0 auto !important; height: calc(var(--rd-square) + 40px) !important; width: 100%; }
+    .rd-filmstrip .q-scrollarea__content {
+        flex-direction: row !important; flex-wrap: nowrap; align-items: center; gap: 8px !important;
+    }
+    .rd-filmstrip .rd-thumb { flex: 0 0 auto; width: var(--rd-square); }
+    .rd-filmstrip .rd-thumb img { width: 100%; height: auto; aspect-ratio: 1 / 1; }
+    .rd-filmstrip .rd-thumb-label { font-size: 0.75rem; }
+}
+'''
+
+# The desk's Image | Text switch, in the browser at once (owner, 2026-11-23: "Text" sometimes threw the page
+# to its top). The pane shown takes the other's place at once, and the page keeps the switch where it was
+# on the screen, or brings it to the screen's top when the reader had scrolled past it into the pane: hiding
+# a pane taller than the other shortened the page, and the browser pulled its scroll up to the new end.
+# The server's class change that follows says the same.
+PANE_SWITCH_JS = '''(value) => {
+    const sw = document.querySelector('[data-testid="rd-phone-pane"]');
+    const panels = document.querySelector('.reading-desk-panels');
+    if (!sw || !panels) return;
+    const before = sw.getBoundingClientRect().top;
+    panels.classList.toggle('rd-show-text', value === 'text');
+    window.scrollBy(0, sw.getBoundingClientRect().top - Math.max(before, 0));
+}'''
+
+# The page to its top after the drawing that comes with it: the desk left for one of its fragments, where
+# "Back to the Reading Desk" is, above the manuscript's card (owner, 2026-11-23: on a phone the page stayed
+# scrolled where the desk had been, the button out of sight above).
+TO_THE_TOP_JS = "setTimeout(function () { window.scrollTo({top: 0, left: 0, behavior: 'instant'}); }, 50)"
+
+# A phone (owner, 2026-11-23): one pane at a time, full width, an Image | Text switch above them
+# choosing which. Below 900px the two panes stood side by side at half the width each, about 170px
+# at 375px, and both images and texts were cut off. The visible pane takes the screen's height
+# less the switch; the desk's header and toolbar give their buttons' words up for their icons.
+PHONE_CSS = '''
+@media not all and (max-width: 900px) { .rd-phone-only { display: none !important; } }
+@media (max-width: 900px) {
+    .reading-desk-panels { flex-direction: column !important; min-height: 0 !important; }
+    .reading-desk-panels > .q-card { flex: 0 0 auto !important; width: 100% !important; min-height: 0 !important; }
+    .reading-desk-panels:not(.rd-show-text) > .rd-text-card { display: none !important; }
+    .reading-desk-panels.rd-show-text > .rd-image-card { display: none !important; }
+    /* flex: 1 has a zero basis, which in a stacked card of no fixed height is no height at all */
+    .reading-desk-panels .rd-image-pane, .reading-desk-panels .rd-join-stack,
+    .reading-desk-panels .rd-text-pane {
+        flex: 0 0 auto !important; height: calc(100vh - 150px) !important; height: calc(100dvh - 150px) !important;
+    }
+    .rd-pane-switch { margin-bottom: 6px; }
+    /* a Quasar scroll area grows as wide as its widest row (an image's toolbar): held to the pane, the
+       rows wrap, and nothing is cut off at the start of the line */
+    .reading-desk-panels .q-scrollarea__content { width: 100% !important; max-width: 100% !important; }
+    .reading-desk-panels .rd-image-pane .nicegui-row, .rd-image-shown { flex-wrap: wrap !important; }
+}
+@media (max-width: 640px) {
+    .rd-add-box { max-width: none !important; flex: 1 1 100% !important; }
+    .rd-wide-only { display: none !important; }
+    .rd-toolbar-row { gap: 4px 8px !important; }
 }
 '''

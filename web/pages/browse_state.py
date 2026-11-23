@@ -156,6 +156,8 @@ class BrowseState:
         self.reading_desk_entries: list = []
         # Each entry: {sys_id, shelfmark, pages: [{p_num, text, full_header, fl_id}], sources: [], pgp_doc: {}}
         self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
+        # The desk left for one of its fragments, on this page (``keep_desk_to_return``)
+        self.desk_left: Optional[dict] = None
         # Volume-aware browse (multi-IE manuscripts)
         self.volume_ie: Optional[str] = None  # Active IE; None = default (all pages)
         # Source switching state: 'nli' (default), 'cambridge', 'manchester', or 'jts'
@@ -255,6 +257,54 @@ def restore_browse_snapshot(state: 'BrowseState') -> tuple:
     return (saved_position, saved_desk)
 
 
+def desk_data(state: 'BrowseState') -> dict:
+    """The desk as it is kept: its fragments, its document and the reader's choices on it."""
+    return {
+        'entries': [{'sys_id': e.get('sys_id', ''), 'shelfmark': e.get('shelfmark', '')}
+                    for e in state.reading_desk_entries],
+        'pgpid': state.joined_pgpid,
+        'selected_sources': state.reading_desk_selected_sources or {},
+    }
+
+
+# The desk left for one of its fragments (owner, 2026-11-23: a click on a shelfmark in the Reading Desk
+# opened it in Browse, and the desk was gone). Kept apart from ``reading_desk_state``, the desk on screen,
+# which every page drawn outside the desk drops; while it is kept, Browse offers "Back to the Reading Desk".
+# A desk opened or brought back takes its place (``forget_desk_to_return``). On the page (``state.desk_left``)
+# always; for the next visit too only while the reader keeps their state between sessions, as the desk
+# itself (``session_persistence_enabled``; Codex #109).
+DESK_LEFT_KEY = 'reading_desk_left'
+
+
+def _persisting() -> bool:
+    return bool(safe_user_get('session_persistence_enabled', True))
+
+
+def keep_desk_to_return(state: 'BrowseState') -> None:
+    if not state.reading_desk_entries:
+        return
+    state.desk_left = desk_data(state)
+    if _persisting():
+        safe_user_set(DESK_LEFT_KEY, state.desk_left)
+
+
+def desk_to_return(state: Optional['BrowseState'] = None) -> Optional[dict]:
+    held = getattr(state, 'desk_left', None)
+    if isinstance(held, dict) and held.get('entries'):
+        return held
+    if not _persisting():
+        return None
+    saved = safe_user_get(DESK_LEFT_KEY)
+    return saved if isinstance(saved, dict) and saved.get('entries') else None
+
+
+def forget_desk_to_return(state: Optional['BrowseState'] = None) -> None:
+    if state is not None:
+        state.desk_left = None
+    safe_user_pop(DESK_LEFT_KEY, None)
+
+
+
 def persist_browse_snapshot(state: 'BrowseState', page=None) -> None:
     """Serialize browse position and reading desk state to app.storage.user.
 
@@ -294,15 +344,7 @@ def persist_browse_snapshot(state: 'BrowseState', page=None) -> None:
 
         # Reading desk (browse.py:1056-1074 analog).
         if state.view_joined and state.reading_desk_entries:
-            rd_data = [
-                {'sys_id': e.get('sys_id', ''), 'shelfmark': e.get('shelfmark', '')}
-                for e in state.reading_desk_entries
-            ]
-            safe_user_set('reading_desk_state', {
-                'entries': rd_data,
-                'pgpid': state.joined_pgpid,
-                'selected_sources': state.reading_desk_selected_sources or {},
-            })
+            safe_user_set('reading_desk_state', desk_data(state))
         else:
             safe_user_pop('reading_desk_state', None)
     except Exception as e:
@@ -322,7 +364,7 @@ def clear_browse_snapshot(keep_position: bool = False) -> None:
     """
     keys = ['reading_desk_state']
     if not keep_position:
-        keys.extend(('browse_position', 'browse_snapshot_schema_version'))
+        keys.extend(('browse_position', 'browse_snapshot_schema_version', DESK_LEFT_KEY))
     for key in keys:
         # Class A wrapper collapsed — safe_user_pop absorbs prune-race AssertionError.
         safe_user_pop(key, None)
