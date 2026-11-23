@@ -114,6 +114,10 @@ from web.pages.browse_desk_document import (
     DESK_CSS as _RD_DOCUMENT_CSS, VIEW_FRAGMENTS, document_desk, document_view,
     is_other_desk, render_document_text_panel,
 )
+from web.pages.browse_correction_edit import (
+    EditedPage, done_keeping, end_edit_for, held_edit, keep_draft, reopen_kept, restore_unkept,
+    submission_landed, write_correction,
+)
 from web.pages.browse_desk_images import (
     IMAGES_CSS as _RD_IMAGES_CSS, KEY_IMAGE_SHOWN as DESK_KEY_IMAGE_SHOWN, move_buttons as desk_move_buttons,
     KEY_PHONE_PANE as DESK_KEY_PHONE_PANE, PHONE_CSS as _RD_PHONE_CSS, phone_pane as desk_phone_pane,
@@ -1600,6 +1604,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Update volume_ie from the loaded page (auto-detect if not set)
                 if page.volume_ie:
                     state.volume_ie = page.volume_ie
+                _leave_edit(page)
                 if not await _ensure_shelf_place(page.sys_id, my_gen):
                     return  # Superseded by newer load
 
@@ -1657,6 +1662,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.current_page = meta_page
                     state.page_input_value = meta_page.p_num
                     state.error = None
+                    _leave_edit(meta_page)
                     # A manuscript without a transcription has its place on the shelf too.
                     if not await _ensure_shelf_place(meta_page.sys_id, my_gen):
                         return  # Superseded by newer load
@@ -1732,6 +1738,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # measurement takes the image on screen after this (ux_timing event v2).
             if my_gen == _load_generation['value']:
                 ux_settled(_page_client, 'browse_page')
+
+    def _leave_edit(page):
+        """An editor left on another page closes; its unsaved edit is kept as its own page's draft (GS-5)."""
+        if (kept := end_edit_for(state, page)) is not None:
+            state.keeping[kept.page.key()] = kept
+            background_tasks.create(_keep_left_draft(kept, GlobalAuthState.get_user_id(), get_user_client()),
+                                    name='browse-keep-draft')
+
+    async def _keep_left_draft(kept, author_id, client):
+        outcome, detail = await keep_draft(kept, lock=state.correction_lock, io_bound=run.io_bound, author_id=author_id,
+                                           client=client, create=create_correction, update=update_correction)
+        latest = done_keeping(state, kept)  # else a newer edit of the page is being kept: it is the reader's
+        if outcome == 'failed' and latest and state.edit_page is not kept.page:  # theirs on return; at once if there
+            state.unkept[kept.page.key()] = kept
+            if not state.edit_mode and restore_unkept(state, state.current_page) and not client_gone(_page_client.layout):
+                update_content()
+        if outcome != 'nothing' and not client_gone(_page_client.layout):
+            with content_container:
+                ui.notify(tr('Draft saved') if outcome == 'kept' else (detail or tr(
+                    'The change could not be saved. Check your connection and try again.')),
+                    type='positive' if outcome == 'kept' else 'negative')
 
     async def _record_recent(sys_id: str, fl_id: Optional[str], user_id: Optional[str]) -> None:
         """Record a viewed manuscript in the visitor's Recently Viewed, off the loop.
@@ -2583,15 +2610,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             }});
         ''')
 
-    async def _submit_correction_now():
-        """Submit the correction to the backend."""
-        if not state.edit_mode or state.is_loading:
-            return  # a stale button (the form after a submit, kept under a reload)
+    async def _submit_correction_now(clicked):
+        """Submit `clicked` (what the editor held, and for which page, when Submit was clicked)."""
+        edited, sent = clicked.page, (clicked.text, clicked.notes)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login first'), type='negative')
             return
-
-        if state.edit_text == state.original_edit_text and not state.edit_notes:
+        if sent == edited.submitted:
+            return  # a second click: this text went out already
+        if clicked.text == edited.original_text and not clicked.notes:
             ui.notify(tr('No changes to submit'), type='warning')
             return
 
@@ -2610,26 +2637,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # write anonymously, refused by RLS).
         client = get_user_client()
         try:
-            if state.draft_id:
-                result = await run.io_bound(update_correction, state.draft_id, {
-                    'corrected_text': state.edit_text,
-                    'notes': state.edit_notes,
-                    'status': status
-                }, client=client)
-            else:
-                result = await run.io_bound(
-                    create_correction,
-                    author_id=user_id,
-                    sys_id=state.current_page.sys_id,
-                    shelfmark=state.current_page.shelfmark or '',
-                    page_number=state.current_page.p_num,
-                    original_text=state.original_edit_text,
-                    corrected_text=state.edit_text,
-                    notes=state.edit_notes if state.edit_notes else '',
-                    status=status,
-                    ie_id=state.volume_ie,
-                    client=client,
-                )
+            result = await run.io_bound(write_correction, edited, draft_id=edited.draft_to_update(clicked.draft_id), author_id=user_id,
+                                        text=sent[0], notes=sent[1], status=status, client=client,
+                                        create=create_correction, update=update_correction)
         except Exception as e:
             ui.notify(f'{tr("Error")}: {e}', type='negative')
             logger.error(f"Submit error: {e}")
@@ -2648,20 +2658,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 ui.notify(error_msg, type='negative')
             return
 
-        # Success — update state and reload
+        # Success — close the editor and reload, unless it is the reader's now: on another page, or
+        # holding text typed since (submission_landed). A kept draft queued by a page turn must not demote it.
+        ui.notify(tr('Correction submitted successfully'), type='positive')
+        if not submission_landed(state, edited, sent):
+            return
         state.edit_mode = False
         state.draft_saved = False
-        state.draft_id = None
-        ui.notify(tr('Correction submitted successfully'), type='positive')
+        state.draft_id = state.edit_page = None
         await load_page(direction=0)
 
-    async def _save_draft_now():
-        """Save the draft to Supabase, off the loop (see _submit_correction_now)."""
-        if not state.edit_mode or state.is_loading:
-            return  # a stale button (the form after a submit, kept under a reload)
+    async def _save_draft_now(clicked):
+        """Save `clicked` as a draft, off the loop (see _submit_correction_now)."""
+        edited, sent = clicked.page, (clicked.text, clicked.notes)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login to save drafts'), type='warning')
             return
+        if sent == edited.submitted:
+            return  # a Submit ahead of it sent this text for review: no draft of it
 
         user_id = GlobalAuthState.get_user_id()
         if not user_id:
@@ -2669,30 +2683,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             return
 
         client = get_user_client()
-        sent = (state.edit_text, state.edit_notes)  # what this write carries
-        load_gen = _load_generation['value']  # the page this draft belongs to
-        if state.draft_id:
-            # Update existing draft
-            result = await run.io_bound(update_correction, state.draft_id, {
-                'corrected_text': state.edit_text,
-                'notes': state.edit_notes,
-                'status': 'draft'
-            }, client=client)
-        else:
-            # Create new draft
-            result = await run.io_bound(
-                create_correction,
-                author_id=user_id,
-                sys_id=state.current_page.sys_id,
-                shelfmark=state.current_page.shelfmark or '',
-                page_number=state.current_page.p_num,
-                original_text=state.original_edit_text,
-                corrected_text=state.edit_text,
-                notes=state.edit_notes if state.edit_notes else '',
-                status='draft',
-                ie_id=state.volume_ie,
-                client=client,
-            )
+        result = await run.io_bound(write_correction, edited, draft_id=edited.draft_to_update(clicked.draft_id), author_id=user_id,
+                                    text=sent[0], notes=sent[1], status='draft', client=client,
+                                    create=create_correction, update=update_correction)
 
         if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
             ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
@@ -2705,12 +2698,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                           type='negative', timeout=10000)
             else:
                 ui.notify(error_msg, type='negative')
-        elif load_gen != _load_generation['value']:
-            # The reader moved to another page while the write ran: the draft is
-            # saved, but its id must not become the new page's draft (a later
-            # save would overwrite this draft with the other page's text).
+        elif edited is not state.edit_page:
+            # The reader moved to another page while the write ran: the draft is saved, and its page
+            # knows it (a kept draft then updates it), but it must not become the new page's draft.
+            edited.note_saved(sent, (result.get('correction') or {}).get('id'))
             ui.notify(tr('Draft saved'), type='positive')
         else:
+            edited.note_saved(sent, (result.get('correction') or {}).get('id'))
             # Text typed while the write ran is not in the draft: say "Saved"
             # only when the editor still holds what was sent.
             state.draft_saved = (state.edit_text, state.edit_notes) == sent
@@ -2723,15 +2717,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # the loop serves a second click at once; it now WAITS for the first and
     # then runs, as it did when the write blocked: a second Save Draft updates
     # the draft the first created, and Submit during a draft save submits it.
-    # (Dropping it instead lost a Submit without a word.) The guard at the top
-    # of each is read after the wait: a stale Submit after a submit does nothing.
+    # (Dropping it instead lost a Submit without a word.) What a click writes, and
+    # for which page, is fixed when it is clicked (held_edit): a page turn while
+    # it waits neither drops it nor moves it to another page's editor (GS-5).
     async def handle_submit_correction():
-        async with state.correction_lock:
-            await _submit_correction_now()
+        if (clicked := held_edit(state)) is not None:  # None: a stale button
+            async with state.correction_lock:
+                await _submit_correction_now(clicked)
 
     async def handle_save_draft():
-        async with state.correction_lock:
-            await _save_draft_now()
+        if (clicked := held_edit(state)) is not None:
+            async with state.correction_lock:
+                await _save_draft_now(clicked)
 
     def toggle_edit_mode():
         """Toggle edit mode with fetching existing corrections."""
@@ -2741,6 +2738,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         if state.edit_mode:
             cancel_edit()
+        elif reopen_kept(state, state.current_page):  # the reader's own edit, still being kept (GS-5)
+            update_content()
         else:
             # Enter edit mode - Show loading state
             state.edit_loading = True
@@ -2796,7 +2795,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Original manuscript text acts as the "original_text" reference
                 state.original_edit_text = state.current_page.text or ""
                 state.edit_notes = base_notes
-                
+                state.edit_page = EditedPage.bind(state, state.current_page, start=(base_text, base_notes))
                 state.edit_loading = False
                 update_content()
             except Exception as e:

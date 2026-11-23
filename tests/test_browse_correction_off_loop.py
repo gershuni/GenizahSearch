@@ -443,3 +443,332 @@ def test_a_stale_button_after_a_submit_writes_nothing(editor):
 
     asyncio.run(_run())
     assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
+
+
+# ---------------------------------------------------------------------------
+# A page turn while editing (GS-5). The editor used to survive it: the
+# textarea kept page 1's text over page 2, and Save Draft or Submit then filed
+# that text under page 2. The edit now belongs to its page
+# (web/pages/browse_correction_edit.py): the turn closes the editor, and an
+# unsaved edit is kept as a draft of the page it was typed on.
+# ---------------------------------------------------------------------------
+
+def _turn_page(editor, *, text=None, then=None):
+    """Open page 1 in edit mode, set the editor's text, turn to page 2, run ``then``."""
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        if text is not None:
+            state.edit_text = text
+        load_page = _load_page_of(client)
+        with client:
+            await load_page(direction=1)
+            if then is not None:
+                await then(client, state)
+        return state
+
+    return asyncio.run(_run())
+
+
+def test_a_page_turn_keeps_an_unsaved_edit_as_a_draft_of_its_own_page(editor):
+    async def until_written(_client, _state):
+        assert await _wait(lambda: editor['calls'], timeout=10), 'the unsaved edit was not kept'
+
+    state = _turn_page(editor, then=until_written)
+
+    assert state.current_page.p_num == 2
+    assert state.edit_mode is False and state.edit_page is None and state.draft_id is None
+    calls = editor['calls']
+    assert [c['helper'] for c in calls] == ['create_correction'], calls
+    kw = calls[0]['kwargs']
+    assert (kw['page_number'], kw['corrected_text'], kw['status']) == (1, 'שלום עולם', 'draft'), kw
+    assert calls[0]['thread'] != editor['loop_thread'] and calls[0]['client'] is SENTINEL
+    assert (tr('Draft saved'), 'positive') in editor['notes'], editor['notes']
+
+
+def test_save_draft_or_submit_after_a_page_turn_never_files_under_the_new_page(editor):
+    """The reported fault: a write after the turn landed on page 2 with page 1's text."""
+    async def click_both(client, _state):
+        await _wait(lambda: editor['calls'], timeout=10)       # the kept draft of page 1
+        for name in ('handle_save_draft', 'handle_submit_correction'):
+            handler = _handler(client, name)
+            if handler is not None:
+                await handler()
+
+    _turn_page(editor, then=click_both)
+
+    pages = [c['kwargs'].get('page_number') for c in editor['calls'] if c['helper'] == 'create_correction']
+    assert 2 not in pages, editor['calls']
+
+
+def test_a_page_turn_with_nothing_typed_closes_the_editor_without_a_write(editor):
+    async def settle(_client, _state):
+        await asyncio.sleep(0.3)
+
+    state = _turn_page(editor, text='שלום', then=settle)         # the page's own text: nothing typed
+
+    assert state.edit_mode is False and editor['calls'] == [], editor['calls']
+
+
+def test_an_edit_entered_through_the_edit_button_belongs_to_its_page(editor, monkeypatch):
+    """toggle_edit_mode binds the edit when it opens, with its resumed draft as already saved."""
+    import web.pages.browse as browse
+    monkeypatch.setattr(browse, 'get_corrections', lambda **_k: [
+        {'id': 7, 'page_number': 1, 'corrected_text': 'טיוטה', 'notes': '', 'status': 'draft', 'created_at': '1'}])
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        state.edit_mode, state.edit_page = False, None
+        with client:
+            await _load_page_of(client)(direction=0)              # re-render in view mode: the Edit button
+        assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button'
+        toggle = _handler(client, 'toggle_edit_mode')
+        with client:
+            toggle()
+        return state
+
+    state = asyncio.run(_run())
+    assert state.edit_mode is True and state.draft_id == 7 and state.edit_text == 'טיוטה'
+    page = state.edit_page
+    assert (page.sys_id, page.p_num, page.start, page.saved, page.saved_draft_id) == \
+        ('990000000000017', 1, ('טיוטה', ''), ('טיוטה', ''), 7)
+
+
+def test_an_edit_that_could_not_be_kept_reopens_when_the_reader_returns(editor):
+    """The write of a left page's edit fails: the text is not lost, and the editor reopens with it
+    when that page is shown again (Codex on #118)."""
+    editor['answer'] = None
+
+    async def go_back(client, state):
+        assert await _wait(lambda: editor['calls'], timeout=10)
+        assert await _wait(lambda: state.unkept, timeout=10), 'the failed edit was not kept'
+        await _load_page_of(client)(direction=-1)
+
+    state = _turn_page(editor, then=go_back)
+
+    assert state.current_page.p_num == 1
+    assert state.edit_mode is True and state.edit_text == 'שלום עולם' and state.unkept == {}
+    assert (tr(FAILURE), 'negative') in editor['notes'], editor['notes']
+
+
+def test_a_submission_in_flight_during_a_page_turn_is_not_turned_back_into_a_draft(editor):
+    """Submit, then a page turn while it runs: the kept draft queued behind it must not write the
+    submitted text back as a draft (Codex on #118)."""
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        submit = _handler(client, 'handle_submit_correction')
+        load_page = _load_page_of(client)
+
+        async def turn_page():
+            await _until_writing(editor)
+            await load_page(direction=1)
+            editor['hold'].set()
+
+        with client:
+            await asyncio.gather(submit(), turn_page())
+            await asyncio.sleep(0.5)                              # room for a queued kept draft to run
+        return state
+
+    asyncio.run(_run())
+    assert not any(c.get('hold_timed_out') for c in editor['calls']), editor['calls']
+    assert _kinds(editor) == [('create_correction', 'pending')], editor['calls']
+
+
+def test_a_submission_that_lands_after_the_reader_opened_another_page_leaves_that_editor_open(editor, monkeypatch):
+    """Submit page 1, turn to page 2 and open its editor while the submission runs: when it lands,
+    the editor on page 2 and its text are the reader's (Codex on #118, round 2)."""
+    import web.pages.browse as browse
+    monkeypatch.setattr(browse, 'get_corrections', lambda **_k: [])
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        submit = _handler(client, 'handle_submit_correction')
+
+        async def edit_page_two():
+            await _until_writing(editor)
+            await _load_page_of(client)(direction=1)
+            assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button on page 2'
+            _handler(client, 'toggle_edit_mode')()
+            state.edit_text = 'עמוד שני'
+            editor['hold'].set()
+
+        with client:
+            await asyncio.gather(submit(), edit_page_two())
+            await asyncio.sleep(0.5)
+        return state
+
+    state = asyncio.run(_run())
+    assert _kinds(editor) == [('create_correction', 'pending')], editor['calls']
+    assert editor['calls'][0]['kwargs']['page_number'] == 1
+    assert state.current_page.p_num == 2 and state.edit_mode is True and state.edit_text == 'עמוד שני'
+    assert state.edit_page is not None and state.edit_page.p_num == 2
+
+
+def test_edit_on_a_page_whose_kept_draft_is_still_being_written_does_not_make_a_second_draft(editor):
+    """Turn away with an unsaved edit, come back and press Edit while its draft is still being
+    written: the editor reopens with that edit, and a Save then updates the kept draft instead of
+    creating another (Codex on #118, round 2)."""
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        load_page = _load_page_of(client)
+        with client:
+            await load_page(direction=1)                          # the keep starts, and is held
+            await _until_writing(editor)
+            await load_page(direction=-1)                         # back to page 1
+            assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button on page 1'
+            _handler(client, 'toggle_edit_mode')()
+            assert state.edit_mode is True and state.edit_text == 'שלום עולם', 'the kept edit did not reopen'
+            editor['hold'].set()                                  # the kept draft lands: id 41
+            assert await _wait(lambda: not state.keeping, timeout=10)
+            state.edit_text = 'שלום עולם ומלואו'
+            await _handler(client, 'handle_save_draft')()
+        return state
+
+    asyncio.run(_run())
+    kinds = [c['helper'] for c in editor['calls']]
+    assert kinds == ['create_correction', 'update_correction'], editor['calls']
+    assert editor['calls'][1]['args'][0] == 41, 'the save did not update the kept draft'
+
+
+@pytest.mark.parametrize('open_page_two', [False, True], ids=['page-turn', 'page-two-editor-opened'])
+def test_a_submit_waiting_behind_a_save_goes_out_for_its_own_page_after_a_page_turn(editor, monkeypatch, open_page_two):
+    """Save Draft, Submit while the save runs (it waits for the lock), then a page turn before the save
+    answers: the Submit still goes out, for page 1 with page 1's text. It used to read the editor after
+    the wait: closed, it dropped the Submit; open on page 2, it submitted page 2 (Codex on #118, round 3)."""
+    import web.pages.browse as browse
+    monkeypatch.setattr(browse, 'get_corrections', lambda **_k: [])
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        save, submit = _handler(client, 'handle_save_draft'), _handler(client, 'handle_submit_correction')
+
+        async def submit_then_leave():
+            await _until_writing(editor)
+            queued = asyncio.ensure_future(submit())
+            await asyncio.sleep(0.05)                             # the Submit reaches the lock and waits
+            await _load_page_of(client)(direction=1)
+            if open_page_two:
+                assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button on page 2'
+                _handler(client, 'toggle_edit_mode')()
+                state.edit_text = 'עמוד שני'
+            editor['hold'].set()
+            await queued
+
+        with client:
+            await asyncio.gather(save(), submit_then_leave())
+            await asyncio.sleep(0.5)                              # room for page 1's kept draft to run
+        return state
+
+    state = asyncio.run(_run())
+    assert not any(c.get('hold_timed_out') for c in editor['calls']), editor['calls']
+    assert _kinds(editor) == [('create_correction', 'draft'), ('update_correction', 'pending')], editor['calls']
+    assert editor['calls'][1]['args'][0] == 41 and editor['calls'][1]['args'][1]['corrected_text'] == 'שלום עולם'
+    assert (tr('Correction submitted successfully'), 'positive') in editor['notes'], editor['notes']
+    assert state.current_page.p_num == 2 and state.edit_mode is open_page_two
+    if open_page_two:
+        assert state.edit_text == 'עמוד שני' and state.edit_page.p_num == 2
+
+
+def test_save_draft_waiting_behind_a_submit_of_the_same_text_writes_no_draft(editor):
+    """The Save Draft is fixed when clicked, so it runs after the submission lands: it must not file
+    the submitted text again as a new draft."""
+    _client, state = _drive_twice(editor, 'handle_submit_correction', 'handle_save_draft')
+
+    assert _kinds(editor) == [('create_correction', 'pending')], editor['calls']
+    assert state.edit_mode is False and not state.correction_lock.locked()
+
+
+@pytest.mark.parametrize('first_fails', [False, True], ids=['first-kept', 'first-failed'])
+def test_a_newer_edit_waiting_to_be_kept_survives_the_older_keep_finishing(editor, monkeypatch, first_fails):
+    """Turn away with an edit; come back while its draft is written, reopen it, change it, turn away
+    again: a second keep waits behind the first. When the first is done (or fails) the second is still
+    being kept, so Edit on the page opens the newest text, not the server's older one, and a failure
+    of the older text is not reopened over it (Codex on #118, round 4)."""
+    import web.pages.browse as browse
+    monkeypatch.setattr(browse, 'get_corrections', lambda **_k: [
+        {'id': 41, 'page_number': 1, 'corrected_text': 'שלום עולם', 'notes': '', 'status': 'draft', 'created_at': '1'}])
+    first_hold = threading.Event()
+    editor['writing'], editor['hold'] = threading.Event(), first_hold
+    newest = 'שלום עולם ומלואו'
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        load_page = _load_page_of(client)
+        with client:
+            await load_page(direction=1)                          # keep 1 starts, and is held
+            await _until_writing(editor)
+            await load_page(direction=-1)
+            assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button on page 1'
+            _handler(client, 'toggle_edit_mode')()
+            state.edit_text = newest
+            await load_page(direction=1)                          # keep 2 waits behind keep 1
+            editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+            if first_fails:
+                editor['answer'] = None
+            first_hold.set()                                      # keep 1 answers; keep 2's write starts, held
+            await _until_writing(editor)
+            editor['answer'] = {'success': True, 'correction': {'id': 41}}
+            being_kept, unkept = [k.text for k in state.keeping.values()], dict(state.unkept)
+            await load_page(direction=-1)                         # back to page 1 while keep 2 is written
+            assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button on page 1'
+            _handler(client, 'toggle_edit_mode')()
+            reopened = state.edit_text
+            editor['hold'].set()
+            assert await _wait(lambda: not state.keeping, timeout=10)
+        return being_kept, unkept, reopened
+
+    being_kept, unkept, reopened = asyncio.run(_run())
+    assert not any(c.get('hold_timed_out') for c in editor['calls']), editor['calls']
+    assert being_kept == [newest], 'the older keep, done, dropped the newer one still being kept'
+    assert unkept == {}, "the older keep's failure was kept to reopen over the newer edit"
+    assert reopened == newest, 'Edit opened the older text'
+    assert [c['helper'] for c in editor['calls']] == ['create_correction', 'create_correction' if first_fails
+                                                       else 'update_correction'], editor['calls']
+
+
+@pytest.mark.parametrize('typed', [False, True], ids=['as-submitted', 'newer-text'])
+def test_a_submission_landing_in_its_reopened_editor_keeps_text_typed_since(editor, typed):
+    """Submit page 1, turn away and come back while it runs, reopen the edit (still being kept) and
+    type: when the submission lands, the editor keeps the newer text, and its Save is a new draft, never
+    an update of the submitted row. Nothing typed, the editor closes as after any submission (Codex on
+    #118, round 5)."""
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+    newest = 'שלום עולם ומלואו'
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        submit = _handler(client, 'handle_submit_correction')
+        load_page = _load_page_of(client)
+
+        async def come_back_and_type():
+            await _until_writing(editor)
+            await load_page(direction=1)                          # page 1's keep waits behind the submission
+            await load_page(direction=-1)
+            assert await _wait(lambda: _handler(client, 'toggle_edit_mode')), 'no Edit button on page 1'
+            _handler(client, 'toggle_edit_mode')()
+            assert state.edit_mode is True and state.edit_text == 'שלום עולם', 'the kept edit did not reopen'
+            if typed:
+                state.edit_text = newest
+            editor['hold'].set()
+
+        with client:
+            await asyncio.gather(submit(), come_back_and_type())
+            assert await _wait(lambda: not state.keeping, timeout=10)
+            after = (state.edit_mode, state.edit_text, state.draft_id)
+            if typed:
+                await _handler(client, 'handle_save_draft')()
+        return after
+
+    edit_mode, text, draft_id = asyncio.run(_run())
+    assert not any(c.get('hold_timed_out') for c in editor['calls']), editor['calls']
+    if not typed:
+        assert edit_mode is False and _kinds(editor) == [('create_correction', 'pending')], editor['calls']
+        return
+    assert (edit_mode, text, draft_id) == (True, newest, None), 'the newer text was discarded'
+    assert _kinds(editor) == [('create_correction', 'pending'), ('create_correction', 'draft')], editor['calls']
+    assert editor['calls'][1]['kwargs']['corrected_text'] == newest

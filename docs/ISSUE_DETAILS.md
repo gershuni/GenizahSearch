@@ -66,21 +66,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 
 *Triage 2026-10-25:* still open. _add_bracket_variants (search_engine.py:552-580) expands only edge forms and ]term[; its docstring still says brackets inside a word are not expanded (stage 0b), and tests/test_bracket_lacuna_retrieval.py:9,34 pins the 'inside' page as not returned.
 
-## GS-5
-
-**A correction draft follows the reader to the next page: after a page turn in edit mode it is filed under the new page with the old text** · P2 · Browse and viewer · ❌ Open · opened 2026-10-21
-
-Where: `web/pages/browse.py::load_page`, _save_draft_now
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
-
-- **Issue:** **A correction draft follows the reader to the next page: after a page turn in edit mode, a new draft is filed under the new page with the old page's text**
-- **File:** `web/pages/browse.py::load_page` (never resets `edit_mode`, `edit_text`, `original_edit_text`, `draft_id`), `_save_draft_now`
-- **Status:** ❌ Open (2026-10-21, code reading and a review probe; pre-existing)
-- **Notes:** `load_page` keeps the editor's state across a page turn, so the textarea keeps page 1's text over page 2's image. Save Draft then writes page 1's text into page 1's draft (`draft_id` kept), or, with no draft yet, into a NEW correction filed under page 2's `sys_id`/`p_num` with page 1's `original_text`. Fix: on a page change leave edit mode (asking first if the text changed) or reload the editor for the new page. Found by the 2026-10-21 review of `ccr-cb9f4b76-qh2uvw`, which did not change it.
-
-*Triage 2026-10-25:* still open. load_page (web/pages/browse.py:1072-1830) contains no assignment to edit_mode, edit_text, original_edit_text or draft_id; the prev/next buttons (4430-4490) are disabled only by page index, not by edit mode; _save_draft_now (1909-1969) creates from state.current_page.sys_id/p_num with state.original_edit_text. The only related guard is load_gen (1923, 1956), which stops a draft id being adopted by a page the reader left while a write ran, not this case.
-
 ## GS-6
 
 **The reading view can render a V0.7 transcription while labelling it V0.8 — and can pick V0.7 over a fuller V0.8 for the same folio** · P2 · Browse and viewer · ❌ Open · opened 2026-08-14

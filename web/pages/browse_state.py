@@ -133,6 +133,14 @@ class BrowseState:
         self.original_edit_text: str = ""  # Text when editing started
         self.draft_saved: bool = False
         self.draft_id: Optional[str] = None
+        # The page the edit belongs to (web/pages/browse_correction_edit.py, GS-5): every
+        # correction write files under it, never under the page on screen.
+        self.edit_page = None
+        # Edits the reader turned away from that could not be kept as drafts, by page; each reopens
+        # in the editor when its page is shown again.
+        self.unkept: dict = {}
+        # Edits being kept as drafts right now, by page; Edit on such a page reopens the edit itself.
+        self.keeping: dict = {}
         self.edit_loading: bool = False
         # One correction or draft write at a time (the write runs off the loop,
         # so a second click would otherwise start a second write: two drafts).

@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-22 (archived GS-66). 189 open: P1 0, P2 43, P3 146.
+> **Last Updated:** 2026-11-23 (archived GS-5). 188 open: P1 0, P2 42, P3 146.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -23,7 +23,7 @@ the private repository; grep only).
 | Area | P1 | P2 | P3 | Total |
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
-| Browse and viewer | 0 | 4 | 6 | 10 |
+| Browse and viewer | 0 | 3 | 6 | 9 |
 | Desktop app | 0 | 10 | 30 | 40 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **43** | **146** | **189** |
+| **Total** | **0** | **42** | **146** | **188** |
 
 ## P1 - Critical
 
@@ -54,7 +54,6 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-5](ISSUE_DETAILS.md#gs-5) | A correction draft follows the reader to the next page: after a page turn in edit mode it is filed under the new page with the old text | `web/pages/browse.py::load_page`, _save_draft_now | 2026-10-21 | ❌ Open |
 | [GS-6](ISSUE_DETAILS.md#gs-6) | The reading view can render a V0.7 transcription while labelling it V0.8 — and can pick V0.7 over a fuller V0.8 for the same folio | `web/pages/browse.py:2091,4278`; `shared/search_engine.py:5687,5743` | 2026-08-14 | ❌ Open |
 | [GS-7](ISSUE_DETAILS.md#gs-7) | Image failure UX: an NLI metadata fetch failure still shows 'No images available' as if none existed | `desktop/viewers.py:1296-1298`, `genizah_app.py:10819`, `web/static/manuscript_viewer.js:199` | 2026-04-26 | ❌ Open |
 | [GS-8](ISSUE_DETAILS.md#gs-8) | H2: Cached image reload only works for Oxford manuscripts when offline; NLI/CUL/JTS/Manchester cached images do not appear from disk cache | `desktop/image_loader.py` (cache key), `genizah_app.py` (browse load path), `desktop/viewers.py` | 2026-04-26 | ❌ Open |
