@@ -533,8 +533,9 @@ def test_a_metadata_only_record_gets_no_citation():
     guard = "if not (page.text or '').strip() and not shown_edition:"
     assert guard in body, (
         'a page with no transcription still produces a page citation')
+    # (since 2026-11-23 the citation is kept for "Copy text" before it is set: page_citation['value'])
     assert body.index(guard) < body.index(
-        'set_page_citation(browse_page_citation('), (
+        'browse_page_citation('), (
         'the empty-text check runs after the citation is built')
     # Since 2026-10-27 a page without an automatic text cites the edition shown on it -- and only an edition or
     # the reader's approved version: the automatic text's own source never lifts the guard.
@@ -595,10 +596,10 @@ def test_print_this_page_is_disabled_where_it_would_lie():
     text are built by the VIEW branch only, so what printed was the editor --
     unsaved draft text with no shelfmark and no attribution on the sheet."""
     code = _code_only(BROWSE)
-    assert '_no_single = (state.view_all' in code
-    assert 'or state.edit_mode' in code
-    assert 'or state.edit_loading)' in code
-    assert "_single.props('disable')" in code, (
+    # since 2026-11-23 "this page" is three entries (image and text, image, text), each disabled alike
+    assert '_no_single = state.view_all or state.edit_mode or state.edit_loading' in code
+    assert "if _no_single or _off:" in code
+    assert "_entry.props('disable')" in code, (
         'the entry is computed as unavailable but still clickable')
 
 

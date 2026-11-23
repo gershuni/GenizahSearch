@@ -1,0 +1,7 @@
+## [Unreleased] -- Browse: copy the shelfmark, share in sight, the text's tools by the text (web, branch `claude/web-browse-tools`)
+
+- The green card has Copy shelfmark, then Share, on every width (on a phone beside the card's ⋮).
+- By the text, on its version line: Copy text (the text on screen with the page's citation, as "How to cite" gives it), Print, Edit, Send Comment. The toolbar no longer carries Print, Edit or Send Comment for a page with a text. Both copies go through the site's copy, which says "copied" only when the browser did; the shelfmark is written in the click itself (`web/clipboard.py::copy_on_click`), as a phone's browser asks.
+- The print menu prints this page's image and text, its image alone, or its text alone ("הדפסת תמונה וטקסט של הדף הנוכחי", "הדפסת תמונת הדף הנוכחי", "הדפסת טקסט הדף הנוכחי"), or every page's text as before (the text alone not for a catalogue-only record, which has none); the masthead prints with each, the transcription's credit only with its text. "Service not available" is never printed.
+- A long title is cut to the green card at every width (between 641 and 1023 px it stretched the card and the page to its length); its tooltip is a box of bounded size.
+- `web/pages/browse.py` (`_print_js`, `_print_button`); tests in `tests/render_smoke/test_browse_text_head_render_smoke.py` and `tests/render_smoke/test_browse_phone_top_render_smoke.py`.

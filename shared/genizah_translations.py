@@ -1555,6 +1555,11 @@ TRANSLATIONS = {
     "Export Word": "יצא Word",
     "Print / Save as PDF": "הדפסה / שמירה כ-PDF",
     "Print this page": "הדפסת הדף הנוכחי",
+    # the print menu by the text (owner's wording, 2026-11-23)
+    "Print this page image and text": "הדפסת תמונה וטקסט של הדף הנוכחי",
+    "Print this page image": "הדפסת תמונת הדף הנוכחי",
+    "Print this page text": "הדפסת טקסט הדף הנוכחי",
+    "Copy shelfmark": "העתק מספר מדף",
     # The "How to cite" chip that replaced the citation footer (2026-09-04).
     # The citations themselves are assembled bilingually in
     # shared/transcription_credits.py, which shared/ code cannot get from tr().

@@ -87,6 +87,8 @@ def test_the_green_card_is_the_shelfmark_and_the_whole_title_with_the_rest_in_it
         [title] = [d for d in card.descendants() if 'browse-header-title' in d.classes]
         tips = [t.text for t in _all_elements(user) if isinstance(t, ui.tooltip)
                 and t.props.get('target') == f'#{title.html_id}']
+        seen['tip_bounds'] = [(t.props.get('max-width'), t.props.get('max-height')) for t in _all_elements(user)
+                              if isinstance(t, ui.tooltip) and t.props.get('target') == f'#{title.html_id}']
         taps = [ls.js_handler for ls in title._event_listeners.values() if ls.type == 'click']
         seen['title'] = (title.text, tips, taps)
         # the card's inline controls: a wide screen's only
@@ -108,14 +110,18 @@ def test_the_green_card_is_the_shelfmark_and_the_whole_title_with_the_rest_in_it
                      r'<span class="browse-h2-sm">T-S 12.001</span></h2>', content), content
     title, tips, taps = seen['title']
     assert title == LONG_TITLE and tips == [LONG_TITLE]                 # whole: not cut at five words
+    # ... in a box of bounded size; and the title's row narrower than the title at every width (owner,
+    # 2026-11-23: at half the screen a long title stretched the card and the page to ~12,800px)
+    assert seen['tip_bounds'] == [('min(640px, 90vw)', '40vh')]
+    assert '\n    .browse-header-center { min-width: 0; }\n' in browse.VIEWER_STYLES
     assert taps == [browse._TITLE_TAP_JS]
     # no puzzle button on the card; every other button there is a wide screen's
-    assert seen['inline'] == [('info', True), ('search', True), ('share', True), ('star_border', True)]
+    # share in sight on a phone too, copying the shelfmark before it (owner, 2026-11-23)
+    assert seen['inline'] == [('info', True), ('search', True), ('share', False), ('star_border', True)]
     assert seen['ktiv_link_wide']
     assert seen['more'] == (True, 'More actions')                       # a phone's only (the puzzle is on the toolbar)
     entries = seen['entries']
-    assert [t for t, _phone, _h in entries] == ['Ktiv', 'Search for Parallels', 'Show Metadata', 'Add to List',
-                                                 'Copy Link']
+    assert [t for t, _phone, _h in entries] == ['Ktiv', 'Search for Parallels', 'Show Metadata', 'Add to List']
     assert [t for t, phone, _h in entries if not phone] == []
     assert entries[0][2].startswith('https://www.nli.org.il/')          # a link: it opens in the browser
 
@@ -124,7 +130,8 @@ def test_every_piece_of_the_card_has_its_place_on_a_phone():
     """A phone orders the card's line: the shelfmark (an Oxford part's badge beside it), ⋮, then the title.
     A piece the phone rules do not place takes order 0 and goes first (Codex #107: the Oxford badge did)."""
     seen = {}
-    placed = {'browse-header-h2': 1, 'browse-header-part': 1, 'browse-header-more': 2, 'browse-header-titlebox': 3}
+    placed = {'browse-header-h2': 1, 'browse-header-part': 1, 'browse-header-more': 2, 'browse-header-tool': 2,
+              'browse-header-titlebox': 3}
 
     async def driver(user):
         await _open_browse(user, lambda texts: 'Edit' in texts)
@@ -210,25 +217,32 @@ def test_the_toolbar_menu_stands_in_for_the_buttons_a_phone_hides():
                 tools[tool] = 'browse-wide-only' in e.classes or 'browse-joins-slot' in e.classes
         seen['tools'] = tools
         hidden = [b for b in _buttons(user) if b.props.get('icon') in ('print', 'library_add', 'star_border', 'extension')
-                  and 'browse-header-card' not in {c for a in b.ancestors() for c in a.classes}]
+                  and 'browse-controls-card' in {c for a in b.ancestors() for c in a.classes}]
         seen['hidden'] = sorted((b.props.get('icon'), 'browse-wide-only' in b.classes) for b in hidden)
+        # by the text, on every width: copy, print, edit, send a comment (owner, 2026-11-23)
+        [head] = [e for e in _all_elements(user) if 'browse-text-head' in e.classes]
+        seen['by_text'] = sorted((b.props.get('icon'), 'browse-wide-only' in b.classes) for b in head.descendants()
+                                 if isinstance(b, ui.button) and b.props.get('icon') in
+                                 ('content_copy', 'print', 'edit', 'comment', 'add_comment', 'chat'))
 
     _run(PAGE, driver)
     assert seen['more'] == (True, 'More actions')
     texts = [t for t, _js in seen['entries']]
-    assert texts == ['Print this page', 'Print all manuscript pages (3)', 'Add to List', 'Toggle Image',
-                     'Edit Transcription', 'Send Comment', 'View Comments', 'Joined Fragments', 'Add to Reading Desk',
+    # print, edit and send a comment are by the text, in sight on a phone too (owner, 2026-11-23)
+    assert texts == ['Add to List', 'Toggle Image', 'View Comments', 'Joined Fragments', 'Add to Reading Desk',
                      'Add to Puzzle']
     # each entry that clicks a hidden button names one that is there, and hidden on a phone
     clicked = []
     for _text, js in seen['entries']:
         for handler in js:
             clicked += re.findall(r'data-tool=\\"(\w+)\\"', handler)
-    assert sorted(set(clicked)) == ['comment', 'edit', 'image', 'joins', 'notes']
+    assert sorted(set(clicked)) == ['image', 'joins', 'notes']
     assert all(seen['tools'].get(tool) for tool in clicked), seen['tools']
     # the print, Reading Desk and puzzle buttons are a wide screen's (the menu does their work itself);
     # Add to Puzzle is on the toolbar, beside Print (owner, 2026-11-23)
-    assert seen['hidden'] == [('extension', True), ('library_add', True), ('print', True), ('star_border', True)]
+    assert seen['hidden'] == [('extension', True), ('library_add', True), ('star_border', True)]
+    assert [icon for icon, wide in seen['by_text'] if wide] == []
+    assert {'content_copy', 'print', 'edit'} <= {icon for icon, _w in seen['by_text']}
 
 
 def test_the_phone_rules_ship_with_the_page_and_the_header():

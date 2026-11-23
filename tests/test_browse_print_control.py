@@ -157,7 +157,9 @@ def test_printing_all_pages_is_offered_and_reaches_the_all_pages_view():
     """
     text = BROWSE.read_text(encoding='utf-8')
     assert "tr('Print all manuscript pages')" in text
-    assert "tr('Print this page')" in text
+    # this page as image and text, its image, its text (owner, 2026-11-23)
+    for label in ('Print this page image and text', 'Print this page image', 'Print this page text'):
+        assert f"tr('{label}')" in text, label
     assert "print_pending = {'value': False}" in text, (
         'the deferred-print flag is gone; a print fired from the click handler '
         'cannot survive toggle_view_all rebuilding the content tree')

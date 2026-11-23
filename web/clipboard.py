@@ -2,7 +2,8 @@
 """Copy text to the viewer's clipboard, and say "copied" only when it worked.
 
 Every web copy button that sends Python text to the browser goes through
-``copy_text_to_clipboard`` (tests/test_web_clipboard_copy.py enforces it).
+``copy_text_to_clipboard``, or ``copy_on_click`` when its text is known as the
+button is drawn (tests/test_web_clipboard_copy.py enforces it).
 
 Two things this module gets right that hand-built JavaScript did not:
 
@@ -45,6 +46,28 @@ def _js_string_literal(text: str) -> str:
 def clipboard_write_js(text: str) -> str:
     """The JavaScript expression that writes ``text`` exactly and resolves to a bool."""
     return _WRITE_JS % _js_string_literal(text)
+
+
+def _say_copied(ok, success_message: str | None) -> None:
+    if ok is True:
+        ui.notify(success_message or tr('Text copied to clipboard'), type='positive')
+    else:
+        ui.notify(tr('Copy failed. Select the text and copy it manually.'), type='negative')
+
+
+def copy_on_click(element, text: str, *, success_message: str | None = None):
+    """Make a click on ``element`` copy ``text``, a text known when the button is drawn; return ``element``.
+
+    The write runs in the click's own handler, in the browser: a phone's browser can refuse a clipboard
+    write that comes after a round trip to the server (``copy_text_to_clipboard``), the click's user
+    activation spent. Only the browser's answer comes back, and the toast follows it, as there.
+    """
+    if not text:
+        element.on('click', lambda: ui.notify(tr('No text to copy'), type='warning'))
+        return element
+    element.on('click', lambda e: _say_copied(e.args, success_message),
+               js_handler=f'async () => emit(await {clipboard_write_js(text)})')
+    return element
 
 
 async def copy_text_to_clipboard(text: str, *, success_message: str | None = None,

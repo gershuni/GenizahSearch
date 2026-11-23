@@ -68,6 +68,7 @@ def _merge_fgp_sources(sys_id: str, pgp_sources):
 # Phase 117 Plan 03: promoted to web/components/typography.py (ANC-03).
 # Re-export the old private name so existing call sites and tests keep working unchanged.
 from web.components.typography import render_line_numbered_html as _render_line_numbered_html
+from web.clipboard import copy_on_click, copy_text_to_clipboard
 from web.components.text_size import current as text_size_now, head_style as text_size_head
 from web.components.text_size import scaled as scaled_text, text_size_buttons
 
@@ -521,9 +522,13 @@ VIEWER_STYLES = '''
         /* an Oxford part's badge stays beside its shelfmark (the default order, 0, put it first: Codex #107) */
         .browse-header-center > .browse-header-part { order: 1; flex: none; white-space: nowrap; }
         .browse-header-center > .browse-header-more { order: 2; }
+        .browse-header-center > .browse-header-tool { order: 2; flex: none; }
         .browse-header-center > .browse-header-titlebox { order: 3; flex: 1 1 100%; min-width: 0; justify-content: center; }
         .browse-header-title.is-open { white-space: normal; overflow: visible; }
         .browse-shelf-place { display: none !important; }
+        /* the text's line: its tools and the version's name on one line at 375px (16px gaps put the name on a
+           second line; owner, 2026-11-23) */
+        .browse-text-head { gap: 2px 4px !important; }
         /* the toolbar: the joins button once its count says there are joins (it is then ringed); ⋮ on
            the page line, the computed identifications' wide entry after it */
         .browse-joins-slot:not(:has(.ring-2)) { display: none !important; }
@@ -535,6 +540,14 @@ VIEWER_STYLES = '''
     .main-content:has(> .browse-root) { padding-top: 8px !important; }
     .browse-root { padding-top: 0 !important; }
     .browse-title-wrap { position: absolute !important; }
+    /* A page's image alone, or its text alone, on paper (owner, 2026-11-23; _print_js): the masthead and the
+       citation print with either */
+    @media print {
+        body.gs-print-image .browse-print-text-body { display: none !important; }
+        body.gs-print-image .browse-print-text-credit { display: none !important; }
+        body.gs-print-image .viewer-panels > .browse-image-card { display: block !important; }
+        body.gs-print-text .viewer-panels > .browse-image-card { display: none !important; }
+    }
     /* the image credit goes with an image that could not be shown (manuscript_viewer.js: handleImageError) */
     .browse-image-credit[hidden] { display: none !important; }
     /* Computed identifications: its icon alone on the toolbar, its words in the tooltip and its name
@@ -548,6 +561,10 @@ VIEWER_STYLES = '''
     /* The title is the whole title, cut to its line at every width (it was cut at five words). */
     .browse-header-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
     .browse-header-titlebox { min-width: 0; max-width: 100%; }
+    /* ... and its row may be narrower than the whole title, at every width: between a phone's 640px and a
+       laptop's 1024px nothing said so, and a long title (MS heb. f.43/2's) stretched the row, the card and the
+       page to its length, ~12,800px (owner, 2026-11-23, at half the screen) */
+    .browse-header-center { min-width: 0; }
     .browse-page-select { min-width: 64px; }
     .browse-more-menu .browse-menu-icon { min-width: 36px; padding-inline-end: 8px; color: #15803d; }
     [data-theme="dark"] .browse-more-menu .browse-menu-icon { color: #86efac; }
@@ -941,7 +958,7 @@ def _menu_entry(text: str, icon: str, *, on_click=None, href: str = '', js: str 
 
 
 def _header_more_menu(page, state, on_shelf, meta_label: str, star_icon: str, *, ktiv_url, on_parallels, on_metadata,
-                      on_list, on_copy, on_place):
+                      on_list, on_place):
     """The green card's ⋮, a phone's only (owner, 2026-11-23): the card's links and buttons and the place
     on the shelf, which the phone does not show (the card is the shelfmark and the title alone there).
     A wider screen has them all on the card; Add to Puzzle is on the page's toolbar."""
@@ -963,7 +980,6 @@ def _header_more_menu(page, state, on_shelf, meta_label: str, star_icon: str, *,
             _menu_entry(meta_label, 'info', on_click=on_metadata, classes=phone)
             _menu_entry(tr('In List') if star_icon == 'star' else tr('Add to List'), star_icon, on_click=on_list,
                         classes=phone)
-            _menu_entry(tr('Copy Link'), 'share', on_click=on_copy, classes=phone)
             if on_shelf is not None and on_shelf['crumbs']:
                 # the place on the shelf, the library first: what the card's own line shows on a wider screen
                 text = f"{tr('Place on the shelf')}: " + f' {CRUMB_SEP} '.join(name for _nid, name in on_shelf['crumbs'])
@@ -981,6 +997,17 @@ _SHORT_LIBRARY_LABELS = {'Cambridge Digital Library': 'CUDL'}
 
 #: A tap on the green card's title shows it whole on a phone (its CSS cuts it to a line), and cuts it again.
 _TITLE_TAP_JS = "(e) => e.currentTarget.classList.toggle('is-open')"
+
+
+def _print_js(part: str = '') -> str:
+    """Print the page; ``part`` 'image' or 'text' prints that part of it alone (the body's class
+    ``gs-print-<part>`` for the print rules, taken off once the print dialog closes)."""
+    if not part:
+        return '() => window.print()'
+    cls = f'gs-print-{part}'
+    return (f"() => {{ const b = document.body; b.classList.add('{cls}'); "
+            f"window.addEventListener('afterprint', () => b.classList.remove('{cls}'), {{once: true}}); "
+            f"window.print(); }}")
 
 
 def _click_tool_js(tool: str) -> str:
@@ -1110,6 +1137,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             params['volume_ie'] = state.volume_ie
         return f'{GENIZAHSEARCH_URL}/browse?{urlencode(params)}'
 
+    page_citation = {'value': None}   # the page's citation as the "How to cite" chip has it
+
     def _update_citation_chip(version_info=None):
         """Give the layout's "How to cite" chip this page's own citation.
 
@@ -1125,6 +1154,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         try:
             page = state.current_page
             if page is None:
+                page_citation['value'] = None
                 set_page_citation(None)
                 return
 
@@ -1137,17 +1167,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # reader's approved version shown there).
             shown_edition = (version_info or {}).get('source') in ('fgp', 'pgp', 'translation', 'user')
             if not (page.text or '').strip() and not shown_edition:
+                page_citation['value'] = None
                 set_page_citation(None)
                 return
             _sm = page.shelfmark or ''
-            set_page_citation(browse_page_citation(
+            # kept for the text's "Copy text", which copies it under the text (owner, 2026-11-23)
+            page_citation['value'] = browse_page_citation(
                 version_info,
                 lang=get_language(),
                 library=page.library_name,
                 shelfmark=_sm or (f'ID: {page.sys_id}' if page.sys_id else None),
                 folio=page.folio_label,
                 page_url=_citation_page_url(),
-            ))
+            )
+            set_page_citation(page_citation['value'])
         except Exception:                                        # noqa: BLE001
             logger.debug('citation chip update skipped', exc_info=True)
 
@@ -2982,26 +3015,34 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     _ol_dir + ' browse-header-title'
                                 ).style(
                                     'color: #ffffff !important; opacity: 0.95;'
-                                ).on('click', js_handler=_TITLE_TAP_JS).tooltip(_overlay_title)
+                                ).on('click', js_handler=_TITLE_TAP_JS)
+                                # The whole title on hover, in a box of bounded size (a long title's filled the
+                                # page: owner, 2026-11-23); ONE tooltip, its text set by the toggle below (each
+                                # `.tooltip()` call adds another).
+                                _ol_tip = ui.tooltip(_overlay_title).classes('browse-header-title-tip')
+                                _ol_tip.props['target'] = f'#{_ol_lbl.html_id}'
+                                _ol_tip.props['max-width'] = 'min(640px, 90vw)'
+                                _ol_tip.props['max-height'] = '40vh'
                                 if _ol_has_toggle:
                                     _ol_st = {'showing_original': False}
 
-                                    def _make_ol_toggle(lbl, orig_title, trans_title, flag, trans_dir):
+                                    def _make_ol_toggle(lbl, tip, orig_title, trans_title, flag, trans_dir):
                                         def handler():
                                             flag['showing_original'] = not flag['showing_original']
                                             if flag['showing_original']:
                                                 lbl.text = orig_title
                                                 lbl.classes(remove=trans_dir, add='rtl-text hebrew-text')
-                                                lbl.tooltip(orig_title)
+                                                tip.text = orig_title
                                             else:
                                                 lbl.text = trans_title
                                                 lbl.classes(remove='rtl-text hebrew-text', add=trans_dir)
-                                                lbl.tooltip(trans_title)
+                                                tip.text = trans_title
                                         return handler
                                     ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
                                         'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
                                     ).tooltip(tr('Show original title')).on(
-                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title or '', _overlay_title, _ol_st, _ol_dir)
+                                        'click.stop', _make_ol_toggle(_ol_lbl, _ol_tip, page.title or '', _overlay_title,
+                                                                      _ol_st, _ol_dir)
                                     )
 
                         # Ktiv link — Phase 85 D-06: hidden for synthetic sys_ids (no NLI Alma record)
@@ -3096,11 +3137,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     setTimeout(() => t.remove(), 2000);
                                 });
                             ''')
+                        # Copy the shelfmark, then share (owner, 2026-11-23: handy on a phone above all): both in
+                        # sight on every width, beside ⋮ on a phone.
+                        _copy_sm = page.shelfmark or page.sys_id or ''
+                        if _copy_sm:
+                            # through the site's copy (web/clipboard.py): exact, "copied" only when the browser
+                            # says so, and written in the click itself, which a phone's browser asks (Codex #115)
+                            copy_on_click(ui.button(icon='content_copy').props(
+                                f'flat round dense aria-label="{tr("Copy shelfmark")}" data-testid="browse-copy-shelfmark"'
+                            ).style('color: #ffffff !important;').tooltip(tr('Copy shelfmark')).classes(
+                                'browse-header-tool'), _copy_sm, success_message=tr('Copied'))
                         ui.button(
                             icon='share',
                             on_click=_copy_share_link
                         ).props(f'flat round dense aria-label="{tr("Copy Link")}"').style(
-                            'color: #ffffff !important;').tooltip(tr('Copy Link')).classes('browse-wide-only')
+                            'color: #ffffff !important;').tooltip(tr('Copy Link')).classes('browse-header-tool')
 
                         # ⋮, a phone's (owner, 2026-11-23): every control above, the green card being the
                         # shelfmark and the title alone there.
@@ -3108,7 +3159,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             page, state, _on_shelf, _meta_label, star_icon,
                             ktiv_url=None if is_synthetic_sys_id(page.sys_id) else ktiv_url,
                             on_parallels=search_for_parallels, on_metadata=toggle_metadata,
-                            on_list=add_manuscript_to_list, on_copy=_copy_share_link, on_place=open_shelf_picker_at)
+                            on_list=add_manuscript_to_list, on_place=open_shelf_picker_at)
 
                     # Next Shelfmark Button
                     _next_tip = tr('Next manuscript')
@@ -5327,50 +5378,47 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # A phone: this toolbar's buttons from here on are in its ⋮ (owner,
                             # 2026-11-23), each entry clicking the hidden button (data-tool) or doing
                             # the same itself; on a wider screen there is room for them all.
-                            with ui.button(icon='print').props(
-                                f'flat round dense aria-label="{tr("Print / Save as PDF")}"'
-                            ).classes('text-green-700 print-hide browse-wide-only').tooltip(tr('Print / Save as PDF')):
-                                # A menu on the button itself (owner's choice,
-                                # 2026-09-04) rather than a second toolbar
-                                # control -- the row is already crowded enough
-                                # to wrap at 1280px.
-                                with ui.menu().props('auto-close'):
-                                    # DISABLED in Full Manuscript View and in
-                                    # edit mode, for two different reasons.
-                                    #
-                                    # In FMV the DOM holds every folio, so
-                                    # "this page" printed the entire manuscript
-                                    # -- indistinguishable from the entry below
-                                    # it, and a large job nobody asked for.
-                                    #
-                                    # In edit mode the masthead, the source
-                                    # credit and the rendered transcription are
-                                    # built by the VIEW branch only, so what
-                                    # printed was the editor: a textarea of
-                                    # unsaved draft text, with no shelfmark and
-                                    # no credit on the sheet. A printed page
-                                    # carrying manuscript text and no
-                                    # attribution is the defect this whole
-                                    # change set exists to remove.
-                                    _no_single = (state.view_all
-                                                  or state.edit_mode
-                                                  or state.edit_loading)
-                                    _single = ui.menu_item(
-                                        tr('Print this page'),
-                                        on_click=(None if _no_single
-                                                  else (lambda: ui.run_javascript('window.print()'))),
-                                    ).classes('text-sm')
-                                    if _no_single:
-                                        _single.props('disable').tooltip(
-                                            tr('Leave Full Manuscript View or '
-                                               'finish editing to print one page'))
-                                    _all_label = tr('Print all manuscript pages')
-                                    if page.total_pages and page.total_pages > 1:
-                                        _all_label = f'{_all_label} ({page.total_pages})'
-                                    ui.menu_item(
-                                        _all_label,
-                                        on_click=_print_all_pages,
-                                    ).classes('text-sm')
+                            # The page's print, its edit and its comment are on the text's version line when the
+                            # page has one (owner, 2026-11-23); here, the print alone, for a page without.
+                            _tools_by_text = page_has_reading_view(page)
+                            # The text's line is drawn in view mode only: while the page is edited its print
+                            # stays here, every page's print with it (Codex on #115).
+                            _print_on_toolbar = not _tools_by_text or state.edit_mode or state.edit_loading
+                            _all_label = tr('Print all manuscript pages')
+                            if page.total_pages and page.total_pages > 1:
+                                _all_label = f'{_all_label} ({page.total_pages})'
+
+                            def _print_button(classes: str = '') -> None:
+                                """Print, a menu on the button itself (owner's choice, 2026-09-04): this page's image
+                                and text, its image, its text (owner, 2026-11-23: "this page" printed both, and
+                                "all pages" their text alone); every page's text."""
+                                with ui.button(icon='print').props(
+                                    f'flat round dense aria-label="{tr("Print / Save as PDF")}" data-testid="browse-print"'
+                                ).classes(f'print-hide {classes}'.strip()).tooltip(tr('Print / Save as PDF')):
+                                    with ui.menu().props('auto-close'):
+                                        # DISABLED in Full Manuscript View and in edit mode, for two different
+                                        # reasons. In FMV the DOM holds every folio, so "this page" printed the
+                                        # entire manuscript -- indistinguishable from the last entry, and a large
+                                        # job nobody asked for. In edit mode the masthead, the source credit and
+                                        # the rendered transcription are built by the VIEW branch only, so what
+                                        # printed was the editor: unsaved draft text with no shelfmark and no
+                                        # credit on the sheet. The image alone only where the page shows one; the
+                                        # text alone only where it has one to read (not a catalogue-only record,
+                                        # whose sheet would be "No text available": Codex on #115).
+                                        _no_single = state.view_all or state.edit_mode or state.edit_loading
+                                        for _label, _part, _off in ((tr('Print this page image and text'), '', False),
+                                                                    (tr('Print this page image'), 'image', not has_image),
+                                                                    (tr('Print this page text'), 'text', not _tools_by_text)):
+                                            _entry = _menu_entry(_label, 'print', js=_print_js(_part))
+                                            if _no_single or _off:
+                                                _entry.props('disable')
+                                            if _no_single:
+                                                _entry.tooltip(tr('Leave Full Manuscript View or '
+                                                                  'finish editing to print one page'))
+                                        _menu_entry(_all_label, 'print', on_click=_print_all_pages)
+
+                            if _print_on_toolbar:
+                                _print_button('text-green-700 browse-wide-only')
 
                             # Add page to list (star button)
                             from web.state import state as app_state
@@ -5410,21 +5458,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # image-less FJMS-only inventories). UI hide is
                                 # defense-in-depth; backend reject at corrections_client.py
                                 # + supabase_corrections_client.py is the load-bearing gate.
-                                if not is_synthetic_sys_id(page.sys_id):
-                                    ui.button(
-                                        tr('Edit'),
-                                        icon='edit',
-                                        on_click=toggle_edit_mode
-                                    ).props(f'flat dense size=sm aria-label="{tr("Edit")}" data-tool="edit"').classes(
-                                        'text-xs browse-icon-collapse browse-wide-only').tooltip(tr('Edit Transcription'))
-                                with ui.element('span').classes('inline-flex browse-wide-only').props('data-tool="comment"'):
-                                    create_comment_button(
-                                        document_id=page.sys_id,
-                                        page_number=page.p_num,
-                                        shelfmark=page.shelfmark or page.sys_id,
-                                        on_submit=refresh_notes_after_comment,
-                                        ie_id=state.volume_ie
-                                    )
                                 with ui.element('span').classes('inline-flex browse-wide-only').props('data-tool="notes"'):
                                     create_notes_button(
                                         document_id=page.sys_id,
@@ -5486,18 +5519,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 f'flat round dense aria-label="{tr("More actions")}" data-testid="browse-tools-more"'
                             ).classes('text-green-700 print-hide browse-phone-only').tooltip(tr('More actions')):
                                 with ui.menu().classes('browse-more-menu'):
-                                    _print_one = _menu_entry(tr('Print this page'), 'print', js='() => window.print()')
-                                    if state.view_all or state.edit_mode or state.edit_loading:
-                                        _print_one.props('disable')
-                                    _menu_entry(_all_label, 'print', on_click=_print_all_pages)
+                                    if _print_on_toolbar:   # else by the text, with its edit and comment
+                                        # the wide menu's entries that apply: image and text, the image alone
+                                        # where there is one, the text alone where there is one (Codex on #115)
+                                        _phone_prints = [(tr('Print this page image and text'), '')]
+                                        if has_image:
+                                            _phone_prints.append((tr('Print this page image'), 'image'))
+                                        if _tools_by_text:
+                                            _phone_prints.append((tr('Print this page text'), 'text'))
+                                        for _label, _part in _phone_prints:
+                                            _print_one = _menu_entry(_label, 'print', js=_print_js(_part))
+                                            if state.view_all or state.edit_mode or state.edit_loading:
+                                                _print_one.props('disable')
+                                        _menu_entry(_all_label, 'print', on_click=_print_all_pages)
                                     _menu_entry(tr('In List') if page_star_icon == 'star' else tr('Add to List'),
                                                 page_star_icon, on_click=add_page_to_list)
                                     if image_toggle_btn is not None:
                                         _menu_entry(tr('Toggle Image'), 'image', js=_click_tool_js('image'))
                                     if page_has_reading_view(page):
-                                        if not is_synthetic_sys_id(page.sys_id):
-                                            _menu_entry(tr('Edit Transcription'), 'edit', js=_click_tool_js('edit'))
-                                        _menu_entry(tr("Send Comment"), "comment", js=_click_tool_js("comment"))
                                         _menu_entry(tr("View Comments"), "forum", js=_click_tool_js("notes"))
                                         if page.shelfmark:
                                             _menu_entry(tr('Joined Fragments'), 'link', js=_click_tool_js('joins'))
@@ -5588,7 +5627,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     if not has_image:
                         state.image_fullscreen = False  # nothing to show full screen
                     if has_image:
-                        image_panel_ref['container'] = ui.card().style(
+                        image_panel_ref['container'] = ui.card().classes('browse-image-card').style(
                             'flex: 0 0 50%; min-height: 60vh; display: block;'
                         )
                         if state.image_fullscreen:
@@ -5952,20 +5991,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     _update_citation_chip(version_info)
                                     credit = resolve_transcription_credit(
                                         version_info, lang=get_language())
-                                    _rows = [
+                                    _text_rows = [
                                         f'<div style="font-weight: 600;">'
                                         f'{html_module.escape(credit.heading)}</div>'
                                     ]
                                     if credit.citation_lines:
-                                        _rows.append(
+                                        _text_rows.append(
                                             f'<div style="margin-top: 3px;">'
                                             f'{html_module.escape(tr("When publishing material from this site, please cite:"))}'
                                             f'</div>'
                                         )
-                                        _rows.extend(
+                                        _text_rows.extend(
                                             f'<div>{html_module.escape(_line)}</div>'
                                             for _line in credit.citation_lines
                                         )
+                                    # the transcription's credit goes with its text: not on an image printed
+                                    # alone (owner, 2026-11-23); the site's line stays on every sheet
+                                    _rows = ['<div class="browse-print-text-credit">' + ''.join(_text_rows) + '</div>']
                                     _rows.extend(
                                         f'<div style="margin-top: 3px;">'
                                         f'{html_module.escape(_line)}</div>'
@@ -5989,7 +6031,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 version_row = ui.row().classes('w-full items-center p-2 border-b print-hide browse-text-head')
 
                             # Text content container
-                            text_container = ui.column().classes('w-full h-full')
+                            text_container = ui.column().classes('w-full h-full browse-print-text-body')
                             # The reader's switch (owner, 2026-11-04: the page
                             # never guesses the text's language). Marked, the
                             # pane's words are looked up; unmarked, a click on
@@ -6111,6 +6153,34 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         # The switch, the hint and the "type a word" button
                                         # (web/components/dictionary_lookup.py).
                                         dictionaries.switch(text_container, blau_popover, blau_lookup_on)
+
+                                    # The text's tools by the text (owner, 2026-11-23): copy it, with the citation
+                                    # "How to cite" gives this page; print; edit; send a comment.
+                                    async def _copy_text():
+                                        # "Text copied" only once the browser says it is (web/clipboard.py; Codex #115)
+                                        text = current_text['value'] or ''
+                                        cite = page_citation['value'].as_text() if page_citation['value'] else ''
+                                        await copy_text_to_clipboard('\n\n'.join(part for part in (text, cite) if part),
+                                                                     success_message=tr('Text copied'))
+
+                                    ui.button(icon='content_copy', on_click=_copy_text).props(
+                                        f'flat round dense aria-label="{tr("Copy text")}" data-testid="browse-copy-text"'
+                                    ).tooltip(tr('Copy text'))
+                                    _print_button()
+                                    # Edit and Send Comment keep their words where there is room; a phone has
+                                    # their icons, each keeping its name (browse-icon-collapse).
+                                    if not is_synthetic_sys_id(page.sys_id):
+                                        ui.button(tr('Edit'), icon='edit', on_click=toggle_edit_mode).props(
+                                            f'flat dense size=sm aria-label="{tr("Edit")}" data-testid="browse-edit"'
+                                        ).classes('text-xs browse-icon-collapse').tooltip(tr('Edit Transcription'))
+                                    from web.components import create_comment_button
+                                    create_comment_button(
+                                        document_id=page.sys_id,
+                                        page_number=page.p_num,
+                                        shelfmark=page.shelfmark or page.sys_id,
+                                        on_submit=refresh_notes_after_comment,
+                                        ie_id=state.volume_ie
+                                    ).classes('browse-icon-collapse').props(f'aria-label="{tr("Send Comment")}"')
 
                                 if state.enrichment_loaded:
                                     with version_row:
@@ -6421,9 +6491,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         if embedded and _search_card is not None:
             _search_card.set_visibility(False)  # R2-1 embed: hide the search card in the iframe
 
-        # Service status warning
+        # Service status warning (never on paper: owner, 2026-11-23)
         if not service.is_ready:
-            with ui.card().classes('w-full p-4 bg-yellow-50 border border-yellow-300 mb-4'):
+            with ui.card().classes('w-full p-4 bg-yellow-50 border border-yellow-300 mb-4 print-hide browse-service-warning'):
                 with ui.row().classes('items-center gap-2'):
                     ui.icon('warning', color='orange')
                     ui.label(tr('Service not available')).classes('text-yellow-800')

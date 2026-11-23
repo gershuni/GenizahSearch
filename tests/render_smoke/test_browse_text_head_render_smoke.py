@@ -196,3 +196,182 @@ def test_a_search_deep_link_rewrites_the_choosers_one_tooltip():
     asyncio.run(_run())
     assert tips['browsing'] == [words['browsing']]
     assert tips['search'] == [words['search']]
+
+
+def test_the_texts_tools_are_by_the_text():
+    """Owner, 2026-11-23: by the text, a copy of it with the citation "How to cite" gives the page; the print
+    menu, its "this page" now three (image and text, image, text) beside every page's text; Edit; Send
+    Comment. The green card: the shelfmark copied in one click, before Share."""
+    from types import SimpleNamespace as _NS
+    from unittest.mock import patch as _patch
+
+    from web import clipboard
+    seen, copied, said = {}, [], []
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: 'Edit' in texts)
+        await _wait_until(lambda: _row(user) is not None)
+        row = _row(user)
+        seen['tools'] = [b.props.get('data-testid') for b in row.descendants() if isinstance(b, ui.button)
+                         and b.props.get('data-testid') in ('browse-copy-text', 'browse-print', 'browse-edit')]
+        [prt] = [b for b in row.descendants() if b.props.get('data-testid') == 'browse-print']
+        seen['print'] = [(' '.join(d.text for d in m.descendants() if isinstance(d, ui.item_section) and d.text),
+                          [ls.js_handler for ls in m._event_listeners.values() if ls.type == 'click' and ls.js_handler])
+                         for m in prt.descendants() if isinstance(m, ui.menu_item)]
+        [copy] = [b for b in row.descendants() if b.props.get('data-testid') == 'browse-copy-text']
+
+        async def record(text, **kwargs):
+            copied.append((text, kwargs.get('success_message')))
+            return True
+
+        # through the site's copy (web/clipboard.py), which says "copied" only when the browser did
+        with _patch.object(browse, 'copy_text_to_clipboard', side_effect=record):
+            _click(user, copy)
+            await _wait_until(lambda: len(copied) == 1)
+        # the shelfmark is written in the click itself, in the browser (a phone's browser refuses a write
+        # after a round trip: Codex on #115); only the browser's answer comes back, for the toast (the card as
+        # it is now: the page is drawn again once its enrichment comes)
+        [card_copy] = [e for e in _all_elements(user) if e.props.get('data-testid') == 'browse-copy-shelfmark']
+        [listener] = [ls for ls in card_copy._event_listeners.values() if ls.type == 'click']
+        seen['card_copy'] = (card_copy.props.get('aria-label'), listener.js_handler)
+        with user._client, _patch.object(clipboard.ui, 'notify', side_effect=lambda m, **k: said.append((m, k))):
+            listener.handler(_NS(args=True))
+            listener.handler(_NS(args=False))
+
+    _run_browse(OPEN_PAGE, driver)
+    assert seen['tools'] == ['browse-copy-text', 'browse-print', 'browse-edit']
+    labels = [label for label, _js in seen['print']]
+    assert labels == ['Print this page image and text', 'Print this page image', 'Print this page text',
+                      'Print all manuscript pages (3)']
+    js = dict(seen['print'])
+    assert js['Print this page image and text'] == [browse._print_js()]
+    assert "classList.add('gs-print-image')" in js['Print this page image'][0]
+    assert "classList.add('gs-print-text')" in js['Print this page text'][0]
+    # the text on screen, then the page's citation
+    [(text, message)] = copied
+    shown, citation = text.split('\n\n', 1)
+    assert shown == OPEN_PAGE.text and 'T-S 12.001' in citation and message == 'Text copied'
+    name, js = seen['card_copy']
+    assert name == 'Copy shelfmark'
+    assert js == f'async () => emit(await {clipboard.clipboard_write_js("T-S 12.001")})'
+    assert [(m, k.get('type')) for m, k in said] == [
+        ('Copied', 'positive'), ('Copy failed. Select the text and copy it manually.', 'negative')]
+
+
+def test_the_print_rules_print_a_part_alone():
+    styles = browse.VIEWER_STYLES
+    assert 'body.gs-print-image .browse-print-text-body { display: none !important; }' in styles
+    assert 'body.gs-print-text .viewer-panels > .browse-image-card { display: none !important; }' in styles
+    # an image hidden by Toggle Image comes back for its print (Codex on #115)
+    assert 'body.gs-print-image .viewer-panels > .browse-image-card { display: block !important; }' in styles
+    assert "window.addEventListener('afterprint'" in browse._print_js('image')
+    # the transcription's credit goes with its text (owner, 2026-11-23)
+    assert 'body.gs-print-image .browse-print-text-credit { display: none !important; }' in styles
+
+
+def test_an_image_print_has_no_service_warning_and_no_transcription_credit():
+    """Owner, 2026-11-23, on a printed image: "Service not available" printed above it, and MiDRASH's
+    credit below it. The warning is never on paper; the transcription's credit is in its own block, which
+    an image printed alone leaves out, and the site's line stays outside it."""
+    import tests.render_smoke.test_browse_button_icons_render_smoke as icons
+    from unittest.mock import patch as _patch
+
+    real_service = icons._service
+
+    def not_ready(page):
+        svc = real_service(page)
+        svc.is_ready = False
+        return svc
+
+    seen = {}
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: 'Edit' in texts)
+        elements = _all_elements(user)
+        seen['warning'] = [e.classes for e in elements if 'browse-service-warning' in e.classes]
+        seen['credit'] = [e.content for e in elements
+                          if 'browse-print-text-credit' in (getattr(e, 'content', '') or '')]
+
+    with _patch.object(icons, '_service', side_effect=not_ready):
+        _run_browse(OPEN_PAGE, driver)
+    [warning] = seen['warning']
+    assert 'print-hide' in warning
+    [credit] = seen['credit']
+    text_block, after = credit.split('<div class="browse-print-text-credit">', 1)[1].split('</div></div>', 1)
+    assert 'MiDRASH' in text_block and 'Retrieved from' not in text_block
+    assert 'Retrieved from' in after
+
+
+def test_a_catalogue_only_record_offers_no_text_alone_to_print():
+    """Codex on #115: a catalogue-only record has no text to read, so its print menu (on the toolbar) has
+    "Print this page text" disabled: its sheet would have been "No text available"."""
+    from dataclasses import replace
+    page = replace(OPEN_PAGE, sys_id='990001234560000000', text='')   # shared/synthetic_sys_id.py
+    seen = {}
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: True)
+        await _wait_until(lambda: any(e.props.get('data-testid') == 'browse-print' for e in _all_elements(user)))
+        [prt] = [e for e in _all_elements(user) if e.props.get('data-testid') == 'browse-print']
+        seen['entries'] = [(' '.join(d.text for d in m.descendants() if isinstance(d, ui.item_section) and d.text),
+                            'disable' in m.props)
+                           for m in prt.descendants() if isinstance(m, ui.menu_item)]
+        [more] = [e for e in _all_elements(user) if e.props.get('data-testid') == 'browse-tools-more']
+        seen['phone'] = [' '.join(d.text for d in m.descendants() if isinstance(d, ui.item_section) and d.text)
+                         for m in more.descendants() if isinstance(m, ui.menu_item)]
+
+    _run_browse(page, driver)
+    entries = dict(seen['entries'])
+    assert entries['Print this page text'] is True, seen['entries']
+    assert entries['Print this page image and text'] is False
+    # the phone's ⋮, its only print menu: the entries that apply -- this page has no image to print alone
+    prints = [label for label in seen['phone'] if label.startswith('Print')]
+    assert prints == ['Print this page image and text', 'Print all manuscript pages (3)'], prints
+
+
+def test_a_catalogue_only_record_with_an_image_prints_it_alone_from_the_phones_menu():
+    """Codex on #115: on a phone the ⋮ is a catalogue-only record's only print menu; it lacked the image alone."""
+    from dataclasses import replace
+    from tests.render_smoke.test_browse_button_icons_render_smoke import SWITCH_PAGE
+    page = replace(SWITCH_PAGE, sys_id='990001234560000000', text='')   # Cambridge's images, no text
+    seen = {}
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: True)
+        await _wait_until(lambda: any(e.props.get('data-testid') == 'browse-tools-more' for e in _all_elements(user)))
+        [more] = [e for e in _all_elements(user) if e.props.get('data-testid') == 'browse-tools-more']
+        seen['phone'] = [(' '.join(d.text for d in m.descendants() if isinstance(d, ui.item_section) and d.text),
+                          [ls.js_handler for ls in m._event_listeners.values() if ls.type == 'click' and ls.js_handler])
+                         for m in more.descendants() if isinstance(m, ui.menu_item)]
+
+    _run_browse(page, driver)
+    prints = {label: js for label, js in seen['phone'] if label.startswith('Print')}
+    assert list(prints) == ['Print this page image and text', 'Print this page image',
+                            'Print all manuscript pages (3)'], list(prints)
+    assert prints['Print this page image'] == [browse._print_js('image')]
+
+
+def test_while_the_page_is_edited_its_print_stays_on_the_toolbar():
+    """Codex on #115: the text's line is drawn in view mode only, so in edit mode the print menu, every page's
+    print with it, had gone from the page. It stays on the toolbar while the page is edited: "this page"
+    disabled (the editor would print), every page's print as before."""
+    seen = {}
+
+    def prints(user):
+        return [e for e in _all_elements(user) if e.props.get('data-testid') == 'browse-print']
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: 'Edit' in texts)
+        [edit] = [e for e in _all_elements(user) if e.props.get('data-testid') == 'browse-edit']
+        _click(user, edit)
+        await _wait_until(lambda: not any(e.props.get('data-testid') == 'browse-copy-text' for e in _all_elements(user))
+                          and prints(user))
+        [prt] = prints(user)
+        seen['entries'] = [(' '.join(d.text for d in m.descendants() if isinstance(d, ui.item_section) and d.text),
+                            'disable' in m.props)
+                           for m in prt.descendants() if isinstance(m, ui.menu_item)]
+
+    _run_browse(OPEN_PAGE, driver)
+    entries = dict(seen['entries'])
+    assert entries['Print all manuscript pages (3)'] is False, seen['entries']
+    assert entries['Print this page image and text'] is True and entries['Print this page text'] is True

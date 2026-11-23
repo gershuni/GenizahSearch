@@ -563,3 +563,45 @@ def test_web_clipboard_imports_stay_narrow():
             continue
         top = mod.split(".")[0]
         assert top in {"__future__", "json", "re", "nicegui"} or mod == "web.translations", mod
+
+
+class _Clickable:
+    """Records ``.on`` the way an element would."""
+
+    def __init__(self):
+        self.listeners = []
+
+    def on(self, type, handler=None, js_handler=None):
+        self.listeners.append((type, handler, js_handler))
+        return self
+
+
+def test_copy_on_click_writes_in_the_click_and_toasts_the_answer(monkeypatch):
+    """A text known when the button is drawn is written in the click itself (a phone's browser can refuse a
+    write after a round trip: Codex on #115); the toast follows the browser's answer, as copy_text_to_clipboard's."""
+    from types import SimpleNamespace
+    from web import clipboard
+
+    said = []
+    monkeypatch.setattr(clipboard.ui, "notify", lambda m, **k: said.append((m, k.get("type"))))
+    btn = _Clickable()
+    assert clipboard.copy_on_click(btn, "T-S 12.001", success_message="Copied") is btn
+    [(kind, handler, js)] = btn.listeners
+    assert kind == "click" and js == f"async () => emit(await {clipboard.clipboard_write_js('T-S 12.001')})"
+    handler(SimpleNamespace(args=True))
+    handler(SimpleNamespace(args=None))            # no answer is not a success
+    assert said == [("Copied", "positive"),
+                    (clipboard.tr("Copy failed. Select the text and copy it manually."), "negative")]
+
+
+def test_copy_on_click_without_text_copies_nothing(monkeypatch):
+    from web import clipboard
+
+    said = []
+    monkeypatch.setattr(clipboard.ui, "notify", lambda m, **k: said.append((m, k.get("type"))))
+    btn = _Clickable()
+    clipboard.copy_on_click(btn, "")
+    [(_kind, handler, js)] = btn.listeners
+    assert js is None
+    handler()
+    assert said == [(clipboard.tr("No text to copy"), "warning")]
