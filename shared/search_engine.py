@@ -58,6 +58,7 @@ from shared.responsa_match import (
     refuse_unsupported_stars, ResponsaQueryRefused, StarExclusion, GUARD_REFUSAL_TEXT,
 )
 from shared.search_mode_signs import MODE_SIGNS
+from shared import background_work
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -1429,6 +1430,10 @@ class _CrossingPlan:
     note: Optional[str] = None      # why some were not searched (the search is marked "N+")
 
 
+# A page header's FL id (MetadataManager.parse_full_id_components: the first FL\d+).
+_FL_ID_RE = re.compile(r'FL(\d+)')
+
+
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
     # Editions search (plan §3.3), as class defaults so an engine made without __init__
@@ -1441,7 +1446,7 @@ class SearchEngine:
     _edition_generation = {}
 
     def __init__(self, meta_mgr, variants_mgr, *, worker_mode=False, open_local=True,
-                 index_path=None, edition_leaf=False):
+                 index_path=None, edition_leaf=False, build_fl_index=True):
         self._worker_mode = worker_mode
         self.meta_mgr = meta_mgr
         self.var_mgr = variants_mgr
@@ -1480,7 +1485,9 @@ class SearchEngine:
         # nothing and goes again from the new one.
         self._fl_id_index_generation = 0
         self.reload_index()
-        if not worker_mode and not self._edition_leaf:
+        # The desktop passes build_fl_index=False: its startup queue builds the lookup once the
+        # restored manuscript is shown (desktop/startup_work.py, build_fl_id_index_now).
+        if not worker_mode and not self._edition_leaf and build_fl_index:
             self.start_fl_id_index_build()
         # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
         self.local_index = None            # tantivy.Index for LOCAL side-index
@@ -2248,17 +2255,18 @@ class SearchEngine:
         browse_map = self._load_browse_map()
         if not browse_map:
             return True
+        # One compiled search per page, not parse_full_id_components (four searches): its
+        # fl_id is the digits of the header's first FL\d+, which is this group exactly.
+        # 11.0 s -> 2.75 s over the corpus, the same 973,091 keys (measured 2026-11-23).
+        search = _FL_ID_RE.search
         index = {}
-        for sys_id, pages in browse_map.items():
+        for n, (sys_id, pages) in enumerate(browse_map.items()):
+            if not n & 1023:
+                background_work.checkpoint()
             for idx, page in enumerate(pages):
-                parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
-                fl_id = parsed.get('fl_id')
-                if fl_id:
-                    fl_digits = re.sub(r"\D", "", str(fl_id))
-                    if fl_digits:
-                        if fl_digits not in index:
-                            index[fl_digits] = []
-                        index[fl_digits].append((sys_id, idx))
+                match = search(page.get('full_header', ''))
+                if match:
+                    index.setdefault(match.group(1), []).append((sys_id, idx))
         with self._fl_id_index_lock:
             if generation != self._fl_id_index_generation:
                 LOGGER.info("FL ID index built from a browse map since replaced; building again")
@@ -2266,6 +2274,14 @@ class SearchEngine:
             self._fl_id_index = index
         LOGGER.info("FL ID index built: %d entries", len(index))
         return True
+
+    def build_fl_id_index_now(self):
+        """Build the FL ID index in the calling thread (the desktop's startup queue,
+        desktop/startup_work.py). Nothing when it is built or a build is running."""
+        if self._fl_id_index is not None or self._fl_id_index_building:
+            return
+        self._fl_id_index_building = True
+        self._build_fl_id_index_thread()
 
     def start_fl_id_index_build(self):
         """Start building FL ID index in background. Non-blocking."""
@@ -6806,14 +6822,16 @@ class SearchEngine:
         # Fallback: linear scan (index not yet ready or FL ID not found in index)
         sys_candidates = [sys_id] if sys_id else list(browse_map.keys())
 
+        # The index build's one compiled search (parse_full_id_components' fl_id exactly),
+        # a quarter of the CPU: before the lookup is built this scans the whole map.
+        search = _FL_ID_RE.search
         for sid in sys_candidates:
             if sid not in browse_map:
                 continue
             pages = browse_map[sid]
             for idx, page in enumerate(pages):
-                parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
-                page_fl = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
-                if page_fl and page_fl == fl_digits:
+                match = search(page.get('full_header', ''))
+                if match and match.group(1) == fl_digits:
                     return _build_fl_result(sid, pages, page, idx)
         return None
 

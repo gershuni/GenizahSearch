@@ -66,13 +66,14 @@ class _Timers:
             self.calls.pop(0)()
 
 
-def _restore(monkeypatch, state, known=(A, B, C), busy=None, before_timers=None):
+def _restore(monkeypatch, state, known=(A, B, C), busy=None, before_timers=None, queue=False):
     """``_restore_session`` on a stand-in host: the Browse and desk restore are GenizahGUI's own
     methods, everything else a recorder. ``known``: the manuscripts the catalogue and index still
     have. ``busy(host)``: the startup's background loading is still running (asked at each look;
     by default it has finished). ``before_timers(host)``: run once ``_restore_session`` has returned,
-    before its deferred Browse restore. Answers the host and what the desk held when it was first
-    drawn."""
+    before its deferred Browse restore. ``queue``: the loading is the startup queue's
+    (desktop/startup_work.py), busy until its first phase is done; else the old loaders'. Answers the
+    host and what the desk held when it was first drawn."""
     monkeypatch.setattr(genizah_app, 'load_app_config', lambda: {'restore_mode': 'always'})
     monkeypatch.setattr(session_persistence, 'load_session_state', lambda: state)
     monkeypatch.setattr(session_persistence, 'get_interrupted_search', lambda: None)
@@ -99,7 +100,18 @@ def _restore(monkeypatch, state, known=(A, B, C), busy=None, before_timers=None)
     def finished():
         host.looks += 1
         return not (busy and busy(host))
-    host.meta_mgr.background_loading_finished.side_effect = finished
+    if queue:
+        class _Queue:                          # the steps the restore waits on are done; phase 1 asked
+            browse_map_loaded = browse_resolver_built = True
+
+            @property
+            def phase1_done(self):
+                return finished()
+        host._startup_work = _Queue()
+        host.meta_mgr.background_loading_finished.return_value = True   # never started: True
+    else:
+        host._startup_work = None
+        host.meta_mgr.background_loading_finished.side_effect = finished
     reads = host.reads = []
 
     def full_manuscript(sid):
@@ -269,6 +281,21 @@ def test_the_desk_opens_once_the_startup_loading_has_finished(monkeypatch):
     host, drawn = _restore(monkeypatch, state, busy=busy)
     assert host.looks == 4 and len(drawn) == 1 and drawn[0]['ids'] == [C, A, B]
     assert waiting == [state['browse_reading_desk']] * 3
+    assert host._browse_rd_restore_pending is None
+
+
+def test_the_desk_waits_for_the_startup_queues_first_phase(monkeypatch):
+    # PR #111: the old loaders never start; the desk opens once phase 1 has read the catalogue.
+    state = _saved(monkeypatch, browse_reading_desk_active=True, browse_reading_desk_state=_open_desk())
+    state['browse_shelfmark'] = {'sys_id': A, 'shelfmark': '', 'fl_id': '', 'last_field': 'sys'}
+
+    def busy(host):
+        if host.looks <= 3:
+            assert not host.browse_reading_desk_active and host.reads == []
+            return True
+        return False
+    host, drawn = _restore(monkeypatch, state, busy=busy, queue=True)
+    assert host.looks == 4 and len(drawn) == 1 and drawn[0]['ids'] == [C, A, B]
     assert host._browse_rd_restore_pending is None
 
 

@@ -38,6 +38,7 @@ from shared.codicological import CodicologicalManager, bodleian_cache_needs_refr
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
 from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
 from shared.text_normalize import strip_search_diacritics
+from shared import background_work
 
 # One spelling for the quote marks of a Hebrew abbreviation: gershayim and the curly
 # double quotes read as the ASCII double quote, geresh and the curly single quotes as
@@ -204,7 +205,12 @@ def _warn_bridge_import_failed(exc):
 # the loop's; tests/test_shelfmark_search_path.py checks that against the loop itself.
 
 _SHELFMARK_TOKEN_SPLIT = re.compile(r'[\s\.\-]+')
-_SHELFMARK_SEARCH_BUILD_LOCK = threading.Lock()
+# One build at a time; a caller waiting for it makes the startup queue's build go on at its
+# checkpoints instead of giving way (shared/background_work.py).
+_SHELFMARK_SEARCH_BUILD = background_work.OnDemandBuild()
+# Browse's resolver index (_get_shelfmark_index): one build at a time, so a Go to on the UI
+# thread waits for the startup queue's build instead of making a second one.
+_SHELFMARK_INDEX_BUILD = background_work.OnDemandBuild()
 
 
 def _shelfmark_tokens(text):
@@ -350,14 +356,16 @@ class _ShelfmarkSearchIndex:
     __slots__ = ('bank_id', 'size', 'norm_keys', 'norm_ids', 'nodot_keys', 'nodot_ids',
                  'token_keys', 'token_ids', 'alternate_hashes')
 
-    def __init__(self, csv_bank, normalize):
+    def __init__(self, csv_bank, normalize, wanted=None):
         self.bank_id = id(csv_bank)
         self.size = len(csv_bank)
         by_norm = []
         by_nodot = []
         by_token = {}
         alternates = set()
-        for sys_id, data in list(csv_bank.items()):
+        for n, (sys_id, data) in enumerate(list(csv_bank.items())):
+            if not n & 4095:
+                background_work.checkpoint(wanted)
             value = data.get('shelfmark', '') if isinstance(data, dict) else ''
             if not value or not isinstance(value, str):
                 continue
@@ -749,6 +757,42 @@ class MetadataManager:
             except Exception as e:
                 LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
 
+    def load_catalogue_now(self):
+        """libraries.csv read in the calling thread (the desktop's startup queue,
+        desktop/startup_work.py; the web reads it in start_background_loading). Without
+        the CUDL alias index: that is built later by the queue, or by the first lookup
+        that needs it (shelfmark_bridge.defer_alias_index)."""
+        try:
+            self._load_csv_bank(build_alias=False)
+        finally:
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.set()
+
+    def load_oxford_parts_now(self):
+        """The Oxford codicological parts, in the calling thread, once libraries.csv is read
+        (the desktop's startup queue; ``_load_heavy_caches_bg`` on the web)."""
+        try:
+            self.codico_mgr.load(csv_bank=self.csv_bank)
+        finally:
+            event = getattr(self, '_oxford_parts_event', None)
+            if event is not None:
+                event.set()
+
+    def expect_oxford_parts(self):
+        """A load of the Oxford parts is coming (``load_oxford_parts_now``, the desktop's
+        startup queue): ``wait_for_oxford_parts`` waits for it until it ends."""
+        self._oxford_parts_event = threading.Event()
+
+    def wait_for_oxford_parts(self, timeout=20.0):
+        """True when the Oxford parts are loaded. While an expected load is under way
+        (``expect_oxford_parts``), waits for it up to *timeout* seconds; otherwise at once."""
+        codico = getattr(self, 'codico_mgr', None)
+        event = getattr(self, '_oxford_parts_event', None)
+        if event is not None and not getattr(codico, '_loaded', False):
+            event.wait(timeout)
+        return bool(getattr(codico, '_loaded', False))
+
     def _load_heavy_caches_bg(self):
         try:
             self._load_csv_bank()
@@ -779,8 +823,9 @@ class MetadataManager:
             cached = self._corpus_ids = (len(self.csv_bank), ids)
         return cached[1]
 
-    def _load_csv_bank(self):
-        """Load the massive CSV file into memory for instant lookup."""
+    def _load_csv_bank(self, build_alias=True):
+        """Load the massive CSV file into memory for instant lookup. *build_alias* False
+        (the desktop, load_catalogue_now) leaves the CUDL alias index to be built later."""
         if not os.path.exists(Config.LIBRARIES_CSV):
             LOGGER.warning("libraries.csv not found at %s; csv_bank will remain empty", Config.LIBRARIES_CSV)
             return
@@ -847,8 +892,12 @@ class MetadataManager:
 
             # Phase 84: build CUDL alias index for cross-system shelfmark lookups (D-03).
             try:
-                from shared.shelfmark_bridge import build_alias_index as _build_cudl_alias_index
-                _build_cudl_alias_index(self.csv_bank)
+                if build_alias:
+                    from shared.shelfmark_bridge import build_alias_index as _build_cudl_alias_index
+                    _build_cudl_alias_index(self.csv_bank)
+                else:
+                    from shared.shelfmark_bridge import defer_alias_index
+                    defer_alias_index(lambda: self.csv_bank if self._csv_bank_loaded else None)
             except ImportError as e:
                 _warn_bridge_import_failed(e)
             except MemoryError:
@@ -1055,7 +1104,11 @@ class MetadataManager:
         temp_map = {}
         try:
             with open(Config.FILE_V7, 'r', encoding='utf-8') as f:
-                for line in f:
+                for n, line in enumerate(f):
+                    if not n & 65535:
+                        # The legacy corpus (~1.6 GB) when the cache is missing: the desktop's
+                        # startup queue gives way to a search here (shared/background_work.py).
+                        background_work.checkpoint()
                     if line.startswith("###"):
                         uid = self.extract_unique_id(line)
                         if "xml -" in line:
@@ -1757,6 +1810,9 @@ class MetadataManager:
 
         # 2a2. Check for Oxford Part images (if no Cambridge images)
         if not images_ext:
+            # The desktop reads the Oxford parts at start, maybe after this lookup began
+            # (desktop/startup_work.py): wait for them rather than miss the part's images.
+            self.wait_for_oxford_parts()
             part_id = self.get_part_for_folio(system_id)
             if part_id:
                 current_meta['oxford_part_id'] = part_id
@@ -2577,11 +2633,12 @@ class MetadataManager:
         index = getattr(self, '_shelfmark_search_index', None)
         if index is not None and index.is_for(csv_bank):
             return index
-        with _SHELFMARK_SEARCH_BUILD_LOCK:
+        with _SHELFMARK_SEARCH_BUILD.held():
             index = getattr(self, '_shelfmark_search_index', None)
             if index is not None and index.is_for(csv_bank):
                 return index
-            index = _ShelfmarkSearchIndex(csv_bank, self._normalize_shelfmark)
+            index = _ShelfmarkSearchIndex(csv_bank, self._normalize_shelfmark,
+                                          wanted=_SHELFMARK_SEARCH_BUILD.wanted)
             self._shelfmark_search_index = index
         return index
 
@@ -2674,19 +2731,37 @@ class MetadataManager:
         if self._shelfmark_index is not None:
             return self._shelfmark_index
 
-        cached = self._cached_shelfmarks()
-        index = _ShelfmarkIndex()
-        index.cached_variants = {sys_id: candidates for sys_id, (candidates, _title) in cached.items()}
-        seen = set()
-        for sys_id, shelf, title in self._iter_shelfmark_sources(cached):
-            norm_shelf = normalize_shelfmark(shelf)
-            if not norm_shelf or (sys_id, norm_shelf) in seen:
-                continue
-            seen.add((sys_id, norm_shelf))
-            index.append((sys_id, shelf, title, norm_shelf, norm_shelf.replace('.', '')))
+        with _SHELFMARK_INDEX_BUILD.held():
+            if self._shelfmark_index is not None:     # built by another thread meanwhile
+                return self._shelfmark_index
+            cached = self._cached_shelfmarks()
+            index = _ShelfmarkIndex()
+            index.cached_variants = {sys_id: candidates for sys_id, (candidates, _title) in cached.items()}
+            seen = set()
+            wanted = _SHELFMARK_INDEX_BUILD.wanted
+            for n, (sys_id, shelf, title) in enumerate(self._iter_shelfmark_sources(cached)):
+                if not n & 4095:
+                    # The startup queue's build gives way to a search, unless a Go to waits
+                    # for it (shared/background_work.py).
+                    background_work.checkpoint(wanted)
+                norm_shelf = normalize_shelfmark(shelf)
+                if not norm_shelf or (sys_id, norm_shelf) in seen:
+                    continue
+                seen.add((sys_id, norm_shelf))
+                index.append((sys_id, shelf, title, norm_shelf, norm_shelf.replace('.', '')))
 
-        self._shelfmark_index = index
+            self._shelfmark_index = index
         return index
+
+    def prewarm_browse_resolver(self):
+        """Build Browse's shelfmark resolver index (``_get_shelfmark_index``; 5.6 s over the corpus,
+        measured 2026-11-23) in the calling thread: the desktop's startup queue, so neither a
+        restored Browse state nor the first Go to by shelfmark builds it on the UI thread. Only
+        once libraries.csv is read to the end; False before."""
+        if not self._csv_bank_loaded or not self.csv_bank:
+            return False
+        self._get_shelfmark_index()
+        return True
 
     def has_shelfmark(self, query) -> bool:
         """True when ``query`` is a catalogue shelfmark exactly, as ``resolve_system_by_shelfmark``

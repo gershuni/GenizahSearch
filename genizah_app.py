@@ -51,6 +51,7 @@ if _CORE_IMPORT_ERROR:
 from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_word_gap
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
+from desktop.startup_work import StartupWork, shelfmark_completer_rows
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
@@ -1650,7 +1651,16 @@ def _startup_loading_busy(window):
     """The startup's background loading is still running on *window*: the catalogue's caches
     (MetadataManager.background_loading_finished) or the FL-id lookup (SearchEngine). They hold the
     interpreter while they run, so every Qt call on the UI thread waits for them. A function, not a
-    method: the session-restore methods that call it are borrowed by stand-ins in the tests."""
+    method: the session-restore methods that call it are borrowed by stand-ins in the tests.
+
+    With the startup queue (desktop/startup_work.py; the old loaders never start, so
+    ``background_loading_finished`` is True at once): busy until its first phase has read the
+    browse map, libraries.csv and the Oxford parts. A desk built before that would drop an entry
+    with images but no pages (its shelfmark not read yet). Its second phase gives way to the
+    UI's turns (fast switching) and to searches, so the desk does not wait for it."""
+    work = getattr(window, '_startup_work', None)
+    if work is not None:
+        return not getattr(work, 'phase1_done', True)
     finished = getattr(getattr(window, 'meta_mgr', None), 'background_loading_finished', None)
     return bool((callable(finished) and finished() is False)
                 or getattr(getattr(window, 'searcher', None), '_fl_id_index_building', False) is True)
@@ -1838,6 +1848,55 @@ def _snapshot_has_compound_rows(*lists):
                         'compound' in rec or rec.get('is_condition_evidence')):
                     return True
     return False
+
+
+def _append_completer_rows(model, keys, rows):
+    """The shelfmark completer's rows (``shelfmark_completer_rows``) into *model*: the display
+    text, its key as UserRole (what the completer matches), an Oxford part's id as UserRole + 1."""
+    for text, key, part_id in rows:
+        item = QStandardItem(text)
+        item.setData(key, Qt.ItemDataRole.UserRole)
+        if part_id is not None:
+            item.setData(part_id, Qt.ItemDataRole.UserRole + 1)
+        keys.add(key)
+        model.appendRow(item)
+
+
+def _open_startup_gate(window):
+    """The restored manuscript is shown, or there is none: the window's startup queue may go
+    on to its second phase (desktop/startup_work.py)."""
+    work = getattr(window, '_startup_work', None)
+    if work is not None:
+        work.open_gate()
+
+
+def _after_startup_step(window, ready, signal_name, fn):
+    """Run *fn* on the UI thread once the window's startup queue has its *ready* attribute
+    true (its *signal_name* signal says so): now if it is, or if there is no queue; once."""
+    work = getattr(window, '_startup_work', None)
+    if work is None or getattr(work, ready):
+        fn()
+        return
+    ran = []
+
+    def once():
+        if not ran:
+            ran.append(True)
+            fn()
+    getattr(work, signal_name).connect(once)
+    if getattr(work, ready):     # it became true before the connection was made
+        once()
+
+
+def _new_shelfmark_completer(model, keys, parent):
+    """A ``ShelfmarkCompleter`` over *model*: it overrides splitPath to normalize what is
+    typed, and matches the rows' keys (UserRole) from their start, case aside."""
+    completer = ShelfmarkCompleter(model, parent, valid_keys=keys)
+    completer.setCompletionRole(Qt.ItemDataRole.UserRole)
+    completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+    completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+    completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+    return completer
 
 
 class GenizahGUI(QMainWindow):
@@ -2248,22 +2307,30 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
 
-    @staticmethod
-    def _prewarm_shelfmark_search(meta_mgr):
-        """Background thread: ``MetadataManager.prewarm_shelfmark_search`` (waits for
-        libraries.csv). A failure only leaves the index to be built on first use."""
-        try:
-            if meta_mgr is not None and hasattr(meta_mgr, 'prewarm_shelfmark_search'):
-                meta_mgr.prewarm_shelfmark_search()
-        except Exception:
-            logger.debug("Shelfmark search prewarm failed", exc_info=True)
-
     def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer):
         try:
             self.meta_mgr = meta_mgr
             self.var_mgr = var_mgr
             self.searcher = searcher
             self.indexer = indexer
+            # The startup builds, one at a time and the restored manuscript first
+            # (desktop/startup_work.py): the browse map, libraries.csv and the Oxford parts at
+            # once; the completer, the CUDL alias and Shelfmark search indexes and the FL-id
+            # lookup once the restored manuscript is shown (_open_startup_gate). Started when
+            # this slot returns, so they do not share the CPU with it (it took 1.0-1.5 s beside
+            # them, 0.06 s after them; measured 2026-11-23), and before the restore's timer.
+            # Kept by this attribute, not by a Qt parent: its thread may outlive the window
+            # at the app's end (its signals then go nowhere, StartupWork._emit).
+            try:
+                self._startup_work = StartupWork(meta_mgr, searcher)
+                self._startup_work.completer_rows_ready.connect(self._fill_shelfmark_completer)
+                QTimer.singleShot(0, self._startup_work.start)
+            except Exception:
+                logger.exception("The startup queue could not start; loading as before it")
+                self._startup_work = None
+                meta_mgr.start_background_loading()
+                searcher.start_fl_id_index_build()
+                self._completer_after_background_loading()
             # The scholarly transcriptions' index (editions plan §3.7, D3; desktop/editions_index.py).
             # Made here, before the "Index Missing" offer below can start a main-index build,
             # so that build suspends it and its end checks it (Codex review of PR #25). Nothing
@@ -2370,10 +2437,6 @@ class GenizahGUI(QMainWindow):
                     self.settings_dialog.show()
                     self.run_indexing()
 
-            # Start checking for CSV bank readiness to init Autocomplete
-            self.shelf_init_timer = QTimer(self)
-            self.shelf_init_timer.timeout.connect(self._check_shelfmark_completer_ready)
-            self.shelf_init_timer.start(500)
             # Automatic Update Check
             self.check_updates_auto()
 
@@ -2383,12 +2446,6 @@ class GenizahGUI(QMainWindow):
                     self._vs_cache = DesktopVSCache()
                 self._vs_cache.check_and_update_version(self._VS_SERVER_URL)
             threading.Thread(target=_check_vs_cache_version, daemon=True).start()
-
-            # The Shelfmark search index, built once libraries.csv is read: the Go to
-            # box asks it whether Latin text is a catalogue shelfmark (``Mingana 9``),
-            # and Browse's shelfmark lookup would otherwise build it on first use.
-            threading.Thread(target=self._prewarm_shelfmark_search, args=(meta_mgr,),
-                             daemon=True, name="prewarm-shelfmark-search").start()
 
             # The shelf tree (Pick from the shelf, the place on the shelf, previous / next in shelf
             # order): opened and checked off the UI thread; its button shows once it is served.
@@ -2680,69 +2737,66 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass  # perf flush is best-effort; never raise
 
-    def _check_shelfmark_completer_ready(self):
-        if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
-            if self.setup_shelfmark_completer():
-                self.shelf_init_timer.stop()
-                self.shelf_init_timer = None
-        # Add a timeout/limit? For now, we assume it eventually loads or stays empty (if file missing).
-        # If libraries.csv is missing, csv_bank remains empty, so this never setups. That's acceptable.
+    def _completer_after_background_loading(self):
+        """The startup queue's fallback (``on_startup_finished``): the shelfmark completer,
+        all at once, once ``start_background_loading`` has read libraries.csv and the Oxford
+        parts to the end (Codex on #111). Asked every 500 ms; stops when the loaders end,
+        with or without a catalogue (``setup_shelfmark_completer`` then makes none)."""
+        def check():
+            meta = getattr(self, 'meta_mgr', None)
+            if meta is None or not meta.background_loading_finished():
+                return
+            self._completer_fallback_timer.stop()
+            self.setup_shelfmark_completer()
+        self._completer_fallback_timer = QTimer(self)
+        self._completer_fallback_timer.timeout.connect(check)
+        self._completer_fallback_timer.start(500)
 
-    def setup_shelfmark_completer(self):
-        """Initialize the shelfmark autocomplete with data from csv_bank and Parts."""
+    def setup_shelfmark_completer(self, rows=None):
+        """The shelfmark autocomplete, all at once: the catalogue's shelfmarks, then the Oxford
+        parts (``desktop/startup_work.py::shelfmark_completer_rows``). At startup
+        ``_fill_shelfmark_completer`` puts the same rows in across event-loop turns."""
         if not self.meta_mgr: return False
-
-        # 1. Extract unique shelfmarks (Protected against background updates)
-        try:
-            shelfmarks = sorted(list({v['shelfmark'] for v in self.meta_mgr.csv_bank.values() if v.get('shelfmark')}))
-        except RuntimeError:
-            # Dictionary changed size during iteration (background loader still running)
+        if rows is None:
+            rows = shelfmark_completer_rows(self.meta_mgr)
+        if not rows or rows[0][2] is not None:     # no catalogue shelfmark (parts alone)
             return False
-
-        if not shelfmarks: return False
-
-        # 2. Setup Models (Optimized with QStandardItemModel + UserRole)
-        self.shelf_model = QStandardItemModel()
-        self.valid_shelf_keys = set()
-
-        # Add regular shelfmarks
-        for s in shelfmarks:
-            item = QStandardItem(s)
-            norm = ShelfmarkCompleter.normalize(s)
-            self.valid_shelf_keys.add(norm)
-            item.setData(norm, Qt.ItemDataRole.UserRole)
-            self.shelf_model.appendRow(item)
-
-        # 2b. Add Codicological Parts (Neubauer) with (neubauer) suffix
-        try:
-            part_list = self.meta_mgr.get_part_autocomplete_list()
-            for part_info in part_list:
-                display = part_info['display']  # e.g., "MS. Heb. d. 29/2 (neubauer)"
-                normalized = part_info['normalized']
-
-                item = QStandardItem(display)
-                item.setData(normalized, Qt.ItemDataRole.UserRole)
-                # Store part_id for later retrieval
-                item.setData(part_info['part_id'], Qt.ItemDataRole.UserRole + 1)
-                self.valid_shelf_keys.add(normalized)
-                self.shelf_model.appendRow(item)
-        except Exception as e:
-            # Parts might not be loaded yet, that's OK
-            pass
-
-        # 3. Setup Completer
-        # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
-        self.shelf_completer = ShelfmarkCompleter(self.shelf_model, self, valid_keys=self.valid_shelf_keys)
-        self.shelf_completer.setCompletionRole(Qt.ItemDataRole.UserRole)
-        self.shelf_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.shelf_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        self.shelf_completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
-
-        # 4. Attach to Input
+        model = QStandardItemModel()
+        keys = set()
+        _append_completer_rows(model, keys, rows)
+        self.shelf_model = model
+        self.valid_shelf_keys = keys
+        self.shelf_completer = _new_shelfmark_completer(model, keys, self)
         if hasattr(self, 'browse_shelf_input'):
             self.browse_shelf_input.setCompleter(self.shelf_completer)
-
         return True
+
+    # Rows put in the completer's model per event-loop turn at startup: 252,000 rows in one go
+    # held the window 1.6 s (measured 2026-11-23); 5,000 take about 35 ms.
+    _COMPLETER_CHUNK = 5000
+
+    def _fill_shelfmark_completer(self, rows):
+        """The startup queue's completer rows, ``_COMPLETER_CHUNK`` at a time; the completer is
+        attached once all are in, so a half-filled one is never offered."""
+        if not rows or rows[0][2] is not None:
+            return
+        model = QStandardItemModel()
+        keys = set()
+
+        def step(start):
+            if getattr(self, '_app_shutting_down', False):
+                return
+            end = start + self._COMPLETER_CHUNK
+            _append_completer_rows(model, keys, rows[start:end])
+            if end < len(rows):
+                QTimer.singleShot(0, lambda: step(end))
+                return
+            self.shelf_model = model
+            self.valid_shelf_keys = keys
+            self.shelf_completer = _new_shelfmark_completer(model, keys, self)
+            if hasattr(self, 'browse_shelf_input'):
+                self.browse_shelf_input.setCompleter(self.shelf_completer)
+        step(0)
              
     def init_ui(self):
         if CURRENT_LANG == 'he':
@@ -9445,6 +9499,9 @@ class GenizahGUI(QMainWindow):
             self._browse_release_image()
 
     def on_browse_enriched_loaded(self, sid, meta, gen=None, expected_vol_ie=None):
+        # The first manuscript shown is complete (its images are asked for below): the
+        # startup queue's second phase may begin, after this slot (desktop/startup_work.py).
+        QTimer.singleShot(0, lambda: _open_startup_gate(self))
         if not meta: return
         # Generation guard: reject stale enrichment from a previous browse action
         if gen is not None and gen != self._browse_enrich_gen: return
@@ -17932,7 +17989,7 @@ class GenizahGUI(QMainWindow):
     def _catalogue_has_shelfmark(self, query):
         """The Go to box's catalogue check (``MetadataManager.has_shelfmark``): False
         until the catalogue and its Shelfmark search index are ready (built in the
-        background at start, ``_prewarm_shelfmark_search``), or if the lookup fails."""
+        background at start, desktop/startup_work.py), or if the lookup fails."""
         meta = getattr(self, 'meta_mgr', None)
         if meta is None or not hasattr(meta, 'has_shelfmark'):
             return False
@@ -20392,7 +20449,8 @@ class GenizahGUI(QMainWindow):
         self._revalidate_comp_method()
         self._judge_deferred_comp_snapshot()
         if index is not None:
-            self._start_local_freshness_check()
+            # It reads the whole library: after the startup builds (desktop/startup_work.py).
+            _after_startup_step(self, 'done', 'finished', self._start_local_freshness_check)
 
     def _start_local_freshness_check(self):
         # Never during a close: a check reads the whole library, and the
@@ -38171,6 +38229,8 @@ class GenizahGUI(QMainWindow):
         try:
             self._restore_session()
         finally:
+            if not getattr(self, '_restore_browse_scheduled', False):
+                _open_startup_gate(self)     # no manuscript to show: the queue goes on
             try:
                 self._refocus_after_restore(section_before)
             except Exception:
@@ -38470,6 +38530,7 @@ class GenizahGUI(QMainWindow):
                     if desk is not None and _held_restore_desk(self) is not desk:
                         # The reader moved on before this ran (loaded a manuscript, opened a desk)
                         self._browse_rd_restore_pending = None
+                        _open_startup_gate(self)
                         return
                     sid = browse.get('sys_id', '').strip()
                     if not sid and (browse.get('shelfmark') or browse.get('fl_id')):
@@ -38479,6 +38540,7 @@ class GenizahGUI(QMainWindow):
                         return
                     if not self.searcher:
                         self._browse_rd_restore_pending = None
+                        _open_startup_gate(self)
                         return
                     if not sid:
                         # Only the desk was kept: Browse shows its first manuscript that still
@@ -38487,6 +38549,7 @@ class GenizahGUI(QMainWindow):
                                     if _desk_entry_pages(self, e['sys_id']) is not None), None)
                         if sid is None:
                             self._browse_rd_restore_pending = None
+                            _open_startup_gate(self)     # nothing to show: the queue goes on
                             return
                         self.browse_sys_input.setText(sid)
                     # Restore volume_ie before loading (D-11, D-12)
@@ -38511,7 +38574,25 @@ class GenizahGUI(QMainWindow):
                 # would otherwise write no desk. Held over what Browse shows now: a reader who
                 # loads a manuscript or opens a desk before it runs has moved on.
                 _hold_restore_desk(self, desk)
-                QTimer.singleShot(300, _restore_browse)
+                # The page's text is in the browse map, which the startup queue loads first
+                # (desktop/startup_work.py): restored once it is in, rather than loaded again
+                # here on the UI thread. A state without a sys_id is resolved through the
+                # catalogue (browse_load -> resolve_system_by_shelfmark): it waits for Browse's
+                # resolver index, built by the queue after all of phase 1, so it never searches
+                # a half-read libraries.csv nor builds that index (5.6 s) here. Nothing is shown
+                # until then, so the queue's second phase may begin at once (Codex on #111).
+                # A desk alone looks its manuscripts up in the browse map and the catalogue
+                # (_desk_entry_pages): all of phase 1.
+                self._restore_browse_scheduled = True
+                if (browse.get('sys_id') or '').strip():
+                    wait_for = ('browse_map_loaded', 'browse_map_ready')
+                elif browse.get('shelfmark') or browse.get('fl_id'):
+                    _open_startup_gate(self)
+                    wait_for = ('browse_resolver_built', 'browse_resolver_ready')
+                else:
+                    wait_for = ('phase1_done', 'phase1_ready')
+                QTimer.singleShot(300, lambda: _after_startup_step(
+                    self, *wait_for, _restore_browse))
 
             # Restore catalog browse filters (Browse by Identification). A date
             # range saved before the manuscript features is read into Period of
@@ -38679,12 +38760,8 @@ class GenizahGUI(QMainWindow):
                 except Exception as _ne:
                     logger.warning("notify_session_restored failed: %s", _ne)
 
-        # Refresh history dropdowns
-        try:
-            self._refresh_search_history()
-            self._refresh_comp_history()
-        except Exception as e:
-            logger.error("Failed to refresh history: %s", e)
+        # The history menus are filled when they open (aboutToShow), not here: rebuilding
+        # them took over a second of the startup (measured 2026-11-23).
 
         # Check for interrupted composition search
         try:

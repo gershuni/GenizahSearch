@@ -21,6 +21,8 @@ Functions:
   _collapse_numeric_runs(s)          -- Or.-only numeric-collapse helper (NORM-02)
   lookup_cudl(classmark)             -- alias index lookup (3-tier cascade)
   build_alias_index(csv_bank, ...)   -- populate alias index with strict ambiguity exclusion
+  defer_alias_index(source)          -- build it later, or on first lookup (desktop startup)
+  ensure_alias_index()               -- build a deferred alias index now (once)
   load_collision_keys(report_path)   -- load D-06 gate file
   shelfmark_to_cudl_label(shelfmark) -- conservative forward lookup with documented allowlist
   _is_collision_key(key)             -- check collision safety net
@@ -45,9 +47,12 @@ from __future__ import annotations
 import csv
 import logging
 import re
+import threading
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Set
+
+from shared.background_work import OnDemandBuild, checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +254,7 @@ def _write_alias_collision_report(
         logger.debug("alias-collisions report skipped (write failed): %s: %s", report_path, e)
 
 
-def build_alias_index(csv_bank, report_path: Optional[Path] = None) -> None:
+def build_alias_index(csv_bank, report_path: Optional[Path] = None, wanted=None) -> None:
     """Build the CUDL alias index with strict ambiguity-exclusion (Codex HIGH #2).
 
     For each CUL/Mosseri row, walk its variants and produce normalized index keys
@@ -276,7 +281,9 @@ def build_alias_index(csv_bank, report_path: Optional[Path] = None) -> None:
 
     index_builder: defaultdict = defaultdict(set)
 
-    for sys_id, data in csv_bank.items():
+    for n, (sys_id, data) in enumerate(csv_bank.items()):
+        if not n & 4095:
+            checkpoint(wanted)
         variants = data.get('call_numbers_raw') or []
         primary = data.get('shelfmark')
         if primary and primary not in variants:
@@ -329,6 +336,38 @@ def build_alias_index(csv_bank, report_path: Optional[Path] = None) -> None:
     )
 
 
+# Built later (the desktop's startup queue, desktop/startup_work.py) or by the first lookup
+# that needs it: defer_alias_index(source) names where the catalogue is, ensure_alias_index()
+# builds once. The web builds at once (MetadataManager._load_csv_bank) and never defers.
+_ALIAS_SOURCE = None
+_ALIAS_BUILD = OnDemandBuild()
+
+
+def defer_alias_index(source) -> None:
+    """The alias index is built later, from ``source()``: the catalogue (``csv_bank``) once it
+    is read to the end, None before."""
+    global _ALIAS_SOURCE
+    _ALIAS_SOURCE = source
+
+
+def ensure_alias_index() -> bool:
+    """Build the deferred alias index now, unless it is built; wait while another thread
+    builds it. Not for the UI thread (seconds of CPU). True when it is built. False when nothing was deferred (it is built at load)
+    or the catalogue is not read yet."""
+    if _CUDL_ALIAS_INDEX is not None:
+        return True
+    source = _ALIAS_SOURCE
+    if source is None:
+        return False
+    with _ALIAS_BUILD.held():
+        if _CUDL_ALIAS_INDEX is None:
+            bank = source()
+            if not bank:
+                return False
+            build_alias_index(bank, wanted=_ALIAS_BUILD.wanted)
+    return _CUDL_ALIAS_INDEX is not None
+
+
 def lookup_cudl(classmark: str) -> Optional[Dict[str, str]]:
     """Map a CUDL classmark to a libraries.csv row.
 
@@ -345,9 +384,15 @@ def lookup_cudl(classmark: str) -> Optional[Dict[str, str]]:
     The alias index must first be populated by build_alias_index(). Returns None
     if the index has not been built yet or is empty.
     """
-    if _CUDL_ALIAS_INDEX is None or not _CUDL_ALIAS_INDEX:
-        return None
     if not classmark:
+        return None
+    if (_CUDL_ALIAS_INDEX is None and _ALIAS_SOURCE is not None
+            and threading.current_thread() is not threading.main_thread()):
+        # Built on first need, but never on the UI (main) thread, which it would hold for
+        # seconds (Browse resolves a typed shelfmark there): there the lookup answers as it
+        # did before the index existed, until the startup queue has built it.
+        ensure_alias_index()
+    if _CUDL_ALIAS_INDEX is None or not _CUDL_ALIAS_INDEX:
         return None
     k1 = cudl_normalize(classmark)
     hit = _CUDL_ALIAS_INDEX.get(k1) if k1 else None

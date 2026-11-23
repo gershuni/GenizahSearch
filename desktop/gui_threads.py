@@ -10,6 +10,7 @@ import weakref
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
+from shared import background_work
 from shared.config import Config
 from shared.indexer import IndexBuildCancelled
 from shared.index_swap import delete_leftovers_in_background, recover_index_dirs
@@ -92,8 +93,26 @@ def _retire_worker(worker, *signal_names) -> None:
     _keep_until_finished(worker)
 
 
+def mark_user_work_started():
+    """The calling QThread runs a search of the user's: the startup builds give way until
+    ``mark_user_work_ended`` (shared/background_work.py, desktop/startup_work.py). Its
+    ``isRunning`` tells them when ``terminate()`` ended it before that."""
+    thread = QThread.currentThread()
+    background_work.user_work_started(alive=thread.isRunning if thread is not None else None)
+
+
+def mark_user_work_ended():
+    background_work.user_work_ended()
+
+
 def _prevent_sleep():
-    """Prevent OS sleep while search is running (Windows only)."""
+    """Prevent OS sleep while search is running (Windows only).
+
+    Every search worker calls this when it starts and when it resumes from Pause, and
+    ``_allow_sleep`` when it ends or parks: exactly the moments it starts and stops using
+    the CPU. So both also tell the startup builds to give way meanwhile
+    (``mark_user_work_started``)."""
+    mark_user_work_started()
     if platform.system() == 'Windows':
         try:
             ES_CONTINUOUS = 0x80000000
@@ -104,7 +123,9 @@ def _prevent_sleep():
 
 
 def _allow_sleep():
-    """Re-allow OS sleep after search completes (Windows only)."""
+    """Re-allow OS sleep after search completes (Windows only); the startup builds go on
+    (``_prevent_sleep``)."""
+    mark_user_work_ended()
     if platform.system() == 'Windows':
         try:
             ES_CONTINUOUS = 0x80000000
@@ -168,6 +189,9 @@ class RefinementReplayThread(QThread):
         self.searcher_for_step = searcher_for_step
 
     def run(self):
+        # A search like the others (one per step): the startup builds give way to it
+        # (shared/background_work.py), as they do to the workers that call _prevent_sleep.
+        mark_user_work_started()
         try:
             from shared.refinement import replay_chain
             result = replay_chain(self.chain, self.searcher, self.filter_restrict,
@@ -176,6 +200,8 @@ class RefinementReplayThread(QThread):
         except Exception as e:  # noqa: BLE001
             logger.warning("RefinementReplayThread failed: %s", e)
             self.error_signal.emit(str(e))
+        finally:
+            mark_user_work_ended()
 
 
 class PausableSearchMixin:
@@ -1416,11 +1442,10 @@ class StartupThread(QThread):
             # its swap is finished, or its leftovers moved aside, before the index opens.
             recover_index_dirs(Config.INDEX_DIR, Config.BROWSE_MAP)
             delete_leftovers_in_background(Config.INDEX_DIR)
-            searcher = SearchEngine(meta_mgr, var_mgr)
+            # The FL-id lookup and libraries.csv are built by the window's startup queue,
+            # one at a time, the restored manuscript first (desktop/startup_work.py).
+            searcher = SearchEngine(meta_mgr, var_mgr, build_fl_index=False)
             indexer = Indexer(meta_mgr)
-
-            # Start loading heavy resources in background
-            meta_mgr.start_background_loading()
 
             self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer)
         except Exception as e:

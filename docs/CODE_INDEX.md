@@ -1756,6 +1756,13 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 Browse's neighbours on the shelf, prepared while the reader looks at a manuscript (2026-11-22).
 - **Class** `BrowsePrefetcher` — the manuscripts the window names (the next two the reader's way, then the one behind), one at a time: metadata unless fresh, then the first page's preview and sharp image into the image cache; `schedule(sid)`, `cancel(keep=...)` (a move drops the rest, keeps a job for the manuscript being opened or one of its neighbours), `stop()`
 
+## desktop/startup_work.py
+
+The desktop's startup builds on one thread, one at a time, the restored manuscript first (2026-11-23: about 33 s of Python in six threads had starved the window for 13-21 s).
+- **Class** `StartupWork(meta_mgr, searcher)` — `start()`; phase 1 at once: the browse map (`browse_map_ready`), libraries.csv (`MetadataManager.load_catalogue_now`), the Oxford parts (`load_oxford_parts_now`); phase 2 after `open_gate()` (`GenizahGUI.open_startup_gate`: the first enrichment shown, or no Browse restore) or `GATE_TIMEOUT`: the completer's rows (`completer_rows_ready` -> `GenizahGUI._fill_shelfmark_completer`, 5,000 rows a turn), Browse's resolver index (`MetadataManager.prewarm_browse_resolver` -> `_get_shelfmark_index`, now under one lock; `browse_resolver_ready`, which a restored Browse state without a sys_id waits for), `shelfmark_bridge.ensure_alias_index`, `prewarm_shelfmark_search`, `SearchEngine.build_fl_id_index_now`, the file map; `finished`. Phase 2 gives way to searches; the whole runs under `fast_switching()` (`shared/background_work.py`); `gc.freeze()` after each build (`gc_freeze=`). The window starts it when `on_startup_finished` returns (`QTimer.singleShot(0, ...)`), and falls back to `start_background_loading` + `start_fl_id_index_build` if it cannot be made. The window waits through `GenizahGUI._after_startup_step` (the restored Browse page for the browse map, the My Library freshness check for the end)
+- **Function** `shelfmark_completer_rows(meta_mgr)` — `(text, key, part_id)`: the catalogue's shelfmarks sorted once each, then the Oxford parts (`GenizahGUI.setup_shelfmark_completer` fills a model from them at once)
+Tests: `tests/test_startup_work.py`.
+
 ## desktop/result_dialog.py
 
 - **Function** `fit_window_geometry` — Size and position for a top-level window so it fits its screen's usable area; the title bar always stays on screen (2026-09-24).
@@ -2913,6 +2920,16 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
 - **Function** `strip_nikud` (Line 17) — Remove Hebrew vowel marks (nikud) and cantillation marks from text.
 - **Function** `strip_search_diacritics` (Line 44) — Strip combining diacritical marks, apostrophe variants, and geresh/gershayim from search text.
 
+## shared/background_work.py
+
+Background builds that give way to the user's own work (the desktop's startup, 2026-11-23).
+- **Function** `user_work_started()` / `user_work_ended()` — a search worker of the user's runs / ended or parked; called from `desktop/gui_threads.py::_prevent_sleep` / `_allow_sleep`; per thread
+- **Function** `yielding()` — context: the builds run in this thread give way (only such a thread ever waits)
+- **Function** `checkpoint(wanted=None)` — inside a build's loop: in a yielding thread, wait while user work runs, unless `wanted()`; after `MAX_WAIT` (30 s) once, the thread stops giving way
+- **Class** `OnDemandBuild` — a build's lock: `held()` counts the threads waiting, `wanted()` says whether any are (the Shelfmark search index, the CUDL alias index)
+- **Function** `fast_switching()` — context: `sys.setswitchinterval(0.0005)`, back to the old value while user work runs and at the end
+Tests: `tests/test_startup_work.py`.
+
 ## shared/metadata_manager.py
 
 - **Function** `_warn_bridge_import_failed` (Line 37) — Log shelfmark_bridge import failure at WARNING once per process (Gemini LOW).
@@ -2936,7 +2953,8 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
 - **Class** `MetadataManager` (Line 228)
     - Method `_make_session` (Line 229)
     - Method `__init__` (Line 233)
-    - Method `start_background_loading` (Line 255) — Start loading heavy metadata resources (CSV, Maps) in background.
+    - Method `start_background_loading` (Line 255) — Start loading heavy metadata resources (CSV, Maps) in background (the web; the desktop's startup queue calls the steps below instead).
+    - Method `load_catalogue_now` / `load_oxford_parts_now` — libraries.csv (without the CUDL alias index: `shelfmark_bridge.defer_alias_index`) and the Oxford parts, in the calling thread (`desktop/startup_work.py`, 2026-11-23). `expect_oxford_parts` / `wait_for_oxford_parts(timeout)`: an enrichment of a non-Cambridge manuscript waits for an expected parts load rather than miss its part images.
     - Method `_load_small_caches` (Line 260)
     - Method `_load_heavy_caches_bg` (Line 279)
     - Method `_load_csv_bank` (Line 284) — Load the massive CSV file into memory for instant lookup.
@@ -2976,7 +2994,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `batch_fetch_shelfmarks` (Line 1597) — Populate metadata cache.
     - Method `search_by_meta` (Line 1636) — Search for system IDs where the specified field matches the query.
     - Method `_shelfmark_search_catalogue` / class `_ShelfmarkSearchIndex` — the catalogue normalized once for Shelfmark searches (three sorted views: normalized, dotless, tokens), narrowing a query to the records that can match; `_shelfmark_matches` (the old loop's rules) decides over those, so the answer is the loop's. `_shelfmark_scan_catalogue` is the loop itself: the path while libraries.csv loads, and the reference `tests/test_shelfmark_search_path.py` checks the index against.
-    - Method `prewarm_shelfmark_search` — builds that index at server start (web/main.py, background), ~2 s over the corpus.
+    - Method `prewarm_shelfmark_search` — builds that index at server start (web/main.py, background) and in the desktop's startup queue (`desktop/startup_work.py`); 9.6 s over the corpus alone (measured 2026-11-23). Its build gives way to a desktop search at checkpoints unless a caller waits for it (`shared/background_work.py::OnDemandBuild`).
     - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
     - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
     - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
@@ -3045,7 +3063,7 @@ The parsed NLI MARC / IIIF-manifest answers kept on disk (2026-11-03), one SQLit
     - Method `_build_local_result_dict` (Line 858) — Construct a result row from a LOCAL Tantivy doc per D-34 shape.
     - Method `_rrf_merge` (Line 950) — Reciprocal Rank Fusion merger (D-08 Codex P0). BM25 scores from two
     - Method `_build_fl_id_index` (Line 983) — Build FL ID -> (sys_id, page_idx) index from browse_map. Called in background thread.
-    - Method `start_fl_id_index_build` (Line 1003) — Start building FL ID index in background. Non-blocking.
+    - Method `start_fl_id_index_build` (Line 1003) — Start building FL ID index in background. Non-blocking. Not at construction with `SearchEngine(..., build_fl_index=False)` (the desktop), whose startup queue calls `build_fl_id_index_now()` in its own thread. The build reads each header with one compiled `FL(\d+)` (2.75 s over the corpus, was 11.0 s with `parse_full_id_components`, the same index).
     - Method `_build_fl_id_index_thread` (Line 1011)
     - Method `format_snippet` (Line 1020) — Format snippet with highlighted matches, safely escaping HTML.
     - Method `close_index` (Line 1042) — Release Tantivy index and searcher to unlock files (required before rebuild on Windows).

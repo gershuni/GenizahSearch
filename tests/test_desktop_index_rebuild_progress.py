@@ -440,6 +440,6 @@ def test_the_indexer_thread_builds_beside_the_live_index_and_reports_the_phases(
     # The startup thread sets the index folders right before the engine opens the index.
     from desktop.gui_threads import StartupThread
     src = inspect.getsource(StartupThread.run)
-    assert src.index("recover_index_dirs(Config.INDEX_DIR, Config.BROWSE_MAP)") < src.index("SearchEngine(meta_mgr, var_mgr)")
+    assert src.index("recover_index_dirs(Config.INDEX_DIR, Config.BROWSE_MAP)") < src.index("SearchEngine(meta_mgr, var_mgr")
     assert "delete_leftovers_in_background(Config.INDEX_DIR)" in src
 

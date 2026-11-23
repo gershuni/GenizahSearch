@@ -1968,6 +1968,16 @@ if _QT_AVAILABLE:
                 raise InterruptedError("cross-side search superseded")
 
         def run(self):
+            # The other side's search over the corpus: the startup builds give way to it,
+            # as to any search (shared/background_work.py).
+            from desktop.gui_threads import mark_user_work_ended, mark_user_work_started
+            mark_user_work_started()
+            try:
+                self._search()
+            finally:
+                mark_user_work_ended()
+
+        def _search(self):
             from shared.joins_lab import apply_cross_side, compose, MergeResult
             try:
                 b_str, _b_ro_ignored, b_pos = compose(self.b_query)

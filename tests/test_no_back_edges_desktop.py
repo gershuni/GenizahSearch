@@ -30,6 +30,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DESKTOP_MODULES = [
     "desktop/__init__.py",
     "desktop/browse_prefetch.py",
+    "desktop/startup_work.py",
     "desktop/consent_dialog.py",
     "desktop/dialogs_filter.py",
     "desktop/dialogs_scholarly.py",
