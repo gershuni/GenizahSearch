@@ -88,6 +88,7 @@ window.puzzleCanvas = {
     _pendingAdds: [],
     _listenersAttached: false,
     _resizeHandler: null,
+    _resizeObserver: null,
     _keyboardHandler: null,
     _hideMenuClickHandler: null,
     _hideMenuEscapeHandler: null,
@@ -170,6 +171,10 @@ window.puzzleCanvas = {
         if (this._resizeHandler) {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;
+        }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
         }
         if (this._keyboardHandler) {
             document.removeEventListener('keydown', this._keyboardHandler);
@@ -624,12 +629,16 @@ window.puzzleCanvas = {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;
         }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
 
         this._setupExtensionListener();
 
         var container = el.parentElement;
         var w = container.clientWidth || 1200;
-        var h = Math.max(container.clientHeight, 400) || 600;
+        var h = Math.max(container.clientHeight, 240) || 600;   // the floor the resize keeps (Codex #113)
 
         this.canvas = new fabric.Canvas(canvasId, {
             backgroundColor: '#333333',
@@ -673,11 +682,19 @@ window.puzzleCanvas = {
             if (!p) return;
             self.canvas.setDimensions({
                 width: p.clientWidth,
-                height: Math.max(p.clientHeight, 400)
+                height: Math.max(p.clientHeight, 240)
             });
             self.canvas.requestRenderAll();
         };
         window.addEventListener('resize', this._resizeHandler);
+        // ... and whenever its room changes without the window (the side menu opened or closed, the
+        // extension's notice dismissed, the toolbars wrapping): it kept the width it was drawn at, half
+        // of the room (owner, 2026-11-23).
+        var room = (this.canvas.wrapperEl || document.getElementById(canvasId) || {}).parentElement;
+        if (room && window.ResizeObserver) {
+            this._resizeObserver = new ResizeObserver(function () { self._resizeHandler && self._resizeHandler(); });
+            this._resizeObserver.observe(room);
+        }
 
         console.log('Puzzle canvas initialized:', w, 'x', h);
 
@@ -2317,6 +2334,16 @@ window.puzzleCanvas = {
 </script>
 '''
 
+# The Puzzle's Back button (.puzzle-back) shows when the reader came from another page of this site and the
+# tab has a page to go back to; an attribute, not a style or a class, so that a redraw keeps it.
+_BACK_SHOWN_JS = '''(function () {
+    try {
+        var from = document.referrer ? new URL(document.referrer) : null;
+        if (!from || from.origin !== location.origin || from.pathname === location.pathname || history.length < 2) return;
+        document.querySelectorAll('.puzzle-back').forEach(function (b) { b.setAttribute('data-back', ''); });
+    } catch (e) { /* no way back shown */ }
+})()'''
+
 # Context menu styles
 PUZZLE_STYLES = '''
 <style>
@@ -2334,6 +2361,15 @@ body.puzzle-fullscreen .puzzle-container {
     height: 100vh;
     height: 100dvh;
     z-index: 5000;
+}
+/* The toolbars and the extension's notice keep the height of what they hold; the canvas gives way (owner,
+   2026-11-23: with min-height 32px a toolbar shrank to 32px in a short window and its wrapped lines lay
+   over the next row). */
+.puzzle-toolbar, #extBannerContainer {
+    flex-shrink: 0;
+}
+.puzzle-back:not([data-back]) {
+    display: none !important;
 }
 .puzzle-toolbar {
     display: flex;
@@ -2384,7 +2420,7 @@ body.puzzle-fullscreen .puzzle-container {
     align-self: stretch;
     position: relative;
     overflow: hidden;
-    min-height: 400px;
+    min-height: 240px;
 }
 .puzzle-canvas-wrap canvas {
     display: block;
@@ -3769,6 +3805,15 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         # ── Toolbar Row 1: Add fragments + actions ──
         with ui.row().classes('puzzle-toolbar items-center gap-1'):
+            # Back to the page the Puzzle was opened from (owner, 2026-11-23: from the Reading Desk, and
+            # from any other way in, there was only the browser's back). Shown once the browser says the
+            # reader came from another page of this site (_BACK_SHOWN_JS).
+            back_btn = ui.button(
+                icon='arrow_forward' if get_language() == 'he' else 'arrow_back'
+            ).props('dense flat dark round size=sm').classes('puzzle-back').tooltip(tr('Back'))
+            back_btn.props['aria-label'] = tr('Back')
+            back_btn.on('click', js_handler='() => history.back()')
+            ui.timer(0.2, lambda: ui.run_javascript(_BACK_SHOWN_JS), once=True)
             shelfmark_input = ui.input(
                 placeholder=tr('Enter shelfmark...')
             ).props('dense outlined dark color=white').style(
