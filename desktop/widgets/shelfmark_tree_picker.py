@@ -957,6 +957,7 @@ class _NodeColumn(QWidget):
         self.table.viewport().installEventFilter(self)
         self.table.installEventFilter(self)
         self.table.verticalScrollBar().installEventFilter(self)
+        self.table.verticalScrollBar().rangeChanged.connect(self._range_changed)
         self.table.clicked.connect(lambda index: dialog._clicked_row(self, index.row(), index.column()))
         self.table.installEventFilter(dialog)
         self.table.viewport().installEventFilter(dialog)
@@ -993,9 +994,16 @@ class _NodeColumn(QWidget):
     def size_rows(self) -> None:
         self.table.resizeRowsToContents()
         if self._keep_chosen and self.chosen_row is not None:
-            # the chosen row was scrolled to at the old heights: in sight again at the new ones,
-            # once the table has its scroll range for them (it takes them in on the next turn)
+            # the chosen row was scrolled to at the old heights: in sight again at the new ones.
+            # The table takes the new heights into its scroll range in a timer of its own, and
+            # which runs first is the platform's: on Windows the range comes before this call, on
+            # Linux after it, against the old range. So also when the range changes (below).
             QTimer.singleShot(0, self._show_chosen)
+
+    def _range_changed(self, *_range) -> None:
+        # not while the column is being filled (updates off): the chosen row is the old list's then
+        if self._keep_chosen and self.table.updatesEnabled():
+            self._show_chosen()
 
     def _show_chosen(self) -> None:
         item = self.table.item(self.chosen_row, self.name_col) if self.chosen_row is not None else None

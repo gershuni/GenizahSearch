@@ -20,7 +20,6 @@ desktop profile (Hebrew on the owner's machine) is never read.
 from __future__ import annotations
 
 import os
-import sys
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -940,37 +939,39 @@ def test_a_chosen_row_is_drawn_by_its_row_not_marked_cell_by_cell(monkeypatch):
     assert told and not told[0] & QStyle.StateFlag.State_Selected and not told[0] & QStyle.StateFlag.State_HasFocus
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("linux"),
-    reason="Windows-only for now (the desktop app ships for Windows): on Linux Qt runs the picker's "
-           "scroll back before the table takes the rows' new heights into its scroll range, so the "
-           "list keeps its old place (public CI, 2026-11-22; docs/open_issues.d, the picker's "
-           "scroll back on Linux)")
+def _long_column_scrolled_to_row_250(dialog):
+    """The first column with 300 long names, the chosen row (250) scrolled to at one line a row;
+    returns the column and two checks: the chosen row in sight, the names wrapped."""
+    column = dialog.node_columns[0]
+    rows = [{"id": f"n{i}", "label": f"Collection number {i} with a long name", "count": i,
+             "on": i == 250, "title": ""} for i in range(300)]
+    column.setMinimumWidth(100)
+    column.setMaximumWidth(2000)
+    column.table.setFixedWidth(900)
+    column.show_column({"depth": 0, "parent": None, "title": "T", "rows": rows, "more": 0, "filter_key": "n:test"})
+    column.scroll_to(None)
+    table = column.table
+
+    def chosen_in_sight():
+        return table.viewport().rect().intersects(table.visualItemRect(table.item(250, 0)))
+
+    def wrapped():
+        return table.rowHeight(0) > table.fontMetrics().height() + picker._RowDelegate.PAD
+
+    # Waits for the outcome, not fixed sleeps: on a slow runner (public CI, Ubuntu, 2026-11-22)
+    # the rows' timer fired in the last pass of a 0.3 s sleep, and the scroll back to the
+    # chosen row, posted for the next turn, had not run yet when the test looked.
+    assert _wait(chosen_in_sight, timeout=5)
+    return column, chosen_in_sight, wrapped
+
+
 def test_the_chosen_row_stays_in_sight_when_the_rows_are_measured_again(svc):
     # The rows are measured again once the columns have their widths; the chosen row, scrolled to
     # at the first heights, must still be in sight at the new ones.
     dialog = _open(svc)
     try:
-        column = dialog.node_columns[0]
-        rows = [{"id": f"n{i}", "label": f"Collection number {i} with a long name", "count": i,
-                 "on": i == 250, "title": ""} for i in range(300)]
-        column.setMinimumWidth(100)
-        column.setMaximumWidth(2000)
-        column.table.setFixedWidth(900)
-        column.show_column({"depth": 0, "parent": None, "title": "T", "rows": rows, "more": 0, "filter_key": "n:test"})
-        column.scroll_to(None)
+        column, chosen_in_sight, wrapped = _long_column_scrolled_to_row_250(dialog)
         table = column.table
-
-        def chosen_in_sight():
-            return table.viewport().rect().intersects(table.visualItemRect(table.item(250, 0)))
-
-        def wrapped():
-            return table.rowHeight(0) > table.fontMetrics().height() + picker._RowDelegate.PAD
-
-        # Waits for the outcome, not fixed sleeps: on a slow runner (public CI, Ubuntu, 2026-11-22)
-        # the rows' timer fired in the last pass of a 0.3 s sleep, and the scroll back to the
-        # chosen row, posted for the next turn, had not run yet when the test looked.
-        _wait(chosen_in_sight, timeout=5)
         column.table.setFixedWidth(160)                          # the names wrap: every row grows
         _wait(lambda: wrapped() and chosen_in_sight(), timeout=5)
         assert wrapped()                                         # several lines now
@@ -983,5 +984,32 @@ def test_the_chosen_row_stays_in_sight_when_the_rows_are_measured_again(svc):
         column.table.setFixedWidth(300)
         _wait(lambda: False, timeout=0.3)
         assert table.verticalScrollBar().value() == 0
+    finally:
+        _close(dialog)
+
+
+def test_the_chosen_row_comes_back_also_when_the_scroll_range_is_taken_in_after_the_scroll_back(svc, monkeypatch):
+    # Linux's order, on every platform. The table takes the rows' new heights into its scroll range
+    # in a timer of its own; on Linux Qt runs the picker's posted scroll back before that timer
+    # (public CI, 2026-11-22), so the scroll back meets the old range and the list stays where it
+    # was. Here the scroll back runs at once, before the range: its change must bring the row back.
+    dialog = _open(svc)
+    try:
+        column, chosen_in_sight, wrapped = _long_column_scrolled_to_row_250(dialog)
+        table = column.table
+        ran = []
+
+        class _AtOnce(picker.QTimer):
+            @staticmethod
+            def singleShot(_msec, slot, *_rest):
+                ran.append(table.verticalScrollBar().maximum())
+                slot()
+
+        monkeypatch.setattr(picker, "QTimer", _AtOnce)
+        column.table.setFixedWidth(160)                          # the names wrap: every row grows
+        _wait(lambda: wrapped() and chosen_in_sight(), timeout=5)
+        assert wrapped() and ran                                 # the scroll back ran, at once
+        assert ran[-1] < table.verticalScrollBar().maximum()     # ... against the old, shorter range
+        assert chosen_in_sight(), (table.visualItemRect(table.item(250, 0)), table.viewport().rect())
     finally:
         _close(dialog)
