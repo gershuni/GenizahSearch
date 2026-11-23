@@ -1204,6 +1204,17 @@ def _entry_control_client(model):
     return holder['client']
 
 
+def test_the_entry_controls_words_are_also_its_name_and_tooltip():
+    # Browse shows it as its icon alone (owner, 2026-11-23): its words stay its name and its tooltip.
+    from nicegui import ui as _ui
+    client = _entry_control_client(model_for(claim_items=[], works=[work_summary_row()]))
+    with client:
+        [button] = [e for e in client.elements.values() if isinstance(e, _ui.button)]
+        tips = [e.text for e in client.elements.values() if isinstance(e, _ui.tooltip)]
+    assert button.text and button.props.get('aria-label') == button.text   # in the page's language
+    assert tips == [button.text]
+
+
 @pytest.mark.parametrize('lang', ('en', 'he'))
 @pytest.mark.parametrize('status', _OUTAGE_STATUSES)
 def test_the_entry_control_says_so_when_the_scope_read_failed(status, lang):

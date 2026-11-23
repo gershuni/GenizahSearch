@@ -105,7 +105,7 @@ def test_the_page_shortcuts_leave_a_focused_slider_its_arrow_keys():
 
 def test_moving_the_slider_turns_the_image_and_a_rebuilt_page_keeps_the_angle():
     async def driver(user):
-        await _open_browse(user, lambda texts: 'Show Metadata' in texts)
+        await _open_browse(user, lambda texts: 'Metadata' in texts)
         _tell_the_page(user, {'scale': 2.25})
         [slider] = _sliders(user, 'browse-rotate-slider')
         with patch.object(ui, 'run_javascript') as run_js:

@@ -177,6 +177,9 @@ def render_discovery_entry_control(model: PanelModel, *, on_toggle=None,
     with ui.element('span').classes(entry_classes):
         button = ui.button(label, icon='hub', on_click=on_toggle).props(
             'flat dense size=sm no-caps')
+        # Its words also as its tooltip and its name: Browse shows the icon alone (owner, 2026-11-23).
+        button.props['aria-label'] = label
+        button.tooltip(label)
         if highlight_new:
             # A SEPARATE element, not text appended to the label: the label is
             # already `Computed identifications (N)`, and a reader matching on

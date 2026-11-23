@@ -474,6 +474,7 @@ def test_the_header_search_box_narrows_then_folds_behind_a_button():
             'container: header-search / inline-size;\n}\n') in top
     assert '.app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }' in _phone_rules(css)
     assert '.app-header > .header-search { min-width: 36px; }' in _phone_rules(css)
+    assert '.app-header > .header-search.has-shelf { min-width: 76px; }' in _phone_rules(css)  # and the shelf button
     assert '.app-header > .nicegui-row:not(.header-search) { min-width: 0; }' in _phone_rules(css)
     assert '.app-header > .nicegui-row { min-width: 0; }' not in css
     # The logo text gives way to the box below 826px.
@@ -481,12 +482,21 @@ def test_the_header_search_box_narrows_then_folds_behind_a_button():
     # The Sign in label goes on a phone, its icon above: exact complements, no 640.5px gap.
     assert '.phone-icon-only .q-btn__content > .q-icon { display: none; }' in _media_rules(
         css, 'not all and (max-width: 640px)')
-    field = _media_rules(css, 'header-search (min-width: 150px)', at='@container')
+    # 150px for the field; beside the shelf button, which left the field (owner, 2026-11-23), 50px more: its
+    # 34px and the row's 16px gap (Codex #107: 40px let the row overflow its group by 10px). Without the
+    # shelf tree there is no button and no room kept for it (Codex #107).
+    alone = _media_rules(css, 'header-search (min-width: 150px)', at='@container')
+    for rule in ('.header-search:not(.has-shelf) .header-search-toggle { display: none !important; }',
+                 '.header-search:not(.has-shelf) .header-search-field { display: flex !important; }',
+                 '.header-search-input { width: min(clamp(220px, 24vw, 320px), 100cqi); }'):
+        assert rule in alone, rule
+    field = _media_rules(css, 'header-search (min-width: 200px)', at='@container')
     for rule in ('.header-search-toggle { display: none !important; }',
                  '.header-search .header-search-field { display: flex !important; }',
-                 '.header-search-input { width: min(clamp(220px, 24vw, 320px), 100cqi); }'):
+                 '.header-search.has-shelf .header-search-input { width: min(clamp(220px, 24vw, 320px), '
+                 'calc(100cqi - 50px)); }'):
         assert rule in field, rule
-    assert 'is-open' not in field  # open is the same at every room: the group covers the bar
+    assert 'is-open' not in alone + field  # open is the same at every room: the group covers the bar
     phone = _phone_rules(css)
     assert '.app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }' in phone
 

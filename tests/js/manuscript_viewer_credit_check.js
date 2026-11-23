@@ -140,6 +140,17 @@ const checks = {
         assert.equal(page.preloads.length, 1);
         assert.equal(page.img.src, FULL);
     },
+    async 'an image that no source could show takes its credit away'() {
+        // Every source tried and failed (owner, 2026-11-23: a credit under "Image not available").
+        const credit = { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+        const card = { querySelector: (sel) => (sel === '.browse-image-credit' ? credit : null) };
+        const parent = { innerHTML: 'img', appendChild() {} };
+        const page = makePage({ triedOxford: 'true', triedManifest: 'true', triedServerProxy: 'true' },
+            { closest: (sel) => (sel === '.q-card' ? card : null), parentElement: parent });
+        await page.sandbox.handleImageError(page.img, '', 0, false, null);
+        assert.equal(page.img.style.display, 'none');
+        assert.equal(credit.attrs.hidden, '', 'the credit stayed under no image');
+    },
     async 'an NLI fallback that loaded before init is not upgraded'() {
         const page = makePage({ creditFallback: 'nli', triedManifest: 'true' },
             { complete: true, naturalWidth: 2000, src: 'https://iiif.nli.org.il/IIIFv21/FL167042239/full/max/0/default.jpg' });

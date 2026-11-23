@@ -168,6 +168,10 @@ def test_the_header_has_the_shelf_picker_beside_the_box(monkeypatch):
         await user.open('/about')
         [button] = hosts._by_testid(user, 'header-shelf-pick')
         assert button.props.get('aria-label') == 'Pick from the shelf'
+        # beside the field, not in it: a phone shows it beside the search button (owner, 2026-11-23)
+        ancestors = [a.classes for a in button.ancestors()]
+        assert not any('header-search-field' in c for c in ancestors)
+        assert any('header-search' in c and 'has-shelf' in c for c in ancestors)  # its room kept (common.css)
         hosts._click(user, button)
         # the pick opens the manuscript: "Open", Add to List and Add to Puzzle beside it (DX21, DX22)
         assert (stand_in.opened[-1]['pick_label'], stand_in.opened[-1]['add_to']) == ('Open', True)
@@ -189,5 +193,8 @@ def test_the_header_has_no_shelf_picker_without_the_tree(monkeypatch):
     async def driver(user):
         await user.open('/about')
         assert hosts._by_testid(user, 'header-shelf-pick') == []
+        # and no room kept for it beside the field (Codex #107)
+        groups = [e for e in user._client.elements.values() if 'header-search' in e.classes]
+        assert groups and not any('has-shelf' in g.classes for g in groups)
 
     _run_home_smoke(driver, lang='en')

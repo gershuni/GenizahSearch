@@ -1980,21 +1980,25 @@ def create_layout():
                 # 2026-11-16): its keys open over the page under the box.
                 hebrew_keyboard.attach(header_box, hebrew_keyboard.HEADER_FIELD, tr,
                                        floating=True, dark=True)
-                # Pick from the shelf beside the box (owner, 2026-11-21): on every page, with the
-                # field (a phone sees it once the search is opened). The pick opens in Browse at the
-                # place it was picked at, as the home page's does; Add to List and Add to Puzzle
-                # beside Open (handoff DX22). Browse's picker: "Open more than one" opens the ticked
-                # ones in Browse's Reading Desk (web/reading_desk_handoff.py), the same kept choice.
-                shelf_pick_button(lambda selection: ui.navigate.to(browse_url_for_pick(selection)),
-                                  label='', props='flat round dense text-color=white',
-                                  confirm_label=tr('Open'), add_to=True, lists_mgr=lambda: state.lists_mgr,
-                                  switch_label=tr('Open more than one'), purpose='reading_desk',
-                                  on_several=open_in_reading_desk,
-                                  several_label=tr('Open'), limit=desk_choice_limit,
-                                  testid='header-shelf-pick')
                 ui.button(icon='close').props(
                     f'flat round dense text-color=white aria-label="{tr("Close")}"'
                 ).classes('header-search-close').on('click', js_handler=_HEADER_SEARCH_CLOSE_JS)
+            # Pick from the shelf beside the box (owner, 2026-11-21): on every page. Beside the field, not
+            # in it, so a phone shows it beside the search button too, the field closed (owner,
+            # 2026-11-23). The pick opens in Browse at the place it was picked at, as the home page's
+            # does; Add to List and Add to Puzzle beside Open (handoff DX22). Browse's picker: "Open more
+            # than one" opens the ticked ones in Browse's Reading Desk (web/reading_desk_handoff.py).
+            # .has-shelf: the field's room leaves the button's (common.css), absent without the tree
+            shelf_button = shelf_pick_button(
+                lambda selection: ui.navigate.to(browse_url_for_pick(selection)),
+                label='', props='flat round dense text-color=white',
+                confirm_label=tr('Open'), add_to=True, lists_mgr=lambda: state.lists_mgr,
+                switch_label=tr('Open more than one'), purpose='reading_desk',
+                on_several=open_in_reading_desk,
+                several_label=tr('Open'), limit=desk_choice_limit,
+                testid='header-shelf-pick')
+            if shelf_button is not None:
+                section.classes('has-shelf')
             ui.button(icon='search').props(
                 f'flat round text-color=white aria-label="{tr("Search")}"'
             ).tooltip(tr('Search')).classes('header-search-toggle').on(

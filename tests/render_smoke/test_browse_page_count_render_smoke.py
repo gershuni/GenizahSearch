@@ -81,7 +81,9 @@ def _next(user):
 
 
 def _page_input(user):
-    return next(e for e in _all_elements(user) if isinstance(e, ui.number))
+    """The page's list ("1 / 4"), or its box while the count is not known (owner, 2026-11-23)."""
+    return next(e for e in _all_elements(user)
+                if isinstance(e, ui.number) or (isinstance(e, ui.select) and 'browse-page-select' in e.classes))
 
 
 def test_a_manuscript_without_automatic_text_counts_its_images_and_pages_on():

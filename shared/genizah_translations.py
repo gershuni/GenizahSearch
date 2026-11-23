@@ -7006,3 +7006,9 @@ TRANSLATIONS.update({
     "Show as a table": "הצגה כטבלה",
     "Show as thumbnails": "הצגה בתמונות ממוזערות",
 })
+# Browse on a phone (2026-11-23): View All's words, which a phone now shows instead of its icon
+# alone (the owner's Hebrew, approved in the session)
+TRANSLATIONS.update({
+    "All pages": "כל העמודים",
+    "One page": "עמוד אחד",
+})

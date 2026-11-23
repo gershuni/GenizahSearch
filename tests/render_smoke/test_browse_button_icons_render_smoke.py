@@ -142,25 +142,15 @@ def _assert_collapsing(button, icon, text):
     assert button.props.get('aria-label') == text, button.props
 
 
-def test_go_buttons_carry_an_icon_and_keep_their_text():
+def test_the_lookup_go_button_carries_an_icon_and_keeps_its_text():
+    """The lookup's Go. The page's own Go is gone (owner, 2026-11-23): its arrow, alone on a phone,
+    read as forward; the page is chosen from a list (tests/render_smoke/test_browse_phone_top_render_smoke.py)."""
     async def driver(user):
-        await _open_browse(user, lambda texts: texts.count('Go') >= 2)
-        go_buttons = _button(user, 'Go')
-        icons = sorted(b.props.get('icon') for b in go_buttons)
-        assert icons == ['arrow_forward', 'search'], icons
-        for b in go_buttons:
-            _assert_collapsing(b, b.props.get('icon'), 'Go')
+        await _open_browse(user, lambda texts: 'Edit' in texts)
+        [go] = _button(user, 'Go')
+        _assert_collapsing(go, 'search', 'Go')
 
     _run_browse(OPEN_PAGE, driver)
-
-
-def test_the_page_go_arrow_points_the_hebrew_way():
-    async def driver(user):
-        await _open_browse(user, lambda texts: texts.count('עבור') >= 2)
-        icons = sorted(b.props.get('icon') for b in _button(user, 'עבור'))
-        assert icons == ['arrow_back', 'search'], icons
-
-    _run_browse(OPEN_PAGE, driver, lang='he')
 
 
 def test_chips_that_open_a_library_viewer_carry_open_in_new_and_replace_the_icon_button():
@@ -261,8 +251,8 @@ def test_switching_the_image_source_does_not_load_the_page_again():
 
 def test_external_links_carry_open_in_new_after_their_text():
     async def driver(user):
-        await _open_browse(user, lambda texts: 'Show Metadata' in texts)
-        [show] = _button(user, 'Show Metadata')
+        await _open_browse(user, lambda texts: 'Metadata' in texts)
+        [show] = _button(user, 'Metadata')            # its name says the action: "Show Metadata"
         _click(user, show)
         await _wait_until(lambda: {'NLI Ktiv', 'Cambridge CUDL'} <= _labels(user))
         links = {}

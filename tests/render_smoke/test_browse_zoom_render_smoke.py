@@ -59,8 +59,9 @@ def _tell_the_page(user, payload):
 
 
 def _rebuild(user):
-    """Show / Hide Metadata rebuilds the page content, image markup included."""
-    toggles = [b for b in _buttons(user) if b.text in ('Show Metadata', 'Hide Metadata')]
+    """Show / Hide Metadata rebuilds the page content, image markup included. The card's button says
+    "Metadata"; its name says the action (owner, 2026-11-23: shorter words on the card)."""
+    toggles = [b for b in _buttons(user) if b.props.get('aria-label') in ('Show Metadata', 'Hide Metadata')]
     assert len(toggles) == 1, [b.text for b in toggles]
     _click(user, toggles[0])
 
@@ -86,7 +87,7 @@ def test_the_zoom_buttons_carry_no_server_click_handler():
 
 def test_the_page_hears_the_level_and_a_rebuilt_page_keeps_it():
     async def driver(user):
-        await _open_browse(user, lambda texts: 'Show Metadata' in texts)
+        await _open_browse(user, lambda texts: 'Metadata' in texts)
         assert 'scale(1.0)' in _image_markup(user)
         assert _zoom_labels(user) == ['100%']
 
@@ -102,7 +103,7 @@ def test_the_page_hears_the_level_and_a_rebuilt_page_keeps_it():
         _tell_the_page(user, {'scale': 1.5, 'seq': 3})
         _tell_the_page(user, {'scale': 1.5, 'seq': 'x'})
         _rebuild(user)
-        await _wait_until(lambda: 'Show Metadata' in _texts(user))
+        await _wait_until(lambda: 'Metadata' in _texts(user))
         assert 'data-zoom-seq="7"' in _image_markup(user)
 
         # Clamped to the viewer's range, and a broken payload changes nothing.
@@ -114,7 +115,7 @@ def test_the_page_hears_the_level_and_a_rebuilt_page_keeps_it():
         _tell_the_page(user, {})
         _tell_the_page(user, 'not a dict')
         _rebuild(user)
-        await _wait_until(lambda: 'Show Metadata' in _texts(user))
+        await _wait_until(lambda: 'Metadata' in _texts(user))
         assert 'scale(1.0)' in _image_markup(user), 'a payload that is not a finite number is the fit level'
 
     _run_browse(OPEN_PAGE, driver)
@@ -122,7 +123,7 @@ def test_the_page_hears_the_level_and_a_rebuilt_page_keeps_it():
 
 def test_reset_view_and_rotation_never_push_a_scale():
     async def driver(user):
-        await _open_browse(user, lambda texts: 'Show Metadata' in texts)
+        await _open_browse(user, lambda texts: 'Metadata' in texts)
         _tell_the_page(user, {'scale': 2.25})
         _rebuild(user)
         await _wait_until(lambda: 'scale(2.25)' in _image_markup(user))

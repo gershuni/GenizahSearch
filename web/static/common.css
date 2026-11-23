@@ -1366,12 +1366,19 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 .header-search.is-open .header-search-input { flex: 1 1 auto; width: auto; }
 .header-search.is-open .header-search-close { display: inline-flex !important; }
 .header-search.is-open .header-search-toggle { display: none !important; }
-/* The field in the bar: at least 150px of room. Its width is today's (24vw, 220-320px) or the
-   room, if less. */
+/* The field in the bar: at least 150px of room for it. Its width is today's (24vw, 220-320px) or the
+   room, if less. Beside the shelf button (2026-11-23: out of the field; the group has .has-shelf while
+   the shelf tree is served) the button takes 50px of the room: its 34 and the row's gap, 16 (the field
+   shows above 640px only). */
 @container header-search (min-width: 150px) {
+    .header-search:not(.has-shelf) .header-search-toggle { display: none !important; }
+    .header-search:not(.has-shelf) .header-search-field { display: flex !important; }
+    .header-search-input { width: min(clamp(220px, 24vw, 320px), 100cqi); }
+}
+@container header-search (min-width: 200px) {
     .header-search-toggle { display: none !important; }
     .header-search .header-search-field { display: flex !important; }
-    .header-search-input { width: min(clamp(220px, 24vw, 320px), 100cqi); }
+    .header-search.has-shelf .header-search-input { width: min(clamp(220px, 24vw, 320px), calc(100cqi - 50px)); }
 }
 /* Room for the search button on a phone (measured at 375px: without this the
    groups beside it wrapped to a second line under the 64px bar). */
@@ -1379,6 +1386,12 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     .app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }
     .app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }
     .app-header > .header-search { min-width: 36px; }
+    .app-header > .header-search.has-shelf { min-width: 76px; }  /* and the shelf button */
+    /* A phone has the button only, whatever the room (owner, 2026-11-23: the field crowded the bar
+       on Browse, which has a lookup box of its own), and the shelf button beside it; open, the field
+       covers the bar as at every width. */
+    .app-header .header-search:not(.is-open) .header-search-toggle { display: inline-flex !important; }
+    .app-header .header-search:not(.is-open) .header-search-field { display: none !important; }
 }
 /* The logo text gives its room to the go-to box below 826px: there the two no longer fit side by
    side in the widest header measured (Hebrew, signed out, What's New; the box at 150px), and the

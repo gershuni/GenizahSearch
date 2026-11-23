@@ -74,8 +74,10 @@ def _run(tmp_path, driver, lang='en', saved=None, orders=None):
 
     async def run(user):
         await user.open(f'/browse?sys_id={SID_A}')
+        # the page drawn: its page list (or the box while its count is not known)
         await _wait_until(lambda: made and made[-1].enter_joined_view is not None
-                          and any(isinstance(e, ui.number) for e in _all_elements(user)))
+                          and any(isinstance(e, ui.number) or 'browse-page-select' in e.classes
+                                  for e in _all_elements(user)))
 
         def enter(fragments, pgpid):
             with user._client:

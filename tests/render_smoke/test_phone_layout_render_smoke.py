@@ -21,7 +21,11 @@ from tests.render_smoke.test_browse_button_icons_render_smoke import (
     _run_browse,
 )
 
-FOLDING = ('Search for Parallels', 'Show Metadata', 'Show Full Manuscript', 'Edit', 'Send Comment')
+# View All keeps its words on a phone now ("All pages", browse-icon-wide: owner, 2026-11-23);
+# tests/render_smoke/test_browse_phone_top_render_smoke.py.
+# The green card's are short (owner, 2026-11-23): "Parallels Search", "Metadata" (whose name says the
+# action, "Show Metadata": tests/render_smoke/test_browse_phone_top_render_smoke.py).
+FOLDING = ('Parallels Search', 'Edit', 'Send Comment')
 
 
 def test_the_long_buttons_fold_to_named_icons_on_a_phone():

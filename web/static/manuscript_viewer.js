@@ -196,6 +196,13 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
 
     // All fallbacks exhausted
     console.log('All image sources failed for:', currentSrc);
+    // No image on screen, so no credit for one (owner, 2026-11-23). The `hidden` attribute, not a style
+    // or a class: the server's redraw of the strip replaces those, and leaves an attribute it never set.
+    try {
+        const card = img.closest && img.closest('.q-card');
+        const credit = card && card.querySelector && card.querySelector('.browse-image-credit');
+        if (credit) credit.setAttribute('hidden', '');
+    } catch (e) { /* cosmetic */ }
     img.style.display = 'none';
     const parent = img.parentElement;
     if (parent) {

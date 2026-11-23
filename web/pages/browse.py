@@ -85,7 +85,7 @@ from web.ux_timing import ux_done, ux_settled
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections, get_user_client
-from web.components.typography import h1, h2, h3
+from web.components.typography import SemanticHeading, h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
 from web.components.shelfmark_tree_picker import open_shelf_picker
@@ -493,6 +493,59 @@ VIEWER_STYLES = '''
         .browse-header-center > *:has(> .browse-header-title) { flex: 1 1 0%; min-width: 160px; }
         .browse-header-center .q-btn { white-space: nowrap; }
     }
+    /* A phone (owner, 2026-11-23): at 375x812 the image began 897px down, under a 310px green card and
+       a 254px toolbar of unnamed icons. On a phone the page's controls are in two ⋮ menus (the card's,
+       the toolbar's); a wider screen has room for them all. Exact complements: no 640.5px gap. */
+    @media not all and (max-width: 640px) {
+        .browse-phone-only { display: none !important; }
+    }
+    @media (max-width: 640px) {
+        .browse-wide-only { display: none !important; }
+        /* the page: 8px each side and above (it was 40: the page's 16, the shell's 8 and NiceGUI's 16) */
+        .nicegui-content:has(.browse-root) { padding: 0 !important; }
+        .browse-root { padding: 0 !important; gap: 8px !important; }
+        /* the green card: the shelfmark, ⋮ beside it, then the title on a line cut with "..." (a tap
+           shows it all); the library and the place on the shelf are in the ⋮ menu */
+        .browse-header-card { padding: 6px 4px !important; }
+        .browse-header-center { flex-wrap: wrap !important; gap: 0 4px !important; min-width: 0; }
+        .browse-header-center > .browse-header-h2 { order: 1; flex: 0 1 auto; width: auto; min-width: 0; }
+        .browse-header-h2 h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* out of sight, not out of the heading: a screen reader still says "library, shelfmark" (Codex #107) */
+        .browse-h2-lib { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+            clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+        /* an Oxford part's badge stays beside its shelfmark (the default order, 0, put it first: Codex #107) */
+        .browse-header-center > .browse-header-part { order: 1; flex: none; white-space: nowrap; }
+        .browse-header-center > .browse-header-more { order: 2; }
+        .browse-header-center > .browse-header-titlebox { order: 3; flex: 1 1 100%; min-width: 0; justify-content: center; }
+        .browse-header-title.is-open { white-space: normal; overflow: visible; }
+        .browse-shelf-place { display: none !important; }
+        /* the toolbar: the joins button once its count says there are joins (it is then ringed); ⋮ on
+           the page line, the computed identifications' wide entry after it */
+        .browse-joins-slot:not(:has(.ring-2)) { display: none !important; }
+        .browse-discovery-slot { order: 10; }
+    }
+    /* The top of the page (owner, 2026-11-23: too much room above the lookup): the shell's 8px, then the
+       lookup; the screen-reader title takes no place in the column (it was a 16px gap of its own). */
+    .nicegui-content:has(.browse-root) { padding-top: 0 !important; }
+    .main-content:has(> .browse-root) { padding-top: 8px !important; }
+    .browse-root { padding-top: 0 !important; }
+    .browse-title-wrap { position: absolute !important; }
+    /* the image credit goes with an image that could not be shown (manuscript_viewer.js: handleImageError) */
+    .browse-image-credit[hidden] { display: none !important; }
+    /* Computed identifications: its icon alone on the toolbar, its words in the tooltip and its name
+       (owner, 2026-11-23: the line took a row); "New" a gold dot on it */
+    .browse-discovery-slot .gs-discovery .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
+    .browse-discovery-slot .gs-discovery .q-btn__content > .q-icon { margin: 0; }
+    .browse-discovery-slot .gs-discovery.discovery-panel-entry-new { padding-inline: 0; gap: 0; border: 0; background: none; position: relative; }
+    .browse-discovery-slot .gs-discovery .discovery-panel-entry-new-badge {
+        position: absolute; top: 2px; inset-inline-end: 2px; width: 9px; height: 9px; padding: 0;
+        font-size: 0; line-height: 0; overflow: hidden; pointer-events: none; }
+    /* The title is the whole title, cut to its line at every width (it was cut at five words). */
+    .browse-header-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+    .browse-header-titlebox { min-width: 0; max-width: 100%; }
+    .browse-page-select { min-width: 64px; }
+    .browse-more-menu .browse-menu-icon { min-width: 36px; padding-inline-end: 8px; color: #15803d; }
+    [data-theme="dark"] .browse-more-menu .browse-menu-icon { color: #86efac; }
     /* Transcription type by width (the owner's screen-size table). */
     .viewer-panels .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
     @media (min-width: 641px) { .viewer-panels .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
@@ -847,6 +900,88 @@ def _external_link(text: str, url: str):
         ui.label(text)
         ui.icon('open_in_new', size='14px')
     return link
+
+
+class _BrowseHeading(SemanticHeading):
+    """The green card's heading: the library and the shelfmark, each in a span of its own, so a phone
+    shows the shelfmark alone (owner, 2026-11-23: the card was 310px tall at 375px); ``.text`` stays
+    the whole line, as the screen reader and every wider screen have it."""
+
+    def __init__(self, library: str, shelfmark: str, classes: str = '', style: str = ''):
+        self._library, self._shelfmark = library or '', shelfmark
+        super().__init__('h2', f'{library}, {shelfmark}' if library else shelfmark, classes, style)
+
+    def _build_html(self, text):
+        lib = (f'<span class="browse-h2-lib">{html_module.escape(self._library)}, </span>'
+               if self._library else '')
+        return (f'<h2 class="{self.heading_classes}" style="{self.heading_style}">{lib}'
+                f'<span class="browse-h2-sm">{html_module.escape(self._shelfmark)}</span></h2>')
+
+
+def _menu_entry(text: str, icon: str, *, on_click=None, href: str = '', js: str = '', classes: str = ''):
+    """One line of a ⋮ menu (owner, 2026-11-23: on a phone the page's controls are in a menu): its
+    icon and its words. ``href`` opens a page in a new tab (a link, in the browser: no round trip,
+    so no popup blocker); ``js`` runs in the browser (it clicks a control the phone does not show)."""
+    item = ui.menu_item(on_click=on_click).classes(f'browse-menu-item {classes}'.strip())
+    if href:
+        item.props.update({'href': href, 'target': '_blank', 'rel': 'noopener noreferrer'})
+    if js:
+        item.on('click', js_handler=js)
+    with item:
+        with ui.item_section().props('avatar').classes('browse-menu-icon'):
+            ui.icon(icon, size='20px')
+        ui.item_section(text)
+    return item
+
+
+def _header_more_menu(page, state, on_shelf, meta_label: str, star_icon: str, *, ktiv_url, on_parallels, on_metadata,
+                      on_list, on_copy, on_place):
+    """The green card's ⋮, a phone's only (owner, 2026-11-23): the card's links and buttons and the place
+    on the shelf, which the phone does not show (the card is the shelfmark and the title alone there).
+    A wider screen has them all on the card; Add to Puzzle is on the page's toolbar."""
+    phone = 'browse-phone-only'
+    with ui.button(icon='more_vert').props(
+            f'flat round dense aria-label="{tr("More actions")}" data-testid="browse-header-more"').style(
+            'color: #ffffff !important;').classes(f'browse-header-more {phone}').tooltip(
+            tr('More actions')):
+        with ui.menu().classes('browse-more-menu'):
+            if ktiv_url:
+                _menu_entry(tr('Ktiv'), 'open_in_new', href=ktiv_url, classes=phone)
+            pgp_url = (state.pgp_metadata or {}).get('pgp_url') if state.enrichment_loaded else None
+            if pgp_url:
+                _menu_entry('PGP', 'open_in_new', href=pgp_url, classes=phone)
+            lib = page.library_viewer_url or {}
+            if lib.get('url') and not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
+                _menu_entry(tr(lib.get('label') or 'Library'), 'open_in_new', href=lib['url'], classes=phone)
+            _menu_entry(tr('Search for Parallels'), 'search', on_click=on_parallels, classes=phone)
+            _menu_entry(meta_label, 'info', on_click=on_metadata, classes=phone)
+            _menu_entry(tr('In List') if star_icon == 'star' else tr('Add to List'), star_icon, on_click=on_list,
+                        classes=phone)
+            _menu_entry(tr('Copy Link'), 'share', on_click=on_copy, classes=phone)
+            if on_shelf is not None and on_shelf['crumbs']:
+                # the place on the shelf, the library first: what the card's own line shows on a wider screen
+                text = f"{tr('Place on the shelf')}: " + f' {CRUMB_SEP} '.join(name for _nid, name in on_shelf['crumbs'])
+                pos = on_shelf['position']
+                if pos is not None:
+                    text += ' · ' + tr('{index} of {total}').format(index=f'{pos.index:,}', total=f'{pos.total:,}')
+                last = on_shelf['crumbs'][-1][0]
+                _menu_entry(text, 'shelves', on_click=lambda: on_place(last), classes=phone)
+
+
+#: The library viewers' names as the green card's button shows them (owner, 2026-11-23: short on the
+#: card; the whole name in its tooltip and in the phone's menu).
+_SHORT_LIBRARY_LABELS = {'Cambridge Digital Library': 'CUDL'}
+
+
+#: A tap on the green card's title shows it whole on a phone (its CSS cuts it to a line), and cuts it again.
+_TITLE_TAP_JS = "(e) => e.currentTarget.classList.toggle('is-open')"
+
+
+def _click_tool_js(tool: str) -> str:
+    """Clicks the toolbar control marked ``data-tool=<tool>`` (hidden on a phone, where its ⋮ menu
+    entry stands in for it): the control's own handler runs, nothing is done twice."""
+    sel = json.dumps(f'.q-btn[data-tool="{tool}"], [data-tool="{tool}"] .q-btn')
+    return f'() => {{ const b = document.querySelector({sel}); if (b) b.click(); }}'
 
 
 # One Recently-Viewed write at a time per account, across all its tabs:
@@ -1867,6 +2002,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         clear_browse_snapshot(keep_position=True)
         update_content()
 
+    def add_to_puzzle():
+        """Add to Puzzle (Phase 49): this page to the Fragment Puzzle. On the toolbar beside Print (owner,
+        2026-11-23; it was on the green card, which most readers do not need it on)."""
+        sid = state.sys_id
+        fl = state.current_page.fl_id if state.current_page else None
+        if fl:
+            param = f'{sid},{fl}'
+        elif state.current_page and state.active_source != 'nli':
+            # External library — pass page index (0-based from p_num)
+            page_idx = max(0, state.current_page.p_num - 1) if state.current_page.p_num else 0
+            param = f'{sid},page:{page_idx}'
+        else:
+            param = str(sid)
+        ui.navigate.to(f'/puzzle?add={param}')
+
     def add_to_reading_desk():
         """Add current manuscript to the reading desk, or start reading desk if not active."""
         if not state.sys_id or not state.current_page:
@@ -2747,18 +2897,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4 browse-header-center'):
-                        # Shelfmark with Library Name - H2
-                        display_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
-                        if page.library_name:
-                            display_shelfmark = f"{page.library_name}, {display_shelfmark}"
-                        h2(display_shelfmark, classes='text-xl font-bold', style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
+                        # Shelfmark with Library Name - H2 (a phone: the shelfmark alone; the library
+                        # is in the ⋮ menu's place on the shelf and the metadata)
+                        _BrowseHeading(page.library_name, page.shelfmark or f"ID: {page.sys_id}",
+                                       classes='text-xl font-bold',
+                                       style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);'
+                                       ).classes('browse-header-h2')
 
                         # Oxford Part badge (e.g. [part 6], or [fol. 27] when the Part is the
                         # whole codex). Computed once by the shared codicological helper in
                         # browse_enrichment -- never re-derived here by splitting on "part".
                         if page.oxford_part_label:
                             ui.label(f"[{page.oxford_part_label}]").classes(
-                                'text-lg font-bold'
+                                'text-lg font-bold browse-header-part'
                             ).style(
                                 'color: #3b82f6 !important; '
                                 'text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);'
@@ -2773,54 +2924,43 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             else:
                                 _overlay_title = state.title_translation.get('english_title') or state.title_translation.get('hebrew_title') or page.title
                         if _overlay_title:
+                            # The whole title, cut to the line by the CSS ("..."), its tooltip the whole
+                            # of it; a tap shows it all on a phone, which has no tooltip (owner,
+                            # 2026-11-23). It was cut at five words, whatever the room.
                             _ol_dir = 'rtl-text hebrew-text' if not (state.title_translation and get_language() != 'he' and state.title_translation.get('english_title')) else ''
-                            words = _overlay_title.split()
-                            if len(words) > 5:
-                                short_title = ' '.join(words[:5]) + '...'
-                            else:
-                                short_title = _overlay_title
                             _ol_has_toggle = state.title_translation and _overlay_title != page.title
-                            if _ol_has_toggle:
-                                _ol_st = {'showing_original': False}
-                                with ui.row().classes('items-center gap-0'):
-                                    _ol_lbl = ui.label(short_title).classes(
-                                        _ol_dir + ' browse-header-title'
-                                    ).style(
-                                        'color: #ffffff !important; opacity: 0.95;'
-                                    )
-                                    if len(words) > 5:
-                                        _ol_lbl.tooltip(_overlay_title)
-                                    def _make_ol_toggle(lbl, orig_title, trans_title, orig_short, trans_short, flag, trans_dir):
-                                        def handler():
-                                            flag['showing_original'] = not flag['showing_original']
-                                            if flag['showing_original']:
-                                                lbl.text = orig_short
-                                                lbl.classes(remove=trans_dir, add='rtl-text hebrew-text')
-                                                lbl.tooltip(orig_title)
-                                            else:
-                                                lbl.text = trans_short
-                                                lbl.classes(remove='rtl-text hebrew-text', add=trans_dir)
-                                                lbl.tooltip(trans_title)
-                                        return handler
-                                    _orig_words = page.title.split() if page.title else []
-                                    _orig_short = (' '.join(_orig_words[:5]) + '...') if len(_orig_words) > 5 else (page.title or '')
-                                    ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
-                                        'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
-                                    ).tooltip(tr('Show original title')).on(
-                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title, _overlay_title, _orig_short, short_title, _ol_st, _ol_dir)
-                                    )
-                            else:
-                                ui.label(short_title).classes(
+                            with ui.row().classes('items-center gap-0 no-wrap browse-header-titlebox'):
+                                _ol_lbl = ui.label(_overlay_title).classes(
                                     _ol_dir + ' browse-header-title'
                                 ).style(
                                     'color: #ffffff !important; opacity: 0.95;'
-                                ).tooltip(_overlay_title if len(words) > 5 else '')
+                                ).on('click', js_handler=_TITLE_TAP_JS).tooltip(_overlay_title)
+                                if _ol_has_toggle:
+                                    _ol_st = {'showing_original': False}
+
+                                    def _make_ol_toggle(lbl, orig_title, trans_title, flag, trans_dir):
+                                        def handler():
+                                            flag['showing_original'] = not flag['showing_original']
+                                            if flag['showing_original']:
+                                                lbl.text = orig_title
+                                                lbl.classes(remove=trans_dir, add='rtl-text hebrew-text')
+                                                lbl.tooltip(orig_title)
+                                            else:
+                                                lbl.text = trans_title
+                                                lbl.classes(remove='rtl-text hebrew-text', add=trans_dir)
+                                                lbl.tooltip(trans_title)
+                                        return handler
+                                    ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                        'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
+                                    ).tooltip(tr('Show original title')).on(
+                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title or '', _overlay_title, _ol_st, _ol_dir)
+                                    )
 
                         # Ktiv link — Phase 85 D-06: hidden for synthetic sys_ids (no NLI Alma record)
                         if not is_synthetic_sys_id(page.sys_id):
                             ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
                             with ui.link(target=ktiv_url, new_tab=True).classes(
-                                'flex items-center gap-1 px-2 py-1 rounded'
+                                'flex items-center gap-1 px-2 py-1 rounded browse-wide-only'
                             ).style(
                                 'text-decoration: none; '
                                 'color: #ffffff !important; '
@@ -2830,7 +2970,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
 
                         # PGP link button placeholder (populated by enrichment Phase B)
-                        pgp_link_el = ui.element('span')
+                        pgp_link_el = ui.element('span').classes('browse-wide-only')
                         enrichment_refs['pgp_link_container'] = pgp_link_el
                         if state.enrichment_loaded and state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
                             with pgp_link_el:
@@ -2848,39 +2988,43 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if page.library_viewer_url and page.library_viewer_url.get('url'):
                             lib_info = page.library_viewer_url
                             if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
+                                _lib_name = tr(lib_info.get('label') or 'Library')
                                 with ui.link(target=lib_info['url'], new_tab=True).classes(
-                                    'flex items-center gap-1 px-2 py-1 rounded'
+                                    'flex items-center gap-1 px-2 py-1 rounded browse-wide-only'
                                 ).style(
                                     'text-decoration: none; '
                                     'color: #ffffff !important; '
                                     'background: rgba(255, 255, 255, 0.2);'
-                                ):
+                                ).tooltip(_lib_name):
                                     ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
-                                    ui.label(tr(lib_info.get('label') or 'Library')).classes('text-sm font-semibold').style('color: #ffffff !important;')
+                                    ui.label(_SHORT_LIBRARY_LABELS.get(lib_info.get('label') or '', _lib_name)).classes(
+                                        'text-sm font-semibold').style('color: #ffffff !important;')
 
-                        # Search for Parallels button
+                        # Search for Parallels button: short on the card (owner, 2026-11-23), the whole name
+                        # in its tooltip; its name is its words
                         ui.button(
-                            tr('Search for Parallels'),
+                            tr('Parallels Search'),
                             icon='search',
                             on_click=search_for_parallels
-                        ).props(f'flat dense aria-label="{tr("Search for Parallels")}"').style(
+                        ).props(f'flat dense aria-label="{tr("Parallels Search")}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
-                        ).tooltip(tr('Search for Parallels')).classes('browse-icon-collapse')
+                        ).tooltip(tr('Search for Parallels')).classes('browse-icon-collapse browse-wide-only')
 
                         # Metadata button. One label for the text, the aria-label
                         # and the tooltip: the aria-label replaces the text for a
                         # screen reader, so a fixed "Show Metadata" named the
                         # opposite action while the panel was open (Codex on #434).
+                        # The card says "Metadata" (owner, 2026-11-23); the name says the action.
                         _meta_label = tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata')
                         ui.button(
-                            _meta_label,
+                            tr('Metadata'),
                             icon='info',
                             on_click=toggle_metadata
                         ).props(f'flat dense aria-label="{_meta_label}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
-                        ).tooltip(_meta_label).classes('browse-icon-collapse')
+                        ).tooltip(_meta_label).classes('browse-icon-collapse browse-wide-only')
 
                         # Add manuscript to list (star button)
                         from web.state import state as app_state
@@ -2889,26 +3033,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.button(
                             icon=star_icon,
                             on_click=add_manuscript_to_list
-                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('In List') if star_icon == 'star' else tr('Add to List'))
-
-                        if WEB_PUZZLE_ENABLED:
-                            # Add to Puzzle button (Phase 49)
-                            def add_to_puzzle():
-                                sid = state.sys_id
-                                fl = state.current_page.fl_id if state.current_page else None
-                                if fl:
-                                    param = f'{sid},{fl}'
-                                elif state.current_page and state.active_source != 'nli':
-                                    # External library — pass page index (0-based from p_num)
-                                    page_idx = max(0, state.current_page.p_num - 1) if state.current_page.p_num else 0
-                                    param = f'{sid},page:{page_idx}'
-                                else:
-                                    param = str(sid)
-                                ui.navigate.to(f'/puzzle?add={param}')
-                            ui.button(
-                                icon='extension',
-                                on_click=add_to_puzzle
-                            ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Puzzle'))
+                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(
+                            tr('In List') if star_icon == 'star' else tr('Add to List')).classes('browse-wide-only')
 
                         # Share / Copy Link button
                         def _copy_share_link():
@@ -2925,7 +3051,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.button(
                             icon='share',
                             on_click=_copy_share_link
-                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Copy Link'))
+                        ).props(f'flat round dense aria-label="{tr("Copy Link")}"').style(
+                            'color: #ffffff !important;').tooltip(tr('Copy Link')).classes('browse-wide-only')
+
+                        # ⋮, a phone's (owner, 2026-11-23): every control above, the green card being the
+                        # shelfmark and the title alone there.
+                        _header_more_menu(
+                            page, state, _on_shelf, _meta_label, star_icon,
+                            ktiv_url=None if is_synthetic_sys_id(page.sys_id) else ktiv_url,
+                            on_parallels=search_for_parallels, on_metadata=toggle_metadata,
+                            on_list=add_manuscript_to_list, on_copy=_copy_share_link, on_place=open_shelf_picker_at)
 
                     # Next Shelfmark Button
                     _next_tip = tr('Next manuscript')
@@ -4994,10 +5129,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     value=_folio_val,
                                     on_change=handle_folio_select
                                 ).classes('w-20').props('dense outlined')
+                            elif page.total_pages:
+                                # The page by its number, from a list (owner, 2026-11-23): the box and its
+                                # Go button folded on a phone to "1 ← 7 /", an arrow read as forward.
+                                async def handle_page_pick(e):
+                                    try:
+                                        val = int(e.value)
+                                    except (ValueError, TypeError):
+                                        return
+                                    if val != page.p_num:
+                                        await go_to_page(val)
+
+                                ui.select(
+                                    options={n: str(n) for n in range(1, page.total_pages + 1)},
+                                    value=min(max(page.p_num, 1), page.total_pages),
+                                    on_change=handle_page_pick,
+                                ).classes('browse-page-select').props(
+                                    f'dense outlined options-dense aria-label="{tr("Page")}" data-ux=browse_page')
                             else:
+                                # The number of pages not known (yet): the box, Enter goes there.
                                 page_input = ui.number(
-                                    value=page.p_num, min=1, max=page.total_pages or None
-                                ).classes('w-24').props('dense outlined')
+                                    value=page.p_num, min=1
+                                ).classes('w-24').props(f'dense outlined aria-label="{tr("Page")}"')
 
                                 async def handle_go_click():
                                     try:
@@ -5006,9 +5159,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         val = 1
                                     await go_to_page(val)
 
-                                ui.button(
-                                    tr('Go'), icon='arrow_back' if is_rtl() else 'arrow_forward', on_click=handle_go_click,
-                                ).props(f'flat dense color=green size=sm data-ux=browse_page aria-label="{tr("Go")}"').classes('browse-icon-collapse')
+                                page_input.on('keydown.enter', handle_go_click)
 
                             if page.total_pages:  # 0: not known (yet) -- never "/ 0"
                                 ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
@@ -5021,11 +5172,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             ).tooltip(f'{tr("Next Page")} ({"←" if is_rtl() else "→"})')
 
-                            ui.button(
-                                tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
-                                icon='view_agenda' if not state.view_all else 'view_day',
-                                on_click=toggle_view_all
-                            ).props(f'flat dense color=green size=sm aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"').classes('browse-icon-collapse')
+                            # Its words at every width (owner, 2026-11-23): its icon alone said nothing on
+                            # a phone. A phone drops the icon instead (browse-icon-wide).
+                            _view_all_label = tr('One page') if state.view_all else tr('All pages')
+                            # with the phone's ⋮ (put in below): it never takes a line alone (owner, 2026-11-23)
+                            _tools_tail = ui.row().classes('items-center no-wrap browse-tools-tail').style('gap: 4px;')
+                            with _tools_tail:
+                                ui.button(
+                                    _view_all_label,
+                                    icon='view_agenda' if not state.view_all else 'view_day',
+                                    on_click=toggle_view_all
+                                ).props(f'flat dense no-caps color=green size=sm aria-label="{_view_all_label}"').classes(
+                                    'browse-icon-wide browse-view-all').tooltip(
+                                    tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'))
 
                             # Print / Save as PDF -- ON THE ALWAYS-VISIBLE TOOLBAR.
                             #
@@ -5075,9 +5234,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 if not state.view_all:
                                     print_pending['value'] = False
 
+                            # A phone: this toolbar's buttons from here on are in its ⋮ (owner,
+                            # 2026-11-23), each entry clicking the hidden button (data-tool) or doing
+                            # the same itself; on a wider screen there is room for them all.
                             with ui.button(icon='print').props(
                                 f'flat round dense aria-label="{tr("Print / Save as PDF")}"'
-                            ).classes('text-green-700 print-hide').tooltip(tr('Print / Save as PDF')):
+                            ).classes('text-green-700 print-hide browse-wide-only').tooltip(tr('Print / Save as PDF')):
                                 # A menu on the button itself (owner's choice,
                                 # 2026-09-04) rather than a second toolbar
                                 # control -- the row is already crowded enough
@@ -5127,14 +5289,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon=page_star_icon,
                                 on_click=add_page_to_list
-                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes('text-green-700').tooltip(tr('In List') if page_star_icon == 'star' else tr('Add to List'))
+                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes(
+                                'text-green-700 browse-wide-only').tooltip(tr('In List') if page_star_icon == 'star' else tr('Add to List'))
 
                             # Image toggle button - placeholder, will be connected later
                             image_toggle_btn = None
                             if has_image:
                                 image_toggle_btn = ui.button(
                                     icon='image'
-                                ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
+                                ).props(f'flat dense aria-label="{tr("Toggle Image")}" data-tool="image"').classes(
+                                    'text-green-700 browse-wide-only').tooltip(tr('Toggle Image'))
 
                             # Edit, Comment, Notes, and Joins buttons -- also on a page without an
                             # automatic transcription (its text is then empty; owner, 2026-10-27)
@@ -5161,24 +5325,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         tr('Edit'),
                                         icon='edit',
                                         on_click=toggle_edit_mode
-                                    ).props(f'flat dense size=sm aria-label="{tr("Edit")}"').classes('text-xs browse-icon-collapse').tooltip(tr('Edit Transcription'))
-                                create_comment_button(
-                                    document_id=page.sys_id,
-                                    page_number=page.p_num,
-                                    shelfmark=page.shelfmark or page.sys_id,
-                                    on_submit=refresh_notes_after_comment,
-                                    ie_id=state.volume_ie
-                                )
-                                create_notes_button(
-                                    document_id=page.sys_id,
-                                    page_number=page.p_num,
-                                    shelfmark=page.shelfmark or page.sys_id,
-                                    ie_id=state.volume_ie
-                                )
+                                    ).props(f'flat dense size=sm aria-label="{tr("Edit")}" data-tool="edit"').classes(
+                                        'text-xs browse-icon-collapse browse-wide-only').tooltip(tr('Edit Transcription'))
+                                with ui.element('span').classes('inline-flex browse-wide-only').props('data-tool="comment"'):
+                                    create_comment_button(
+                                        document_id=page.sys_id,
+                                        page_number=page.p_num,
+                                        shelfmark=page.shelfmark or page.sys_id,
+                                        on_submit=refresh_notes_after_comment,
+                                        ie_id=state.volume_ie
+                                    )
+                                with ui.element('span').classes('inline-flex browse-wide-only').props('data-tool="notes"'):
+                                    create_notes_button(
+                                        document_id=page.sys_id,
+                                        page_number=page.p_num,
+                                        shelfmark=page.shelfmark or page.sys_id,
+                                        ie_id=state.volume_ie
+                                    )
 
-                                # Joins button placeholder (populated by enrichment Phase B)
+                                # Joins button placeholder (populated by enrichment Phase B). A phone shows
+                                # it only once its count says the manuscript has joins (it is then ringed).
                                 if page.shelfmark:
-                                    joins_el = ui.element('span')
+                                    joins_el = ui.element('span').classes('browse-joins-slot').props('data-tool="joins"')
                                     enrichment_refs['joins_container'] = joins_el
                                     enrichment_refs['navigate_to_shelfmark'] = navigate_to_shelfmark
                                     if state.enrichment_loaded:
@@ -5206,7 +5374,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # on, so a flag-off browse page is byte-for-byte
                             # what it was before this plan.
                             if discovery_panel_enabled():
-                                discovery_entry_el = ui.element('span')
+                                discovery_entry_el = ui.element('span').classes('browse-discovery-slot')
                                 enrichment_refs['discovery_entry_container'] = discovery_entry_el
 
                             # "Add to View" button -- start or extend reading desk with current manuscript
@@ -5214,8 +5382,38 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 icon='library_add',
                                 on_click=add_to_reading_desk
                             ).props(f'flat dense aria-label="{tr("Add to Reading Desk")}"').classes(
-                                'text-green-700'
+                                'text-green-700 browse-wide-only'
                             ).tooltip(tr('Add to Reading Desk'))
+
+                            # Add to Puzzle, beside Print and the others (owner, 2026-11-23)
+                            if WEB_PUZZLE_ENABLED:
+                                ui.button(icon='extension', on_click=add_to_puzzle).props(
+                                    f'flat dense aria-label="{tr("Add to Puzzle")}"').classes(
+                                    'text-green-700 browse-wide-only').tooltip(tr('Add to Puzzle'))
+
+                            # The phone's ⋮ for the buttons above (owner, 2026-11-23), beside All pages.
+                            with _tools_tail, ui.button(icon='more_vert').props(
+                                f'flat round dense aria-label="{tr("More actions")}" data-testid="browse-tools-more"'
+                            ).classes('text-green-700 print-hide browse-phone-only').tooltip(tr('More actions')):
+                                with ui.menu().classes('browse-more-menu'):
+                                    _print_one = _menu_entry(tr('Print this page'), 'print', js='() => window.print()')
+                                    if state.view_all or state.edit_mode or state.edit_loading:
+                                        _print_one.props('disable')
+                                    _menu_entry(_all_label, 'print', on_click=_print_all_pages)
+                                    _menu_entry(tr('In List') if page_star_icon == 'star' else tr('Add to List'),
+                                                page_star_icon, on_click=add_page_to_list)
+                                    if image_toggle_btn is not None:
+                                        _menu_entry(tr('Toggle Image'), 'image', js=_click_tool_js('image'))
+                                    if page_has_reading_view(page):
+                                        if not is_synthetic_sys_id(page.sys_id):
+                                            _menu_entry(tr('Edit Transcription'), 'edit', js=_click_tool_js('edit'))
+                                        _menu_entry(tr("Send Comment"), "comment", js=_click_tool_js("comment"))
+                                        _menu_entry(tr("View Comments"), "forum", js=_click_tool_js("notes"))
+                                        if page.shelfmark:
+                                            _menu_entry(tr('Joined Fragments'), 'link', js=_click_tool_js('joins'))
+                                    _menu_entry(tr('Add to Reading Desk'), 'library_add', on_click=add_to_reading_desk)
+                                    if WEB_PUZZLE_ENABLED:
+                                        _menu_entry(tr('Add to Puzzle'), 'extension', on_click=add_to_puzzle)
 
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
                 # State for image panel visibility
@@ -6054,11 +6252,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         await search_shelfmark()
 
     # === Main Layout ===
-    with ui.column().classes('w-full max-w-7xl mx-auto p-4'):
+    with ui.column().classes('w-full max-w-7xl mx-auto p-4 browse-root'):
         # Page title
         # Changed to H1
         if not embedded:
-            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800 print-hide browse-page-title')
+            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800 print-hide browse-page-title'
+               ).classes('browse-title-wrap')
 
         # Shelfmark Search Box - Simple and Working
         # `print-hide`: a lookup form is furniture, not part of the sheet.
