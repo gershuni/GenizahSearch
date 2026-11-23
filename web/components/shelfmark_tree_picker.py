@@ -762,6 +762,8 @@ CHIPS_DRAWN = 40
 # again takes as the same desk (one on the desk already counts as taken). An exclusion or a list's choice
 # leaves the picker when taken: its host keeps it, and taking it again would add it twice.
 KEEP_CHOSEN_PURPOSES = frozenset({'reading_desk'})
+# The reader's last mode of a picker with the switch ("Open more than one"), per purpose
+MODE_KEY = 'shelf_picker.multi.'
 _BOX = {'all': 'check_box', 'some': 'indeterminate_check_box', 'none': 'check_box_outline_blank'}
 _ARIA = {'all': 'true', 'some': 'mixed', 'none': 'false'}
 
@@ -976,6 +978,10 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         raise ValueError("the multiple-choice mode needs a purpose and on_confirm")
     if both and on_pick is None:
         raise ValueError("the switch needs on_pick for its single choice")
+    if both:
+        # The switch as the reader left it, for this purpose (owner, 2026-11-23: the header's and the home
+        # page's "Open more than one" were off again at each opening)
+        multi = bool(safe_user_get(MODE_KEY + purpose, multi))
     lang = get_language()
     labels = {'library': tr('Library'), 'others': tr('All other libraries, A-Z'),
               'in': tr('Shown inside {place}'), 'part': tr('Part: {part}')}
@@ -1033,16 +1039,20 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                 if multi or both:
                     count_label = ui.label('').classes('stp-total').props('aria-live="polite"')
                 ui.element('div').style('flex: 1 1 auto;')
-                # aria-label: a phone's multiple choice shows these three as their icons alone
+                # aria-label and a tooltip: a narrow screen's multiple choice shows these three as their icons
+                # alone (owner, 2026-11-23: no tooltips there)
                 if multi or both:
                     clear_btn = ui.button(tr('Clear'), icon='delete_sweep', on_click=lambda: clear_all()).props(
-                        f'flat dense no-caps aria-label="{_attr(tr("Clear"))}"').classes('stp-clear')
+                        f'flat dense no-caps aria-label="{_attr(tr("Clear"))}"').classes('stp-clear').tooltip(
+                        tr('Clear'))
                 if add_to or can_save:
                     list_btn = ui.button(tr('Add to List'), icon='playlist_add', on_click=lambda: add_to_list()).props(
-                        f'flat dense no-caps aria-label="{_attr(tr("Add to List"))}"').classes('stp-save')
+                        f'flat dense no-caps aria-label="{_attr(tr("Add to List"))}"').classes('stp-save').tooltip(
+                        tr('Add to List'))
                 if add_to:
                     puzzle_btn = ui.button(tr('Add to Puzzle'), icon='extension', on_click=lambda: add_to_puzzle()).props(
-                        f'flat dense no-caps aria-label="{_attr(tr("Add to Puzzle"))}"').classes('stp-puzzle')
+                        f'flat dense no-caps aria-label="{_attr(tr("Add to Puzzle"))}"').classes('stp-puzzle').tooltip(
+                        tr('Add to Puzzle'))
                 confirm_btn = ui.button(words['multi' if multi else 'single'], icon='check',
                                         on_click=lambda: confirm() if multi else pick_selected()).props(
                     'unelevated no-caps color=primary data-testid="shelf-picker-confirm"').classes('stp-confirm')
@@ -1088,6 +1098,8 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         if ms['busy']:
             return False
         multi = want
+        if both:
+            safe_user_set(MODE_KEY + purpose, want)   # the next opening starts in it
         if switch is not None and bool(switch.value) != want:
             switch.value = want                     # its handler finds the mode already set
         show_mode()

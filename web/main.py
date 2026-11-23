@@ -2236,12 +2236,13 @@ def create_layout():
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
-    # breakpoint=1023 (was 768, 2026-10-22): a tablet gets the overlay drawer
-    # and keeps the width for the page; the sidebar stays open from 1024px.
+    # breakpoint=899 (768 until 2026-10-22, then 1023): a portrait tablet and half a laptop's screen get
+    # the overlay drawer and keep the width for the page; from 900px the sidebar pushes the page aside
+    # (owner, 2026-11-23: at two thirds of the screen, ~1009px at 125%, it covered the text it could push).
     main_drawer = (
         ui.drawer(side=drawer_side, value=False, bordered=True)
         .classes('shadow-xl gs-main-drawer')
-        .props('width=256 mini-width=64 breakpoint=1023')
+        .props('width=256 mini-width=64 breakpoint=899')
     )
     if drawer_open:
         # Only when the reader has not explicitly closed it. An explicit close

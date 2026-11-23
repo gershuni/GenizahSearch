@@ -1313,11 +1313,8 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 /* Header mobile adjustments */
 @media (max-width: 640px) {
     .app-header { padding: 0 8px !important; }
-    .app-header .status-indicator {
-        padding: 4px 8px !important;
-        font-size: 0.7rem !important;
-    }
-    .app-header .status-indicator .status-text { display: none; }
+    /* No server status dot on a phone (owner, 2026-11-23): its room goes to the bar's buttons */
+    .app-header .status-indicator { display: none !important; }
     .app-header .auth-buttons { gap: 4px !important; }
     .app-header .auth-buttons .q-btn {
         min-width: 32px !important;
@@ -1326,11 +1323,14 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     }
     /* Hide help button on mobile (keyboard shortcuts not relevant for touch) */
     .help-btn-header { display: none !important; }
-    /* The header has no room for the theme button on a phone; the sidebar's
-       theme switcher stays reachable from the menu. */
-    .theme-btn-header { display: none !important; }
     /* Hide logo text on mobile - only show icon */
     .header-logo-text { display: none !important; }
+}
+/* The theme button while the bar has room for it (owner, 2026-11-23: missing at half a screen's width,
+   with room to spare): from 370px, measured with the status dot gone on a phone (above); under that the
+   buttons met. The sidebar's theme switcher stays reachable from the menu. */
+@media (max-width: 369.98px) {
+    .theme-btn-header { display: none !important; }
 }
 
 /* The header's go-to box (web/main.py::render_header_center, 2026-11-04). The field sits in the
@@ -1436,12 +1436,13 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
     }
 }
 
-/* Mobile drawer - CSS only, hide on phones/tablets. Up to 1023px since
-   2026-10-22 (the owner's screen-size table): a tablet gets the overlay
-   drawer, so the content keeps the width. The drawer's own breakpoint prop in
-   web/main.py says the same. */
+/* Mobile drawer - CSS only, hide on phones/tablets. Up to 899px since
+   2026-11-23 (1023px from 2026-10-22): a portrait tablet gets the overlay
+   drawer, so the content keeps the width; from 900px the sidebar pushes the
+   page. The drawer's own breakpoint prop in web/main.py says the same: this
+   rule, left at 1023px, slid the pushing sidebar over the page at 900-1023px. */
 /* Handles both LTR (left drawer) and RTL (right drawer) modes */
-@media (max-width: 1023px) {
+@media (max-width: 899px) {
     .q-drawer--left:not(.q-drawer--on-top) {
         transform: translateX(-100%) !important;
     }
@@ -1449,6 +1450,13 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
         transform: translateX(100%) !important;
     }
 }
+
+/* The sidebar as an overlay (under its breakpoint, web/main.py: 899px) lies under the 64px header, not over
+   it, so the header's menu button, which opens and closes it, stays in sight (owner, 2026-11-23: it covered
+   the button). Quasar puts the overlay at z-index 3000 and its backdrop at 2999, the header at 2000. */
+.q-layout:has(.q-drawer--mobile > .gs-main-drawer) .q-header { z-index: 3001; }
+.q-drawer--mobile:has(> .gs-main-drawer),
+.q-drawer-container:has(.q-drawer--mobile > .gs-main-drawer) > .q-drawer__backdrop { top: 64px !important; }
 
 /* Hebrew mode text direction enhancements */
 /* Layout RTL is handled by Quasar natively; these rules enhance text content */

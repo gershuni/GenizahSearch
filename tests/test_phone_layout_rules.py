@@ -475,6 +475,11 @@ def test_the_header_search_box_narrows_then_folds_behind_a_button():
     assert '.app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }' in _phone_rules(css)
     assert '.app-header > .header-search { min-width: 36px; }' in _phone_rules(css)
     assert '.app-header > .header-search.has-shelf { min-width: 76px; }' in _phone_rules(css)  # and the shelf button
+    # no server status dot on a phone (owner, 2026-11-23)
+    assert '.app-header .status-indicator { display: none !important; }' in _phone_rules(css)
+    # the theme button while the bar has room: hidden only under 370px (owner, 2026-11-23: missing at half width)
+    assert '.theme-btn-header { display: none !important; }' not in _phone_rules(css)
+    assert '.theme-btn-header { display: none !important; }' in _media_rules(css, '(max-width: 369.98px)')
     assert '.app-header > .nicegui-row:not(.header-search) { min-width: 0; }' in _phone_rules(css)
     assert '.app-header > .nicegui-row { min-width: 0; }' not in css
     # The logo text gives way to the box below 826px.
@@ -635,3 +640,20 @@ def test_on_off_buttons_follow_the_theme_when_off():
     calls.clear()
     set_btn_on(btn, False)
     assert calls == [('props', (), {'remove': 'color'}), ('classes', (), {'add': OFF_CLASS})], calls
+
+
+def test_the_sidebar_pushes_from_900px_and_its_overlay_keeps_the_menu_button_in_sight():
+    """Owner, 2026-11-23: at two thirds of the screen (~1009px at 125%) the sidebar covered the text it could
+    push aside; at half the screen its overlay covered even the button that opens and closes it."""
+    main = _read('web/main.py')
+    assert ".props('width=256 mini-width=64 breakpoint=899')" in main
+    css = _read('web/static/common.css')
+    # the rule that slides a pushing sidebar away follows the breakpoint (left at 1023px it slid it over the page)
+    hide = _media_rules(css, '(max-width: 899px)')
+    assert '.q-drawer--left:not(.q-drawer--on-top)' in hide and '.q-drawer--right:not(.q-drawer--on-top)' in hide
+    assert '.q-drawer--left:not(.q-drawer--on-top)' not in _media_rules(css, '(max-width: 1023px)')
+    # the overlay under the 64px header, the header above it
+    top = _top_level(css)
+    assert '.q-layout:has(.q-drawer--mobile > .gs-main-drawer) .q-header { z-index: 3001; }' in top
+    assert '.q-drawer--mobile:has(> .gs-main-drawer),' in top
+    assert '> .q-drawer__backdrop { top: 64px !important; }' in top

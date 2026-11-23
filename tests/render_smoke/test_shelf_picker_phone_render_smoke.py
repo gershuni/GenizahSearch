@@ -180,8 +180,23 @@ def test_the_foot_is_marked_in_the_multiple_choice_only(tmp_path, monkeypatch):
             assert await _until(lambda: foot_multi(user))
             seen['names'] = sorted((cls, e.props.get('aria-label')) for cls in ('stp-clear', 'stp-save', 'stp-puzzle')
                                    for e in _classed(user, cls))
+            with user.client:                       # and a tooltip each (owner, 2026-11-23: none there)
+                tips = [t for t in user.client.elements.values() if isinstance(t, ui.tooltip)]
+                seen['tips'] = sorted((cls, [t.text for t in tips if t.props.get('target') == f'#{e.html_id}'])
+                                      for cls in ('stp-clear', 'stp-save', 'stp-puzzle') for e in _classed(user, cls))
+            # opened again: as the reader left it (owner, 2026-11-23)
+            await _get_page(user, f'/_test/shelf-phone-switch?start={HERE}')
+            await _connect(user)
+            assert await _until(lambda: bool(_els(user, 'data-leaf')))
+            [switch] = _testid(user, 'shelf-picker-switch')
+            seen['again'] = (switch.value, foot_multi(user))
             switch.set_value(False)
             assert await _until(lambda: not foot_multi(user))
+            await _get_page(user, f'/_test/shelf-phone-switch?start={HERE}')
+            await _connect(user)
+            assert await _until(lambda: bool(_els(user, 'data-leaf')))
+            [switch] = _testid(user, 'shelf-picker-switch')
+            seen['off_again'] = (switch.value, foot_multi(user))
 
     try:
         _run(go)
@@ -190,6 +205,9 @@ def test_the_foot_is_marked_in_the_multiple_choice_only(tmp_path, monkeypatch):
     assert seen['single'] is False
     # a phone shows these three as their icons alone: each keeps its name
     assert seen['names'] == [('stp-clear', 'Clear'), ('stp-puzzle', 'Add to Puzzle'), ('stp-save', 'Add to List')]
+    assert seen['tips'] == [('stp-clear', ['Clear']), ('stp-puzzle', ['Add to Puzzle']), ('stp-save', ['Add to List'])]
+    assert seen['again'] == (True, True)                # the switch as it was left
+    assert seen['off_again'] == (False, False)
 
 
 def test_the_phone_css_lets_every_column_fill_the_height():
