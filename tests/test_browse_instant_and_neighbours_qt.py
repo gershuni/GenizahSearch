@@ -174,25 +174,32 @@ def test_the_drawn_manuscript_starts_its_page_at_once_and_schedules_its_neighbou
     """on_browse_enriched_loaded builds dozens of widgets, so this checks its shape: the page
     starts right after load_images (flush_pending_page), before the panels it then builds
     (~0.25 s, which the viewer's debounce waited out), and the neighbours are scheduled. The
-    effect was measured in the desktop window (IMAGE_LOADING_SPEED_PLAN, private repository)."""
+    effect was measured in the desktop window (IMAGE_LOADING_SPEED_PLAN, private repository).
+    The images are drawn by ``_browse_show_images`` (also called when the Reading Desk is left
+    with Browse's image owed), called before the panels."""
     import ast
     import inspect
     import textwrap
     import genizah_app
-    src = textwrap.dedent(inspect.getsource(genizah_app.GenizahGUI.on_browse_enriched_loaded))
-    fn = ast.parse(src).body[0]
-    calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
-    names = [(ast.unparse(c.func), c.lineno) for c in calls]
+
+    def calls_of(method):
+        src = textwrap.dedent(inspect.getsource(method))
+        fn = ast.parse(src).body[0]
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+        return [(ast.unparse(c.func), c.lineno) for c in calls]
+    names = calls_of(genizah_app.GenizahGUI.on_browse_enriched_loaded)
+    shown = [ln for name, ln in names if name == 'self._browse_show_images']
+    panels = [ln for name, ln in names if name == 'self._build_browse_enriched_html']
+    assert shown and panels and shown[0] < panels[0], 'the image waits for the panels to be built'
+    assert any(name == 'self._browse_prefetcher().schedule' for name, _ in names)
+    names = calls_of(genizah_app.GenizahGUI._browse_show_images)
     load = [ln for name, ln in names if name == 'self.browse_viewer.load_images']
     flush = [ln for name, ln in names if name == 'self.browse_viewer.flush_pending_page']
     assert load and flush, (load, flush)
     following = min(ln for _name, ln in names if ln > load[0])
     assert following == flush[0], 'something runs between load_images and the page start'
-    panels = [ln for name, ln in names if name == 'self._build_browse_enriched_html']
-    assert panels and flush[0] < panels[0]
     after_flush = min(ln for _name, ln in names if ln > flush[0])
     assert ('self._browse_release_image', after_flush) in names, 'the image waits for the panels to be painted'
-    assert any(name == 'self._browse_prefetcher().schedule' for name, _ in names)
 
 
 def test_opening_a_neighbour_being_prepared_takes_the_prefetch_s_answer(monkeypatch):

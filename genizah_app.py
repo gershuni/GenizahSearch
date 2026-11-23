@@ -85,8 +85,8 @@ from desktop.shortcuts_dialog import ShortcutsDialog, arrow_keys, key_label
 # Pick from the shelf, the place on the shelf, previous / next in shelf order (shelf tree plan PR 3).
 # The module, not its names: tests replace pick_from_shelf and shelf_tree_service on it.
 import desktop.widgets.shelfmark_tree_picker as shelf_picker
-from shared.shelfmark_tree_limits import (LIST_MAX_ITEMS, UNTRANSCRIBED_DESK_PAGES, SelectionLimit,
-                                          desk_pages_function, limit_for, refusal_message)
+from shared.shelfmark_tree_limits import (LIST_MAX_ITEMS, READING_DESK_MAX_ITEMS, UNTRANSCRIBED_DESK_PAGES,
+                                          SelectionLimit, desk_pages_function, limit_for, refusal_message)
 from shared.shelfmark_tree_view import (crumbs as shelf_crumbs, display_name as shelf_display_name,
                                         place_of as shelf_place_of, placement_request_is_spent,
                                         position as shelf_position, step_from as shelf_step_from)
@@ -140,7 +140,9 @@ from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_s
                                           recorded_settings_searcher, variant_settings_now)
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import clean_text_single_line, coerce_img_page_cell
-from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
+from shared.reading_desk_model import (
+    DESK_SESSION_CHOICES, ReadingDeskEntry, ReadingDeskState, desk_from_session, desk_session_state,
+)
 from shared.editions_search import result_sys_ids, row_sys_ids
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial, saved_cutoff
 from shared.document_service import select_pgp_page_entry
@@ -1636,6 +1638,58 @@ def _restore_sources_choice(window, choice):
     update = getattr(window, '_update_sources_visibility', None)
     if callable(update):
         update()
+
+
+#: How long a restored Reading Desk waits for the startup's own loading before it opens anyway,
+#: and how often it looks (GenizahGUI._restore_browse_reading_desk).
+_DESK_RESTORE_WAIT_MS = 30000
+_DESK_RESTORE_POLL_MS = 250
+
+
+def _startup_loading_busy(window):
+    """The startup's background loading is still running on *window*: the catalogue's caches
+    (MetadataManager.background_loading_finished) or the FL-id lookup (SearchEngine). They hold the
+    interpreter while they run, so every Qt call on the UI thread waits for them. A function, not a
+    method: the session-restore methods that call it are borrowed by stand-ins in the tests."""
+    finished = getattr(getattr(window, 'meta_mgr', None), 'background_loading_finished', None)
+    return bool((callable(finished) and finished() is False)
+                or getattr(getattr(window, 'searcher', None), '_fl_id_index_building', False) is True)
+
+
+def _desk_entry_pages(window, sys_id):
+    """A restored desk's manuscript: its pages from the index (a list, maybe empty for one with
+    images only), or None when it no longer resolves -- unknown to the catalogue and without pages
+    in the index. A function, not a method, for the same stand-ins."""
+    found = window.searcher.get_full_manuscript(sys_id) or []
+    shelf, _title = window.meta_mgr.get_meta_for_id(sys_id)
+    if not found and (not shelf or shelf == "Unknown"):
+        return None
+    return found
+
+
+def _hold_restore_desk(window, desk):
+    """Keep a restored desk that has not opened yet (``_browse_rd_restore_pending``) together with
+    what Browse shows now: its manuscript and its load generation (``_browse_enrich_gen``, moved on
+    by every manuscript or volume Browse loads). None lets go. A function, not a method, for the
+    same stand-ins."""
+    window._browse_rd_restore_pending = (
+        None if desk is None
+        else (desk, getattr(window, '_browse_enrich_gen', None), getattr(window, 'current_browse_sid', None)))
+
+
+def _held_restore_desk(window):
+    """The restored desk still waiting to open, while Browse shows what it was kept over (the same
+    manuscript, nothing loaded since); else None: the reader has moved on, and the desk is neither
+    opened (_restore_browse_reading_desk) nor saved (_save_session). A desk opened meanwhile has let
+    go of it already (_browse_enter_reading_desk)."""
+    held = getattr(window, '_browse_rd_restore_pending', None)
+    if not isinstance(held, tuple) or len(held) != 3:
+        return None
+    desk, generation, sys_id = held
+    if (generation != getattr(window, '_browse_enrich_gen', None)
+            or sys_id != getattr(window, 'current_browse_sid', None)):
+        return None
+    return desk
 
 
 #: A result's sources as the website names them (web/pages/search_editions.py::_SOURCE_NAMES).
@@ -9369,6 +9423,26 @@ class GenizahGUI(QMainWindow):
             )
         return display_meta, idx, folio_num
 
+    def _browse_show_images(self, sid, meta, shelf):
+        """Browse's viewer shows the manuscript's images (``meta``: its enriched metadata) at the
+        page Browse is on: from on_browse_enriched_loaded, or when the desk is left with the image
+        still owed (``_browse_viewer_owed``)."""
+        display_meta, idx, folio_num = self._browse_image_choice(
+            self.current_browse_sid, meta, shelf, self.current_browse_p, self.current_browse_volume_ie)
+        if display_meta.get('external_provider') == 'katz':
+            scan_sid, scan_page, fl_id, metadata_only = self._browse_displayed_scan
+            same_page = (scan_sid, scan_page) == (sid, self.current_browse_p)
+            self.browse_viewer.set_katz_page(display_meta, fl_id if same_page else None, self.current_browse_p,
+                                            metadata_only=same_page and metadata_only)
+        else:
+            self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
+            # Start the page now, not after the panels below are built: about a
+            # quarter of a second on the UI thread, which the viewer's debounce
+            # waited out on every manuscript (measured 2026-11-22).
+            self.browse_viewer.flush_pending_page()
+            # And paint it now: an image drawn from memory waited for those panels.
+            self._browse_release_image()
+
     def on_browse_enriched_loaded(self, sid, meta, gen=None, expected_vol_ie=None):
         if not meta: return
         # Generation guard: reject stale enrichment from a previous browse action
@@ -9479,23 +9553,14 @@ class GenizahGUI(QMainWindow):
         # 2. Populate Image Viewer (using new logic)
         # Guard: skip when reading desk is active to preserve stacked image layout.
         # This handles both new requests and in-flight enrichment threads that
-        # complete after reading desk activation.
+        # complete after reading desk activation. The image is then owed to Browse and
+        # shown when the desk is left (_browse_exit_reading_desk): a desk restored at
+        # startup always opens before Browse's manuscript is enriched.
         if not self.browse_reading_desk_active:
-            display_meta, idx, folio_num = self._browse_image_choice(
-                self.current_browse_sid, meta, shelf, self.current_browse_p, self.current_browse_volume_ie)
-            if display_meta.get('external_provider') == 'katz':
-                scan_sid, scan_page, fl_id, metadata_only = self._browse_displayed_scan
-                same_page = (scan_sid, scan_page) == (sid, self.current_browse_p)
-                self.browse_viewer.set_katz_page(display_meta, fl_id if same_page else None, self.current_browse_p,
-                                                metadata_only=same_page and metadata_only)
-            else:
-                self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
-                # Start the page now, not after the panels below are built: about a
-                # quarter of a second on the UI thread, which the viewer's debounce
-                # waited out on every manuscript (measured 2026-11-22).
-                self.browse_viewer.flush_pending_page()
-                # And paint it now: an image drawn from memory waited for those panels.
-                self._browse_release_image()
+            self._browse_viewer_owed = None
+            self._browse_show_images(sid, meta, shelf)
+        else:
+            self._browse_viewer_owed = sid
 
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
@@ -10850,22 +10915,31 @@ class GenizahGUI(QMainWindow):
     # Reading Desk -- Desktop dual-pane rendering
     # -------------------------------------------------------------------------
 
-    def _browse_enter_reading_desk(self, fragments_info, pgpid=None):
+    def _browse_enter_reading_desk(self, fragments_info, pgpid=None, choices=None):
         """Enter reading desk mode with the given fragments.
 
         Args:
             fragments_info: list of dicts with keys: sys_id, shelfmark, sequence_order
+                (and ``chosen``, the text chosen for it, when the desk is restored)
             pgpid: optional PGP document ID that groups these fragments
+            choices: the image side's choices to open with (``image_view``, ``image_shown``,
+                ``puzzles_shown``): the desk as the last session left it
+                (_restore_browse_reading_desk)
         """
         if not fragments_info:
             return
 
         self.browse_reading_desk_active = True
         self.browse_reading_desk_pgpid = pgpid
+        # A desk opened now replaces one still waiting to be restored (_restore_browse_reading_desk)
+        self._browse_rd_restore_pending = None
 
         # Build entries from fragments info
         state = ReadingDeskState()
         state.pgpid = pgpid
+        for name, value in (choices or {}).items():
+            if name in DESK_SESSION_CHOICES:
+                setattr(state, name, value or '')
         for frag in fragments_info:
             sid = frag.get('sys_id', '')
             shelfmark = frag.get('shelfmark', '')
@@ -10890,7 +10964,8 @@ class GenizahGUI(QMainWindow):
                 sys_id=sid,
                 shelfmark=shelfmark,
                 pages=page_list,
-                sequence_order=frag.get('sequence_order', 0)
+                sequence_order=frag.get('sequence_order', 0),
+                chosen=frag.get('chosen') or '',
             )
             state.entries.append(entry)
 
@@ -11106,6 +11181,13 @@ class GenizahGUI(QMainWindow):
         # held the chooser, and the browsed manuscript may have changed meanwhile)
         if self.current_browse_sid:
             self.browse_load_page()
+            # Its images, when they arrived while the desk was open (on_browse_enriched_loaded)
+            sid = self.current_browse_sid
+            owed = getattr(self, '_browse_viewer_owed', None) == sid
+            meta = (getattr(self.meta_mgr, 'nli_cache', None) or {}).get(sid) if owed else None
+            if meta:
+                self._browse_viewer_owed = None
+                self._browse_show_images(sid, meta, self._browse_display_shelf(sid, meta))
             self._check_document_community_status()
             self._browse_refresh_pgp_for_page()
 
@@ -37800,6 +37882,57 @@ class GenizahGUI(QMainWindow):
         # The raw-entry fallback lives inside _update_exclusion_display.
         self._update_exclusion_display('search')
 
+    def _restore_browse_reading_desk(self, desk, waited_ms=0):
+        """The Reading Desk as the last session left it (``desk_from_session``), reopened over the
+        manuscript Browse has just restored: its manuscripts in their order, the PGP document it was
+        opened for, the text chosen for each, and the image view, the image on show and the puzzle
+        images on show. A manuscript that no longer resolves -- unknown to the catalogue and without
+        pages in the index -- is left out quietly; with none left, Browse stays as restored. The pages
+        read here to check are the ones the desk takes (``_browse_rd_preloaded``), so each is read
+        once; images and sources follow in the background, as on any desk.
+
+        It opens once the startup's background loading has finished (``_startup_loading_busy``, at
+        most ``_DESK_RESTORE_WAIT_MS``): built while that runs, the desk froze the window 4.5-9 s;
+        after it, the same desk takes about 0.3 s (measured 2026-11-23). Meanwhile it is held over
+        the manuscript Browse has just restored (_hold_restore_desk) and the session file keeps it
+        (_save_session); a reader who loads another manuscript in Browse, or opens a desk of their
+        own (even one closed again before the next look), has moved on, and it is let go
+        (_held_restore_desk)."""
+        if (not desk or getattr(self, 'browse_reading_desk_active', False)
+                or (waited_ms and _held_restore_desk(self) is not desk)):
+            self._browse_rd_restore_pending = None
+            return
+        if not waited_ms:
+            _hold_restore_desk(self, desk)   # over the manuscript Browse has just restored; later looks keep it
+        if waited_ms < _DESK_RESTORE_WAIT_MS and _startup_loading_busy(self):
+            QTimer.singleShot(_DESK_RESTORE_POLL_MS, lambda: self._restore_browse_reading_desk(
+                desk, waited_ms + _DESK_RESTORE_POLL_MS))
+            return
+        self._browse_rd_restore_pending = None
+        try:
+            if not self.searcher:
+                return
+            pages, fragments = {}, []
+            for frag in desk['entries']:
+                if len(fragments) >= READING_DESK_MAX_ITEMS:   # the desk's own limit
+                    break
+                sid = frag['sys_id']
+                found = _desk_entry_pages(self, sid)
+                if found is None:
+                    logger.info("Reading Desk restore: %s no longer resolves, left out", sid)
+                    continue
+                pages[sid] = found
+                fragments.append(dict(frag, sequence_order=len(fragments) + 1))
+            if not fragments:
+                return
+            self._browse_rd_preloaded = pages
+            try:
+                self._browse_enter_reading_desk(fragments, pgpid=desk.get('pgpid'), choices=desk)
+            finally:
+                self._browse_rd_preloaded = None
+        except Exception:
+            logger.exception("Could not restore the Reading Desk")
+
     def _save_session(self):
         """Save current search state to disk for session persistence."""
         from shared.session_persistence import load_session_state, save_session_state
@@ -37949,6 +38082,12 @@ class GenizahGUI(QMainWindow):
                     'last_field': getattr(self, 'last_browse_field', 'shelf'),
                     'volume_ie': getattr(self, 'current_browse_volume_ie', None),  # persist volume across restart
                 },
+                # The Reading Desk, when it is open (or restored and still waiting to open):
+                # reopened after Browse's manuscript on restart (_restore_browse_reading_desk).
+                # None when it is closed.
+                'browse_reading_desk': (desk_session_state(getattr(self, 'browse_reading_desk_state', None))
+                                        if getattr(self, 'browse_reading_desk_active', False)
+                                        else _held_restore_desk(self)),
                 'browse_catalog': {
                     'domain': getattr(self, '_catalog_current_domain', None),
                     'author': getattr(self, '_catalog_current_author', None),
@@ -38049,6 +38188,7 @@ class GenizahGUI(QMainWindow):
             comp = state.get('composition_search', {})
             browse = state.get('browse_shelfmark', {})
             cat = state.get('browse_catalog', {})
+            desk = desk_from_session(state.get('browse_reading_desk'))  # None: no desk was open
             self._apply_persistent_session_preferences(state)
 
             if restore_mode == 'never':
@@ -38061,7 +38201,8 @@ class GenizahGUI(QMainWindow):
                         or cat.get('text_all') or cat.get('text_any') or cat.get('text_not')
                         or cat.get('include_undated')
                         # Feature 2 (Phase 96 fix-7): LOCAL Browse state counts as restorable data.
-                        or state.get('local_browse_sys_id'))
+                        or state.get('local_browse_sys_id')
+                        or desk is not None)
             if not has_data:
                 return
 
@@ -38284,9 +38425,9 @@ class GenizahGUI(QMainWindow):
                 self.comp_progress.setValue(1)
                 self.comp_progress.setFormat(self.comp_summary_text)
 
-            # Restore Browse by Shelfmark
+            # Restore Browse by Shelfmark, and the Reading Desk on top of it when it was open
             browse = state.get('browse_shelfmark', {})
-            if browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id'):
+            if browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id') or desk is not None:
                 if browse.get('sys_id'):
                     self.browse_sys_input.setText(browse['sys_id'])
                 if browse.get('shelfmark'):
@@ -38297,13 +38438,28 @@ class GenizahGUI(QMainWindow):
                 # Load directly by sys_id — skip browse_load() resolution logic
                 # (shelfmark resolution can fail during startup, prompt dialogs, etc.)
                 def _restore_browse():
+                    if desk is not None and _held_restore_desk(self) is not desk:
+                        # The reader moved on before this ran (loaded a manuscript, opened a desk)
+                        self._browse_rd_restore_pending = None
+                        return
                     sid = browse.get('sys_id', '').strip()
-                    if not sid:
+                    if not sid and (browse.get('shelfmark') or browse.get('fl_id')):
                         # Fall back to full browse_load if no sys_id
                         self.browse_load()
+                        self._restore_browse_reading_desk(desk)
                         return
                     if not self.searcher:
+                        self._browse_rd_restore_pending = None
                         return
+                    if not sid:
+                        # Only the desk was kept: Browse shows its first manuscript that still
+                        # resolves, as the web's restored desk does, and the desk opens over it.
+                        sid = next((e['sys_id'] for e in desk['entries']
+                                    if _desk_entry_pages(self, e['sys_id']) is not None), None)
+                        if sid is None:
+                            self._browse_rd_restore_pending = None
+                            return
+                        self.browse_sys_input.setText(sid)
                     # Restore volume_ie before loading (D-11, D-12)
                     restored_vie = browse.get('volume_ie')
                     if restored_vie:
@@ -38320,6 +38476,12 @@ class GenizahGUI(QMainWindow):
                     self._start_browse_enrichment(sid, is_part=False)
                     # Load page text
                     self.browse_load_page()
+                    self._restore_browse_reading_desk(desk)
+                # The desk is kept from now on (_save_session) until its restore opens it or gives
+                # it up: the restoring flag is cleared before this runs, and a save in between
+                # would otherwise write no desk. Held over what Browse shows now: a reader who
+                # loads a manuscript or opens a desk before it runs has moved on.
+                _hold_restore_desk(self, desk)
                 QTimer.singleShot(300, _restore_browse)
 
             # Restore catalog browse filters (Browse by Identification). A date
