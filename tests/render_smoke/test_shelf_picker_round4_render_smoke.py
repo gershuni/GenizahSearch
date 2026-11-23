@@ -377,3 +377,53 @@ def test_the_rows_signs_come_when_they_are_loaded(tmp_path, monkeypatch):
     assert seen['tip'] == [LABEL[SYS['as2'][5]] + '\n' + ' · '.join(names)]
     assert seen['marks'] == [('PGP', names[0]), ('description', names[1]), ('link', names[2])]
     assert seen['selected'] == ('false', 'true')               # drawn again, the selection kept
+
+
+def _classed(user, cls):
+    with user.client:
+        return [e for e in user.client.elements.values() if cls in e.classes and not e.is_deleted]
+
+
+def _bar(user):
+    """A phone's folded pane: (text, hint?, button shown?)."""
+    [bar] = _testid(user, 'shelf-details-bar')
+    label = next(d for d in bar.descendants() if 'stp-pbar-sm' in d.classes)
+    button = next(d for d in bar.descendants() if 'stp-pbar-btn' in d.classes)
+    return label.text, 'stp-hint' in label.classes, button.visible
+
+
+# From the phone's tests (#106), here so that it uses this module's pages: imported from another test
+# module, this one was loaded a second time under another name, and that copy's pages took the place of
+# these (its service closed), failing every test here after it in the same run.
+def test_a_join_followed_with_the_pane_open_keeps_it_open(tmp_path, monkeypatch):
+    """Codex on #106: a join's partner outside the view is reached by drawing the dialog anew, which
+    empties (and so folds) the pane on the way; the pane the reader had open stays open on the partner."""
+    from web.components import shelfmark_tree_picker as picker
+    monkeypatch.setattr(picker, 'item_details', _details_of(JOINS))
+    monkeypatch.setattr(picker, '_thumbnail_src', lambda sys_id, shelfmark, width=320: '')
+    svc = _setup(tmp_path)
+    seen = {}
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-round4-open?start={HERE}')
+            await _connect(user)
+            assert await _until(lambda: len(_els(user, 'data-join')) == 4)
+            [bar] = _testid(user, 'shelf-details-bar')
+            button = next(d for d in bar.descendants() if 'stp-pbar-btn' in d.classes)
+            [main] = _classed(user, 'stp-main')
+            UserInteraction(user, {button}, None).trigger('click')
+            assert await _until(lambda: 'stp-pane-open' in main.classes)
+            seen['far_in_view'] = _has_leaf(user, FAR)
+            link = next(k for row in _els(user, 'data-join') if row.props['data-join'] == FAR
+                        for k in row.descendants() if isinstance(k, ui.link))
+            UserInteraction(user, {link}, None).trigger('click')
+            assert await _until(lambda: _pane_shelfmark(user) == LABEL[FAR])
+            seen['after'] = ('stp-pane-open' in main.classes, button.props.get('aria-expanded'), _bar(user))
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert seen['far_in_view'] is False                 # reached by drawing the dialog anew
+    assert seen['after'] == (True, 'true', (LABEL[FAR], False, True))

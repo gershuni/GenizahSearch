@@ -174,10 +174,56 @@ _CSS = """
   .stp-d-thumb img { max-height: 110px; }
   .stp-d-textbox { max-height: calc(6 * 1.5em + 12px); }
   .stp-body > .stp-panel:not(.stp-phone) { display: none; }
-  .stp-col { flex: 1 1 auto; min-height: 220px; }
+  /* every column fills the height: the libraries' own width rule (270px) is a height here */
+  .stp-col, .stp-col.stp-libs { flex: 1 1 auto; min-height: 220px; }
   .stp-grid { grid-template-columns: 1fr; }
   .stp-back { display: inline-flex; }
-  .stp-foot { flex-wrap: wrap; }
+}
+/* A phone (owner, 2026-11-23): the list gets the screen. Adding to the Reading Desk left it two rows
+   between the crumbs on three lines, the level named twice more, a hint, the pane and a two-line foot. */
+@media (max-width: 900px) {
+  /* the whole screen: Quasar keeps 24px around a dialog and 48px off its height */
+  .q-dialog__inner--minimized:has(> .stp-card) { padding: 0; }
+  .q-dialog__inner--minimized > .stp-card { height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh;
+    gap: 6px; }
+  /* the crumbs on one line, scrolled to their end (the level shown: _CRUMBS_END_JS) */
+  .stp-crumbs { flex: none; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; scrollbar-width: none;
+    min-height: 32px; }
+  .stp-crumbs::-webkit-scrollbar { display: none; }
+  .stp-crumbs > * { flex: none; }
+  /* ... the back arrow stays at the line's start while the crumbs scroll under it */
+  .stp-crumbs > .stp-back { position: sticky; inset-inline-start: 0; z-index: 1;
+    background: var(--bg-card, #fff); }
+  /* the chips bar only with chips: alone, its hint is a line the list needs */
+  .stp-chips:has(> .stp-hint) { display: none; }
+  /* the shelfmarks: the filter and the view switch on one line, the column's title gone (below) */
+  .stp-col.stp-leaves { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr); gap: 6px; }
+  .stp-leaves > .stp-lhead { display: contents; }
+  .stp-leaves > .stp-lhead > .stp-title { display: none; }
+  .stp-leaves > .stp-lhead > .stp-views { grid-row: 1; grid-column: 2; }
+  .stp-leaves > .stp-filter { grid-row: 1; grid-column: 1; }
+  .stp-leaves > .stp-whole { grid-row: 2; grid-column: 1 / -1; }
+  .stp-leaves > .stp-list { grid-row: 3; grid-column: 1 / -1; }
+  /* the pane: one line under the list (the shelfmark and Details), opened over the list by its button */
+  .stp-main { position: relative; gap: 0; }
+  .stp-main:not(.stp-pane-open) > .stp-details { display: none; }
+  .stp-main.stp-pane-open > .stp-details { position: absolute; inset-inline: 0; bottom: 44px; z-index: 6;
+    max-height: calc(100% - 52px); padding: 10px; border: 1px solid var(--border-light, #d5d8de); border-radius: 8px;
+    background: var(--bg-primary, #fff); box-shadow: 0 -4px 18px rgba(0, 0, 0, .22); }
+  .stp-main > .stp-pbar { display: flex; }
+  /* a column's title is the last crumb again ("Library" under "All libraries") */
+  .stp-col > .stp-title { display: none; }
+  /* the foot on one line: in the multiple choice its other buttons are their icons (named by aria-label) */
+  .stp-foot { flex-wrap: wrap; gap: 4px; }
+  .stp-foot.stp-foot-multi { flex-wrap: nowrap; }
+  .stp-foot-multi .stp-total { flex: 0 1 auto; min-width: 0; font-size: 13px; line-height: 1.25; }
+  /* Quasar's .block is display: block !important: the text is shrunk away, not undisplayed */
+  .stp-foot-multi :is(.stp-clear, .stp-save, .stp-puzzle) .q-btn__content > .block { font-size: 0; width: 0;
+    overflow: hidden; }
+  .stp-foot-multi :is(.stp-clear, .stp-save, .stp-puzzle) .q-icon { margin: 0; }
+  .stp-foot-multi .stp-confirm .q-icon { display: none; }
+  .stp-foot-multi .stp-confirm .q-btn__content > .block { white-space: normal; line-height: 1.2; }
 }
 /* a short window: the dialog takes nearly all its height (86% left the shelfmarks a few rows) */
 @media (max-height: 760px) and (min-width: 901px) { .stp-card { height: 96vh; } }
@@ -211,6 +257,14 @@ _CSS = """
 .stp-hint { color: var(--text-secondary, #5b6270); font-size: 13px; }
 .stp-foot { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--border-light, #d5d8de);
   padding-top: 8px; }
+/* the pane folded to one line, on a phone only (the rules under max-width: 900px) */
+.stp-pbar { display: none; align-items: center; gap: 8px; min-height: 40px; padding-top: 4px;
+  border-top: 1px solid var(--border-light, #d5d8de); }
+.stp-pbar-sm { flex: 1 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; unicode-bidi: plaintext; text-align: start; }
+.stp-pbar-sm.stp-hint { font-weight: 400; }
+.stp-pbar-btn { flex: none; }
+.stp-main.stp-pane-open .stp-pbar-btn .q-icon { transform: rotate(180deg); }
 .stp-total { font-weight: 600; color: var(--text-primary, #1d2129); }
 .stp-all-chips { width: min(640px, 96vw); max-height: 80vh; display: flex; flex-direction: column; gap: 8px; }
 .stp-all-list { display: flex; flex-wrap: wrap; gap: 6px; overflow-y: auto; }
@@ -692,10 +746,22 @@ setTimeout(() => document.querySelectorAll('.stp-grid').forEach((grid) => {
   if (widest) { grid.style.setProperty('--stp-leaf', Math.max(140, widest + 24) + 'px'); }
 }), 30);
 """
+#: A phone draws the crumbs on one line that scrolls sideways (owner, 2026-11-23): its end, the level
+#: shown, is the part in sight. A right-to-left box scrolls to its end with a negative offset.
+_CRUMBS_END_JS = """
+setTimeout(() => document.querySelectorAll('.stp-crumbs').forEach((c) => {
+  c.scrollLeft = getComputedStyle(c).direction === 'rtl' ? -c.scrollWidth : c.scrollWidth;
+}), 30);
+"""
 
 
 #: The chips the bar draws; the rest are only behind "+N more" (D11).
 CHIPS_DRAWN = 40
+# The choices that stay ticked when their host takes them, until the reader clears them (owner, 2026-11-23:
+# "the picker should remember the user's choices until cleared"): the Reading Desk's, which a desk opened
+# again takes as the same desk (one on the desk already counts as taken). An exclusion or a list's choice
+# leaves the picker when taken: its host keeps it, and taking it again would add it twice.
+KEEP_CHOSEN_PURPOSES = frozenset({'reading_desk'})
 _BOX = {'all': 'check_box', 'some': 'indeterminate_check_box', 'none': 'check_box_outline_blank'}
 _ARIA = {'all': 'true', 'some': 'mixed', 'none': 'false'}
 
@@ -888,7 +954,9 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     The confirm button calls ``on_confirm(entries, label)`` (awaited if async) with the entries
     ``[{sys_id, shelfmark, placement_id}]`` in the order chosen and a label naming the chips. It
     answers None when it took them all, else the ids it took (an empty list: none); what it did not
-    take stays chosen and the dialog stays open. ``lists_mgr``: offer "Save as a list".
+    take stays chosen and the dialog stays open. A purpose of ``KEEP_CHOSEN_PURPOSES`` (the Reading
+    Desk's) keeps what was taken ticked too, until the reader clears it; the dialog closes when the
+    host took them all. ``lists_mgr``: offer "Save as a list".
 
     ``switch_label``: a switch in the header between the two modes, in this same dialog and at the
     same place (Browse's "Open more than one", handoff DX16); ``mode`` is the one it opens in, and
@@ -923,7 +991,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     # the single choice's selected shelfmark (DX21), and the pane's shelfmark and its generation (DX25)
     one = {'leaf': None, 'rows': {}}
     # ... the pane's contents as shown, the places of its join partners and the holders filled again
-    pane = {'gen': 0, 'leaf': None, 'info': None, 'places': {}, 'lines': None, 'joins': None}
+    pane = {'gen': 0, 'leaf': None, 'info': None, 'places': {}, 'lines': None, 'joins': None, 'open': False}
     # the shelfmarks pane's view (VX1, kept per reader), the details of the rows (by sys_id, this dialog's
     # language), the thumbnails' addresses (by width, worked out again at each whole drawing), the HTML
     # each row's cells are drawn in, and the one loader (VX5)
@@ -948,25 +1016,33 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             chips_row = None
             if multi or both:
                 chips_row = ui.element('div').classes('stp-chips w-full').props(f'data-chips="{dialog.id}"')
-            with ui.element('div').classes('stp-main w-full'):
+            with ui.element('div').classes('stp-main w-full') as main_el:
                 body = ui.element('div').classes('stp-body')
                 # not a live region: it holds a manuscript's whole text, read only when the reader goes to it
                 details = ui.element('div').classes('stp-details').props('role="region" data-testid="shelf-details"')
                 details.props['aria-label'] = tr('Details')
+                # A phone: the pane folded to this one line under the list, the shelfmark clicked last and a
+                # button that opens the pane over the list (owner, 2026-11-23; shown by the CSS there only).
+                with ui.element('div').classes('stp-pbar').props('data-testid="shelf-details-bar"'):
+                    bar_label = ui.label('').classes('stp-pbar-sm').props('dir="auto"')
+                    bar_btn = ui.button(tr('Details'), icon='expand_less').props(
+                        f'flat dense no-caps aria-expanded="false" aria-controls="c{details.id}"').classes(
+                        'stp-pbar-btn').on('click', lambda: set_pane_open(not pane['open']))
             count_label = clear_btn = list_btn = puzzle_btn = None
-            with ui.element('div').classes('stp-foot w-full'):
+            with ui.element('div').classes('stp-foot w-full') as foot:
                 if multi or both:
                     count_label = ui.label('').classes('stp-total').props('aria-live="polite"')
                 ui.element('div').style('flex: 1 1 auto;')
+                # aria-label: a phone's multiple choice shows these three as their icons alone
                 if multi or both:
                     clear_btn = ui.button(tr('Clear'), icon='delete_sweep', on_click=lambda: clear_all()).props(
-                        'flat dense no-caps').classes('stp-clear')
+                        f'flat dense no-caps aria-label="{_attr(tr("Clear"))}"').classes('stp-clear')
                 if add_to or can_save:
                     list_btn = ui.button(tr('Add to List'), icon='playlist_add', on_click=lambda: add_to_list()).props(
-                        'flat dense no-caps').classes('stp-save')
+                        f'flat dense no-caps aria-label="{_attr(tr("Add to List"))}"').classes('stp-save')
                 if add_to:
                     puzzle_btn = ui.button(tr('Add to Puzzle'), icon='extension', on_click=lambda: add_to_puzzle()).props(
-                        'flat dense no-caps').classes('stp-puzzle')
+                        f'flat dense no-caps aria-label="{_attr(tr("Add to Puzzle"))}"').classes('stp-puzzle')
                 confirm_btn = ui.button(words['multi' if multi else 'single'], icon='check',
                                         on_click=lambda: confirm() if multi else pick_selected()).props(
                     'unelevated no-caps color=primary data-testid="shelf-picker-confirm"').classes('stp-confirm')
@@ -982,6 +1058,10 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         if list_btn is not None:
             list_btn.set_visibility(multi or add_to)
         confirm_btn.set_text(words['multi' if multi else 'single'])
+        if multi:                                   # a phone: the foot on one line (the CSS)
+            foot.classes(add='stp-foot-multi')
+        else:
+            foot.classes(remove='stp-foot-multi')
         enable_actions()
 
     def enable_actions():
@@ -1084,6 +1164,31 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         details.clear()
         with details:
             ui.label(tr('Choose a shelfmark to see it here')).classes('stp-hint')
+        show_on_bar(None)
+
+    def set_pane_open(on: bool):
+        """A phone's pane over the list (``stp-pane-open`` on the main area), or folded. Kept here, not
+        in the browser: a pane emptied while open (a way back, a filter) folds with it (Codex #106),
+        where a class set in the browser stayed, over the list, with its button gone."""
+        pane['open'] = on
+        if on:
+            main_el.classes(add='stp-pane-open')
+        else:
+            main_el.classes(remove='stp-pane-open')
+        bar_btn.props(f'aria-expanded="{"true" if on else "false"}"')
+
+    def show_on_bar(leaf):
+        """The phone's folded pane: the shelfmark the pane shows and its button, or the pane's hint
+        (and folded: an empty pane is not left over the list)."""
+        if leaf is None:
+            set_pane_open(False)
+            bar_label.set_text(tr('Choose a shelfmark to see it here'))
+            bar_label.classes(add='stp-hint')
+            bar_btn.set_visibility(False)
+        else:
+            bar_label.set_text(leaf.shelfmark or leaf.label)
+            bar_label.classes(remove='stp-hint')
+            bar_btn.set_visibility(True)
 
     def field(caption: str, key: str):
         """A labelled field of the pane: its label, then what the caller puts in it."""
@@ -1200,6 +1305,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         where no NiceGUI or per-user storage call is made. A newer click wins."""
         pane['gen'] = gen = pane['gen'] + 1
         pane['leaf'] = leaf
+        show_on_bar(leaf)
         meta, pages_of, texts_of = _meta_mgr(), _page_count(), _page_texts()
         info, places = await run.io_bound(_pane_info, service, leaf, lang, meta, pages_of, texts_of)
         if gen != pane['gen'] or details.is_deleted or not info:
@@ -1251,9 +1357,12 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         st['path'] = first.path
         st['highlight'] = first.leaf.id
         one['leaf'] = first.leaf                    # in the multiple choice too: the switch back acts on it
-        await draw()
+        was_open = pane['open']                     # a phone's pane open over the list stays open: the
+        await draw()                                # drawing empties (and folds) it on the way (Codex #106)
         enable_actions()
         if sel == st['sel'] and not dialog.is_deleted:
+            if was_open:
+                set_pane_open(True)
             await show_details(first.leaf)
 
     async def tick_partner(sys_id: str, box):
@@ -1575,8 +1684,9 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         await change(flip)
 
     async def confirm():
-        """Hand the host what is chosen as it stands now; what it takes leaves the selection, what
-        it does not stays (and so does anything ticked while it worked). A failure keeps it all."""
+        """Hand the host what is chosen as it stands now; what it takes leaves the selection (not for a
+        purpose that keeps its choice, ``KEEP_CHOSEN_PURPOSES``), what it does not stays (and so does
+        anything ticked while it worked). A failure keeps it all."""
         if not multi or ms['busy'] or not owner_ok():   # not multi: clicked as the switch went off
             return
         ms['busy'] = True
@@ -1607,6 +1717,12 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             else:
                 wanted = set(submitted)
                 applied = [s for s in outcome if s in wanted]
+            if purpose in KEEP_CHOSEN_PURPOSES:      # all of it stays ticked, until cleared
+                async with lock:
+                    ms['since'] = None
+                if applied and len(set(applied)) == len(set(submitted)):
+                    dialog.close()
+                return
             # What the reader chose again while the host worked (cleared, then ticked) stays chosen:
             # the host took the choice it was sent, not the later one. Under the lock, so a change
             # still being made has finished and recorded what it chose before the tracker is read.
@@ -1972,7 +2088,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
 
     def filter_box(key: str):
         ui.input(placeholder=tr('Filter'), value=st['filters'].get(key, '')).props(
-            'dense outlined clearable debounce=250').classes('w-full').on_value_change(
+            'dense outlined clearable debounce=250').classes('w-full stp-filter').on_value_change(
             lambda e, k=key: set_filter(k, e.value))
 
     def forget_left(view: dict, columns: list):
@@ -1991,7 +2107,8 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             enable_actions()
 
     def after_draw():
-        body.client.run_javascript(_RESTORE_SCROLL_JS + _FIT_GRID_JS + (_THUMBS_JS if vw['view'] == 'gallery' else '')
+        body.client.run_javascript(_RESTORE_SCROLL_JS + _FIT_GRID_JS + _CRUMBS_END_JS
+                                   + (_THUMBS_JS if vw['view'] == 'gallery' else '')
                                    + (_RESIZE_JS if vw['view'] == 'table' else ''))
 
     async def draw(only: Optional[str] = None):

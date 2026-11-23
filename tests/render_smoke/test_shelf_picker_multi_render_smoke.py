@@ -178,6 +178,62 @@ def test_a_partial_take_keeps_the_rest_and_a_reopened_picker_shows_it(tmp_path):
     assert seen['after_full'].startswith('0 ')
 
 
+@ui.page('/_test/shelf-picker-desk')
+def _picker_page_desk(start: str = ''):
+    from web.components.shelfmark_tree_picker import open_shelf_picker
+    container = ui.column()
+    open_shelf_picker(container, SERVICE['svc'], start=start or None, mode='multi', purpose='reading_desk',
+                      on_confirm=_on_confirm, confirm_label='Open')
+
+
+def test_the_reading_desks_choice_stays_ticked_until_cleared(tmp_path):
+    """Owner, 2026-11-23: "The picker should also remember the users choices until cleared". The Reading
+    Desk's choice stays ticked when the desk takes it (the dialog closes); the picker opened again shows it,
+    and Clear empties it. Another host's choice still leaves when taken (the tests above)."""
+    from web.components.shelfmark_tree_picker import KEEP_CHOSEN_PURPOSES
+    svc = _setup(tmp_path)
+    seen = {}
+
+    async def go():
+        async with _app(object()) as user:
+            await _get_page(user, f'/_test/shelf-picker-desk?start={SYS["as2"][0]}')
+            await _connect(user)
+            assert await _until(lambda: _els(user, 'data-leaf'))
+            for sid in (SYS['as2'][0], SYS['as2'][1]):
+                UserInteraction(user, {_leaf(user, sid)}, None).click()
+                assert await _until(lambda: _leaf(user, sid).props.get('aria-checked') == 'true')
+            UserInteraction(user, {_classed(user, 'stp-confirm')[0]}, None).click()
+            assert await _until(lambda: CONFIRMED)
+            await asyncio.sleep(0.3)
+            with user.client:
+                seen['open_after'] = any(isinstance(d, ui.dialog) and d.value for d in user.client.elements.values())
+            seen['total_after'] = _total(user)
+            # opened again (another page, a reload): the same two are ticked
+            await _get_page(user, f'/_test/shelf-picker-desk?start={SYS["as2"][0]}')
+            await _connect(user)
+            assert await _until(lambda: _total(user).startswith('2 '))
+            seen['ticked_again'] = sorted(e.props['data-sys-id'] for e in _els(user, 'data-leaf')
+                                          if e.props.get('aria-checked') == 'true')
+            # Clear empties it
+            UserInteraction(user, {_classed(user, 'stp-clear')[0]}, None).click()
+            assert await _until(lambda: _total(user).startswith('0 '))
+            await _get_page(user, f'/_test/shelf-picker-desk?start={SYS["as2"][0]}')
+            await _connect(user)
+            assert await _until(lambda: _total(user) != '')
+            seen['after_clear'] = _total(user)
+
+    try:
+        _run(go)
+    finally:
+        svc.close()
+    assert KEEP_CHOSEN_PURPOSES == frozenset({'reading_desk'})
+    assert [e['sys_id'] for e in CONFIRMED[0][0]] == [SYS['as2'][0], SYS['as2'][1]]
+    assert seen['open_after'] is False                             # the desk took them all: it closes
+    assert seen['total_after'].startswith('2 ')                    # and they stay ticked
+    assert seen['ticked_again'] == sorted([SYS['as2'][0], SYS['as2'][1]])
+    assert seen['after_clear'].startswith('0 ')
+
+
 def test_a_node_box_ticks_the_node_without_opening_it(tmp_path):
     svc = _setup(tmp_path)
     seen = {}
