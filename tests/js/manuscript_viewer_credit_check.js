@@ -151,6 +151,20 @@ const checks = {
         assert.equal(page.img.style.display, 'none');
         assert.equal(credit.attrs.hidden, '', 'the credit stayed under no image');
     },
+    async 'the image-unavailable message and the Bodleian link are in the reader\'s language'() {
+        // owner, 2026-11-23: "Image not available" and "Open in Bodleian Libraries" in English in Hebrew
+        const parent = { innerHTML: 'img', kids: [], appendChild(c) { this.kids.push(c); } };
+        const page = makePage({ triedOxford: 'true', triedManifest: 'true', triedServerProxy: 'true',
+                                unavailableLabel: 'תמונה לא זמינה', oxfordDirectLabel: 'פתח בספריות הבודליאנה',
+                                oxfordDirect: 'https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_f_43_2b.jpg' },
+            { closest: () => null, parentElement: parent });
+        page.sandbox.document.createElement = () => ({
+            style: {}, kids: [], textContent: '', appendChild(c) { this.kids.push(c); }, setAttribute() {} });
+        await page.sandbox.handleImageError(page.img, '', 0, false, null);
+        const box = parent.kids[0];
+        assert.equal(box.kids[0].textContent, 'תמונה לא זמינה');
+        assert.equal(box.kids[1].kids[0].textContent, 'פתח בספריות הבודליאנה');
+    },
     async 'an NLI fallback that loaded before init is not upgraded'() {
         const page = makePage({ creditFallback: 'nli', triedManifest: 'true' },
             { complete: true, naturalWidth: 2000, src: 'https://iiif.nli.org.il/IIIFv21/FL167042239/full/max/0/default.jpg' });

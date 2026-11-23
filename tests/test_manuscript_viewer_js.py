@@ -52,7 +52,7 @@ def test_the_viewer_credit_checks_pass_under_node():
     sys.stdout.write(run.stdout)
     sys.stderr.write(run.stderr)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert 'all 10 credit checks passed' in run.stdout
+    assert 'all 11 credit checks passed' in run.stdout
 
 
 PROGRESSIVE_CHECK = REPO / 'tests' / 'js' / 'manuscript_viewer_progressive_check.js'

@@ -137,14 +137,17 @@ class TestInitialOxfordCreditIsComplete:
 
     def test_the_prefixed_text_is_still_what_the_attribute_carries(self):
         src = _read("web/pages/browse.py")
-        assert 'data-credit-oxford="{html_module.escape(_credit_ox_text, quote=True)}"' in src
+        # set directly since 2026-11-23 (an escaped props string kept `&quot;` as text)
+        assert "_credit_label.props['data-credit-oxford'] = _credit_ox_text" in src
 
     def test_nli_active_still_wins(self):
         src = _read("web/pages/browse.py")
         i = src.index("credit_text = (")
         window = src[i:i + 400]
-        # #61 widened the Oxford test ("page.is_oxford or ..."): NLI still comes first
-        assert "_is_nli_active and (page.is_oxford" in window
+        # #61 widened the Oxford test ("page.is_oxford or ..."): NLI still comes first; since 2026-11-23 "NLI
+        # shown" also counts the Cambridge proxy's NLI stand-in (_nli_shown)
+        assert "_nli_shown and (page.is_oxford" in window
+        assert "_nli_shown = _is_nli_active or bool(_img_result.get('nli_stand_in'))" in src
         assert window.index("_credit_nli_text") < window.index("_credit_ox_text")
 
 

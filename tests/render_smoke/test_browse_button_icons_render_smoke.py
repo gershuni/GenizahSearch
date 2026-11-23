@@ -341,3 +341,21 @@ def test_the_phone_rules_ship_with_the_page():
     assert '.browse-icon-collapse .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }' in styles
     assert '.browse-icon-wide .q-icon { display: none; }' in styles
     assert '[dir="rtl"] .browse-icon-flip-rtl .q-icon { transform: scaleX(-1); }' in styles
+
+
+def test_the_image_source_chips_keep_their_own_colours():
+    """Owner, 2026-11-23: the Cambridge chip shown read green on blue (light) and grey on blue (dark). Quasar's
+    `.text-primary` is `!important` and beat the chip's own `color`; the chips and their links carry none."""
+    seen = {}
+
+    async def driver(user):
+        await _open_browse(user, lambda texts: {'NLI', 'Cambridge'} <= set(texts))
+        seen['chips'] = [(e.text, e.props.get('color'), e._style.get('color'))
+                         for e in _all_elements(user) if isinstance(e, ui.button) and e.text in ('NLI', 'Cambridge')]
+        seen['links'] = [(e.props.get('color'), e._style.get('color')) for e in _all_elements(user)
+                         if isinstance(e, ui.button) and e.props.get('icon') == 'open_in_new' and not e.text]
+
+    _run_browse(OPEN_PAGE, driver)
+    assert sorted(name for name, _c, _s in seen['chips']) == ['Cambridge', 'NLI']
+    assert all(color is None and own for _n, color, own in seen['chips']), seen['chips']
+    assert all(color is None and own for color, own in seen['links']), seen['links']

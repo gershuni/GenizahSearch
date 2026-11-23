@@ -72,6 +72,23 @@ def _warn_if_on_event_loop(func_name: str) -> None:
     )
 
 
+def _cudl_page_is_nli(sys_id: str, page_idx: int, images: List[Dict]) -> bool:
+    """Whether /api/cambridge_image serves NLI's image for this page (web/api.py: the page's (folio, side) has no
+    CUDL canvas, answered with 200, so the browser's error fallback never fires). Its credit is then NLI's
+    (Codex on #116). An unreadable sidecar is the route's positional case: CUDL's."""
+    try:
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        resolved = resolve_cambridge_canvas_for_page(sys_id, page_idx, images or [])
+    except Exception:
+        return False
+    if resolved is None:
+        return True
+    if resolved.get('degraded'):
+        return False
+    idx = resolved.get('canvas_index')
+    return idx is None or not (0 <= idx < len(images or []))
+
+
 def resolve_image_url(
     *,
     sys_id: str,
@@ -232,6 +249,7 @@ def resolve_image_url(
         active_source = 'cambridge'
 
     # ---- Build EXACTLY ONE URL from the final active_source ----
+    nli_stand_in = False  # the Cambridge proxy serves NLI's image for this page (its credit NLI's)
     # Width applies to the /api/* proxy URLs (thumbnails pass width=300); the
     # direct Bodleian URL carries its own sizing so width is NOT appended there.
     _width_api = f"&width={int(width)}" if width else ''
@@ -257,6 +275,9 @@ def resolve_image_url(
         # that time, so a new Cambridge decision needs a new URL (cudl_identity).
         img_url = (f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
                    f"&cv={CUDL_RESOLVER_REVISION}")
+        # The viewers' credit follows the image the proxy will serve; not asked per thumbnail.
+        if surface == 'viewer':
+            nli_stand_in = _cudl_page_is_nli(sys_id, page_idx, cambridge_images)
     elif active_source == 'manchester' and _has_manchester_images and not is_oxford:
         has_image = True
         # For multi-IE manuscripts, Manchester canvases span all volumes
@@ -295,6 +316,7 @@ def resolve_image_url(
         'img_url': img_url,
         'has_image': has_image,
         'active_source': active_source,
+        'nli_stand_in': nli_stand_in,
         'has_oxford_image': _has_oxford_images,
         'has_katz_image': katz_idx is not None,
         'katz_fl_id': current_fl if katz_idx is not None else None,
@@ -364,21 +386,32 @@ def cached_external_images(sys_id: str, meta_mgr: Any = None) -> Optional[Dict[s
 
 
 def image_credits(entry: Dict[str, Any], library_code: str, is_oxford: bool,
-                  with_katz: bool = True) -> tuple:
+                  with_katz: bool = True, own_images: bool = True) -> tuple:
     """(credit, NLI credit) for a page's image, from the manuscript's cache entry.
 
     The one rule for both of Browse's draws: Phase B's enrichment
     (web/pages/browse_enrichment.py) and Phase A when it draws a library image from
     memory (``apply_cached_external_images``). The manifest's credit, a library's own
     where it has one (``web.services.ATTRIBUTION_BY_LIBRARY``), the Bodleian's for
-    Oxford; a Katz record's own. The NLI credit is the NLI manifest's.
+    Oxford; a Katz record's own; Cambridge's and JTS's images, from their own servers,
+    their library's name alone. The NLI credit is the catalogue's (the library and
+    Ktiv), else the NLI manifest's (shared/metadata_manager.py: the rule both apps keep).
     ``with_katz=False``: Phase B applies the Katz credit itself, after its enrichment,
-    from the entry that enrichment answered with.
+    from the entry that enrichment answered with. ``own_images=False``: the library's
+    images are not in hand (Phase B's first read, before its enrichment says whether there
+    are any; or none came back), so NLI's image is the one shown: its credit (a library's
+    fixed one, BL's say, still wins).
     """
+    from shared.metadata_manager import nli_image_credit, own_server_image_credit
     from web.services import ATTRIBUTION_BY_LIBRARY, _get_library_attribution
+    from web.translations import get_language
     entry = entry or {}
-    attribution = entry.get('attribution', '') or ''
-    nli_attribution = entry.get('attribution_nli', '') or ''
+    nli_attribution = nli_image_credit(entry)
+    if own_images:
+        attribution = (own_server_image_credit(entry, library_code=library_code, lang=get_language())
+                       or entry.get('attribution', '') or '')
+    else:
+        attribution = nli_attribution
     if library_code in ATTRIBUTION_BY_LIBRARY:
         lib_attr = _get_library_attribution(library_code)
         if lib_attr is not None:

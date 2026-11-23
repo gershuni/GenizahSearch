@@ -1059,8 +1059,15 @@ class ManuscriptViewerWidget(QWidget):
                 'From the collections of the National Library of Israel')
         else:
             attr = getattr(self, '_attr_ext', '')
+        if not getattr(self, 'active_list', None):
+            attr = ''  # no image, no credit for one (owner, 2026-11-23)
         self.lbl_attribution.setText(attr)
         self.lbl_attribution.setVisible(bool(attr))
+
+    def _show_no_image(self):
+        """Say "No Image", and take the credit away: there is no image to credit (owner, 2026-11-23)."""
+        self.scroll_area.set_status_message(tr("No Image"))
+        self.lbl_attribution.setVisible(False)
 
     def set_katz_page(self, meta, fl_id, page_num, *, metadata_only=False):
         """Show the Penn scan for an indexed page or a catalogue-only folio."""
@@ -1093,8 +1100,15 @@ class ManuscriptViewerWidget(QWidget):
         # source and NLI's own manifest credit -- so the label can follow the
         # image actually on screen. A fallback or a manual switch to NLI must not
         # leave the Bodleian/CUDL credit under an NLI image (Codex P2, 2026-09-02).
-        self._attr_ext = meta.get('attribution') or ''
-        self._attr_nli = meta.get('attribution_nli') or ''
+        # By the server the image came from (owner, 2026-11-23; the rule in
+        # shared/metadata_manager.py, the web's too): Cambridge's and JTS's own
+        # images their library alone, NLI's the catalogue's credit (the library and Ktiv).
+        import genizah_core
+        from shared.metadata_manager import nli_image_credit, own_server_image_credit
+        self._attr_ext = (own_server_image_credit(meta, provider=self.external_provider or '',
+                                                  lang=genizah_core.CURRENT_LANG)
+                          or meta.get('attribution') or '')
+        self._attr_nli = nli_image_credit(meta)
         # NOT applied here: `current_source` is only decided further down, so the
         # label is set right after that (Codex P1) -- applying it now would read a
         # stale source from the previous manuscript.
@@ -1552,7 +1566,7 @@ class ManuscriptViewerWidget(QWidget):
                 tr("Oxford image unavailable — the Bodleian site shows it only in a web browser"),
                 _failed_url, transient=True,
             )
-            self.scroll_area.set_status_message(tr("No Image"))
+            self._show_no_image()
             return
 
         if (
@@ -1569,10 +1583,10 @@ class ManuscriptViewerWidget(QWidget):
                 tr("Oxford image unavailable, and the National Library copy could not be loaded"),
                 self._oxford_failed_url, transient=True,
             )
-            self.scroll_area.set_status_message(tr("No Image"))
+            self._show_no_image()
             return
 
-        self.scroll_area.set_status_message(tr("No Image"))
+        self._show_no_image()
 
     def _show_fallback_notice(self, text, bodleian_url='', transient=False):
         """Fill and show the red strip under the toolbar.
@@ -1623,6 +1637,11 @@ class ManuscriptViewerWidget(QWidget):
             self._retire_transient_notice()
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
+        # An image, its credit (again, after a page that had none); none, none (owner, 2026-11-23)
+        if pix.isNull():
+            self.lbl_attribution.setVisible(False)
+        else:
+            self._apply_attribution_for_source()
         self._sync_fullscreen_image()
         self.slider_rotation.setValue(0)
         # Reset adjustment controls on new image

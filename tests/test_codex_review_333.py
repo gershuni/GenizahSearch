@@ -111,7 +111,8 @@ class TestDesktopCreditFollowsTheDisplayedImage:
     def test_viewer_keeps_both_credits_and_swaps_them(self):
         src = _read("desktop/viewers.py")
         assert "def _apply_attribution_for_source(self):" in src
-        assert "self._attr_nli = meta.get('attribution_nli')" in src
+        # NLI's credit from the shared rule (the catalogue's, else NLI's manifest's: owner, 2026-11-23)
+        assert "self._attr_nli = nli_image_credit(meta)" in src
         # called on load, on the auto-fallback, and on the manual switch
         assert src.count("self._apply_attribution_for_source()") >= 3
 

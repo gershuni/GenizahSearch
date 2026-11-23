@@ -86,10 +86,14 @@ class TestCreditFollowsTheActiveEntry:
         assert "National Library of Israel" in v.text or "הספרייה הלאומית" in v.text
 
     def test_an_out_of_range_index_is_safe(self):
-        v = _Viewer([], 3, "ext", attr_ext=CUDL, attr_nli=NLI)
+        v = _Viewer([{"label": "1r"}], 3, "ext", attr_ext=CUDL, attr_nli=NLI)
         assert v._showing_nli_image() is False
         v._apply()
         assert v.text == CUDL
+        # no image at all, no credit (owner, 2026-11-23)
+        v = _Viewer([], 3, "ext", attr_ext=CUDL, attr_nli=NLI)
+        v._apply()
+        assert v.text == "" and v.visible is False
 
     def test_empty_credits_hide_the_label(self):
         v = _Viewer([{"label": "1r"}], 0, "ext", attr_ext="", attr_nli="")

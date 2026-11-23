@@ -38,7 +38,7 @@ from web.services import (
 )
 from web.page_count import apply_page_count, count_pages
 from shared.synthetic_sys_id import is_synthetic_sys_id
-from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
+from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN, nli_image_credit, own_server_image_credit
 from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
 from genizah_core import SearchEngine, get_library_display, resolve_volume_suffix
 from web.document_service import (
@@ -215,11 +215,30 @@ def quick_view_external_images(sys_id: str) -> dict:
     ext = dict(resolve_external_images(sys_id) or {})
     ext['sys_id'] = sys_id
     try:
-        cached = state.meta_mgr.nli_cache.get(sys_id, {}) if state.meta_mgr else {}
-        ext['attribution'] = (cached or {}).get('attribution', '') or ''
+        cached = (state.meta_mgr.nli_cache.get(sys_id, {}) if state.meta_mgr else {}) or {}
     except Exception:
-        ext['attribution'] = ''
+        cached = {}
+    ext['attribution'] = cached.get('attribution', '') or ''
+    # What the credits are made of (quick_view_credits, on the page's own thread: its language)
+    ext['credit_entry'] = {
+        'images_ext': cached.get('images_ext') or ext.get('cambridge_images') or [],
+        'external_provider': cached.get('external_provider') or ext.get('external_provider') or '',
+        'attribution': cached.get('attribution', '') or '',
+        'attribution_nli': cached.get('attribution_nli', '') or '',
+        'marc': {'attribution': (cached.get('marc') or {}).get('attribution', '') or ''},
+    }
     return ext
+
+
+def quick_view_credits(ext: dict, library_code: str) -> tuple:
+    """(the credit under the library's own image, under NLI's) for Quick View, by the rule both apps keep
+    (shared/metadata_manager.py; owner, 2026-11-23): Cambridge's and JTS's own images their library alone (a
+    JTS manifest has no credit: its label, the shelfmark, stood there), NLI's the catalogue's credit (the
+    library and Ktiv). The NLI one is '' while unknown."""
+    ext = ext or {}
+    entry = ext.get('credit_entry') or {'attribution': ext.get('attribution', '') or ''}
+    own = own_server_image_credit(entry, library_code=library_code or '', lang=get_language())
+    return own or entry.get('attribution', '') or '', nli_image_credit(entry)
 
 
 def _quick_view_browse_page(service, sys_id, **navigation):
@@ -311,6 +330,9 @@ def quick_view_img_html(img_url: str, sys_id: str, page_idx: int, *, is_oxford: 
         nli_fl = page.fl_id
     if nli_fl:
         fallback += f' data-nli-fl="{html.escape(str(nli_fl).removeprefix("FL"), quote=True)}"'
+    # what handleImageError says when no source's image loads, in the reader's language (owner, 2026-11-23)
+    fallback += (f' data-unavailable-label="{html.escape(tr("Image not available"), quote=True)}"'
+                 f' data-oxford-direct-label="{html.escape(tr("Open in Bodleian Libraries"), quote=True)}"')
     return (
         f'<img src="{thumb}" data-full-src="{safe_img_url}" class="adv-zoomable-image"{fallback}'
         f' style="transform: translate(0px, 0px) rotate({clamp_rotation(rotation)}deg) scale(1); cursor: grab; max-height: 100%;"'
@@ -1606,24 +1628,41 @@ def open_advanced_dialog(search_state, refs, index, result):
         sys_id, page_idx, img_args, shown = choice
         chosen = quick_view_image(sys_id, page_idx, external=ext, **img_args)
         new_url = chosen.get('img_url') or None
+        _page = img_args.get('page')
+        own_credit, nli_credit = quick_view_credits(ext, getattr(_page, 'library_code', '') or '')
+        _nli_shown = chosen.get('active_source') == 'nli' or bool(chosen.get('nli_stand_in'))
+        credit = own_credit if chosen.get('active_source') not in ('nli', 'oxford') and not _nli_shown else ''
+        credit_el = adv_state.image_credit_el
+        if credit_el is not None and credit_el.is_deleted:
+            credit_el = None
+        # The credit first, even for the same image: NLI's, kept (misaligned library images), now has the
+        # catalogue's credit (Codex on #116).
+        shown_credit = credit or (nli_credit if _nli_shown else '')
+        if shown_credit and credit_el is not None:
+            credit_el.text = shown_credit
+            if credit:
+                credit_el.props['data-role'] = 'image-credit'
+                credit_el.props['data-credit-oxford'] = credit
+                credit_el.props['data-credit-nli'] = nli_credit or QUICK_VIEW_NLI_CREDIT
+            elif 'data-credit-nli' in credit_el.props:
+                credit_el.props['data-credit-nli'] = nli_credit
+            credit_el.update()
         if not new_url or new_url == shown:
             return
-        credit = ext.get('attribution', '') if chosen.get('active_source') not in ('nli', 'oxford') else ''
         image_el.content = quick_view_img_html(new_url, sys_id, page_idx, is_oxford=img_args['is_oxford'],
                                               credit_falls_back_to_nli=bool(credit), rotation=adv_state.rotation,
                                               nli_fl=img_args.get('fl_id') if chosen['active_source'] == 'katz' else None,
                                               page=img_args.get('page'))
         adv_state.image_choice = (sys_id, page_idx, img_args, new_url)
-        credit_el = adv_state.image_credit_el
-        if credit and credit_el is not None and not credit_el.is_deleted:
-            credit_el.text = credit
-            credit_el.props['data-role'] = 'image-credit'
-            credit_el.props['data-credit-oxford'] = credit
-            credit_el.props['data-credit-nli'] = QUICK_VIEW_NLI_CREDIT
-            credit_el.update()
+        # A new image to try: its credit back in sight, if the last image's failure hid it (manuscript_viewer.js
+        # sets `hidden` in the browser, where it is taken off too; Codex on #116).
+        unhide = ''
+        if credit_el is not None and credit_el.parent_slot is not None:
+            row_id = credit_el.parent_slot.parent.html_id
+            unhide = f"(document.getElementById('{row_id}') || {{removeAttribute() {{}}}}).removeAttribute('hidden'); "
         try:
             image_el.client.run_javascript(
-                'setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
+                unhide + 'setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
         except Exception:
             pass  # the dialog is gone
 
@@ -2105,9 +2144,11 @@ def open_advanced_dialog(search_state, refs, index, result):
         image_source = _img.get('active_source', 'nli')
         adv_state.image_choice = (sys_id, page_idx, _img_args, img_url)
         _ext_images = adv_state.external_images or {}
-        library_image_credit = (
-            _ext_images.get('attribution', '')
-            if _ext_images.get('sys_id') == sys_id and image_source not in ('nli', 'oxford') else '')
+        _own_credit, _nli_credit = (quick_view_credits(_ext_images, library_code)
+                                    if _ext_images.get('sys_id') == sys_id else ('', ''))
+        # (a page CUDL lacks: the Cambridge proxy serves NLI's image, under NLI's credit; Codex on #116)
+        library_image_credit = (_own_credit if image_source not in ('nli', 'oxford') and not _img.get('nli_stand_in')
+                                else '')
 
         # Get library display name
         library_name = ''
@@ -2844,16 +2885,22 @@ def open_advanced_dialog(search_state, refs, index, result):
                             # `data-role="image-credit"` (Codex P2, 2026-09-02); there is
                             # no link element here, and the helper tolerates its absence.
                             _adv_credit_nli = QUICK_VIEW_NLI_CREDIT
+                            if _nli_credit:  # NLI's image: the catalogue's credit once known (2026-11-23)
+                                _adv_credit_nli = _nli_credit
                             attribution = ''
                             if is_oxford:
                                 attribution = OXFORD_IMAGE_CREDIT_EN if image_source == 'oxford' else _adv_credit_nli
                             elif library_image_credit:  # the library's own image (Cambridge, ...)
                                 attribution = library_image_credit
+                            elif _nli_credit:
+                                attribution = _nli_credit
                             elif page and page.attribution:
                                 attribution = page.attribution
                             else:
                                 attribution = _adv_credit_nli
-                            with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
+                            # `browse-image-credit`: manuscript_viewer.js hides it (`hidden`, common.css) when no
+                            # source's image loads -- no image, no credit (owner, 2026-11-23)
+                            with ui.row().classes('w-full items-center justify-center gap-2 py-2 browse-image-credit').style(
                                 'background: #2a2a2a; border-radius: 0 0 8px 8px;'
                             ):
                                 ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
@@ -2862,11 +2909,11 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 # A library's image (Cambridge, ...) falls back to NLI's in the
                                 # browser as Oxford's does: its credit must switch with it.
                                 if is_oxford or library_image_credit:
-                                    _adv_credit_lbl.props(
-                                        'data-role="image-credit" '
-                                        f'data-credit-oxford="{html.escape(attribution, quote=True)}" '
-                                        f'data-credit-nli="{html.escape(_adv_credit_nli, quote=True)}"'
-                                    )
+                                    # set directly, not escaped into a props string (which keeps `&quot;` as
+                                    # text): the catalogue's credits quote "Ktiv"
+                                    _adv_credit_lbl.props['data-role'] = 'image-credit'
+                                    _adv_credit_lbl.props['data-credit-oxford'] = attribution
+                                    _adv_credit_lbl.props['data-credit-nli'] = _adv_credit_nli
                                 adv_state.image_credit_el = _adv_credit_lbl
 
             # === Actions Section ===

@@ -114,3 +114,14 @@ def test_the_viewer_switches_the_credit_for_a_marked_image_on_both_nli_fallbacks
     from pathlib import Path
     js = (Path(__file__).resolve().parent.parent / 'web' / 'static' / 'manuscript_viewer.js').read_text(encoding='utf-8')
     assert js.count("if (isOxford || img.dataset.creditFallback === 'nli') switchImageCredit('nli');") == 2
+
+
+def test_the_image_says_unavailable_in_the_readers_language():
+    """Owner, 2026-11-23: Quick View said "Image not available" and "Open in Bodleian Libraries" in English in the
+    Hebrew interface; handleImageError reads both from the image."""
+    from web.pages.search_results import quick_view_img_html
+    from web.translations import using_language
+    with using_language('he'):
+        tag = quick_view_img_html('/api/nli_image_by_sysid/1?page=0', '1', 0, is_oxford=False)
+    assert 'data-unavailable-label="תמונה לא זמינה"' in tag
+    assert 'data-oxford-direct-label="פתח בספריות הבודליאנה"' in tag

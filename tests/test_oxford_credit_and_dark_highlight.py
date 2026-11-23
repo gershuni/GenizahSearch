@@ -49,7 +49,7 @@ class TestOxfordCreditWording:
 class TestCreditFollowsDisplayedSource:
     def test_footer_carries_both_credits_and_links_to_genizah_fragments(self):
         src = _read("web/pages/browse.py")
-        assert 'data-credit-nli=' in src and 'data-credit-oxford=' in src
+        assert "props['data-credit-nli']" in src and "props['data-credit-oxford']" in src
         assert "credit_link = _ox_direct_link or page.external_url or 'https://hebrew.bodleian.ox.ac.uk/'" in src
         assert "https://digital.bodleian.ox.ac.uk/" not in src.split("# === Image Credit/Attribution Footer ===")[1].split("# === RIGHT PANEL")[0]
 

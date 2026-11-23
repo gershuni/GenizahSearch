@@ -550,6 +550,9 @@ VIEWER_STYLES = '''
     }
     /* the image credit goes with an image that could not be shown (manuscript_viewer.js: handleImageError) */
     .browse-image-credit[hidden] { display: none !important; }
+    /* the first draw's credit, until Phase B draws the right one; seen after 8s if Phase B never does */
+    .browse-image-credit.is-pending { visibility: hidden; animation: gs-credit-late 0s linear 8s forwards; }
+    @keyframes gs-credit-late { to { visibility: visible; } }
     /* Computed identifications: its icon alone on the toolbar, its words in the tooltip and its name
        (owner, 2026-11-23: the line took a row); "New" a gold dot on it */
     .browse-discovery-slot .gs-discovery .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
@@ -894,7 +897,9 @@ def _source_chip(label: str, on_click, style: str, tooltip: str, *, opens_extern
     A chip that switches the images shown here carries ``image``, on wide screens
     only: the library's name is what tells the chips apart.
     """
-    btn = ui.button(label, on_click=None if opens_external else on_click).props(
+    # No Quasar colour (color=None): its `.text-primary` is `!important` and beat the chip's own `color`, so the
+    # chip shown (white on its library's colour) was the site's green on blue, unreadable (owner, 2026-11-23).
+    btn = ui.button(label, on_click=None if opens_external else on_click, color=None).props(
         'flat dense size=sm no-caps'
     ).classes('text-xs px-2 py-0').style(style).tooltip(tooltip)
     if opens_external:
@@ -908,7 +913,7 @@ def _source_chip(label: str, on_click, style: str, tooltip: str, *, opens_extern
 def _source_external_button(target: str, color: str, tooltip: str):
     """The icon-only "open in the library's viewer" button beside a switching chip.
     ``target``: the URL, or the click JavaScript (:func:`_open_in_new_tab`)."""
-    btn = ui.button(icon='open_in_new').props(
+    btn = ui.button(icon='open_in_new', color=None).props(  # no Quasar colour: the chip's own (_source_chip)
         'flat round dense size=xs'
     ).style(f'min-width: 20px; min-height: 20px; color: {color}; opacity: 0.8;').tooltip(tooltip)
     btn.props['aria-label'] = tooltip  # set directly: a translation may hold a quote
@@ -5009,7 +5014,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _is_manchester_active = state.active_source == 'manchester' and _has_manchester_images
                 _is_jts_active = state.active_source == 'jts' and _has_jts_images
                 _is_katz_active = state.active_source == 'katz' and _has_katz_image
-                _fallback_attrs = 'data-credit-fallback="nli"' if _is_katz_active else ''
+                # A library's image (Katz's, and Cambridge's, JTS's, Manchester's: their credit is the library
+                # alone) that the browser replaces with NLI's on error takes NLI's credit with it (Codex on #116).
+                _fallback_attrs = ('data-credit-fallback="nli"'
+                                   if _is_katz_active or _img_result.get('active_source') in ('cambridge', 'jts', 'manchester')
+                                   else '')
                 if (_is_katz_active or is_oxford) and fl_digits.isascii() and fl_digits.isdigit():
                     _fallback_attrs += f' data-nli-fl="{fl_digits}"'
                 _is_oxford_active = state.active_source == 'oxford' and _has_oxford_images
@@ -5736,6 +5745,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         data-volume-suffix="{int(page.volume_suffix or 1)}"
                                         {_fallback_attrs}
                                         data-oxford-direct-label="{_ox_direct_label}"
+                                        data-unavailable-label="{html_module.escape(tr('Image not available'), quote=True)}"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
                                         onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'manuscriptViewer')"
                                     />
@@ -5752,7 +5762,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # possible here, unlike the green header card, because
                             # this inline background is not `!important`.
                             if page.attribution or page.attribution_nli:
-                                with ui.row().classes('w-full items-center justify-center gap-2 py-2 browse-image-credit').style(
+                                # The first draw knows no credit but NLI's default (the catalogue's comes with
+                                # Phase B): kept out of sight, its room kept (owner, 2026-11-23: NLI's credit
+                                # showed, then the library's). From memory, the library's image and its credit.
+                                _credit_pending = not state.enrichment_loaded and not _any_ext_images
+                                with ui.row().classes('w-full items-center justify-center gap-2 py-2 browse-image-credit'
+                                                      + (' is-pending' if _credit_pending else '')).style(
                                     'background: #2a2a2a; border-radius: 0 0 8px 8px; border-top: 1px solid #333;'
                                 ):
                                     ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
@@ -5773,8 +5788,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # "[object] ... Image provided by [owner]" form is
                                     # what should be on screen from the start
                                     # (Codex P2, 2026-09-02).
+                                    # NLI's own credit under NLI's image wherever the manuscript's credit is another
+                                    # source's: Oxford, Katz, and any page with another library's images (Cambridge
+                                    # images found misaligned leave NLI's on screen: Codex on #116).
+                                    # NLI's image is shown too where the Cambridge proxy stands it in for a page CUDL
+                                    # lacks (resolve_image_url's nli_stand_in; Codex on #116).
+                                    _nli_shown = _is_nli_active or bool(_img_result.get('nli_stand_in'))
                                     credit_text = (
-                                        _credit_nli_text if (_is_nli_active and (page.is_oxford or page.external_provider == 'katz'))
+                                        _credit_nli_text if (_nli_shown and (page.is_oxford or page.external_provider == 'katz'
+                                                                             or _any_ext_images))
                                         else (_credit_ox_text or _credit_nli_text)
                                     )
                                     # Route credit link based on the actively viewed source,
@@ -5788,7 +5810,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _nli_credit_url = ''
                                     else:
                                         _nli_credit_url = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
-                                    if _is_nli_active:
+                                    if _nli_shown:
                                         credit_link = _nli_credit_url
                                     elif _is_oxford_active or (page.is_oxford and state.active_source != 'nli'):
                                         # Licence: link to the Genizah Fragments site as the source.
@@ -5810,12 +5832,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         f'data-role="image-credit-link" data-link-oxford="{html_module.escape(_credit_ox_link, quote=True)}" '
                                         f'data-link-nli="{html_module.escape(_nli_credit_url, quote=True)}"'
                                     ):
-                                        ui.label(credit_text).classes('text-xs').style(
+                                        _credit_label = ui.label(credit_text).classes('text-xs').style(
                                             'color: #aaa; font-style: italic;'
-                                        ).props(
-                                            f'data-role="image-credit" data-credit-oxford="{html_module.escape(_credit_ox_text, quote=True)}" '
-                                            f'data-credit-nli="{html_module.escape(_credit_nli_text, quote=True)}"'
-                                        )
+                                        ).props('data-role="image-credit"')
+                                        # Set directly, not escaped into a props string, which keeps `&quot;` as
+                                        # text: the catalogue's credits quote "Ktiv" (shown by the fallback script).
+                                        _credit_label.props['data-credit-oxford'] = _credit_ox_text
+                                        _credit_label.props['data-credit-nli'] = _credit_nli_text
                             # NLI could not answer for this manuscript, so its catalogue
                             # record and image list came from the copies kept on disk
                             # (shared/nli_metadata_store.py): say so quietly, with their date.
@@ -6297,7 +6320,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _fs_oxford = html_module.escape(page.bodleian_links.get('current', ''), quote=True)
                                         _fs_full = safe_img_url
                                         _fs_thumb = preview_url(safe_img_url) or safe_img_url
-                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" data-oxford-direct="{_fs_oxford}" data-volume-suffix="{int(page.volume_suffix or 1)}" {_fallback_attrs} class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
+                                        # what handleImageError says if no source's image loads, in the reader's language (Codex on #116)
+                                        _fs_said = (f'data-oxford-direct-label="{html_module.escape(tr("Open in Bodleian Libraries"), quote=True)}" '
+                                                    f'data-unavailable-label="{html_module.escape(tr("Image not available"), quote=True)}"')
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" data-oxford-direct="{_fs_oxford}" data-volume-suffix="{int(page.volume_suffix or 1)}" {_fallback_attrs} {_fs_said} class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')
                                     else:

@@ -116,7 +116,7 @@ def create_fjms_bibliography_dialog(
             rows=rows,
             row_key='id',
             pagination={'rowsPerPage': 50},
-        ).classes('w-full').style('flex: 1; overflow: auto;').props(
+        ).classes('w-full bibliography-table').style('flex: 1; overflow: auto;').props(  # dark: common.css
             f'''rows-per-page-label="{tr('Records per page')}"'''
         )
         # Header tooltips for abbreviated columns
@@ -129,7 +129,7 @@ def create_fjms_bibliography_dialog(
 
         # Detail panel
         detail_label = ui.html('', sanitize=False).classes('text-sm p-2 w-full').style(
-            'background: var(--surface-variant, #f5f5f5); border-radius: 4px; '
+            'background: var(--bg-tertiary); color: var(--text-primary); border-radius: 4px; '
             'min-height: 3em; max-height: 200px; overflow-y: auto; white-space: pre-wrap; '
             'flex-shrink: 0; word-break: break-word;'
         )
@@ -332,7 +332,7 @@ def create_nli_bibliography_dialog(
             rows=rows,
             row_key='id',
             pagination={'rowsPerPage': 50},
-        ).classes('w-full').style('flex: 1; overflow: auto;').props(
+        ).classes('w-full bibliography-table').style('flex: 1; overflow: auto;').props(  # dark: common.css
             f'''rows-per-page-label="{tr('Records per page')}"'''
         )
         # Header tooltips for abbreviated columns
@@ -344,7 +344,7 @@ def create_nli_bibliography_dialog(
 
         # Detail panel
         detail_label = ui.html('', sanitize=False).classes('text-sm p-2 w-full').style(
-            'background: var(--surface-variant, #f5f5f5); border-radius: 4px; '
+            'background: var(--bg-tertiary); color: var(--text-primary); border-radius: 4px; '
             'min-height: 3em; max-height: 200px; overflow-y: auto; white-space: pre-wrap; '
             'flex-shrink: 0; word-break: break-word;'
         )

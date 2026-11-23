@@ -382,7 +382,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
                 cached_meta = state_mod.meta_mgr.nli_cache.get(_sys_id, {}) or {}
             attribution, nli_attribution = image_credits(cached_meta, _library_code, _is_oxford,
-                                                         with_katz=False)
+                                                         with_katz=False, own_images=False)
             if attribution:
                 result['attribution'] = attribution
             if nli_attribution:
@@ -505,7 +505,12 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 # and the Oxford->NLI fallback fell back to the generic credit instead
                 # of the manifest's own. Read it back here, where the cache is warm.
                 if hasattr(state_mod.meta_mgr, 'nli_cache'):
-                    _cached_attr = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    _cached_attr = state_mod.meta_mgr.nli_cache.get(_sys_id, {}) or {}
+                    # Both credits too, read empty above on a first visit (a Cambridge image under NLI's
+                    # credit: owner, 2026-11-23); the library's only with its images in hand (Codex on #116).
+                    _warm_credit, _warm_nli = image_credits(_cached_attr, _library_code, _is_oxford, with_katz=False,
+                                                            own_images=bool(_ext.get('cambridge_images')))
+                    result.update({k: v for k, v in (('attribution', _warm_credit), ('attribution_nli', _warm_nli)) if v})
                     if _ext['external_provider'] == 'katz' and _cached_attr.get('attribution'):
                         result['attribution'] = _cached_attr['attribution']
                     if not result.get('attribution_nli') and _cached_attr.get('attribution_nli'):

@@ -213,9 +213,14 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
         // keep them inert here.
         const direct = img.dataset.oxfordDirect || '';
         const label = img.dataset.oxfordDirectLabel || 'Open in Bodleian Libraries';
+        // in the reader's language: the page puts both texts on the image (owner, 2026-11-23)
+        const unavailable = img.dataset.unavailableLabel || 'Image not available';
         const box = document.createElement('div');
         box.style.cssText = 'text-align: center; color: #888;';
-        box.innerHTML = '<i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p>';
+        box.innerHTML = '<i class="material-icons" style="font-size: 4rem;">image_not_supported</i>';
+        const said = document.createElement('p');
+        said.textContent = unavailable;
+        box.appendChild(said);
         if (direct && /^https:\/\/hebrew\.bodleian\.ox\.ac\.uk\//.test(direct)) {
             const p = document.createElement('p');
             const a = document.createElement('a');

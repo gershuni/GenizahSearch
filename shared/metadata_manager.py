@@ -169,6 +169,45 @@ def _title_near_matcher(q, latin_near=None):
 OXFORD_IMAGE_CREDIT_EN = "Image provided by the Bodleian Libraries, University of Oxford"
 OXFORD_GENIZAH_FRAGMENTS_URL = "https://hebrew.bodleian.ox.ac.uk/"
 
+# An image's credit follows the server it came from (owner, 2026-11-23), in both apps:
+# * a library's image from its own server (Cambridge's CUDL; JTS's, through Princeton's) names the
+#   library alone -- Ktiv had no part in it;
+# * NLI's image of the same leaf is Ktiv's photograph: the catalogue's credit, which names the library
+#   and Ktiv ("Cambridge University Library, "Ktiv" Project, The National Library of Israel."), else
+#   NLI's manifest's own.
+# The cache's `attribution` is the catalogue's credit whenever there is one, so it named Ktiv under
+# Cambridge's and JTS's own images.
+_OWN_SERVER_LIBRARY = {'cambridge': 'CUL', 'jts': 'JTS'}
+
+
+def own_server_image_credit(entry, *, provider: str = '', library_code: str = '', lang: str = 'en') -> str:
+    """The credit under a library's own image of ``entry``'s manuscript (a cache entry), or '' where the
+    rule above has none (Oxford, Manchester and Katz have credits of their own)."""
+    entry = entry or {}
+    if not entry.get('images_ext'):
+        return ''
+    provider = (provider or entry.get('external_provider') or '').lower()
+    library = _OWN_SERVER_LIBRARY.get(provider)
+    if library is None and not provider and library_code == 'CUL':
+        library = 'CUL'  # Cambridge's images, the provider unwritten
+    if library is None:
+        return ''
+    from shared.browse_map_utils import get_library_display
+    return get_library_display(library, short=False, lang=lang)
+
+
+# NLI's catalogue (MARC 597) names NLI twice in most of its credits ("<library>, The National Library of
+# Israel. "Ktiv" Project, The National Library of Israel."): once, as Cambridge's reads (owner, 2026-11-23).
+_DOUBLED_NLI = re.compile(r',\s*The National Library of Israel\.\s*(?="Ktiv" Project, The National Library of Israel)')
+
+
+def nli_image_credit(entry) -> str:
+    """The credit under NLI's image of ``entry``'s manuscript: the catalogue's (the library and Ktiv, NLI
+    named once), else NLI's manifest's; '' when neither is known."""
+    entry = entry or {}
+    credit = ((entry.get('marc') or {}).get('attribution') or '') or (entry.get('attribution_nli') or '')
+    return _DOUBLED_NLI.sub(', ', credit)
+
 # NLI's Rosetta "thumbnail" endpoint answers HTTP 200 image/png with a generic
 # 94x73 "no image" placeholder (~1,615 bytes) for FL ids it will not deliver --
 # since 2026-09 that includes every Bodleian-held Ktiv copy (IIIF answers 500,

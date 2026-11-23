@@ -27,20 +27,23 @@ def _footer_block(src):
 class TestAdvancedViewCreditIsSwitchable:
     def test_footer_renders_the_switchable_metadata(self):
         block = _footer_block(_read(SRC))
-        assert 'data-role="image-credit"' in block
-        assert "data-credit-oxford=" in block
-        assert "data-credit-nli=" in block
+        # set directly since 2026-11-23 (escaped into a props string, `&quot;` stayed as text)
+        assert "_adv_credit_lbl.props['data-role'] = 'image-credit'" in block
+        assert "_adv_credit_lbl.props['data-credit-oxford']" in block
+        assert "_adv_credit_lbl.props['data-credit-nli']" in block
 
-    def test_both_credit_variants_are_html_escaped(self):
+    def test_both_credit_variants_are_set_as_values_not_markup(self):
+        # props set directly are attribute values (Vue escapes them); escaping them as well put `&quot;`
+        # in the text the fallback shows (2026-11-23)
         block = _footer_block(_read(SRC))
-        assert block.count("html.escape(") == 2, "both attribute values must be escaped"
+        assert block.count("html.escape(") == 0
 
     def test_the_nli_variant_is_not_the_oxford_credit(self):
         block = _footer_block(_read(SRC))
         assert "_adv_credit_nli" in block
-        m = re.search(r"data-credit-nli=\"\{html\.escape\((\w+),", block)
+        m = re.search(r"props\['data-credit-nli'\] = (\w+)", block)
         assert m and m.group(1) == "_adv_credit_nli"
-        m2 = re.search(r"data-credit-oxford=\"\{html\.escape\((\w+),", block)
+        m2 = re.search(r"props\['data-credit-oxford'\] = (\w+)", block)
         assert m2 and m2.group(1) == "attribution"
 
     def test_the_image_still_runs_the_shared_error_chain(self):
@@ -62,7 +65,7 @@ class TestAdvancedViewCreditIsSwitchable:
         i = src.index("_adv_credit_lbl = ui.label(attribution)")
         window = src[i:i + 700]
         gate = window.index("if is_oxford or library_image_credit:")
-        props = window.index("_adv_credit_lbl.props(")
+        props = window.index("_adv_credit_lbl.props[")
         assert gate < props
 
 

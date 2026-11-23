@@ -90,6 +90,8 @@ def test_quick_view_opens_on_the_cambridge_image_browse_shows():
             credit = _credit_label(user)
             assert credit is not None and credit.props['data-credit-oxford'] == 'Cambridge University Library'
             assert credit.props['data-credit-nli'] == search_results.QUICK_VIEW_NLI_CREDIT
+            # the row manuscript_viewer.js hides when no source's image loads: no image, no credit (2026-11-23)
+            assert 'browse-image-credit' in credit.parent_slot.parent.classes
 
     _run(driver)
 
@@ -156,5 +158,68 @@ def test_without_library_images_it_stays_on_nli():
             await user.open(f'{PAGE}?case=hit')
             await _wait_until(lambda: 'adv-zoomable-image' in _html(user))
             assert _shows(user, f'/api/nli_image_by_sysid/{SID}?page=1'), _html(user)[:500]
+
+    _run(driver)
+
+
+KTIV = 'Cambridge University Library, "Ktiv" Project, The National Library of Israel.'
+
+
+def _credit_row(user):
+    rows = [e for e in _elements(user) if 'browse-image-credit' in e.classes]
+    return rows[0] if rows else None
+
+
+def _credit_text(user):
+    row = _credit_row(user)
+    labels = [e for e in row.descendants() if isinstance(e, ui.label)] if row else []
+    return labels[0].text if labels else None
+
+
+def test_a_late_answer_that_keeps_nlis_image_brings_its_catalogue_credit():
+    """Codex on #116: misaligned Cambridge images, answered after the wait, keep NLI's image -- the same URL,
+    so nothing was redrawn, and NLI's image kept the first credit. Its credit now comes all the same."""
+    def misaligned_late(sys_id):
+        time.sleep(1.0)
+        return dict(_external(sys_id), cambridge_alignment={'verdict': 'misaligned'}, credit_entry={
+            'images_ext': CUDL, 'external_provider': 'cambridge', 'attribution': KTIV,
+            'attribution_nli': '', 'marc': {'attribution': KTIV}})
+
+    async def driver(user):
+        with patch.object(search_results, 'quick_view_external_images', misaligned_late), \
+                patch.object(search_results, 'QUICK_VIEW_EXTERNAL_WAIT_S', 0.2), \
+                patch('shared.nli_circuit_breaker.is_open', return_value=False):
+            await user.open(f'{PAGE}?case=hit')
+            await _wait_until(lambda: 'adv-zoomable-image' in _html(user) and _credit_row(user) is not None)
+            assert _shows(user, f'/api/nli_image_by_sysid/{SID}?page=1'), _html(user)[:500]
+            await _wait_until(lambda: _credit_text(user) == KTIV)
+            assert _credit_text(user) == KTIV
+            assert _shows(user, f'/api/nli_image_by_sysid/{SID}?page=1')
+
+    _run(driver)
+
+
+def test_a_late_library_image_takes_hidden_off_its_credit_row():
+    """Codex on #116: NLI's image failing meanwhile, manuscript_viewer.js hid the credit row (`hidden`, in the
+    browser); the library image swapped in later came without its credit. The swap takes `hidden` off."""
+    from nicegui import Client
+    sent = []
+    real = Client.run_javascript
+
+    def record(self, code, *args, **kwargs):
+        sent.append(code)
+        return real(self, code, *args, **kwargs)
+
+    async def driver(user):
+        with patch.object(search_results, 'quick_view_external_images', _slow_external), \
+                patch.object(search_results, 'QUICK_VIEW_EXTERNAL_WAIT_S', 0.2), \
+                patch('shared.nli_circuit_breaker.is_open', return_value=False), \
+                patch.object(Client, 'run_javascript', record):
+            await user.open(f'{PAGE}?case=hit')
+            await _wait_until(lambda: 'adv-zoomable-image' in _html(user) and _credit_row(user) is not None)
+            await _wait_until(lambda: _shows(user, f'/api/cambridge_image/{SID}'))
+            row_id = _credit_row(user).html_id
+            assert any(f"getElementById('{row_id}')" in code and "removeAttribute('hidden')" in code
+                       for code in sent), [c[:120] for c in sent if 'hidden' in c]
 
     _run(driver)

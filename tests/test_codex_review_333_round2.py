@@ -95,6 +95,7 @@ class TestCurrentSourceIsInitialized:
 
     def test_helper_runs_with_a_freshly_constructed_state(self):
         v = _Viewer()          # current_source is None, as after __init__
+        v.active_list = [{"url": "x"}]   # an image: with none there is no credit (owner, 2026-11-23)
         v._attr_ext = "Bodleian Libraries"
         v._apply()             # must not raise
         assert v._label_text == "Bodleian Libraries"
@@ -149,11 +150,14 @@ class TestWebFallbackCredit:
         src = _read("web/pages/browse_enrichment.py")
         assert "image_credits(cached_meta" in src
         rule = _read("web/components/image_resolution.py")
-        assert "nli_attribution = entry.get('attribution_nli', '')" in rule
+        # NLI's credit from the rule both apps share (the catalogue's, else NLI's manifest's: 2026-11-23)
+        assert "nli_attribution = nli_image_credit(entry)" in rule
         assert "nli_attribution = attribution\n" not in src + rule
         from web.components.image_resolution import image_credits
         credit, nli_credit = image_credits({'attribution': 'Bodleian', 'attribution_nli': 'NLI'}, 'X', True)
         assert nli_credit == 'NLI', 'the NLI image must not take the primary (Bodleian) credit'
+        marc = {'attribution': 'Bodleian', 'attribution_nli': 'NLI', 'marc': {'attribution': 'Bodleian, Ktiv'}}
+        assert image_credits(marc, 'X', True)[1] == 'Bodleian, Ktiv'   # the catalogue's, which names Ktiv
 
 
 class TestRosettaUsesNliTlsPolicy:

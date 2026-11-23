@@ -413,27 +413,35 @@ a.nicegui-link[style*="--primary-600"] { color: var(--primary-700) !important; }
 }
 
 /* R2-10: Candidate table (joins-candidate-table) dark-mode — mirrors q-card/q-menu pattern.
-   Uses CSS vars only (no hardcoded hex) so light/parchment/dark stay consistent. */
+   Uses CSS vars only (no hardcoded hex) so light/parchment/dark stay consistent.
+   The Browse bibliographies (FJMS, Ktiv) too: they were white in the dark theme (owner, 2026-11-23). */
 [data-theme="dark"] .joins-candidate-table,
 [data-theme="dark"] .joins-candidate-table .q-table__container,
-[data-theme="dark"] .joins-candidate-table .q-table__card {
+[data-theme="dark"] .joins-candidate-table .q-table__card,
+[data-theme="dark"] .bibliography-table,
+[data-theme="dark"] .bibliography-table .q-table__container,
+[data-theme="dark"] .bibliography-table .q-table__card {
     background: var(--bg-secondary) !important;
     color: var(--text-primary) !important;
 }
-[data-theme="dark"] .joins-candidate-table .q-table thead tr th {
+[data-theme="dark"] .joins-candidate-table .q-table thead tr th,
+[data-theme="dark"] .bibliography-table .q-table thead tr th {
     background: var(--bg-tertiary) !important;
     color: var(--text-primary) !important;
     border-bottom: 1px solid var(--border-light) !important;
 }
-[data-theme="dark"] .joins-candidate-table .q-table tbody td {
+[data-theme="dark"] .joins-candidate-table .q-table tbody td,
+[data-theme="dark"] .bibliography-table .q-table tbody td {
     background: var(--bg-card) !important;
     color: var(--text-primary) !important;
     border-bottom: 1px solid var(--border-light) !important;
 }
-[data-theme="dark"] .joins-candidate-table .q-table tbody tr:hover td {
+[data-theme="dark"] .joins-candidate-table .q-table tbody tr:hover td,
+[data-theme="dark"] .bibliography-table .q-table tbody tr:hover td {
     background: var(--bg-hover) !important;
 }
-[data-theme="dark"] .joins-candidate-table .q-table__bottom {
+[data-theme="dark"] .joins-candidate-table .q-table__bottom,
+[data-theme="dark"] .bibliography-table .q-table__bottom {
     background: var(--bg-secondary) !important;
     color: var(--text-secondary) !important;
     border-top: 1px solid var(--border-light) !important;
@@ -2446,6 +2454,11 @@ body:not(.gs-nav-mini) .nav-mini-tip { display: none !important; }
 /* Print-sheet furniture is hidden on screen. Kept OUTSIDE the media query so
    the rule applies whether or not the print block is reached. */
 .print-only { display: none; }
+
+/* An image credit whose image could not be shown (manuscript_viewer.js sets `hidden`): no image, no
+   credit (owner, 2026-11-23). Quick View's; Browse's VIEWER_STYLES carry the same rule. A flex row's
+   display beats the attribute's own, hence !important. */
+.browse-image-credit[hidden] { display: none !important; }
 
 /* /browse while a page loads: the previous content stays under the spinner,
    dimmed and inert, instead of being rebuilt as a spinner and rebuilt again.
