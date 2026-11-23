@@ -1,6 +1,6 @@
 # GenizahSearch -- Architecture Overview
 
-> Last updated: 2026-09-18
+> Last updated: 2026-11-23
 >
 > This page is the **current-architecture** authority for where code and data live and who owns
 > them. It supersedes the "Architecture" and "Key Files" sections that `CLAUDE.md` carried until
@@ -123,6 +123,7 @@ The rules are enforced by tests, not by convention. One row per guard:
 | [tests/test_export_utils_shim.py](../../tests/test_export_utils_shim.py) | the root `shared_export_utils` shim drifting from `shared/export_utils.py` |
 | [tests/test_no_raw_storage_access.py](../../tests/test_no_raw_storage_access.py) | raw `app.storage.user` access in `web/` outside the Phase 87 allowlist |
 | [tests/test_sys_id_patterns.py](../../tests/test_sys_id_patterns.py) | a hand-rolled sys_id regex anywhere in tracked Python, outside `shared/sys_id_patterns.py` itself and any line carrying an annotated `sys-id-pattern-exempt:` opt-out |
+| [tests/test_size_ratchet.py](../../tests/test_size_ratchet.py) | `genizah_app.py`, `GenizahGUI` or a large web page factory growing past its ceiling, or shrinking more than 100 lines under it without the ceiling being lowered: new logic goes in a module of its own, and a raise is made in the same PR, with a reason |
 | [tests/conftest.py](../../tests/conftest.py) (`_pin_root_scripts_namespace`) | not a test but the pin that keeps `scripts` bound to the root namespace package |
 
 The two back-edge guards are **registries**: a new `shared/` or `desktop/` module must be added to
