@@ -164,7 +164,7 @@ def _enriched(user):
     the whole content container then, the popover with it, so an event fired
     at the popover of the first render reaches an element the page has
     already deleted (which the handler ignores, by design)."""
-    return any(isinstance(e, ui.button) and e.props.get('icon') == 'history' for e in _all_elements(user))
+    return any(isinstance(e, ui.button) and e.props.get('data-testid') == 'version-chooser' for e in _all_elements(user))
 
 
 async def _open(user):

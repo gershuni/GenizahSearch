@@ -115,7 +115,7 @@ def test_a_count_that_cannot_be_known_is_not_shown_as_zero():
 
 
 def _version_chooser(user):
-    return [b for b in _all_elements(user) if isinstance(b, ui.button) and b.props.get('icon') == 'history']
+    return [b for b in _all_elements(user) if isinstance(b, ui.button) and b.props.get('data-testid') == 'version-chooser']
 
 
 def test_a_slow_count_does_not_hold_up_phase_b():

@@ -219,7 +219,7 @@ def _button(user, aria_label):
 
 
 def _history_buttons(user):
-    return [b for b in _elements(user) if isinstance(b, ui.button) and b.props.get('icon') == 'history']
+    return [b for b in _elements(user) if isinstance(b, ui.button) and b.props.get('data-testid') == 'version-chooser']
 
 
 async def _wait_until(ready, timeout=10.0):

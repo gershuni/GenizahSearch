@@ -68,6 +68,8 @@ def _merge_fgp_sources(sys_id: str, pgp_sources):
 # Phase 117 Plan 03: promoted to web/components/typography.py (ANC-03).
 # Re-export the old private name so existing call sites and tests keep working unchanged.
 from web.components.typography import render_line_numbered_html as _render_line_numbered_html
+from web.components.text_size import current as text_size_now, head_style as text_size_head
+from web.components.text_size import scaled as scaled_text, text_size_buttons
 
 # Phase 117 Plan 03: per-provider image-URL resolution extracted to web/components/image_resolution.py.
 from web.components.image_resolution import apply_cached_external_images, preview_url, resolve_image_url
@@ -547,10 +549,11 @@ VIEWER_STYLES = '''
     .browse-more-menu .browse-menu-icon { min-width: 36px; padding-inline-end: 8px; color: #15803d; }
     [data-theme="dark"] .browse-more-menu .browse-menu-icon { color: #86efac; }
     /* Transcription type by width (the owner's screen-size table). */
-    .viewer-panels .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
-    @media (min-width: 641px) { .viewer-panels .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
-    @media (min-width: 1024px) { .viewer-panels .transcription-text { font-size: 19px !important; line-height: 2 !important; } }
-    @media (min-width: 1440px) { .viewer-panels .transcription-text { font-size: 20px !important; line-height: 2 !important; max-width: 760px; } }
+    /* ... times the reader's A- A+ (web/components/text_size.py; owner, 2026-11-23). */
+    .viewer-panels .transcription-text { font-size: calc(17px * var(--gs-text-scale, 1)) !important; line-height: 1.8 !important; }
+    @media (min-width: 641px) { .viewer-panels .transcription-text { font-size: calc(18px * var(--gs-text-scale, 1)) !important; line-height: 1.9 !important; } }
+    @media (min-width: 1024px) { .viewer-panels .transcription-text { font-size: calc(19px * var(--gs-text-scale, 1)) !important; line-height: 2 !important; } }
+    @media (min-width: 1440px) { .viewer-panels .transcription-text { font-size: calc(20px * var(--gs-text-scale, 1)) !important; line-height: 2 !important; max-width: calc(760px * var(--gs-text-scale, 1)); } }
 
     @media (max-width: 640px) {
         .browse-header-card h2 { font-size: 1.1rem !important; }
@@ -1284,6 +1287,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     # Add custom styles
     ui.add_head_html(VIEWER_STYLES)
+    ui.add_head_html(text_size_head(text_size_now()))  # the visitor's text size (A- A+)
 
     def update_search_error():
         """Update the inline search error display below the search bar."""
@@ -2786,14 +2790,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         return highlighted
 
-    def get_source_badge_class(full_header: str) -> str:
-        """Determine source badge class based on header."""
-        if 'V0.8' in full_header:
-            return 'source-v08'
-        elif 'V0.7' in full_header:
-            return 'source-v07'
-        return 'source-v08'
-
     def extract_folio_number(full_header: str) -> str:
         """Extract folio number from header if available."""
         if not full_header:
@@ -3841,6 +3837,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Changed to H2
                             h2(tr('Full Manuscript View'), classes='font-bold text-lg')
                             ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('ml-2').style('color: var(--text-secondary);')
+                            text_size_buttons()
 
                         # Back to single page button
                         ui.button(
@@ -3935,7 +3932,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         text=doc_page.text,
                                         highlight_html=_hl_html,
                                         line_height='2.0',
-                                        font_size='1.3rem',
+                                        font_size=scaled_text('1.3rem'),
                                         show_line_numbers=_show_ln,
                                     )
                                 else:
@@ -3943,7 +3940,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         text=doc_page.text,
                                         highlight_html=None,
                                         line_height='2.0',
-                                        font_size='1.3rem',
+                                        font_size=scaled_text('1.3rem'),
                                         show_line_numbers=_show_ln,
                                     )
                                 ui.html(_fmv_html, sanitize=False)
@@ -4362,11 +4359,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         rd_shown_page = rd_shown['page_index'] if rd_shown else None
                         rd_text_card.clear()
                         with rd_text_card:
-                            if rd_view is None:
-                                ui.label(tr('Transcriptions')).classes('text-sm font-semibold px-2').style(
-                                    'color: var(--text-secondary);'
-                                )
-                            else:
+                            # The texts' head: their title (by fragment) and A- A+ (owner, 2026-11-23)
+                            with ui.row().classes('w-full items-center no-wrap px-2 rd-text-head').style('gap: 4px;'):
+                                if rd_view is None:
+                                    ui.label(tr('Transcriptions')).classes('text-sm font-semibold').style(
+                                        'color: var(--text-secondary);'
+                                    )
+                                ui.element('div').classes('flex-grow')
+                                text_size_buttons()
+                            if rd_view is not None:
                                 # The document's own text, once; "By fragment" in its
                                 # controls brings back the stack below.
                                 render_document_text_panel(
@@ -4520,7 +4521,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                                         section_text = '\n\n'.join(section_texts) if section_texts else content
                                                                     if section_text:
                                                                         ui.label(section_text).style(
-                                                                            f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                                            f'font-size: calc(1.2rem * var(--gs-text-scale, 1)); line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
                                                                             f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
                                                                             f'overflow-wrap: break-word; word-break: break-word; '
                                                                             f'color: var(--text-primary);'
@@ -4540,7 +4541,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                                             break
                                                                     if pg_text:
                                                                         ui.label(pg_text).style(
-                                                                            'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
+                                                                            'font-size: calc(1.2rem * var(--gs-text-scale, 1)); line-height: 1.9; direction: rtl; text-align: right; '
                                                                             'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
                                                                             'overflow-wrap: break-word; word-break: break-word; '
                                                                             'color: var(--text-primary);'
@@ -4615,7 +4616,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                                 if display_text:
                                                     ui.label(display_text).style(
-                                                        f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                        f'font-size: calc(1.2rem * var(--gs-text-scale, 1)); line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
                                                         f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
                                                         f'overflow-wrap: break-word; word-break: break-word; '
                                                         f'color: var(--text-primary);'
@@ -4929,10 +4930,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 else:
                                     ui.label(f"{tr('Page')} {page.p_num}").classes('text-sm font-bold')
 
-                            # Source badge
-                            source_class = get_source_badge_class(page.full_header)
-                            source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
-                            ui.label(source_text).classes(f'source-badge {source_class}')
+                            # (The "V0.8" badge that stood here is gone (owner, 2026-11-23): it named the
+                            # automatic transcription's model even while an edition was on screen; the
+                            # version chooser at the head of the text names what is shown.)
 
                             # Source chips with matching external link icon colors
                             if _has_nli:
@@ -5891,6 +5891,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 _render_print_credit()
 
+                            # The head of the text (owner, 2026-11-23): the version chooser, the line
+                            # numbers, A- A+ and the dictionary switch, above the text. The row sat under
+                            # it: below the fold at 1280x800, after the whole text on a phone. Filled below.
+                            version_row = None
+                            if page_has_reading_view(page):
+                                version_row = ui.row().classes('w-full items-center p-2 border-b print-hide browse-text-head')
+
                             # Text content container
                             text_container = ui.column().classes('w-full h-full')
                             # The reader's switch (owner, 2026-11-04: the page
@@ -5899,31 +5906,44 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # a word does nothing.
                             blau_lookup_on = dictionaries.mark_pane(text_container)
                             current_text = {'value': page.text}
+                            # The text's HTML element while a text is shown: a new text or the line numbers
+                            # change its content in place (owner, 2026-11-23: the line numbers' button made
+                            # the window jump up). Drawn again from nothing, the pane was empty for a moment:
+                            # the page lost its height (845px measured at 375px) and the browser pulled a
+                            # short page's scroll up to its new end.
+                            text_view = {'html': None}
+
+                            def _text_html(text: str) -> str:
+                                # D-07: line numbers ON by default; coerced to bool to defend against type drift.
+                                show_ln = bool(safe_user_get('ui.show_line_numbers', True))
+                                # The edition's exact mark, on the folio its link arrived
+                                # for only (Codex review of PR #18).
+                                highlight_html = (mark_html(text, state.exact_mark['mark'],
+                                                            state.exact_mark['occurrence'])
+                                                  if state.exact_mark and on_target_folio(state, page)
+                                                  else None)
+                                if highlight_html is None and state.highlight_terms:
+                                    highlight_html = highlight_text(text)
+                                return _render_line_numbered_html(
+                                    text=text,
+                                    highlight_html=highlight_html,
+                                    line_height="2.2",
+                                    font_size=scaled_text('1.4rem'),
+                                    show_line_numbers=show_ln,
+                                )
 
                             def render_text_content(text: str):
                                 """Render text content with optional highlighting + optional line-number gutter (Phase 999.4)."""
+                                shown = text_view['html']
+                                if text and shown is not None and not shown.is_deleted:
+                                    shown.set_content(_text_html(text))
+                                    return
+                                text_view['html'] = None
                                 text_container.clear()
-                                # D-07: line numbers ON by default; coerced to bool to defend against type drift.
-                                show_ln = bool(safe_user_get('ui.show_line_numbers', True))
                                 with text_container:
                                     with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
                                         if text:
-                                            # The edition's exact mark, on the folio its link arrived
-                                            # for only (Codex review of PR #18).
-                                            highlight_html = (mark_html(text, state.exact_mark['mark'],
-                                                                        state.exact_mark['occurrence'])
-                                                              if state.exact_mark and on_target_folio(state, page)
-                                                              else None)
-                                            if highlight_html is None and state.highlight_terms:
-                                                highlight_html = highlight_text(text)
-                                            html_str = _render_line_numbered_html(
-                                                text=text,
-                                                highlight_html=highlight_html,
-                                                line_height="2.2",
-                                                font_size="1.4rem",
-                                                show_line_numbers=show_ln,
-                                            )
-                                            ui.html(html_str, sanitize=False)
+                                            text_view['html'] = ui.html(_text_html(text), sanitize=False)
                                         else:
                                             with ui.column().classes('items-center justify-center h-full'):
                                                 ui.icon('text_snippet', size='4rem').style('color: var(--text-muted);')
@@ -5985,8 +6005,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Version selector placeholder (populated by enrichment Phase B). A page without
                             # an automatic transcription gets it too, with empty text, so an edition of the
                             # page shows by the usual rule (owner, 2026-10-27).
-                            if page_has_reading_view(page):
-                                version_row = ui.row().classes('items-center p-2 border-b print-hide')
+                            if version_row is not None:
                                 enrichment_refs['version_container'] = version_row
                                 enrichment_refs['version_change_handler'] = handle_version_change
 
@@ -5997,6 +6016,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         icon='format_list_numbered',
                                         on_click=_toggle_line_numbers,
                                     ).props('flat round dense').tooltip(tr('Toggle line numbers'))
+                                    text_size_buttons()
                                     if dict_on:
                                         # The switch, the hint and the "type a word" button
                                         # (web/components/dictionary_lookup.py).

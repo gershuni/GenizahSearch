@@ -233,10 +233,22 @@ def create_version_selector(
             _notify_caller(text, info)
 
     with container:
-        # Version indicator
-        version_label = ui.label('V0.8').classes('text-xs font-medium').style(
+        # The version shown, and the chooser: its name opens the list of versions (owner, 2026-11-23:
+        # a separate "Version History" button beside a plain name was misleading). ``.text`` and
+        # ``.style`` below name and colour the version shown, as they did the label.
+        version_label = ui.button('V0.8').props(
+            f'flat dense no-caps size={size} icon-right=arrow_drop_down data-testid="version-chooser"'
+        ).classes('text-xs font-medium gs-version-chooser').style(
             'color: var(--text-secondary);'
         )
+        # Its one tooltip (its name is the version shown, so no aria-label over it). A search's
+        # deep link that showed the version holding the phrase rewrites this text: another
+        # ``.tooltip()`` would add a second tooltip competing with it.
+        with version_label:
+            chooser_tip = ui.tooltip(tr('Version'))
+
+        def _note_search():
+            chooser_tip.set_text(tr('showing the version containing your search'))
         if _marks_uids:
             _marks_lab = marks_labels(get_language())
             with ui.dialog() as marks_dialog, ui.card().style('max-width: 640px;'):
@@ -274,7 +286,7 @@ def create_version_selector(
                         version_label.text = 'PGP'
                         version_label.style('color: var(--q-positive);')  # Green for verified
                         if _note:
-                            version_label.tooltip(tr('showing the version containing your search'))
+                            _note_search()
                         if on_version_change:
                             on_version_change(src.get('content', ''), {
                                 'source': 'pgp',
@@ -290,7 +302,7 @@ def create_version_selector(
                     version_label.text = 'FGP'
                     version_label.style(f'color: {_FGP_COLOR};')
                     if _note:
-                        version_label.tooltip(tr('showing the version containing your search'))
+                        _note_search()
                     # Same bilingual credit + translation labelling as the menu
                     # path, so the initial auto-loaded FGP source shows the same
                     # metadata it would after the user reselects it (Codex #309 P2).
@@ -342,7 +354,7 @@ def create_version_selector(
                     # Arabic PGP text under a V0.8 badge for exactly that reason).
                     version_label.text = 'V0.8'
                     if _note:
-                        version_label.tooltip(tr('showing the version containing your search'))
+                        _note_search()
                     if on_version_change:
                         on_version_change(original_text, {'source': 'original', 'is_default': True})
                     return
@@ -397,7 +409,7 @@ def create_version_selector(
             0.1, lambda: asyncio.create_task(_safe_load())
         )
 
-        with ui.button(icon='history').props(f'flat dense size={size}').tooltip(tr('Version History')) as btn:
+        with version_label as btn:
             menu = ui.menu()
             with menu:
                 ui.menu_item(tr('Loading...')).props('disable')

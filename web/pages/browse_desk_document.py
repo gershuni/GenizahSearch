@@ -40,7 +40,7 @@ KEY_EDITION = '__document_edition__'
 KEY_TRANSLATION = '__document_translation__'
 
 _TEXT_STYLE = (
-    'font-size: 1.2rem; line-height: 1.9; '
+    'font-size: calc(1.2rem * var(--gs-text-scale, 1)); line-height: 1.9; '
     'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
     'overflow-wrap: break-word; word-break: break-word; color: var(--text-primary);'
 )
