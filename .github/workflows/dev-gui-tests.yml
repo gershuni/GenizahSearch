@@ -1,0 +1,54 @@
+name: dev GUI tests
+
+# The development repository runs only ci.yml's lint-and-docs. This adds its one
+# test lane: ci.yml's gui-tests, on Linux, for a PR labelled `gui-tests` (release
+# PRs, desktop work). Linux is where the Qt lane fails in ways a Windows machine
+# cannot show; Windows is covered by the local `scripts/run_gui_tests.py`, which
+# runs headless as CI does. One run costs about 8 of the free plan's monthly
+# minutes, most of which lint-and-docs uses, so the label is not for every PR.
+#
+# A workflow of its own, not a job in ci.yml: a label must start this lane, and
+# a ci.yml run started by a label would leave skipped jobs behind under real
+# check names (a skipped `tests` counts as passing). In the public repository,
+# where ci.yml runs gui-tests on both systems, this job always skips, under a
+# name no other check uses.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+# The newest run replaces one still running for the same PR.
+concurrency:
+  group: ${{ format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
+
+jobs:
+  gui-tests-labelled:
+    name: gui-tests (labelled, ubuntu-latest)
+    # On a labelled PR EVERY event runs the tests, another label too (`labeled` cannot be filtered
+    # by name). A run that skipped would still leave a check under this name, and a skipped check
+    # counts as passing: it could stand over a failed run on the same commit. So the latest
+    # `gui-tests (labelled, ubuntu-latest)` on a labelled PR is always a real result, at the cost
+    # of a repeat run when someone adds another label to it (rare here).
+    if: >-
+      github.repository != 'gershuni/GenizahSearch'
+      && contains(github.event.pull_request.labels.*.name, 'gui-tests')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+    # The same steps as ci.yml's gui-tests (tests/test_ci_workflows.py keeps them equal);
+    # the reasons for each are there.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      - run: python scripts/run_gui_tests.py

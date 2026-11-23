@@ -59,8 +59,8 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 - `python scripts/run_local_tests.py` — all tests pass? (the bounded runner; never one `pytest tests/`
   process — see `tests/README.md`). Its default expression excludes the lanes CI runs as separate
   jobs, so add them explicitly: `python scripts/run_local_tests.py -m render_smoke` (the NiceGUI
-  render-smoke lane; REQUIRED for a web release) and `python scripts/run_gui_tests.py` (the Qt lane;
-  REQUIRED for a desktop release). If the render-smoke lane includes a content-safety sweep
+  render-smoke lane; REQUIRED for a web release) and `python scripts/run_gui_tests.py` (the Qt lane,
+  headless as CI runs it; REQUIRED for a desktop release). If the render-smoke lane includes a content-safety sweep
   maintained in the private repository, follow its own setup instructions there before running it --
   it is out of scope for this public skill. A web
   release that touches the Atlas builder or its baked asset also needs the atlas-bake lane CI
@@ -82,8 +82,9 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 - Version consistency: `version.py`, `CompileScriptGenizah.iss`, `version_info.txt`, `README.md` all match current version (not yet bumped)
 - **`tests/test_release_artifacts.py` `_TARGET_VERSION`** — `bump_version.py` does NOT update this constant. Check its current value matches the pre-bump version; you'll need to bump it manually in Phase 3.
 
-The development repository runs only the light CI check; the full suite runs in the public
-repository after publishing (Phase 7). The local runs above are what stands between a mistake and a
+The development repository runs only the light CI check, plus the Qt lane on Linux for a PR
+labelled `gui-tests` (Phase 6); the full suite runs in the public repository after publishing
+(Phase 7). The local runs above are what stands between a mistake and a
 red public CI, so do not skip them.
 
 **Report** findings to the user. If there are blockers, stop and ask how to proceed. If there are warnings, list them and ask for confirmation to continue.
@@ -238,7 +239,16 @@ Ask: "Does this look right? Proceed with the release PR?"
    ```bash
    git push -u origin HEAD         # the release branch you are on (release/vX.Y.Z, or a -fixN branch)
    gh pr create --base master-main --title "release: vX.Y.Z — <theme>" --body-file <body file>
+   gh pr edit --add-label gui-tests  # the Qt lane on Linux, which no local run can show
    ```
+   Before the owner merges, `gui-tests (labelled, ubuntu-latest)` must PASS on the PR's last commit,
+   from the Bash tool (PowerShell 5.1 mangles `--jq`):
+   ```bash
+   gh pr checks <PR number> --json name,bucket --jq '.[] | select(.name == "gui-tests (labelled, ubuntu-latest)") | .bucket'
+   ```
+   It must print exactly `pass`. A bare `gh pr checks` does not fail on `skipping`, and a skipped
+   check is what a PR whose label was removed gets. This lane is where the public CI has failed at
+   release time; a failure here is fixed on this branch, before anything is merged or published.
 3. **The owner squash-merges it in the browser.** Note the merge commit's FULL id (40 characters)
    and wait until the development repository's light CI check on EXACTLY that commit has
    completed successfully (a run for another commit proves nothing):

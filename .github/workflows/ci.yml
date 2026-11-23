@@ -27,7 +27,10 @@ concurrency:
 
 # Only lint-and-docs runs in the development repository: it is the check the
 # publishing step waits for. Every other job runs in the public repository, on
-# each published commit, and carries the same `if:` below.
+# each published commit, and carries the same `if:` below. (The development
+# repository's one test lane, gui-tests on Linux for a PR labelled `gui-tests`,
+# is dev-gui-tests.yml: a workflow of its own, so that this one never runs for a
+# label and never leaves a skipped `tests` check behind.)
 jobs:
   lint-and-docs:
     # Bounded so a hung runner fails in minutes instead of burning GitHub's

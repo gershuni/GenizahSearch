@@ -72,9 +72,14 @@ def gui_files() -> list:
 
 
 def main() -> int:
+    # Headless, as the CI job runs it (ci.yml sets QT_QPA_PLATFORM=offscreen on both systems), so a
+    # local pass means what a CI pass means. Windows' native platform measures fonts and minimum
+    # window sizes differently: a test can pass natively here and fail on the CI runner. Set
+    # QT_QPA_PLATFORM yourself (e.g. `windows`) to run on the native platform instead.
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     files = gui_files()
-    print(f'running {len(files)} gui test file(s), one process each',
-          flush=True)
+    print(f'running {len(files)} gui test file(s), one process each, '
+          f'on the {os.environ["QT_QPA_PLATFORM"]} platform', flush=True)
     failed, crashed, passed = [], [], 0
     for name in files:
         rel = name

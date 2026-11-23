@@ -125,7 +125,12 @@ tests (job names as in the workflow file):
 - `tests-all` (shown as `tests`) -- one pass/fail for all the shards.
 - `render-smoke-tests` -- `pytest tests/ -m render_smoke`, the NiceGUI lane.
 - `findings-browser-check` -- one named Playwright test, kept in the private repository.
-- `gui-tests` -- `python scripts/run_gui_tests.py`, the Qt lane.
+- `gui-tests` -- `python scripts/run_gui_tests.py`, the Qt lane, headless (`offscreen`) on both
+  systems; the script runs it the same way locally unless `QT_QPA_PLATFORM` is set. The
+  development repository runs it only through `.github/workflows/dev-gui-tests.yml`: on Linux,
+  for a PR labelled `gui-tests` (check `gui-tests (labelled, ubuntu-latest)`). Label a release
+  PR, or a PR that changes desktop code, to see the Linux result before publishing.
+  `tests/test_ci_workflows.py` keeps that copy's steps equal to this job's.
 - `slow-tests` (Phase 78, R2-#5) -- `pytest -m slow tests/`, the dedicated gate
   for the soak suite.
 - `atlas-bake-tests` -- `pytest tests/atlas_bake -m atlas_bake`.
