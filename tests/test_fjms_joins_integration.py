@@ -145,6 +145,39 @@ class TestFjmsJoinsMergeIntoFetchConnectedFragments:
         assert "Gil" in all_scholars
 
 
+class TestViewAllFragmentsOfAnFjmsJoin:
+    """Owner, 2026-11-23 (ENA 2069.29, an FJMS join of two): "View All Fragments" opened the Reading Desk
+    with the other fragment alone. An FJMS group named only the other members in its details, and the
+    desk was built from the details whenever there were any."""
+
+    @patch("web.components.joins_panel.get_fragment_joins")
+    @patch("web.components.joins_panel.state")
+    @patch("web.document_service.get_document_for_fragment", return_value=None)
+    @patch("web.fjms_service.get_fjms_service")
+    def test_the_fragment_on_screen_is_in_the_details_first(self, mock_get_fjms, mock_doc_for_frag, mock_state,
+                                                            mock_get_joins, fjms_service, mock_meta_mgr):
+        mock_get_joins.return_value = []
+        mock_state.meta_mgr = mock_meta_mgr
+        mock_get_fjms.return_value = fjms_service
+        from web.components.joins_panel import fetch_connected_fragments
+
+        result = fetch_connected_fragments(shelfmark="T-S 12.100", document_id="SYS001", force_refresh=True)
+        details = [(d["shelfmark"], d["document_id"]) for d in result["fragment_details"]]
+        assert details[0] == ("T-S 12.100", "SYS001")
+        assert sorted(details) == [("T-S 12.100", "SYS001"), ("T-S 12.200", "SYS002"), ("T-S 12.300", "SYS003")]
+
+    def test_view_all_takes_the_details_then_any_fragment_they_miss(self):
+        from web.components.joins_panel import view_all_entries
+
+        ids = {"T-S 12.100": "SYS001", "T-S 12.300": "SYS003"}
+        entries = view_all_entries(
+            [{"shelfmark": "T-S 12.200", "document_id": "SYS002"}, {"shelfmark": "T-S 12.300", "document_id": ""}],
+            ["T-S 12.100", "T-S 12.200", "t-s 12.300", "T-S 12.999"],
+            lambda shelf: ids.get(shelf))
+        assert [(e["shelfmark"], e["document_id"]) for e in entries] == [
+            ("T-S 12.200", "SYS002"), ("T-S 12.300", "SYS003"), ("T-S 12.100", "SYS001")]   # 12.999: no id
+
+
 class TestFjmsJoinsDeduplication:
     """Test deduplication between FJMS and PGP/user joins."""
 

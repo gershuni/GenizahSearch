@@ -491,6 +491,12 @@ def _fetch_connected_fragments_uncached(shelfmark: str = None, document_id: str 
         # Ensure current shelfmark is in fragments_set
         if shelfmark and shelfmark.upper() not in fragments_upper:
             fragments_set.add(shelfmark)
+        # ... and among the details, first: a user's join names both its fragments, a PGP document all of
+        # its own, but an FJMS group or a community puzzle only the others, so "View All Fragments" opened
+        # the desk without the fragment it was opened from (owner, 2026-11-23, ENA 2069.29: a desk of one).
+        if shelfmark and document_id and shelfmark.upper() not in details_upper:
+            fragment_details.insert(0, {'shelfmark': shelfmark, 'document_id': document_id})
+            details_upper.add(shelfmark.upper())
 
         # If no joins at all (no user joins, no PGP joins, no FJMS joins), return empty
         if not formatted_joins:
@@ -514,6 +520,28 @@ def _fetch_connected_fragments_uncached(shelfmark: str = None, document_id: str 
     except Exception as e:
         logger.error("Error fetching connected fragments: %s", e)
         return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0, "fragment_details": []}
+
+
+def view_all_entries(fragment_details, fragments, docid_for: Callable[[str], Optional[str]]) -> List[Dict]:
+    """Every fragment of a join for the Reading Desk: the details first, in their order, then each fragment
+    they miss, its id from ``docid_for(shelfmark)`` (one with no id found is left out). It used the details
+    alone whenever there were any, and a fragment they missed was not on the desk."""
+    entries, have = [], set()
+    for fd in fragment_details or []:
+        shelf = fd.get('shelfmark') or ''
+        if not shelf or shelf.upper() in have:
+            continue
+        sid = fd.get('document_id') or docid_for(shelf)
+        entries.append({**fd, 'document_id': sid or ''})
+        have.add(shelf.upper())
+    for shelf in fragments or []:
+        if not shelf or shelf.upper() in have:
+            continue
+        sid = docid_for(shelf)
+        if sid:
+            entries.append({'shelfmark': shelf, 'document_id': sid})
+            have.add(shelf.upper())
+    return entries
 
 
 def invalidate_joins_cache(document_id: str = None, shelfmark: str = None, clear_all: bool = False):
@@ -1004,25 +1032,22 @@ def create_joins_dialog(
 
                     def handle_view_all():
                         dialog.close()
-                        # Build fragment info from fragment_details + fallback
-                        frag_info = list(fragment_details) if fragment_details else []
-                        # If no fragment_details (only user joins), build from fragments list
-                        if not frag_info:
-                            for f in fragments:
-                                f_docid = shelfmark_to_docid.get(f.upper())
-                                if f_docid:
-                                    frag_info.append({'shelfmark': f, 'document_id': f_docid})
-                                else:
-                                    # Try csv_bank fallback
-                                    if state.meta_mgr and hasattr(state.meta_mgr, 'csv_bank'):
-                                        import re as _re
-                                        norm = _re.sub(r'[^\w]', '', f).lower()
-                                        if norm.startswith('ms'):
-                                            norm = norm[2:]
-                                        sid = shelf_to_sys.get(norm)
-                                        if sid:
-                                            frag_info.append({'shelfmark': f, 'document_id': sid})
-                        on_view_all(frag_info, pgpid)
+
+                        def _docid_for(f):
+                            f_docid = shelfmark_to_docid.get(f.upper())
+                            if f_docid:
+                                return f_docid
+                            # Try csv_bank fallback
+                            if state.meta_mgr and hasattr(state.meta_mgr, 'csv_bank'):
+                                import re as _re
+                                norm = _re.sub(r'[^\w]', '', f).lower()
+                                if norm.startswith('ms'):
+                                    norm = norm[2:]
+                                return shelf_to_sys.get(norm)
+                            return None
+
+                        # Every fragment of the join: the details, and any fragment they miss
+                        on_view_all(view_all_entries(fragment_details, fragments, _docid_for), pgpid)
 
                     ui.button(
                         tr('View All Fragments'), icon='auto_stories',

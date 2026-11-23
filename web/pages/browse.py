@@ -6472,8 +6472,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             clear_browse_snapshot(keep_position=True)
             state.is_loading = True
             update_content()
+
+            async def _open_handed():
+                # In the page's own slot: a task started here has none, and the desk's notices
+                # ("Loading 2 manuscripts...", "... added") need one. Without it the first of them
+                # raised, after the first manuscript had opened and a desk of it alone was begun:
+                # several from the home page or the header opened one, and Browse later restored a
+                # desk of one (owner, 2026-11-23).
+                with _page_client.layout:
+                    await _browse_open_chosen(handed, None)
+
             # Cat-2: deferred init - container must mount before async load.
-            asyncio.ensure_future(_browse_open_chosen(handed, None))
+            asyncio.ensure_future(_open_handed())
         elif action == 'fl_id':
             state.is_loading = True
             update_content()  # Show spinner synchronously before async kicks in

@@ -354,6 +354,48 @@ def test_several_from_the_header_or_the_home_page_open_in_a_new_desk(tmp_path, m
     _empty_browse_run(tmp_path, monkeypatch, driver, url=f'/browse?sys_id={SID_B}&desk=shelf', before=leave)
 
 
+class _NotifyNeedsAPage:
+    """The test User's notice recorder, but as strict as the real ``ui.notify``: it needs the current
+    page (``context.client``), which a task started without a slot does not have. The User's own
+    recorder does not, which is how a raising notice went unseen here."""
+
+    def __init__(self):
+        self.messages = []
+
+    def __call__(self, message, **_kwargs):
+        from nicegui import context
+        context.client                          # noqa: B018 -- raises in a task with no slot, as ui.notify
+        self.messages.append(message)
+
+    def contains(self, needle):
+        return isinstance(needle, str) and any(needle in m for m in self.messages)
+
+
+def test_three_from_the_home_page_all_open_in_the_desk(tmp_path, monkeypatch):
+    # Owner, 2026-11-23: several from the home page opened one, and Browse later restored a desk of one.
+    # The list is opened in a task of its own, which had no page slot: the desk's first notice raised
+    # ("Loading 2 manuscripts..." with three ticked; "... added" with two, after the desk was kept, so
+    # the test of two above did not see it). Three: the first opens, the other two join it, the desk is
+    # drawn and the reader told.
+    from tests.render_smoke.test_reading_desk_document_render_smoke import SID_A, SID_B, SID_C
+    from web.reading_desk_handoff import stage_for_reading_desk
+
+    async def leave(user):
+        user.notify = _NotifyNeedsAPage()      # as the real ui.notify: no page slot, no notice
+        with user._client:
+            assert stage_for_reading_desk([_entry(SID_B, 'Frag B'), _entry(SID_C, 'Frag C'), _entry(SID_A, 'Frag A')])
+
+    async def driver(user, desks):
+        await _until(lambda: desks and desks[-1] == [SID_B, SID_C, SID_A])
+        await _until(lambda: _back_button(user))
+        await _until(lambda: '2 added to the Reading Desk' in user.notify.messages)
+        assert desks[-1] == [SID_B, SID_C, SID_A]
+        assert _back_button(user)
+        assert '2 added to the Reading Desk' in user.notify.messages
+
+    _empty_browse_run(tmp_path, monkeypatch, driver, url=f'/browse?sys_id={SID_B}&desk=shelf', before=leave)
+
+
 def test_without_the_list_the_address_opens_its_manuscript(tmp_path, monkeypatch):
     # a reload, another tab took it, or Browse opened at another manuscript: no desk, the address's own
     from tests.render_smoke.test_reading_desk_document_render_smoke import SID_B, SID_C
