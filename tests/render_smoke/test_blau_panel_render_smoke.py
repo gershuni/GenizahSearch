@@ -31,6 +31,7 @@ from nicegui import events, ui
 from shared import arabic_service
 from shared.arabic_service import LaneEntry, LaneLookup, LaneReading, LaneRoot, empty_lane
 from shared.blau_service import SITE_URL, BlauCard, BlauExample, BlauLookup, BlauSense, empty_lookup
+from shared.genizah_translations import TRANSLATIONS
 from shared.ja_roots import BORROW_LANE, BorrowedRoot
 from tests.render_smoke.test_browse_button_icons_render_smoke import (
     OPEN_PAGE, SID, _all_elements, _click, _run_home_smoke, _service, _wait_until,
@@ -389,7 +390,9 @@ def test_the_hebrew_ui_shows_the_site_s_line_only_and_its_own_words():
         texts = _texts(user)
         assert CREDIT_HE in texts and CREDIT_EN not in texts
         assert any(t.startswith('מילון בלאו מתעד') for t in texts), 'the disclaimer in Hebrew'
-        assert any(t.startswith('המהדורה הדיגיטלית: פרויקט MiDRASH') for t in texts), 'MiDRASH, in Hebrew'
+        # The credit's own Hebrew, whatever its wording (it named the project team from #121 on).
+        assert TRANSLATIONS[blau_panel.MIDRASH_CREDIT] in texts, 'MiDRASH, in Hebrew'
+        assert blau_panel.MIDRASH_CREDIT not in texts, 'MiDRASH, not in English'
         assert 'מילון בלאו' in texts and 'עמ׳ 587' in texts and 'קלאסי' in texts
         assert 'לחיצה על מילה מחפשת אותה במילונים' in _visible_texts(user)
         assert _switch_tip(user) == ['כיבוי המילונים', 'לחצו על D או M (או מ) ואז על מילה (או לחצו עליה כש-Alt לחוץ), או בחרו מילים ולחצו על D או M']
