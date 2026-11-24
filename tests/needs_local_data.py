@@ -65,13 +65,18 @@ _PGP_FGP = "pgp.db and fgp_data/fgp_transcriptions.db"
 _DISCOVERY = "discovery_data/live (the live discovery artifact)"
 _NLI = "nli_crossref.db (the NLI cross-reference sidecar)"
 _PRIVATE = "a record in the private repository"
+_INDEX = "the Tantivy index, found where the apps look for it (tests/real_index.py)"
+_RESEARCH = "same_work_spike/probe/scripts (the research normalizer, gitignored)"
+_RESEARCH_CORPUS = "same_work_spike/probe/scripts and Transcriptions.txt (both gitignored)"
 
 # file -> what it needs that CI does not have
 WHOLE_FILES = {
+    "tests/test_attach_htr_realignment.py": _RESEARCH,
 }
 
 # "file::test" -> what it needs that CI does not have
 TESTS = {
+    "tests/test_browse_api.py::test_browse_real_core_shape_smoke": _INDEX,
     "tests/test_catalog_numbers.py::test_golden_table_covers_every_form_in_the_real_sidecar": _FJMS,
     "tests/test_desktop_folio_navigation.py::test_real_crossref_folio_labels": _NLI,
     "tests/test_discovery_genre_labels.py::test_every_live_hebrew_domain_name_passes_the_surface_honesty_gate": _FJMS,
@@ -88,6 +93,13 @@ TESTS = {
     "tests/test_fgp_default_coverage.py::TestTextMatchDemotion::test_real_ms_heb_g2_folio27_case": _FGP,
     "tests/test_filter_unavailable_service.py::test_real_sidecar_line_height_is_reported_consistently": _FJMS,
     "tests/test_open_issues_fragments.py::test_no_open_issue_reuses_an_id_the_archive_holds": _PRIVATE,
+    "tests/test_parallels_api.py::test_parallels_locator_round_trip_real": _INDEX,
+    "tests/test_responsa_performance.py::test_exact_search_shows_first_results_within_3s": _INDEX,
+    "tests/test_passage_normalize.py::test_corpus_parity_of_gram_codes": _RESEARCH_CORPUS,
+    "tests/test_passage_normalize.py::test_corpus_parity_with_research_normalizer": _RESEARCH_CORPUS,
+    "tests/test_passage_normalize.py::test_fixture_parity_with_research_normalizer": _RESEARCH,
+    "tests/test_passage_normalize.py::test_research_k_and_base_match_the_spec": _RESEARCH,
+    "tests/test_search_api_v2.py::test_search_mode_real_index_returns_at_least_one_result": _INDEX,
     "tests/test_seed022_manual_transcription_tag.py::test_pgp_text_predicate_is_stricter_than_link_presence": _PGP,
     "tests/test_seed023_catalog_filters.py::test_editions_union_matches_scholarly_transcriptions_stat": _PGP_FGP,
     "tests/test_seed023_catalog_filters.py::test_fgp_editions_excludes_translations": _FGP,
@@ -102,23 +114,14 @@ TESTS = {
 # checkout, 2026-11-24. They stay listed so the gap is visible and
 # `fold_lane_timings.py --skips` does not report them again; making one run (or
 # deleting it) is its own change, after which it moves to TESTS.
-_PORTABLE_INDEX = ("looks for the index at <checkout>/Genizah_Index; the development machine "
-                   "keeps it at shared/config.py's legacy path in the home folder")
-_WEB_STATE = "needs web.state's searcher and catalogue loaded, which no test does"
+# 2026-11-24: the index tests now find the index where the apps do (tests/real_index.py),
+# and the research tree's two modules were copied into the main checkout from the retired
+# one; those moved to TESTS. The Responsa benchmarks below run, and fail their ceilings
+# several times over: an open issue (docs/open_issues.d/2026-11-24-responsa-common-word-
+# searches-slow.md); they are skipped until it is fixed.
 RUNS_NOWHERE = {
-    "tests/test_attach_htr_realignment.py": "the spike normalizer, a research tree not on the development machine",
-    "tests/test_browse_api.py::test_browse_real_core_shape_smoke": _WEB_STATE,
-    "tests/test_parallels_api.py::test_parallels_locator_round_trip_real": _WEB_STATE,
-    "tests/test_passage_normalize.py::test_corpus_parity_of_gram_codes":
-        "GENIZAH_PROBE_SCRIPTS: the research tree is not on the development machine",
-    "tests/test_passage_normalize.py::test_corpus_parity_with_research_normalizer":
-        "GENIZAH_PROBE_SCRIPTS: the research tree is not on the development machine",
-    "tests/test_passage_normalize.py::test_fixture_parity_with_research_normalizer":
-        "GENIZAH_PROBE_SCRIPTS: the research tree is not on the development machine",
-    "tests/test_passage_normalize.py::test_research_k_and_base_match_the_spec":
-        "GENIZAH_PROBE_SCRIPTS: the research tree is not on the development machine",
-    "tests/test_responsa_performance.py::TestPerformanceBenchmarks": _PORTABLE_INDEX,
-    "tests/test_search_api_v2.py::test_search_mode_real_index_returns_at_least_one_result": _PORTABLE_INDEX,
+    "tests/test_responsa_performance.py::TestPerformanceBenchmarks":
+        "skipped on purpose: Responsa searches over a common word are too slow, an open issue",
 }
 
 

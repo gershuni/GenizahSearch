@@ -36,6 +36,11 @@ and timings; `python scripts/fold_lane_timings.py --run <id>` folds the
 timings into `tests/lane_durations.json` and `--skips` lists what skipped on
 CI unmarked.
 
+A test that needs the real Tantivy index takes the `real_web_state` fixture
+(`tests/real_index.py`): it looks for the index where the apps do
+(`Config.INDEX_DIR`), loads the catalogue and the search engine into
+`web.state` for the module, and skips where there is no index.
+
 xdist is installed but is not the answer here: its workers collect the whole
 selection and persist across many files, and `--dist loadfile` keeps a file's
 tests together without recycling the worker -- the shape that failed.

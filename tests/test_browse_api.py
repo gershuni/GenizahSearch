@@ -171,20 +171,6 @@ def enriched_sidecars(monkeypatch):
     })
 
 
-def _has_test_fixture_data():
-    """Detect whether the dev/CI environment has the full Tantivy index +
-    csv_bank loaded for real-shape integration tests. R-PR-07 smoke test
-    skips when this returns False so CI without the full data set still passes.
-    """
-    try:
-        from web.state import state
-        if not state or not getattr(state, 'searcher', None):
-            return False
-        return bool(getattr(state, 'meta_mgr', None))
-    except Exception:
-        return False
-
-
 # ---------------------------------------------------------------------------
 # Route registration + decorator contract (R-PR-03)
 # ---------------------------------------------------------------------------
@@ -1001,53 +987,35 @@ def test_browse_locator_round_trip_serializer_unit(
     assert r.status_code == 200, r.text
 
 
-@pytest.mark.skipif(
-    not _has_test_fixture_data(),
-    reason='requires real csv_bank/Tantivy index (R-PR-07 smoke test)',
-)
-def test_browse_real_core_shape_smoke():
+def test_browse_real_core_shape_smoke(real_web_state):
     """R-PR-07 integration smoke test.
 
     Constructs a fresh FastAPI app + init_search_api. Does NOT mock
-    WebDataService at all. Picks a known fixture sys_id from production
-    csv_bank. This is the test that fails if R-PR-02 regresses (someone
-    reverts _fetch_core to call the raw core resolver and the resulting
-    minimal-dict shape breaks serializer attribute access).
+    WebDataService at all. Browses the first page of a real manuscript, one
+    that is in the catalogue and has pages in the index. This is the test that
+    fails if R-PR-02 regresses (someone reverts _fetch_core to call the raw
+    core resolver and the resulting minimal-dict shape breaks serializer
+    attribute access).
 
-    Skipif when fixture data unavailable -- runs on dev machines, skipped
-    on minimal CI.
+    `real_web_state` loads the real catalogue and index into web.state, and
+    skips where there is no index (CI). With them loaded only a 200 passes: a
+    404 or 504 would never reach the serializer this test is about.
     """
+    state = real_web_state
+    # csv_bank is keyed by sys_id (its values carry no id); the browse map says which
+    # of them the index has pages of.
+    sys_id = next((s for s in state.meta_mgr.csv_bank if state.searcher.page_count(s)), None)
+    assert sys_id, 'no catalogued manuscript has pages in the index'
     bare = FastAPI()
     init_search_api(app_override=bare)
     with TestClient(bare) as c:
-        # Use a known sys_id from production csv_bank. '1' is a safe choice
-        # because libraries.csv contains 217K records starting at sys_id=1.
-        # If '1' doesn't resolve, pick the first sys_id from state.meta_mgr.
-        from web.state import state
-        candidate_sys_id = '1'
-        try:
-            mgr = state.meta_mgr
-            if mgr and hasattr(mgr, 'csv_bank'):
-                rows = list(mgr.csv_bank.values())[:5] if mgr.csv_bank else []
-                if rows:
-                    first = rows[0]
-                    cand = first.get('id') if isinstance(first, dict) else None
-                    if cand:
-                        candidate_sys_id = str(cand)
-        except Exception:
-            pass
-
-        r = c.get(f'/api/browse?sys_id={candidate_sys_id}&p_num=1')
-        # Either 200 (resolved) or 404 (manuscript_page_not_found).
-        # 504 (core_timeout) is also acceptable on a slow dev machine.
-        # The test FAILS only on 500 (which is the R-PR-02 regression: serializer
-        # tried to read attributes off the raw core resolver's minimal dict).
-        assert r.status_code in (200, 404, 504), r.text
-        if r.status_code == 200:
-            body = r.json()
-            # Verify hydrated shape is preserved.
-            assert isinstance(body.get('shelfmark'), str)
-            assert isinstance(body.get('library', {}).get('code'), str)
+        r = c.get(f'/api/browse?sys_id={sys_id}&p_num=1')
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body['locator']['sys_id'] == sys_id
+        # Verify hydrated shape is preserved.
+        assert isinstance(body.get('shelfmark'), str) and body['shelfmark']
+        assert isinstance(body.get('library', {}).get('code'), str)
 
 
 # ---------------------------------------------------------------------------

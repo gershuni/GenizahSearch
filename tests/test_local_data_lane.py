@@ -279,7 +279,11 @@ def test_a_test_that_runs_nowhere_is_listed_apart_and_never_marked():
     assert not set(registry.RUNS_NOWHERE) & (set(registry.TESTS) | set(registry.WHOLE_FILES))
 
 
-def test_the_skips_report_leaves_out_marked_and_runs_nowhere_tests():
+def test_the_skips_report_leaves_out_marked_and_runs_nowhere_tests(monkeypatch):
+    # RUNS_NOWHERE may be empty (every entry made to run): a stand-in entry, in the
+    # registry the fold script itself loads.
+    monkeypatch.setattr(registry, "RUNS_NOWHERE", {"tests/test_gone.py::test_nowhere": "why"})
+    monkeypatch.setattr(fold.runner, "_local_data_registry", lambda: registry)
     marked = next(iter(registry.TESTS)).partition("::")
     nowhere = next(iter(registry.RUNS_NOWHERE)).partition("::")
     timing = _timing("1/1")

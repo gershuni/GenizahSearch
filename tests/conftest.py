@@ -110,6 +110,8 @@ _Config.LANGUAGE_FILE = os.path.join(_PERSONAL_STATE_AT_IMPORT, "lang.pkl")
 # ---------------------------------------------------------------------------
 from tests.needs_local_data import CI_UNCOLLECTED as _CI_UNCOLLECTED  # noqa: E402
 from tests.needs_local_data import is_marked as _needs_local_data  # noqa: E402
+# The real index and catalogue in web.state, for the tests that drive them (tests/real_index.py).
+from tests.real_index import real_web_state  # noqa: E402,F401
 
 collect_ignore_glob: list[str] = []
 if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":

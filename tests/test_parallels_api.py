@@ -31,8 +31,8 @@ healthy. Verifies _rate_limiter is not _browse_rate_limiter is not _parallels_ra
 
 D-08 / SC-4 (locator round-trip): test_parallels_locator_round_trip_real does
 real HTTP POST /api/parallels -> GET /api/browse against the production corpus.
-Env-gated via @pytest.mark.skipif(not _has_fixture_corpus()) so locked-in tests
-do NOT depend on fixture corpus availability.
+It takes the `real_web_state` fixture (tests/real_index.py), which skips where
+there is no index, so locked-in tests do NOT depend on the corpus.
 
 filtered_results uncapped (v7.10 decision): test_parallels_filtered_results_uncapped
 asserts that when the searcher returns > 200 filtered rows, the envelope filtered[]
@@ -177,22 +177,6 @@ def mock_searcher(monkeypatch):
     yield fake_searcher
     state.searcher = saved_searcher
     state.meta_mgr = saved_meta
-
-
-def _has_fixture_corpus() -> bool:
-    """Detect whether real Tantivy index + meta_mgr are loaded.
-
-    Mirrors test_browse_api.py:_has_fixture_corpus pattern.
-    """
-    try:
-        from web.state import state
-        if state.searcher is None or state.meta_mgr is None:
-            return False
-        if not getattr(state.meta_mgr, 'csv_bank', None):
-            return False
-        return True
-    except Exception:
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +334,19 @@ def test_parallels_locator_round_trip_serializer_unit(client, mock_searcher, cle
     assert r2.status_code == 200, r2.text
 
 
-@pytest.mark.skipif(not _has_fixture_corpus(), reason='no fixture corpus available')
-def test_parallels_locator_round_trip_real(bare_app, clean_env):
+_PART_UID_ISSUE = 'docs/open_issues.d/2026-11-24-parallels-part-uid-not-browsable.md'
+
+
+def test_parallels_locator_round_trip_real(real_web_state, bare_app, clean_env):
     """SC-4 / D-08 PRIMARY locator round-trip test against real Tantivy index +
     sidecars. Uses a short composition with high probability of matches.
+    `real_web_state` loads them into web.state and skips where there is no index
+    (CI); with them loaded, a failed search or no result is a failure, not a skip.
+
+    Known defect: a continuous part result keeps its `part:` uid, which
+    /api/browse refuses with 400 locator_conflict (_PART_UID_ISSUE). Exactly that
+    outcome, after a successful search, is an expected failure; anything else
+    fails. Remove the xfail branch with the fix.
     """
     composition = (
         # Common Hebrew piyut opening -- high match probability across the corpus.
@@ -363,12 +356,10 @@ def test_parallels_locator_round_trip_real(bare_app, clean_env):
         r = c.post('/api/parallels', json={
             'text': composition, 'chunk_size': 3, 'mode': 'exact',
         })
-        if r.status_code != 200:
-            pytest.skip(f'POST /api/parallels failed: {r.status_code} {r.text[:200]}')
+        assert r.status_code == 200, f'POST /api/parallels: {r.status_code} {r.text[:200]}'
         body = r.json()
         results = body.get('results') or []
-        if not results:
-            pytest.skip('Composition produced no results against this corpus')
+        assert results, 'the composition found nothing in the real corpus'
         item = results[0]
         locator = item['locator']
         sys_id = locator['sys_id']
@@ -377,10 +368,14 @@ def test_parallels_locator_round_trip_real(bare_app, clean_env):
                if item_uid else
                f"/api/browse?sys_id={sys_id}&p_num={locator['p_num']}")
         r2 = c.get(url)
-        # 200 (browse resolved); 404 (locator pointed at non-existent -- corpus mismatch);
-        # 504 (core_timeout on slow dev machine). 500 is the SC-4 regression.
-        assert r2.status_code in (200, 404, 504), (
-            f'SC-4 regression: GET /api/browse returned {r2.status_code} '
+        if (r2.status_code == 400 and str(item_uid or '').startswith(('part:', 'sys:'))
+                and (r2.json().get('error') or {}).get('code') == 'locator_conflict'):
+            pytest.xfail(f'{item_uid!r} is refused by /api/browse ({_PART_UID_ISSUE})')
+        # The search and the browse read the same index here, so the locator must open:
+        # a 404 is an unusable locator, a 504 an unavailable browse, a 500 the SC-4
+        # regression. Only the known defect above is expected.
+        assert r2.status_code == 200, (
+            f'SC-4 round trip: GET /api/browse returned {r2.status_code} '
             f'body={r2.text[:200]!r} for url={url}'
         )
 

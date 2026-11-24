@@ -28,18 +28,21 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO_ROOT)
 
 from shared.passage_normalize import (  # noqa: E402
     GRAM_CODE_SPACE, K, NORMALIZER_VERSION, gram_codes, nfc, norm_stream,
     norm_stream_fast, project_span,
 )
 
+# Both gitignored, in the checkout (the main checkout; a worktree has neither), where
+# scripts/attach_htr_realignment.py finds the same research tree.
 PROBE_SCRIPTS = os.environ.get(
     'GENIZAH_PROBE_SCRIPTS',
-    r'C:\GenizahSearch\same_work_spike\probe\scripts')
+    os.path.join(REPO_ROOT, 'same_work_spike', 'probe', 'scripts'))
 TRANSCRIPTIONS = os.environ.get(
-    'GENIZAH_TRANSCRIPTIONS', r'C:\GenizahSearch\Transcriptions.txt')
+    'GENIZAH_TRANSCRIPTIONS', os.path.join(REPO_ROOT, 'Transcriptions.txt'))
 
 # Deliberately nasty: nikud, cantillation, the Judeo-Arabic upper dot, all five
 # finals, brackets, maqaf, geresh/gershayim, curly quotes, Latin, digits, and

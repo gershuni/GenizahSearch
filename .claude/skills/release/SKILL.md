@@ -72,7 +72,8 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
   The private repository's procedure document has the same steps with the full paths. The lane
   fails when any of its tests skips there (in a worktree it fails at once): a test that skips both
   there and on CI ran nowhere. Report each skip; `--allow-skips` only when approved, for a sidecar
-  this machine does not have. (Measured 2026-11-24: 31 tests, 19 seconds.)
+  this machine does not have. (Measured 2026-11-24: 67 tests and 1 expected failure, about a minute;
+  the tests that need the index load it from where the apps keep it, `tests/real_index.py`.)
   The lanes CI runs as separate jobs still run locally, from the release worktree:
   `python scripts/run_local_tests.py -m render_smoke` (the NiceGUI
   render-smoke lane; REQUIRED for a web release) and `python scripts/run_gui_tests.py` (the Qt lane,

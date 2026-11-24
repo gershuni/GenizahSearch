@@ -23,7 +23,6 @@ violation, extra='forbid' rejection) return HTTP 400 with
 web/api_hardening.py:326. NOT 422.
 """
 
-import os
 from typing import Optional
 from unittest.mock import MagicMock
 
@@ -97,11 +96,6 @@ REQUEST_ECHO_KEYS = {
     'limit_effective',
     'filters',
 }
-
-
-def _has_index() -> bool:
-    """Return True only if a real Tantivy index appears to be loadable."""
-    return os.path.isdir('Genizah_Index')
 
 
 # ---------------------------------------------------------------------------
@@ -386,12 +380,12 @@ def test_search_mode_returns_envelope_via_stub(client, stub_searcher, search_mod
         assert env['request']['responsa_options_effective'] is None
 
 
-@pytest.mark.skipif(not _has_index(), reason='no Tantivy index in test env')
 @pytest.mark.parametrize('search_mode', SEARCH_MODES)
-def test_search_mode_real_index_returns_at_least_one_result(search_mode):
+def test_search_mode_real_index_returns_at_least_one_result(search_mode, real_web_state):
     """LAYER 2: against a real Tantivy index every fixture query returns ≥1
-    result. Skipped in CI environments without the index. The stub-based
-    tests above cover the same envelope-shape assertion deterministically."""
+    result. Skipped where there is no index (CI); tests/real_index.py looks for
+    it where the apps do. The stub-based tests above cover the same
+    envelope-shape assertion deterministically."""
     bare = FastAPI()
     init_search_api(app_override=bare)
     with TestClient(bare) as cli:
