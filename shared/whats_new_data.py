@@ -8,6 +8,133 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "11.1.0",
+        "date": "2026-11-24",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Fixes and improvements",
+            "he": "תיקונים ושיפורים"
+        },
+        "items": [
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "A faster start: the program starts faster, and the state you were in (a search or browsing a manuscript) is restored more quickly.",
+                "he": "פתיחה מהירה יותר: התוכנה עולה מהר יותר, ושחזור המצב שהייתם בו (חיפוש או עיון בכתב יד) מתבצע במהירות רבה יותר."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "On a phone: Browse shows the image on the first screen, the Reading Desk shows the image or the text at the full width of the screen, and Pick from the shelf gives its list the whole screen.",
+                "he": "בטלפון: בעיון לפי מספר מדף התמונה מופיעה כבר במסך הראשון, שולחן העיון מציג תמונה או טקסט ברוחב המסך, ובבחירה מהמדף הרשימה תופסת את כל המסך."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "A- / A+ beside the text set its size, on Browse, in Full Manuscript View and in the Reading Desk. The size you choose is kept.",
+                "he": "A- / A+ ליד הטקסט קובעים את גודלו, בעיון לפי מספר מדף, בתצוגת כתב יד מלא ובשולחן העיון. הגודל שבחרתם נשמר."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Beside the text: Copy text (with the page's citation), Print, Edit and Send Comment. Print can print the page's image and text, its image alone, its text alone, or the text of every page. Copy shelfmark and Share are on the shelfmark's card.",
+                "he": "ליד הטקסט: \"העתק טקסט\" (עם ההפניה לעמוד), הדפסה, עריכה ו\"שלח הערה\". אפשר להדפיס את התמונה והטקסט של העמוד, את התמונה בלבד, את הטקסט בלבד, או את הטקסט של כל העמודים. \"העתק מספר מדף\" ו\"שתף\" נמצאים בכרטיס של מספר המדף."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The version chooser heads the text, and a click on it opens the list of versions.",
+                "he": "בחירת הגרסה נמצאת בראש הטקסט, ולחיצה עליה פותחת את רשימת הגרסאות."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "A shelfmark clicked in the Reading Desk opens in Browse, and \"Back to the Reading Desk\" brings the desk back as it was.",
+                "he": "לחיצה על מספר מדף בשולחן העיון פותחת אותו בעיון לפי מספר מדף, ו\"חזרה לשולחן העיון\" מחזירה את השולחן כפי שהיה."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "The credit under an image names the source the image came from.",
+                "he": "הקרדיט שמתחת לתמונה מציין את המקור שממנו הגיעה התמונה."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "A Reading Desk left open comes back on the next start, as you left it.",
+                "he": "שולחן עיון שהשארתם פתוח חוזר בפתיחה הבאה של התוכנה, כפי שהשארתם אותו."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "In the Reading Desk, the image button (🖼) shows and hides the desk's images.",
+                "he": "בשולחן העיון, כפתור התמונה (🖼) מציג ומסתיר את תמונות השולחן."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "Choosing several manuscripts from the home page or the header opens all of them in the Reading Desk.",
+                "he": "בחירת כמה כתבי יד מדף הבית או מהכותרת פותחת את כולם בשולחן העיון."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "\"View All Fragments\" in a join's details opens every fragment of the join, the one you opened it from included.",
+                "he": "\"הצג את כל הקטעים\" בפרטי צירוף פותח את כל קטעי הצירוף, כולל הקטע שממנו פתחתם."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "A correction draft stays with the page it was written on, also when you turn the page before saving it.",
+                "he": "טיוטת תיקון נשארת עם העמוד שבו נכתבה, גם כשעוברים עמוד לפני ששומרים אותה."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "The Fragment Puzzle: the toolbars keep their height in a small window, the canvas fills its room, and a Back button returns to the page you came from.",
+                "he": "פאזל הקטעים: סרגלי הכלים שומרים על גובהם גם בחלון קטן, משטח העבודה ממלא את מקומו, וכפתור \"חזרה\" מחזיר לדף שממנו הגעתם."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "In the dark theme, the bibliography windows and the image source buttons are readable.",
+                "he": "בערכת הצבעים הכהה, חלונות הביבליוגרפיה וכפתורי מקור התמונה קריאים."
+            }
+        ]
+    },
+    {
         "version": "11.0.0",
         "date": "2026-11-22",
         "apps": [

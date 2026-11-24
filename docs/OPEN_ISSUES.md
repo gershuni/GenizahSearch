@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-23 (archived GS-5). 188 open: P1 0, P2 42, P3 146.
+> **Last Updated:** 2026-11-24 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-23-startup-user-work-mark-thread-id-reuse.md). 189 open: P1 0, P2 42, P3 147.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ the private repository; grep only).
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 3 | 6 | 9 |
-| Desktop app | 0 | 10 | 30 | 40 |
+| Desktop app | 0 | 10 | 31 | 41 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **42** | **146** | **188** |
+| **Total** | **0** | **42** | **147** | **189** |
 
 ## P1 - Critical
 
@@ -171,6 +171,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-309](ISSUE_DETAILS.md#gs-309) | A search that reuses a terminated worker's thread id can lose its user-work mark | `shared/background_work.py::user_work_started` | 2026-11-23 | ❌ Open |
 | [GS-304](ISSUE_DETAILS.md#gs-304) | A shelfmark opened in the first seconds after start can fail with "dictionary changed size during iteration" | `shared/metadata_manager.py::_iter_shelfmark_sources` (iterates `self.csv_bank` while the catalogue is still being loaded), reached from `MetadataManager.resolve_system_by_shelfmark` -> `_get_shelfmark_index` | 2026-11-20 | ❌ Open |
 | [GS-295](ISSUE_DETAILS.md#gs-295) | A saved Catalog search shows the Exact marker in the history menu | `genizah_app.py::GenizahGUI._MODE_CHARS`, `GenizahGUI._add_history_menu_item` | 2026-11-18 | ❌ Open |
 | [GS-296](ISSUE_DETAILS.md#gs-296) | A search-within step records the mode shown when the results arrive, not the one searched | `genizah_app.py` (`_combo_step_mode(self.mode_combo.currentIndex())` where the refinement step is built; `_apply_run_params`) | 2026-11-18 | ❌ Open |

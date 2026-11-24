@@ -36250,13 +36250,11 @@ class GenizahGUI(QMainWindow):
         self.browse_thumb.setText("No Preview")
 
     def cancel_browse_image_thread(self):
-        """Silence the thumbnail's running loader and keep it until it finishes.
-
-        It is handed to ``_browse_inflight``, which deletes it once it has finished, so this
-        window lets go of it: ``fetch_browse_thumbnail`` returns early (no thumbnail URL, a
-        Bodleian refresh) without starting another, and the next call -- the next page, the
-        window closing -- touched a deleted object (RuntimeError, 2026-11-22: Browse's instant
-        draws took that path on almost every move)."""
+        """Silence the thumbnail's running loader, keep it in ``_browse_inflight`` until it
+        finishes and is deleted, and let go of it at once (the next page or the window's close
+        touched a deleted object: RuntimeError). ``finished`` is connected before the cancel, and a
+        loader that finished before that is cleaned up on the next turn: one that stopped between
+        the cancel and the connection was never deleted (the Linux CI's order)."""
         thread = getattr(self, 'browse_img_thread', None)
         if thread is None:
             return
@@ -36267,24 +36265,25 @@ class GenizahGUI(QMainWindow):
             return
         if running:
             self.browse_img_thread = None
-            thread.cancel()
             try:
                 thread.image_loaded.disconnect()
                 thread.load_failed.disconnect()
             except (TypeError, RuntimeError):
                 pass
             # Keep alive until finished to prevent QThread destruction while running
-            if not hasattr(self, '_browse_inflight'):
-                self._browse_inflight = []
+            self._browse_inflight = getattr(self, '_browse_inflight', [])
             self._browse_inflight.append(thread)
             thread.finished.connect(lambda t=thread: self._cleanup_browse_inflight(t))
+            thread.cancel()
+            if thread.isFinished():
+                QTimer.singleShot(0, lambda t=thread: self._cleanup_browse_inflight(t))
 
     def _cleanup_browse_inflight(self, thread):
-        """Remove finished browse thread from in-flight list."""
+        """Remove a finished browse thread from the in-flight list and delete it, once."""
         try:
             self._browse_inflight.remove(thread)
         except (ValueError, AttributeError):
-            pass
+            return  # cleaned up already (both the signal and the next turn can call this)
         thread.deleteLater()
 
     def fetch_browse_thumbnail(self, sys_id, meta=None):

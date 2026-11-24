@@ -1,9 +1,0 @@
-## [Unreleased] -- The Reading Desk on a phone: one pane at a time (web, branch `claude/web-desk-phone`)
-
-- Below 900 px the desk's two panes stood side by side at half the width each, about 170 px at 375 px, and both its images and its texts were cut off. Now an Image | Text switch ("תמונה" / "טקסט") above the panes shows one of them at full width and the screen's height; the choice is kept with the desk's others, and a redrawn desk shows the same pane. Wider screens are unchanged (the switch is not shown).
-- "All images" cut each image and its toolbar at the start of the line on a narrow screen: the scroll area grew as wide as its widest row. It is held to the pane's width and the rows wrap.
-- On a phone the desk's header buttons (Open in Puzzle, Back to Page View) and its toolbar's (Add, Pick from the shelf, Add from List) are their icons, each named for screen readers; the box to add a shelfmark has a line of its own; the fragment count is in the header's badge only.
-- `web/pages/browse_desk_images.py` (`PHONE_CSS`, `KEY_PHONE_PANE`, `phone_pane`), `web/pages/browse.py`, `web/pages/browse_desk_document.py`; tests `tests/render_smoke/test_reading_desk_phone_render_smoke.py`.
-- The filmstrip's thumbnails on a narrow screen are squares, about two and a half to the width (up to 180 px), scrolled sideways; they were 68 px slivers, a dozen and more to the line (owner, 2026-11-23).
-- The Image | Text switch no longer throws the page up: it changes the pane in the browser at once and keeps itself where it was on the screen, or at its top when the reader had scrolled into the pane (hiding the taller pane shortened the page).
-- A click on a shelfmark in the desk opens it in Browse and keeps the desk: Browse offers "Back to the Reading Desk (n)" ("חזרה לשולחן העיון"), which brings it back as it was. A desk opened or brought back takes its place; "Back to Page View" still closes the desk. `web/pages/browse_state.py` (`reading_desk_left`).

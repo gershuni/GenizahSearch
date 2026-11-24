@@ -111,6 +111,49 @@ def test_the_cancelled_loader_is_kept_until_it_finishes_and_no_longer_held_by_th
     assert w._browse_inflight == []
 
 
+class _StopsInsideCancel(_Loader):
+    """Has finished before ``cancel`` returns: the order the Linux CI ran the test above in, where
+    the loader stopped between the cancel and the connection of its ``finished`` signal."""
+
+    def cancel(self):
+        super().cancel()
+        self.wait(2000)
+
+
+def test_a_loader_that_finishes_inside_the_cancel_is_still_deleted(monkeypatch):
+    import genizah_app
+    w = _window(monkeypatch, {})
+    monkeypatch.setattr(genizah_app, "ImageLoaderThread", _StopsInsideCancel)
+    w.start_browse_download(SID, 'https://example.org/thumb.jpg')
+    [loader] = LOADERS
+    w.cancel_browse_image_thread()
+    assert w.browse_img_thread is None
+    assert _until_deleted(loader), 'a loader that finished before the cleanup was connected is kept'
+    assert w._browse_inflight == []
+
+
+class _FinishedAfterTheCheck(_Loader):
+    """Seen running, then finished before ``finished`` is connected: its signal is gone."""
+
+    def isRunning(self):
+        return True
+
+
+def test_a_loader_that_finished_before_the_connection_is_deleted_on_the_next_turn(monkeypatch):
+    import genizah_app
+    w = _window(monkeypatch, {})
+    monkeypatch.setattr(genizah_app, "ImageLoaderThread", _FinishedAfterTheCheck)
+    w.start_browse_download(SID, 'https://example.org/thumb.jpg')
+    [loader] = LOADERS
+    loader.stop.set()
+    assert loader.wait(2000)
+    QTest.qWait(50)                                        # its finished signal is delivered to no one
+    w.cancel_browse_image_thread()
+    assert w._browse_inflight == [loader], 'cleaned up inside the cancel, not on the next turn'
+    assert _until_deleted(loader), 'a loader that finished before the connection is kept'
+    assert w._browse_inflight == []
+
+
 def test_a_loader_deleted_while_still_held_is_dropped_quietly(monkeypatch):
     w = _window(monkeypatch, {})
     loader = _Loader('https://example.org/thumb.jpg')

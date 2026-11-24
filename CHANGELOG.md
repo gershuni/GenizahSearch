@@ -8,6 +8,210 @@ which is not public.
 
 ---
 
+## [11.1.0] - 2026-11-24 — Fixes and improvements
+
+### Improvements
+- **A faster desktop start**: the startup lookup tables (the browse map, libraries.csv, the Oxford
+  parts, the completer, the shelfmark indexes, the FL-id lookup) are built by one thread in turn,
+  in the order the reader needs them, instead of five or six at once. The window responds
+  throughout, and the state restored from the last session (a search or a manuscript in Browse)
+  comes back sooner. A search started meanwhile goes first. The FL-id lookup reads each page header
+  in one pass, about four times faster (both apps).
+- **Phone layouts** (website): Browse shows the image on the first screen (the shelfmark's card is
+  one line, with its links in a ⋮; the page is chosen from a list; the toolbar's other buttons are
+  in a ⋮). Below 900 px the Reading Desk shows one pane at a time with an Image | Text switch, and
+  Pick from the shelf takes the whole screen with its details folded under the list. Narrow screens
+  also get tooltips on the picker's icons, the theme button from 370 px, and the sidebar beside the
+  page from 900 px.
+- **Text size** (website): A- / A+ beside the text in Browse, Full Manuscript View and the Reading
+  Desk, in the desktop app's steps; one size per reader, kept for the next page. A reader who has
+  not chosen a size starts one step smaller.
+- **The text's tools by the text** (website): Copy text (the text on screen with the page's
+  citation), Print, Edit and Send Comment on the text's version line. Print offers the page's image
+  and text, its image, its text, or every page's text. Copy shelfmark and Share are on the
+  shelfmark's card at every width.
+- **The version chooser heads the text** (website, Browse and Quick View): it names the version
+  shown, and a click opens the list of versions. The separate Version History button and the model
+  badge beside the page number are gone.
+- **Back to the Reading Desk** (website): a shelfmark clicked in the desk opens in Browse and keeps
+  the desk; "Back to the Reading Desk (n)" brings it back as it was.
+
+### Bug Fixes
+- **Image credits by the image's server** (both apps): a library's own image names that library;
+  NLI's image of the same leaf (Ktiv's photograph) takes the catalogue's credit, naming the library
+  and Ktiv. A Cambridge manuscript shows Cambridge's credit from the first visit. Quick View follows
+  the same rule. With no image, no credit is shown. "Image not available" and the Bodleian link
+  under a failed image are in the reader's language.
+- **The desktop Reading Desk comes back after a restart**: the session restore brings back an open
+  desk, with its manuscripts in their order, the PGP document it was opened for, the text chosen
+  for each, the image view and the images on show.
+- **The desktop Reading Desk's image button** (🖼) shows and hides the desk's images in each of its
+  views; Browse's own viewer stays hidden while the desk is open, and leaving the desk gives Browse
+  its image back.
+- **Several manuscripts from the home page or the header** ("Open more than one") all open in the
+  Reading Desk (website).
+- **"View All Fragments" in a join's dialog** opens the whole join in the Reading Desk, the fragment
+  it was opened from included (website).
+- **A correction draft stays with the page it was written on** (website): a page turn keeps an
+  unsaved edit as a draft of its own page, and Save Draft or Submit never files under the new page.
+- **The Fragment Puzzle in a short window** (website): the toolbars keep their height and the canvas
+  gives way; the canvas follows its room; a Back button returns to the page it was opened from.
+- **The dark theme** (website): the bibliography dialogs take the theme's colours, and the image
+  source chips are readable in both themes.
+- A long title no longer stretches the shelfmark's card on mid-width screens (website).
+
+### Internal
+- Development pull requests labelled `gui-tests` run the Qt lane on Linux; the local Qt lane runs
+  headless, as CI does.
+- A size ratchet test caps `genizah_app.py`, `GenizahGUI` and the largest web page factories.
+- The desktop shelf picker scrolls back to the chosen row on Linux too; its test runs on every
+  platform again.
+- `tests/lane_durations.json` re-measured on the whole suite (915 test files), so the CI shards are
+  balanced.
+- Desktop Browse: a cancelled thumbnail loader that stopped before its cleanup was connected is
+  deleted too (`cancel_browse_image_thread`); the Linux Qt lane ran it in that order.
+- No sidecar changes: code only, for the website and the installer.
+
+### Browse: a correction draft stays with the page it was written on (web)
+
+- Turning the page while editing a correction used to leave the editor open over the next page.
+  Save Draft or Submit then filed the first page's text under the second page (GS-5).
+- Now the turn closes the editor. A change not yet saved is kept as a draft of its own page, and
+  the site says "Draft saved". Every correction write is filed under the page the editing began
+  on, never under the page on screen.
+- A draft save still running when the page turns is not written twice. The kept draft waits for
+  that save, and updates its draft only if the text has changed since.
+- The code is in `web/pages/browse_correction_edit.py` (new: `EditedPage`, `end_edit_for`,
+  `keep_draft`, `write_correction`), wired into `web/pages/browse.py`. `create_browse_page` is 17
+  lines shorter, and its ceiling in `tests/test_size_ratchet.py` is lowered to match. Tests are in
+  `tests/test_browse_correction_off_loop.py` (a page turn while editing) and
+  `tests/test_browse_correction_edit.py`.
+
+### Pick from the shelf on a phone: the list gets the screen (web)
+
+- The libraries filled only half the picker's height on a phone: the library column's width rule (270 px) became its height once the columns stood one under the other. Every column now fills the height (375x812: 16 libraries in sight, 5 before).
+- Choosing several on a phone (adding to the Reading Desk) left the list about two rows. Now, below 900 px: the dialog takes the whole screen; the crumbs stay on one line, scrolled to the level shown, with the back arrow kept at its start; the column's title (the last crumb again) and the "Tick shelfmarks" hint are gone; the filter and the view switch share a line; the details pane is folded to one line under the list (the shelfmark and a Details button that opens the pane over the list and folds it again; an emptied pane folds itself); the foot is one line (Clear, Add to List and Add to Puzzle as their icons, each named for screen readers). 375x812, Reading Desk picker at Yevr. II B 201-400: 13 rows of the list in sight.
+- Desktop widths are unchanged. `web/components/shelfmark_tree_picker.py` (phone rules under `max-width: 900px`, `show_on_bar`, `set_pane_open`, `_CRUMBS_END_JS`); tests `tests/render_smoke/test_shelf_picker_phone_render_smoke.py`.
+- The Reading Desk's choice of several stays ticked when the desk takes it, until Clear: opened again, the picker shows the same ticks, and a desk opened again from them is the same desk (one already on it counts as taken). The other hosts' choices (the search's exclusions, a list, the Puzzle) still leave the picker when taken. `KEEP_CHOSEN_PURPOSES`; test `test_the_reading_desks_choice_stays_ticked_until_cleared`.
+
+### The Reading Desk on a phone: one pane at a time (web)
+
+- Below 900 px the desk's two panes stood side by side at half the width each, about 170 px at 375 px, and both its images and its texts were cut off. Now an Image | Text switch ("תמונה" / "טקסט") above the panes shows one of them at full width and the screen's height; the choice is kept with the desk's others, and a redrawn desk shows the same pane. Wider screens are unchanged (the switch is not shown).
+- "All images" cut each image and its toolbar at the start of the line on a narrow screen: the scroll area grew as wide as its widest row. It is held to the pane's width and the rows wrap.
+- On a phone the desk's header buttons (Open in Puzzle, Back to Page View) and its toolbar's (Add, Pick from the shelf, Add from List) are their icons, each named for screen readers; the box to add a shelfmark has a line of its own; the fragment count is in the header's badge only.
+- `web/pages/browse_desk_images.py` (`PHONE_CSS`, `KEY_PHONE_PANE`, `phone_pane`), `web/pages/browse.py`, `web/pages/browse_desk_document.py`; tests `tests/render_smoke/test_reading_desk_phone_render_smoke.py`.
+- The filmstrip's thumbnails on a narrow screen are squares, about two and a half to the width (up to 180 px), scrolled sideways; they were 68 px slivers, a dozen and more to the line.
+- The Image | Text switch no longer throws the page up: it changes the pane in the browser at once and keeps itself where it was on the screen, or at its top when the reader had scrolled into the pane (hiding the taller pane shortened the page).
+- A click on a shelfmark in the desk opens it in Browse and keeps the desk: Browse offers "Back to the Reading Desk (n)" ("חזרה לשולחן העיון"), which brings it back as it was. A desk opened or brought back takes its place; "Back to Page View" still closes the desk. `web/pages/browse_state.py` (`reading_desk_left`).
+
+### The Fragment Puzzle: toolbars that keep their height, a canvas as wide as its room, a way back (web)
+
+- In a short window the Puzzle's toolbars shrank to 32 px and their wrapped lines lay over the next row (the sliders over the buttons). They keep their height now, as does the extension's notice; the canvas gives way, down to 240 px.
+- The canvas kept the width it was drawn at when its room changed without the window (the side menu opened or closed, the notice dismissed), and could fill half of it. It follows its room now.
+- A Back button first on the Puzzle's toolbar, to the page it was opened from (the Reading Desk, Browse, a list, ...): shown when the reader came from another page of the site.
+- `web/pages/puzzle.py`; tests `tests/render_smoke/test_puzzle_layout_render_smoke.py`.
+
+### Picker, header and sidebar on narrow screens: tooltips on the icons, the switch remembered, no status dot, the theme button, the sidebar beside the page (web)
+
+- The picker's Clear, Add to List and Add to Puzzle, shown as their icons alone on a narrow screen, have their names as tooltips.
+- A picker with "Open more than one" (the header's, the home page's, Browse's) opens in the mode the reader last left it in.
+- The header's server status dot is hidden on a phone (up to 640 px).
+- The header's theme button shows from 370 px (it was hidden up to 640 px, with room for it).
+- The sidebar pushes the page aside from 900 px (it covered the page up to 1023 px); narrower, its overlay starts under the header, whose menu button stays in sight.
+- `web/components/shelfmark_tree_picker.py` (`MODE_KEY`), `web/static/common.css`, `web/main.py` (the sidebar's breakpoint); tests in `tests/render_smoke/test_shelf_picker_phone_render_smoke.py`, `tests/test_phone_layout_rules.py`.
+
+### Desktop startup: the restored manuscript sooner, the window answering throughout (desktop)
+
+- **What was slow.** At start the desktop built about 33 s of Python lookup tables in five or six threads at once: the browse map, libraries.csv, the Oxford parts, the FL-id lookup (11 s alone), the CUDL alias index (5.8 s), the Shelfmark search index (9.6 s), and the completer. Python runs one thread at a time, so every Qt callback of the window waited for a build's time slice (measured: 0.08 ms idle, 42-67 ms beside one busy thread). The window froze for 13-21 s, and the manuscript restored from the last session showed its images after 22 s (Cambridge) or 25-30 s (Oxford). Turning all the builds off brought it to 12 s; turning off any one of them still left a 13-17 s freeze.
+- **Now** one thread builds them in turn, in the order the reader needs them (`desktop/startup_work.py`). First the browse map, libraries.csv and the Oxford parts. Then, once the restored manuscript is shown (or 8 s later), the completer, Browse's shelfmark resolver index, the alias and Shelfmark search indexes, the FL-id lookup and the file map. The resolver index took 5.6 s on the UI thread at the first Go to by shelfmark; it is now built here, and a Go to that comes sooner waits for this build instead of making a second one. A search started meanwhile goes first: the builds pause at their next checkpoint until it ends (`shared/background_work.py`). While the startup builds run, Python hands the CPU over every 0.5 ms instead of every 5 ms, so the window answers between their slices. It goes back to 5 ms when they end, and while a search runs. After each build, `gc.freeze()` moves what it made out of reach of Python's full collections. Each of those had held the CPU for 0.2-0.66 s, longer after every build, and stalled the window every few seconds. The web does the same once its loaders end. The queue starts when the startup slot returns, so the two no longer share the CPU: the slot took 1.0-1.5 s beside the builds, 0.06 s without them.
+- **Usage behind the order** (PostHog, desktop, 90 days, the developer's machine left out): half the sessions only read what the restore brought back; the commonest first action is a keyword search, about 24 s in; going to a shelfmark in Browse comes early (about 9 s), going to an FL id rarely.
+- **Nothing waits for its turn.** The restored Browse page waits for the browse map, then shows (it no longer loads the map on the UI thread). A saved Browse state without a sys_id waits for the resolver index, so it never searches a half-read libraries.csv. An Oxford manuscript's enrichment waits for the parts rather than miss its images (`MetadataManager.wait_for_oxford_parts`). A CUDL-form shelfmark looked up off the UI thread before the alias index is built builds it then (`shelfmark_bridge.ensure_alias_index`). On the UI thread the lookup answers as it did before the index existed, since a build there would hold the window. The Shelfmark search builds its index on first use, as before, and an FL id is found by a scan until its lookup is built, as before. The My Library freshness check runs after the builds.
+- **Cheaper:** the FL-id lookup reads each page header with one compiled search instead of four. 11.0 s becomes 2.75 s, with the same 973,091 keys. This applies on the web too.
+- **Fixed on the way.** The shelfmark completer polled for libraries.csv and could build from a half-read file: it now gets its rows from the queue once the file is read, and is filled 5,000 rows per event-loop turn (252,000 rows in one go held the window for 1.6 s). The session restore no longer rebuilds the two history menus, which fill themselves when opened.
+- Measured before and after with the timing driver (desktop, Cambridge 990051243290205171 and Oxford 990053638010205171): see the PR.
+- Tests: `tests/test_startup_work.py`, `tests/test_startup_work_qt.py`.
+
+### Desktop Reading Desk: the open desk comes back after a restart (desktop)
+
+#### Fixed
+- **A Reading Desk left open is open again on the next start.** The session restore used to bring
+  back only the manuscript Browse showed, so after a restart Browse showed one manuscript instead
+  of the desk. The desk now comes back over it as it was left: its manuscripts in their order, the
+  PGP document it was opened for, the text chosen for each, and the image view, the image on show
+  and the puzzle images on show. A manuscript that is no longer in the catalogue or the index is
+  left out without a message; a session with no desk restores as before.
+- The desk opens once the app's own startup loading has finished (at most 30 seconds), so the
+  window does not freeze while it is drawn; closing the app before then still keeps the desk.
+- **Leaving the desk shows Browse's image again** when that image arrived while the desk was open
+  (which is always so for a restored desk): Browse's viewer used to stay empty.
+
+### Several from the home page or the header open in the Reading Desk again (web)
+
+- "Open more than one" in the home page's or the header's shelf picker opened only the first manuscript, and Browse later restored a Reading Desk with that one alone (in 11.0.0). Browse opens the list it is handed in a task of its own, which had no page to show its notices on: the first of them ("Loading 2 manuscripts...", with three ticked; "... added", with two) raised after the first manuscript had opened and a desk of it alone was begun and kept. The list is now opened inside the page, so all of them join the desk and the reader is told.
+- `web/pages/browse.py` (`_open_handed`); test `tests/render_smoke/test_shelf_pick_multi_hosts_render_smoke.py::test_three_from_the_home_page_all_open_in_the_desk`, with a notice recorder as strict as the real one (the test User's needs no page, which is how this went unseen).
+- "View All Fragments" in a join's dialog opened the Reading Desk without the fragment it was opened from when the join came from FJMS (or a community puzzle): ENA 2069.29's join of two opened as a desk of one, Ms. 525 alone. The join's details now start with the fragment on screen, and the desk takes every fragment of the join, the details' and any they miss (`web/components/joins_panel.py`: `view_all_entries`). Tests in `tests/test_fjms_joins_integration.py`.
+
+### Image credits by the image's server; the image source chips readable; the bibliographies dark (web + desktop)
+
+- On a first visit to a Cambridge manuscript, its image was drawn under the National Library of Israel's credit until the page was reloaded: the deferred enrichment read the credit before its own fetch had put the Cambridge manifest in the cache. It now reads the credit again once the cache is filled, as it already did for the NLI and Katz credits.
+- An image's credit follows the server it came from, in both apps: Cambridge's and JTS's own images (CUDL; JTS's through Princeton) name their library alone; NLI's image of the same leaf, Ktiv's photograph, takes the catalogue's credit, which names the library and Ktiv (NLI named once: the catalogue names it twice for most libraries). The library's credit used to stand under its own image too, and NLI's image had NLI's manifest credit or a bare "NLI". The rule: `shared/metadata_manager.py` (`own_server_image_credit`, `nli_image_credit`), taken by Browse and the desktop viewer.
+- Browse no longer shows NLI's credit for a moment before the library's: the first draw's credit stays out of sight until the page's catalogue details have come.
+- Quick View takes the same rule (it showed the shelfmark as a JTS image's credit: a JTS manifest has no credit, and its label stood there).
+- "Image not available" and the Bodleian link under a failed image are in the reader's language (they were in English, in Browse and Quick View).
+- No image, no credit: Quick View's credit goes when no source's image loads, as Browse's does; the desktop viewer's goes with "No Image" and with a manuscript that has no image.
+- The image source chip being shown (white on its library's colour) read green on blue in the light theme and grey on blue in the dark: the button's default Quasar colour (`.text-primary`, `!important`) beat the chip's own. The chips and their open-in-new links now carry no Quasar colour.
+- In the dark theme the bibliography dialogs (FJMS, Ktiv) showed a white table: their tables now take the theme as the joins candidate table does (`bibliography-table` in `web/static/common.css`), their detail panel the theme's colours.
+- `shared/metadata_manager.py`, `web/components/image_resolution.py`, `web/pages/browse_enrichment.py`, `web/pages/browse.py` (`_source_chip`, `_source_external_button`, the credit strip), `web/components/bibliography_dialog.py`, `web/pages/search_results.py`, `web/static/common.css`, `desktop/viewers.py`; tests in `tests/test_image_credit_by_server.py`, `tests/test_browse_image_first_draw.py`, `tests/render_smoke/test_browse_button_icons_render_smoke.py` and `tests/test_bibliography_dialog_dark.py`.
+
+### Browse: the version chooser above the text, and A- / A+ (web)
+
+- The version chooser (with the line numbers and the dictionary switch) heads Browse's text pane. It sat under the text: below the fold at 1280x800 (at 973 px), and on a phone after the whole text.
+- The "V0.8" badge beside the page number is gone: it named the automatic transcription's model even while a PGP or FGP edition was on screen. The chooser names the text shown.
+- The version chooser is the name of the version shown, with a drop-down arrow: a click on it opens the list of versions. The separate "Version History" button beside it is gone. Browse and Quick View.
+- A- / A+ beside the text, as in the desktop app: Browse's page and Full Manuscript View, and the Reading Desk's texts (by fragment, and a document's own text). One size per visitor, kept for the next page, in the desktop app's steps (9pt to 40pt by 2pt of its 16: from 9/16 to 2.5 times the size, by 0.125). `web/components/text_size.py` (the `--gs-text-scale` CSS variable the texts' font sizes are multiplied by).
+- Tests `tests/render_smoke/test_browse_text_head_render_smoke.py`.
+- The text starts a step smaller for a visitor who has not chosen a size (one press of A−: 14pt of the desktop's 16), everywhere; a size chosen is kept.
+- The line numbers' button no longer makes the page jump up: the text was drawn again from nothing, the pane empty for a moment (845 px of the page's height at 375 px), and the browser pulled a short page's scroll up. The text's content now changes in place, for a new version too.
+
+### Browse on a phone: the image in the first screen (web)
+
+- On a 375x812 phone the image began 897 px down the page, under a 310 px green card (the library and the shelfmark over three lines, the title, a row of buttons, the place on the shelf) and a 254 px toolbar of icons without names. It now begins at 501 px: the card is 76 px, the toolbar 139 px, and the page is 359 px wide instead of 295 (8 px each side, not 40).
+- The green card on a phone: the shelfmark, a ⋮ and the title on one line cut with "..." (a tap shows it whole). The Ktiv / PGP / library links, Search for Parallels, Show Metadata, Add to List, Copy Link and the place on the shelf (the library first) are in the ⋮. At every width the title is the whole title, cut to its line, not its first five words, and the puzzle button has left the card for the toolbar, beside Print (on a phone, in the toolbar's ⋮).
+- The page is chosen from a list ("1 / 7"): the box and its Go button folded on a phone to "1 ← 7 /", an arrow read as forward. A page count not yet known keeps the box, and Enter goes there.
+- View All has its words at every width: "כל העמודים" / "All pages", and "עמוד אחד" / "One page" to leave it (its icon alone, on a phone, said nothing).
+- The toolbar on a phone: the page list, All pages and a ⋮ with Print (this page, all pages), Add to List, Toggle Image, Edit Transcription, Send Comment, View Comments, Joined Fragments and Add to Reading Desk; the joins button stays in sight when the manuscript has joins. A wider screen keeps every button in sight.
+- The header's search box is its search button on a phone, whatever the room (it opens across the bar as before), with the shelf button beside it (it was inside the box).
+- On a PC: the card's words are shorter (CUDL, Parallels Search, Metadata; the whole names in tooltips); Computed identifications is its icon alone on the toolbar (its words its tooltip, "New" a gold dot); the phone's toolbar ⋮ stays on the line of All pages; 8 px under the header instead of about 70 above the lookup.
+- `web/pages/browse.py` (`_BrowseHeading`, `_header_more_menu`, `_menu_entry`, `_click_tool_js`, `browse-phone-only` / `browse-wide-only`), `web/static/common.css`, `shared/genizah_translations.py` (two strings); tests `tests/render_smoke/test_browse_phone_top_render_smoke.py`.
+- No image credit under an image that could not be shown: when every source failed ("Image not available"), the credit strip goes too (`web/static/manuscript_viewer.js`, `handleImageError`).
+
+### Browse: copy the shelfmark, share in sight, the text's tools by the text (web)
+
+- The green card has Copy shelfmark, then Share, on every width (on a phone beside the card's ⋮).
+- By the text, on its version line: Copy text (the text on screen with the page's citation, as "How to cite" gives it), Print, Edit, Send Comment. The toolbar no longer carries Print, Edit or Send Comment for a page with a text. Both copies go through the site's copy, which says "copied" only when the browser did; the shelfmark is written in the click itself (`web/clipboard.py::copy_on_click`), as a phone's browser asks.
+- The print menu prints this page's image and text, its image alone, or its text alone ("הדפסת תמונה וטקסט של הדף הנוכחי", "הדפסת תמונת הדף הנוכחי", "הדפסת טקסט הדף הנוכחי"), or every page's text as before (the text alone not for a catalogue-only record, which has none); the masthead prints with each, the transcription's credit only with its text. "Service not available" is never printed.
+- A long title is cut to the green card at every width (between 641 and 1023 px it stretched the card and the page to its length); its tooltip is a box of bounded size.
+- `web/pages/browse.py` (`_print_js`, `_print_button`); tests in `tests/render_smoke/test_browse_text_head_render_smoke.py` and `tests/render_smoke/test_browse_phone_top_render_smoke.py`.
+
+### Pick from the shelf (desktop): the chosen row comes back into sight on Linux too (desktop)
+
+- When a column's names wrap and its rows grow, the picker scrolls back to the chosen row. On Linux it did not: the table takes the rows' new heights into its scroll range in a timer of its own, and Qt on Linux ran the picker's scroll back before that timer, against the old range, so the list kept its old place. The picker now scrolls back also when the scroll range changes, while it still keeps the chosen row (until the reader scrolls, clicks or types in that list), so the result no longer depends on which runs first. Windows, where the desktop app ships, already worked. `desktop/widgets/shelfmark_tree_picker.py::_NodeColumn._range_changed`.
+- Tests: the scroll-back test runs on Linux again (it was Windows-only for release 11.0.0), and a new test runs the scroll back before the range on every platform, so the Windows runs check Linux's order too. Checked on Linux (WSL, offscreen) and on Windows, with the scroll back on the range removed (fails) and restored (passes).
+
+### Desktop Reading Desk: the show/hide image button hides the desk's images (desktop)
+
+#### Fixed
+- **With the Reading Desk open, the image button (🖼) hides and shows the desk's images.** It used
+  to leave them and show Browse's own image viewer beside them instead, so the window had two
+  image panes, the second with "No image". It now works in each of the desk's views (One at a
+  time, All images, Puzzle images), Browse's viewer stays hidden while the desk is open, and a
+  redraw of the desk (an image list arriving) keeps hidden images hidden.
+- **The desk opens with its images on show and gives Browse its image back.** Leaving the desk
+  shows or hides Browse's image as it was before the desk; a manuscript opened from the results
+  while the desk is open no longer brings Browse's viewer up beside the desk's images.
+- The button also works on a desk opened with nothing browsed, and while a fragment being added
+  to the desk is still loading.
+
 ## [11.0.0] - 2026-11-22 — Pick from the shelf
 
 ### New Features
