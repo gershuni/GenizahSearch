@@ -6722,9 +6722,17 @@ TRANSLATIONS.update({
     # A root typed with a stem its dictionary does not list under it ("דלל III"; the stem's numeral
     # goes in {stem}).
     "Stem {stem} is not listed under this root.": "בניין {stem} אינו מופיע תחת השורש הזה.",
-    # The digital edition's credit under the print credit (owner, 2026-11-04).
-    "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
-        "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
+    # The digital edition's credit under the print credit (owner, 2026-11-04; the
+    # team named since 2026-11-24, the Hebrew in the owner's own words).
+    "The digital edition of the dictionary is courtesy of the MiDRASH project, "
+    "funded by the European Union (ERC, MiDRASH, 101071829). Project team: from "
+    "Bar-Ilan University, Dr. Vered Raziel Kretzmer, Dr. Elisha Rosensweig, "
+    "Ephraim Meiri and Dr. Avi Shmidman; and from the Eliyahu Lab, University of "
+    "Haifa, Dr. Eliezer Baumgarten, Dr. Yoav Phillips and Prof. Moshe Lavee.":
+        "המהדורה הדיגיטלית של המילון היא באדיבות פרויקט 'מדרש' במימון האיחוד האירופי "
+        "(ERC, MiDRASH, 101071829). צוות הפרויקט: מאוניברסיטת בר אילן: ד\"ר ורד רזיאל קרצמר, "
+        "ד\"ר אלישע רוזנצוויג, אפרים מאירי, ד\"ר אבי שמידמן; וממעבדת אליהו, אוניברסיטת חיפה: "
+        "ד\"ר אליעזר באומגרטן, ד\"ר יואב פיליפס, פרופ' משה לביא.",
 })
 
 # The dictionary panel holds every dictionary, one tab each (owner, 2026-11-04; plan

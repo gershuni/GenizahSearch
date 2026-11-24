@@ -125,9 +125,12 @@ DISCLAIMER = ("Blau's dictionary records mainly meanings particular to Judeo-Ara
 DISCLAIMER_CLASS = 'blau-disclaimer'
 #: The digital edition's credit, under the print credit on EVERY panel (owner,
 #: 2026-11-04): the data is the MiDRASH project's digitization. It links to the
-#: site's about page, which names the team and the funder in full.
-MIDRASH_CREDIT = ("Digital edition: the MiDRASH project, funded by the European Union "
-                  "(ERC, MiDRASH, 101071829).")
+#: site's about page. Since 2026-11-24 it also names the project team (owner's wording).
+MIDRASH_CREDIT = ("The digital edition of the dictionary is courtesy of the MiDRASH project, "
+                  "funded by the European Union (ERC, MiDRASH, 101071829). Project team: from "
+                  "Bar-Ilan University, Dr. Vered Raziel Kretzmer, Dr. Elisha Rosensweig, "
+                  "Ephraim Meiri and Dr. Avi Shmidman; and from the Eliyahu Lab, University of "
+                  "Haifa, Dr. Eliezer Baumgarten, Dr. Yoav Phillips and Prof. Moshe Lavee.")
 MIDRASH_CREDIT_CLASS = 'blau-credit-midrash'
 ABOUT_URL = SITE_URL + 'about.html'
 
