@@ -56,9 +56,25 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 
 **Checks:**
 - `git status` — working tree clean? Uncommitted changes?
-- `python scripts/run_local_tests.py` — all tests pass? (the bounded runner; never one `pytest tests/`
-  process — see `tests/README.md`). Its default expression excludes the lanes CI runs as separate
-  jobs, so add them explicitly: `python scripts/run_local_tests.py -m render_smoke` (the NiceGUI
+- **The local-data lane, in the main checkout:** `python scripts/run_local_tests.py --local-data`.
+  It runs only the `needs_local_data` tests (`tests/needs_local_data.py`): what the public CI skips
+  for want of local data (sidecars, the Tantivy index, the private repository) or does not
+  collect. The full suite is the public CI's job (Phase 7), so there is no local full run. A worktree
+  has none of the data, so run the lane in the main checkout (the one the installer is built from,
+  Phase 8) at the commit being released, then put it back on its branch. From the main checkout:
+  ```powershell
+  git status --porcelain        # must print nothing
+  git fetch origin
+  git switch --detach origin/master-main
+  python scripts/run_local_tests.py --local-data
+  git switch master-main
+  ```
+  The private repository's procedure document has the same steps with the full paths. The lane
+  fails when any of its tests skips there (in a worktree it fails at once): a test that skips both
+  there and on CI ran nowhere. Report each skip; `--allow-skips` only when approved, for a sidecar
+  this machine does not have. (Measured 2026-11-24: 31 tests, 19 seconds.)
+  The lanes CI runs as separate jobs still run locally, from the release worktree:
+  `python scripts/run_local_tests.py -m render_smoke` (the NiceGUI
   render-smoke lane; REQUIRED for a web release) and `python scripts/run_gui_tests.py` (the Qt lane,
   headless as CI runs it; REQUIRED for a desktop release). If the render-smoke lane includes a content-safety sweep
   maintained in the private repository, follow its own setup instructions there before running it --
@@ -84,8 +100,10 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 
 The development repository runs only the light CI check, plus the Qt lane on Linux for a PR
 labelled `gui-tests` (Phase 6); the full suite runs in the public repository after publishing
-(Phase 7). The local runs above are what stands between a mistake and a
-red public CI, so do not skip them.
+(Phase 7). The local runs above cover what that CI cannot (the local-data lane) and what has
+failed there at release time before (render-smoke, the Qt lane), so do not skip them. A failure
+that only the full suite shows now first appears in the public CI: it is fixed as in "Fixing a
+failure before the tag", under the same version.
 
 **Report** findings to the user. If there are blockers, stop and ask how to proceed. If there are warnings, list them and ask for confirmation to continue.
 
@@ -159,6 +177,19 @@ Once texts are approved (or Phase 2 was skipped), on the release branch:
    - Edit help files if applicable
 3. Run `python scripts/check_docs.py` to verify docs are still healthy
 4. Update `docs/OPEN_ISSUES.md` — mark any fixed issues, update timestamp
+5. **Refresh the CI shard balance from the last public CI run** (no local full run needed). Take
+   the newest public CI run on `master-main` (the procedure document shows how) and, from the Bash tool:
+   ```bash
+   python scripts/fold_lane_timings.py --run <its run id> --dry-run   # what would change
+   python scripts/fold_lane_timings.py --run <its run id>             # writes tests/lane_durations.json
+   python scripts/fold_lane_timings.py --run <its run id> --skips     # tests CI skipped, unmarked
+   ```
+   It folds the Windows shards' measured seconds (the CI's longest jobs) and prints the predicted
+   shard minutes before and after; commit `tests/lane_durations.json` with the release changes.
+   `--skips` lists the tests that skipped on CI without the `needs_local_data` marker: one that
+   skips for want of data belongs in `tests/needs_local_data.py` (it runs nowhere otherwise); one
+   that skips for a reason this machine shares too (Linux only, say) stays out. A run older than
+   30 days has no artifacts left; then skip this step and say so.
 
 ## Phase 4: "Did You Forget?" Checklist
 
@@ -177,7 +208,8 @@ RELEASE CHECKLIST — vX.Y.Z
 [ ] Desktop What's New bar + dialog updated (or N/A)
 [ ] Help pages updated (or N/A)
 [ ] OPEN_ISSUES.md up to date
-[ ] All tests passing (default, render_smoke for web, gui for desktop)
+[ ] Tests passing: the local-data lane (main checkout), render_smoke for web, gui for desktop
+[ ] tests/lane_durations.json folded from the last public CI run (or: no artifacts left)
 [ ] ruff explicit pass (python -m ruff check .)
 [ ] requirements.txt ↔ requirements-lock.txt diff is empty (CI uses the lock file; missing deps break CI)
 [ ] No uncommitted changes (besides release changes)
@@ -231,6 +263,7 @@ Ask: "Does this look right? Proceed with the release PR?"
    ```bash
    git status --porcelain
    git add version.py version_info.txt CompileScriptGenizah.iss README.md CHANGELOG.md CLAUDE.md
+   git add tests/lane_durations.json  # if Phase 3 step 5 folded the CI timings
    git add <every other file this release changed, by name>
    git commit -F <message file>     # first line: release: vX.Y.Z — <theme>
    ```

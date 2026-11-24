@@ -104,25 +104,16 @@ _Config.LANGUAGE_FILE = os.path.join(_PERSONAL_STATE_AT_IMPORT, "lang.pkl")
 # Proper fix lands in v7.16 (D-F15 in docs/OPEN_ISSUES.md): audit the
 # FolderWalkWorker + PdfRenderWorker cleanup paths so QThread.quit() + wait()
 # completes deterministically before the parent QWidget destructor runs.
+#
+# The list itself is tests/needs_local_data.py's CI_UNCOLLECTED: CI never runs
+# these files, so they are `needs_local_data` and run in the release's local lane.
 # ---------------------------------------------------------------------------
+from tests.needs_local_data import CI_UNCOLLECTED as _CI_UNCOLLECTED  # noqa: E402
+from tests.needs_local_data import is_marked as _needs_local_data  # noqa: E402
+
 collect_ignore_glob: list[str] = []
 if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
-    collect_ignore_glob.extend([
-        "test_my_library_tab*.py",
-        "test_unified_tree_async_populate.py",
-        "test_folder_walk_worker.py",
-        "test_local_optout_persistence.py",
-        "test_recovery_scan_runs_cleanup.py",
-        "test_disk_headroom.py",
-        # Phase 108 Join Lab widget construction smoke tests (QWidget build).
-        "test_join_workbench_construct.py",
-        # Phase 100 PdfImageController + PdfRenderWorker QThread.
-        "test_pdf_image_controller.py",
-        "test_pdf_page_renderer.py",
-        # Phase 97.2 discard_run / Tantivy-failure short-circuit — Linux-only
-        # failure mode but skipping uniformly keeps the conftest simple.
-        "test_phase_97_2_sqlite_vs_tantivy_consistency.py",
-    ])
+    collect_ignore_glob.extend(_CI_UNCOLLECTED)
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +220,12 @@ def pytest_collection_modifyitems(config, items):
         # `atlas-bake-tests` CI job installs the pinned deps and runs them for real.
         if "atlas_bake" in Path(str(item.fspath)).parts:
             item.add_marker(_pytest.mark.atlas_bake)
+        # `needs_local_data`: what CI skips for want of local data, or does not
+        # collect (tests/needs_local_data.py). The release's local lane runs only
+        # these (scripts/run_local_tests.py --local-data); CI runs everything else.
+        _file, _sep, _test = item.nodeid.partition("::")
+        if _needs_local_data(_file, _test):
+            item.add_marker(_pytest.mark.needs_local_data)
     if config.getoption("--run-scale"):
         return  # run everything including scale tests
     skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")

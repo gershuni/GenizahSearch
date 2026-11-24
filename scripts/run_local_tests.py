@@ -43,6 +43,24 @@ chunk print "All chunks passed." over a chunk that ran nothing.
     python scripts/run_local_tests.py --record        # refresh the balance file
     python scripts/run_local_tests.py -m "not gui"    # a different selection
     python scripts/run_local_tests.py --shard 2/3     # one CI job's share
+    python scripts/run_local_tests.py --local-data    # the release's local lane
+
+LOCAL-DATA LANE (RELEASES)
+--------------------------
+The public CI runs the full suite on every published commit. What it cannot run
+is what needs the local data: tests that skip there for want of a sidecar,
+the Tantivy index or the private repository, and the files tests/conftest.py
+does not collect on CI. Those carry the `needs_local_data` marker
+(tests/needs_local_data.py), and `--local-data` runs only them. It runs in the
+main checkout -- a worktree has no data -- and FAILS when any of its tests
+skips, because a test that skips here as well ran nowhere.
+
+TIMINGS
+-------
+Each chunk writes a JUnit report; the runner reads each file's own test time
+from it. `--record` writes those into tests/lane_durations.json; `--timings-out
+FILE` writes them (and the skipped tests) as JSON, which the CI uploads and
+scripts/fold_lane_timings.py folds into the same table.
 
 SHARDS (CI)
 -----------
@@ -94,6 +112,16 @@ _extended_length = _lane_rmtree.extended_length
 # genuinely expensive slow test carries its own explicit opt-in instead.
 DEFAULT_MARKERS = "not gui and not render_smoke and not atlas_bake"
 
+TIMINGS_FORMAT = 1              # --timings-out's JSON; fold_lane_timings.py checks it
+
+# --local-data: the release's local lane. Only what CI cannot run: the tests that
+# skip there for want of local data and the files it does not collect
+# (tests/needs_local_data.py lists them; tests/conftest.py marks them). The
+# full suite is the public CI's job. Still within DEFAULT_MARKERS, because the
+# gui and render-smoke lanes cannot share a process with these.
+LOCAL_DATA_MARKER = "needs_local_data"
+LOCAL_DATA_MARKERS = "%s and %s" % (LOCAL_DATA_MARKER, DEFAULT_MARKERS)
+LOCAL_DATA_REGISTRY = os.path.join(REPO_ROOT, "tests", "needs_local_data.py")
 MAX_FILES_PER_CHUNK = 30        # process lifetime cap -- the thing that fixed it
 ISOLATE_ABOVE_SECONDS = 45.0    # a heavy module gets a lane to itself
 DEFAULT_DURATION = 1.0          # unmeasured module: assume cheap, not free
@@ -254,6 +282,86 @@ def _test_files(markers):
             selects = _selects_anything(d, markers)
         (isolated.append(group) if selects else skipped.extend(group))
     return included, sorted(skipped), isolated
+
+
+def _local_data_registry():
+    """tests/needs_local_data.py, loaded by path (importing it as `tests.` would
+    run nothing else, but by path the runner needs no package on sys.path)."""
+    spec = importlib.util.spec_from_file_location("needs_local_data", LOCAL_DATA_REGISTRY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _local_data_files():
+    """The test files holding a needs_local_data test: the --local-data plan.
+
+    Only these are collected -- collecting all ~900 files to deselect nearly every
+    test would cost more than the lane's own tests. A listed file that does not
+    exist, or one under a dedicated-job directory, is an error, not a skip: a
+    stale list would quietly run less than it claims."""
+    files = sorted(_local_data_registry().files())
+    on_disk = set(_all_test_files())
+    missing = [f for f in files if f not in on_disk]
+    dedicated = [f for f in files if f.startswith(_DEDICATED_JOB_DIRS)]
+    if missing or dedicated:
+        raise SystemExit(
+            "tests/needs_local_data.py is out of date: %s%s"
+            % ("not in tests/: %s. " % ", ".join(missing) if missing else "",
+               "in a dedicated-job directory: %s" % ", ".join(dedicated)
+               if dedicated else ""))
+    return files
+
+
+def _in_worktree():
+    """Is REPO_ROOT a session worktree (.claude/worktrees/<name>)? Those have none
+    of the gitignored data folders (CLAUDE.md)."""
+    parts = os.path.normcase(os.path.abspath(REPO_ROOT)).replace("\\", "/").split("/")
+    return any(parts[i:i + 2] == [".claude", "worktrees"] for i in range(len(parts)))
+
+
+def _local_data_problems(results, allow_skips=False, registry=None):
+    """The --local-data lane's own failures: (problems, skipped).
+
+    - A test in it that skipped. Every test this lane selects skips on CI, so a
+      test that skips HERE too ran nowhere -- and in a worktree, which has none of
+      the data, that is nearly all of them. A green lane that ran nothing would be
+      the false green this runner exists to prevent, so skips fail it, listed by
+      reason. --allow-skips is for a deliberate partial run (a machine without one
+      sidecar), and says so.
+    - A chunk without a readable JUnit report: its skips cannot be seen, so the
+      lane cannot vouch for it (Codex on PR #123).
+    - A registry entry (*registry*: tests/needs_local_data.py) that matched no test
+      in the run: a test renamed or removed while its file stayed marks nothing,
+      and the lane would pass without it (Codex on PR #123)."""
+    problems = []
+    blind = sorted(idx for idx, r in results.items() if r.get("junit") is None)
+    if blind:
+        problems.append("%d chunk(s) wrote no readable JUnit report (chunks %s): "
+                        "their skips cannot be checked, so the lane cannot pass"
+                        % (len(blind), ", ".join(map(str, blind))))
+    if registry is not None and not blind:
+        ran = [t for r in results.values() for t in r["junit"]["tests"]]
+        stale = [e for e in sorted(set(registry.TESTS) | set(registry.WHOLE_FILES))
+                 if not any(registry._listed([e], f, t) for f, t in ran)]
+        if stale:
+            problems.append("%d entr(y/ies) of tests/needs_local_data.py matched no "
+                            "test in this run -- renamed or removed? %s"
+                            % (len(stale), "; ".join(stale)))
+    skipped = sorted(s for r in results.values() if r.get("junit")
+                     for s in r["junit"]["skipped"])
+    if not skipped or allow_skips:
+        return problems, skipped
+    by_reason = {}
+    for f, test, reason in skipped:
+        by_reason.setdefault(reason, []).append("%s::%s" % (f, test) if test else f)
+    lines = ["%d test(s) of the local-data lane skipped here, so they ran nowhere "
+             "(CI skips them too). Run the lane where the data is -- the main "
+             "checkout, not a worktree -- or pass --allow-skips for a deliberate "
+             "partial run:" % len(skipped)]
+    for reason, tests in sorted(by_reason.items(), key=lambda kv: -len(kv[1])):
+        lines.append("    %4d  %s  (e.g. %s)" % (len(tests), reason[:110], tests[0]))
+    return problems + ["\n".join(lines)], skipped
 
 
 def _durations():
@@ -448,15 +556,34 @@ def main(argv=None) -> int:
     ap.add_argument("--max-files", type=int, default=MAX_FILES_PER_CHUNK)
     ap.add_argument("--record", action="store_true",
                     help="rewrite tests/lane_durations.json from this run")
+    ap.add_argument("--timings-out", metavar="FILE",
+                    help="write this run's per-file seconds and skipped tests "
+                         "to FILE as JSON (CI uploads it; "
+                         "scripts/fold_lane_timings.py folds it in)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the plan and exit")
     ap.add_argument("--shard", metavar="K/N",
                     help="run only the K-th of N balanced shares of the chunks "
                          "(CI runs one share per job)")
+    ap.add_argument("--local-data", action="store_true",
+                    help="the release's local lane: only the needs_local_data tests "
+                         "(what CI skips or does not collect); fails when any of "
+                         "them skips here")
+    ap.add_argument("--allow-skips", action="store_true",
+                    help="with --local-data: report skipped tests instead of failing")
     args = ap.parse_args(argv)
     shard = _parse_shard(args.shard) if args.shard else None
+    if args.allow_skips and not args.local_data:
+        ap.error("--allow-skips goes with --local-data")
 
-    files, skipped, isolated = _test_files(args.markers)
+    if args.local_data:
+        if args.markers != DEFAULT_MARKERS:
+            ap.error("--local-data sets its own marker expression (%s)"
+                     % LOCAL_DATA_MARKERS)
+        args.markers = LOCAL_DATA_MARKERS
+        files, skipped, isolated = _local_data_files(), [], []
+    else:
+        files, skipped, isolated = _test_files(args.markers)
     durs = _durations()
     plan = _plan(files, durs, args.lanes, args.max_files, isolated)
     measured = sum(1 for f in files if f in durs)
@@ -471,6 +598,9 @@ def main(argv=None) -> int:
     print(" balance data: %d/%d modules measured, %.1f min of known work"
           % (measured, len(files), sum(durs.get(f, 0) for f in files) / 60))
     print(" markers: %s" % args.markers)
+    if args.local_data and _in_worktree():
+        print(" ! this is a worktree: it has none of the data these tests need, so")
+        print("   they will skip and the lane will fail. Run it in the main checkout.")
     if shard:
         print(" shard %d/%d: %d of %d chunks, %d files, %.1f of %.1f min predicted"
               % (shard[0], shard[1], len(plan), len(whole),
@@ -540,19 +670,26 @@ def main(argv=None) -> int:
             except queue.Empty:
                 return
             leaf = os.path.join(basetemp, "c%d" % idx)
+            # Beside the leaf, not in it: pytest empties --basetemp when it starts.
+            junit = leaf + ".junit.xml"
             with lock:
                 leaves[idx] = leaf
             _rmtree(leaf)
-            cmd = _chunk_cmd(leaf, args.markers, chunk)
+            cmd = _chunk_cmd(leaf, args.markers, chunk, junit=junit)
             t0 = time.time()
             pr = subprocess.run(cmd, cwd=REPO_ROOT, env=env,
                                 capture_output=True, text=True,
                                 encoding="utf-8", errors="replace")
             dur = time.time() - t0
             counts = _parse_counts(pr.stdout or "")
+            report = _read_junit(junit)
+            try:
+                os.remove(junit)
+            except OSError:
+                pass
             result = {
                 "files": chunk, "predicted": load, "seconds": dur,
-                "rc": pr.returncode, "counts": counts,
+                "rc": pr.returncode, "counts": counts, "junit": report,
                 "stdout": pr.stdout or "", "stderr": pr.stderr or "",
             }
             if _chunk_passed(result):
@@ -581,6 +718,13 @@ def main(argv=None) -> int:
 
     totals, empty, bad, problems = _verdict(len(plan), results)
     passed, failed, errors, skipped = totals
+    if args.local_data:
+        lane_problems, lane_skips = _local_data_problems(
+            results, args.allow_skips, registry=_local_data_registry())
+        problems += lane_problems
+        if lane_skips and args.allow_skips:
+            print(" --allow-skips: %d test(s) of the lane skipped and ran nowhere"
+                  % len(lane_skips))
 
     print("\n" + "=" * 78)
     print(" wall %.1f min  |  %d passed, %d failed, %d errors, %d skipped"
@@ -593,6 +737,8 @@ def main(argv=None) -> int:
 
     if args.record:
         _record_durations(results)
+    if args.timings_out:
+        _write_timings(args.timings_out, results, args, wall)
 
     if problems:
         print("\nFAILED:")
@@ -617,7 +763,7 @@ def main(argv=None) -> int:
     return 0
 
 
-def _chunk_cmd(leaf, markers, chunk):
+def _chunk_cmd(leaf, markers, chunk, junit=None):
     """The pytest command for one chunk, its tmp_path files under *leaf*; run it
     with _chunk_env().
 
@@ -625,12 +771,136 @@ def _chunk_cmd(leaf, markers, chunk):
     call and teardown, so a chunk keeps only its failing and erroring tests' folders
     (and what fixtures made with tmp_path_factory). Without it every test's folder
     stayed until the run ended: ~17.5 GB per full run, measured 2026-11-11, four of
-    which filled drive C: in one morning."""
-    return [sys.executable, "-m", "pytest", "-q", "--no-header",
-            "-p", "no:cacheprovider",
-            "-p", LANE_PLUGIN,
-            "--basetemp", leaf,
-            "-m", markers] + list(chunk)
+    which filled drive C: in one morning.
+
+    *junit*, when given, is where pytest writes the chunk's JUnit report (_read_junit):
+    xunit1, the family whose test cases carry their file."""
+    cmd = [sys.executable, "-m", "pytest", "-q", "--no-header",
+           "-p", "no:cacheprovider",
+           "-p", LANE_PLUGIN,
+           "--basetemp", leaf,
+           "-m", markers]
+    if junit:
+        cmd += ["--junitxml", junit, "-o", "junit_family=xunit1"]
+    return cmd + list(chunk)
+
+
+def _junit_file(case):
+    """The repo-relative test file of one JUnit <testcase>, or None.
+
+    xunit1 gives it as `file`. A module skipped as a whole at collection (a
+    module-level importorskip) has no `file`: its dotted module path is the name
+    or the classname, and that is mapped back to a file here."""
+    path = case.get("file")
+    if path:
+        return path.replace("\\", "/")
+    for dotted in (case.get("classname") or "", case.get("name") or ""):
+        parts = dotted.split(".")
+        for n in range(len(parts), 0, -1):
+            cand = "/".join(parts[:n]) + ".py"
+            if os.path.isfile(os.path.join(REPO_ROOT, cand)):
+                return cand
+    return None
+
+
+def _read_junit(path):
+    """Per-file test seconds and the skipped tests of one chunk's JUnit report.
+
+    {"seconds": {file: s}, "tests": [[file, test], ...],
+    "skipped": [[file, test, reason], ...]}, or None when the report is missing or
+    unreadable (a chunk that crashed before pytest wrote it). `test` is the node id
+    after the file (`name[param]`, `Class::name`; "" for a module skipped whole at
+    collection). A test's time is pytest's `total`: setup, call and teardown. What
+    a chunk spends outside its tests -- interpreter start, collection, imports --
+    is not in here; _module_seconds spreads it over the chunk's files."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    seconds, tests, skipped = {}, [], []
+    for case in root.iter("testcase"):
+        f = _junit_file(case)
+        if f is None:
+            continue
+        try:
+            t = float(case.get("time") or 0.0)
+        except ValueError:
+            t = 0.0
+        seconds[f] = seconds.get(f, 0.0) + t
+        module = f[:-3].replace("/", ".")
+        cls = case.get("classname") or ""
+        name = case.get("name") or ""
+        test = name
+        if cls.startswith(module + "."):
+            test = cls[len(module) + 1:] + "::" + name
+        elif not cls or name == module or name == cls:
+            test = ""                           # the whole module, at collection
+        tests.append([f, test])
+        skip = case.find("skipped")
+        # JUnit files an expected failure (xfail) under <skipped> too; it ran.
+        if skip is not None and skip.get("type") != "pytest.xfail":
+            reason = skip.get("message") or ""
+            if not reason or reason == "collection skipped":
+                reason = (skip.text or "").strip() or reason
+            skipped.append([f, test, reason])
+    return {"seconds": seconds, "tests": tests, "skipped": skipped}
+
+
+def _module_seconds(results):
+    """Measured seconds per test file, from each chunk's JUnit report.
+
+    A file's share is its tests' own time plus an equal part of what its chunk
+    spent outside any test (start-up, collection, imports): the chunk's wall time
+    is the number the lanes are balanced against. A chunk without a report (it
+    crashed) is spread over its files by their previous weight, as --record did
+    before the reports existed. Balance data only."""
+    durs = _durations()
+    out = {}
+    for r in results.values():
+        chunk, secs = r["files"], r["seconds"]
+        junit = r.get("junit")
+        if junit is None:
+            prev = [durs.get(f, DEFAULT_DURATION) for f in chunk]
+            total_prev = sum(prev) or float(len(chunk))
+            for f, p in zip(chunk, prev):
+                out[f] = round(secs * (p / total_prev), 2)
+            continue
+        own = {f: junit["seconds"].get(f, 0.0) for f in chunk}
+        overhead = max(0.0, secs - sum(own.values())) / len(chunk)
+        for f in chunk:
+            out[f] = round(own[f] + overhead, 2)
+    return out
+
+
+def _write_timings(path, results, args, wall):
+    """The run's per-file seconds and skipped tests, as JSON, for CI to upload.
+
+    scripts/fold_lane_timings.py folds these into tests/lane_durations.json, so the
+    CI shards are balanced by what CI itself measured, without a local full run."""
+    skipped = sorted(s for r in results.values() if r.get("junit")
+                     for s in r["junit"]["skipped"])
+    payload = {
+        "_comment": "Written by scripts/run_local_tests.py --timings-out; folded "
+                    "into tests/lane_durations.json by scripts/fold_lane_timings.py.",
+        "format": TIMINGS_FORMAT,
+        "measured": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "platform": sys.platform,
+        "markers": args.markers,
+        "shard": args.shard,
+        "lanes": args.lanes,
+        "wall_seconds": round(wall, 1),
+        "chunks_without_report": sum(1 for r in results.values()
+                                     if r.get("junit") is None),
+        "modules": dict(sorted(_module_seconds(results).items())),
+        "skipped": skipped,
+    }
+    folder = os.path.dirname(os.path.abspath(path))
+    os.makedirs(folder, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1)
+    print("wrote %d module timings and %d skipped tests -> %s"
+          % (len(payload["modules"]), len(skipped), path))
 
 
 def _chunk_env(base=None):
@@ -751,32 +1021,32 @@ def _folder_bytes(path):
 
 
 def _record_durations(results):
-    """Rewrite the balance file from measured per-chunk time.
+    """Rewrite the balance file from this run's measured per-file time.
 
-    Per-CHUNK, spread over its files by their previous weight: this runner does
-    not see per-module timings, and a chunk's own total is the honest thing it
-    does know. Balance data only -- a wrong number here costs packing quality,
-    never correctness.
+    Each file's own tests' time from the chunk's JUnit report, plus its share of
+    the chunk's start-up (_module_seconds). Until 2026-11-24 the runner saw only
+    per-CHUNK time and spread it by the files' previous weight, so a module first
+    recorded at the 1-second default stayed light however long it took. Balance
+    data only -- a wrong number here costs packing quality, never correctness.
     """
-    durs = _durations()
-    updated = dict(durs)
-    for r in results.values():
-        chunk, secs = r["files"], r["seconds"]
-        prev = [durs.get(f, DEFAULT_DURATION) for f in chunk]
-        total_prev = sum(prev) or float(len(chunk))
-        for f, p in zip(chunk, prev):
-            updated[f] = round(secs * (p / total_prev), 2)
+    updated = dict(_durations())
+    updated.update(_module_seconds(results))
+    write_durations(updated)
+
+
+def write_durations(modules):
+    """Write tests/lane_durations.json (also scripts/fold_lane_timings.py's writer)."""
     payload = {
         "_comment": "Measured per-module pytest seconds, used ONLY to balance "
                     "lanes in scripts/run_local_tests.py. Stale entries cost "
                     "balance, never correctness; refresh with --record.",
         "_measured": time.strftime("%Y-%m-%d"),
-        "modules": dict(sorted(updated.items())),
+        "modules": dict(sorted(modules.items())),
     }
     with open(DURATIONS, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=1)
     print("recorded %d module timings -> %s"
-          % (len(updated), os.path.relpath(DURATIONS, REPO_ROOT)))
+          % (len(modules), os.path.relpath(DURATIONS, REPO_ROOT)))
 
 
 def _tolerant_console(streams=None):

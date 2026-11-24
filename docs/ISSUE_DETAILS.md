@@ -3088,6 +3088,8 @@ Moved 2026-10-25 from `5. Code Quality Debt / 2026-09-25 sweep: hygiene and tool
 
 *Triage 2026-10-25:* still open. (a) _record_durations still spreads each chunk's time by previous weights (DEFAULT_DURATION=1.0, :81,:633); (b) schedule script comments 'Deliberately NOT WakeToRun' (:128) and init.ps1 never references artifact-verify-log; (c) git grep finds no test referencing export_access_index. No commit since 2026-10-06 touches these three concerns.
 
+*2026-11-24:* (a) fixed: each chunk writes a JUnit report and `--record` (and the CI's `--timings-out`) take each file's own test time from it (`_module_seconds`); a chunk without a report still falls back to the old spread. (b) and (c) still open.
+
 ## GS-218
 
 **A findings-page test (kept in the private repository) fails locally when `web.main` is imported before it** · test-gap · Build, CI and tests · ❌ Open · opened 2026-10-05

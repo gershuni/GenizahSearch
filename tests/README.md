@@ -22,6 +22,20 @@ collapses non-linearly. `scripts/run_local_tests.py` does that split, balances
 the chunks by measured duration (`tests/lane_durations.json`), and runs four
 lanes with a private `--basetemp` each.
 
+## The release's local lane: `--local-data`
+
+The public CI runs the full suite on every published commit, so a release does
+not run it again locally. What CI cannot run carries the `needs_local_data`
+marker: tests that skip there for want of a sidecar, the Tantivy index or the
+private repository, and the files `conftest.py` does not collect on CI. The
+list is `tests/needs_local_data.py`; `conftest.py` applies the marker.
+`python scripts/run_local_tests.py --local-data` runs only those, in the main
+checkout (a worktree has no data), and fails when any of them skips: a test
+that skips there and on CI ran nowhere. Each public CI shard uploads its skips
+and timings; `python scripts/fold_lane_timings.py --run <id>` folds the
+timings into `tests/lane_durations.json` and `--skips` lists what skipped on
+CI unmarked.
+
 xdist is installed but is not the answer here: its workers collect the whole
 selection and persist across many files, and `--dist loadfile` keeps a file's
 tests together without recycling the worker -- the shape that failed.
@@ -121,7 +135,8 @@ tests (job names as in the workflow file):
   and not atlas_bake" --shard K/3 -j 2`: the runner's own chunks, split into
   three shards per OS, one job each (since 2026-10-19; as one process the
   Windows lane took 41-52 min). Slow tests are NOT excluded here -- Concern #7
-  preservation.
+  preservation. Each shard uploads `lane-timings-<OS>-shard-<K>` (each file's
+  seconds and the skipped tests; `--timings-out`), kept 30 days.
 - `tests-all` (shown as `tests`) -- one pass/fail for all the shards.
 - `render-smoke-tests` -- `pytest tests/ -m render_smoke`, the NiceGUI lane.
 - `findings-browser-check` -- one named Playwright test, kept in the private repository.

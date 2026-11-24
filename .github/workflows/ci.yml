@@ -117,7 +117,21 @@ jobs:
       # dedicated `atlas-bake-tests` job below.
       # -j 2: two chunk processes at a time on the 4-vCPU runner (a chunk peaked
       # at 5.6 GB locally; runners have 16 GB).
-      - run: python scripts/run_local_tests.py -m "not gui and not render_smoke and not atlas_bake" --shard ${{ matrix.shard }}/3 -j 2
+      # --timings-out: each file's measured seconds (and the tests that skipped
+      # here), uploaded below. `python scripts/fold_lane_timings.py --run <id>`
+      # folds the Windows shards into tests/lane_durations.json, so the shards
+      # stay balanced by what this job measured, without a local full run.
+      - run: python scripts/run_local_tests.py -m "not gui and not render_smoke and not atlas_bake" --shard ${{ matrix.shard }}/3 -j 2 --timings-out lane-timings.json
+      # Also after a failed shard: its timings are still balance data. Only the
+      # public repository runs this job, so it costs no development-repository
+      # minutes; the file is ~100 KB.
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: lane-timings-${{ runner.os }}-shard-${{ matrix.shard }}
+          path: lane-timings.json
+          if-no-files-found: warn
+          retention-days: 30
 
   # One result for the sharded job above, for anything that wants a single
   # "tests" check (a required status, a glance at the PR). Fails if any shard

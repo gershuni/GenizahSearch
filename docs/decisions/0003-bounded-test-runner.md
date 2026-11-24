@@ -30,6 +30,9 @@ bounded chunks finished in about 90 minutes.
 - The runner's `-m` **replaces** its default expression, so a custom lane must repeat the exclusions
   it wants. The default -- and CI's -- is `"not gui and not render_smoke and not atlas_bake"`;
   note it does **not** exclude `slow` (that omission is deliberate, see `pyproject.toml`).
+- A release runs only `--local-data` locally (2026-11-24): the `needs_local_data` tests, which CI
+  skips or does not collect, in the main checkout. The full selection is the public CI's, which
+  also uploads the per-file timings that `scripts/fold_lane_timings.py` folds into the table.
 - The runner refuses to report success without having run the tests
   ([tests/test_run_local_tests_gate.py](../../tests/test_run_local_tests_gate.py) proves it).
 - Instruction files state the policy once, in `AGENTS.md`, and every other file follows it.
