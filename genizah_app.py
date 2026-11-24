@@ -4446,7 +4446,11 @@ class GenizahGUI(QMainWindow):
             # On the desk the chooser holds the shown fragment's texts; the browsed page's own
             # versions would replace the desk's text with that page's.
             data = self.browse_version_combo.currentData() if hasattr(self, 'browse_version_combo') else None
-            if data and data.get('desk') and data.get('sys_id'):
+            if data and data.get('document'):  # the document's own edition or translation
+                from desktop.reading_desk_text import choose_source
+                if choose_source(self.browse_reading_desk_state, data.get('view'), data.get('source_id')):
+                    self._browse_rd_render_text()
+            elif data and data.get('desk') and data.get('sys_id'):
                 self._browse_rd_choose_text(data['sys_id'], data.get('key'))
             return
         if not hasattr(self, 'current_browse_sid') or not self.current_browse_sid:
@@ -10940,6 +10944,10 @@ class GenizahGUI(QMainWindow):
                 self._browse_rd_remove_entry(sid)
             return
 
+        if url_str.startswith("genizah://rd-doc-"):
+            self._browse_rd_document_link(url_str)
+            return
+
         if url_str.startswith("genizah://rd-version/"):
             parts = url_str.replace("genizah://rd-version/", "").split("/")
             if len(parts) >= 2:
@@ -11943,17 +11951,27 @@ class GenizahGUI(QMainWindow):
         return {e.sys_id: fragment_image_list(self.meta_mgr.nli_cache.get(e.sys_id, {}))
                 for e in self.browse_reading_desk_state.entries}
 
-    def _browse_rd_is_document(self):
-        """The desk shows a PGP document (shared/reading_desk_views.py::is_document_desk),
-        asked of the sidecar once per set of fragments."""
+    def _browse_rd_document_desk(self):
+        """The PGP document the desk shows (shared/reading_desk_document.py::document_desk), asked
+        of the sidecar once per set of fragments; {} when it is none, has no text, or the sidecar
+        cannot be read: the desk is then one text per fragment."""
         state = self.browse_reading_desk_state
         sys_ids = tuple(e.sys_id for e in state.entries)
         cached = self._browse_rd_document
         if cached is None or cached[0] != state.pgpid or cached[1] != sys_ids:
-            from shared.reading_desk_views import is_document_desk
-            cached = (state.pgpid, sys_ids, is_document_desk(state.pgpid, sys_ids))
+            from shared.reading_desk_document import document_desk, has_document_text
+            try:
+                desk = document_desk(state.pgpid, sys_ids)
+            except Exception:
+                logger.exception("Reading Desk: the sources of PGP %s", state.pgpid)
+                desk = {}
+            cached = (state.pgpid, sys_ids, desk if has_document_text(desk) else {})
             self._browse_rd_document = cached
         return cached[2]
+
+    def _browse_rd_is_document(self):
+        """The desk shows a PGP document: its images open one at a time, its text is the document's."""
+        return bool(self._browse_rd_document_desk())
 
     def _browse_rd_shown_image(self):
         """The image on show in "One at a time" (None in the other views): the text side
@@ -11963,127 +11981,23 @@ class GenizahGUI(QMainWindow):
                                 self._browse_rd_is_document(), self.current_browse_sid or '')
 
     def _browse_rd_render_text(self):
-        """The text pane: every fragment's text, one under another -- or, with one image on
-        show, that image's fragment alone, and of its automatic transcription that image's
-        page alone (shared/reading_desk_views.py::text_page_for_image). A PGP or FGP source is
-        one text for the fragment and is shown whole."""
-        import html as _html_mod
-        from shared.reading_desk_views import text_page_for_image
+        """The text pane (desktop/reading_desk_text.py): a PGP document's own edition or
+        translation, once; or every fragment's text, one under another, or with one image on
+        show that image's fragment alone (and of its automatic transcription, its page)."""
+        from desktop.reading_desk_text import desk_text_html
         state = self.browse_reading_desk_state
         if not state.entries:
             return
         shown = self._browse_rd_shown_image()
-
-        # Update toolbar count label
         count = len(state.entries)
         self.browse_rd_count_label.setText(
             f" ({count} {tr('fragment') if count == 1 else tr('fragments')})"
         )
-
-        # === LEFT PANE: Stacked Texts in browse_text ===
-        html_parts = []
-        # Phase 999.4: parallel accumulator of raw transcription text so the
-        # line-number gutter can count source `\n` lines across all fragments.
-        raw_text_parts: list[str] = []
-
-        # Header bar with exit button
-        html_parts.append(
-            "<div style='background: #2c3e50; color: white; padding: 8px 12px; "
-            "margin-bottom: 10px; border-radius: 4px;'>"
-            f"<b>{tr('Reading Desk')}</b>"
-        )
-        if state.pgpid:
-            html_parts.append(f" &mdash; PGP #{state.pgpid}")
-        html_parts.append(
-            f" ({len(state.entries)} {tr('fragment') if len(state.entries) == 1 else tr('fragments')})"
-            "</div>"
-        )
-
-        for idx, entry in enumerate(state.entries):
-            if shown is not None and idx != shown['frag_idx']:
-                continue  # one image on show: its fragment's text alone
-            sid = entry.sys_id
-            shelfmark = entry.shelfmark
-
-            # Fragment header (clickable to navigate to single view). With one image on show
-            # there is none: the fragment's name and its remove are over the image, and its
-            # version is the "Version" chooser above the text (_browse_rd_sync_version_combo).
-            if shown is None:
-                is_current = (sid == self.current_browse_sid)
-                current_badge = f" <span style='background: #27ae60; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px;'>{_html_mod.escape(tr('Current'))}</span>" if is_current else ""
-                html_parts.append(
-                    f"<div id='rd-text-frag-{idx}' style='background: #ecf0f1; padding: 6px 10px; "
-                    f"margin-top: {'0' if idx == 0 else '20'}px; border-bottom: 2px solid #3498db;'>"
-                    f"<a href='genizah://rd-navigate/{sid}' style='color: #2980b9; text-decoration: none; font-weight: bold;'>"
-                    f"{shelfmark}</a>{current_badge}"
-                    f" <a href='genizah://rd-remove/{sid}' style='color: #e74c3c; text-decoration: none; font-size: 11px; margin-left: 10px;'>[{_html_mod.escape(tr('Remove'))}]</a>"
-                )
-
-                # Version selector link
-                if entry.sources:
-                    html_parts.append(
-                        f" <a href='genizah://rd-version/{sid}/{idx}' style='color: #8e44ad; text-decoration: none; font-size: 11px; margin-left: 10px;'>[{_html_mod.escape(tr('Change version'))}]</a>"
-                    )
-
-                html_parts.append("</div>")
-
-            # The text to show: the reader's choice, else an edition, else V0.8
-            display_text, text_direction, _key = self._browse_rd_entry_text(entry)
-
-            # Fallback to V0.8 text from pages — Phase 999.4: emit ONE
-            # `<div>` (and ONE raw_text_parts entry) per page so the
-            # per-page block matcher restarts numbering at each page rather
-            # than at each fragment. PGP edition path keeps its single
-            # `<div>` because there is no internal page concept.
-            text_pages = [p for p in entry.pages if p.get('text')] if (not display_text and entry.pages) else []
-            # One image on show: its page alone (none, when that image has no text page),
-            # never every page of the fragment together.
-            shown_page = text_page_for_image(shown, text_pages) if (shown is not None and text_pages) else None
-            if shown is not None and text_pages:
-                text_pages = [text_pages[shown_page]] if shown_page is not None else []
-            page_texts_v08 = [p.get('text', '') for p in text_pages]
-
-            def _emit_content_div(text_body):
-                # Escaped: a PGP edition's `<...>` added letters would vanish.
-                html_text = text_lines_to_html(text_body)
-                html_parts.append(
-                    f"<div dir='{text_direction}' style='padding: 10px; font-family: SBL Hebrew, serif; "
-                    f"font-size: 16px; line-height: 1.6;'>"
-                    f"{html_text}</div>"
-                )
-                raw_text_parts.append(text_body)
-
-            if display_text:
-                _emit_content_div(display_text)
-            elif page_texts_v08:
-                if shown_page is not None:
-                    html_parts.append(
-                        "<div style='padding: 2px 10px; color: #6c757d; font-size: 11px;'>"
-                        f"{_html_mod.escape(shown.get('label') or '')}</div>"
-                    )
-                for page_idx, page_text in enumerate(page_texts_v08):
-                    if page_idx > 0:
-                        # Visible page separator inside the fragment so the user
-                        # sees the page break the gutter is restarting at.
-                        html_parts.append(
-                            "<div style='margin: 12px 0; padding: 4px 10px; "
-                            "background: #f8f9fa; color: #6c757d; font-size: 11px; "
-                            "border-top: 1px dashed #ced4da;'>"
-                            f"{_html_mod.escape(tr('Page'))} {page_idx + 1}</div>"
-                        )
-                    _emit_content_div(page_text)
-            else:
-                html_parts.append(
-                    "<div style='padding: 10px; color: #95a5a6; font-style: italic;'>"
-                    f"{_html_mod.escape(tr('No text available'))}</div>"
-                )
-
-        full_html = "\n".join(html_parts)
+        full_html, raw_text_parts = desk_text_html(state, shown=shown, current_sid=self.current_browse_sid or '',
+                                                   document=self._browse_rd_document_desk(), tr=tr, theme_of=self)
         sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)  # the Reading Desk's stacked view
-        # Phase 999.4: route through gutter helper in PER-FRAGMENT mode.
-        # Each fragment's content gets numbered 1..N independently. The
-        # per-fragment "Current" / "remove" header rows don't match any
-        # source-text entry, so the painter skips them.
+        # Per-fragment gutter: each text's lines are numbered 1..N on their own; the header rows
+        # match no source text, so the painter skips them.
         apply_line_numbered_text(
             self.browse_text, full_html, pages=raw_text_parts, is_html=True,
         )
@@ -12091,70 +12005,44 @@ class GenizahGUI(QMainWindow):
 
     @staticmethod
     def _browse_rd_source_key(src, position):
-        """A source's key for the reader's choice (``ReadingDeskEntry.chosen``): its
-        provider and id (PGP and FGP ids may collide), else its place in the list."""
-        from shared.fgp_service import namespaced_source_id
-        return namespaced_source_id(src) or f"#{position}"
+        """A source's key for the reader's choice (desktop/reading_desk_text.py::source_key)."""
+        from desktop.reading_desk_text import source_key
+        return source_key(src, position)
 
     def _browse_rd_source_options(self, entry):
-        """(label, key) for each text of a fragment that has one: its sources, then the
-        automatic transcription (key 'v08')."""
-        from shared.fgp_service import source_provider
-        options = []
-        for position, src in enumerate(entry.sources or []):
-            if not (src.get('content') or '').strip():
-                continue
-            relation = src.get('doc_relation', '') or ''
-            scholar = src.get('source_scholar', 'Unknown')
-            language = src.get('language', '')
-            if 'Edition' in relation:
-                label = f"{tr('Edition')}: {scholar}"
-            elif 'Translation' in relation:
-                label = (f"{tr('Translation')} ({language}): {scholar}" if language
-                         else f"{tr('Translation')}: {scholar}")
-            else:
-                label = f"{relation}: {scholar}"
-            if source_provider(src) == 'fgp':
-                label = f"FGP {label}"
-            options.append((label, self._browse_rd_source_key(src, position)))
-        options.append(("V0.8 (HTR)", 'v08'))
-        return options
+        """(label, key) for each text of a fragment (desktop/reading_desk_text.py::source_options)."""
+        from desktop.reading_desk_text import fragment_scope, source_options
+        return source_options(entry, tr, fragment_scope(self.browse_reading_desk_state, self._browse_rd_document_desk()))
 
     def _browse_rd_entry_text(self, entry):
-        """(text, direction, key) the desk shows for a fragment: the reader's choice, else its
-        first edition, else its first source with text; ('', 'rtl', 'v08') for the automatic
-        transcription, shown page by page."""
-        def direction(src):
-            return 'ltr' if src.get('language', '') == 'English' else 'rtl'
-
-        sources = entry.sources or []
-        chosen = getattr(entry, 'chosen', '') or ''
-        if chosen == 'v08':
-            return '', 'rtl', 'v08'
-        if chosen:
-            for position, src in enumerate(sources):
-                if self._browse_rd_source_key(src, position) == chosen and src.get('content'):
-                    return src['content'], direction(src), chosen
-        for position, src in enumerate(sources):
-            if 'Edition' in (src.get('doc_relation') or '') and src.get('content'):
-                return src['content'], 'rtl', self._browse_rd_source_key(src, position)
-        for position, src in enumerate(sources):
-            if src.get('content'):
-                return src['content'], direction(src), self._browse_rd_source_key(src, position)
-        return '', 'rtl', 'v08'
+        """(text, direction, key) the desk shows for a fragment (desktop/reading_desk_text.py::entry_text);
+        on a document's desk, By fragment opens on the fragment's own transcription."""
+        from desktop.reading_desk_text import entry_text, fragment_scope
+        return entry_text(entry, fragment_scope(self.browse_reading_desk_state, self._browse_rd_document_desk()))
 
     def _browse_rd_sync_version_combo(self, shown):
-        """The "Version" chooser above the text, on the desk: with one image on show, the texts
-        of its fragment (choosing one shows it, _browse_change_version); in the other views it
-        is off, each fragment's [change version] choosing its own."""
+        """The "Version" chooser above the text, on the desk: in a document's edition (or
+        translation), the document's own; with one image on show, the texts of its fragment
+        (choosing one shows it, _browse_change_version); in the other views it is off, each
+        fragment's [change version] choosing its own."""
+        from desktop.reading_desk_text import VIEW_FRAGMENTS, desk_view, document_options
+        from genizah_core import CURRENT_LANG as _lang
         combo = getattr(self, 'browse_version_combo', None)
         if combo is None:
             return
         state = self.browse_reading_desk_state
+        document = self._browse_rd_document_desk()
+        view = desk_view(state, document)
         entry = state.entries[shown['frag_idx']] if shown is not None and shown['frag_idx'] < len(state.entries) else None
         combo.blockSignals(True)
         combo.clear()
-        if entry is None:
+        if view not in (None, VIEW_FRAGMENTS):
+            items, current = document_options(state, document, view, tr, _lang)
+            for label, data in items:
+                combo.addItem(label, data)
+            combo.setCurrentIndex(current)
+            combo.setEnabled(combo.count() > 1)
+        elif entry is None:
             combo.addItem("V0.8", {"source": "original", "desk": True, "key": "v08"})
             combo.setEnabled(False)
         else:
@@ -12167,31 +12055,18 @@ class GenizahGUI(QMainWindow):
         combo.blockSignals(False)
 
     def _browse_rd_version_data(self, entry, key):
-        """A desk chooser item's data: the fragment and its text's key (``desk``, ``sys_id``,
-        ``key``), in the browse chooser's own vocabulary as well, so that whatever reads the
-        chosen item -- the Cite bar's credit (_credit_version_info) -- credits the right
-        provider rather than falling through to the automatic transcription's."""
+        """A desk chooser item's data, in the browse chooser's vocabulary as well, for the Cite
+        bar's credit (desktop/reading_desk_text.py::version_data)."""
+        from desktop.reading_desk_text import version_data
         from genizah_core import CURRENT_LANG as _lang
-        from shared.fgp_service import pick_fgp_credit, source_provider, source_relation_kind
-        data = {"source": "original", "desk": True, "sys_id": entry.sys_id, "key": key}
-        for position, src in enumerate(entry.sources or []):
-            if key == 'v08' or self._browse_rd_source_key(src, position) != key:
-                continue
-            translation = source_relation_kind(src) == 'translation'
-            fgp = source_provider(src) == 'fgp'
-            data.update({
-                "source": (("fgp_translation" if translation else "fgp_edition") if fgp
-                           else ("pgp_translation" if translation else "pgp_edition")),
-                "content": src.get('content', ''),
-                "scholar": src.get('source_scholar', 'FGP' if fgp else 'Unknown'),
-                "language": src.get('language') or '',
-                "attribution": src.get('attribution'),
-                "source_credit": pick_fgp_credit(src, _lang) if fgp else None,
-                "source_id": src.get('id'),
-                "pgpid": src.get('pgpid'),
-            })
-            break
-        return data
+        return version_data(entry, key, _lang)
+
+    def _browse_rd_document_link(self, url):
+        """A link of the desk's document text: Edition / Translation / By fragment, or
+        [Change version] of the edition on show (desktop/reading_desk_text.py::follow_link)."""
+        from desktop.reading_desk_text import follow_link
+        if follow_link(self, self.browse_reading_desk_state, self._browse_rd_document_desk(), url, tr):
+            self._browse_rd_render_text()
 
     def _browse_rd_release_version_combo(self):
         """The "Version" chooser given back to Browse when the desk is left: none of the desk's

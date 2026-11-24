@@ -739,7 +739,7 @@ def test_the_controls_are_in_hebrew(tmp_path):
         assert _view_toggle(user).options == {
             dd.VIEW_EDITION: 'מהדורה', dd.VIEW_TRANSLATION: 'תרגום', dd.VIEW_FRAGMENTS: 'לפי קטע'}
         [note] = _of(user, ui.label, 'rd-document-partial')
-        assert note.text == 'בשולחן העיון 1 מתוך 2 קטעי המסמך'
+        assert note.text == '1 מתוך 2 קטעי המסמך בשולחן העיון'
         assert _labels(user).count(EDITION_ONE) == 1  # codepoint for codepoint
 
     _run(tmp_path, driver, lang='he')

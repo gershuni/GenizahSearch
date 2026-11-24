@@ -416,3 +416,16 @@ def test_ltr_layout_gutter_on_left(textedit):
     assert geom.x() < cr.width() // 2, (
         f"LTR gutter x={geom.x()} expected on the visual left of width={cr.width()}"
     )
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_the_gutter_is_drawn_in_the_text_areas_theme(dark):
+    """The gutter was the light one on every theme: a pale strip beside dark text (UAT of #120)."""
+    from PyQt6.QtGui import QColor, QPalette
+
+    import desktop.widgets.line_number_text_edit as lnte
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e1e" if dark else "#f0f0f0"))
+    expected = ((lnte._GUTTER_BG_DARK_HEX, lnte._GUTTER_COLOR_DARK_HEX) if dark
+                else (lnte._GUTTER_BG_HEX, lnte._GUTTER_COLOR_HEX))
+    assert lnte.gutter_colors(palette) == expected

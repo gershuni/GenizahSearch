@@ -2205,12 +2205,9 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 
 ## web/pages/browse_desk_document.py
 
-The Reading Desk's document mode (2026-11-18): a PGP document's text shown once for the whole document, not per fragment. Tests: `tests/test_reading_desk_document.py`, `tests/render_smoke/test_reading_desk_document_render_smoke.py`.
+The Reading Desk's document mode on the web (2026-11-18): a PGP document's text shown once for the whole document, not per fragment. Its rules are `shared/reading_desk_document.py` (2026-11-24, shared with the desktop); this module re-exports them and reads the reader's choices from `state.reading_desk_selected_sources`. Tests: `tests/test_reading_desk_document.py`, `tests/render_smoke/test_reading_desk_document_render_smoke.py`.
 
-- **Function** `document_desk` — for the document a desk was opened for and the fragments now on it: whether the sidecar knows the document, whether every fragment on the desk is one of its own (`whole`), and the document's own editions and translations (never another document's)
-- **Function** `document_view` — the text view: edition, translation, one text per fragment, or None when the per-fragment desk stays (no document, an outside fragment, no text)
-- **Function** `chosen_source` — the reader's edition or translation if it is still one of the document's, else the first
-- **Function** `is_other_desk` — a desk opened for a document that now holds a fragment from outside it (titled "Reading Desk" again)
+- **Function** `document_view` / `chosen_source` / `source_label` — the shared rules, with the reader's choices read from the `__document_*__` keys and the web's `tr`
 - **Function** `render_document_text_panel` — the view toggle, one selector, the attribution and the whole text; choices live in `state.reading_desk_selected_sources` under the `__document_*__` keys
 
 ## web/pages/browse_desk_images.py
@@ -2246,6 +2243,16 @@ The Reading Desk's third image view, "Puzzle images" (2026-11-18; several at onc
 - **Function** `shown_joins` — the puzzles on show: the reader's choice (`KEY_JOIN_SHOWN`, ids one per line; `NONE_SHOWN` when cleared), in the order found, else the first `SHOWN_FIRST` (4)
 - **Function** `render_join_view` — the lookup off the event loop, then the puzzles shown one under another, each with its own viewer (`rd-viewer-join-<n>`), image toolbar and "Open in Puzzle"; a multiple chooser when there are several, "New Puzzle" to arrange another, or "Arrange in Puzzle" when there is none
 
+## shared/reading_desk_document.py
+
+The Reading Desk's document mode, the rules for both apps (2026-11-24, GS-307; moved from `web/pages/browse_desk_document.py`): while every fragment on the desk belongs to the PGP document it was opened for, the text side is that document's own edition or translation, once, never another document's. Tests: `tests/test_reading_desk_document.py`, `tests/test_desktop_reading_desk_qt.py`.
+
+- **Function** `document_desk` — for the document a desk was opened for and the fragments now on it: whether the sidecar knows the document, whether every fragment on the desk is one of its own (`whole`), and the document's own editions and translations (never another document's)
+- **Function** `document_view` — the text view: edition, translation, one text per fragment, or None when the per-fragment desk stays (no document, an outside fragment, no text)
+- **Function** `views_on_offer` / `view_sources` / `chosen_source` — the views with a text, then By fragment; the sources a view chooses among; the reader's if still one of the document's, else the first
+- **Function** `is_other_desk` / `has_document_text` — a desk opened for a document now holding a fragment from outside it; the document's text is on offer
+- **Function** `text_direction` / `source_label` / `source_labels` — a text's direction; its attribution (a translation led by its language), numbered where two read alike
+
 ## shared/reading_desk_views.py
 
 The Reading Desk's three image views, the rules for both apps (2026-11-22, GS-294; the web desk keeps its own copies in `web/pages/browse_desk_images.py` until its puzzle-images change lands). Tests: `tests/test_reading_desk_views.py`.
@@ -2279,7 +2286,17 @@ The desktop Reading Desk's image side (2026-11-22, GS-294): the view switcher, o
 - **Function** `move_buttons` — ▲ ▼ for a fragment, none on a desk of one, disabled at the ends
 - **Class** `ReadingDeskImagePane` — one frame for the three views (`head_cell` controls over `main_cell` the image(s); the switcher over `side_cell`, the thumbnails or the puzzle list); signals `image_chosen`, `view_changed`, `navigate_requested`, `remove_requested`, `move_requested`, `arrange_requested`, `open_puzzle_requested`; `set_desk` redraws, `stack_scroll_bar` (all images only) for the text side's scroll sync, `shutdown` retires every loader; thumbnails load three at a time; the puzzles found are kept until the view is chosen again
 
-The host's side (`genizah_app.py`): `_browse_rd_place_image_pane` (stretch and half the room; the sizes before the desk kept), `_browse_rd_render_text` (one image on show: its fragment, no fragment line), `_browse_rd_entry_text` / `_browse_rd_source_options` / `_browse_rd_choose_text` (a fragment's chosen text, `ReadingDeskEntry.chosen`), `_browse_rd_sync_version_combo` / `_browse_rd_restore_version_combo` (the "Version" chooser on the desk), `_browse_rd_move_entry`.
+The host's side (`genizah_app.py`): `_browse_rd_place_image_pane` (stretch and half the room; the sizes before the desk kept), `_browse_rd_document_desk` (the desk's PGP document, asked once per set of fragments), `_browse_rd_render_text` (`desktop/reading_desk_text.py`), `_browse_rd_document_link`, `_browse_rd_entry_text` / `_browse_rd_source_options` / `_browse_rd_choose_text` (a fragment's chosen text, `ReadingDeskEntry.chosen`), `_browse_rd_sync_version_combo` / `_browse_rd_restore_version_combo` (the "Version" chooser on the desk), `_browse_rd_move_entry`.
+
+## desktop/reading_desk_text.py
+
+The desktop Reading Desk's text side (2026-11-24, GS-307; moved out of `genizah_app.py`): on a PGP document's desk, the document's own edition or translation once, with Edition / Translation / By fragment above it; else every fragment's text, or with one image on show its fragment alone. The host (`genizah_app.py`, `_browse_rd_*`) keeps the state. Tests: `tests/test_desktop_reading_desk_qt.py`.
+
+- **Function** `desk_text_html` — the text pane's HTML and each text's lines for the gutter
+- **Function** `source_key` / `source_options` / `entry_text` / `version_data` — a fragment's texts: the key of each, the chooser's items, the one shown (on a document's desk in By fragment, its own FGP or automatic transcription first), an item in the browse chooser's vocabulary for the Cite bar
+- **Function** `fragment_scope` — the desk's PGP document while its text is By fragment: each fragment then offers that document's PGP sources and its own, never another document's, even a choice kept from before
+- **Function** `desk_view` / `shown_source` / `document_options` — the document text's view, the edition on show, the Version chooser's items in a document view
+- **Function** `choose_view` / `choose_source` / `ask_source` / `follow_link` — the reader's choices (`ReadingDeskState.text_view`, `edition`, `translation`, kept in the session file), [Change version], the text's `genizah://rd-doc-*` links
 
 ## desktop/reading_desk_puzzles.py
 

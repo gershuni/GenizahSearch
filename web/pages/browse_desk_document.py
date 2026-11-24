@@ -9,7 +9,8 @@ could be the one shown, and each text was cut into "recto" and "verso" by its he
 dealt out to every fragment's pages.
 
 Here the sources are asked for by document. ``document_desk`` is the data and the rule for
-when the desk is "the document"; ``render_document_text_panel`` draws the text side.
+when the desk is "the document", kept in ``shared/reading_desk_document.py`` for both apps (the
+desktop desk follows it too); ``render_document_text_panel`` draws the web's text side.
 
 The rule: the desk shows the document's text while every fragment on it belongs to the
 document it was opened for. Removing a fragment keeps it (the edition is still the
@@ -20,17 +21,18 @@ fragment, until that fragment is removed again.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 from nicegui import ui
 
+import shared.reading_desk_document as _document
+from shared.reading_desk_document import (  # noqa: F401  (the desk's names, re-exported for browse.py)
+    VIEW_EDITION, VIEW_FRAGMENTS, VIEW_TRANSLATION, document_desk, has_document_text, is_other_desk,
+    text_direction,
+)
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
-
-VIEW_EDITION = 'edition'
-VIEW_TRANSLATION = 'translation'
-VIEW_FRAGMENTS = 'fragments'
 
 # Keys in ``state.reading_desk_selected_sources`` (sys_id -> choice for the per-fragment
 # selectors; these three cannot collide with a sys_id). Values are strings, so the dict
@@ -82,100 +84,22 @@ DESK_CSS = '''
 '''
 
 
-def _relation(source: Dict[str, Any]) -> str:
-    return source.get('doc_relation') or ''
-
-
-def _has_text(source: Dict[str, Any]) -> bool:
-    return bool((source.get('content') or '').strip())
-
-
-def document_desk(pgpid: Optional[int], entry_sys_ids: Iterable[str]) -> Dict[str, Any]:
-    """What the desk may show for document ``pgpid`` with these fragments on it.
-
-    ``known``: the sidecar has the document's fragments. ``whole``: every fragment on the
-    desk is one of them (the desk is the document, or part of it). ``editions`` and
-    ``translations`` are the document's own sources, never another document's; a source
-    that is both ("Edition ; Translation") counts as an edition.
-    """
-    from shared.document_service import (
-        get_document_metadata, get_editions_for_document, get_fragments_for_document,
-        get_translations_for_document,
-    )
-    on_desk = {str(s) for s in entry_sys_ids if s}
-    desk: Dict[str, Any] = {
-        'pgpid': pgpid, 'known': False, 'whole': False, 'editions': [], 'translations': [],
-        'fragments_total': 0, 'fragments_on_desk': len(on_desk), 'pgp_url': None,
-    }
-    if not pgpid or not on_desk:
-        return desk
-    of_document = {str(f['sys_id']) for f in get_fragments_for_document(pgpid) if f.get('sys_id')}
-    desk['known'] = bool(of_document)
-    desk['fragments_total'] = len(of_document)
-    desk['whole'] = bool(of_document) and on_desk <= of_document
-    if not desk['whole']:
-        return desk
-    desk['editions'] = [s for s in get_editions_for_document(pgpid) if _has_text(s)]
-    desk['translations'] = [s for s in get_translations_for_document(pgpid)
-                            if _has_text(s) and 'Edition' not in _relation(s)]
-    desk['pgp_url'] = (get_document_metadata(pgpid) or {}).get('pgp_url')
-    return desk
-
-
-def is_other_desk(desk: Dict[str, Any]) -> bool:
-    """The desk was opened for a document but now holds a fragment from outside it."""
-    return bool(desk.get('known')) and not desk.get('whole')
-
-
-def has_document_text(desk: Dict[str, Any]) -> bool:
-    return bool(desk.get('whole')) and bool(desk.get('editions') or desk.get('translations'))
-
-
 def document_view(desk: Dict[str, Any], selected: Dict[str, Any]) -> Optional[str]:
-    """Which text view the desk is in: an edition, a translation, one text per fragment --
-    or None when the document's text is not on offer at all (the per-fragment desk)."""
-    if not has_document_text(desk):
-        return None
-    wanted = (selected or {}).get(KEY_VIEW)
-    if wanted == VIEW_FRAGMENTS:
-        return VIEW_FRAGMENTS
-    if wanted == VIEW_TRANSLATION and desk['translations']:
-        return VIEW_TRANSLATION
-    return VIEW_EDITION if desk['editions'] else VIEW_TRANSLATION
+    """Which text view the desk is in (``shared.reading_desk_document.document_view``), the
+    reader's choice read from ``selected``."""
+    return _document.document_view(desk, (selected or {}).get(KEY_VIEW))
 
 
 def chosen_source(desk: Dict[str, Any], selected: Dict[str, Any], view: str) -> Optional[Dict[str, Any]]:
     """The edition (or translation) on show: the reader's choice if it is still one of the
     document's, else the first."""
-    sources = desk['translations'] if view == VIEW_TRANSLATION else desk['editions']
-    if not sources:
-        return None
-    wanted = str((selected or {}).get(KEY_TRANSLATION if view == VIEW_TRANSLATION else KEY_EDITION) or '')
-    return next((s for s in sources if str(s.get('id')) == wanted), sources[0])
-
-
-def text_direction(source: Dict[str, Any]) -> str:
-    """'rtl' or 'ltr' for a source's text: the sidecar's own word, else English reads left
-    to right and everything else right to left."""
-    direction = source.get('source_direction')
-    if direction in ('rtl', 'ltr'):
-        return direction
-    return 'ltr' if source.get('language') == 'English' and 'Edition' not in _relation(source) else 'rtl'
+    wanted = (selected or {}).get(KEY_TRANSLATION if view == VIEW_TRANSLATION else KEY_EDITION)
+    return _document.chosen_source(desk, view, wanted)
 
 
 def source_label(source: Dict[str, Any], view: str) -> str:
     """The attribution as PGP gives it; a translation is led by its language."""
-    scholar = (source.get('source_scholar') or '').strip()
-    if view != VIEW_TRANSLATION:
-        return scholar or tr('PGP edition')
-    language = tr(source['language']) if source.get('language') else tr('Translation')
-    return f'{language}: {scholar}' if scholar else language
-
-
-def _numbered(labels: List[str]) -> List[str]:
-    """Labels that read alike get a number, so two sources of one scholar can be told apart."""
-    from shared.fgp_service import number_repeated_labels
-    return number_repeated_labels(labels)
+    return _document.source_label(source, view, tr)
 
 
 def render_document_text_panel(desk: Dict[str, Any], state: Any, view: str,
@@ -208,7 +132,7 @@ def render_document_text_panel(desk: Dict[str, Any], state: Any, view: str,
                 return
             sources = desk['translations'] if current == VIEW_TRANSLATION else desk['editions']
             if len(sources) > 1:
-                labels = _numbered([source_label(s, current) for s in sources])
+                labels = _document.source_labels(sources, current, tr)
                 options = {str(s.get('id')): label for s, label in zip(sources, labels)}
 
                 def on_source(e, current=current):

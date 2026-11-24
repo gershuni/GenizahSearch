@@ -3792,7 +3792,7 @@ TRANSLATIONS.update({
     "This join has too many fragments to show here. Open it in the Puzzle.": "בצירוף הזה יותר מדי קטעים להצגה כאן. פתחו אותו בפאזל.",
     "Your saved join": "צירוף שמור שלך",
     "Published by {}": "פורסם על ידי {}",
-    "{on} of this document's {total} fragments are on the desk": "בשולחן העיון {on} מתוך {total} קטעי המסמך",
+    "{on} of this document's {total} fragments are on the desk": "{on} מתוך {total} קטעי המסמך בשולחן העיון",
 
     # --- Browse / image controls ---
     "Add Notes": "הוסף הערות",

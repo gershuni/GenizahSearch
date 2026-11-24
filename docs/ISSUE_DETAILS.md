@@ -4310,22 +4310,6 @@ Fix sketch: run the panel's rows through the same cascade the chips use (`_apply
 → word-search → domain → printed/PGP/scholarly/library → measurements), with the panel's fields as
 one more step, in both Apply and Clear, and give the count line the same parts.
 
-## GS-294
-
-**Desktop Reading Desk: parity with the web's (a document's edition once, the image views, a join's assembled picture)** · idea · Desktop app · ❌ Open · opened 2026-11-18
-
-Where: `genizah_app.py` (reading desk / joined view), `desktop/puzzle.py`; web: `web/pages/browse_desk_document.py`, `browse_desk_images.py`, `browse_desk_puzzle.py`
-
-Owner, 2026-11-18, after the web Reading Desk was reworked: the desktop app should get the same.
-On the web a desk opened for a PGP document now shows that document's edition once (one selector
-over its own editions, translations apart) instead of once per fragment; the image side has three
-views (one image beside a strip of thumbnails, all images, the assembled picture of a saved join);
-and with one image on show the per-fragment text is that image's side alone and follows the
-thumbnail chosen. None of this exists on the desktop. The rule and the data are in shared-free web
-modules today (`document_desk`, `desk_images`, `find_joins`): the parts that are not NiceGUI would
-have to move to `shared/` first. The desktop's saved joins are not kept per visitor, so its lookup
-is simpler than the web's.
-
 ## GS-295
 
 **A saved Catalog search shows the Exact marker in the history menu** · P3 · Desktop app · ❌ Open · opened 2026-11-18
@@ -4514,27 +4498,6 @@ columns through `update_discovery`. Unless the live table has those columns fill
 (not in any tracked SQL), a discovery shared on the web shows no linked document and no additional
 shelfmarks in the feed. Not checked against the live database. Fix sketch: in the feed, fall back
 to `shelfmarks[0]` and `shelfmarks[1:]` when the top-level keys are empty.
-
-## GS-307
-
-**The desktop Reading Desk shows a document's edition under every fragment, sometimes another document's** · P2 · Desktop app · ❌ Open · opened 2026-11-22
-
-Where: `genizah_app.py::_browse_rd_render_text`, `desktop/gui_threads.py::ReadingDeskWorker`
-
-The desktop desk asks for sources fragment by fragment (`get_all_sources_for_fragment`, which
-returns the sources of every PGP document a fragment belongs to) and shows, under each fragment,
-the first edition with text among them. Replayed on the local `pgp.db` (2026-11-22): a desk of
-PGP 712 (ENA 2740.3 + ENA 2805.2) shows edition 558 under both fragments; a desk of PGP 1702
-(T-S 13J16.11, T-S 13J22.21, T-S 8J22.14) shows edition 5171 under all three, and 5171 belongs to
-PGP 1246. The website fixed the same fault in v10.1.0 with its document mode
-(`web/pages/browse_desk_document.py`: the document's own edition once, Edition / Translation /
-By fragment), measured there on 548 documents shown repeated and 128 opening on another
-document's edition.
-
-Fix sketch: move `document_desk` and its rules from `web/pages/browse_desk_document.py` to
-`shared/`, and give the desktop desk the same text panel (a source selector over the document's
-own editions, translations apart, "By fragment" for each fragment's own transcriptions). The
-image views of GS-294 (one image at a time, puzzle images) are in; this is the text half.
 
 ## GS-308
 

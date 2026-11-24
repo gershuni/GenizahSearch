@@ -364,7 +364,8 @@ def test_the_session_file_entry_is_checked_on_the_way_back():
                               'pgpid': '12', 'image_view': 'all', 'image_shown': None})
     assert back == {'entries': [{'sys_id': A, 'shelfmark': '', 'chosen': ''},
                                 {'sys_id': B, 'shelfmark': '', 'chosen': 'v08'}],
-                    'pgpid': 12, 'image_view': 'all', 'image_shown': '', 'puzzles_shown': ''}
+                    'pgpid': 12, 'image_view': 'all', 'image_shown': '', 'puzzles_shown': '',
+                    'text_view': '', 'edition': '', 'translation': ''}
     assert desk_from_session({'entries': [{'sys_id': A}], 'pgpid': True})['pgpid'] is None
     assert desk_session_state(ReadingDeskState()) is None
     kept = desk_session_state(_open_desk())

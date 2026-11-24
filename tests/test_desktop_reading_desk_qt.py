@@ -668,6 +668,7 @@ def _host(state, lists, view):
     )
     host._browse_rd_image_lists = lambda: lists
     host._browse_rd_is_document = lambda: False
+    host._browse_rd_document_desk = lambda: {}  # not a PGP document's desk (see the document tests)
     host.browse_version_combo = QComboBox()
     host._browse_rd_saved_versions = None
     host.renders = []
@@ -930,3 +931,188 @@ def test_the_scroll_sync_binds_to_the_stack_only():
     # The delayed set-up after a view change finds no stack and binds nothing.
     gui._browse_rd_setup_sync_scroll(host)
     assert host._rd_image_sync_handler is None and host._rd_sync_image_bar is None
+
+
+# -- a PGP document's desk: its own text, once (GS-307) ------------------------------------------
+
+# Every fragment's sources (get_all_sources_for_fragment) hold the editions of every document the
+# fragment belongs to: here PGP 1702's own and PGP 1246's, which the desk used to show under each.
+_OWN = {'id': 701, 'doc_relation': 'Edition', 'source_scholar': 'A. Editor', 'content': 'own edition text',
+        'pgpid': 1702}
+_OWN_2 = {'id': 702, 'doc_relation': 'Edition', 'source_scholar': 'B. Editor', 'content': 'second edition text',
+          'pgpid': 1702}
+_OWN_TR = {'id': 703, 'doc_relation': 'Translation', 'language': 'English', 'source_scholar': 'T. Ranslator',
+           'content': 'own translation text', 'pgpid': 1702}
+_OTHER = {'id': 5171, 'doc_relation': 'Edition', 'source_scholar': 'O. Ther', 'content': 'another document edition',
+          'pgpid': 1246}
+_FGP = {'id': 9, 'source': 'fgp', 'doc_relation': 'Edition', 'source_scholar': 'FGP', 'content': 'fgp text 1'}
+
+
+def _document_host(view='all', editions=(_OWN, _OWN_2), on_desk=2):
+    """A desk of PGP 1702 (two of its three fragments): every fragment's sources hold another
+    document's edition too, and fragment 1 has an FGP transcription of its own."""
+    state, lists = _desk(2)
+    state.pgpid = 1702
+    state.entries[0].sources = [dict(_OTHER), dict(_OWN), dict(_FGP)]
+    state.entries[1].sources = [dict(_OTHER), dict(_OWN)]
+    document = {'pgpid': 1702, 'known': True, 'whole': True, 'editions': list(editions),
+                'translations': [_OWN_TR], 'fragments_total': 3, 'fragments_on_desk': on_desk, 'pgp_url': None}
+    gui, host = _host(state, lists, view)
+    host._browse_rd_document_desk = lambda: document
+    host._browse_rd_is_document = lambda: True
+    host._browse_rd_document_link = lambda url: gui._browse_rd_document_link(host, url)
+    host._browse_pgp_url = None
+    return gui, host, state
+
+
+def test_a_documents_desk_shows_its_own_edition_once_never_another_documents():
+    gui, host, _state = _document_host()
+    gui._browse_rd_render_text(host)
+    text = host.browse_text.toPlainText()
+    assert text.count('own edition text') == 1, text
+    assert 'another document edition' not in text and 'text 1 recto' not in text
+    assert "2 of this document's 3 fragments are on the desk" in text
+    assert 'Edition' in text and 'Translation' in text and 'By fragment' in text
+
+
+def test_the_version_chooser_holds_the_documents_editions_and_the_cite_bar_credits_the_one_on_show():
+    gui, host, state = _document_host(view='one')
+    gui._browse_rd_render_text(host)
+    combo = host.browse_version_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == ['A. Editor', 'B. Editor']
+    assert combo.isEnabled() and combo.currentIndex() == 0
+    assert gui._credit_version_info(host, combo.currentData())['attribution'] == 'A. Editor'
+    combo.setCurrentIndex(1)                                     # the reader chooses the other edition
+    text = host.browse_text.toPlainText()
+    assert 'second edition text' in text and 'own edition text' not in text and state.edition == '702'
+    assert gui._credit_version_info(host, combo.currentData())['attribution'] == 'B. Editor'
+
+
+def test_the_views_switch_to_the_translation_and_to_each_fragments_own_text():
+    gui, host, state = _document_host()
+    gui._browse_rd_render_text(host)
+    host._browse_rd_document_link('genizah://rd-doc-view/translation')
+    text = host.browse_text.toPlainText()
+    assert state.text_view == 'translation' and 'own translation text' in text and 'own edition text' not in text
+    host._browse_rd_document_link('genizah://rd-doc-view/fragments')
+    text = host.browse_text.toPlainText()
+    # By fragment: each opens on what it has of its own -- fragment 1 its FGP transcription,
+    # fragment 2 its automatic one -- never the PGP editions every fragment shares.
+    assert 'fgp text 1' in text and 'text 2 recto' in text, text
+    assert 'another document edition' not in text and 'own edition text' not in text
+    assert '[Change version]' in text and 'T-S 1' in text           # each fragment's own chooser
+    host._browse_rd_document_link('genizah://rd-doc-view/edition')
+    assert 'own edition text' in host.browse_text.toPlainText()
+
+
+def test_change_version_of_the_document_text_picks_among_its_editions(monkeypatch):
+    gui, host, state = _document_host()
+    gui._browse_rd_render_text(host)
+    assert '[Change version]' in host.browse_text.toPlainText()
+    asked = []
+    monkeypatch.setattr(QInputDialog, 'getItem', staticmethod(
+        lambda *a, **k: (asked.append(a[3]), ('B. Editor', True))[1]))
+    host._browse_rd_document_link('genizah://rd-doc-source')
+    assert asked == [['A. Editor', 'B. Editor']] and state.edition == '702'
+    assert 'second edition text' in host.browse_text.toPlainText()
+    gui, host, _state = _document_host(editions=(_OWN,))
+    gui._browse_rd_render_text(host)
+    assert '[Change version]' not in host.browse_text.toPlainText()  # one edition: nothing to choose
+
+
+def test_the_documents_text_choices_are_kept_with_the_desk():
+    from shared.reading_desk_model import desk_from_session, desk_session_state
+    gui, host, state = _document_host()
+    gui._browse_rd_render_text(host)
+    host._browse_rd_document_link('genizah://rd-doc-view/translation')
+    state.edition = '702'
+    back = desk_from_session(desk_session_state(state))
+    assert (back['text_view'], back['edition'], back['translation']) == ('translation', '702', '')
+
+
+def test_the_document_is_asked_once_per_set_of_fragments_and_never_without_its_text(monkeypatch):
+    import genizah_app
+    import shared.reading_desk_document as rdd
+    gui = genizah_app.GenizahGUI
+    state, _lists = _desk(2)
+    state.pgpid = 1702
+    host = SimpleNamespace(browse_reading_desk_state=state, _browse_rd_document=None)
+    asked = []
+    answer = {'whole': True, 'editions': [_OWN], 'translations': []}
+    monkeypatch.setattr(rdd, 'document_desk', lambda pgpid, ids: (asked.append((pgpid, tuple(ids))), answer)[1])
+    assert gui._browse_rd_document_desk(host) is answer and gui._browse_rd_document_desk(host) is answer
+    assert asked == [(1702, ('990001', '990002'))]
+    state.entries.pop()                                          # another set of fragments: asked again
+    host._browse_rd_document = None
+    answer = {'whole': True, 'editions': [], 'translations': []}  # the document has no text
+    assert gui._browse_rd_document_desk(host) == {}
+    host._browse_rd_document = None
+    monkeypatch.setattr(rdd, 'document_desk', lambda *a: 1 / 0)  # the sidecar cannot be read
+    assert gui._browse_rd_document_desk(host) == {}
+
+
+def test_by_fragment_offers_this_documents_sources_and_the_fragments_own_never_another_documents(monkeypatch):
+    """By fragment on a document's desk: each fragment's chooser and [Change version] hold this
+    document's PGP sources and the fragment's own FGP and automatic transcriptions, never another
+    document's edition, which a choice made before (kept in the session) cannot bring back either
+    (Codex on #120)."""
+    gui, host, state = _document_host(view='one')
+    state.text_view = 'fragments'
+    state.image_shown = '990001:0'
+    gui._browse_rd_render_text(host)
+    combo = host.browse_version_combo
+    labels = [combo.itemText(i) for i in range(combo.count())]
+    assert labels == ['Edition: A. Editor', 'FGP Edition: FGP', 'V0.8 (HTR)'], labels
+    assert combo.currentText() == 'FGP Edition: FGP'
+    state.entries[0].chosen = 'pgp:5171'                          # another document's, chosen before
+    gui._browse_rd_render_text(host)
+    assert 'another document edition' not in host.browse_text.toPlainText()
+    assert 'fgp text 1' in host.browse_text.toPlainText()
+    asked = []
+    monkeypatch.setattr(QInputDialog, 'getItem', staticmethod(lambda *a, **k: (asked.append(a[3]), ('', False))[1]))
+    gui._browse_rd_show_version_dialog(host, '990002', 1)
+    assert asked == [['Edition: A. Editor', 'V0.8 (HTR)']]
+    gui, host, state = _desk_host_all_sources()                   # a hand-built desk: every source on offer
+    gui._browse_rd_render_text(host)
+    combo = host.browse_version_combo
+    assert 'Edition: O. Ther' in [combo.itemText(i) for i in range(combo.count())]
+
+
+def _desk_host_all_sources():
+    state, lists = _desk(2)
+    state.entries[0].sources = [dict(_OTHER), dict(_OWN)]
+    state.image_shown = '990001:0'
+    gui, host = _host(state, lists, 'one')
+    return gui, host, state
+
+
+def _themed(dark):
+    """A widget in the light or the dark theme (the app's test: the window's lightness)."""
+    from PyQt6.QtGui import QPalette
+    widget = QWidget()
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor('#1e1e1e' if dark else '#f0f0f0'))
+    widget.setPalette(palette)
+    _KEEP.append(widget)
+    return widget
+
+
+@pytest.mark.parametrize('dark', [False, True])
+def test_the_desks_rows_are_drawn_in_the_panes_theme(dark):
+    """On the dark theme the attribution, the fragment names and the page breaks were light blocks
+    with light text on them (UAT of #120): each row now takes the pane's theme."""
+    from desktop.reading_desk_text import _DARK, _LIGHT, desk_text_html
+    gui, host, state = _document_host()
+    document = host._browse_rd_document_desk()
+    html, _parts = desk_text_html(state, shown=None, current_sid='', document=document,
+                                  tr=lambda s: s, theme_of=_themed(dark))
+    ours, other = (_DARK, _LIGHT) if dark else (_LIGHT, _DARK)
+    assert f"background: {ours['row']}" in html and f"background: {other['row']}" not in html
+    state.text_view = 'fragments'                                 # the fragments' names and page breaks
+    html, _parts = desk_text_html(state, shown=None, current_sid='', document=document,
+                                  tr=lambda s: s, theme_of=_themed(dark))
+    assert html.count(f"background: {ours['row']}") == 2 and f"background: {ours['page']}" in html
+    assert f"background: {other['row']}" not in html and f"background: {other['page']}" not in html
+    host.palette = _themed(dark).palette                          # and as the app draws it, in its own theme
+    gui._browse_rd_render_text(host)
+    assert ours['row'] in host.browse_text.toHtml() and other['row'] not in host.browse_text.toHtml()

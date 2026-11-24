@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-24 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-23-startup-user-work-mark-thread-id-reuse.md). 189 open: P1 0, P2 42, P3 147.
+> **Last Updated:** 2026-11-24 (archived GS-307). 188 open: P1 0, P2 41, P3 147.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ the private repository; grep only).
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 3 | 6 | 9 |
-| Desktop app | 0 | 10 | 31 | 41 |
+| Desktop app | 0 | 9 | 31 | 40 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **42** | **147** | **189** |
+| **Total** | **0** | **41** | **147** | **188** |
 
 ## P1 - Critical
 
@@ -62,7 +62,6 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-307](ISSUE_DETAILS.md#gs-307) | The desktop Reading Desk shows a document's edition under every fragment, sometimes another document's | `genizah_app.py::_browse_rd_render_text`, `desktop/gui_threads.py::ReadingDeskWorker` | 2026-11-22 | ❌ Open |
 | [GS-9](ISSUE_DETAILS.md#gs-9) | Desktop Search export, filters and counts see only the loaded rows | `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch | 2026-09-25 | ❌ Open |
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
 | [GS-11](ISSUE_DETAILS.md#gs-11) | Desktop: a stale `PGPBadgeWorker` can blank the PGP column of a table it never searched | `genizah_app.py::_on_pgp_badges_loaded`, _on_tag_search_results; PGPBadgeWorker | 2026-09-03 | ❌ Open |

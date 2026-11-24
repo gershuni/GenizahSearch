@@ -43,6 +43,7 @@ DESKTOP_MODULES = [
     "desktop/puzzle.py",
     "desktop/reading_desk_images.py",    # the Reading Desk's image side, three views (GS-294)
     "desktop/reading_desk_puzzles.py",   # the Reading Desk's puzzle images (GS-294)
+    "desktop/reading_desk_text.py",      # the Reading Desk's text side, a document's text once (GS-307)
     "desktop/result_dialog.py",
     "desktop/settings_dialogs.py",
     "desktop/telemetry.py",

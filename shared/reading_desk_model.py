@@ -45,18 +45,26 @@ class ReadingDeskState:
     image_view: str = ''
     image_shown: str = ''
     puzzles_shown: str = ''
+    # The text side's choices on a PGP document's desk (shared/reading_desk_document.py): the
+    # view ('' = the default: the edition, else the translation; or 'fragments'), and the id of
+    # the edition and of the translation on show ('' = the first).
+    text_view: str = ''
+    edition: str = ''
+    translation: str = ''
 
 
 # -- The desk in the desktop session file (genizah_app.py::_save_session, ``browse_reading_desk``) --
 
-# The image side's choices the session file keeps with the desk (``ReadingDeskState`` fields).
-DESK_SESSION_CHOICES = ('image_view', 'image_shown', 'puzzles_shown')
+# The choices the session file keeps with the desk (``ReadingDeskState`` fields): the image
+# side's, then the document text's.
+DESK_SESSION_CHOICES = ('image_view', 'image_shown', 'puzzles_shown', 'text_view', 'edition', 'translation')
 
 
 def desk_session_state(state: Optional[ReadingDeskState]) -> Optional[Dict[str, Any]]:
     """What the session file keeps of an open desk: its manuscripts in their order (system
     number, shelfmark, the text chosen for each), the PGP document it was opened for, and the
-    image side's choices. The pages and sources are not kept: they are read again on restore.
+    image side's and the document text's choices. The pages and sources are not kept: they are
+    read again on restore.
     None for no desk or an empty one."""
     if state is None:
         return None

@@ -36,6 +36,19 @@ _GUTTER_PADDING_PX = 8
 _GUTTER_FONT_SIZE = 10
 _GUTTER_COLOR_HEX = "#9ca3af"
 _GUTTER_BG_HEX = "#f3f4f6"
+# On the dark theme: a gutter a shade off the dark text area, its numbers a muted grey (it was the
+# light gutter on every theme, a pale strip beside dark text).
+_GUTTER_COLOR_DARK_HEX = "#7b8491"
+_GUTTER_BG_DARK_HEX = "#24282e"
+
+
+def gutter_colors(palette):
+    """(background, numbers) for the gutter in ``palette``'s theme: dark when its window is dark,
+    the app's own test (genizah_app.py)."""
+    from PyQt6.QtGui import QPalette
+    if palette.color(QPalette.ColorRole.Window).lightness() < 128:
+        return _GUTTER_BG_DARK_HEX, _GUTTER_COLOR_DARK_HEX
+    return _GUTTER_BG_HEX, _GUTTER_COLOR_HEX
 
 
 def is_line_numbers_enabled() -> bool:
@@ -172,8 +185,9 @@ class LineNumberArea(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(event.rect(), QColor(_GUTTER_BG_HEX))
-        painter.setPen(QColor(_GUTTER_COLOR_HEX))
+        background, numbers = gutter_colors(self.palette())
+        painter.fillRect(event.rect(), QColor(background))
+        painter.setPen(QColor(numbers))
         painter.setFont(self._font)
 
         if self._line_count == 0 and not getattr(self, "_per_page_mode", False):
