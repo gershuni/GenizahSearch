@@ -3483,6 +3483,27 @@ class SearchEngine:
         cross_page = len({o.get('uid') for o in overlaps if o.get('uid')}) > 1
         return {'primary': primary or (boundaries[0] if boundaries else None), 'overlaps': overlaps, 'cross_page': cross_page}
 
+    def _note_composition_match_page(self, rec, doc, span):
+        """Composition: keep on *rec* the page a whole-manuscript / part doc's first match
+        starts on -- ``rec['_first_match'] = (start, page)``, page being the boundary
+        entry (uid, full_header, ...) holding the match's start, or None when the doc's
+        boundaries do not place it (none, or the match in no page). Strictly the page
+        that holds it: never _map_span_to_pages's fallback to the first page, which is
+        what the row's raw_header already names. Boundaries are parsed once per doc."""
+        first = rec.get('_first_match')
+        if first is not None and first[0] <= span[0]:
+            return
+        if '_boundaries' not in rec:
+            rec['_boundaries'] = self._parse_boundaries(doc)
+        page = None
+        if rec['_boundaries']:
+            span_map = self._map_span_to_pages(span, rec['_boundaries'])
+            if span_map.get('overlaps'):
+                primary = span_map.get('primary') or {}
+                if primary.get('uid') and primary.get('full_header'):
+                    page = primary
+        rec['_first_match'] = (span[0], page)
+
     # --- Crossings (plan §6.1 point 2, §7 Phase 3 points 7-12) --------------------------
 
     def _seams_ready(self):
@@ -5689,13 +5710,22 @@ class SearchEngine:
                             # mapped onto the original (its offsets cut a bracketed word
                             # short: *אבג ש[לו*ם -- Codex review of PR #375). The
                             # stripped match is reused: no third search.
-                            _orig_m = _sm if match_content is content else regex.search(content)
+                            # A whole-manuscript / part doc: always the stripped match,
+                            # mapped -- the original text's own first match may be a later
+                            # occurrence on another page (של[ו]ם on page 2, שלום on page 3),
+                            # and the row is placed on the page of the one it shows
+                            # (Codex review of PR #125).
+                            _aggregate = (self._get_field(doc, 'scope', ['page']) or ['page'])[0] != 'page'
+                            _orig_m = (_sm if match_content is content
+                                       else None if _aggregate else regex.search(content))
                             if _orig_m is None:
                                 _orig_m = _Span(*_unstripped_span(content, _sm.start(), _sm.end()))
                             uid = doc['unique_id'][0]
 
                             # Always use single map - accumulate all matches for same uid
                             rec = doc_hits[uid]
+                            if _aggregate:
+                                self._note_composition_match_page(rec, doc, _orig_m.span())
 
                             # Mark as filtered if ANY chunk match is filtered
                             if is_text_filtered or is_freq_filtered:
@@ -6083,6 +6113,15 @@ class SearchEngine:
                     'is_filtered': data.get('is_filtered', False),
                     'filter_reason': data.get('filter_reason', '')
                 })
+                if '_first_match' in data:
+                    # A whole-manuscript / part doc: its uid (sys:/part:) and header (its
+                    # first page) stay as they were -- the web page and the desktop tell
+                    # these rows apart by the uid. The page its first match starts on, or
+                    # None when its boundaries do not place it, is what a client is given
+                    # (search_serializer: the uid /api/browse takes, and the locator).
+                    page = data['_first_match'][1] or {}
+                    final_items[-1]['match_page_uid'] = page.get('uid') or None
+                    final_items[-1]['match_page_header'] = page.get('full_header') or None
 
             # Sort by final_score in combined mode, otherwise by base score
             if boundary_mode == 'combined':

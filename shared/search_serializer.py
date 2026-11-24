@@ -118,6 +118,42 @@ def _is_local_item(result: dict) -> bool:
     return library_code == 'LOCAL' or is_local_sys_id(sys_id)
 
 
+# A whole-manuscript or codicological-part document's uid. /api/browse takes only a
+# page's IE{N}_P{M}_FL{K} and refuses these (400 locator_conflict), so a result item
+# never carries one: such a row is given as the page its match starts on when the
+# engine placed it (Composition's match_page_uid / match_page_header), else with
+# `uid` null and the locator of its raw_header -- the document's first page.
+_AGGREGATE_UID_PREFIXES = ('sys:', 'part:')
+
+
+def _match_page(result: dict) -> Optional[tuple[str, str]]:
+    """(uid, header) of the page an aggregate row's match starts on, or None: for a
+    page's own row, and for an aggregate row the engine did not place."""
+    if not str(result.get('uid') or '').startswith(_AGGREGATE_UID_PREFIXES):
+        return None
+    uid, header = result.get('match_page_uid'), result.get('match_page_header')
+    if isinstance(uid, str) and uid and isinstance(header, str) and header:
+        return uid, header
+    return None
+
+
+def _public_uid(result: dict) -> Optional[str]:
+    """The item's `uid`: the row's own, the page its match starts on for an aggregate
+    row, or None for an aggregate row that names no page."""
+    uid = result.get('uid', '') or ''
+    if not str(uid).startswith(_AGGREGATE_UID_PREFIXES):
+        return uid
+    page = _match_page(result)
+    return page[0] if page else None
+
+
+def _locating_header(result: dict) -> str:
+    """The header a row is located and grouped by: its match page's for an aggregate
+    row the engine placed, else its raw_header. Always the same page as _public_uid."""
+    page = _match_page(result)
+    return page[1] if page else (result.get('raw_header', '') or '')
+
+
 def _extract_sys_id_for_batch(result: dict, meta_mgr=None) -> str:
     """MUST-FIX 94-02-A -- Shared sys_id resolution chain for batch lookups.
 
@@ -145,7 +181,7 @@ def _extract_sys_id_for_batch(result: dict, meta_mgr=None) -> str:
         did = display.get('id')
         if isinstance(did, str) and did.strip():
             return did.strip()
-    raw = result.get('raw_header') or ''
+    raw = _locating_header(result)
     if isinstance(raw, str) and raw:
         m = _SYS_ID_REGEX.search(raw)
         if m:
@@ -329,8 +365,9 @@ def _serialize_item(
     display = result.get('display', {}) or {}
     sys_id_raw = display.get('id', '') or ''
 
-    # Locator from raw_header -- D-04 always-present, fields may be null
-    raw_header = result.get('raw_header', '') or ''
+    # Locator from raw_header -- D-04 always-present, fields may be null. An aggregate
+    # (sys:/part:) row: from the page its match starts on, the page `uid` names.
+    raw_header = _locating_header(result)
     if raw_header and meta_mgr is not None:
         try:
             parsed = meta_mgr.parse_full_id_components(raw_header) or {}
@@ -434,7 +471,7 @@ def _serialize_item(
     )
 
     out = {
-        'uid': result.get('uid', '') or '',
+        'uid': _public_uid(result),
         'locator': {
             'sys_id': final_sys_id or None,
             'volume_ie': parsed.get('ie_id'),
@@ -953,7 +990,9 @@ def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any,
     """
     groups: dict[str, dict] = {}
     for item in items:
-        raw_header = item.get('raw_header', '') or ''
+        # An aggregate row belongs to the manuscript of the page its match starts on
+        # (an Oxford part can span manuscripts): the one its item's locator names.
+        raw_header = _locating_header(item)
         parsed = {}
         if raw_header and meta_mgr is not None:
             try:

@@ -1,6 +1,6 @@
 # GenizahSearch Search-Helper API
 
-> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-11-15
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-11-24
 
 The **site release** above is the GenizahSearch version this document was last checked
 against — it is NOT a separate API version, and it does not gate what is true. The
@@ -424,7 +424,7 @@ Notes:
 
 | Name | Type | Notes |
 | ---- | ---- | ----- |
-| `uid` | string \| null | `IE{N}_P{M}_FL{K}` when resolvable; safe to feed verbatim into `/api/browse?uid=...` |
+| `uid` | string \| null | `IE{N}_P{M}_FL{K}` when resolvable; safe to feed verbatim into `/api/browse?uid=...`. A match found in a manuscript's (or a codicological part's) text read whole -- across a page break, say -- is the page it starts on, uid and `locator` alike; `null`, with the manuscript's first page in `locator`, only where that page cannot be told. Never a `sys:` / `part:` id (until 2026-11 `/api/parallels` could give one, which `/api/browse` refuses) |
 | `locator` | object | always present; EXACTLY `{sys_id, volume_ie, p_num}` — three keys, any of which may be null. **No `fl_id`**: that key exists only on `/api/browse`'s locator, and a client reading `result["locator"]["fl_id"]` here gets a `KeyError`, not `null`. `p_num` is a **string** (`"3"`), not an int — it is stringified in `parse_full_id_components`. Documented with a 4th `fl_id` key and an integer `p_num` until 2026-09-08; the code was right |
 | `is_synthetic` | bool | Phase 85 SYNTH-06 (v7.11): `true` iff the row is a Phase-85 synthetic libraries.csv entry generated for an FJMS-only or CUDL-orphaned inventory; `false` for real NLI Alma records. Top-level (NOT nested under `locator`); additive — schema_version stays 1. Skill consumers should consider showing a "no NLI metadata" annotation when `true`. |
 | `score` | float | Tantivy raw score |
@@ -1244,7 +1244,8 @@ because the browse endpoint cross-checks them post-resolution (Phase 79 D-03b) a
 404 `manuscript_page_not_found` if the pair refers to different manuscripts.
 
 When `uid` is null on the result item (rare: the underlying record lacked a complete
-locator triple), use one of the alternate browse paths:
+locator triple, or a match in a manuscript's text read whole could not be placed on a page,
+when `locator` is the manuscript's first page), use one of the alternate browse paths:
 
 ```
 GET /api/browse?sys_id=...&volume_ie=IE12345&p_num=3
@@ -1559,6 +1560,16 @@ The following improvements are documented here as future work but are NOT implem
 ---
 
 ## Changelog
+
+### 2026-11 — A parallel found across a page break is its page
+
+- `POST /api/parallels` could give a result whose `uid` was `part:<id>` or `sys:<id>`: a
+  manuscript or codicological part found only in its text read whole (a match across a page
+  break, for one). `/api/browse` refused that uid (400 `locator_conflict`), and the `locator`
+  named the manuscript's first page. Such a result is now the page its match starts on: that
+  page's `uid` and `locator`, and the manuscript it belongs to (a part can span manuscripts).
+  Where the page cannot be told, `uid` is `null` and `locator` the first page. The same rule
+  holds on `POST /api/search` and in the JSON exports.
 
 ### 2026-11 — Scholarly editions: `sources`, one result per page, `version`
 

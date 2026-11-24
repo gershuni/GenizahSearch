@@ -334,7 +334,85 @@ def test_parallels_locator_round_trip_serializer_unit(client, mock_searcher, cle
     assert r2.status_code == 200, r2.text
 
 
-_PART_UID_ISSUE = 'docs/open_issues.d/2026-11-24-parallels-part-uid-not-browsable.md'
+def _browse_page_recorder(monkeypatch, *, uid, sys_id, volume_ie, p_num, fl_id):
+    """Short-circuit /api/browse's page fetch (Phase 79 pattern) with one page; returns
+    the list of requests it was given: ('fl', fl_id, sys_id) or ('page', sys_id, p_num,
+    volume_ie)."""
+    from web.services import get_service, BrowsePage
+    svc = get_service()
+    asked = []
+    page = BrowsePage(
+        uid=uid, p_num=p_num, text='', full_header='', total_pages=9, current_idx=0,
+        sys_id=sys_id, fl_id=fl_id, shelfmark='T-S 99.99', title='Synthetic',
+        library_code='CUL', library_name='Cambridge', volume_ie=volume_ie,
+        volumes=[{'ie_id': volume_ie, 'suffix': 1, 'page_count': 9}],
+        folio_label='1r', folio_images=[], cambridge_images=[],
+        physical_metadata=None, library_viewer_url=None, external_provider='',
+    )
+
+    def _by_fl(fl, sys_id=None, *a, **k):
+        asked.append(('fl', fl, sys_id))
+        return page
+
+    def _by_page(sys_id, p_num=None, volume_ie=None, *a, **k):
+        asked.append(('page', sys_id, p_num, volume_ie))
+        return page
+    monkeypatch.setattr(svc, 'get_browse_page_by_fl', _by_fl)
+    monkeypatch.setattr(svc, 'get_browse_page', _by_page)
+    return asked
+
+
+@pytest.mark.parametrize('aggregate_uid', ['part:MS. Heb. e. 95/27', 'sys:99001'])
+def test_parallels_aggregate_row_is_given_as_its_match_page(
+        aggregate_uid, client, mock_searcher, clean_env, monkeypatch):
+    """A whole-manuscript / part row (its match only in the continuous document): the
+    item is the page its match starts on -- that page's uid, which /api/browse takes,
+    and its locator -- not the `sys:`/`part:` uid /api/browse refuses (400
+    locator_conflict), nor the document's first page its raw_header names. The part
+    here spans manuscripts: the match page is in another manuscript than the first."""
+    row = _make_main_row(uid=aggregate_uid, sys_id='99001')
+    row['raw_header'] = 'h_99001_IE99_P1_FL101'          # the document's first page
+    row['match_page_uid'] = 'IE77_P4_FL444'
+    row['match_page_header'] = 'h_99007_IE77_P4_FL444'
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [row], 'filtered': [], 'boundary_stats': None}
+    asked = _browse_page_recorder(monkeypatch, uid='IE77_P4_FL444', sys_id='99007',
+                                  volume_ie='IE77', p_num=4, fl_id='FL444')
+
+    r = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert r.status_code == 200, r.text
+    (item,) = r.json()['results']
+    assert item['uid'] == 'IE77_P4_FL444'
+    assert item['locator'] == {'sys_id': '99007', 'volume_ie': 'IE77', 'p_num': '4'}
+    r2 = client.get(f"/api/browse?sys_id={item['locator']['sys_id']}&uid={item['uid']}")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()['locator']['uid'] == 'IE77_P4_FL444'
+    assert len(asked) == 1 and asked[0][-1] == '99007'
+
+
+@pytest.mark.parametrize('aggregate_uid', ['part:MS. Heb. e. 95/27', 'sys:99001'])
+def test_parallels_aggregate_row_without_a_match_page_has_no_uid(
+        aggregate_uid, client, mock_searcher, clean_env, monkeypatch):
+    """An aggregate row the engine could not place (its document has no page
+    boundaries): `uid` null -- never the aggregate's own -- and the locator of the
+    document's first page, which /api/browse takes by p_num (docs/SEARCH_API.md: "When
+    uid is null ...")."""
+    row = _make_main_row(uid=aggregate_uid, sys_id='99001')
+    row['raw_header'] = 'h_99001_IE99_P1_FL101'
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [row], 'filtered': [], 'boundary_stats': None}
+    asked = _browse_page_recorder(monkeypatch, uid='IE99_P1_FL101', sys_id='99001',
+                                  volume_ie='IE99', p_num=1, fl_id='FL101')
+
+    r = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert r.status_code == 200, r.text
+    (item,) = r.json()['results']
+    assert item['uid'] is None
+    assert item['locator'] == {'sys_id': '99001', 'volume_ie': 'IE99', 'p_num': '1'}
+    loc = item['locator']
+    r2 = client.get(f"/api/browse?sys_id={loc['sys_id']}&volume_ie={loc['volume_ie']}&p_num={loc['p_num']}")
+    assert r2.status_code == 200, r2.text
+    assert asked == [('page', '99001', 1, 'IE99')]
 
 
 def test_parallels_locator_round_trip_real(real_web_state, bare_app, clean_env):
@@ -343,10 +421,10 @@ def test_parallels_locator_round_trip_real(real_web_state, bare_app, clean_env):
     `real_web_state` loads them into web.state and skips where there is no index
     (CI); with them loaded, a failed search or no result is a failure, not a skip.
 
-    Known defect: a continuous part result keeps its `part:` uid, which
-    /api/browse refuses with 400 locator_conflict (_PART_UID_ISSUE). Exactly that
-    outcome, after a successful search, is an expected failure; anything else
-    fails. Remove the xfail branch with the fix.
+    On the index of 2026-11-24 every result of this composition is a whole-manuscript
+    or part document's (`sys:`/`part:`): the item must be the page its match starts
+    on, whose uid /api/browse takes. Until that fix it was refused with 400
+    locator_conflict.
     """
     composition = (
         # Common Hebrew piyut opening -- high match probability across the corpus.
@@ -364,16 +442,14 @@ def test_parallels_locator_round_trip_real(real_web_state, bare_app, clean_env):
         locator = item['locator']
         sys_id = locator['sys_id']
         item_uid = item.get('uid')
+        assert not str(item_uid or '').startswith(('sys:', 'part:')), item_uid
         url = (f'/api/browse?sys_id={sys_id}&uid={item_uid}'
                if item_uid else
                f"/api/browse?sys_id={sys_id}&p_num={locator['p_num']}")
         r2 = c.get(url)
-        if (r2.status_code == 400 and str(item_uid or '').startswith(('part:', 'sys:'))
-                and (r2.json().get('error') or {}).get('code') == 'locator_conflict'):
-            pytest.xfail(f'{item_uid!r} is refused by /api/browse ({_PART_UID_ISSUE})')
         # The search and the browse read the same index here, so the locator must open:
-        # a 404 is an unusable locator, a 504 an unavailable browse, a 500 the SC-4
-        # regression. Only the known defect above is expected.
+        # a 400 is a uid browse refuses, a 404 an unusable locator, a 504 an unavailable
+        # browse, a 500 the SC-4 regression.
         assert r2.status_code == 200, (
             f'SC-4 round trip: GET /api/browse returned {r2.status_code} '
             f'body={r2.text[:200]!r} for url={url}'

@@ -145,6 +145,10 @@ _PARALLELS_ROW_ALLOWLIST = frozenset((
     # field -- it lives once in the witness list, not once per matched page.
     'witness_id', 'witness_label', 'witness_count', 'witness_ids',
     'fusion_score', 'best_witness_score',
+    # A whole-manuscript / part row's match page (two flat strings): without them the
+    # export gives that row `uid` null and its first page, where /api/parallels gives
+    # the page its match starts on (shared/search_serializer.py::_match_page).
+    'match_page_uid', 'match_page_header',
 ))
 
 # Pre-compiled at module load for the per-row compaction hot path. CORPUS
