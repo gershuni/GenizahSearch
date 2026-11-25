@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-24 (archived GS-307). 188 open: P1 0, P2 41, P3 147.
+> **Last Updated:** 2026-11-25 (archived GS-310). 188 open: P1 0, P2 41, P3 147.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it

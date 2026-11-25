@@ -3,7 +3,8 @@
 The preview must be exactly the first _PREVIEW_ROWS rows of the final list (same uids,
 same order) -- the table shows it while the search runs and the finished handler then
 rebuilds from the full list -- so it is offered only where nothing after the loop can
-drop or move those rows: Genizah scope, no exclude_words, not Responsa.
+drop or move those rows: Genizah scope, no exclude_words (a Responsa -word is one), no
+all-star Responsa order.
 """
 import gc
 import json
@@ -116,10 +117,38 @@ def test_the_preview_is_the_first_rows_of_the_final_list(engines, monkeypatch):
 @pytest.mark.parametrize("kw", [
     {"exclude_words": [F]},
     {"corpus_scope": "all"},
-    {"responsa_options": {"responsa_mode": True}},
-], ids=["exclude_words", "local_fusion", "responsa"])
+], ids=["exclude_words", "local_fusion"])
 def test_no_preview_where_a_later_step_could_drop_or_move_rows(engines, kw):
     calls, _final = _run(engines["many"], **kw)
+    assert calls == []
+
+
+_RESPONSA = {"responsa_mode": True, "variants": False, "ja": False, "flex_spacing": False,
+             "bidirectional": False, "variant_mode": "exact"}
+
+
+def test_a_responsa_search_previews_the_first_rows_of_its_final_list(engines, monkeypatch):
+    # 2026-11-25 (docs/open_issues.d/2026-11-24-responsa-common-word-searches-slow.md): a
+    # Responsa search for a common word showed nothing for half a minute. On an index whose
+    # documents all carry a scope it keeps the first row of each page in the order found,
+    # as the other modes do, so its first rows are known while it runs.
+    monkeypatch.setattr(se, "_PREVIEW_AFTER_S", float("inf"))
+    calls = []
+    final = engines["many"].execute_search(W, "responsa", 0, responsa_options=_RESPONSA,
+                                           corpus_scope="genizah", preview_callback=calls.append)
+    assert len(calls) == 1
+    assert [r["uid"] for r in calls[0]] == [r["uid"] for r in final[:se._PREVIEW_ROWS]]
+
+
+@pytest.mark.parametrize("query", [f"{W} -{F}", "של*"], ids=["minus_word", "all_star"])
+def test_no_responsa_preview_where_rows_are_dropped_or_reordered_later(engines, monkeypatch, query):
+    # A -word drops rows after the loop; an all-star query is ordered by its matches once
+    # every row is found (decision 2).
+    monkeypatch.setattr(se, "_PREVIEW_AFTER_S", 0.0)
+    calls = []
+    final = engines["many"].execute_search(query, "responsa", 0, responsa_options=_RESPONSA,
+                                           corpus_scope="genizah", preview_callback=calls.append)
+    assert final, "the search must find rows for the test to mean anything"
     assert calls == []
 
 

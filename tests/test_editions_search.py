@@ -939,3 +939,106 @@ def test_the_worker_reads_the_editions_only_in_the_editions_leg(monkeypatch):
     assert wants_editions({**leg, "arguments": {"leg": "main"}}) is False
     monkeypatch.setenv("EDITIONS_SEARCH_ENABLED", "0")
     assert wants_editions({**leg, "arguments": {"leg": "editions"}}) is False
+
+
+# --- the first rows only (max_rows, the API's limit; 2026-11-25) -----------------------------------
+#
+# The editions leg runs first, whole; the main leg builds only the rows that can be among the
+# first results (SearchEngine._first_grouped_rows, editions_search.counterparts). The crowd:
+# 30 automatic pages for the word, and two more that rank last in the main index -- one whose
+# edition leads the grouped list, one in a manuscript whose edition's page was not identified
+# (fold_same_text joins its automatic page to that edition's early result).
+
+MS_LATE = "990000000900205171"
+MS_JOIN = "990000000910205171"
+P_LATE, P_JOIN = uid(90, 1), uid(91, 1)
+WORD, FILL = "\u05e9\u05dc\u05d5\u05dd", "\u05e2\u05d5\u05d3"
+
+
+@pytest.fixture(scope="module")
+def crowd(tmp_path_factory):
+    base = tmp_path_factory.mktemp("editions-max-rows")
+    main = [(f"99000000{200 + i:03d}0205171", 200 + i, 1, " ".join([WORD] + [FILL] * (i % 7) + ["\u05e1\u05d5\u05e3"]))
+            for i in range(30)]
+    main += [(MS_LATE, 90, 1, " ".join([WORD] + [FILL] * 40)),
+             (MS_JOIN, 91, 1, " ".join([WORD] + [FILL] * 45))]
+    root = build(base / "main", main)
+    fgp, pgp = _sidecars(str(base))
+    gen = str(base / "Editions")
+    docs = [_doc(SOURCE_FGP, 21, MS_LATE, f"{WORD} {FILL}", [(WORD, P_LATE)]),
+            _doc(SOURCE_FGP, 22, MS_JOIN, f"{WORD} {WORD}", [(WORD, None)])]
+    build_generation(gen, fgp_db=fgp, pgp_db=pgp, browse_map_path=os.path.join(root, "browse_map.pkl"),
+                     folio_images_for=lambda s: [], documents=docs, progress=lambda m: None)
+    browse = patch.object(Config, "BROWSE_MAP", os.path.join(root, "browse_map.pkl"))
+    browse.start()
+    SearchEngine._shared_browse_map = None
+    eng = make_engine(root)
+    assert eng.attach_editions(gen)
+    try:
+        yield eng
+    finally:
+        eng.close_index()
+        SearchEngine._shared_browse_map = None
+        browse.stop()
+
+
+_MARKERS = ("result_total", "responsa_warning", "responsa_expanded_count", "responsa_pattern_count")
+FIRST_ROWS_CASES = [("literal", {}), ("literal", {"responsa_options": R}), ("variants", {})]
+
+
+def _plain(rows):
+    return [{k: v for k, v in r.items() if k not in _MARKERS} for r in rows]
+
+
+def test_the_crowd_holds_what_the_first_rows_are_about(crowd):
+    rows = _search(crowd, WORD, sources="all")
+    uids = [r["uid"] for r in rows]
+    assert uids[0] == P_LATE, "the late page's edition leads the list"
+    joined = next(r for r in rows if P_JOIN in [m["uid"] for m in r["members"]])
+    assert uids.index(joined["uid"]) < 5 and joined["members"][0]["uid"] == P_JOIN, (
+        "the late page of the unplaced edition's manuscript is joined to that edition's early result")
+
+
+@pytest.mark.parametrize("mode, kw", FIRST_ROWS_CASES)
+def test_the_first_rows_are_the_whole_lists_and_the_total_its_length(crowd, mode, kw):
+    import shared.search_engine as se
+    whole = _search(crowd, WORD, mode, sources="all", **copy.deepcopy(kw))
+    assert len(whole) >= 30 and "result_total" not in whole[0]
+    with patch.object(se.LOGGER, "error") as fell_back:
+        for n in (1, 2, 3, 5, len(whole) - 1, len(whole), len(whole) + 3):
+            part = _search(crowd, WORD, mode, sources="all", max_rows=n, **copy.deepcopy(kw))
+            assert _plain(part) == _plain(whole[:n]), (mode, n)
+            assert part[0]["result_total"] == len(whole), (mode, n)
+    fell_back.assert_not_called()
+
+
+@pytest.mark.parametrize("dropped", ["pages", "manuscripts"])
+def test_without_its_counterparts_the_main_leg_would_show_a_counted_row(crowd, dropped):
+    """Each part of editions_search.counterparts is needed: without it a row the main leg only
+    counted reaches the first results, and the guard builds the main leg whole (logged)."""
+    import shared.editions_search as es
+    import shared.search_engine as se
+    real = es.counterparts
+
+    def partial(rows):
+        pages, sys_ids = real(rows)
+        return (set(), sys_ids) if dropped == "pages" else (pages, set())
+    whole = _search(crowd, WORD, sources="all")
+    with patch.object(es, "counterparts", side_effect=partial), \
+            patch.object(se.LOGGER, "error") as fell_back:
+        part = _search(crowd, WORD, sources="all", max_rows=5)
+    assert fell_back.called
+    assert _plain(part) == _plain(whole[:5]) and part[0]["result_total"] == len(whole)
+
+
+def test_the_counted_rows_are_not_built(crowd):
+    built = []
+    real = crowd.meta_mgr.get_display_data
+
+    def counting(header, source):
+        built.append(header)
+        return real(header, source)
+    whole = _search(crowd, WORD, sources="all")
+    with patch.object(crowd.meta_mgr, "get_display_data", side_effect=counting):
+        _search(crowd, WORD, sources="all", max_rows=2)
+    assert len(built) < len(whole) // 2, f"{len(built)} rows built for 2 shown of {len(whole)}"

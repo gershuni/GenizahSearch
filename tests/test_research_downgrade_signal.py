@@ -57,7 +57,7 @@ class _Engine:
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None,
                        responsa_options=None, restrict_sys_ids=None, text_position=None,
                        corpus_scope='all', phase_callback=None, preview_callback=None,
-                       ids_only=False):
+                       ids_only=False, max_rows=None):
         raise AssertionError('runs in the (faked) worker, never in this process')
 
 

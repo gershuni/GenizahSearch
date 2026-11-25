@@ -393,6 +393,19 @@ def test_page_asks_for_early_rows_in_the_genizah_scope():
     assert '_painter.cancel()' in source
 
 
+def test_page_asks_for_early_rows_in_responsa_too():
+    """A Responsa search asks for early rows like any other (2026-11-25: a common word's
+    showed nothing for half a minute). The engine offers them only where its final list
+    keeps them first (no -word, no all-star query: tests/test_search_preview.py)."""
+    function = _execute_search_source()
+    wanted = [n for n in ast.walk(function) if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == '_preview_wanted' for t in n.targets)]
+    assert len(wanted) == 1
+    condition = ast.unparse(wanted[0].value)
+    assert 'responsa' not in condition, condition
+    assert 'not not_words' in condition and 'preview_shows_final_rows(search_state)' in condition
+
+
 def test_preview_translation_exists():
     from shared.genizah_translations import TRANSLATIONS
     assert TRANSLATIONS['Still searching. The first results:']

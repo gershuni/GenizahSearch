@@ -6269,9 +6269,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Early rows (2026-10-05): the worker hands over the first rows it finds
         # (execute_search's preview_callback, the desktop's streaming) and the
         # page shows them while the search runs. Only where the engine offers
-        # them (no NOT-words, not Responsa) and no post-search filter could hide
-        # one; the completed search then renders the whole list as before.
-        _preview_wanted = (not lab_mode.value and not not_words and responsa_options is None
+        # them (no NOT-words; Responsa: the engine's own checks) and no filter
+        # could hide one; the completed search then renders the whole list.
+        _preview_wanted = (not lab_mode.value and not not_words
                            and preview_shows_final_rows(search_state)
                            # With the scholarly transcriptions the order is known only at
                            # the end: no early rows (editions plan section 5).

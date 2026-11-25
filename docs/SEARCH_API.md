@@ -1561,6 +1561,18 @@ The following improvements are documented here as future work but are NOT implem
 
 ## Changelog
 
+### 2026-11 — Searches build only the results they return
+
+- `POST /api/search` builds only the `limit` results it returns; every other match is
+  checked and counted, so `total` is unchanged. A `responsa` search for a common word built
+  all its tens of thousands of results first: `#שלום` with variants and Judaeo-Arabic could
+  answer 504 `core_timeout`, and now answers in about half the time. The other text modes
+  are faster on common words for the same reason, and so are searches that also read the
+  scholarly editions (`sources` 'all', the default where they are served): the editions are
+  searched first, then only the transcription results that can be among the first `limit`
+  are built. A search whose time is checking its candidates (`#שלום [3] עולם`) is not faster.
+  The response is unchanged.
+
 ### 2026-11 — A parallel found across a page break is its page
 
 - `POST /api/parallels` could give a result whose `uid` was `part:<id>` or `sys:<id>`: a

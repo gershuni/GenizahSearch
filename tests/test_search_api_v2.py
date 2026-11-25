@@ -1650,3 +1650,38 @@ def test_interactive_slot_released_after_completed_search(client, stub_searcher,
     for _ in range(2):
         assert _post_search(client, query='test', search_mode='exact').status_code == 200
     assert _InteractiveSemaphoreState.sem._value == 1
+
+
+# ---------------------------------------------------------------------------
+# The engine builds only the rows a response returns (2026-11-25)
+#   docs/open_issues.d/2026-11-24-responsa-common-word-searches-slow.md: a Responsa
+#   search for a common word built all of its 50,000 rows, then the handler cut them to
+#   `limit`, and the request ran past its 30 s limit. The handler now passes its limit
+#   (execute_search's max_rows), and the engine counts the other rows on the first row.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('search_mode', SEARCH_MODES)
+def test_the_engine_is_asked_for_the_rows_returned_only(client, stub_searcher, search_mode):
+    r = _post_search(client, query=QUERIES_PER_MODE[search_mode], search_mode=search_mode, limit=7)
+    assert r.status_code == 200, r.text
+    assert stub_searcher.calls[0]['max_rows'] == 7
+
+
+def test_fuzzy_without_a_limit_asks_for_its_recall_default(client, stub_searcher):
+    from web.search_api import _resolve_fuzzy_max_limit
+    r = _post_search(client, query=QUERIES_PER_MODE['fuzzy'], search_mode='fuzzy')
+    assert r.status_code == 200, r.text
+    assert stub_searcher.calls[0]['max_rows'] == min(_resolve_fuzzy_max_limit(), 250)
+    assert r.json()['request']['limit_effective'] == stub_searcher.calls[0]['max_rows']
+
+
+def test_total_is_the_engines_count_of_every_match(client, stub_searcher):
+    first = dict(stub_searcher.results[0], result_total=51208)
+    second = dict(stub_searcher.results[0], uid='uid_002')
+    stub_searcher.results = [first, second]
+    r = _post_search(client, query='#שלום', search_mode='responsa', limit=2)
+    assert r.status_code == 200, r.text
+    env = r.json()
+    assert env['total'] == 51208 and env['count'] == 2
+    assert 'results_cut_off' not in env['warnings']
+    assert all('result_total' not in row for row in env['results']), 'the count is not a row field'

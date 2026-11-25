@@ -1946,6 +1946,19 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     f'(max {effective_max}; submitted {req.limit})',
                     http_status=400,
                 )
+            # The rows this response returns (step 8). P9X: for fuzzy, if the client did
+            # NOT supply `limit` (Pydantic filled the default of 50), widen to a
+            # recall-oriented default so an agent that just sets search_mode=fuzzy gets
+            # wider recall. Detect "limit not supplied" by checking the raw body dict.
+            _fuzzy_recall_default = 250  # wider default when client omits limit
+            if (
+                req.search_mode == 'fuzzy'
+                and isinstance(body, dict)
+                and 'limit' not in body
+            ):
+                effective_limit = min(_resolve_fuzzy_max_limit(), _fuzzy_recall_default)
+            else:
+                effective_limit = req.limit
 
             # 4. Filter resolution (API-07, D-17).
             restrict_sys_ids: Optional[set] = None
@@ -2053,6 +2066,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             responsa_options=responsa_options,
                             restrict_sys_ids=restrict_sys_ids,
                             text_position=None,
+                            # Only the rows returned are built; the rest are counted
+                            # (results[0]['result_total']). 2026-11-25: a common word's
+                            # 50,000 rows were all built, then cut to `limit`.
+                            max_rows=effective_limit,
                             **extra,
                         ) or []
                     # D8: whether the search reached its candidate limit (same thread).
@@ -2135,6 +2152,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     if _slot_release is not None:
                         _slot_release()
                 total = len(results)
+                # The engine built only the rows returned and counted the rest:
+                # the count is on the first row (execute_search's max_rows).
+                counted = results[0].pop('result_total', None) if results else None
+                if isinstance(counted, int) and counted > total:
+                    total = counted
                 if req.search_mode == 'catalog' and results:
                     # The catalogue search counts every match exactly; its rows stop at
                     # CATALOG_MAX_ROWS (shared/catalog_text_rows.py), so the count comes
@@ -2143,20 +2165,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     if isinstance(exact_total, int) and exact_total > total:
                         total = exact_total
 
-            # 8. Cap results.
-            # P9X: for fuzzy, if the client did NOT supply `limit` (Pydantic
-            # filled the default of 50), widen to a recall-oriented default so
-            # an agent that just sets search_mode=fuzzy gets wider recall.
-            # Detect "limit not supplied" by checking the raw body dict.
-            _fuzzy_recall_default = 250  # wider default when client omits limit
-            if (
-                req.search_mode == 'fuzzy'
-                and isinstance(body, dict)
-                and 'limit' not in body
-            ):
-                effective_limit = min(_resolve_fuzzy_max_limit(), _fuzzy_recall_default)
-            else:
-                effective_limit = req.limit
+            # 8. Cap results (effective_limit: step 3).
             results = results[:effective_limit]
             result_count = len(results)
 

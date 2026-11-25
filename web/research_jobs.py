@@ -550,8 +550,11 @@ def consume_editions_skipped() -> bool:
 
 
 def _leg_arguments(arguments, leg):
-    """``execute_search``'s arguments as ``execute_search_leg`` takes them for *leg*."""
-    out = {k: v for k, v in arguments.items() if k not in ('sources', 'metadata_sys_ids', 'preview_callback')}
+    """``execute_search``'s arguments as ``execute_search_leg`` takes them for *leg*. A leg
+    returns every row (``max_rows`` is execute_search's, which ignores it with editions too):
+    the order is known once both legs are grouped."""
+    out = {k: v for k, v in arguments.items()
+           if k not in ('sources', 'metadata_sys_ids', 'preview_callback', 'max_rows')}
     out['leg'] = leg
     return out
 
@@ -560,8 +563,12 @@ def _reads_editions_in_parallel(name, arguments):
     """A search whose source choice is "automatic and editions" (``sources='all'``) in a text
     mode: its legs run in two workers at once. The caller decided the editions are served
     (the switch, readiness, who is an editor); "editions only" is one leg, one worker, as the
-    coordinator runs it."""
+    coordinator runs it. So is one that shows only its first rows (``max_rows``, the API's
+    limit): the coordinator runs the editions leg first and builds only the main rows that can
+    be among them (SearchEngine._first_grouped_rows), which two legs apart cannot know."""
     if name != 'execute_search' or arguments.get('mode') in METADATA_SEARCH_MODES:
+        return False
+    if arguments.get('max_rows') is not None:
         return False
     if arguments.get('corpus_scope', 'all') == 'local':
         return False

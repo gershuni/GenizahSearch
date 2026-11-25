@@ -413,6 +413,25 @@ def group_key(row: Dict[str, Any]) -> str:
     return row.get("group_key") or row.get("uid")
 
 
+def counterparts(edition_rows: Sequence[Dict[str, Any]]) -> Tuple[set, set]:
+    """``(pages, manuscripts)`` whose main-index rows the grouping of *edition_rows* with them
+    can lead with, whatever those rows rank (SearchEngine._first_grouped_rows builds them
+    whole): every page an edition row is grouped under (``group_key``: its result holds that
+    edition, and ``fold_same_text`` may join it with another result holding the same hit), and
+    the manuscript (``_row_sys_id``) of every edition row whose page was not identified (its
+    result is joined with a result of the same manuscript). No other main row is grouped,
+    folded or joined with anything: it is a result of its own, where its rank puts it."""
+    pages, sys_ids = set(), set()
+    for row in edition_rows:
+        key = group_key(row)
+        pages.add(key)
+        if key == (row.get("edition") or {}).get("uid"):     # group_results' page_identified False
+            sid = _row_sys_id(row)
+            if sid:
+                sys_ids.add(sid)
+    return pages, sys_ids
+
+
 def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Dict[str, Any]],
                   local_rows: Sequence[Dict[str, Any]] = (), *, ids_only: bool = False,
                   match_count: Optional[Callable[[Dict[str, Any]], int]] = None,

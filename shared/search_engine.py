@@ -728,11 +728,39 @@ def _strip_brackets(text: str) -> str:
     return text.replace('[', '').replace(']', '')
 
 
+_BRACKET_RE = re.compile(r'[\[\]]')
+
+
 def _unstripped_span(text, start, end):
     """Where the span [start, end) of _strip_brackets(text) stands in *text*: the
     same characters, with any brackets among them (של[ו]ם for שלום); a bracket that
     closes or opens a pair right at its edge is kept with it (ב[ג], not ב[ג), never
     a letter outside the span."""
+    if 0 <= start < end:
+        # The k-th kept character stands at k plus the brackets before it. A page has
+        # few brackets and thousands of letters: walk the brackets, not the letters
+        # (the letter walk below was a third of a Responsa search's time, 2026-11-25).
+        s0 = e0 = None
+        brackets = 0
+        for m in _BRACKET_RE.finditer(text):
+            b = m.start()
+            if s0 is None and b > start + brackets:
+                s0 = start + brackets
+            if b > end - 1 + brackets:
+                e0 = end + brackets
+                break
+            brackets += 1
+        if s0 is None:
+            s0 = start + brackets
+        if e0 is None:
+            e0 = end + brackets
+        if e0 <= len(text):
+            seg = text[s0:e0]
+            if seg.count('[') > seg.count(']') and text[e0:e0 + 1] == ']':
+                e0 += 1
+            if seg.count(']') > seg.count('[') and s0 and text[s0 - 1] == '[':
+                s0 -= 1
+            return s0, e0
     kept, s0, e0 = 0, None, None
     for i, ch in enumerate(text):
         if ch in '[]':
@@ -4320,8 +4348,14 @@ class SearchEngine:
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None,
                        responsa_options=None, restrict_sys_ids: set = None, text_position: str = None,
                        corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False,
-                       metadata_sys_ids=None, sources=None, catalog_options=None):
+                       metadata_sys_ids=None, sources=None, catalog_options=None, max_rows=None):
         """Search the Genizah (and/or LOCAL) index; return the verified result rows.
+
+        *max_rows* (the API's ``limit``): only the first *max_rows* rows are built and
+        returned; every other match is checked and counted as it would be in the whole
+        list, and the first row carries the count as ``result_total``
+        (``_execute_search_leg``; with editions, ``_first_grouped_rows``: the editions leg
+        first, then the main leg). None: every row, as before.
 
         Mode ``'Catalog'`` searches the catalogue text instead (plan
         CATALOGUE_TEXT_SEARCH_PLAN §4.3; ``_execute_catalog_search``): *catalog_options*
@@ -4365,7 +4399,8 @@ class SearchEngine:
             if sources in (SOURCES_AUTOMATIC, SOURCES_ALL) or mode in ('Title', 'Shelfmark') or corpus_scope == 'local':
                 near = mode == 'Title' and bool((catalog_options or {}).get('near_spellings'))
                 rows = self._execute_search_leg(query_str, mode, gap, preview_callback=preview_callback,
-                                                metadata_sys_ids=metadata_sys_ids, near_spellings=near, **args)
+                                                metadata_sys_ids=metadata_sys_ids, near_spellings=near,
+                                                max_rows=max_rows, **args)
                 _EDITIONS_UNAVAILABLE.value = unavailable
                 return rows
             # Editions only, and no editions index open: nothing is searched.
@@ -4378,15 +4413,62 @@ class SearchEngine:
         _validate_word_gap(mode, gap, responsa_options)
         main_leg, editions_leg = {}, {}
         main_rows, edition_rows = [], []
+        # Its own corpus: the editions index only (My Library is fused once, here).
+        edition_args = dict(args, corpus_scope='genizah', phase_callback=None)
+        if max_rows is not None and max_rows >= 1 and not ids_only:
+            return self._first_grouped_rows(query_str, mode, gap, editions, sources == SOURCES_ALL,
+                                            max_rows, args, edition_args)
         if sources == SOURCES_ALL:
             main_rows = self._execute_search_leg(query_str, mode, gap, _leg=main_leg, **args)
         if not _search_interrupted():
             if phase_callback is not None:
                 phase_callback(PHASE_EDITIONS_SEARCH)
-            # Its own corpus: the editions index only (My Library is fused once, here).
-            edition_args = dict(args, corpus_scope='genizah', phase_callback=None)
             edition_rows = editions._execute_search_leg(query_str, mode, gap, _leg=editions_leg, **edition_args)
         return self._grouped_rows(main_rows, edition_rows, main_leg, editions_leg, ids_only)
+
+    def _first_grouped_rows(self, query_str, mode, gap, editions, with_main, max_rows, args, edition_args):
+        """A search with editions that shows its first *max_rows* results (execute_search's
+        max_rows, the API's limit): those results built, every other one counted, the count on
+        the first row (``result_total``), as on a one-index search.
+
+        The editions leg (small: 7,551 rows for #שלום against the main leg's 51,208) runs first,
+        whole. The main leg then builds full rows until *max_rows* of its own are settled, and
+        id rows after them, except for the pages the grouping can put among the first results
+        whatever their rank here (``editions_search.counterparts``): a page the editions found
+        (its result holds an edition, and may be joined with another holding the same one), and
+        every page of a manuscript where an edition's page was not identified (``fold_same_text``
+        joins those by manuscript). Every other main row past the settled ones is a result of
+        its own, ranked by the main leg alone below *max_rows* results that rank above it, so
+        it never reaches the first *max_rows*. All the rows are grouped and folded -- the id
+        rows carry what grouping and folding read of them (page, manuscript, source) -- then
+        cut. A built row missing from the first results (which would be a flaw in that
+        reasoning) is never shown: the main leg is run again whole. An all-star query's results
+        are ordered by their matches once all are found: every row is built, none cut."""
+        from shared.editions_search import counterparts
+        phase_callback = args.get('phase_callback')
+        main_leg, editions_leg = {}, {}
+        if phase_callback is not None:
+            phase_callback(PHASE_EDITIONS_SEARCH)
+        edition_rows = editions._execute_search_leg(query_str, mode, gap, _leg=editions_leg, **edition_args)
+        main_rows = []
+        if with_main and not _search_interrupted():
+            pages, sys_ids = counterparts(edition_rows)
+            main_rows = self._execute_search_leg(query_str, mode, gap, _leg=main_leg, _full_rows=max_rows,
+                                                 _full_pages=pages, _full_sys_ids=sys_ids, **args)
+        rows = self._grouped_rows(main_rows, edition_rows, main_leg, editions_leg, False)
+        if main_leg.get('all_star') or editions_leg.get('all_star'):
+            return rows
+        if any('snippet' not in m for r in rows[:max_rows] for m in (r.get('members') or [r])):
+            LOGGER.error("A counted row reached the first %d results of a search with editions; "
+                         "building the main leg whole", max_rows)
+            main_leg = {}
+            main_rows = self._execute_search_leg(query_str, mode, gap, _leg=main_leg, **args)
+            rows = self._grouped_rows(main_rows, edition_rows, main_leg, editions_leg, False)
+        found = len(rows)
+        rows = rows[:max_rows]
+        if rows:
+            rows[0]['result_total'] = found
+        return rows
 
     @staticmethod
     def _clear_search_state():
@@ -4458,7 +4540,7 @@ class SearchEngine:
         editions = editions or {'rows': [], 'leg': {}}
         return _group_legs(main['rows'], editions['rows'], main['leg'], editions['leg'], ids_only)
 
-    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, near_spellings=False, _leg=None):
+    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, near_spellings=False, _leg=None, max_rows=None, _full_rows=None, _full_pages=None, _full_sys_ids=None):
         """One index's search (execute_search's docstring, below); today's whole search
         when *_leg* is None. *_leg* (a dict): one leg of a search with editions -- the state
         is not cleared (the coordinator did), no previews, My Library's rows go to
@@ -4479,10 +4561,32 @@ class SearchEngine:
         first _PREVIEW_ROWS rows when they are found. Each call extends the one
         before and is the start of the final list, since rows keep their
         first-seen order. Only offered where no later step can drop or
-        move those rows: Genizah scope (no LOCAL rank fusion), no exclude_words,
-        not Responsa. The rows are the first-seen V0.8 row per uid in hit order,
+        move those rows: Genizah scope (no LOCAL rank fusion), no exclude_words
+        (a Responsa query's -words are some), no all-star order (Responsa:
+        decision 2). The rows are the first-seen V0.8 row per uid in hit order,
         which is the order _deduplicate keeps (V0.7 rows only go at the end),
-        and outside Responsa it keeps these same first rows as well (first_wins).
+        and it keeps these same first rows as well (first_wins: every search but
+        Responsa on an index whose documents do not all carry a scope).
+
+        *max_rows* (2026-11-25, the API's ``limit``): the caller shows the first
+        *max_rows* rows only. Full rows are built until the first *max_rows* of the
+        final list are settled -- that many pages with a V0.8 row not excluded, in
+        the order above, which no later row can move -- and every later candidate is
+        checked as *ids_only* checks it (the same match, no snippet or metadata), only
+        to be counted. The rows returned are the first *max_rows*, the first carrying
+        ``result_total``: the length the whole list would have. A candidate for a page
+        that already has its V0.8 row is not checked at all: first_wins drops it; a
+        V0.7 page waits until every page hit is read, so that most are not. Where
+        the order is not settled as rows are found (all-star, the last-row rule,
+        ids_only, a leg of a search with editions), and in the searches with paths of
+        their own (Title, Shelfmark, line-break ``|``, My Library alone), *max_rows*
+        is ignored: every row is built and returned, with no ``result_total``.
+
+        *_full_rows* (a leg of a search with editions, ``_leg`` set): *max_rows*' rule for one
+        leg -- full rows until that many are settled, then id rows -- with every row returned,
+        to be grouped and counted by the coordinator (execute_search). *_full_pages* /
+        *_full_sys_ids*: pages, and manuscripts, whose rows are always built: those the
+        grouping can lead with whatever their rank here (``_editions_counterparts``).
 
         *ids_only* (D8, 2026-10-04): the COMPLETE set of matches, as light rows
         ({'uid', 'display': {'id', 'source'}, 'scope'}) -- every candidate read, no
@@ -4761,7 +4865,10 @@ class SearchEngine:
         def _row_pattern(text):
             return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
 
-        _parse_header = getattr(type(self.meta_mgr), 'parse_header_smart', None) if ids_only else None
+        # An id row's manuscript, without the display lookup (ids_only, and the rows
+        # max_rows only counts).
+        _parse_header = (getattr(type(self.meta_mgr), 'parse_header_smart', None)
+                         if ids_only or max_rows is not None or _full_rows is not None else None)
         _excluded = _exclusion_test(exclude_words)
         if self._edition_leaf:
             from shared.editions_search import edition_position_ok as _position_check
@@ -4906,16 +5013,25 @@ class SearchEngine:
         LOGGER.debug(f"Tantivy returned {total_hits} hits")
         _from_seams = _crossings is not None and _crossings.route == 'seams'
 
+        # max_rows: the V0.7 pages only counted, put aside until every page hit is read
+        # (score, address, page uid); see the loop below.
+        _put_aside = []
+
         def _page_hits_then_aggregates():
-            """(score, address, from a seam) of the page hits, then -- fetched only now --
-            the whole-manuscript / part hits or the seams, with a limit of their own:
+            """(score, address, from a seam, page uid of a hit put aside) of the page hits,
+            then the V0.7 pages max_rows put aside, then -- fetched only now -- the
+            whole-manuscript / part hits or the seams, with a limit of their own:
             they are the only source of a phrase's page-break matches, so page hits that
             fill the limit must not leave them no room (Codex review of PR #375). A step
             that fails, or that a star query may not read in time, leaves the search
             marked "N+" -- never silently (plan §5.4)."""
             nonlocal total_hits, tantivy_elapsed_ms
             for score, addr in hits:
-                yield score, addr, False
+                yield score, addr, False, None
+            # Each V0.7 page row still comes after every page row before it and before
+            # any whole-manuscript row: the V0.7 rows keep their order among themselves.
+            for score, addr, uid in _put_aside:
+                yield score, addr, False, uid
             if agg_q is None and not _from_seams:
                 return
             if progress_callback:
@@ -4948,7 +5064,7 @@ class SearchEngine:
             tantivy_elapsed_ms += (time.perf_counter() - started) * 1000.0
             total_hits += len(more)
             for score, addr in more:
-                yield score, addr, _from_seams
+                yield score, addr, _from_seams, None
         results = []
         regex_filtered_count = 0
         was_interrupted = False
@@ -4980,29 +5096,62 @@ class SearchEngine:
             return (not text_position or _position_check(
                 text, m, text_position, _line_constraints or None, strip_brackets=strip_br))
 
-        # Early rows for the desktop (see the docstring): only where nothing after
-        # this loop can drop or move them.
+        # Responsa rows whose every word holds a star are ordered by their matches on the
+        # page (decision 2): a page row counts them as it is built.
+        _count_rows = _responsa is not None and _responsa.all_star and not ids_only
+        # The final list keeps the first row found for each page, V0.8 rows first, in the
+        # order they are found (_deduplicate's first_wins): every search but Responsa on
+        # an index whose documents do not all carry a scope. Then the rows found first are
+        # the start of the final list, unless an all-star order moves them.
+        _found_order_kept = (_responsa is None or _crossings is not None) and not _count_rows
+
+        # Early rows (the desktop's and the website's; see the docstring): only where
+        # nothing after this loop can drop or move them.
         _preview = (preview_callback
                     if (preview_callback is not None and not ids_only and _leg is None
-                        and corpus_scope == 'genizah' and not exclude_words
-                        and not (responsa_options and responsa_options.get('responsa_mode')))
+                        and corpus_scope == 'genizah' and not exclude_words and _found_order_kept)
                     else None)
         _preview_rows = {}   # uid -> first V0.8 row, in hit order
         _preview_scanned = 0
         _preview_sent = 0                # rows in the last preview handed over
         _preview_last = search_started   # when it was handed over (or the search began)
 
+        # max_rows (see the docstring): full rows until the first _row_cap rows of the
+        # final list are settled, then id rows, only counted. A LOCAL merge keeps them
+        # first: reciprocal rank fusion ranks a row below every row ranked above it in
+        # its own list, and they are _row_cap.
+        # A leg's cap is _full_rows: its rows are all returned, cut once grouped (execute_search).
+        _cap = max_rows if _leg is None else _full_rows
+        _row_cap = (_cap if (_cap is not None and _cap >= 1 and not ids_only
+                             and not self._edition_leaf and _found_order_kept)
+                    else None)
+        _keep_pages = frozenset(_full_pages or ())
+        _keep_sids = frozenset(str(s) for s in (_full_sys_ids or ()))
+
+        def _kept_whole(uid, sys_id):
+            """A row always built (*_full_pages*, *_full_sys_ids*), however far down."""
+            return uid in _keep_pages or (sys_id is not None and str(sys_id) in _keep_sids)
+        _v8_pages = {}       # uid -> its first V0.8 row is not excluded (the final list's row)
+        _settled = 0         # pages with a V0.8 row that is not excluded
+        _settle_scanned = 0  # rows of `results` read into _v8_pages
+
+        def _row_excluded(r):
+            """Whether _without_excluded drops row *r* (the same test, keys left in place)."""
+            if '_excluded' in r:
+                return bool(r['_excluded'])
+            if _excluded is None:
+                return False
+            text = r.get('_page_text')
+            return _excluded(r.get('full_text') or '' if text is None else text)
+
         materialize_started = time.perf_counter()
         document_load_seconds = 0.0
         candidate_match_seconds = 0.0
         last_tick = time.monotonic()
         _strip_q = not _query_has_brackets(query_str)
-        # Responsa rows whose every word holds a star are ordered by their matches on the
-        # page (decision 2): a page row counts them as it is built.
-        _count_rows = _responsa is not None and _responsa.all_star and not ids_only
         _seam_pages = {}     # (uid, source) -> page text: a seam row carries its pages whole
 
-        def _seam_hit(score, doc_addr):
+        def _seam_hit(score, doc_addr, light):
             """The rows of one seam: the first match across its central break (plan §6.1
             point 2), shown as the page it starts on, carrying the pages it covers whole.
             Returns how many it gave."""
@@ -5034,11 +5183,13 @@ class SearchEngine:
                 if restrict_uids is not None and not any(
                         _page_in_restriction(o, restrict_uids, restrict_sids) for o in span_map.get('overlaps') or []):
                     continue
-                if ids_only:
+                sys_id = None
+                if light:
                     primary = span_map.get('primary') or {}
                     header, source = primary.get('full_header', ''), primary.get('source', '')
                     sys_id = (_parse_header(self.meta_mgr, header)[0] if _parse_header is not None
                               else self.meta_mgr.get_display_data(header, source).get('id'))
+                if light and (ids_only or not _kept_whole(primary.get('uid'), sys_id)):
                     row = {'uid': primary.get('uid'), 'display': {'id': sys_id, 'source': source},
                            'scope': SEAM_SCOPE}
                     if _excluded is not None:
@@ -5052,11 +5203,14 @@ class SearchEngine:
 
         i = 0       # read below when the checkpoint before the aggregates stops an empty run
         try:
-            for i, (score, doc_addr, from_seam) in enumerate(_page_hits_then_aggregates()):
+            for i, (score, doc_addr, from_seam, set_aside_uid) in enumerate(_page_hits_then_aggregates()):
                 if progress_callback and (i % _PROGRESS_TICK_EVERY == 0
                                           or time.monotonic() - last_tick >= _PROGRESS_TICK_SECONDS):
-                    progress_callback(i, total_hits)
+                    # A page put aside is read twice: the count does not pass the hits.
+                    progress_callback(min(i, total_hits), total_hits)
                     last_tick = time.monotonic()
+                if set_aside_uid is not None and set_aside_uid in _v8_pages:
+                    continue    # its page has a V0.8 row now: dropped unread (first_wins)
                 if _preview is not None:
                     if len(results) > _preview_scanned:
                         for r in results[_preview_scanned:]:
@@ -5072,9 +5226,18 @@ class SearchEngine:
                             # The rows so far; more follow as they are found.
                             _preview(list(_preview_rows.values()))
                             _preview_sent, _preview_last = len(_preview_rows), now
+                if _row_cap is not None and len(results) > _settle_scanned:
+                    for r in results[_settle_scanned:]:
+                        if r['display'].get('source') == "V0.8" and r['uid'] not in _v8_pages:
+                            _v8_pages[r['uid']] = shown = not _row_excluded(r)
+                            _settled += shown
+                    _settle_scanned = len(results)
+                # An id row (checked, not built): ids_only, or max_rows' rows past the
+                # settled start of the list.
+                light = ids_only or (_row_cap is not None and _settled >= _row_cap)
                 try:
                     if from_seam:
-                        if not _seam_hit(score, doc_addr):
+                        if not _seam_hit(score, doc_addr, light):
                             regex_filtered_count += 1
                         continue
                     load_started = time.perf_counter()
@@ -5090,6 +5253,22 @@ class SearchEngine:
                     if restrict_uids is not None and scope == 'page':
                         if doc['unique_id'][0] not in restrict_uids:
                             continue
+                    if light and not ids_only and scope == 'page':
+                        # Counted only. A page with a V0.8 row keeps that row (first_wins):
+                        # this one's match is not needed. A V0.7 page, often found before
+                        # its V0.8 copy, waits until every page hit is read: most then
+                        # have their V0.8 row and are never checked (half the work of
+                        # counting a common word, 2026-11-25).
+                        page_uid = doc['unique_id'][0]
+                        if page_uid in _v8_pages:
+                            continue
+                        if set_aside_uid is None and self._get_field(doc, 'source', [''])[0] == 'V0.7':
+                            _put_aside.append((score, doc_addr, page_uid))
+                            continue
+                        if (_keep_pages or _keep_sids) and _kept_whole(
+                                page_uid, _parse_header(self.meta_mgr, doc['full_header'][0])[0]
+                                if _keep_sids else None):
+                            light = False
 
                     content = self._get_field(doc, 'content', [""])[0]
 
@@ -5136,11 +5315,12 @@ class SearchEngine:
                                 if not any(_page_in_restriction(o, restrict_uids, restrict_sids)
                                            for o in overlaps):
                                     continue
-                            results.append(
-                                _id_row_of_span(doc, content, span, boundaries, scope) if ids_only else
-                                self._aggregate_result_row(
+                            row = _id_row_of_span(doc, content, span, boundaries, scope) if light else None
+                            if row is None or (not ids_only and _kept_whole(row['uid'], row['display']['id'])):
+                                row = self._aggregate_result_row(
                                     doc, content, span, boundaries, _row_pattern(content), scope, score,
-                                    page_text=bool(exclude_words)))
+                                    page_text=bool(exclude_words))
+                            results.append(row)
                             kept += 1
                         if not kept:
                             regex_filtered_count += 1
@@ -5214,7 +5394,7 @@ class SearchEngine:
 
                     # Fuzzy: a page row shows the nearest spelling on the page.
                     if (isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing
-                            and not ids_only):
+                            and not light):
                         match_obj = regex.closest(
                             content, match_obj,
                             lambda m, _t=content: _accept(_t, m, not _query_has_brackets(query_str)))
@@ -5247,7 +5427,7 @@ class SearchEngine:
                             regex_filtered_count += 1
                             continue
                     span = match_obj.span()
-                    if ids_only:
+                    if light:
                         # A page whose match the original text does not hold is dropped
                         # below with its snippet; drop it here the same way.
                         if boundaries or not orig_match_missing:
@@ -5368,12 +5548,19 @@ class SearchEngine:
         if crossing_notes and _responsa is not None:
             responsa_warning = '; '.join(([responsa_warning] if responsa_warning else []) + crossing_notes)
 
-        LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
+        found = len(deduped)
+        if _row_cap is not None and _leg is None:
+            # The settled start of the list (all built rows), and the whole list's length.
+            deduped = deduped[:_row_cap]
+            if deduped:
+                deduped[0]['result_total'] = found
+
+        LOGGER.debug(f"Results after dedup & filtering: {found}")
         LOGGER.info(
             "search_perf mode=%s scope=%s candidates=%d regex_kept=%d final=%d "
             "tantivy_ms=%.0f materialize_ms=%.0f doc_load_ms=%.0f candidate_match_ms=%.0f "
             "local_merge_ms=%.0f total_ms=%.0f",
-            mode, corpus_scope, total_hits, len(results), len(deduped),
+            mode, corpus_scope, total_hits, len(results), found,
             tantivy_elapsed_ms, materialize_elapsed_ms,
             document_load_seconds * 1000, candidate_match_seconds * 1000, local_merge_elapsed_ms,
             (time.perf_counter() - search_started) * 1000.0,

@@ -94,6 +94,7 @@ TESTS = {
     "tests/test_filter_unavailable_service.py::test_real_sidecar_line_height_is_reported_consistently": _FJMS,
     "tests/test_open_issues_fragments.py::test_no_open_issue_reuses_an_id_the_archive_holds": _PRIVATE,
     "tests/test_parallels_api.py::test_parallels_locator_round_trip_real": _INDEX,
+    "tests/test_responsa_performance.py::TestPerformanceBenchmarks": _INDEX,
     "tests/test_responsa_performance.py::test_exact_search_shows_first_results_within_3s": _INDEX,
     "tests/test_passage_normalize.py::test_corpus_parity_of_gram_codes": _RESEARCH_CORPUS,
     "tests/test_passage_normalize.py::test_corpus_parity_with_research_normalizer": _RESEARCH_CORPUS,
@@ -116,13 +117,10 @@ TESTS = {
 # deleting it) is its own change, after which it moves to TESTS.
 # 2026-11-24: the index tests now find the index where the apps do (tests/real_index.py),
 # and the research tree's two modules were copied into the main checkout from the retired
-# one; those moved to TESTS. The Responsa benchmarks below run, and fail their ceilings
-# several times over: an open issue (docs/open_issues.d/2026-11-24-responsa-common-word-
-# searches-slow.md); they are skipped until it is fixed.
-RUNS_NOWHERE = {
-    "tests/test_responsa_performance.py::TestPerformanceBenchmarks":
-        "skipped on purpose: Responsa searches over a common word are too slow, an open issue",
-}
+# one; those moved to TESTS. 2026-11-25: the Responsa benchmarks, skipped while Responsa
+# searches over a common word were too slow, run again (the issue is fixed) and moved to
+# TESTS. None is left.
+RUNS_NOWHERE: dict = {}
 
 
 def _ci_uncollected(path):

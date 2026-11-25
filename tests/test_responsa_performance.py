@@ -1,5 +1,5 @@
 """
-Search speed on the real Tantivy index: what a website user waits for.
+Search speed on the real Tantivy index: what a website user and an API caller wait for.
 
 These tests require the real Tantivy index, looked for where the apps look for it
 (tests/real_index.py: Config.INDEX_DIR). Where there is none (CI), ALL tests in this
@@ -12,20 +12,37 @@ worker, and asserts that the first results are handed on within 3 seconds: the 3
 target of the plain-search benchmark it replaces. That benchmark timed engine mode
 `exact`, which neither the website nor the API runs for Exact any more.
 
-The Responsa benchmarks (TestPerformanceBenchmarks, from 2026-02) assert a 10 s ceiling,
-double the roadmap's 5 s target for a Responsa search with variants + JA. Measured
-2026-11-24 they exceed it several times over (prefix expansion 17.9 s, variants + JA
-55.6 s, the two-component gap query 67.5 s): every one of tens of thousands of rows is
-built, and a Responsa search shows no early rows. That is an open issue
-(docs/open_issues.d/2026-11-24-responsa-common-word-searches-slow.md), so the class is
-skipped until it is fixed; tests/needs_local_data.py lists it in RUNS_NOWHERE.
+TestPerformanceBenchmarks times four Responsa searches over a common word (shalom; with
+prefix expansion; with variants + JA; `#shalom [3] olam`) on the two paths that were slow
+(docs/open_issues.d/2026-11-24-responsa-common-word-searches-slow.md, fixed 2026-11-25).
+Every one of tens of thousands of rows used to be built before anything was shown or
+returned. Measured 2026-11-25 through a research worker on this index: the website showed
+nothing for 13-33 s (matching as production's Linux workers do, with stdlib re) or 27 s to
+2 minutes (as Windows workers do, with the regex module), and the API answered #shalom with
+variants + JA in 22 s or with 504 at its 30 s limit (re), and all three with 504 (regex).
+Now:
+- the website shows a Responsa search's first rows while it runs, as it does Exact's:
+  within RESPONSA_FIRST_RESULTS_SECONDS, on production's route (a fresh research worker,
+  which compiles the query's patterns and spellings first): 0.9-1.5 s for shalom, 2.1-2.8 s
+  for the gap query (its first match comes later in score order);
+- the API builds only the rows it returns (execute_search's max_rows) and counts the
+  rest: within API_SECONDS, two thirds of the API's 30 s limit. Timed in this process as
+  production's Linux research workers match, with stdlib re (shared/search_regex.py):
+  Windows workers and the desktop match with the regex module, whose cost per page on these
+  patterns is several times higher (the last three searches here: 5.8 s / 6.9 s / 8.5 s
+  with re, 9.9 s / 31 s / 70 s with regex). The gap query's time is checking its
+  candidates, which counting needs as much as building did.
+The 2026-02 benchmarks they replace timed the whole list against 10 s.
 """
 
+import threading
 import time
 import pytest
 
-_RESPONSA_ISSUE = 'docs/open_issues.d/2026-11-24-responsa-common-word-searches-slow.md'
 FIRST_RESULTS_SECONDS = 3.0
+RESPONSA_FIRST_RESULTS_SECONDS = 5.0
+API_SECONDS = 20.0
+API_LIMIT = 50                 # /api/search's default `limit`
 
 
 @pytest.fixture(scope="module")
@@ -35,132 +52,138 @@ def real_engine(real_web_state):
     return real_web_state.searcher
 
 
-def _format_timing(query, elapsed, result_count):
-    """Format timing output with UAT target comparison."""
-    if elapsed < 5:
-        status = "(WITHIN 5s UAT target)"
-    else:
-        status = "(ABOVE 5s UAT target, within 10s automated ceiling)"
-    return f"Query '{query}': {elapsed:.2f}s, {result_count} results {status}"
+@pytest.fixture(scope="module")
+def real_engine_with_editions(real_web_state):
+    """An engine over the same index and catalogue with the scholarly editions attached, as
+    production serves them (the API's default is then sources 'all'). Skips where there is no
+    coherent editions generation (<INDEX_DIR>/Editions)."""
+    from shared.search_engine import SearchEngine
+    engine = SearchEngine(real_web_state.meta_mgr, real_web_state.var_mgr, build_fl_index=False)
+    try:
+        if not engine.attach_editions():
+            pytest.skip("no coherent editions generation under Config.INDEX_DIR/Editions")
+        yield engine
+    finally:
+        engine.close_index()
 
 
-@pytest.mark.skip(reason=f"Responsa searches over a common word exceed these ceilings "
-                         f"several times over: open issue ({_RESPONSA_ISSUE})")
+def _responsa(variants, ja):
+    """The options the website and the API pass for a Responsa search."""
+    return {'responsa_mode': True, 'variants': variants, 'ja': ja, 'flex_spacing': False,
+            'bidirectional': False, 'variant_mode': 'variants' if variants else 'exact'}
+
+
+SHALOM = "שלום"   # shalom
+OLAM = "עולם"     # olam
+RESPONSA_SEARCHES = {
+    # name: (query, the Responsa options)
+    'no_expansions': (SHALOM, _responsa(False, False)),
+    'prefix_expansion': ("#" + SHALOM, _responsa(False, False)),
+    'variants_and_ja': ("#" + SHALOM, _responsa(True, True)),
+    'two_words_with_gap': ("#" + SHALOM + " [3] " + OLAM, _responsa(True, False)),
+}
+
+
+@pytest.fixture(scope="class")
+def warm_research_queue():
+    """The site at rest as it ships: one slot, its worker started ahead of each search
+    (an environment with GENIZAH_RESEARCH_PRESTART=0 would start none). A fresh queue
+    for the class, which reads both settings when it is created; closed after it."""
+    from web.research_jobs import shutdown_research
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv('GENIZAH_RESEARCH_PRESTART', '1')
+        mp.setenv('GENIZAH_RESEARCH_WORKERS', '1')
+        shutdown_research()
+        try:
+            yield
+        finally:
+            shutdown_research()
+
+
 class TestPerformanceBenchmarks:
-    """Performance benchmarks for Responsa queries on the full corpus.
+    """Responsa over a common word: the website's first rows, and the API's answer."""
 
-    Each test uses time.perf_counter() around execute_search() calls.
-    The 10-second automated ceiling is generous to avoid flaky failures;
-    the 5-second UAT target is what we expect in practice.
-    """
+    @pytest.mark.parametrize('name', list(RESPONSA_SEARCHES))
+    def test_the_website_shows_the_first_results_within_5s(self, real_engine, warm_research_queue, name):
+        """Run as web/pages/search.py::_run_core_search runs a Responsa search (engine mode
+        `responsa`, the Genizah corpus, early rows asked for), through production's
+        IsolatedEngine and a warm research worker. The time runs from the call to the
+        wrapper handing on the first rows; the search is then stopped (Stop), since the
+        rest of it is not what this measures."""
+        from web import research_jobs
+        from web.research_jobs import IsolatedEngine
 
-    def test_simple_responsa_no_expansions(self, real_engine, capsys):
-        """Baseline: Simple Responsa query with all checkboxes OFF.
-
-        Uses Hebrew 'shalom' with responsa_mode=True but no variants, JA, or
-        flex spacing. This is the simplest Responsa query path.
-
-        Automated ceiling: 10s. UAT target: <5s.
-        """
-        query = "\u05e9\u05dc\u05d5\u05dd"  # shalom
+        query, options = RESPONSA_SEARCHES[name]
+        first = {}
+        stop = threading.Event()
+        _wait_warm(research_jobs.get_queue())
+        engine = IsolatedEngine(real_engine, 'search').controlled(cancel=stop)
         start = time.perf_counter()
-        results = real_engine.execute_search(
-            query, 'exact', 0,
-            responsa_options={
-                'responsa_mode': True, 'variants': False, 'ja': False,
-                'flex_spacing': False, 'bidirectional': False,
-                'variant_mode': 'exact'
-            }
-        )
+
+        def preview(rows):
+            first.setdefault('seconds', time.perf_counter() - start)
+            first.setdefault('rows', len(rows))
+            stop.set()
+
+        try:
+            engine.execute_search(query, mode='responsa', gap=0, exclude_words=[],
+                                  responsa_options=options, restrict_sys_ids=None,
+                                  text_position=None, corpus_scope='genizah',
+                                  preview_callback=preview)
+        except InterruptedError:
+            pass                  # stopped once the first rows were handed on
         elapsed = time.perf_counter() - start
+        assert 'seconds' in first, f"{name}: no early results ({elapsed:.1f}s)"
+        assert first['rows'] >= 1
+        assert first['seconds'] < RESPONSA_FIRST_RESULTS_SECONDS, (
+            f"{name}: first results after {first['seconds']:.2f}s, over the "
+            f"{RESPONSA_FIRST_RESULTS_SECONDS:.0f}s ceiling")
 
-        print(_format_timing(query, elapsed, len(results)))
-        # Automated ceiling: 10 seconds (generous for CI variability)
-        assert elapsed < 10.0, (
-            f"Simple Responsa query took {elapsed:.2f}s, exceeds 10s automated ceiling. "
-            f"Returned {len(results)} results."
-        )
+    @pytest.mark.parametrize('name', list(RESPONSA_SEARCHES))
+    def test_the_api_answers_well_within_its_time_limit(self, real_engine, name):
+        """The engine call web/search_api.py makes for a Responsa search with the default
+        limit -- max_rows=50, the corpus the API names (none: all) -- matched as a Linux
+        research worker matches (isolated_matching(native=True): stdlib re)."""
+        from shared.search_regex import isolated_matching
 
-    def test_responsa_with_prefix_expansion(self, real_engine, capsys):
-        """Responsa with prefix expansion: ~25 prefix forms should still be fast.
-
-        Uses Hebrew '#shalom' which triggers grammatical prefix expansion
-        (ha-, ve-, u-, be-, le-, she-, ke-, mi-, etc.)
-
-        Automated ceiling: 10s. UAT target: <5s.
-        """
-        query = "#\u05e9\u05dc\u05d5\u05dd"  # #shalom
+        query, options = RESPONSA_SEARCHES[name]
         start = time.perf_counter()
-        results = real_engine.execute_search(
-            query, 'exact', 0,
-            responsa_options={
-                'responsa_mode': True, 'variants': False, 'ja': False,
-                'flex_spacing': False, 'bidirectional': False,
-                'variant_mode': 'exact'
-            }
-        )
+        with isolated_matching(native=True):
+            rows = real_engine.execute_search(query, 'responsa', 0, responsa_options=options,
+                                              max_rows=API_LIMIT)
         elapsed = time.perf_counter() - start
+        assert rows, f"{name}: the search found nothing in the real corpus"
+        total = rows[0].get('result_total')
+        assert isinstance(total, int) and len(rows) == min(API_LIMIT, total), (name, len(rows), total)
+        assert elapsed < API_SECONDS, (
+            f"{name}: {elapsed:.1f}s for {len(rows)} rows of {total}, over the {API_SECONDS:.0f}s "
+            f"ceiling (the API's limit is 30 s)")
 
-        print(_format_timing(query, elapsed, len(results)))
-        # Automated ceiling: 10 seconds
-        assert elapsed < 10.0, (
-            f"Prefix expansion query took {elapsed:.2f}s, exceeds 10s automated ceiling. "
-            f"Returned {len(results)} results."
-        )
+    @pytest.mark.parametrize('name', ['prefix_expansion', 'variants_and_ja', 'two_words_with_gap'])
+    def test_the_api_with_the_editions_answers_well_within_its_time_limit(self, real_engine_with_editions,
+                                                                         name):
+        """Production's default: the editions served, so the API reads them too (sources
+        'all', one worker): the editions leg first, then only the main rows that can be among
+        the first results (SearchEngine._first_grouped_rows). Measured 2026-11-25 through the
+        API in a research worker with stdlib re: 12-16 s, 20 s, 16-22 s, against 20-30 s, 23 s
+        or 504, 14-18 s before (the gap query's time is the check, and the editions leg now runs
+        before the main leg instead of beside it)."""
+        from shared.search_regex import isolated_matching
 
-    def test_responsa_with_variants_and_ja(self, real_engine, capsys):
-        """Primary performance criterion: Responsa with variants + JA enabled.
-
-        This produces the most term expansion and is the ROADMAP's primary
-        performance criterion: "<5 seconds for Responsa query with variants + JA."
-
-        Automated ceiling: 10s. UAT target: <5s.
-        """
-        query = "#\u05e9\u05dc\u05d5\u05dd"  # #shalom
+        query, options = RESPONSA_SEARCHES[name]
         start = time.perf_counter()
-        results = real_engine.execute_search(
-            query, 'exact', 0,
-            responsa_options={
-                'responsa_mode': True, 'variants': True, 'ja': True,
-                'flex_spacing': False, 'bidirectional': False,
-                'variant_mode': 'variants'
-            }
-        )
+        with isolated_matching(native=True):
+            rows = real_engine_with_editions.execute_search(
+                query, 'responsa', 0, responsa_options=options, sources='all', max_rows=API_LIMIT)
         elapsed = time.perf_counter() - start
-
-        print(_format_timing(query, elapsed, len(results)))
-        # Automated ceiling: 10 seconds
-        assert elapsed < 10.0, (
-            f"Variants + JA query took {elapsed:.2f}s, exceeds 10s automated ceiling. "
-            f"Returned {len(results)} results."
-        )
-
-    def test_two_component_query_with_gap(self, real_engine, capsys):
-        """Two-component query with gap: '#shalom [3] olam'.
-
-        Tests multi-component query with per-pair gap, variants enabled.
-
-        Automated ceiling: 10s. UAT target: <5s.
-        """
-        # #shalom [3] olam  (shalom with prefixes, 3-word gap, olam plain)
-        query = "#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd"
-        start = time.perf_counter()
-        results = real_engine.execute_search(
-            query, 'exact', 1,
-            responsa_options={
-                'responsa_mode': True, 'variants': True, 'ja': False,
-                'flex_spacing': False, 'bidirectional': False,
-                'variant_mode': 'variants'
-            }
-        )
-        elapsed = time.perf_counter() - start
-
-        print(_format_timing(query, elapsed, len(results)))
-        # Automated ceiling: 10 seconds
-        assert elapsed < 10.0, (
-            f"Two-component gap query took {elapsed:.2f}s, exceeds 10s automated ceiling. "
-            f"Returned {len(results)} results."
-        )
+        assert rows, f"{name}: the search found nothing in the real corpus"
+        total = rows[0].get('result_total')
+        assert isinstance(total, int) and len(rows) == min(API_LIMIT, total), (name, len(rows), total)
+        # One result per page with the editions (a My Library row, where there is one, is not).
+        assert any('members' in r for r in rows), "not grouped: the editions were not read"
+        assert elapsed < API_SECONDS, (
+            f"{name}: {elapsed:.1f}s for {len(rows)} results of {total}, over the "
+            f"{API_SECONDS:.0f}s ceiling (the API's limit is 30 s)")
 
 
 def _wait_warm(queue, timeout=180.0):

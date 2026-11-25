@@ -80,7 +80,7 @@ class FakeSearchEngine:
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None,
                        responsa_options=None, restrict_sys_ids=None, text_position=None,
                        corpus_scope='all', phase_callback=None, preview_callback=None,
-                       ids_only=False):
+                       ids_only=False, max_rows=None):
         raise AssertionError('must run through the worker queue, not in process')
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None,

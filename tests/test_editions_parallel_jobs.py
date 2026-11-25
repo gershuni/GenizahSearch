@@ -52,7 +52,7 @@ out = {'value': value, 'downgrade': None, 'cascade': None, 'cutoff': cutoff, 'ti
 
 def search(query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None,
            restrict_sys_ids=None, text_position=None, corpus_scope="all", phase_callback=None,
-           preview_callback=None, ids_only=False, metadata_sys_ids=None, sources=None):
+           preview_callback=None, ids_only=False, metadata_sys_ids=None, sources=None, max_rows=None):
     raise AssertionError("runs in a worker")
 
 
@@ -111,6 +111,18 @@ def test_the_two_legs_run_at_once_and_come_back_as_one_result_per_page(queues):
         assert 'sources' not in payload['arguments'] and 'preview' not in payload
         assert payload['time_limit']
     assert consume_editions_skipped() is False
+
+
+def test_a_search_that_shows_its_first_rows_runs_in_one_worker(queues):
+    # The API passes its limit as max_rows (2026-11-25): the coordinator runs the editions leg
+    # first and builds only the main rows that can be among the first results
+    # (SearchEngine._first_grouped_rows), which two legs in two workers cannot know.
+    value = _engine().execute_search('q', 'literal', 0, corpus_scope='genizah', sources='all', max_rows=5)
+    assert [(q is queues['main'], p['method']) for q, p in queues['submitted']] == [(True, 'execute_search')]
+    assert value['arguments']['max_rows'] == 5 and value['arguments']['sources'] == 'all'
+    # Its legs, were they ever run apart, take no max_rows (execute_search_leg has none).
+    from web.research_jobs import _leg_arguments
+    assert 'max_rows' not in _leg_arguments({'query_str': 'q', 'max_rows': 5}, 'main')
 
 
 def test_other_source_choices_are_one_worker(queues):

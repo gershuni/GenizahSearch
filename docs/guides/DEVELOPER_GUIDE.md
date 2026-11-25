@@ -241,7 +241,9 @@ result = client.table('profiles').update({'full_name': 'New Name'}).eq('id', use
 from genizah_core import SearchEngine
 
 engine = SearchEngine()
-results = engine.execute_search('שלום', mode='variants', gap=2, limit=100)
+results = engine.execute_search('שלום', mode='variants', gap=2)
+# Only the first 100 rows, the rest counted (results[0]['result_total']), as the API asks:
+first = engine.execute_search('שלום', mode='variants', gap=2, max_rows=100)
 ```
 
 ---
